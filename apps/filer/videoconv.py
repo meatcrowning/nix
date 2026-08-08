@@ -2,11 +2,14 @@
 
 Two of them, sharing one QProcess/toast harness:
 
-  * **"compress to <10MB"** — the main job: take a video the user right-clicked
-    and produce an mp4 next to it that is comfortably under the 10MB ceiling
-    every upload form/chat app enforces, as fast as this machine can do it,
-    without the user answering any questions about codecs. Everything below the
-    next paragraph is about this one.
+  * **"compress to <10MB" / "compress to <4MB"** — the main job: take a video
+    the user right-clicked and produce an mp4 next to it that is comfortably
+    under the ceiling an upload form/chat app enforces, as fast as this machine
+    can do it, without the user answering any questions about codecs. The
+    ceiling is a PARAMETER (`limit`, bytes) threaded through `plan`,
+    `out_path_for` and the job — one sizing model, two rows in the menu —
+    defaulting to `LIMIT`. Everything below the next paragraph is about this
+    one.
   * **"copy without audio"** — `strip_argv()`/`stripAudio()`, at the bottom.
     A stream copy, not an encode: no plan, no dialog, no quality decisions.
 
@@ -22,10 +25,10 @@ Two halves:
     blocking the UI), turns its `-progress` stream into a desktop toast that
     updates in place, and verifies the result actually fits.
 
-Sizing model. The budget is a *total* bit budget — TARGET bytes spread over the
-clip's duration — so everything falls out of one number:
+Sizing model. The budget is a *total* bit budget — `target(limit)` bytes spread
+over the clip's duration — so everything falls out of one number:
 
-    total_kbps = TARGET * 8 / duration
+    total_kbps = target(limit) * 8 / duration
 
 Audio takes its slice first (it's the part that sounds broken when starved),
 video gets the rest, and the rest picks the resolution: `LADDER` is the minimum
@@ -60,9 +63,27 @@ from notify import tool as _tool, toast as _toast_send
 # "Under 10MB" in the sense every uploader means it: 10 million bytes is below
 # both the 10MB and the 10MiB reading, so a file that fits this fits either.
 LIMIT = 10_000_000
-# What we actually aim at. The gap absorbs mp4 container overhead and the slack
-# VBV allows within one buffer period, so we land under LIMIT without a retry.
-TARGET = int(LIMIT * 0.93)
+# The tighter ceiling, offered beside it: the same reading of "4MB" imgconv.py
+# uses for stills, and under 4chan's 4 MiB webm limit as well.
+LIMIT_SMALL = 4_000_000
+# Every ceiling the menu offers, largest first — the one list a new row is
+# added to, since everything else takes the limit as an argument.
+LIMITS = (LIMIT, LIMIT_SMALL)
+
+
+def target(limit=None):
+    """What we actually aim at. The gap absorbs mp4 container overhead and the
+    slack VBV allows within one buffer period, so we land under `limit` without
+    a retry."""
+    return int((LIMIT if limit is None else limit) * 0.93)
+
+
+def label(limit=None):
+    """`10_000_000` -> `"10MB"`, for the menu row, the toasts and the refusals."""
+    return "%gMB" % ((LIMIT if limit is None else limit) / 1_000_000.0)
+
+
+TARGET = target(LIMIT)
 
 VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v", ".wmv", ".flv",
               ".mpg", ".mpeg", ".ts", ".m2ts", ".mts", ".ogv", ".3gp", ".vob",
@@ -174,14 +195,17 @@ def _human(b):
         b /= 1024
 
 
-def out_path_for(src):
+def out_path_for(src, limit=None):
     """`clip.mkv` -> `clip-10mb.mp4`, next to the source, never clobbering an
-    existing file (`-10mb-2.mp4`, …)."""
+    existing file (`-10mb-2.mp4`, …). The tag is the ceiling, so a clip squeezed
+    both ways ends up as `clip-10mb.mp4` and `clip-4mb.mp4` rather than one
+    overwriting the other."""
+    tag = label(limit).lower()
     stem = os.path.splitext(str(src))[0]
-    cand = stem + "-10mb.mp4"
+    cand = "%s-%s.mp4" % (stem, tag)
     n = 2
     while os.path.lexists(cand):
-        cand = "%s-10mb-%d.mp4" % (stem, n)
+        cand = "%s-%s-%d.mp4" % (stem, tag, n)
         n += 1
     return cand
 
@@ -217,8 +241,8 @@ def strip_argv(src, dst, video_only=False):
     return argv + [dst]
 
 
-def plan(path, size=None):
-    """Decide how (and whether) to squeeze `path` under LIMIT.
+def plan(path, size=None, limit=None):
+    """Decide how (and whether) to squeeze `path` under `limit` (default LIMIT).
 
     Returns a plain dict, safe to hand straight to QML:
       ok         — False means don't start; `reason` says why, in user words
@@ -229,14 +253,16 @@ def plan(path, size=None):
       plus the encoder settings run() needs: height/fps/vKbps/aKbps/channels/…
     """
     path = str(path)
+    limit = LIMIT if limit is None else int(limit)
+    budget, cap = target(limit), label(limit)
     try:
         size = os.path.getsize(path) if size is None else int(size)
     except OSError:
         return {"ok": False, "reason": "can't read that file"}
     if not is_video(path):
         return {"ok": False, "reason": "not a video file"}
-    if size <= LIMIT:
-        return {"ok": False, "reason": "already under 10MB (%s)" % _human(size)}
+    if size <= limit:
+        return {"ok": False, "reason": "already under %s (%s)" % (cap, _human(size))}
 
     info = probe(path)
     if info is None:
@@ -245,12 +271,13 @@ def plan(path, size=None):
     if dur <= 0 or src_h <= 0 or src_w <= 0:
         return {"ok": False, "reason": "unknown duration - can't budget a bitrate"}
 
-    total_kbps = TARGET * 8 / 1000.0 / dur
+    total_kbps = budget * 8 / 1000.0 / dur
     if total_kbps < 40:
         # ~35 minutes per 10MB is where even 180p stops being video — spending
-        # minutes of encoding to produce a slideshow helps nobody.
-        return {"ok": False, "reason": "%s is too long to fit 10MB - trim it first"
-                                       % _fmt_dur(dur)}
+        # minutes of encoding to produce a slideshow helps nobody. The line
+        # scales with the ceiling, so 4MB gives up ~14 minutes in.
+        return {"ok": False, "reason": "%s is too long to fit %s - trim it first"
+                                       % (_fmt_dur(dur), cap)}
 
     # Audio first — starved audio is more obviously broken than soft video —
     # but never more than a third of the budget on a long clip.
@@ -295,8 +322,8 @@ def plan(path, size=None):
     # before they've forgotten they started it, and a budget so tight the result
     # will look bad. Everything else just runs.
     slow, rough = est > SLOW_SECONDS, v_kbps < 260
-    lines = ["compress to under 10MB?", "%s -> %s" % (_human(size), _human(TARGET)),
-             summary]
+    lines = ["compress to under %s?" % cap,
+             "%s -> %s" % (_human(size), _human(budget)), summary]
     if rough:
         lines.append("at this length that will look rough")
     if slow:
@@ -313,7 +340,8 @@ def plan(path, size=None):
         "warning": "\n".join(lines),
         "height": height, "fps": round(fps, 3), "vKbps": v_kbps,
         "aKbps": a_kbps, "channels": channels, "encoder": encoder,
-        "durationSec": dur, "srcHeight": src_h, "outPath": out_path_for(path),
+        "durationSec": dur, "srcHeight": src_h,
+        "limit": limit, "cap": cap, "outPath": out_path_for(path, limit),
     }
 
 
@@ -392,21 +420,29 @@ class VideoConv(QObject):
     def isBusy(self, path):
         return any(j["src"] == str(path) for j in self._jobs.values())
 
+    # Both are offered with and without an explicit ceiling: QML names one
+    # (10MB / 4MB), while anything older calling plan(path)/start(path) still
+    # gets LIMIT. Stacked @Slot decorators register both arities.
     @Slot(str, result="QVariant")
-    def plan(self, path):
-        p = plan(str(path))
+    @Slot(str, int, result="QVariant")
+    def plan(self, path, limit=None):
+        p = plan(str(path), limit=limit)
         if p.get("ok") and "compress:" + str(path) in self._jobs:
             return {"ok": False, "reason": "already compressing that file"}
         return p
 
     @Slot(str)
-    def start(self, path):
+    @Slot(str, int)
+    def start(self, path, limit=None):
         """Begin (or refuse) a conversion. Safe to call straight from the menu:
         it re-plans, so nothing depends on the QML side having done so."""
         src = str(path)
+        # One compression per source, whichever ceiling: the second would be
+        # the same decode again, for a file the first is about to produce a
+        # smaller version of anyway.
         if "compress:" + src in self._jobs:
             return
-        p = plan(src)
+        p = plan(src, limit=limit)
         if not p.get("ok"):
             self._toast({}, "can't compress", p.get("reason", "?"), urgency="normal")
             return
@@ -531,13 +567,14 @@ class VideoConv(QObject):
             self._fail(job, job["err"] or "ffmpeg exited %d" % code)
             return
         size = os.path.getsize(dst)
-        if size > LIMIT and job["attempt"] == 1:
+        limit = job["plan"].get("limit", LIMIT)
+        if size > limit and job["attempt"] == 1:
             # VBV slack (or a pathological source) put us over. One corrective
             # pass, scaled by how far off we were, with a slightly higher CRF so
             # the cap is actually reachable instead of being fought by quality.
             job["attempt"] = 2
             job["pct"] = -1
-            scale = max(0.35, TARGET / float(size) * 0.95)
+            scale = max(0.35, target(limit) / float(size) * 0.95)
             try:
                 os.unlink(dst)
             except OSError:

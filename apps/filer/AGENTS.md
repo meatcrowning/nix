@@ -358,13 +358,28 @@ notifications on the user's screen, and the assertions need the exact strings.
 > selection cleared and the list refreshed. `home/prog/filer.nix` now prefixes
 > `glib`'s bin dir onto the wrapper's PATH. Silence is what let it rot.
 
-- **`videoconv.py`** — the context menu's two video actions, "compress to
-  <10MB" (an upload-limit squeeze) and "copy without audio". Exposed as the
+- **`videoconv.py`** — the context menu's video actions: two upload-limit
+  squeezes, "compress to <10MB" and "compress to <4MB", plus "copy without
+  audio". Exposed as the
   `VideoConv` context property; the only part of filer
   that shells out to `ffmpeg`/`ffprobe` (PATH-resolved through `notify.tool`,
   like `kitty` — nothing was added to `filer.nix` for those, so a missing tool
   surfaces as a failure toast, not a broken build; `gio` is the one exception,
   see above).
+  - **The ceiling is a PARAMETER, not two code paths.** `limit` (bytes) is
+    threaded through `plan(path, size, limit)`, `out_path_for(src, limit)` and
+    the `plan`/`start` slots — both of which QML calls with two arguments and
+    both of which still answer a one-argument call with `LIMIT` — so the sizing
+    model, the ladder, the refusals and the corrective pass are one
+    implementation. `LIMITS` is the tuple the menu offers; adding a third row
+    is a label and a number, and `label(limit)` spells it (`"4MB"`) for the
+    menu, the toasts and every refusal. The tag lands in the output name, so
+    the two squeezes of one clip are `clip-10mb.mp4` and `clip-4mb.mp4` rather
+    than one overwriting the other.
+  - **One compression per source, whichever ceiling.** The job key stays
+    `compress:<src>` — a second encode of the same file is the same decode
+    again for a smaller version of what the first is already producing — so
+    the second click is refused with "already compressing that file".
   - `plan(path)` is pure and cheap (one ffprobe) and decides *everything* —
     resolution rung, fps, audio/video bitrate split, encoder, and an encode-time
     estimate. `BrowserPane.qml` calls it before doing anything: `plan.ask` (a slow
@@ -379,7 +394,7 @@ notifications on the user's screen, and the assertions need the exact strings.
   - Encoder policy: libx264 unless the estimate is slow *and* NVENC exists —
     x264 is much better at these bitrates and, on `top`, faster than the GPU for
     a short clip. book has no NVENC and falls through to x264 automatically.
-  - The output is verified against the 10MB line after the encode; one
+  - The output is verified against its own ceiling after the encode; one
     corrective pass runs if it somehow overshot.
   - **"copy without audio" (`stripAudio`) is a stream copy, and that is the
     whole design.** `-map 0 -map -0:a -c copy -dn`: everything but the audio is
@@ -400,8 +415,8 @@ notifications on the user's screen, and the assertions need the exact strings.
 ## "send to phone" — KDE Connect, in the file context menu
 
 `phone.py` + `sendToPhoneItems()`/`sendToPhone()` in `qml/BrowserPane.qml`. It
-sits with `open` / `open with...` / `compress to <10MB` / `copy without audio`,
-before the first
+sits with `open` / `open with...` / `compress to <10MB` / `compress to <4MB` /
+`copy without audio`, before the first
 separator: nothing about it is destructive and it must not be next to `trash`.
 
 - **One row per device, named after the device.** `CtxMenu` has no submenus, and

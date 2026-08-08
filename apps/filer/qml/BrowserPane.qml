@@ -275,7 +275,10 @@ Rectangle {
         // menu must not pay an ffprobe per right-click; VideoConv.stripAudio
         // toasts that instead.
         if (!e.isDir && VideoConv.isVideo(e.path)) {
-            items.push({ label: "compress to <10MB", trigger: () => compressVideo(e.path) });
+            // Two ceilings, one job: 10MB is the usual chat/upload limit, 4MB
+            // the tighter one (and the same "4MB" the stills row below means).
+            items.push({ label: "compress to <10MB", trigger: () => compressVideo(e.path, 10000000) });
+            items.push({ label: "compress to <4MB", trigger: () => compressVideo(e.path, 4000000) });
             items.push({ label: "copy without audio", trigger: () => VideoConv.stripAudio(e.path) });
         }
         // The stills equivalent, and only where it means something: an image
@@ -301,16 +304,21 @@ Rectangle {
         ]);
     }
 
-    // "compress to <10MB": VideoConv.plan() decides everything (resolution,
-    // bitrate, encoder) and estimates the encode. It only asks first when
-    // there's something worth asking about — a long encode, or a budget so
-    // tight the result will look rough; anything quick and decent just runs.
-    // Progress lives in a desktop toast either way, so nothing blocks here.
-    function compressVideo(p) {
-        const plan = VideoConv.plan(p);
-        if (!plan.ok) { VideoConv.start(p); return; }   // start() toasts the reason
-        if (plan.ask) { compressDlg.targetPath = p; compressDlg.text = plan.warning; compressDlg.open(); }
-        else VideoConv.start(p);
+    // "compress to <10MB" / "<4MB": VideoConv.plan() decides everything
+    // (resolution, bitrate, encoder) for the ceiling it is given and estimates
+    // the encode. It only asks first when there's something worth asking about
+    // — a long encode, or a budget so tight the result will look rough;
+    // anything quick and decent just runs. Progress lives in a desktop toast
+    // either way, so nothing blocks here.
+    function compressVideo(p, limit) {
+        const plan = VideoConv.plan(p, limit);
+        if (!plan.ok) { VideoConv.start(p, limit); return; }   // start() toasts the reason
+        if (plan.ask) {
+            compressDlg.targetPath = p;
+            compressDlg.targetLimit = limit;
+            compressDlg.text = plan.warning;
+            compressDlg.open();
+        } else VideoConv.start(p, limit);
     }
 
     // "send to phone" — KDE Connect, acting on the whole selection.
@@ -1155,8 +1163,9 @@ Rectangle {
     BrowserConfirm {
         id: compressDlg
         property string targetPath: ""
+        property int targetLimit: 10000000
         confirmLabel: "compress"
-        onConfirmed: if (targetPath) VideoConv.start(targetPath)
+        onConfirmed: if (targetPath) VideoConv.start(targetPath, targetLimit)
     }
     // permanent delete (the context menu's "delete…"; trash is the safe
     // default elsewhere). Acts on the whole selection.
