@@ -44,12 +44,16 @@ let
     # reset-failed frees the unit name if a previous run crashed.
     if command -v systemd-run >/dev/null 2>&1; then
       systemctl --user reset-failed qs-settings.service 2>/dev/null || true
+      # QS_NO_RELOAD_POPUP, same as the panel service: applying a theme from
+      # the appearance page rewrites Theme.qml, which hot-reloads THIS instance
+      # — that reload is routine, not something to announce.
       exec systemd-run --user --quiet --collect --unit=qs-settings \
         --setenv=WAYLAND_DISPLAY --setenv=HYPRLAND_INSTANCE_SIGNATURE \
         --setenv=XDG_RUNTIME_DIR --setenv=XDG_CURRENT_DESKTOP --setenv=PATH \
+        --setenv=QS_NO_RELOAD_POPUP=1 \
         -- qs -p "$QML"
     fi
-    exec qs -d -n -p "$QML"
+    QS_NO_RELOAD_POPUP=1 exec qs -d -n -p "$QML"
   '';
   # Theme.qml gets its "wal palette" block rewritten in place at runtime by
   # wal-set.sh (in place, not via rename — Quickshell's hot-reload watches by
