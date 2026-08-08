@@ -17,6 +17,11 @@
   swapDevices = [{
     device = "/var/lib/swapfile";
     size = 16*1024; # 16 GB
+    # Fresh random key each boot, so RAM paged to the unencrypted root SSD never
+    # persists in cleartext (the disk itself is not LUKS). Safe here because
+    # nothing hibernates — there is no `resume=` on the kernel cmdline — and
+    # zram is the primary swap anyway (this file is priority -1).
+    randomEncryption.enable = true;
   }];
 
   services = {
