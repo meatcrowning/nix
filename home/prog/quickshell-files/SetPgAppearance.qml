@@ -114,7 +114,9 @@ Column {
                 // the dropdown is a specimen of the face it picks
                 optionsAreFonts: true
                 value: page.d.fontFamily
-                onChanged: (v) => { page.d.fontFamily = v; SettingsStore.save(); }
+                // Through the store, not a direct write: it remembers the
+                // size per face (fontSizeByFamily) across switches.
+                onChanged: (v) => SettingsStore.setFontFamily(v)
             }
         }
         SetRow {

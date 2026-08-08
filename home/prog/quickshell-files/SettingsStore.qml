@@ -76,6 +76,23 @@ Singleton {
         save();
     }
     function toggleLightMode() { setLightMode(!d.lightMode); }
+
+    // Switch the desktop font, remembering the size PER FACE. Same shape as
+    // the pureBlackBgDark round trip above: the outgoing family's size is
+    // captured at the transition (single writer, so pre-existing state
+    // migrates for free), and the incoming family restores its own last size
+    // if it has one — a face tried at 12 comes back at 12 after a detour
+    // through another face at 18. A never-used face keeps the current size,
+    // which is the least surprising seed.
+    function setFontFamily(v) {
+        if (v === d.fontFamily) { return; }
+        const m = JSON.parse(JSON.stringify(d.fontSizeByFamily || {}));
+        m[d.fontFamily] = d.fontSize;
+        d.fontSizeByFamily = m;
+        if (m[v] !== undefined) d.fontSize = m[v];
+        d.fontFamily = v;
+        save();
+    }
     // Pull the file in NOW, synchronously (blockLoading), and let the bindings
     // that depend on it re-evaluate before this call returns.
     //
@@ -245,6 +262,10 @@ Singleton {
             property string accentOverride: "#5c9fcc"  // used when themeMode = manual
             property string fontFamily: "More Perfect DOS VGA"
             property int    fontSize: 15               // matches kitty's on-screen cell (11pt@96dpi ≈ 14.67px); see Theme.qml
+            // Last-used size per font family, family -> px. Written only by
+            // setFontFamily at the switch; fontSize above stays the single
+            // live key every consumer reads.
+            property var    fontSizeByFamily: ({})
             property int    paletteColorCount: 16      // wal quantize cluster count
             property bool   pureBlackBg: true
             // Remembers the dark-mode pure-black choice while light mode has it
@@ -513,7 +534,7 @@ Singleton {
     readonly property var defaults: ({
         schemaVersion: 1,
         themeMode: "auto", accentOverride: "#5c9fcc", fontFamily: "More Perfect DOS VGA",
-        fontSize: 15, paletteColorCount: 16, pureBlackBg: true, pureBlackBgDark: true, lightMode: false,
+        fontSize: 15, fontSizeByFamily: ({}), paletteColorCount: 16, pureBlackBg: true, pureBlackBgDark: true, lightMode: false,
         paletteVariant: "pastel", windowBorderWidth: 2,
         windowRounding: 0, trayTint: true, desktopIcons: true, shadowAlpha: 0.6, scrollbarStyle: "win31",
         rgbFollowTheme: true, reduceMotion: false, animSpeed: 1.0,
