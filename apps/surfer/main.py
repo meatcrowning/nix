@@ -1334,6 +1334,15 @@ PAGE_STYLE_RUNTIME_JS = r"""
   var SHEET_ID = '__surfer_pagestyle__';
   var sheet = null;
 
+  // Which css this frame gets. The top frame takes the whole page style ('s':
+  // font inherit + dark filter + per-site font force). A SUBFRAME takes the
+  // fonts-only body ('f') — never the dark filter, because the top view
+  // already composites its iframes through its own `html` filter and a
+  // subframe copy would double-invert. Fonts don't composite across frames
+  // the way a filter does, so they are the one part that must run here too.
+  var KIND = 's';
+  try { if (window !== window.top) KIND = 'f'; } catch (e) { KIND = 'f'; }
+
   function b64(o){
     var s = JSON.stringify(o), t = '';
     try {
@@ -1376,7 +1385,7 @@ PAGE_STYLE_RUNTIME_JS = r"""
     var css = '';
     try {
       var x = new XMLHttpRequest();
-      x.open('GET', addr('s', { u: location.href }), false);
+      x.open('GET', addr(KIND, { u: location.href }), false);
       x.send();
       css = (x.status === 200 || x.status === 0) ? (x.responseText || '') : '';
     } catch(e){}
@@ -1552,10 +1561,12 @@ class PageStyleHandler(QWebEngineUrlSchemeHandler):
     page-style (dark mode + system-font) CSS for a url, computed by the
     DarkMode bridge.
 
-    One host, `s`, taking a base64url JSON blob ``{"u": href}`` as its path (the
-    same gmxhr convention as surfercos). The reply is `text/css` and is adopted
-    by the courier as a constructed CSSStyleSheet, so it never hits `style-src`
-    and needs no DOM parent."""
+    Two hosts, each taking a base64url JSON blob ``{"u": href}`` as its path
+    (the same gmxhr convention as surfercos): `s` is the whole page style for
+    the TOP frame; `f` is the fonts-only body (the inherit layer + the per-site
+    force, never the dark filter) that the courier fetches from subframes. The
+    reply is `text/css` and is adopted by the courier as a constructed
+    CSSStyleSheet, so it never hits `style-src` and needs no DOM parent."""
 
     def __init__(self, darkmode, parent=None):
         super().__init__(parent)
@@ -1564,10 +1575,12 @@ class PageStyleHandler(QWebEngineUrlSchemeHandler):
     def requestStarted(self, job):
         body, ctype = b"", b"text/css"
         try:
+            kind = job.requestUrl().host()
             spec = json.loads(
                 _b64url_decode(job.requestUrl().path().lstrip("/")).decode("utf-8"))
             url = str(spec.get("u") or "")
-            body = self._dm.css(url).encode("utf-8")
+            css = self._dm.fontsCss(url) if kind == "f" else self._dm.css(url)
+            body = css.encode("utf-8")
         except Exception:
             body = b""
         try:
@@ -1585,10 +1598,14 @@ class PageStyle(QObject):
     Main.qml appends `scripts` to `sharedProfile.userScripts.collection`
     (PySide6 6.11 does not bind QQuickWebEngineScriptCollection, so the object
     is assembled here and handed to QML — the same route CosmeticInject.scripts
-    and UserScripts.scriptObjects take). DocumentCreation + MainWorld, and
-    deliberately NOT RunsOnSubFrames: the top view already composites its
-    iframes through the whole-page `html` filter, so a subframe copy would
-    invert embedded content a second time."""
+    and UserScripts.scriptObjects take). DocumentCreation + MainWorld, and it
+    DOES run on subframes — but a subframe asks the scheme for the fonts-only
+    body (`f`, see PAGE_STYLE_RUNTIME_JS's KIND), never the dark filter: the
+    top view already composites its iframes through the whole-page `html`
+    filter, so a subframe copy of the filter would invert embedded content a
+    second time. The font rules are the part a filter cannot carry across the
+    frame boundary. (One limit: `win.reinjectDark()` refreshes top frames only,
+    so an open subframe follows a settings change at its next navigation.)"""
 
     @Property("QVariantList", constant=True)
     def scripts(self):
@@ -1596,7 +1613,7 @@ class PageStyle(QObject):
         s.setName("surfer-pagestyle")
         s.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
         s.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
-        s.setRunsOnSubFrames(False)
+        s.setRunsOnSubFrames(True)
         s.setSourceCode(PAGE_STYLE_RUNTIME_JS)
         return [s]
 
@@ -2163,10 +2180,22 @@ class DarkMode(QObject):
         pixel-identical to the original at ANY brightness/contrast — dark mode
         never tints or dims them. Global on/off + a per-site exception list
         (hostnames forced OFF — the "whitelist").
+      * font inherit — EVERY page starts from the desktop's font instead of
+        Chromium's: an `@layer` block (beaten by any unlayered page rule, so it
+        behaves as an upgraded user-agent default, not a force) sets the live
+        pick + the desktop font size on `:root`, the monospace elements and the
+        form controls. A page that styles its own text keeps its styles; a page
+        that inherits, inherits the desktop — same family, same apparent size,
+        and the same rasterisation, since the shipped faces carry fontconfig
+        pins Chromium honours. Applies in subframes too (fonts travel as the
+        `f` body, the dark filter never does).
       * system font — force the desktop pixel font on a page's text, so it reads
         in the same typeface as the rest of the desktop. Per-site (an opt-in set
-        of hostnames); family only, so site font-sizes and layout survive. It
-        combines with dark mode rather than replacing it.
+        of hostnames); family only, so site font-sizes and layout survive —
+        forcing sizes too was tried and retracted, docs/DESIGN.md §16 — plus
+        `font-synthesis:none`, §2.2's "no bold, ever": the shipped faces are
+        Regular-only and Chromium's synthetic bold smears them. It combines
+        with dark mode rather than replacing it.
 
     All state persists to the "dark" key of prefs.json. Application is NOT
     per-view at load-finished (that painted light first and flipped once images
@@ -2185,9 +2214,19 @@ class DarkMode(QObject):
     # The desktop's pixel font — matches qml/theme/Theme.qml's `font` (that
     # file reads DeskStyle.fontFamily, i.e. settings.json). Read the LIVE pick
     # the same way instead of pinning the default, so the system-font override
-    # follows the Settings > pixel font choice. Fallback only for harnesses
+    # follows the Settings > pixel font choice. Fallbacks only for harnesses
     # that construct DarkMode without a DeskStyle (find/pagestyle tests).
     _SYSTEM_FONT = "More Perfect DOS VGA"
+    _SYSTEM_SIZE = 15    # kitty's cell height — DESIGN.md §2.1's one number
+
+    def _fam(self):
+        return self._style.fontFamily if self._style is not None else DarkMode._SYSTEM_FONT
+
+    def _px(self):
+        try:
+            return int(self._style.fontSize) if self._style is not None else DarkMode._SYSTEM_SIZE
+        except (TypeError, ValueError):
+            return DarkMode._SYSTEM_SIZE
 
     def __init__(self, prefs, parent=None, style=None):
         super().__init__(parent)
@@ -2385,26 +2424,66 @@ class DarkMode(QObject):
         v = [1.0 - x for x in v]                    # undo invert(100%)
         return "#" + "".join("%02x" % max(0, min(255, round(x * 255))) for x in v)
 
+    def _inherit_css(self):
+        # Webpages INHERIT the desktop font: family, apparent size and (via the
+        # faces' fontconfig pins, which Chromium honours) rasterisation. This is
+        # deliberately an @layer block: a layered author rule loses to ANY
+        # unlayered page rule regardless of order or specificity, so it behaves
+        # as an upgraded user-agent default — a site that sets its own fonts
+        # keeps them, and only text that would have fallen to Chromium's Times/
+        # 16px defaults reads like the desktop instead. That is what keeps this
+        # on the right side of DESIGN.md §16 (sizes are never imposed on a
+        # page's own styling — that full reskin was tried and retracted).
+        # `font-synthesis:none` is §2.2's "no bold, ever" for the shipped faces:
+        # they are Regular-only, and a face that HAS a real bold still gets it.
+        f = json.dumps(self._fam())
+        px = str(self._px())
+        return (
+            "@layer __surfer_inherit__{"
+            ":root{font-family:" + f + ",monospace;font-size:" + px + "px}"
+            "pre,code,kbd,samp,tt{font-family:" + f + ",monospace}"
+            "input,textarea,select,button{font-family:" + f + ",monospace;"
+            "font-size:" + px + "px}"
+            "*{font-synthesis:none}"
+            "}"
+        )
+
     def _font_css(self):
         # Force the desktop pixel font on all page text (family only — sizes stay
-        # the site's, so layout/heading hierarchy survives). Reads the LIVE pick
-        # from DeskStyle so a Settings > pixel font change shows here too, falling
+        # the site's, so layout/heading hierarchy survives; forcing sizes too is
+        # the retracted reskin, DESIGN.md §16). Reads the LIVE pick from
+        # DeskStyle so a Settings > pixel font change shows here too, falling
         # back to the default family only when no DeskStyle was supplied.
-        f = json.dumps(self._style.fontFamily if self._style is not None else DarkMode._SYSTEM_FONT)
-        return "*,*::before,*::after{font-family:" + f + ",monospace!important}"
+        # font-synthesis with !important so the forced Regular-only face is
+        # never synthetically embossed, whatever the page declares.
+        f = json.dumps(self._fam())
+        return ("*,*::before,*::after{font-family:" + f + ",monospace!important;"
+                "font-synthesis:none!important}")
 
     @Slot(str, result=str)
     def css(self, url):
-        """The page-style CSS Python computes for this url right now (dark mode
-        and/or the system-font override, whichever applies) — the body the
-        `surferstyle://` courier adopts at document-creation and re-fetches on
-        a settings change. Empty string = the theme should be stripped here."""
+        """The page-style CSS Python computes for this url right now (the font
+        inherit layer, plus dark mode and/or the system-font override where
+        they apply) — the body the `surferstyle://` courier adopts at
+        document-creation and re-fetches on a settings change."""
         return self._css(url)
 
     def _css(self, url):
-        parts = []
+        parts = [self._inherit_css()]
         if self._enabled and self.isSiteEnabled(url):
             parts.append(self._dark_css())
+        if self.isSystemFontSite(url):
+            parts.append(self._font_css())
+        return "".join(parts)
+
+    @Slot(str, result=str)
+    def fontsCss(self, url):
+        """The fonts-only page style — what a SUBFRAME adopts (`f` on the
+        `surferstyle://` scheme): the inherit layer, plus the per-site force
+        when the frame's own host is opted in. Never the dark filter — the top
+        frame's `html` filter already composites over its iframes and a copy
+        here would double-invert."""
+        parts = [self._inherit_css()]
         if self.isSystemFontSite(url):
             parts.append(self._font_css())
         return "".join(parts)
@@ -3947,6 +4026,11 @@ def main():
     files = Files(prefs, app)
     zoom = Zoom(prefs, app)
     darkmode = DarkMode(prefs, app, style=style)
+    # A Settings > pixel font / font size change must reach OPEN pages: the
+    # inherit layer (and any per-site force) reads DeskStyle live, so chaining
+    # the signals makes QML's existing DarkMode.onChanged -> win.reinjectDark()
+    # re-adopt the sheet with the new family/size, no reload.
+    style.changed.connect(darkmode.changed)
     adblocker = AdBlocker(app)
     cosmetic = Cosmetic(adblocker, app)
     download_dir = str(Path.home() / "Downloads")

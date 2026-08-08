@@ -482,28 +482,50 @@ either half.
 
 ## Dark mode applies at DOCUMENT-CREATION, not after images load
 
-The dark-mode (and system-font) page style used to be injected per-view at
+The page style used to be injected per-view at
 `LoadSucceededStatus`, i.e. AFTER images and scripts had finished — the page
 painted light first and flipped dark only once everything loaded. It is now a
-profile-level **document-creation courier**, exactly like cosmetic ad-blocking:
+profile-level **document-creation courier**, exactly like cosmetic ad-blocking.
+The style it carries has three parts (all computed by `DarkMode`):
+
+- **the font-inherit layer, always on** (2026-08-08, his ask: pages inherit
+  the system font in apparent size/styling/rendering): an `@layer` block that
+  sets the live pick + desktop font size on `:root`, the monospace elements
+  and the form controls, plus `font-synthesis:none` (§2.2's no-bold — the
+  shipped faces are Regular-only). A layered author rule loses to ANY
+  unlayered page rule, so this is an upgraded user-agent default, not a force
+  — a site's own font styling always wins, which is what keeps it inside
+  `docs/DESIGN.md` §16's family-only settlement. Rasterisation parity comes
+  from the faces' fontconfig pins, which Chromium honours.
+- **the dark filter** (global toggle, per-site exceptions), top frame only;
+- **the per-site system-font force** (family only + `font-synthesis:none`,
+  never sizes — the full reskin was retracted, `ad868e4` / DESIGN.md §16).
+
+The plumbing:
 
 - `PAGE_STYLE_RUNTIME_JS` in `main.py` + `PageStyle.scripts` (a
-  `QWebEngineScript`, `DocumentCreation` / `MainWorld`, **not** `RunsOnSubFrames`
-  — the top view already composites its iframes through its own `html` filter,
-  a subframe copy would double-invert) is assigned onto
+  `QWebEngineScript`, `DocumentCreation` / `MainWorld`, `RunsOnSubFrames` **on**
+  since the inherit layer: a subframe asks the scheme for the fonts-only body
+  (`f`) and never the dark filter — the top view already composites its
+  iframes through its own `html` filter, a subframe copy would double-invert)
+  is assigned onto
   `sharedProfile.userScripts.collection` in `Main.qml`, **concatenated** after
   `CosmeticInject.scripts`.
-- At document creation it pulls the page's style CSS from Python over the
+- At document creation it pulls the frame's style CSS from Python over the
   `surferstyle://` scheme (`PageStyleHandler`, a `QWebEngineUrlSchemeHandler`
-  fed by `DarkMode.css(url)`) and adopts it as a constructed `CSSStyleSheet` via
+  fed by `DarkMode.css(url)` for `s` / `DarkMode.fontsCss(url)` for `f`) and
+  adopts it as a constructed `CSSStyleSheet` via
   `document.adoptedStyleSheets` — CSS rules match as the DOM builds, so the
   theme is on the page from its first frame. CSP-proof (`style-src` never sees
   it), and it never `replaceSync`-clobbers cosmetic's sheet (concat-only).
 - **Live settings changes** (global toggle, brightness/contrast sliders,
-  per-site exceptions/font toggles) still re-apply to open pages with no
+  per-site exceptions/font toggles, and — via `style.changed` chained onto
+  `darkmode.changed` in `main()` — a Settings > pixel font / font size change)
+  still re-apply to open pages with no
   reload: `DarkMode.changed` → `win.reinjectDark()` → each view runs
   `window.__surferPageStyleRefresh()`, which re-fetches and re-adopts (or
-  **strips** the sheet when the new state is off). `DarkMode.js(url)` remains
+  **strips** the sheet when the new state is off). Top frames only — an open
+  subframe follows at its next navigation. `DarkMode.js(url)` remains
   the in-process/manual apply (the find-pixel harness drives it directly); it is
   *not* the live path any more.
 
@@ -512,7 +534,11 @@ a real offscreen profile carrying **both** couriers via the exact `concat` line
 Main.qml uses: the invert filter is present at the page's own parse-time inline
 script *and* in its first `requestAnimationFrame` (both before any paint), still
 present once settled, and a brightness change live-refreshes an open page while
-turning dark off strips it back to `none`. Run it after touching `main.py`'s
+turning dark off strips it back to `none`; plus the font checks — unstyled text
+inherits the pick at the desktop size, a page's own font styling beats the
+layer, a subframe gets the face but never the filter, and the per-site force
+imposes the family while the page's font-size survives. Run it after touching
+`main.py`'s
 dark-mode block, `PAGE_STYLE_RUNTIME_JS`, `PageStyle`/`PageStyleHandler`, or the
 `Main.qml` profile/courier wiring.
 
