@@ -58,9 +58,19 @@
     tmp.cleanOnBoot = true;
   };
 
+  # Disallow replacing the running kernel image at runtime: disables kexec
+  # (kernel.kexec_load_disabled=1) and adds `nohibernate`. Free here — nothing
+  # kexecs, and there is no `resume=`/hibernation to break (swap is
+  # randomEncryption'd, which rules hibernation out anyway).
+  security.protectKernelImage = true;
+
   # Disk / SSD hygiene for the perpetually-full root:
   services.fstrim.enable = true;                            # periodic TRIM
-  services.journald.extraConfig = "SystemMaxUse=500M";      # cap journal growth
+  # Cap journal growth, but keep a longer forensic window than 500M gave (that
+  # was already full, so auth/sudo history rotated in ~a week). 1G roughly
+  # doubles the trail for spotting a late-noticed compromise; trivial on a 1.8T
+  # root that currently sits ~72% used.
+  services.journald.extraConfig = "SystemMaxUse=1G";
   zramSwap.enable = true;                                   # RAM-compressed swap
                                                             # ahead of the on-disk swapfile
 
