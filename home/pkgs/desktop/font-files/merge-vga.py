@@ -9,9 +9,9 @@ that lands in ~/.local/share/fonts is this script's output, so editing the
 script is how the desktop's font changes. label (optional, defaults to the
 source file's stem) names the base face in the PxPlus attribution.
 
-It builds EVERY shipped face in this family: the More Perfect DOS VGA default,
-and the Perfect DOS VGA 437 alternative (same 8x16 VGA grid, same em-relative
-geometry, so the same exact import applies). font.nix calls it once per face.
+It builds the More Perfect DOS VGA default (font.nix calls it once per face it
+merges; the Perfect DOS VGA 437 alternative it also built was dropped
+2026-08-08 on his call, but the script stays face-agnostic).
 
 WHY, and what is guaranteed
 ---------------------------

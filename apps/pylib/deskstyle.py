@@ -65,6 +65,14 @@ DEFAULT_FONT_SIZE = 15
 MIN_FONT_SIZE = 10
 MAX_FONT_SIZE = 24
 
+# Faces that are normal smooth outlines and must be ANTIALIASED, never
+# pixel-snapped (currently just Phenex, the hand-authored cursive). Twin of
+# the `smooth` flag in home/pkgs/desktop/font.nix selectableFaces / the
+# generated FontFaces.qml — keep the two in step. Everything font-rendering
+# branches on `DeskStyle.smooth`: PixelText's renderType/antialiasing, and
+# editorFont's style strategy below.
+SMOOTH_FAMILIES = {"Phenex"}
+
 # Motion, likewise from SettingsStore.qml's inline defaults. The validation is
 # the panel's, not the slider's: `ViewMode.ms()` accepts any finite animSpeed
 # > 0 and falls back to 1.0 otherwise, and it must stay that way here or an
@@ -168,25 +176,41 @@ class DeskStyle(QObject):
     def fontSize(self):
         return self._size
 
+    @Property(bool, notify=changed)
+    def smooth(self):
+        """True when the live face is a normal smooth outline (SMOOTH_FAMILIES)
+        rather than a pixel one. PixelText.qml branches its render path on
+        this: pixel faces keep NativeRendering + antialiasing:false +
+        full hinting; a smooth face gets antialiased, unhinted rendering —
+        under the pixel pipeline a cursive face is a jagged staircase."""
+        return self._family in SMOOTH_FAMILIES
+
     @Property(QFont, notify=changed)
     def editorFont(self):
-        """The desktop font as a QFont with NoAntialias pinned — for editable
-        items ONLY (`TextEdit`/`TextInput`).
+        """The desktop font as a QFont with the rasterisation pinned — for
+        editable items ONLY (`TextEdit`/`TextInput`).
 
         A `Text` honours `antialiasing: false` and draws a scalable pixel font
         (the default "More Perfect DOS VGA") as crisp mono glyphs. An *editable*
         item does NOT: `QQuickTextEdit`/`QQuickTextInput` ignore the QML
         `antialiasing` and `renderType` levers for glyph rasterisation and draw
-        grey-fringed AA glyphs regardless of the face (all three pixel faces are
-        scalable outlines now, so none escapes it on its own). The one lever
+        grey-fringed AA glyphs regardless of the face (the pixel faces are
+        scalable outlines, so none escapes it on its own). The one lever
         that reaches the font engine is `QFont::NoAntialias`, which the QML
         `font` group cannot express — so it is set here and bound as a whole
         `font:` (docs/DESIGN.md §2.2). Verified: 17 grey levels in a glyph -> 2.
-        """
+
+        For a SMOOTH face the pin flips the other way: editable items already
+        antialias, which is exactly what a cursive outline wants — so no
+        NoAntialias, and no hinting (matching PixelText and fontconfig; full
+        hinting visibly kinks the connected joins)."""
         f = QFont(self._family)
         f.setPixelSize(self._size)
-        f.setHintingPreference(QFont.PreferFullHinting)
-        f.setStyleStrategy(QFont.NoAntialias)
+        if self._family in SMOOTH_FAMILIES:
+            f.setHintingPreference(QFont.PreferNoHinting)
+        else:
+            f.setHintingPreference(QFont.PreferFullHinting)
+            f.setStyleStrategy(QFont.NoAntialias)
         return f
 
     @Property(int, notify=changed)

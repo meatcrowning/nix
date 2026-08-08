@@ -22,6 +22,12 @@ QtObject {
     // expressions (SettingsStore.d.*) that only Quickshell can evaluate.
     readonly property string font: DeskStyle.fontFamily
 
+    // True when the live face is a normal SMOOTH outline (Phenex, the
+    // cursive) rather than a pixel one; PixelText branches its render path on
+    // it. Guarded like lineHeight below: harnesses stub DeskStyle.
+    readonly property bool fontSmooth: (typeof DeskStyle !== "undefined" && DeskStyle)
+                                       ? DeskStyle.smooth === true : false
+
     // Text size in PIXELS (not points), matched to kitty's on-screen size.
     // See PixelText.qml for why native rendering + integer pixel sizes matter.
     readonly property int fontSize: DeskStyle.fontSize
