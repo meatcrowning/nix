@@ -1,4 +1,5 @@
 import QtQuick
+import "../../qmlcommon"
 
 // Hover explanation for one thing in the window, per docs/DESIGN.md §8: a dwell,
 // then a 220ms clipped slide out of a FIXED edge, in theme colours and
@@ -19,6 +20,10 @@ import QtQuick
 // `clip: true` flickable, so a tooltip drawn in place would be cut off by the
 // viewport edge and would scroll away with the row it belongs to.
 MouseArea {
+
+    // The desktop's one slide duration + curve (docs/DESIGN.md 6.2):
+    // hyprvtb's roll, scaled by reduceMotion/animSpeed. NEVER a literal.
+    Motion { id: motion }
     id: area
     property string text: ""
     hoverEnabled: enabled && text !== ""
@@ -100,7 +105,7 @@ MouseArea {
         property real slide: 0
         Behavior on slide {
             enabled: chip.animate   // out over 220ms; back in one frame
-            NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+            NumberAnimation { duration: motion.ms(motion.slideMs); easing.type: motion.slideEasing }
         }
 
         readonly property real fullW: Math.min(metrics.implicitWidth + 16, 360)
