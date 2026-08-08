@@ -31,6 +31,7 @@ Item {
         width: 320
         height: box.implicitHeight + 24
         color: Theme.bg
+        radius: Theme.rounding
         border.color: root.danger ? Theme.crit : Theme.windowBorder
         border.width: Theme.windowBorderWidth
         MouseArea { anchors.fill: parent }

@@ -28,8 +28,9 @@ Rectangle {
     implicitHeight: header.height + (collapsed ? 0 : inner.implicitHeight + 14)
     height: implicitHeight
     color: Theme.bgAlt
+    radius: Theme.rounding
     border.color: Theme.border
-    border.width: 1
+    border.width: Theme.ctrlBorder
     clip: true
 
     Item {

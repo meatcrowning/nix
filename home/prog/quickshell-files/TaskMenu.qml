@@ -81,8 +81,8 @@ PopupWindow {
         implicitHeight: closeRow.implicitHeight + killSep.implicitHeight + killRow.implicitHeight
         color: Theme.bgAlt
         border.color: Theme.border
-        border.width: 1
-        radius: 3
+        border.width: Theme.ctrlBorder
+        radius: Math.max(3, Theme.windowRounding)
 
         HoverHandler {
             id: menuHover

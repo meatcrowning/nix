@@ -82,8 +82,9 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: Theme.bg
+        radius: Theme.rounding
         border.color: Theme.border
-        border.width: 1
+        border.width: Theme.ctrlBorder
     }
     // Accent edge along the top, tying the section to the cover above it.
     Rectangle {
@@ -101,8 +102,9 @@ Item {
         width: Math.max(1, root.artSide)
         height: width
         color: Theme.bgAlt
+        radius: Theme.rounding
         border.color: Theme.border
-        border.width: 1
+        border.width: Theme.ctrlBorder
 
         Image {
             anchors.fill: parent

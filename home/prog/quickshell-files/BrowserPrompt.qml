@@ -36,8 +36,9 @@ Item {
                 width: parent.width
                 height: 24
                 color: Theme.bgAlt
+                radius: Theme.windowRounding
                 border.color: Theme.accent
-                border.width: 1
+                border.width: Theme.ctrlBorder
                 TextInput {
                     id: field
                     anchors { fill: parent; margins: 4 }

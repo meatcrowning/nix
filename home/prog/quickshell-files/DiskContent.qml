@@ -97,8 +97,9 @@ Item {
                             visible: Disks.renaming === modelData.src
                             anchors.fill: parent
                             color: Theme.bgAlt
+                            radius: Theme.windowRounding
                             border.color: Theme.accent
-                            border.width: 1
+                            border.width: Theme.ctrlBorder
                             TextInput {
                                 id: nameEdit
                                 anchors { fill: parent; leftMargin: 3; rightMargin: 3 }
@@ -131,11 +132,11 @@ Item {
                     width: parent.width
                     height: 8
                     color: Theme.bgAlt
-                    border.width: 1
+                    border.width: Theme.ctrlBorder
                     border.color: Theme.border
                     Rectangle {
-                        anchors { left: parent.left; top: parent.top; bottom: parent.bottom; margins: 1 }
-                        width: Math.round((parent.width - 2) * parent.parent.pct)
+                        anchors { left: parent.left; top: parent.top; bottom: parent.bottom; margins: parent.border.width }
+                        width: Math.round((parent.width - 2 * parent.border.width) * parent.parent.pct)
                         color: parent.parent.pct >= 0.9 ? Theme.crit
                              : parent.parent.pct >= 0.75 ? Theme.warn : Theme.accent
                     }

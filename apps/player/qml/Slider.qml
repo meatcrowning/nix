@@ -43,8 +43,9 @@ Item {
         y: (parent.height - height) / 2
         x: root.frac * (root.width - width)
         color: Theme.bg
+        radius: Theme.rounding
         border.color: root.fgAccent
-        border.width: 1
+        border.width: Theme.ctrlBorder
     }
     MouseArea {
         anchors.fill: parent

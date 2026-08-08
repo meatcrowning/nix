@@ -422,8 +422,9 @@ Window {
         height: 30
         opacity: 0
         color: Theme.bgAlt
+        radius: Theme.rounding
         border.color: error ? Theme.crit : Theme.border
-        border.width: 1
+        border.width: Theme.ctrlBorder
         property bool error: false
 
         function show(text, isError) {

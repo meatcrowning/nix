@@ -21,6 +21,7 @@ Item {
         width: 320
         height: box.implicitHeight + 24
         color: Theme.bg
+        radius: Theme.rounding
         border.color: Theme.windowBorder
         border.width: Theme.windowBorderWidth
         MouseArea { anchors.fill: parent } // swallow clicks
@@ -36,8 +37,9 @@ Item {
                 width: parent.width
                 height: 24
                 color: Theme.bgAlt
+                radius: Theme.rounding
                 border.color: Theme.accent
-                border.width: 1
+                border.width: Theme.ctrlBorder
                 TextInput {
                     id: field
                     anchors { fill: parent; margins: 4 }

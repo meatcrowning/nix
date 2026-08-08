@@ -111,6 +111,29 @@ QtObject {
     // as windows. Derived from accent so it recolours alongside the palette.
     readonly property color windowBorder:         Qt.rgba(accent.r, accent.g, accent.b, 0xee / 255)
     readonly property color windowBorderInactive: Qt.rgba(0x59 / 255, 0x59 / 255, 0x59 / 255, 0xaa / 255)
-    readonly property int   windowBorderWidth: 2
-    readonly property int   windowRounding:    0
+    readonly property int   windowBorderWidth: {
+        // The desktop's GLOBAL border width (Settings > appearance > theme),
+        // published live by DeskStyle. Guarded like lineHeight above —
+        // harnesses stub DeskStyle, and a pylib momentarily older than this
+        // QML publishes no borderWidth; the fallback is the shipped default.
+        const w = (typeof DeskStyle !== "undefined" && DeskStyle)
+                ? Number(DeskStyle.borderWidth) : NaN;
+        return (isFinite(w) && w >= 0) ? w : 2;
+    }
+    readonly property int   windowRounding: rounding
+
+    // The desktop's GLOBAL corner rounding (DeskStyle.rounding, the radius the
+    // compositor clips every window to) — bind it on every corner drawn here.
+    // Guarded as above; the shipped default is 0 (square).
+    readonly property int rounding: {
+        const r = (typeof DeskStyle !== "undefined" && DeskStyle)
+                ? Number(DeskStyle.rounding) : NaN;
+        return (isFinite(r) && r > 0) ? r : 0;
+    }
+
+    // Control-weight border: half the window width, but never 0 unless the
+    // global setting itself is 0 — the hairline every in-window control
+    // (button, field, chip, menu) takes instead of the full window weight.
+    readonly property int ctrlBorder:
+        windowBorderWidth > 0 ? Math.max(1, Math.round(windowBorderWidth / 2)) : 0
 }

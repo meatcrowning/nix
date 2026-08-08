@@ -108,7 +108,8 @@ Rectangle {
     x: 8
     y: -height + slide * (height + 8)
     color: Theme.bgAlt
-    border.width: 1
+    radius: Theme.rounding
+    border.width: Theme.ctrlBorder
     border.color: winActive ? Theme.accent : Theme.inactive
 
     MouseArea { anchors.fill: parent }
@@ -130,7 +131,8 @@ Rectangle {
             width: root.width - 12 - root.oneW * (root.caption.length + 1) - 6
             height: parent.height
             color: Theme.bg
-            border.width: 1
+            radius: Theme.rounding
+            border.width: Theme.ctrlBorder
             border.color: input.activeFocus ? (root.winActive ? Theme.accent : Theme.inactive)
                                             : Theme.border
 

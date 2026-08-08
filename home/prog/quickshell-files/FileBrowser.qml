@@ -103,7 +103,7 @@ FloatingWindow {
             height: 30
             color: Theme.bgAlt
             border.color: Theme.border
-            border.width: 1
+            border.width: Theme.ctrlBorder
 
             Row {
                 anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 8 }
@@ -185,7 +185,7 @@ FloatingWindow {
             height: 32
             color: Theme.bgAlt
             border.color: Theme.border
-            border.width: 1
+            border.width: Theme.ctrlBorder
 
             Row {
                 anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 8 }

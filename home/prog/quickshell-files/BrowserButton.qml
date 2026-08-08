@@ -11,7 +11,8 @@ Rectangle {
     width: t.implicitWidth + 16
     height: 22
     color: ma.containsMouse && enabled ? Theme.bgAlt : "transparent"
-    border.width: 1
+    radius: Theme.windowRounding
+    border.width: Theme.ctrlBorder
     border.color: !enabled ? Theme.border
                  : danger ? Theme.crit
                  : ma.containsMouse ? Theme.accent : Theme.border

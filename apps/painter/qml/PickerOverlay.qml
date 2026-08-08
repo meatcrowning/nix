@@ -76,8 +76,9 @@ Item {
         id: pop
         height: Math.min(overlay.visibleRows, list.count) * 19 + 2
         color: Theme.bgAlt
+        radius: Theme.rounding
         border.color: Theme.accent
-        border.width: 1
+        border.width: Theme.ctrlBorder
 
         KineticListView {
             id: list

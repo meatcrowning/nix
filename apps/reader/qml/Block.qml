@@ -147,7 +147,8 @@ Item {
             id: box
             implicitHeight: Math.max(Theme.lineHeight, codeCol.implicitHeight) + 8
             color: Theme.bgAlt
-            border.width: 1
+            radius: Theme.rounding
+            border.width: Theme.ctrlBorder
             border.color: Theme.border
 
             readonly property int cols: Math.max(8, Math.floor((width - 12) / root.cellW))

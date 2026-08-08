@@ -137,8 +137,9 @@ MouseArea {
             height: chip.fullH
             anchors.right: parent.right   // revealed right-to-left as the clip grows
             color: Theme.bgAlt
+            radius: Theme.rounding
             border.color: Theme.border
-            border.width: 1
+            border.width: Theme.ctrlBorder
             PixelText {
                 id: label
                 x: 7

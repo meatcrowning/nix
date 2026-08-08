@@ -490,7 +490,8 @@ PanelWindow {
                 width: t.implicitWidth + 20
                 height: 28
                 color: active ? Theme.bgAlt : "transparent"
-                border.width: active ? 2 : 1
+                radius: Theme.windowRounding
+                border.width: active ? Theme.ctrlBorder + 1 : Theme.ctrlBorder
                 border.color: active ? Theme.accent : Theme.border
                 PixelText { id: t; anchors.centerIn: parent; text: parent.label; color: parent.active ? Theme.accent : Theme.text }
                 MouseArea {

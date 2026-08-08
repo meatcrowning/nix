@@ -36,8 +36,9 @@ Item {
         id: box
         anchors.fill: parent
         color: Theme.bg
+        radius: Theme.rounding
         border.color: picker.open ? Theme.accent : Theme.border
-        border.width: 1
+        border.width: Theme.ctrlBorder
 
         PixelText {
             anchors.verticalCenter: parent.verticalCenter

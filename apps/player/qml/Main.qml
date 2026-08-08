@@ -379,8 +379,9 @@ Window {
         height: 22
         z: 50
         color: Theme.bgAlt
+        radius: Theme.rounding
         border.color: searchInput.activeFocus ? win.fgAccent : Theme.border
-        border.width: 1
+        border.width: Theme.ctrlBorder
 
         TextInput {
             id: searchInput

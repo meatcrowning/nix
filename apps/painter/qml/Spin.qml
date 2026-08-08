@@ -17,8 +17,9 @@ Rectangle {
     width: 92
     height: 20
     color: Theme.bg
+    radius: Theme.rounding
     border.color: editing ? Theme.accent : Theme.border
-    border.width: 1
+    border.width: Theme.ctrlBorder
 
     function clamp(v) { return Math.max(from, Math.min(to, v)) }
     function fmt(v) { return decimals > 0 ? v.toFixed(decimals) : String(Math.round(v)) }

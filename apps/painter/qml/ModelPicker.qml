@@ -21,8 +21,9 @@ Panel {
         width: parent.width
         height: 190
         color: Theme.bg
+        radius: Theme.rounding
         border.color: Theme.border
-        border.width: 1
+        border.width: Theme.ctrlBorder
         // WHILE A MODE IS ON, THE LIST IS NOT WHAT DECIDES. It stays legible
         // rather than disappearing — you can still see what a mode picked — but
         // it is dimmed and takes no clicks, so there is never a moment where the

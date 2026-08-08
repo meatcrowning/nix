@@ -56,7 +56,7 @@ Item {
         anchors.bottomMargin: 6           // the grab strip below
         color: Theme.bgAlt
         border.color: Theme.border
-        border.width: 1
+        border.width: Theme.ctrlBorder
         clip: true
 
         // (1) the live sampler preview

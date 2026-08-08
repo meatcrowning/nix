@@ -380,8 +380,8 @@ PanelWindow {
                     anchors.fill: parent
                     anchors.margins: 4   // gutter between cells
                     color: Theme.bgAlt
-                    radius: 0
-                    border.width: cell.index === list.currentIndex ? 2 : 1
+                    radius: Theme.windowRounding
+                    border.width: cell.index === list.currentIndex ? Theme.ctrlBorder + 1 : Theme.ctrlBorder
                     border.color: cell.index === list.currentIndex ? Theme.accent : Theme.border
 
                     Image {

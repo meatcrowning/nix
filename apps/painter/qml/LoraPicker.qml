@@ -12,8 +12,9 @@ Rectangle {
 
     height: 172
     color: Theme.bg
+    radius: Theme.rounding
     border.color: Theme.border
-    border.width: 1
+    border.width: Theme.ctrlBorder
 
     function compatCount() {
         var n = 0

@@ -111,6 +111,20 @@ QtObject {
     // as windows. Derived from accent so it recolours alongside the palette.
     readonly property color windowBorder:         Qt.rgba(accent.r, accent.g, accent.b, 0xee / 255)
     readonly property color windowBorderInactive: Qt.rgba(0x59 / 255, 0x59 / 255, 0x59 / 255, 0xaa / 255)
-    readonly property int   windowBorderWidth: 2
-    readonly property int   windowRounding:    0
+    // Global frame settings: DeskStyle (pylib/deskstyle.py) publishes the
+    // Settings window's corner rounding (0-20) and border width (0-6) live.
+    // Guarded like lineHeight above (harnesses stub DeskStyle); fallbacks are
+    // the shipped defaults — rounding 0, border 2.
+    readonly property int rounding: (typeof DeskStyle !== "undefined" && DeskStyle)
+                                    ? DeskStyle.rounding : 0
+    readonly property int windowBorderWidth: (typeof DeskStyle !== "undefined" && DeskStyle)
+                                             ? DeskStyle.borderWidth : 2
+    // Control outlines (buttons, fields, cards, menus) draw at half the window
+    // weight — never below 1px unless borders are off entirely (setting 0).
+    readonly property int ctrlBorder: {
+        const w = (typeof DeskStyle !== "undefined" && DeskStyle)
+                ? DeskStyle.borderWidth : 2;
+        return w > 0 ? Math.max(1, Math.round(w / 2)) : 0;
+    }
+    readonly property int windowRounding: rounding
 }

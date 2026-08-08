@@ -32,7 +32,8 @@ Flow {
             height: 22
             width: chipT.implicitWidth + 18
             color: on ? Theme.bgAlt : "transparent"
-            border.width: 1
+            radius: Theme.windowRounding
+            border.width: Theme.ctrlBorder
             border.color: (on || chipMa.containsMouse) ? Theme.accent : Theme.border
             PixelText {
                 id: chipT

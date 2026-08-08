@@ -56,7 +56,8 @@ Item {
         x: root.width - slide * width
         y: Math.max(8, root.height - height - 8)   // bottom-right, by the "st" button
         color: Theme.bgAlt
-        border.width: 1
+        radius: Theme.rounding
+        border.width: Theme.ctrlBorder
         border.color: Theme.windowBorder
 
         // Swallow clicks so they don't reach the scrim behind.

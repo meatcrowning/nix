@@ -42,7 +42,7 @@ Rectangle {
     width: tileSize
     height: tileSize
     color: selected ? Theme.highlight : Theme.bgAlt
-    border.width: 1
+    border.width: Theme.ctrlBorder
     border.color: selected ? (winActive ? Theme.accent : Theme.inactive) : Theme.border
 
     // Drag-out: same cross-app text/uri-list gesture as the file rows, so a
@@ -125,7 +125,8 @@ Rectangle {
             width: 15
             height: 15
             color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.72)
-            border.width: 1
+            radius: Theme.rounding
+            border.width: Theme.ctrlBorder
             border.color: tile.winActive ? Theme.border : Theme.inactive
             Item {
                 anchors.centerIn: parent

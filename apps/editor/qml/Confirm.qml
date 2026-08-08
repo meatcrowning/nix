@@ -78,6 +78,7 @@ Item {
         height: body.implicitHeight + (root.detail !== "" ? det.implicitHeight + 6 : 0)
                 + buttons.height + 32
         color: Theme.bgAlt
+        radius: Theme.rounding
         border.width: Theme.windowBorderWidth
         border.color: root.winActive ? Theme.windowBorder : Theme.windowBorderInactive
 

@@ -426,7 +426,8 @@ Item {
         width: root.inner
         height: 19
         color: Theme.bgAlt
-        border.width: 1
+        radius: Theme.windowRounding
+        border.width: Theme.ctrlBorder
         border.color: filterInput.activeFocus ? Theme.accent : Theme.border
 
         PixelText {

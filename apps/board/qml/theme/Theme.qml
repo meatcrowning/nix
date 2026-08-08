@@ -111,8 +111,33 @@ QtObject {
     // as windows. Derived from accent so it recolours alongside the palette.
     readonly property color windowBorder:         Qt.rgba(accent.r, accent.g, accent.b, 0xee / 255)
     readonly property color windowBorderInactive: Qt.rgba(0x59 / 255, 0x59 / 255, 0x59 / 255, 0xaa / 255)
-    readonly property int   windowBorderWidth: 2
-    readonly property int   windowRounding:    0
+    readonly property int   windowBorderWidth: {
+        // The GLOBAL frame width (Settings window -> DeskStyle.borderWidth,
+        // 0..6). Guarded like lineHeight above — a DeskStyle that does not
+        // publish it (harness stub, pylib momentarily older than the QML)
+        // must fall back to the shipped default 2, not to undefined/0.
+        const w = (typeof DeskStyle !== "undefined" && DeskStyle)
+                ? Number(DeskStyle.borderWidth) : NaN;
+        return (isFinite(w) && w >= 0) ? Math.round(w) : 2;
+    }
+    readonly property int   windowRounding: rounding
+
+    // The GLOBAL corner rounding (Settings window -> DeskStyle.rounding,
+    // 0..20). The shipped default is 0 — square, as before — so every corner
+    // binds this rather than hardcoding it. Guarded like lineHeight above.
+    readonly property int rounding: {
+        const r = (typeof DeskStyle !== "undefined" && DeskStyle)
+                ? Number(DeskStyle.rounding) : NaN;
+        return (isFinite(r) && r > 0) ? Math.round(r) : 0;
+    }
+
+    // Control-scale border: half the window frame width, but never 0 while
+    // the frame is drawn at all — a field/chip outline at the full window
+    // width reads as a second window. 0 only when he turns borders off.
+    readonly property int ctrlBorder: {
+        const w = windowBorderWidth;
+        return w > 0 ? Math.max(1, Math.round(w / 2)) : 0;
+    }
 
     // The secondary hue, at a value legible as a FOREGROUND mark — a section
     // rule, a group hairline, a category glyph that is not saying "active"

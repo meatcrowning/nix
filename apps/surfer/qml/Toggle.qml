@@ -16,10 +16,10 @@ Rectangle {
 
     width: 44
     height: 20
-    radius: 0
+    radius: Theme.rounding
     opacity: enabled ? 1.0 : 0.4
     color: checked ? Theme.bgAlt : "transparent"
-    border.width: 1
+    border.width: Theme.ctrlBorder
     border.color: !winActive ? Theme.inactive
                  : (checked || ma.containsMouse) ? Theme.accent : Theme.border
 

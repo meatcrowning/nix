@@ -45,7 +45,7 @@ Item {
         y: Math.max(8, drawer.height - height - 8)   // bottom-right, by the "st" cell
         color: Theme.bgAlt
         border.color: Theme.windowBorder
-        border.width: 1
+        border.width: Theme.ctrlBorder
 
         MouseArea { anchors.fill: parent }   // swallow clicks inside
 

@@ -70,7 +70,8 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: hov.hovered ? Theme.highlight : "transparent"
-        border.width: 1
+        radius: Theme.rounding
+        border.width: Theme.ctrlBorder
         border.color: hov.hovered ? Theme.accent : Theme.border
     }
     PixelText {

@@ -21,9 +21,9 @@ Rectangle {
         return root.maxWidth > 0 ? Math.min(w, root.maxWidth) : w;
     }
     height: 22
-    radius: 0
+    radius: Theme.windowRounding
     color: ma.pressed ? Theme.bgAlt : "transparent"
-    border.width: 1
+    border.width: Theme.ctrlBorder
     border.color: (ma.containsMouse || ma.pressed) ? Theme.accent : Theme.border
 
     PixelText {

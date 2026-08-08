@@ -1198,8 +1198,9 @@ Window {
             height: tip.fullH
             anchors.right: parent.right  // revealed from the right as the clip grows
             color: Theme.bgAlt
+            radius: Theme.rounding
             border.color: Theme.accent
-            border.width: 1
+            border.width: Theme.ctrlBorder
             PixelText {
                 id: tipLabel
                 anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: 7; rightMargin: 7 }
@@ -1217,7 +1218,7 @@ Window {
         anchors { top: parent.top; left: parent.left; right: parent.right }
         height: 36
         color: Theme.bgAlt
-        border.width: 1
+        border.width: Theme.ctrlBorder
         border.color: Theme.accent
 
         PixelText {
@@ -1288,7 +1289,7 @@ Window {
         x: win.width - slide * width
         y: 8
         color: Theme.bgAlt
-        border.width: 1
+        border.width: Theme.ctrlBorder
         border.color: Theme.windowBorder
 
         Column {
