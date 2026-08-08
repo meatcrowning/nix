@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Shapes
 import Quickshell
 
 // The panel's SHORTCUT NOTCH: a slab that protrudes from the bar's inner edge,
@@ -13,17 +14,17 @@ import Quickshell
 // surfaces would have to agree across two commits, and during a panel-width
 // drag they would disagree by a frame.
 //
-// THE OUTLINE IS THREE RECTANGLES, NOT A BORDER, and the slab is drawn OVER the
-// bar's accent strip rather than beside it. The strip runs the full height of
-// the panel, uncut; this slab's own fill hides the stretch of it that crosses
-// the notch's mouth, so the line reads as detouring around the notch. The top
-// and bottom pieces reach one strip-width PAST the panel's face, so the join is
-// a painted overlap instead of two shapes abutting — abutting is what [his]
-// "two sides touching without a corner piece" was, because at this fractional
-// scale each shape rounds its own edge and the corner block belongs to neither.
-// The rest of the slab past that (`overlap`) is bare fill on the bar's own
-// background, which is what makes the notch OPEN into the panel rather than sit
-// against it as a box.
+// THE OUTLINE IS A CLIPPED, ROUNDED BORDER RECT (it was three flat strips
+// until 2026-08-08), and the slab is drawn OVER the bar's accent strip rather
+// than beside it. The strip runs the full height of the panel, uncut; the
+// slab's own fill hides the stretch of it that crosses the notch's mouth, so
+// the line reads as detouring around the notch. The outline reaches one
+// strip-width PAST the panel's face, so the join is a painted overlap rather
+// than two shapes abutting — and with rounding on, the tees where the arms
+// meet the strip take concave quarter-arc fillets (the Shapes block at the
+// bottom). The slab past the face (`overlap`) is bare fill on the bar's own
+// background, which is what makes the notch OPEN into the panel rather than
+// sit against it as a box.
 //
 // WINDOWS: the bar is on the BOTTOM layer and windows draw over it — what keeps
 // them off is the exclusive zone, which reserves the bar's own width. The notch
@@ -63,18 +64,22 @@ Item {
 
     // The slab: the bar's background, all the way under the bar body. Its
     // desktop-facing corners follow the global rounding; the bar side is
-    // extended by the radius so the rounded far corners land invisibly on the
-    // bar's own identical background instead of letting the accent strip peek
-    // through the mouth's corners.
-    Rectangle {
-        // bar side: x=0 when the bar is LEFT, x=width when it is RIGHT — the
-        // extension always reaches toward the bar.
-        x: notch.barLeft ? -radius : 0
-        y: 0
-        width: notch.width + radius
-        height: notch.height
-        radius: Theme.windowRounding
-        color: Theme.bg
+    // extended by the radius so the rounded far corners stay square — and the
+    // whole thing is CLIPPED to the notch's own bounds, because the first cut
+    // let the extension paint over whatever panel content sat beside the
+    // mouth (it cropped the media card's album art).
+    Item {
+        anchors.fill: parent
+        clip: true
+        Rectangle {
+            // the extension always reaches toward the bar side
+            x: notch.barLeft ? -radius : 0
+            y: 0
+            width: notch.width + radius
+            height: notch.height
+            radius: Theme.windowRounding
+            color: Theme.bg
+        }
     }
 
     // ---- the outline, in the bar's accent ---------------------------------
@@ -88,9 +93,8 @@ Item {
     // must not exist — the mouth OPENS into the panel — so the rect extends
     // past this clip on the bar side by radius + line width and the clip cuts
     // the arms off square exactly where the old strips ended. At rounding 0
-    // this paints pixel-identically to the three strips. The tee where the
-    // arms meet the panel's own strip stays square on purpose: those are
-    // CONCAVE corners, and nothing else on the desktop fillets those.
+    // this paints pixel-identically to the three strips. The tees where the
+    // arms meet the panel's own strip get their concave fillets below.
     Item {
         x: notch.barLeft ? notch.overlap - notch.lineW : 0
         y: 0
@@ -107,6 +111,68 @@ Item {
             color: "transparent"
             border.width: notch.lineW
             border.color: Theme.accent
+        }
+    }
+
+    // ---- the INNER corners of the connection: concave fillets -------------
+    // Where each arm tees into the panel's edge strip, the accent line now
+    // TURNS through a quarter arc instead of a hard right angle. The straight
+    // stubs the arc replaces are hidden with panel-background cover rects —
+    // legal because everything on the panel side of the curve is flat
+    // Theme.bg; the desktop side of the curve was never painted by us at all.
+    // Fillet radius = the global rounding; at 0 nothing draws and the old
+    // sharp tee remains, pixel-identical.
+    readonly property int filletR: Theme.windowRounding
+    // centerline of the panel's strip, in notch coords
+    readonly property real strokeC: (notch.barLeft ? notch.overlap - notch.lineW : notch.width - notch.overlap) + notch.lineW / 2
+    readonly property real armEndX: notch.barLeft ? notch.overlap - notch.lineW : notch.armW
+
+    Repeater {
+        model: notch.filletR > 0 ? 2 : 0   // 0 = top tee, 1 = bottom tee
+        delegate: Item {
+            required property int index
+            readonly property bool isBottom: index === 1
+
+            // hide the strip's straight stub beside the curve — exactly from
+            // the arc's tangent point to the notch edge, so no strip pixel
+            // above the curve is erased without the arc repainting it
+            Rectangle {
+                x: notch.strokeC - notch.lineW / 2
+                y: isBottom ? notch.height : notch.lineW / 2 - notch.filletR
+                width: notch.lineW
+                height: Math.max(0, notch.filletR - notch.lineW / 2)
+                color: Theme.bg
+            }
+            // ...and the arm's straight stub the arc replaces
+            Rectangle {
+                x: notch.barLeft ? notch.strokeC - notch.lineW / 2 - 0
+                                 : notch.strokeC - notch.filletR
+                y: isBottom ? notch.height - notch.lineW : 0
+                width: notch.filletR + notch.lineW / 2 + (notch.barLeft ? notch.lineW / 2 : 0)
+                height: notch.lineW
+                color: Theme.bg
+            }
+            Shape {
+                antialiasing: true
+                preferredRendererType: Shape.CurveRenderer
+                ShapePath {
+                    strokeWidth: notch.lineW
+                    strokeColor: Theme.accent
+                    fillColor: "transparent"
+                    capStyle: ShapePath.FlatCap
+                    PathAngleArc {
+                        centerX: notch.barLeft ? notch.strokeC + notch.filletR : notch.strokeC - notch.filletR
+                        centerY: isBottom ? notch.height - notch.lineW / 2 + notch.filletR
+                                        : notch.lineW / 2 - notch.filletR
+                        radiusX: notch.filletR
+                        radiusY: notch.filletR
+                        // quarter turn from the strip's vertical into the
+                        // arm's horizontal, concave toward the desktop
+                        startAngle: notch.barLeft ? 180 : 0
+                        sweepAngle: (isBottom ? -90 : 90) * (notch.barLeft ? -1 : 1)
+                    }
+                }
+            }
         }
     }
 

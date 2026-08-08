@@ -1233,8 +1233,13 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     // colour (mirrors the old QS look)
     // Cell chrome follows the global rounding too (clamped to the cell's own
     // half-size, like every small control on the desktop); the inner fill's
-    // radius shrinks by the outline width so the ring reads even.
-    const int CELLRND = std::min(RND, (int)std::round(CELL * SCALE / 2.0));
+    // radius shrinks by the outline width so the ring reads even. The outline
+    // width follows the global border width at CONTROL scale, exactly the
+    // panel's convention: half the window border with a 1px floor, 0 stays 0,
+    // and the lit emphasis keeps its +1 at every scale.
+    const int CELLRND  = std::min(RND, (int)std::round(CELL * SCALE / 2.0));
+    const int BS       = (int)std::round(PWINDOW->getRealBorderSize());
+    const int CELLBW   = BS > 0 ? std::max(1, (int)std::round(BS / 2.0)) : 0;
     auto      drawCellXY = [&](double x, double y, const CHyprColor& hot, bool lit, bool flash = false) {
         if (flash) {
             auto fc = hot;
@@ -1242,10 +1247,11 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
             Hl::rect(localBox(x, y, CELL, CELL), fc, {.round = CELLRND});
             return;
         }
-        const int bw = lit ? 2 : 1;
+        const int bw = lit ? CELLBW + 1 : CELLBW;
         auto      oc = lit ? hot : borderColor;
         oc.a *= a;
-        Hl::rect(localBox(x, y, CELL, CELL), oc, {.round = CELLRND});
+        if (bw > 0)
+            Hl::rect(localBox(x, y, CELL, CELL), oc, {.round = CELLRND});
         Hl::rect(localBox(x + bw, y + bw, CELL - 2 * bw, CELL - 2 * bw), lit ? bgAltColor : bgColor,
                  {.round = std::max(0, CELLRND - (int)std::round(bw * SCALE))});
     };
