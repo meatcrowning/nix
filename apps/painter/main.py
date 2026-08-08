@@ -50,6 +50,9 @@ except Exception:  # noqa: BLE001 - the titlebar bridge is optional
     VtbClient = None
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
 from spellcheck import SpellCheck  # noqa: E402  (pylib; the prompt boxes' spelling)
+# The QBuffer-safe encoder (see its docstring for the SEGV that shape avoids);
+# collage.py already pulls it in, so this costs nothing new.
+import imgfit  # noqa: E402
 
 sys.path.insert(0, str(HERE))
 import collage as Collage  # noqa: E402
@@ -69,6 +72,9 @@ PEER_OUTS = [Path(p) for p in os.environ.get("PAINTER_PEER_OUT", "").split(":") 
 STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "painter"
 CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "painter"
 PREFS = STATE / "prefs.json"
+# What painter will send to the backend as a frame — the drop and the paste
+# both go through App._usable_image, so there is one answer.
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
 UNIT = "comfy-painter.service"
 
 # WHERE THE BACKEND'S UNIT LIVES. On top it is local, so this is plain
@@ -830,18 +836,121 @@ class Painter(QObject):
             return ""
         return (self.reg.family_of(entry) or {}).get("kind", "image")
 
-    # -- the dropped frames ------------------------------------------------
+    # -- the dropped (and pasted) frames -------------------------------------
+
+    def _usable_image(self, path, verb):
+        """(path, "") if painter can send that file to the backend, else
+        ("", why). One rule for the drop and the paste, so the two cannot come
+        to disagree about what counts as an image; `verb` only words it."""
+        if not path or not os.path.isfile(path):
+            return "", "that is not a file painter can read"
+        if Path(path).suffix.lower() not in IMAGE_SUFFIXES:
+            return "", "%s an image (png, jpg, webp)" % verb
+        return path, ""
 
     def _dropped_path(self, url):
         """A dropped url as a local image path, or "" with the reason said."""
-        path = QUrl(url).toLocalFile() if url.startswith("file:") else url
-        if not path or not os.path.isfile(path):
-            self.toast.emit("that is not a file painter can read", True)
-            return ""
-        if Path(path).suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
-            self.toast.emit("drop an image (png, jpg, webp)", True)
-            return ""
+        path, why = self._usable_image(
+            QUrl(url).toLocalFile() if url.startswith("file:") else url, "drop")
+        if why:
+            self.toast.emit(why, True)
         return path
+
+    def _clipboard_offer(self):
+        """What a paste would mean, WITHOUT writing anything:
+        `("file", path)`, `("pixels", QImage)`, or `("", why)`.
+
+        Three shapes, in the order a paste can mean them:
+
+          FILES  — a copy out of filer, viewer or a browser (`text/uri-list`,
+                   which is what `pylib/clipfile.py` puts there). The picture is
+                   already on disk under its own name, so nothing is written and
+                   the well shows the name he knows it by.
+          PIXELS — a screenshot tool, a browser's "copy image", an editor. There
+                   is no file, so `_paste_target` has to make one.
+          TEXT   — a path someone copied as a string (filer's "copy path").
+
+        Reading the clipboard needs painter to have keyboard focus on Wayland —
+        the selection is offered to the focused client — which both paste routes
+        do have: a click on `[ paste ]` and a Ctrl+V over a well are both in a
+        focused window. That is also why the button is not greyed out from this:
+        an offer that has not arrived yet would grey a button that is about to
+        work, and a paste with nothing behind it says so out loud anyway."""
+        md = QGuiApplication.clipboard().mimeData()
+        if md is None:
+            return "", "there is nothing on the clipboard"
+        if md.hasUrls():
+            why = "there is no image file on the clipboard"
+            for u in md.urls():
+                local = u.toLocalFile()
+                if not local:
+                    continue
+                path, why = self._usable_image(local, "paste")
+                if path:
+                    return "file", path
+            return "", why
+        if md.hasImage():
+            img = QGuiApplication.clipboard().image()
+            if img is None or img.isNull():
+                return "", "the clipboard's image could not be read"
+            return "pixels", img
+        if md.hasText():
+            path, why = self._usable_image(md.text().strip(), "paste")
+            return ("file", path) if path else ("", why)
+        return "", "there is no image on the clipboard"
+
+    def _paste_target(self):
+        """`_clipboard_offer()` resolved to a path on disk, or "" with the
+        reason said. Pixels are written into the cache, named by CONTENT: paste
+        the same screenshot twice and it is one file — and, because the upload
+        cache is keyed on the path, one upload to the backend as well."""
+        kind, val = self._clipboard_offer()
+        if kind == "file":
+            return val
+        if kind != "pixels":
+            self.toast.emit(val, True)
+            return ""
+        data = imgfit.encode(val, "png", 50)
+        if not data:
+            self.toast.emit("could not encode what is on the clipboard", True)
+            return ""
+        dest = CACHE / "pasted" / ("pasted-%s.png" % hashlib.sha1(data).hexdigest()[:12])
+        try:
+            if not (dest.exists() and dest.stat().st_size == len(data)):
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(data)
+            self._prune_pasted(dest.parent)
+        except OSError as e:
+            self.toast.emit("could not save the pasted image: %s" % e, True)
+            return ""
+        return str(dest)
+
+    @staticmethod
+    def _prune_pasted(d, keep=20):
+        """A pasted screenshot is scratch, but the file has to outlive the paste
+        (the backend uploads it at generate time, and prefs remember it across a
+        launch). So they accumulate; keep the newest few and drop the rest."""
+        try:
+            old = sorted(d.glob("pasted-*.png"), key=lambda p: p.stat().st_mtime,
+                         reverse=True)[keep:]
+        except OSError:
+            return
+        for p in old:
+            try:
+                p.unlink()
+            except OSError:
+                pass
+
+    @Slot(result=bool)
+    def pasteInputImage(self):
+        """The clipboard as the first frame / the image to edit."""
+        path = self._paste_target()
+        return self.setInputImage(path) if path else False
+
+    @Slot(result=bool)
+    def pasteLastImage(self):
+        path = self._paste_target()
+        return self.setLastImage(path) if path else False
 
     @Slot(str, result=bool)
     def setInputImage(self, url):

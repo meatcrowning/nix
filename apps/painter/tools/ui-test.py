@@ -848,7 +848,7 @@ def test_video(win, ctl, tmp):
           not aspect.isVisible() and res.property("badge") == "from the image",
           res.property("badge"))
     well = find(find(content, "VideoPanel"), "FrameWell",
-                pred=lambda it: it.property("emptyText").startswith("drag the frame to end"))
+                pred=lambda it: it.property("emptyText").endswith("to end on here"))
     check("...and its well stands on its own, with no first frame",
           well is not None and well.isVisible(), well and well.property("active"))
     g = prop(win, "gen")
@@ -997,6 +997,187 @@ MODE_FAKES = {
         "double_blocks.0.double_stream_modulation_img.weight": [16, 16],
         "txt_in.weight": [16, 16]},
 }
+
+
+def test_paste(win, ctl, tmp):
+    """A frame well takes the CLIPBOARD as well as a drop.
+
+    The clipboard here is the offscreen platform's own, in-process: there is no
+    Wayland connection in this run, so nothing below can read or replace HIS
+    selection. Both routes are exercised — the `[ paste ]` button, by a real
+    click, and Ctrl+V, by a real key event at the window — because they are
+    different failure modes: the button is a callback, the shortcut is a
+    window-level Shortcut that must NOT take Ctrl+V away from the prompt boxes.
+    """
+    import main as P
+    from PySide6.QtCore import Qt, QUrl, QMimeData
+    from PySide6.QtGui import QGuiApplication, QImage, QColor
+    from PySide6.QtTest import QTest
+
+    # QTest, not the `key()` helper: a window-level Shortcut is matched by the
+    # shortcut map on the way IN from the platform, and a hand-sent QKeyEvent
+    # goes straight to the focus item without ever passing it (test_escape
+    # drives its Shortcut the same way).
+    def paste_key():
+        QTest.keyClick(win, Qt.Key_V, Qt.ControlModifier)
+        spin(80)
+
+    clip = QGuiApplication.clipboard()
+    content = win.contentItem()
+    said = []
+    ctl.toast.connect(lambda msg, bad: said.append((msg, bad)))
+
+    # A video family, for the two wells side by side — the one arrangement
+    # where "which well did that go into?" can be got wrong.
+    root = os.environ["PAINTER_MODELS"]
+    for rel, keys in VIDEO_FAKES.items():
+        write_safetensors(os.path.join(root, rel), keys)
+    import fingerprint as fp
+    fp.save_cache({})
+    ctl.rescan()
+    spin(200)
+    ctl.selectModelByName("mini-video.safetensors")
+    spin(200)
+    g = prop(win, "gen")
+    g.update({"useInputImage": True, "useLastFrame": True})
+    win.setProperty("gen", g)
+    spin(150)
+
+    well = find(find(content, "VideoPanel"), "FrameWell",
+                pred=lambda it: it.property("emptyText").endswith("to start from here"))
+    check("the first-frame well is there", well is not None and well.isVisible())
+    btn = find(well, "TextButton", pred=lambda it: it.property("label") == "[ paste ]")
+    check("...with a [ paste ] button in it", btn is not None and btn.isVisible())
+
+    # ---- a FILE on the clipboard (filer, viewer, a browser) ----
+    src = fake_png(os.path.join(tmp, "clip-src.png"), {"positive": "x"})
+    md = QMimeData()
+    md.setUrls([QUrl.fromLocalFile(src)])
+    clip.setMimeData(md)
+    ctl.clearInputImage()
+    said.clear()
+    click(win, btn)
+    check("a copied FILE pastes as itself, no copy made",
+          ctl.property("inputImage") == src, ctl.property("inputImage"))
+    check("...silently — the well filling is the report", said == [], said)
+
+    # ---- PIXELS on the clipboard (a screenshot, a browser's copy image) ----
+    img = QImage(8, 6, QImage.Format_RGB32)
+    img.fill(QColor(200, 40, 10))
+    clip.setImage(img)
+    ctl.clearInputImage()
+    click(win, btn)
+    got = ctl.property("inputImage")
+    check("pasted PIXELS are written to a file painter can send",
+          got.endswith(".png") and os.path.isfile(got)
+          and os.path.dirname(got) == str(P.CACHE / "pasted"), got)
+    check("...and it decodes back to the same picture",
+          QImage(got).size() == img.size(), QImage(got).size())
+    first = got
+
+    # Twice is one file: named by CONTENT, so the upload cache hits too.
+    ctl.clearInputImage()
+    click(win, btn)
+    check("the same pixels pasted twice are the same file",
+          ctl.property("inputImage") == first, (first, ctl.property("inputImage")))
+    check("...and only one landed on disk",
+          len(list((P.CACHE / "pasted").glob("pasted-*.png"))) == 1,
+          list((P.CACHE / "pasted").glob("pasted-*.png")))
+
+    # ---- TEXT that names an image (filer's "copy path") ----
+    clip.setText(src)
+    ctl.clearInputImage()
+    click(win, btn)
+    check("a pasted PATH is taken", ctl.property("inputImage") == src,
+          ctl.property("inputImage"))
+
+    # ---- the refusals, out loud (docs/DESIGN.md §10) ----
+    for payload, why in ((("text", "just some words"), "that is not a file painter can read"),
+                         (("file", os.path.join(tmp, "notes.txt")), "paste an image (png, jpg, webp)")):
+        kind, val = payload
+        if kind == "file":
+            open(val, "w").write("x")
+            md = QMimeData()
+            md.setUrls([QUrl.fromLocalFile(val)])
+            clip.setMimeData(md)
+        else:
+            clip.setText(val)
+        ctl.clearInputImage()
+        said.clear()
+        click(win, btn)
+        check("a paste of %r says why" % kind,
+              ctl.property("inputImage") == "" and said and said[0][0] == why
+              and said[0][1] is True, (said, ctl.property("inputImage")))
+
+    # ---- Ctrl+V goes to the well under the POINTER, and nowhere else ----
+    md = QMimeData()
+    md.setUrls([QUrl.fromLocalFile(src)])
+    clip.setMimeData(md)
+    ctl.clearInputImage()
+    # With a text box holding the keyboard, Ctrl+V is ITS paste — a focused
+    # QQuickTextEdit accepts the ShortcutOverride, so the window shortcut never
+    # matches. That is checked below on purpose; here we want the other case.
+    win.metaObject().invokeMethod(win, "releaseFocus")
+    spin(60)
+    win.setProperty("hoveredWell", "")
+    paste_key()
+    check("Ctrl+V over nothing pastes nothing",
+          ctl.property("inputImage") == "", ctl.property("inputImage"))
+
+    win.setProperty("hoveredWell", "input")
+    paste_key()
+    check("Ctrl+V over a well pastes into it", ctl.property("inputImage") == src,
+          ctl.property("inputImage"))
+
+    ctl.clearLastImage()
+    win.setProperty("hoveredWell", "last")
+    paste_key()
+    check("...and the LAST-frame well is its own target",
+          ctl.property("lastImage") == src and ctl.property("inputImage") == src,
+          (ctl.property("lastImage"), ctl.property("inputImage")))
+    ctl.clearLastImage()
+
+    # THE REGRESSION THIS GUARDS: an unconditional window Shortcut would have
+    # eaten the prompt boxes' own paste. With the pointer over no well it must
+    # not exist, and Ctrl+V must reach the text box that has the keyboard.
+    win.setProperty("hoveredWell", "")
+    box = find_all(content, "PromptBox")[0]
+    ed = find(box, "QQuickTextEdit")
+    ed.forceActiveFocus()
+    ed.setProperty("text", "")
+    spin(60)
+    clip.setText("pasted into the prompt")
+    paste_key()
+    check("Ctrl+V still pastes TEXT into a focused prompt box",
+          ed.property("text") == "pasted into the prompt", ed.property("text"))
+
+    # ...and it keeps it even with the pointer parked on a well: a focused text
+    # box owns Ctrl+V, which is why `[ paste ]` exists and is the route that
+    # always works.
+    ed.setProperty("text", "")
+    ctl.clearInputImage()
+    win.setProperty("hoveredWell", "input")
+    paste_key()
+    check("a focused text box wins Ctrl+V over a hovered well",
+          ed.property("text") == "pasted into the prompt"
+          and ctl.property("inputImage") == "",
+          (ed.property("text"), ctl.property("inputImage")))
+    win.setProperty("hoveredWell", "")
+    ed.setProperty("text", "")
+    win.metaObject().invokeMethod(win, "releaseFocus")
+
+    # Put the column back the way test_video expects to find it.
+    ctl.clearInputImage()
+    ctl.clearLastImage()
+    g = prop(win, "gen")
+    g.update({"useInputImage": False, "useLastFrame": False})
+    win.setProperty("gen", g)
+    for rel in VIDEO_FAKES:
+        os.remove(os.path.join(root, rel))
+    fp.save_cache({})
+    ctl.rescan()
+    ctl.selectModelByName("alpha-model.safetensors")
+    spin(200)
 
 
 def test_modes(win, ctl, tmp):
@@ -2141,6 +2322,7 @@ def main():
     print("== panes ==");             test_panes(win)
     print("== live bindings ==");     test_live_bindings(win, ctl)
     print("== video ==");             test_video(win, ctl, tmp)
+    print("== paste ==");             test_paste(win, ctl, tmp)
     print("== modes ==");             test_modes(win, ctl, tmp)
     print("== drag out ==");          test_drag_out(win, ctl, tmp)
     print("== hover play ==");        test_hover_play(win, ctl, tmp)

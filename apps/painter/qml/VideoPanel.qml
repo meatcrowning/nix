@@ -31,8 +31,8 @@ Panel {
     }
 
     PixelText {
-        text: "  drop an image in a well below to start from it, end on it, or "
-              + "both; neither is text-to-video"
+        text: "  drop or paste an image in a well below to start from it, end "
+              + "on it, or both; neither is text-to-video"
         color: Theme.dim
         width: parent.width
         wrapMode: Text.Wrap
@@ -50,8 +50,16 @@ Panel {
         active: root.gen.useInputImage
         path: App.inputImage
         url: App.inputImageUrl
-        emptyText: "drag the frame to start from here"
+        emptyText: "drag or paste the frame to start from here"
+        winActive: root.winActive
         accepts: function (u) { return App.setInputImage(u) }
+        paste: function () { return App.pasteInputImage() }
+        // Order-independent: moving straight from one well to the other must
+        // not have the leave clear the target the enter just set.
+        onHoveredChanged: {
+            if (hovered) root.hoveredWell = "input"
+            else if (root.hoveredWell === "input") root.hoveredWell = ""
+        }
     }
 
     Row {
@@ -75,8 +83,16 @@ Panel {
         active: root.gen.useLastFrame
         path: App.lastImage
         url: App.lastImageUrl
-        emptyText: "drag the frame to end on here"
+        emptyText: "drag or paste the frame to end on here"
+        winActive: root.winActive
         accepts: function (u) { return App.setLastImage(u) }
+        paste: function () { return App.pasteLastImage() }
+        // Order-independent: moving straight from one well to the other must
+        // not have the leave clear the target the enter just set.
+        onHoveredChanged: {
+            if (hovered) root.hoveredWell = "last"
+            else if (root.hoveredWell === "last") root.hoveredWell = ""
+        }
     }
 
     Row {

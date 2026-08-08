@@ -559,6 +559,27 @@ Window {
     }
     Shortcut { sequence: "Ctrl+R"; onActivated: App.rescan() }
 
+    // Ctrl+V INTO A FRAME WELL, and only while the pointer is over one.
+    //
+    // A window-level Shortcut sees a key before the focused item's own handler
+    // (see Escape above), so an unconditional Ctrl+V here would take paste away
+    // from the prompt boxes — the one place in painter where Ctrl+V already
+    // meant something. `enabled` is what keeps that impossible: the pointer
+    // cannot be over a well and inside a prompt box at once, and with the
+    // pointer elsewhere this shortcut does not exist. It also answers "which
+    // well?" with no focus model and no invisible state — the wells are
+    // hovering-highlighted anyway, and `[ paste ]` on each covers the
+    // keyboardless route.
+    property string hoveredWell: ""
+    Shortcut {
+        // Spelled out rather than StandardKey.Paste: the standard key resolves
+        // to a set, and a Shortcut given one matched nothing here.
+        sequences: ["Ctrl+V", "Shift+Ins"]
+        enabled: root.hoveredWell !== ""
+        onActivated: root.hoveredWell === "last" ? App.pasteLastImage()
+                                                 : App.pasteInputImage()
+    }
+
     // ------------------------------------------------------- injecting params
 
     // What "inject" means, in one place, for the gallery's menu. An image's PNG
