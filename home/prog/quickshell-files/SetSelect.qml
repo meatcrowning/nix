@@ -27,7 +27,10 @@ Rectangle {
 
     function _display(v) { return (labels && labels[v] !== undefined) ? labels[v] : v; }
 
-    width: Math.max(96, label.implicitWidth + 24)
+    // Sized to the value, margins and nothing else — the old 96px floor left
+    // a chunk of dead space right of every short value once the label stopped
+    // being centred between arrows.
+    width: label.implicitWidth + 16
     height: 22
     color: (ma.containsMouse || root._menu) ? Theme.bgAlt : "transparent"
     border.width: 1
