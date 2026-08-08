@@ -291,7 +291,16 @@ Rectangle {
         return items.concat(sendToPhoneItems()).concat([
             { separator: true },
             { label: "cut" + n,  trigger: () => { clip = { op: "cut",  paths: selection.slice() }; } },
-            { label: "copy" + n, trigger: () => { clip = { op: "copy", paths: selection.slice() }; } },
+            // TWO clipboards, and copy fills both: filer's own `clip` (which is
+            // what carries cut-vs-copy for filer's paste) and the SYSTEM one,
+            // so the copy is visible to every other program — painter, a chat
+            // window, an editor. It was internal-only until 2026-08-07, which
+            // made "copy here, paste there" do nothing, silently, everywhere
+            // else. Cut stays internal: it is filer's own move, not an offer.
+            { label: "copy" + n, trigger: () => {
+                clip = { op: "copy", paths: selection.slice() };
+                FileOps.copyToClipboard(selection);
+            } },
             { label: e.isDir ? "paste into" : "paste", enabled: clip !== null,
               trigger: () => pasteInto(e.isDir ? e.path : path) },
             { separator: true },

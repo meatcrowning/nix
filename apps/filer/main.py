@@ -47,11 +47,18 @@ from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font set
 from handoff import send as handoff_send, took as handoff_took  # noqa: E402  (pylib)
 
 from notify import tool, toast  # noqa: E402  (next to this file; filer's one toast path)
+
 from videoconv import VideoConv  # noqa: E402  (next to this file; see its docstring)
 from imgconv import ImgConv  # noqa: E402  (next to this file; the stills half of the same idea)
 from pick import Picker, load_spec  # noqa: E402  (picker mode — see its docstring)
 from phone import Phone  # noqa: E402  (next to this file; KDE Connect "send to phone")
 from remote import Remote  # noqa: E402  (next to this file; the `:top` address bar syntax)
+
+# The clipboard holder (pylib, stdlib-only), run as a program rather than
+# imported: it forks and stays alive owning the selection, so a copy outlives
+# filer. A module constant so a harness can repoint it and never touch his
+# clipboard — see FileOps.copyToClipboard.
+CLIPFILE = HERE.parent / "pylib" / "clipfile.py"
 
 # Preview classification. `kind` is the scaffold for file previews: the QML side
 # groups/renders entries by it (previewable files get a thumbnail grid at the top
@@ -503,6 +510,7 @@ class FileOps(QObject):
         super().__init__(parent)
         self._batches = {}
         self._seq = 0
+        self._clip_procs = []      # a QProcess with no Python ref is collected
 
     # ---- failure reporting ----
     def _report(self, title, message):
@@ -695,6 +703,50 @@ class FileOps(QObject):
         """Put text on the system clipboard (the context menu's "copy path").
         QML has no clipboard API of its own, so this bridges to Qt's."""
         QGuiApplication.clipboard().setText(str(text))
+
+    @Slot("QVariantList")
+    def copyToClipboard(self, paths):
+        """`copy` puts the files on the SYSTEM clipboard too, not just in
+        filer's own `clip`.
+
+        Until 2026-08-07 it did not, and that made filer's copy invisible to
+        every other program on the desktop: copy an image here, paste it into
+        painter or a chat window, and nothing arrived — there was nothing on the
+        clipboard to arrive. filer's internal `clip` still drives filer's own
+        paste (it is what carries cut vs copy); this is the half that leaves the
+        app.
+
+        `pylib/clipfile.py`, never QClipboard: a Wayland selection dies with the
+        process that offered it, so a copy that only lived in filer would stop
+        being pasteable the moment filer closed. `--image` for a lone image adds
+        the pixels beside the file, so an editor that cannot take a file paste
+        still gets the picture (apps/AGENTS.md -> pylib/).
+        """
+        paths = [str(p) for p in paths if str(p)]
+        if not paths:
+            return
+        lone_image = (len(paths) == 1
+                      and os.path.splitext(paths[0])[1].lower() in IMAGE_EXTS)
+        argv = ([sys.executable, str(CLIPFILE)]
+                + (["--image"] if lone_image else []) + paths)
+        proc = QProcess(self)
+        self._clip_procs.append(proc)
+
+        def done(code, _status):
+            err = _stderr_lines(bytes(proc.readAllStandardError())
+                                .decode("utf-8", "replace"))
+            if code != 0:
+                # Never silent: a copy that did not take the clipboard is a
+                # paste that will do nothing, minutes later, somewhere else.
+                self._report("copy failed", err or "clipfile exited %d" % code)
+            if proc in self._clip_procs:
+                self._clip_procs.remove(proc)
+            proc.deleteLater()
+
+        proc.finished.connect(done)
+        proc.errorOccurred.connect(
+            lambda _e: self._report("copy failed", "cannot run clipfile"))
+        proc.start(argv[0], argv[1:])
 
     @Slot(str, result="QVariantList")
     def listDir(self, path):
