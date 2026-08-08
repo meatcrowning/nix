@@ -18,6 +18,22 @@ let
       *) echo "unsupported fstype: $fstype" >&2; exit 1 ;;
     esac
   '';
+
+  # Read-only SMART query for the disk-hover popup. The NOPASSWD rule below
+  # points at THIS wrapper, not raw smartctl, so the passwordless-root grant is
+  # hardcoded to `smartctl -a -j <device>` (attributes/health/logs/identity, no
+  # `-t` self-test, no `--set` toggle) and the device is constrained to a real
+  # block node — closing the "arbitrary smartctl args as root" hole while
+  # serving the only invocation quickshell actually makes (disk-smart.sh).
+  driveSmart = pkgs.writeShellScriptBin "drive-smart" ''
+    dev="$1"
+    case "$dev" in
+      /dev/sd[a-z]|/dev/sd[a-z][0-9]*|/dev/nvme[0-9]*|/dev/disk/by-*/*) ;;
+      *) echo "drive-smart: refusing non-block-device argument" >&2; exit 2 ;;
+    esac
+    [ "$#" -eq 1 ] || { echo "usage: drive-smart <device>" >&2; exit 2; }
+    exec ${pkgs.smartmontools}/bin/smartctl -a -j "$dev"
+  '';
 in
 {
   # Declare every data drive by UUID. Kernel sd* letters are NOT stable here —
@@ -77,15 +93,20 @@ in
       options = [ "nofail" "x-systemd.device-timeout=10s" "nosuid" "nodev"
                   "subvolid=5" "discard=async" ];
     };
+    # nosuid,nodev like arc/bak: these old-OS roots carry a full FHS tree with
+    # 2022 setuid-root binaries (linux-old's /usr/bin/{sudo,pkexec,su,...}).
+    # They can't execute on NixOS today (foreign ELF interpreter is absent), but
+    # honouring their setuid bit and device nodes is a needless local-privesc
+    # reservoir — deny both, matching every other data mount here.
     "/home/lam/drives/linux-old" = {
       device = "/dev/disk/by-uuid/41510f82-e570-461f-af0a-91dfcdee6376";
       fsType = "btrfs";
-      options = [ "nofail" "x-systemd.device-timeout=5s" "subvolid=5" ];
+      options = [ "nofail" "x-systemd.device-timeout=5s" "nosuid" "nodev" "subvolid=5" ];
     };
     "/home/lam/drives/nixos-old" = {
       device = "/dev/disk/by-uuid/2364de91-8173-4512-b004-1f109b620a55";
       fsType = "ext4";
-      options = [ "nofail" "x-systemd.device-timeout=5s" ];
+      options = [ "nofail" "x-systemd.device-timeout=5s" "nosuid" "nodev" ];
     };
   };
 
@@ -93,15 +114,16 @@ in
   systemd.tmpfiles.rules = [ "d /home/lam/drives 0755 lam users - -" ];
 
   # SMART for the disk-hover popup. udisks2 could expose this over D-Bus but
-  # the CLI is painful; a NOPASSWD rule for the read-only `smartctl` is the
-  # simple path (quickshell runs as lam, no TTY).
+  # the CLI is painful; a NOPASSWD rule is the simple path (quickshell runs as
+  # lam, no TTY). Scoped to the fixed-arg `drive-smart` wrapper, not raw
+  # smartctl, so the passwordless grant cannot run self-tests or feature toggles.
   security.sudo.extraRules = [{
     users = [ "lam" ];
     commands = [
-      { command = "${pkgs.smartmontools}/bin/smartctl"; options = [ "NOPASSWD" ]; }
+      { command = "${driveSmart}/bin/drive-smart"; options = [ "NOPASSWD" ]; }
       { command = "${driveLabel}/bin/drive-label"; options = [ "NOPASSWD" ]; }
     ];
   }];
 
-  environment.systemPackages = [ pkgs.smartmontools pkgs.jq driveLabel ];
+  environment.systemPackages = [ pkgs.smartmontools pkgs.jq driveLabel driveSmart ];
 }
