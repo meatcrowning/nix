@@ -38,8 +38,23 @@ PanelWindow {
     // How far a card reaches under the bar body: the notch's own mouth depth,
     // so the two attachments read as one construction.
     readonly property int mouth: attached ? NotchModel.overlap : 0
-    // A card's full width, mouth included; the desktop sees notifWidth of it.
-    readonly property int cardW: SettingsStore.d.notifWidth + mouth
+    // The stack's shared width: the widest visible card's content-fitted
+    // width (NotificationCard.fitW, capped there at notifWidth), so a short
+    // toast carries no blank right side. ONE width for the whole stack, not
+    // per-card ragged edges — the input mask below is a single rectangle, and
+    // a rect over a ragged stack would swallow desktop clicks beside the
+    // narrower cards.
+    readonly property int stackW: {
+        let w = 1;
+        for (let i = 0; i < col.children.length; i++) {
+            const c = col.children[i];
+            if (c && c.fitW !== undefined)
+                w = Math.max(w, c.fitW);
+        }
+        return w;
+    }
+    // A card's full width, mouth included; the desktop sees stackW of it.
+    readonly property int cardW: stackW + mouth
 
     anchors { top: win._top; bottom: !win._top; left: win._left; right: !win._left }
     margins {
@@ -50,7 +65,8 @@ PanelWindow {
 
     // Attached: from the screen edge past the widest the panel can be, so the
     // stack can sit at the face at every panel width without the surface ever
-    // resizing. Floating: exactly the stack, placed clear of the reserve.
+    // resizing. Floating: the widest a card can be, placed clear of the
+    // reserve — also fixed, the content-fitted stack sits at its outer edge.
     exclusionMode: win.attached ? ExclusionMode.Ignore : ExclusionMode.Normal
     implicitWidth: win.attached ? ViewMode.maxPx + SettingsStore.d.notifWidth
                                 : SettingsStore.d.notifWidth
@@ -70,14 +86,15 @@ PanelWindow {
     // rest of the bar the attached surface spans) stays the bar's: the grip's
     // drag zone and the panel's own widgets sit under this surface, and an
     // Overlay surface with no mask would swallow every event over them.
-    // Floating, the rect is the whole (card-sized) window — no change.
+    // Floating, the rect is the stack, at the window's outer edge — the slack
+    // the content-fitted cards leave against the cap must not eat clicks.
     mask: Region {
         x: win.attached
            ? (win.barLeft ? ViewMode.liveWidth
-                          : win.width - ViewMode.liveWidth - SettingsStore.d.notifWidth)
-           : 0
+                          : win.width - ViewMode.liveWidth - win.stackW)
+           : (win._left ? 0 : win.width - win.stackW)
         y: 0
-        width: win.attached ? SettingsStore.d.notifWidth : win.width
+        width: win.stackW
         height: win.height
     }
 
@@ -90,8 +107,8 @@ PanelWindow {
         height: parent.height
         x: win.attached
            ? (win.barLeft ? ViewMode.liveWidth - win.mouth
-                          : win.width - ViewMode.liveWidth - SettingsStore.d.notifWidth)
-           : 0
+                          : win.width - ViewMode.liveWidth - win.stackW)
+           : (win._left ? 0 : win.width - win.stackW)
 
         Column {
             id: col

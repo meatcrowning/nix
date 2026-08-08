@@ -260,7 +260,7 @@ Column {
             }
         }
         SetRow {
-            label: "toast width"
+            label: "toast max width"
             SetSlider {
                 from: 220; to: 480; step: 10; unit: "px"
                 value: page.d.notifWidth

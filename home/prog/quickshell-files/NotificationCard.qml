@@ -193,7 +193,26 @@ Rectangle {
     readonly property bool summaryDupesHeader:
         summaryText.trim().toLowerCase() === headerText.trim().toLowerCase()
 
-    width: SettingsStore.d.notifWidth
+    // Sized to its content plus padding, like every other toast (docs/DESIGN.md
+    // §10.4 — "a fixed slab was rejected"): notifWidth is the CAP, not the
+    // size, so a short toast carries no blank right side. Only the texts' own
+    // implicitWidths feed this — never a positioner's implicit size, which Qt
+    // computes from actual child widths and would close a binding loop through
+    // the card's own width. The 26 is bodyRow's desktop-visible padding
+    // (14 + 12); the mouth is not counted because fitW is the DESKTOP-side
+    // width — NotificationWindow adds the mouth on top.
+    readonly property int fitW: {
+        const text = Math.max(
+            (appIcon.visible ? appIcon.width + headerRow.spacing : 0)
+                + headerLabel.implicitWidth,
+            summaryLabel.visible ? summaryLabel.implicitWidth : 0,
+            bodyLabel.visible ? bodyLabel.implicitWidth : 0,
+            actionsBox.visible ? actionRow.implicitWidth : 0);
+        const pad = 26 + (hasImage ? thumbSize + bodyRow.spacing : 0);
+        return Math.min(SettingsStore.d.notifWidth, pad + Math.ceil(text));
+    }
+
+    width: fitW
     implicitHeight: Math.max(Theme.cell,
                              (hasImage ? thumbSize : 0) + 20,
                              content.implicitHeight + 20)
@@ -316,6 +335,7 @@ Rectangle {
             // appName is the same useless "KDE Connect" on every one.
             // Notifications.sender() owns that choice and the font map with it.
             Row {
+                id: headerRow
                 width: parent.width
                 spacing: 6
 
@@ -337,6 +357,7 @@ Rectangle {
                 }
 
                 PixelText {
+                    id: headerLabel
                     width: parent.width - (appIcon.visible ? appIcon.width + parent.spacing : 0)
                     anchors.verticalCenter: parent.verticalCenter
                     text: card.headerText
@@ -351,6 +372,7 @@ Rectangle {
             // stranger just like the body, so it still needs the font map (done in
             // card.summaryText). Hidden when it only repeats the header name.
             PixelText {
+                id: summaryLabel
                 width: parent.width
                 text: card.summaryText
                 color: Theme.text
@@ -363,6 +385,7 @@ Rectangle {
 
             // body — dimmed detail, capped so a wall of text can't fill the screen
             PixelText {
+                id: bodyLabel
                 width: parent.width
                 text: Notifications.plain(card.notif ? card.notif.body : "")
                 color: Theme.textDim
@@ -379,6 +402,7 @@ Rectangle {
             // anchor itself). Sized to their labels rather than the settings
             // pages' 96px floor: three of those would not fit a 300px card.
             Item {
+                id: actionsBox
                 width: parent.width
                 height: card.buttonActions.length > 0 ? actionRow.height + 4 : 0
                 visible: card.buttonActions.length > 0
