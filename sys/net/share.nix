@@ -33,6 +33,11 @@ in
         "server string" = "top";
         "server role" = "standalone server";
         "map to guest" = "never";
+        # SMB direct only — drop the legacy NetBIOS session service on 139. nmbd
+        # is already off, nothing here uses NBT, and 139 was a dead-weight
+        # 0.0.0.0 listener (firewall-dropped on the LAN, but reachable from the
+        # tailnet, which trusts the whole interface).
+        "smb ports" = "445";
         # 100.64.0.0/10 is the tailnet (sys/net/tailscale.nix) — authenticated
         # peers only, so the share works when book is off the home LAN.
         "hosts allow" = "${lanCidr} 100.64.0.0/10 127.0.0.1";
