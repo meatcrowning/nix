@@ -1003,6 +1003,11 @@ Rectangle {
     // what this mode can actually return — files for "open", folders for
     // "dir" — so selecting a folder in a file picker greys accept rather
     // than returning something the app cannot use.
+    // The bar is reachable from outside as `pickerBar`: a QQmlExpression
+    // evaluated against this object gets its PROPERTIES, not its ids (the
+    // context is the creation one), so tools/pick-test.py needs the handle.
+    readonly property alias pickerBar: pickBar
+
     PickerBar {
         id: pickBar
         visible: view.picking
@@ -1014,6 +1019,8 @@ Rectangle {
             if (!view.picking) return [];
             return view.selection.filter(p => Picker.selectable(p));
         }
+        // A folder typed into the name box is somewhere to go, not an answer.
+        onNavigate: (dir) => view.go(dir)
     }
 
     // Enter accepts, Escape cancels — the two keys every file dialog owes
