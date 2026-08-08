@@ -360,6 +360,80 @@ def main():
           [pk.kindOf(os.path.join(tmp, "sub")), pk.kindOf(os.path.join(tmp, "a.txt")),
            pk.kindOf(os.path.join(tmp, "nope"))] == ["dir", "file", "missing"])
 
+    # ---- 8e. SAVE mode: the name box IS the answer --------------------------
+    # surfer's <input type=file> asks for this (Chromium's FileModeSave); the
+    # portal backend never does. The file must NOT have to exist.
+    r8 = os.path.join(tmp, "r8.json")
+    eng, roots, keep = build(app, {"mode": "save", "current_folder": tmp,
+                                   "current_name": "note.txt", "result": r8}, tmp)
+    w = roots[0]
+    pane = pane_of(w)
+    spin(150)
+    check("save: the suggested name is in the box",
+          qml(eng, pane, "pickerBar.nameText") == "note.txt")
+    check("save: a file that does not exist yet IS the answer",
+          qml(eng, pane, "pickerBar.answer[0]") == os.path.join(tmp, "note.txt")
+          and qml(eng, pane, "pickerBar.canAccept") is True,
+          qml(eng, pane, "pickerBar.answer"))
+    check("save: the accept button says save",
+          keep[0].acceptLabel == "save", keep[0].acceptLabel)
+
+    # a name whose FOLDER is not there cannot be written
+    typein(w, eng, pane, "nowhere/note.txt")
+    check("save: a name in a folder that does not exist is refused",
+          qml(eng, pane, "pickerBar.canAccept") is False)
+
+    # a folder still navigates, in save mode too
+    typein(w, eng, pane, "sub")
+    check("save: a typed folder is still travel",
+          qml(eng, pane, "pickerBar.typedIsTravel") is True)
+    qml(eng, pane, "pickerBar.submit()")
+    spin(120)
+    check("save: ...and going there leaves the box empty",
+          qml(eng, pane, "path") == os.path.join(tmp, "sub"))
+    qml(eng, pane, "go('%s')" % tmp)
+    spin(120)
+
+    # clicking a file fills the name — that is how you overwrite by pointing
+    qml(eng, pane, "selectSingle('%s/a.txt', false)" % tmp)
+    spin(80)
+    check("save: clicking a file fills the name",
+          qml(eng, pane, "pickerBar.nameText") == "a.txt"
+          and qml(eng, pane, "pickerBar.answer[0]") == os.path.join(tmp, "a.txt"),
+          qml(eng, pane, "pickerBar.nameText"))
+    check("save: ...and that is flagged as an overwrite",
+          qml(eng, pane, "pickerBar.willOverwrite") is True)
+    qml(eng, pane, "pickerBar.submit()")
+    spin(120)
+    check("save: submitting onto an existing file ASKS, and writes nothing yet",
+          not os.path.exists(r8))
+    qml(eng, pane, "pickerBar.doAccept()")     # what the confirm's OK calls
+    spin(120)
+    check("save: confirming writes the result",
+          os.path.exists(r8)
+          and json.load(open(r8))["uris"] == ["file://" + os.path.join(tmp, "a.txt")],
+          json.load(open(r8)) if os.path.exists(r8) else None)
+    del eng, roots, keep
+
+    # and a brand-new name goes through with no dialog at all
+    r9 = os.path.join(tmp, "r9.json")
+    eng, roots, keep = build(app, {"mode": "save", "current_folder": tmp,
+                                   "current_name": "fresh.txt", "result": r9}, tmp)
+    pane = pane_of(roots[0])
+    spin(150)
+    check("save: a new name does not read as an overwrite",
+          qml(eng, pane, "pickerBar.willOverwrite") is False)
+    qml(eng, pane, "pickerBar.submit()")
+    spin(120)
+    check("save: ...and is written straight out",
+          os.path.exists(r9)
+          and json.load(open(r9))["uris"] == ["file://" + os.path.join(tmp, "fresh.txt")],
+          json.load(open(r9)) if os.path.exists(r9) else None)
+    check("save: writable() is the folder test",
+          keep[0].writable(os.path.join(tmp, "x.txt"))
+          and not keep[0].writable(os.path.join(tmp, "nope", "x.txt")))
+    del eng, roots, keep
+
     # ---- 9. glob case-sensitivity per the spec ----
     p = Picker({"mode": "open", "result": "/dev/null",
                 "filters": [{"name": "I", "patterns": ["*.ico"], "mimes": []}],

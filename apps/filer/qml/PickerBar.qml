@@ -30,16 +30,28 @@ Item {
     // component's public surface (tools/pick-test.py drives it through them).
     property alias nameText: nameField.text
     function focusName() { nameField.forceActiveFocus(); nameField.selectAll(); }
-    readonly property string typedPath: typed ? Picker.resolvePath(nameField.text, currentDir) : ""
-    readonly property string typedKind: typed ? Picker.kindOf(typedPath) : "missing"
+    // Save-as is ALWAYS driven by the box — the name is the answer there, typed
+    // or filled in by clicking a file to overwrite.
+    readonly property bool boxDrives: typed || Picker.saving
+    readonly property string typedPath: boxDrives ? Picker.resolvePath(nameField.text, currentDir) : ""
+    readonly property string typedKind: boxDrives ? Picker.kindOf(typedPath) : "missing"
     // A typed folder in a file dialog is somewhere to GO, not the answer — the
     // same as double-clicking it. In `dir` mode it IS the answer.
-    readonly property bool typedIsTravel: typed && typedKind === "dir" && Picker.mode !== "dir"
+    readonly property bool typedIsTravel: boxDrives && typedKind === "dir" && Picker.mode !== "dir"
 
     // What accept would return. A single-selection request gets one path even
     // if the tree has several selected (ctrl-click is always available), so the
     // box never promises more than the app will receive.
     readonly property var answer: {
+        // SAVE-AS: the answer is the name in the box, and the file it names is
+        // not supposed to exist yet — the only mode where "missing" is fine.
+        // Its folder still has to be real, or the app is handed a path it
+        // cannot write (Picker.accept drops one).
+        if (Picker.saving) {
+            if (typedIsTravel) return [];
+            return (typedPath !== "" && typedKind !== "dir"
+                    && Picker.writable(typedPath)) ? [typedPath] : [];
+        }
         if (typed) {
             return (typedPath !== "" && !typedIsTravel
                     && Picker.selectable(typedPath) && typedKind !== "missing")
@@ -50,10 +62,14 @@ Item {
         return [];
     }
     readonly property bool canAccept: answer.length > 0 || typedIsTravel
+    // Saving over something is a decision, so it is asked rather than done.
+    readonly property bool willOverwrite: Picker.saving && answer.length > 0
+                                          && Picker.kindOf(answer[0]) === "file"
 
     signal accepted()
     signal cancelled()
-    signal navigate(string dir)     // a typed folder: go there instead
+    signal navigate(string dir)             // a typed folder: go there instead
+    signal confirmOverwrite(string path)    // save-as onto an existing file
 
     function submit() {
         // Travel first: Enter on a typed folder opens it and hands the box back
@@ -63,7 +79,16 @@ Item {
             root.navigate(dst);
             return;
         }
-        if (canAccept) { Picker.accept(answer); root.accepted(); }
+        if (!canAccept) return;
+        // Never overwrite on the strength of a button press alone; the answer
+        // is written only after the dialog comes back (BrowserPane wires it).
+        if (willOverwrite) { root.confirmOverwrite(answer[0]); return; }
+        doAccept();
+    }
+    function doAccept() {
+        if (answer.length === 0) return;
+        Picker.accept(answer);
+        root.accepted();
     }
 
     // The selection is what the box shows until the user types over it. Set
