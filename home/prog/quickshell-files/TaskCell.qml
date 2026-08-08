@@ -49,8 +49,23 @@ Rectangle {
     // the real entry appears.
     readonly property var appEntry: {
         DesktopEntries.applications.values;
-        return modelData.appId
-            ? DesktopEntries.heuristicLookup(modelData.appId) : null;
+        if (!modelData.appId)
+            return null;
+        const byClass = DesktopEntries.heuristicLookup(modelData.appId);
+        // `org.quickshell` is Quickshell's OWN entry, not one of his programs,
+        // and every Quickshell toplevel reports it: the Settings window and each
+        // file-browser window are the same class, because Quickshell has no
+        // per-window app id (and `qs` has no flag for one — checked). So for
+        // that one class the title is the only handle that distinguishes them.
+        // "settings" resolves to settings.desktop; a browser's title is a path
+        // and resolves to nothing, which correctly leaves it on the Quickshell
+        // icon rather than borrowing another program's seal.
+        if (byClass && byClass.id === "org.quickshell" && modelData.title) {
+            const byTitle = DesktopEntries.heuristicLookup(modelData.title);
+            if (byTitle)
+                return byTitle;
+        }
+        return byClass;
     }
     readonly property string iconName: appEntry && appEntry.icon
         ? appEntry.icon : (modelData.appId || "")

@@ -188,7 +188,13 @@ in
   # runner (DesktopEntries), same approach as filer.nix (xdg.enable is off, so
   # this goes via home.file). `show` — not `toggle` — so launching from the
   # runner always opens it.
-  home.file.".local/share/applications/quickshell-settings.desktop".text = ''
+  # Named `settings.desktop`, so its ENTRY ID is `settings` — the same word the
+  # window titles itself. That matters because the Settings window's Wayland
+  # class is `org.quickshell` (Quickshell has no per-window app id, and there is
+  # no CLI flag for one — checked), which every file-browser window shares, so
+  # the class cannot name this program and the title has to. `quickshell-settings`
+  # was an id nothing could derive from anything the window says about itself.
+  home.file.".local/share/applications/settings.desktop".text = ''
     [Desktop Entry]
     Type=Application
     Name=settings
