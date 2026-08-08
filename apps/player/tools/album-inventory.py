@@ -17,6 +17,11 @@ References, in order of preference per album:
      without a MusicBrainz tag.
   3. Neither -> the album is listed with status no-ref; its full track list
      has to be looked up (MusicBrainz search by artist+album) at download time.
+     `--ref-lookup` does that lookup inside the inventory: a guarded
+     MusicBrainz search (title/artist agreement, track-count >= owned, a
+     single release-group, >=80% of owned titles on the release) resolves the
+     album to a release and feeds its missing tracks into the work list;
+     anything that fails the guards stays no-ref rather than being guessed.
 
 Outputs (--dump-dir, default the spotify dump dir):
   album-inventory.tsv  per-album summary: artist, album, reference, ref id,
@@ -131,6 +136,12 @@ def main():
     ap.add_argument("--db", default=LIBRARY_DB)
     ap.add_argument("--min-missing", type=int, default=1,
                     help="summary rows with at least this many missing (default 1)")
+    ap.add_argument("--ref-lookup", action="store_true",
+                    help="resolve no-ref albums against MusicBrainz (search + "
+                         "guarded match, ~1 req/s, cached; several minutes for "
+                         "a library this size)")
+    ap.add_argument("--ref-lookup-limit", type=int, default=0,
+                    help="stop the ref-lookup pass after N albums (0 = all)")
     args = ap.parse_args()
 
     snap = os.path.join(args.dump_dir, "library-snapshot.db")
@@ -153,29 +164,87 @@ def main():
     print(f"  {len(mbid_by_path)} files with a MusicBrainz release id in the scan")
 
     # --- library structures ------------------------------------------------
-    # folded title -> set of folded artists, for the generous "elsewhere" match
+    # folded title variant -> set of folded artist variants, for the generous
+    # "elsewhere" match (a track under 'Jorge Cafrune & Marito' counts for an
+    # album by 'Jorge Cafrune')
     title_artists = {}
-    # (folded artist, folded album) -> set of folded titles, for the album view
+    # (folded artist, folded album) -> set of folded title variants, for the
+    # album view
     album_titles = {}
+    # (folded artist variant, folded title variant) -> None — the exact key
+    # set soulseek-missing.py builds at queue time (trackmatch.keys against
+    # the live DB), so a track the downloader would skip as already-owned is
+    # never listed as missing in the first place
+    lib_keys = set()
+    # (folded artist, folded album) -> [folded filename token lists], for the
+    # on-disk check: a file named "06 - String Quartet no. 3 Mishima - II.
+    # November 25 - Ichigaya.flac" IS the reference track even when its title
+    # tag disagrees (the import-time 'skip (exists)' class)
+    album_stems = {}
+    # (folded artist, folded album) -> number of tracks on disk (album_titles
+    # holds VARIANTS, so its len overcounts)
+    album_n = {}
     for t in tracks:
-        art = trackmatch.fold(t.get("artist") or "")
-        title = trackmatch.fold(t.get("title") or "")
-        alb = trackmatch.fold(t.get("album") or "")
-        title_artists.setdefault(title, set()).add(art)
-        if art and alb:
-            album_titles.setdefault((art, alb), set()).add(title)
+        art = t.get("artist") or ""
+        title = t.get("title") or ""
+        alb = t.get("album") or ""
+        fa = trackmatch.fold(art)
+        ft = trackmatch.fold(title)
+        falb = trackmatch.fold(alb)
+        for a in trackmatch.artist_variants(art):
+            fa2 = trackmatch.fold(a)
+            if not fa2:
+                continue
+            for tt in trackmatch.title_variants(title):
+                ft2 = trackmatch.fold(tt)
+                if ft2:
+                    title_artists.setdefault(ft2, set()).add(fa2)
+                    lib_keys.add((fa2, ft2))
+        if fa and falb:
+            album_titles.setdefault((fa, falb), set()).update(
+                trackmatch.fold(v) for v in trackmatch.title_variants(title))
+            album_n[(fa, falb)] = album_n.get((fa, falb), 0) + 1
+            stem = os.path.splitext(os.path.basename(t.get("path") or ""))[0]
+            album_stems.setdefault((fa, falb), []).append(
+                trackmatch.fold(stem).split())
 
-    def present_in_library(title, artist_hint, in_album):
-        """A reference track is present if it is in its album's own files or
+    def present_in_library(artist, title, in_album, stems=()):
+        """A reference track is present if any of its artist/title variants
+        sits in the library under the exact key the queue-time guard uses, in
+        its album's own files, as a filename on disk in the album's dirs, or
         anywhere in the library under a shared-artist token."""
-        if title in in_album:
+        ft = trackmatch.fold(title)
+        if not ft:
+            return True  # no title signal; nothing to fetch
+        # the album's own files, variants included
+        if any(tv in in_album
+               for tv in (ft, *[trackmatch.fold(v)
+                                for v in trackmatch.title_variants(title)])):
             return True
-        arts = title_artists.get(title, set())
+        # exact mirror of soulseek-missing's queue-time dedup
+        for a in trackmatch.artist_variants(artist or ""):
+            fa = trackmatch.fold(a)
+            if not fa:
+                continue
+            if any((fa, trackmatch.fold(v)) in lib_keys
+                   for v in trackmatch.title_variants(title)):
+                return True
+        # on disk in this album's dirs: folded title tokens, in order, inside
+        # a filename stem ('II. November 25 - Ichigaya' in '06 - String
+        # Quartet no. 3 Mishima - II. November 25 - Ichigaya.flac'). Single-
+        # token titles are not name-confirmable ('Love' vs 'Love Me Tender').
+        toks = ft.split()
+        if len(toks) >= 2:
+            for stem in stems:
+                if all(t in iter(stem) for t in toks):
+                    return True
+        # elsewhere in the library under a shared artist token
+        arts = title_artists.get(ft, set())
         if not arts:
             return False
-        if not artist_hint:
+        if not artist:
             return True  # no artist signal; any title match counts
-        return any(shared_artist_token(artist_hint, a) for a in arts)
+        return any(shared_artist_token(artist, a) for a in arts)
 
     summary = []
     work_rows = []
@@ -202,7 +271,11 @@ def main():
 
     for mbid, local in by_mbid.items():
         release = load_release(mbid)
-        local_titles = {trackmatch.fold(t.get("title") or "") for t in local}
+        local_titles = {trackmatch.fold(v) for t in local
+                        for v in trackmatch.title_variants(t.get("title") or "")}
+        local_stems = [trackmatch.fold(
+            os.path.splitext(os.path.basename(t.get("path") or ""))[0]).split()
+            for t in local]
         if not release:
             artist = max({t.get("artist") or "" for t in local}, key=len) or ""
             album = max({t.get("album") or "" for t in local}, key=len) or ""
@@ -220,7 +293,7 @@ def main():
         for num, title, length, isrc, tarts in rtracks:
             if not title:
                 continue
-            if not present_in_library(trackmatch.fold(title), tarts, local_titles):
+            if not present_in_library(tarts, title, local_titles, local_stems):
                 missing.append((num, title, length, isrc, tarts))
         total = len(rtracks)
         present = total - len(missing)
@@ -259,8 +332,8 @@ def main():
                 if t.get("is_local"):
                     continue
                 hint = t.get("artists") or alb_artist
-                if not present_in_library(trackmatch.fold(t.get("title") or ""),
-                                          hint, in_album):
+                if not present_in_library(hint, t.get("title") or "", in_album,
+                                          album_stems.get(key, [])):
                     missing.append(t)
             total = alb.get("total_tracks") or len(rtracks)
             present = total - len(missing)
@@ -302,11 +375,152 @@ def main():
         if (art, alb) in saved_keys:
             continue
         art_d, alb_d = display_name.get((art, alb), (art, alb))
-        count = len(album_titles.get((art, alb), set()))
+        count = album_n.get((art, alb), 0)
         summary.append({"artist": art_d, "album": alb_d, "reference": "none",
                         "ref_id": "", "total": count, "present": count,
                         "missing": 0, "status": "no-ref",
                         "missing_titles": "track list unknown - lookup at run time"})
+
+    # --- pass 3b: no-ref albums looked up on MusicBrainz (--ref-lookup) ------
+    # The albums above have no reference at all: no MusicBrainz release id in
+    # their tags, no Spotify saved-album match. With --ref-lookup, each is
+    # searched on MusicBrainz (artist + album title), and a match is only
+    # trusted when it passes every guard: title/artist agreement, a release
+    # track count >= what the library already has, a single release-group
+    # among the candidates (editions of one album are fine; two different
+    # albums with the same name are not), and -- after the tracklist is
+    # fetched into the shared mbcache -- at least 80% of the on-disk titles
+    # actually present on the release. Anything less stays no-ref: never
+    # guessed. Results are cached in <dump-dir>/album-ref-lookup.json so a
+    # re-run (or one killed halfway) pays for each search at most once.
+    if args.ref_lookup:
+        import time as _time
+        import urllib.parse
+        import urllib.request
+
+        UA = "lam-library-album-inventory/1.0 ( joelcvan@gmail.com )"
+        cache_path = os.path.join(args.dump_dir, "album-ref-lookup.json")
+        lcache = {}
+        if os.path.isfile(cache_path):
+            with open(cache_path) as f:
+                lcache = json.load(f)
+        noref_rows = [r for r in summary if r["status"] == "no-ref"]
+        print(f"\nref-lookup: {len(noref_rows)} no-ref albums, ~1 req/s "
+              f"(search + fetch for the resolved ones)", flush=True)
+        done = 0
+
+        def mb_get(url):
+            req = urllib.request.Request(url, headers={"User-Agent": UA})
+            for attempt in range(4):
+                try:
+                    with urllib.request.urlopen(req, timeout=30) as f:
+                        return json.load(f)
+                except Exception:
+                    _time.sleep(1.5 * (attempt + 1))
+            raise  # give up after 4 attempts
+
+        for row in sorted(noref_rows, key=lambda r: int(r["total"] or 0)):
+            fa, falb = trackmatch.fold(row["artist"]), trackmatch.fold(row["album"])
+            key = fa + "\t" + falb
+            if key in lcache:
+                row["_mbid"] = lcache[key].get("mbid")
+            else:
+                try:
+                    q = 'artist:"%s" AND release:"%s"' % (row["artist"],
+                                                          row["album"])
+                    data = mb_get("https://musicbrainz.org/ws/2/release/?query="
+                                  + urllib.parse.quote(q) + "&fmt=json&limit=5")
+                    _time.sleep(1.05)
+                except Exception:
+                    print(f"  lookup error on {row['artist']} - {row['album']}; "
+                          f"not cached, will retry next run", flush=True)
+                    continue
+                cands = []
+                for rel in data.get("releases") or []:
+                    if not (trackmatch.title_matches(rel.get("title") or "",
+                                                     row["album"])
+                            and shared_artist_token(row["artist"],
+                                                    primary_artist(rel))):
+                        continue
+                    total = sum((m.get("track-count") or 0)
+                                for m in rel.get("media") or [])
+                    if total >= int(row["total"] or 0):
+                        cands.append(rel)
+                # one release-group among the candidates = editions of one
+                # album: pick the fullest. Two different albums, same name:
+                # not confident, leave no-ref.
+                groups = {}
+                for rel in cands:
+                    rg = (rel.get("release-group") or {}).get("id") or rel["id"]
+                    groups.setdefault(rg, []).append(rel)
+                if len(groups) == 1:
+                    rel = max(groups[list(groups)[0]],
+                              key=lambda r: sum((m.get("track-count") or 0)
+                                                for m in r.get("media") or []))
+                    row["_mbid"] = rel["id"]
+                else:
+                    row["_mbid"] = None
+                lcache[key] = {"mbid": row["_mbid"]}
+            done += 1
+            if args.ref_lookup_limit and done >= args.ref_lookup_limit:
+                break
+            if row.get("_mbid"):
+                release = load_release(row["_mbid"])
+                if not release:
+                    try:
+                        release = mb_get(
+                            f"https://musicbrainz.org/ws/2/release/{row['_mbid']}"
+                            "?fmt=json&inc=recordings+artist-credits")
+                        os.makedirs(MBCACHE, exist_ok=True)
+                        with open(os.path.join(MBCACHE,
+                                               row["_mbid"] + ".json"),
+                                  "w") as f:
+                            json.dump(release, f)
+                        _time.sleep(1.05)
+                    except Exception:
+                        print(f"  fetch error on {row['_mbid']} "
+                              f"({row['artist']} - {row['album']}); "
+                              f"will retry next run", flush=True)
+                        continue
+                rtracks = release_tracks(release)
+                on_disk = album_titles.get((fa, falb), set())
+                rt_folds = {trackmatch.fold(t) for _, t, _, _, _ in rtracks}
+                if on_disk:
+                    hit = sum(1 for t in on_disk if t in rt_folds)
+                    if hit / len(on_disk) < 0.8:
+                        # a different edition, not this album
+                        row["_mbid"] = None
+                        lcache[key] = {"mbid": None}
+                        continue
+                missing = []
+                for num, title, length, isrc, tarts in rtracks:
+                    if not title:
+                        continue
+                    if not present_in_library(tarts, title, on_disk,
+                                              album_stems.get((fa, falb), [])):
+                        missing.append((num, title, length, isrc, tarts))
+                total = len(rtracks)
+                row.update({"reference": "mb", "ref_id": row["_mbid"],
+                            "total": total, "present": total - len(missing),
+                            "missing": len(missing),
+                            "status": "complete" if not missing else "missing",
+                            "missing_titles": " | ".join(
+                                f"{n} {t}" for n, t, _, _, _ in missing)})
+                if missing:
+                    year = (release.get("date") or "")[:4]
+                    for num, title, length, isrc, tarts in missing:
+                        add_work(tarts, title, row["album"], year,
+                                 length if length else "", isrc or "", "",
+                                 row["artist"], row["_mbid"])
+            if done % 50 == 0:
+                with open(cache_path, "w") as f:
+                    json.dump(lcache, f)
+                print(f"  {done}/{len(noref_rows)} looked up", flush=True)
+        with open(cache_path, "w") as f:
+            json.dump(lcache, f)
+        n_found = sum(1 for r in noref_rows if r["status"] != "no-ref")
+        print(f"ref-lookup done: {n_found} resolved, "
+              f"{len(noref_rows) - n_found} still no-ref")
 
     # --- write outputs -------------------------------------------------------
     inv_path = os.path.join(args.dump_dir, "album-inventory.tsv")
