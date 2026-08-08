@@ -487,6 +487,7 @@ Item {
     // own clicks, and only the parts of the card that accept none — the three
     // lines, the gutter, the drawer itself — fall through to here.
     MouseArea {
+        cursorShape: Qt.PointingHandCursor   // it toggles the drawer (docs/DESIGN.md 10)
         id: openArea
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton
