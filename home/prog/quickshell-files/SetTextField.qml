@@ -13,8 +13,20 @@ Rectangle {
     property string placeholder: ""
     signal committed(string text)
 
+    // What is in the box RIGHT NOW, for the one case where waiting for a commit
+    // is wrong: a search field filtering a list under itself, which has to
+    // narrow as you type. Read-only and additive — `committed` still fires only
+    // on Enter or focus-out, so nothing that persists a value sees keystrokes.
+    readonly property alias liveText: field.text
+
     // pull external changes in only while the user isn't editing
     onValueChanged: if (!field.activeFocus && field.text !== value) field.text = value;
+
+    // Empty the box outright, focused or not. The controlled `value` path
+    // above deliberately refuses to touch the text while the field has focus,
+    // which is right for a setting and wrong for a search field whose query
+    // has just been consumed — the caller still has the caret.
+    function clear() { field.text = ""; }
 
     width: fieldWidth
     height: 24
