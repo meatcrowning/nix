@@ -61,6 +61,45 @@ def qrows(w):
     return None, []
 
 
+def pane_of(w):
+    """The BrowserPane — the child carrying the `rows` model."""
+    return qrows(w)[0]
+
+
+def qml(engine, obj, js):
+    """Evaluate JS in `obj`'s own QML scope (phone-test.py's helper): a QML
+    `function` is not a slot, and a component's ids are reachable no other way."""
+    from PySide6.QtQml import QQmlExpression
+    expr = QQmlExpression(engine.contextForObject(obj), obj, js)
+    val = expr.evaluate()
+    if expr.hasError():
+        raise SystemExit("QML expression %r: %s" % (js, expr.error().toString()))
+    return val[0] if isinstance(val, tuple) else val
+
+
+def typein(w, engine, pane, text):
+    """Put the keyboard in the name box and TYPE — real key events, so
+    `onTextEdited` runs and the bar learns the answer was typed rather than
+    picked. Setting `.text` from here would skip exactly that."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    qml(engine, pane, "pickerBar.nameText = ''")
+    qml(engine, pane, "pickerBar.focusName()")
+    # keyClicks is a QWidget API; a QQuickWindow takes one keyClick at a time.
+    for ch in text:
+        QTest.keyClick(w, ch)
+    spin(60)
+
+
+def spin(ms=80):
+    import time
+    from PySide6.QtGui import QGuiApplication
+    end = time.time() + ms / 1000.0
+    while time.time() < end:
+        QGuiApplication.processEvents()
+        time.sleep(0.005)
+
+
 def build(app, spec, start_dir):
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
@@ -69,19 +108,26 @@ def build(app, spec, start_dir):
     palette = filermain.Palette(filermain.PANEL_THEME)
     settings = filermain.Settings()
     ctx.setContextProperty("FileOps", ops)
-    ctx.setContextProperty("DirWatch", filermain.DirWatch())
+    # EVERY context-property object needs a Python reference to outlive this
+    # function: the engine does not own them, and a collected one reads back as
+    # null in QML — which showed up here as `go()` dying on
+    # "Cannot call method 'setDirs' of null" the first time a test navigated.
+    extra = (filermain.DirWatch(), filermain.WinCtl(), StubTitlebar(),
+             filermain.VideoConv(), filermain.Phone(), filermain.Remote(),
+             filermain.ImgConv())
+    ctx.setContextProperty("DirWatch", extra[0])
     _deskstyle = DeskStyle(parent=engine)
     ctx.setContextProperty("WalPalette", palette)
     # Theme.qml binds font/fontSize to DeskStyle (pylib/deskstyle.py), so the
     # harness must install it too or the theme loads with an empty font.
     ctx.setContextProperty("DeskStyle", _deskstyle)
-    ctx.setContextProperty("WinCtl", filermain.WinCtl())
-    ctx.setContextProperty("Titlebar", StubTitlebar())
+    ctx.setContextProperty("WinCtl", extra[1])
+    ctx.setContextProperty("Titlebar", extra[2])
     ctx.setContextProperty("Settings", settings)
-    ctx.setContextProperty("VideoConv", filermain.VideoConv())
-    ctx.setContextProperty("Phone", filermain.Phone())
-    ctx.setContextProperty("Remote", filermain.Remote())
-    ctx.setContextProperty("ImgConv", filermain.ImgConv())
+    ctx.setContextProperty("VideoConv", extra[3])
+    ctx.setContextProperty("Phone", extra[4])
+    ctx.setContextProperty("Remote", extra[5])
+    ctx.setContextProperty("ImgConv", extra[6])
     ctx.setContextProperty("Picker", picker)
     ctx.setContextProperty("startDir", start_dir)
     ctx.setContextProperty("startSortField", "name")
@@ -101,7 +147,7 @@ def build(app, spec, start_dir):
     engine.load(QUrl.fromLocalFile(os.path.join(FILER, "qml/Main.qml")))
     roots = engine.rootObjects()
     # keep refs alive (context-property objects are not owned by the engine)
-    return engine, roots, (picker, ops, palette, settings, theme)
+    return engine, roots, (picker, ops, palette, settings, theme) + extra
 
 
 def main():
@@ -198,7 +244,123 @@ def main():
     check("spec without a result path is rejected", load_spec(bad) is None)
     check("unreadable spec is rejected", load_spec(os.path.join(tmp, "nope.json")) is None)
 
-    # ---- 8. glob case-sensitivity per the spec ----
+    # ---- 8. the name box is EDITABLE ----------------------------------------
+    # A path from somewhere else (typed, or pasted out of a terminal) is the
+    # whole reason a file dialog has a name box. Driven through the real QML:
+    # real key events into the real TextInput, then the bar's own answer.
+    r5 = os.path.join(tmp, "r5.json")
+    spec5 = {"mode": "open", "multiple": False, "title": "Attach a file",
+             "current_folder": tmp, "result": r5}
+    eng, roots, keep = build(app, spec5, tmp)
+    w = roots[0]
+    pane = pane_of(w)
+    spin(150)
+    check("the box starts empty, showing the prompt",
+          qml(eng, pane, "pickerBar.nameText") == "", qml(eng, pane, "pickerBar.nameText"))
+
+    # selecting in the view writes the name into the box
+    qml(eng, pane, "selectSingle('%s/a.txt', false)" % tmp)
+    spin(80)
+    check("clicking a file puts its NAME in the box",
+          qml(eng, pane, "pickerBar.nameText") == "a.txt",
+          qml(eng, pane, "pickerBar.nameText"))
+    check("...and that is still the answer",
+          qml(eng, pane, "pickerBar.answer[0]") == os.path.join(tmp, "a.txt"))
+
+    # a typed name, relative to the folder on screen
+    typein(w, eng, pane, "b.png")
+    check("a typed name resolves against the folder on screen",
+          qml(eng, pane, "pickerBar.typed") is True
+          and qml(eng, pane, "pickerBar.answer[0]") == os.path.join(tmp, "b.png"),
+          (qml(eng, pane, "pickerBar.typed"), qml(eng, pane, "pickerBar.answer")))
+    check("...and it overrides the selection, which is still a.txt",
+          qml(eng, pane, "selection[0]") == os.path.join(tmp, "a.txt"))
+
+    # a name that is not there cannot be an answer — accept greys rather than
+    # writing a result the app cannot open (docs/DESIGN.md 10)
+    typein(w, eng, pane, "nope.txt")
+    check("a name that does not exist refuses to be an answer",
+          qml(eng, pane, "pickerBar.canAccept") is False
+          and qml(eng, pane, "pickerBar.answer.length") == 0,
+          qml(eng, pane, "pickerBar.answer"))
+
+    # an absolute path, and ~
+    typein(w, eng, pane, os.path.join(tmp, "sub", "..", "c.jpg"))
+    check("an absolute path is taken as it stands (and normalised)",
+          qml(eng, pane, "pickerBar.answer[0]") == os.path.join(tmp, "c.jpg"),
+          qml(eng, pane, "pickerBar.answer"))
+    check("~ expands", Picker({"mode": "open", "result": "/dev/null"})
+          .resolvePath("~/x", tmp) == os.path.join(os.path.expanduser("~"), "x"))
+
+    # a typed FOLDER is somewhere to go, not the answer
+    typein(w, eng, pane, "sub")
+    check("a typed folder is travel, not an answer",
+          qml(eng, pane, "pickerBar.typedIsTravel") is True
+          and qml(eng, pane, "pickerBar.answer.length") == 0)
+    check("...but the button is live, because Enter does something",
+          qml(eng, pane, "pickerBar.canAccept") is True)
+    qml(eng, pane, "pickerBar.submit()")
+    spin(120)
+    check("...and submitting goes there",
+          qml(eng, pane, "path") == os.path.join(tmp, "sub"),
+          qml(eng, pane, "path"))
+    check("...leaving the box empty for the new folder",
+          qml(eng, pane, "pickerBar.nameText") == ""
+          and qml(eng, pane, "pickerBar.typed") is False,
+          qml(eng, pane, "pickerBar.nameText"))
+    check("no result was written by travelling", not os.path.exists(r5))
+
+    # and a typed name really is what gets returned
+    qml(eng, pane, "go('%s')" % tmp)
+    spin(120)
+    typein(w, eng, pane, "d.log")
+    qml(eng, pane, "pickerBar.submit()")
+    spin(120)
+    check("a typed name is what the app receives",
+          os.path.exists(r5)
+          and json.load(open(r5))["uris"] == ["file://" + os.path.join(tmp, "d.log")],
+          json.load(open(r5)) if os.path.exists(r5) else None)
+    del eng, roots, keep
+
+    # ---- 8b. dir mode: a typed folder IS the answer -------------------------
+    r6 = os.path.join(tmp, "r6.json")
+    eng, roots, keep = build(app, {"mode": "dir", "current_folder": tmp,
+                                   "result": r6}, tmp)
+    w = roots[0]
+    pane = pane_of(w)
+    spin(150)
+    typein(w, eng, pane, "sub")
+    check("dir mode: a typed folder is the answer, not travel",
+          qml(eng, pane, "pickerBar.typedIsTravel") is False
+          and qml(eng, pane, "pickerBar.answer[0]") == os.path.join(tmp, "sub"),
+          qml(eng, pane, "pickerBar.answer"))
+    typein(w, eng, pane, "a.txt")
+    check("dir mode: a typed FILE is refused",
+          qml(eng, pane, "pickerBar.canAccept") is False)
+    del eng, roots, keep
+
+    # ---- 8c. the app's suggested name seeds the box -------------------------
+    eng, roots, keep = build(app, {"mode": "open", "current_folder": tmp,
+                                   "current_name": "a.txt",
+                                   "result": os.path.join(tmp, "r7.json")}, tmp)
+    pane = pane_of(roots[0])
+    spin(150)
+    check("current_name seeds the box",
+          qml(eng, pane, "pickerBar.nameText") == "a.txt"
+          and qml(eng, pane, "pickerBar.answer[0]") == os.path.join(tmp, "a.txt"),
+          qml(eng, pane, "pickerBar.nameText"))
+    del eng, roots, keep
+
+    # ---- 8d. resolvePath / kindOf, without a window -------------------------
+    pk = Picker({"mode": "open", "result": "/dev/null"})
+    check("resolvePath: empty text is nothing", pk.resolvePath("  ", tmp) == "")
+    check("resolvePath: relative joins the folder",
+          pk.resolvePath("a.txt", tmp) == os.path.join(tmp, "a.txt"))
+    check("kindOf tells the three cases apart",
+          [pk.kindOf(os.path.join(tmp, "sub")), pk.kindOf(os.path.join(tmp, "a.txt")),
+           pk.kindOf(os.path.join(tmp, "nope"))] == ["dir", "file", "missing"])
+
+    # ---- 9. glob case-sensitivity per the spec ----
     p = Picker({"mode": "open", "result": "/dev/null",
                 "filters": [{"name": "I", "patterns": ["*.ico"], "mimes": []}],
                 "current_filter": {"name": "I", "patterns": ["*.ico"], "mimes": []}})

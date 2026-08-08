@@ -19,20 +19,81 @@ Item {
     property string currentDir: ""
     property bool winActive: true
 
+    // THE NAME BOX IS EDITABLE, so an answer can be typed or pasted as well as
+    // clicked — a path from somewhere else is the whole reason a file dialog
+    // has a name box at all. Clicking in the view keeps writing the name here
+    // (`syncFromPicked`), and typing takes over from that moment (`typed`)
+    // until the selection changes again. `Picker.resolvePath` decides where the
+    // text points, in python; nothing about a path is worked out in QML.
+    property bool typed: false
+    // What is in the box, and a way to put the keyboard in it. Both are the
+    // component's public surface (tools/pick-test.py drives it through them).
+    property alias nameText: nameField.text
+    function focusName() { nameField.forceActiveFocus(); nameField.selectAll(); }
+    readonly property string typedPath: typed ? Picker.resolvePath(nameField.text, currentDir) : ""
+    readonly property string typedKind: typed ? Picker.kindOf(typedPath) : "missing"
+    // A typed folder in a file dialog is somewhere to GO, not the answer — the
+    // same as double-clicking it. In `dir` mode it IS the answer.
+    readonly property bool typedIsTravel: typed && typedKind === "dir" && Picker.mode !== "dir"
+
     // What accept would return. A single-selection request gets one path even
     // if the tree has several selected (ctrl-click is always available), so the
-    // summary never promises more than the app will receive.
+    // box never promises more than the app will receive.
     readonly property var answer: {
+        if (typed) {
+            return (typedPath !== "" && !typedIsTravel
+                    && Picker.selectable(typedPath) && typedKind !== "missing")
+                   ? [typedPath] : [];
+        }
         if (picked.length > 0) return Picker.multiple ? picked : [picked[0]];
         if (Picker.mode === "dir" && currentDir) return [currentDir];
         return [];
     }
-    readonly property bool canAccept: answer.length > 0
+    readonly property bool canAccept: answer.length > 0 || typedIsTravel
 
     signal accepted()
     signal cancelled()
+    signal navigate(string dir)     // a typed folder: go there instead
 
-    function submit() { if (canAccept) { Picker.accept(answer); root.accepted(); } }
+    function submit() {
+        // Travel first: Enter on a typed folder opens it and hands the box back
+        // to the selection, which is what every other file dialog does.
+        if (typedIsTravel) {
+            const dst = typedPath;
+            root.navigate(dst);
+            return;
+        }
+        if (canAccept) { Picker.accept(answer); root.accepted(); }
+    }
+
+    // The selection is what the box shows until the user types over it. Set
+    // imperatively behind a flag rather than bound: a TextInput cannot be both
+    // bound and editable, and a two-way binding on one is a loop (painter's
+    // PromptBox learned the same thing).
+    property bool syncing: false
+    function syncFromPicked() {
+        syncing = true;
+        nameField.text = picked.length > 1 ? (picked.length + " items")
+                       : picked.length === 1 ? baseName(picked[0]) : "";
+        syncing = false;
+        typed = false;
+    }
+    function baseName(p) {
+        const q = String(p).replace(/\/+$/, "");
+        const i = q.lastIndexOf("/");
+        return i >= 0 ? q.substring(i + 1) : q;
+    }
+    onPickedChanged: syncFromPicked()
+    // Navigating away is a new context: a name typed for the old folder must
+    // not silently point somewhere else now.
+    onCurrentDirChanged: syncFromPicked()
+
+    // The name the asking app suggested (spec `current_name`), which is the one
+    // case where the box starts with something the user did not choose.
+    Component.onCompleted: if (Picker.currentName !== "") {
+        nameField.text = Picker.currentName;
+        typed = true;
+    }
 
     implicitHeight: Theme.fontSize * 2 + 14
 
@@ -42,30 +103,59 @@ Item {
         border.color: Theme.border
         border.width: 1
 
-        // what will be returned, so the choice is never ambiguous — the count
-        // when it is a multi-selection, the name when it is one thing.
-        PixelText {
-            id: summary
+        // What will be returned, and where you type one instead: the name when
+        // it is one thing, the count when it is a multi-selection, and a full
+        // path the moment you type or paste one.
+        Rectangle {
+            id: nameBox
             anchors {
                 left: parent.left; leftMargin: 10
                 right: filterBox.left; rightMargin: 10
                 verticalCenter: parent.verticalCenter
             }
-            elide: Text.ElideMiddle
-            color: !root.winActive ? Theme.inactive
-                   : (root.canAccept ? Theme.text : Theme.textDim)
-            text: {
-                const a = root.answer;
-                // With nothing chosen, say what is being ASKED — it is the only
-                // place the requesting app's prompt is shown (the window title
-                // is the address bar).
-                if (a.length === 0) return Picker.title;
-                if (a.length === 1) {
-                    const q = a[0].replace(/\/+$/, "");
-                    const i = q.lastIndexOf("/");
-                    return i >= 0 ? q.substring(i + 1) : q;
-                }
-                return a.length + " items";
+            height: Theme.fontSize + 10
+            color: Theme.bg
+            border.width: 1
+            // Says whether what is in it is an answer — the accept button is
+            // greyed for the same reason, but the box is where the eye is.
+            border.color: !root.winActive ? Theme.inactive
+                          : nameField.activeFocus ? Theme.accent
+                          : (root.typed && !root.canAccept) ? Theme.crit
+                          : Theme.border
+
+            TextInput {
+                id: nameField
+                anchors { fill: parent; leftMargin: 6; rightMargin: 6 }
+                verticalAlignment: TextInput.AlignVCenter
+                clip: true
+                color: !root.winActive ? Theme.inactive
+                       : (root.typed && !root.canAccept) ? Theme.crit
+                       : root.canAccept ? Theme.text : Theme.textDim
+                font.family: Theme.font
+                font.pixelSize: Theme.fontSize
+                renderType: Text.NativeRendering
+                selectByMouse: true
+                selectionColor: Theme.accent
+                selectedTextColor: Theme.bg
+                // A menu row acts on the selection as it stood at the
+                // right-click, and a TextInput drops it on losing focus
+                // (apps/AGENTS.md, CtxMenu).
+                persistentSelection: true
+                onTextEdited: root.typed = true
+                // Enter is the window's Shortcut (BrowserPane), so it reaches
+                // submit() whether or not this box has the keyboard.
+            }
+
+            // With nothing chosen and nothing typed, say what is being ASKED —
+            // this is the only place the requesting app's prompt is shown (the
+            // window title is the address bar).
+            PixelText {
+                anchors { left: parent.left; leftMargin: 6; right: parent.right
+                          rightMargin: 6; verticalCenter: parent.verticalCenter }
+                visible: nameField.text === ""
+                elide: Text.ElideMiddle
+                text: Picker.title
+                color: !root.winActive ? Theme.inactive : Theme.dim
             }
         }
 

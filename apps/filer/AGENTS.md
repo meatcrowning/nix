@@ -271,6 +271,30 @@ Four things to know before touching any of it:
   the spec/result JSON described in `pick.py`, which is what lets each be tested
   without the other.
 
+**The name box in the bar is EDITABLE**, because a path from somewhere else —
+typed, or pasted out of a terminal — is the whole reason a file dialog has one.
+It was a read-only summary until 2026-08-07.
+
+- **Clicking in the view writes the name into it; typing takes over** until the
+  selection or the folder changes (`syncFromPicked`). Set imperatively behind a
+  `syncing` flag, never bound: a `TextInput` cannot be both bound and editable.
+- **`Picker.resolvePath(text, folder)` + `kindOf(path)` decide what it means**,
+  in python, for the same reason a uri-list is decoded there: `~` expansion, an
+  absolute path taken as it stands, anything else relative to the folder on
+  screen. Nothing about a path is worked out in QML.
+- **A typed FOLDER is travel, not an answer** (`typedIsTravel`) — Enter opens
+  it, exactly as double-clicking would, and the box resets for the new folder.
+  In `dir` mode a folder *is* the answer and a file is refused.
+- **A name that is not there greys accept** and turns the box `crit`. It must:
+  `Picker.accept` drops a path that does not exist, and with nothing left it
+  returns without writing the result file *and without quitting* — a dialog
+  that just sits there.
+- **`current_name` from the spec seeds the box.** It was being dropped before,
+  there being nothing to seed.
+- `BrowserPane` exposes the bar as `pickerBar` (an alias) because a
+  `QQmlExpression` evaluated against an object gets its properties, not its
+  file's ids — that is the handle the harness drives.
+
 Picker mode reuses the whole browser — tree, expand, sort, preview grid,
 titlebar address bar — and adds `qml/PickerBar.qml` along the bottom. Every
 picker branch in `qml/BrowserPane.qml` is gated on the pane's `picking`

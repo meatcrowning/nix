@@ -86,6 +86,14 @@ class Picker(QObject):
         lbl = str(self._spec.get("accept_label") or "").replace("_", "")
         return lbl or ("choose" if self.mode == "dir" else "open")
 
+    @Property(str, constant=True)
+    def currentName(self):
+        """The name the asking app suggested, which the bar seeds its (editable)
+        name box with. Mostly a SaveFile idea, but the spec allows it on an open
+        dialog too and it was being dropped on the floor before the box could be
+        typed into."""
+        return str(self._spec.get("current_name") or "")
+
     @Property("QVariantList", constant=True)
     def filterNames(self):
         return [f["name"] for f in (self._spec.get("filters") or [])]
@@ -140,6 +148,41 @@ class Picker(QObject):
         button's enabled state)."""
         is_dir = os.path.isdir(path)
         return is_dir if self.mode == "dir" else not is_dir
+
+    # -- the typed name -------------------------------------------------------
+    # The bar's name box is editable, so an answer can be TYPED (or pasted)
+    # rather than clicked. Resolving it is python's job for the same reason
+    # decoding a uri-list is: QML has no path handling, and the two halves of a
+    # "does this name mean anything" question — where it points and what is
+    # there — must not be answered in different places.
+
+    @Slot(str, str, result=str)
+    def resolvePath(self, text, folder):
+        """What the user typed, as an absolute path — `""` for nothing usable.
+
+        `~` and `~user` expand, an absolute path is taken as it stands, and
+        anything else is relative to the folder on screen (typing `notes.txt`
+        means the one you are looking at). Existence is NOT checked here; that
+        is `kindOf`, because "no such file" and "that is a folder" lead to
+        different behaviour in the bar."""
+        text = str(text).strip()
+        if not text:
+            return ""
+        path = os.path.expanduser(text)
+        if not os.path.isabs(path):
+            base = str(folder) or os.getcwd()
+            path = os.path.join(base, path)
+        return os.path.normpath(path)
+
+    @Slot(str, result=str)
+    def kindOf(self, path):
+        """`"dir"`, `"file"` or `"missing"` for an absolute path."""
+        p = str(path)
+        if not p:
+            return "missing"
+        if os.path.isdir(p):
+            return "dir"
+        return "file" if os.path.exists(p) else "missing"
 
     # -- the answer -----------------------------------------------------------
 
