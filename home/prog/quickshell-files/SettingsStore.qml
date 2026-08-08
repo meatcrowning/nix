@@ -307,11 +307,12 @@ Singleton {
             // property and apps/qmlcommon/VScroll.qml binds to it, exactly like
             // fontFamily/fontSize/reduceMotion/animSpeed.
             property string scrollbarStyle: "win31"
-            // Cluster hexes (bare rrggbb) clicked OFF in the theme swatch row
-            // (SetSwatches.qml) — wal-extract.py drops them from the palette
-            // derivation. Keyed by colour, so a wallpaper change naturally
-            // resets the selection: new clusters don't match old hexes.
-            property var    paletteDropped: []
+            // Per-wallpaper memory of the theme swatch strip (SetSwatches.qml):
+            // wallpaper path (realpath'd, = Wall.path) -> cluster hexes (bare
+            // rrggbb) clicked OFF for that paper. wal-extract.py drops the
+            // current paper's entry from the palette derivation; switching
+            // papers restores each one's own selection.
+            property var    paletteDropped: ({})
             // RGB hardware (DRAM sticks + motherboard headers) follows the
             // accent on every theme change. Read by rgb-set.py itself, which
             // wal-set.sh step 6c fires detached — so turning this off leaves
@@ -548,7 +549,7 @@ Singleton {
         fontSize: 15, fontSizeByFamily: ({}), paletteColorCount: 16, pureBlackBg: true, pureBlackBgDark: true, lightMode: false,
         paletteVariant: "pastel", windowBorderWidth: 2,
         windowRounding: 0, trayTint: true, desktopIcons: true, shadowAlpha: 0.6, titleOrientation: "vertical", scrollbarStyle: "win31",
-        paletteDropped: [],
+        paletteDropped: ({}),
         rgbFollowTheme: true, reduceMotion: false, animSpeed: 1.0,
         wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",
         wallpaperSolid: false,

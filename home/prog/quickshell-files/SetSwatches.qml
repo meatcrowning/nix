@@ -33,7 +33,22 @@ Row {
 
     readonly property var clusters: Wall.clusters
     readonly property int count: clusters.length
-    readonly property var dropped: SettingsStore.d.paletteDropped || []
+    // This paper's own entry in the per-wallpaper map (see SettingsStore's
+    // paletteDropped note). A bare-array value is the pre-per-paper format.
+    readonly property var dropped: {
+        const m = SettingsStore.d.paletteDropped;
+        if (!m || typeof m !== "object" || Array.isArray(m)) return [];
+        return m[Wall.path] || [];
+    }
+    function writeDropped(arr) {
+        const old = SettingsStore.d.paletteDropped;
+        const m = (old && typeof old === "object" && !Array.isArray(old))
+                ? JSON.parse(JSON.stringify(old)) : {};
+        if (arr.length) m[Wall.path] = arr;
+        else delete m[Wall.path];
+        SettingsStore.d.paletteDropped = m;
+        SettingsStore.save();
+    }
 
     // an in-flight drag: the index range and the state it paints
     property int  dragA: -1
@@ -133,7 +148,7 @@ Row {
                 const hi = Math.max(root.dragA, root.dragB);
                 root.dragA = -1;
                 root.dragB = -1;
-                const cur = (SettingsStore.d.paletteDropped || []).slice();
+                const cur = root.dropped.slice();
                 for (let i = lo; i <= hi; i++) {
                     const hx = root.clusters[i];
                     const at = cur.indexOf(hx);
@@ -146,8 +161,7 @@ Row {
                     refuse.restart();
                     return;
                 }
-                SettingsStore.d.paletteDropped = cur;
-                SettingsStore.save();
+                root.writeDropped(cur);
             }
         }
     }
@@ -174,10 +188,7 @@ Row {
             enabled: root.dropped.length > 0
             hoverEnabled: root.dropped.length > 0
             cursorShape: Qt.PointingHandCursor
-            onClicked: {
-                SettingsStore.d.paletteDropped = [];
-                SettingsStore.save();
-            }
+            onClicked: root.writeDropped([])
         }
     }
 }

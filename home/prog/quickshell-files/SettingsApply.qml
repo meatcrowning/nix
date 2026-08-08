@@ -152,7 +152,10 @@ Item {
     property string _paletteSig: ""
     function _sig() {
         const d = SettingsStore.d;
-        return root._paletteKeys.map(k => String(d[k])).join("|");
+        // JSON, not String(): paletteDropped is an object, and String() of any
+        // object is the constant "[object Object]" — its changes would never
+        // move the signature and the debounced apply would skip them.
+        return root._paletteKeys.map(k => JSON.stringify(d[k])).join("|");
     }
     function reapplyTheme() { themeApply.restart(); }
     Timer {
