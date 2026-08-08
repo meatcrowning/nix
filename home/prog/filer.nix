@@ -116,6 +116,7 @@ in
     Icon=filer
     Terminal=false
     Categories=Utility;System;FileTools;
+    X-GNOME-UsesNotifications=true
     Keywords=bespoke;
     MimeType=inode/directory;
   '';

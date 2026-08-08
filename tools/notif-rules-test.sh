@@ -43,6 +43,35 @@ Seen=true
 Seen=true
 RC
 
+# The page also SCANS installed .desktop files for X-GNOME-UsesNotifications,
+# which is how this desktop's own apps get listed. Give it a synthetic
+# application set for the same reason as the config above: the real one differs
+# per machine, and this way the picker's corpus is deterministic too.
+export XDG_DATA_HOME="$WORK/data"
+export XDG_DATA_DIRS="$WORK/data-sys"
+mkdir -p "$XDG_DATA_HOME/applications" "$WORK/data-sys/applications"
+cat >"$XDG_DATA_HOME/applications/test-notifier-a.desktop" <<'DE'
+[Desktop Entry]
+Type=Application
+Name=Test Notifier A
+Exec=/bin/true
+X-GNOME-UsesNotifications=true
+DE
+cat >"$WORK/data-sys/applications/test-notifier-b.desktop" <<'DE'
+[Desktop Entry]
+Type=Application
+Name=Test Notifier B
+Exec=/bin/true
+X-GNOME-UsesNotifications=true
+DE
+# A third that does NOT declare it: absent from the list, findable in the picker.
+cat >"$WORK/data-sys/applications/test-quiet-c.desktop" <<'DE'
+[Desktop Entry]
+Type=Application
+Name=Test Quiet C
+Exec=/bin/true
+DE
+
 cp "$SRC"/*.qml "$WORK/"
 [ -d "$SRC/scripts" ] && cp -r "$SRC/scripts" "$WORK/"
 
@@ -223,13 +252,20 @@ Scope {
             // The plasmanotifyrc keys below are deliberately not installed
             // programs, so no DesktopEntries lookup can rename them and the
             // expectation holds on either machine.
-            t.check("the list merges all three sources",
+            t.check("the list merges every source",
                     page.seenApps.map(a => a.key),
-                    ["filer", "goetia", "kde connect", "painter", "player",
-                     "nix", "recording", "screenshot", "surfer",
-                     "test.notifier.one", "test.notifier.two", "quickshell",
-                     "vivaldi-stable"]);
-            t.check("this desktop's own senders are named, not keyed",
+                    ["kde connect", "nix", "recording", "screenshot",
+                     "test-notifier-a", "test-notifier-b",
+                     "test.notifier.one", "test.notifier.two",
+                     "quickshell", "vivaldi-stable"]);
+            t.check("an app declaring X-GNOME-UsesNotifications is SCANNED in",
+                    page.declaredApps, ["test-notifier-a", "test-notifier-b"]);
+            t.check("a declaring app is named from its own entry",
+                    page.seenApps.filter(a => a.key === "test-notifier-b")[0].label,
+                    "Test Notifier B");
+            t.check("an installed app that does NOT declare it is left out",
+                    page.seenApps.filter(a => a.key === "test-quiet-c").length, 0);
+            t.check("a panel sender is named, not keyed",
                     page.seenApps.filter(a => a.key === "quickshell")[0].label, "the panel");
             t.check("a learned sender keeps the name it sent",
                     page.seenApps.filter(a => a.key === "vivaldi-stable")[0].label, "Vivaldi");
@@ -241,9 +277,12 @@ Scope {
             // in the list is never offered twice.
             page.appQuery = "f";
             t.check("a one-character query offers nothing", page.matches.length, 0);
-            page.appQuery = "filer";
-            t.check("an app already listed is not offered",
-                    page.matches.filter(m => m.key === "filer").length, 0);
+            page.appQuery = "test-quiet";
+            t.check("a non-declaring app IS findable in the picker",
+                    page.matches.map(m => m.key), ["test-quiet-c"]);
+            page.appQuery = "test-notifier-a";
+            t.check("an app already in the list is not offered again",
+                    page.matches.length, 0);
             page.appQuery = "";
 
             // Adding puts a row in the list with no rule attached.

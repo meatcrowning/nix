@@ -318,7 +318,16 @@ def notify(body):
         if stub:
             subprocess.run(["/bin/sh", "-c", stub], timeout=10)
         else:
-            subprocess.run(["notify-send", "-a", "goetia", "goetia", body or ""],
+            # The desktop-entry hint, because this is the ONE sender whose
+            # app name and .desktop id disagree: the program is goetia, the
+            # entry is board.desktop. The panel's notifs page enumerates
+            # candidates from .desktop files (X-GNOME-UsesNotifications), so
+            # without the hint the row it offers would be keyed `board` while
+            # this notification arrives as `goetia`, and a rule set on it would
+            # silently never fire.
+            subprocess.run(["notify-send", "-a", "goetia",
+                            "-h", "string:desktop-entry:board",
+                            "goetia", body or ""],
                            timeout=10)
         log("notified: " + (body or "")[:120])
     except (OSError, subprocess.SubprocessError) as e:

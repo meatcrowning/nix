@@ -20,40 +20,64 @@ Column {
     // ---- who is in the list ------------------------------------------------
     //
     // A list you can only edit AFTER an app has interrupted you is a list that
-    // is useless exactly when you want it. Plasma builds its candidates from
-    // three sources; both of the ones we lack here were measured rather than
-    // assumed, so what replaces them is aimed at this desktop:
+    // is useless exactly when you want it, so the candidates are enumerated,
+    // the same four ways Plasma's kcm_notifications enumerates its own — with
+    // the one thing it cannot do (pick any installed program) added, and the
+    // one source that is dead weight here dropped:
     //
-    //   - `.desktop` files declaring `X-GNOME-UsesNotifications` — Plasma's
-    //     primary source, and on `top` it yields ZERO: nothing in the 299
-    //     entries across the system and user application dirs sets that key
-    //     (it is a GNOME convention nixpkgs does not carry). Replaced by
-    //     "search every installed program and pick one", below, which needs no
-    //     declaration and cannot go stale.
-    //   - `.notifyrc` services — 31 installed, and all of them Plasma/KDE
-    //     internals (kwin, powerdevil, akonadi, plasma_workspace) that this
-    //     Hyprland session never runs. Listing them would be 31 rows of noise,
-    //     so they are deliberately not a source here.
+    //   1. `.desktop` files declaring `X-GNOME-UsesNotifications=true`. This is
+    //      Plasma's primary source and it is SCANNED, not listed. Measured on
+    //      `top` 2026-08-07: of 299 installed entries, zero declared it — it is
+    //      a GNOME convention nixpkgs does not carry — so this desktop's own
+    //      five notifying apps now declare it themselves (`home/prog/{filer,
+    //      player,painter,surfer,board}.nix`). Adding the key to a new app is
+    //      the whole of listing it here; there is no second list to update.
+    //   2. `~/.config/plasmanotifyrc` — the apps Plasma itself recorded as
+    //      notifiers, which on this machine is the only record that firefox,
+    //      discord, nheko and vivaldi notify at all.
+    //   3. `notifSeen` — what the panel has learned since.
+    //   4. The picker: any installed program, searched by name. Needs no
+    //      declaration from the app and so cannot go stale.
     //
-    // What IS: this desktop's own programs (known statically — each passes its
-    // own `-a` name to notify-send), every app Plasma itself has recorded as a
-    // notifier in ~/.config/plasmanotifyrc (his real history, and the only
-    // place on this machine that knows firefox and discord notify), and the
-    // senders the panel has learned since. Plus anything he adds by hand.
+    // `.notifyrc` services, Plasma's other source, are deliberately NOT one:
+    // 31 are installed and every one is a Plasma/KDE internal (kwin, powerdevil,
+    // akonadi, plasma_workspace) that a Hyprland session never runs.
 
-    // This desktop's own senders — the `-a` name each passes to notify-send,
-    // which for these is also the only name they send (no desktop entry).
-    // Keep in step with the notify-send call sites under apps/ and home/srvs/.
-    readonly property var ownApps: [
-        { key: "filer",      label: "filer" },
-        { key: "goetia",     label: "goetia" },
+    // Ids of installed programs that declare the capability — `grep`, because
+    // Quickshell's DesktopEntry exposes the standard fields and not arbitrary
+    // keys. (KApplicationTrader does the same scan behind a nicer face.)
+    property var declaredApps: []
+    Process {
+        running: true
+        command: ["sh", "-c",
+            "for d in $(printf '%s' \"${XDG_DATA_HOME:-$HOME/.local/share}:"
+            + "${XDG_DATA_DIRS:-/usr/local/share:/usr/share}\" | tr ':' ' '); do "
+            + "grep -lix 'X-GNOME-UsesNotifications=true' \"$d\"/applications/*.desktop "
+            + "2>/dev/null; done | sed 's|.*/||; s|\\.desktop$||' | sort -u"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const out = [];
+                for (const line of this.text.split("\n")) {
+                    const k = line.trim().toLowerCase();
+                    if (k)
+                        out.push(k);
+                }
+                page.declaredApps = out;
+            }
+        }
+    }
+
+    // The senders that are NOT applications and so have no `.desktop` file to
+    // declare anything: three panel features and one user service, all of them
+    // sending from this repo. Nothing can enumerate these — the name each uses
+    // exists only as the `-a` argument at its notify-send call site — so they
+    // are named here, and this is the only list to keep in step (`grep -rn
+    // notify-send apps home` finds every call site).
+    readonly property var panelSenders: [
         { key: "nix",        label: "repo updates" },
-        { key: "painter",    label: "painter" },
-        { key: "player",     label: "player" },
         { key: "quickshell", label: "the panel" },
         { key: "recording",  label: "screen recording" },
-        { key: "screenshot", label: "screenshot" },
-        { key: "surfer",     label: "surfer" }
+        { key: "screenshot", label: "screenshot" }
     ]
 
     // [Applications][<desktop entry>] out of Plasma's own notification config.
@@ -100,16 +124,20 @@ Column {
     property var seenApps: []
     function _rebuildSeen() {
         const byKey = {};
-        // Weakest label first, strongest last: a learned sender's own app name
-        // beats a guess, and this desktop's own naming beats both.
+        // Weakest label first, strongest last: a name read off the installed
+        // entry beats the bare key, a learned sender's own app name beats that,
+        // and the panel's own naming for its own senders beats everything.
         for (const k of page.plasmaApps)
+            if (k !== "@other")
+                byKey[k] = page._installedName(k) || k;
+        for (const k of page.declaredApps)
             if (k !== "@other")
                 byKey[k] = page._installedName(k) || k;
         const seen = page.d.notifSeen || {};
         for (const k in seen)
             if (k !== "@other")
                 byKey[k] = seen[k] || byKey[k] || k;
-        for (const a of page.ownApps)
+        for (const a of page.panelSenders)
             byKey[a.key] = a.label;
 
         const out = [];
@@ -130,6 +158,7 @@ Column {
     }
     onSeenJsonChanged: page._rebuildSeen()
     onPlasmaAppsChanged: page._rebuildSeen()
+    onDeclaredAppsChanged: page._rebuildSeen()
     // DesktopEntries scans asynchronously, so a plasmanotifyrc key read before
     // the scan lands has no pretty name yet; rebuild when the scan fills in.
     onInstalledChanged: page._rebuildSeen()

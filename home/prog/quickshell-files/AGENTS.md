@@ -2076,38 +2076,53 @@ disclosure under it (docs/DESIGN.md §9.1).
 #### The app list must be populated BEFORE an app interrupts you
 
 A list you can only edit after the fact is useless exactly when you want it, and
-the first cut of this got that wrong: it listed only learned senders. Plasma
-draws on three sources, and **both of the ones we lack were measured, not
-assumed**, on `top` 2026-08-07:
+the first cut of this got that wrong twice: first it listed only learned
+senders, then it made up for that with a **hardcoded array of this desktop's
+apps**. Plasma hardcodes nothing — it runs a `KApplicationTrader` query and
+scans the `.notifyrc` dirs — and neither does this now. `SetPgNotifs.qml`
+merges four sources, weakest label first so the best name wins:
 
-- **`.desktop` files declaring `X-GNOME-UsesNotifications`** — Plasma's primary
-  source, and here it yields **zero**. Not one of the 299 entries across
-  `/run/current-system/sw/share/applications` and `~/.local/share/applications`
-  sets that key; it is a GNOME convention nixpkgs does not carry. (Which also
-  means Plasma's *own* list on this machine is built almost entirely from the
-  other two.) Do not "fix" the enumeration by reaching for it.
-- **`.notifyrc` services** — 31 installed, every one of them a Plasma/KDE
-  internal (`kwin`, `powerdevil`, `akonadi_*`, `plasma_workspace`) that a
-  Hyprland session never runs. Listing them is 31 rows of noise for zero real
-  senders, so they are deliberately **not** a source.
-
-What `SetPgNotifs.qml` merges instead, weakest label first so the best name wins:
-
-1. **`~/.config/plasmanotifyrc`** `[Applications][…]`, read once by a `Process`,
+1. **Installed `.desktop` files declaring `X-GNOME-UsesNotifications=true`**,
+   found by `grep` across `$XDG_DATA_HOME` + `$XDG_DATA_DIRS`. `grep` and not
+   `DesktopEntries` because Quickshell's `DesktopEntry` exposes the standard
+   fields and not arbitrary keys; `KApplicationTrader` does the same scan behind
+   a nicer face. **Measured on `top` 2026-08-07: zero of the 299 installed
+   entries declared it** — a GNOME convention nixpkgs does not carry, which is
+   also why Plasma's own list here is built almost entirely from its other two
+   sources. So **this desktop's five notifying apps now declare it themselves**
+   (`home/prog/{filer,player,painter,surfer,board}.nix`). Adding that one key to
+   a new app is the whole of listing it; there is no second list to update, and
+   Plasma's KCM picks them up too.
+2. **`~/.config/plasmanotifyrc`** `[Applications][…]`, read once by a `Process`,
    best-effort — an absent file is simply no extra candidates. This is the one
    place on the machine that knows firefox, discord, nheko and vivaldi notify
    him, because Plasma learned it over months.
-2. **`ownApps`** — this desktop's own senders, hardcoded, because they are
-   knowable: each passes its own `-a` name to `notify-send` (`filer`, `goetia`,
-   `nix`, `painter`, `player`, `quickshell`, `recording`, `screenshot`,
-   `surfer`). **Keep that list in step with the `notify-send` call sites** under
-   `apps/` and `home/srvs/` — `grep -rn 'notify-send' apps home` finds them.
 3. **`notifSeen`** — what the panel has learned since.
 4. **The picker**: a live search over `DesktopEntries.applications.values`,
-   adding any installed program by its `.id`. This is what replaces source one,
-   and it needs no declaration from the app, so it cannot go stale. Adding
-   writes the app into `notifSeen` and **no rule** — the row appears reading its
-   inherited defaults.
+   adding any installed program by its `.id`. Needs no declaration from the app,
+   so it cannot go stale, and it is the answer to "must I wait for it to
+   notify". Adding writes the app into `notifSeen` and **no rule** — the row
+   appears reading its inherited defaults.
+
+**`.notifyrc` services, Plasma's other source, are deliberately not one here**:
+31 are installed and every one is a Plasma/KDE internal (`kwin`, `powerdevil`,
+`akonadi_*`, `plasma_workspace`) that a Hyprland session never runs — 31 rows of
+noise for zero real senders.
+
+**`panelSenders` is the one list left, and it is four entries** — `quickshell`,
+`screenshot`, `recording`, `nix`. These are three panel features and a user
+service, not applications: they have no `.desktop` file to declare anything, and
+the name each uses exists only as the `-a` argument at its `notify-send` call
+site, so nothing can enumerate them. **Keep it in step** — `grep -rn
+'notify-send' apps home` finds every call site.
+
+**A sender whose `-a` name and `.desktop` id disagree must send the
+`desktop-entry` hint.** goetia is the only one: the program is `goetia`, the
+entry is `board.desktop`. Without the hint the scan offers a row keyed `board`
+while the notification arrives as `goetia`, and the rule silently never fires —
+so `board-notify.py` passes `-h string:desktop-entry:board`. The two-key lookup
+covers the ordinary case where they merely differ in *case* or where one is
+absent; it cannot invent a mapping between two different words.
 
 `SetTextField.liveText` exists for that search field and nothing else: the
 component still commits only on Enter/focus-out, because every other user of it

@@ -79,6 +79,7 @@ in
     Icon=goetia
     Terminal=false
     Categories=Utility;
+    X-GNOME-UsesNotifications=true
     Keywords=bespoke;goetia;board;decisions;
   '';
 }
