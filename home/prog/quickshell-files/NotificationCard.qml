@@ -41,6 +41,22 @@ Rectangle {
     // The Quickshell Notification object this toast renders.
     required property var notif
 
+    // Attached-to-the-panel mode (NotificationWindow.attached): the card is
+    // drawn like the shortcut notch (DesktopNotch.qml) — no border on the bar
+    // side, the top and bottom arms overrunning the panel's face by one line
+    // width so the bar's accent strip reads as detouring around the card, and
+    // the stretch under the bar painted in the bar's own background so the
+    // mouth opens INTO the panel instead of sitting against it as a box.
+    property bool attached: false
+    // Which side the mouth (the bar) is on. false = right, the default edge.
+    property bool mouthOnLeft: false
+    // The notch's own mouth depth, so the two attachments read as one.
+    readonly property int mouth: attached ? NotchModel.overlap : 0
+    readonly property int lineW: 2
+    // The arms run to the panel's face plus one line width: the corner is
+    // painted over the strip rather than shared between two shapes abutting.
+    readonly property int armW: width - mouth + lineW
+
     readonly property int urgency: notif ? notif.urgency : 1
     readonly property bool critical: urgency === 2
 
@@ -183,11 +199,16 @@ Rectangle {
                              content.implicitHeight + 20)
     radius: 0
     color: Theme.bgAlt
-    border.width: 2
+    // Attached, the border is the three rectangles below (the notch's
+    // construction); a four-sided border would close the mouth.
+    border.width: attached ? 0 : lineW
     border.color: tint
 
-    // fade in on arrival (removal is instant when the model drops the item)
-    opacity: 0
+    // fade in on arrival (removal is instant when the model drops the item).
+    // Attached cards slide out of the panel instead (NotificationWindow's add
+    // transition), so they arrive at full opacity — a fade under the clip
+    // would just dim the emerging card.
+    opacity: attached ? 1 : 0
     Component.onCompleted: {
         opacity = 1;
         // Kick off resolution of the real on-disk path (the hinted ~/Downloads
@@ -201,9 +222,50 @@ Rectangle {
     // fade's to choose.
     Behavior on opacity { NumberAnimation { duration: ViewMode.ms(160); easing.type: ViewMode.slideEasing } }
 
-    // left urgency strip
+    // The mouth: the stretch under the bar body, in the bar's own background,
+    // exactly like the notch's overlap. Any opaque pixel of this Overlay
+    // surface covers the bar's accent strip beneath it; painting Theme.bg
+    // makes the cover invisible against the bar, so the strip simply reads as
+    // interrupted — detouring around the card's arms.
     Rectangle {
-        anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+        visible: card.attached
+        x: card.mouthOnLeft ? 0 : card.width - card.mouth
+        width: card.mouth
+        height: parent.height
+        color: Theme.bg
+    }
+
+    // ---- the attached outline: three sides, in the urgency tint -----------
+    // (DesktopNotch.qml's three-rectangle outline, per card.)
+    Rectangle {   // the desktop-facing side
+        visible: card.attached
+        x: card.mouthOnLeft ? card.width - card.lineW : 0
+        width: card.lineW
+        height: parent.height
+        color: card.tint
+    }
+    Rectangle {   // top arm
+        visible: card.attached
+        x: card.mouthOnLeft ? card.mouth - card.lineW : 0
+        y: 0
+        width: card.armW
+        height: card.lineW
+        color: card.tint
+    }
+    Rectangle {   // bottom arm
+        visible: card.attached
+        x: card.mouthOnLeft ? card.mouth - card.lineW : 0
+        y: parent.height - card.lineW
+        width: card.armW
+        height: card.lineW
+        color: card.tint
+    }
+
+    // urgency strip, on the desktop-facing edge (left unless the attached
+    // mouth puts the bar there)
+    Rectangle {
+        anchors { top: parent.top; bottom: parent.bottom }
+        x: (card.attached && card.mouthOnLeft) ? parent.width - width : 0
         width: 3
         color: card.tint
     }
@@ -214,9 +276,13 @@ Rectangle {
         // Only the action buttons actually take events up here — text and images
         // accept none, so a click anywhere else still falls through to dismiss.
         z: 1
+        // The bar-side margin absorbs the mouth, so the text ends where the
+        // desktop ends — nothing reads from under the panel.
         anchors {
             left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter
-            leftMargin: 14; rightMargin: 12
+            leftMargin: (card.attached && card.mouthOnLeft) ? 12 + card.mouth : 14
+            rightMargin: (card.attached && card.mouthOnLeft) ? 14
+                       : 12 + (card.attached ? card.mouth : 0)
         }
         spacing: 10
 
