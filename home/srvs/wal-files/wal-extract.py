@@ -41,7 +41,13 @@ warnings.filterwarnings("ignore")
 SETTINGS = os.path.expanduser("~/.config/quickshell/settings.json")
 DEFAULTS = {"themeMode": "auto", "accentOverride": "#5c9fcc",
             "paletteColorCount": 16, "pureBlackBg": True,
-            "paletteVariant": "pastel", "lightMode": False}
+            "paletteVariant": "pastel", "lightMode": False,
+            # Cluster hexes the user clicked OFF in the Settings swatch row —
+            # dropped from the derivation (accent scoring, secondary, status
+            # sampling), still published in CLUSTERS so the row can re-light
+            # them. Keyed by colour, so a wallpaper change naturally resets it:
+            # the new image's clusters simply don't match the old hexes.
+            "paletteDropped": []}
 
 # Full-mode variant knobs. Each is a global transform over the generated
 # palette, NOT a different derivation: the same hues come out, dressed brighter
@@ -294,10 +300,17 @@ def main():
         sys.stderr.write("wal-extract: bad accentOverride %r, falling back to "
                          "the wallpaper\n" % (accent_hex,))
 
+    try:
+        dropped = {str(x).strip().lstrip("#").lower()
+                   for x in (cfg["paletteDropped"] or [])}
+    except (TypeError, AttributeError):
+        dropped = set()
+
     # The palette always derives FROM the wallpaper — the accent in auto mode,
     # and the secondary + status hues always (even when the accent hue was
     # picked by hand) — so the image is always read.
     clusters = []
+    all_hexes = []    # every cluster, dominant first, dropped ones included
     img_hsv = None    # (h, s, v, avg_sat) from the image's winning cluster
     if True:
         if path is None:
@@ -317,10 +330,24 @@ def main():
             # mode, more candidate hues for the secondary and status tones.
             q = img.quantize(colors=colors, method=Image.FASTOCTREE).convert("RGB")
             counts = Counter(q.getdata())
+            # Every cluster first (dominant first — the order the Settings
+            # swatch row draws), THEN the user's dropped colours come out
+            # before anything downstream sees the list. All dropped = the
+            # selection is ignored, never a black desktop (and never a silent
+            # no-op: the swatch row refuses to un-light the last one).
+            allc = sorted(((rgb, cnt) for rgb, cnt in counts.items()),
+                          key=lambda x: -x[1])
+            all_hexes = ["%02x%02x%02x" % rgb for rgb, _ in allc]
+            kept = [(rgb, cnt) for (rgb, cnt), hx in zip(allc, all_hexes)
+                    if hx not in dropped]
+            if not kept:
+                sys.stderr.write("wal-extract: every cluster dropped; "
+                                 "ignoring paletteDropped\n")
+                kept = allc
             best, best_score = None, -1.0
             total = 0.0
             sat_sum = 0.0
-            for (r, g, b), cnt in counts.items():
+            for (r, g, b), cnt in kept:
                 h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
                 clusters.append((h, s, v, cnt))
                 sat_sum += s * cnt
@@ -372,6 +399,9 @@ def main():
              variant, colors,
              "pure" if pure_bg else "tone",
              (" accent=%s" % accent_hex) if manual_hsv is not None else ""))
+    # Every quantised cluster, dominant first, dropped ones included — wal-set
+    # publishes this to $CACHE/current.clusters for the Settings swatch row.
+    print("CLUSTERS=%s" % ",".join(all_hexes))
     for k, val in out.items():
         print("%s=%s" % (k, val))
     return 0

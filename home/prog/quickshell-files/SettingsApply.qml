@@ -49,12 +49,20 @@ Item {
     // plugin's title-texture cache, so both take effect with no window touched.
     // Re-applied at startup so the picks survive a reboot without editing
     // seed-once hyprland.lua.
-    function applyVtb() {
+    // `flush` also flushes every bar's cached textures and damages them
+    // (hl.plugin.hyprvtb.refresh_fonts — the same poke apply-pixel-font.sh
+    // uses): setting a config value alone never invalidates m_pTitleTex, so
+    // without it the orientation only changed when something else repainted
+    // the bar. In the SAME eval, because two execDetached hyprctls can land
+    // out of order. Not on the shadow slider path — the alpha is read per
+    // frame, and a drag fires this per step (refresh re-inits fontconfig).
+    function applyVtb(flush) {
         const d = SettingsStore.d;
         const lua = "hl.config({plugin = { hyprvtb = { "
             + "shadow_alpha = " + d.shadowAlpha + ", "
             + "title_rotated = " + _b(d.titleOrientation === "horizontal")
-            + " } }})";
+            + " } }})"
+            + (flush ? " hl.plugin.hyprvtb.refresh_fonts()" : "");
         Quickshell.execDetached(["hyprctl", "eval", lua]);
     }
 
@@ -81,7 +89,9 @@ Item {
         SettingsStore.loadNow();
         root._paletteSig = root._sig();
         applyInput();
-        applyVtb();
+        // flush: bars may have rendered before this re-assert landed, and a
+        // stored "horizontal" would otherwise wait for the next repaint
+        applyVtb(true);
         sunsetProbe.running = true;
     }
 
@@ -92,8 +102,8 @@ Item {
         function onPointerSpeedChanged() { root.applyInput(); }
         function onNaturalScrollChanged() { root.applyInput(); }
         function onTapToClickChanged() { root.applyInput(); }
-        function onShadowAlphaChanged() { root.applyVtb(); }
-        function onTitleOrientationChanged() { root.applyVtb(); }
+        function onShadowAlphaChanged() { root.applyVtb(false); }
+        function onTitleOrientationChanged() { root.applyVtb(true); }
 
         // ---- pixel-font propagation (kitty / titlebar / kdeglobals) ----
         // The panel + Qt apps read the pick live themselves; this pushes it to
@@ -114,6 +124,7 @@ Item {
         function onPaletteColorCountChanged() { root.reapplyTheme(); }
         function onPureBlackBgChanged()       { root.reapplyTheme(); }
         function onPaletteVariantChanged()    { root.reapplyTheme(); }
+        function onPaletteDroppedChanged()    { root.reapplyTheme(); }
         // lightMode is in _paletteKeys (the loop guard), but without this it was
         // never a trigger — so light->dark never re-themed live, and dark->light
         // only did by the pureBlackBg side effect setLightMode forces. The
@@ -136,7 +147,8 @@ Item {
     // real values readable there) and the timer applies only a genuine change.
     readonly property var _paletteKeys: ["themeMode", "accentOverride",
                                          "paletteColorCount", "pureBlackBg",
-                                         "paletteVariant", "lightMode"]
+                                         "paletteVariant", "lightMode",
+                                         "paletteDropped"]
     property string _paletteSig: ""
     function _sig() {
         const d = SettingsStore.d;

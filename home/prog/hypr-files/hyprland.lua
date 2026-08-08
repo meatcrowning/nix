@@ -329,6 +329,11 @@ hl.config({
             -- line is only the persisted floor. The value is masked in
             -- seed-drift.sh so the runtime rewrite is not flagged as drift.
             ["shadow_alpha"]      = 0.6,
+            -- Title orientation — the other USER setting persisted here, for
+            -- exactly the shadow_alpha reasons above: wal-set.sh rewrites it
+            -- from settings.json's titleOrientation, the panel applies live
+            -- changes, this line is the persisted floor across a reload.
+            ["title_rotated"]     = false,
             -- THE DESKTOP'S MOTION. This is not just the window roll: the roll
             -- is the REFERENCE every sliding animation on this machine is
             -- matched to (docs/DESIGN.md 6.2), so this one number is also the

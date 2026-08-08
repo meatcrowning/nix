@@ -45,6 +45,16 @@ Singleton {
     property string _mode: "scale"
     property string _blur: ""
 
+    // The clusters wal-extract.py quantised the current wallpaper into —
+    // bare rrggbb, dominant first, dropped ones included — published by
+    // wal-set.sh to current.clusters. Drawn by the Settings swatch row
+    // (SetSwatches.qml); empty until the first theme apply writes the file.
+    property var clusters: []
+    function _setClusters(t) {
+        const s = (t || "").trim();
+        root.clusters = s.length ? s.split(",") : [];
+    }
+
     // The pre-blurred backdrop wal-prepare.sh cached for this image. Empty until
     // it exists; WallpaperLayer falls back to blurring the source itself, so a
     // missing file is a quality regression for one wallpaper, never a black gap.
@@ -100,6 +110,16 @@ Singleton {
         onLoaded: root._blur = text().trim()
     }
 
+    FileView {
+        id: clustersFile
+        path: root.cacheDir + "/current.clusters"
+        watchChanges: true
+        blockLoading: true
+        printErrors: false
+        onTextChanged: root._setClusters(text())
+        onLoaded: root._setClusters(text())
+    }
+
     // Fallback poll. watchChanges alone is not quite enough here for the same
     // reason SettingsStore polls: an inotify watch follows the INODE, so any
     // writer that replaces the file (temp + rename) silently detaches it.
@@ -111,7 +131,7 @@ Singleton {
         interval: 500
         running: true
         repeat: true
-        onTriggered: { curFile.reload(); modeFile.reload(); blurFile.reload(); }
+        onTriggered: { curFile.reload(); modeFile.reload(); blurFile.reload(); clustersFile.reload(); }
     }
 
     // Read all three files RIGHT NOW, synchronously, and return the path.
