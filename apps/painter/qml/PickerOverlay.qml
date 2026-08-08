@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls.Basic   // ScrollBar (attached), for VScroll
 import "../../qmlcommon"
 
 // THE one dropdown list, over everything — the same shape as `CtxMenu` and for
@@ -86,8 +87,16 @@ Item {
             clip: true
             currentIndex: overlay.options.indexOf(overlay.value)
 
+            // Every scrollable region gets a bar, and a picker's content is
+            // genuinely unbounded — this is the model/sampler/scheduler list,
+            // however many are installed (docs/DESIGN.md §9.2). painter's other
+            // two pickers (ModelPicker, LoraPicker) already carry one; this was
+            // the odd one out, so a long list scrolled with nothing saying so.
+            ScrollBar.vertical: VScroll { id: vbar }
+
             delegate: Rectangle {
-                width: list.width
+                // sized against the gutter, so no row sits under the bar (§9.2)
+                width: list.width - vbar.barW
                 height: 19
                 color: hover.containsMouse || modelData === overlay.value
                      ? Theme.highlight : "transparent"

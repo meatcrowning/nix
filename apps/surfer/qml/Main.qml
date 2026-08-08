@@ -586,19 +586,19 @@ Window {
             items.push({ label: "Open link in new tab",        trigger: function(){ win.newTab(c.link); } });
             items.push({ label: "Open link in background tab",  trigger: function(){ win.newTabBg(c.link); } });
             items.push({ label: "Copy link address",           trigger: function(){ Clip.copy(c.link); } });
-            items.push({ label: "Save link as…",               trigger: function(){ view.triggerWebAction(WebEngineView.DownloadLinkToDisk); } });
+            items.push({ label: "Save link as...",               trigger: function(){ view.triggerWebAction(WebEngineView.DownloadLinkToDisk); } });
         }
         if (c.isImage && c.media !== "") {
             sep();
             items.push({ label: "Open image in new tab",  trigger: function(){ win.newTab(c.media); } });
-            items.push({ label: "Save image…",            trigger: function(){ view.triggerWebAction(WebEngineView.DownloadImageToDisk); } });
+            items.push({ label: "Save image...",            trigger: function(){ view.triggerWebAction(WebEngineView.DownloadImageToDisk); } });
             items.push({ label: "Copy image",             trigger: function(){ view.triggerWebAction(WebEngineView.CopyImageToClipboard); } });
             items.push({ label: "Copy image address",     trigger: function(){ Clip.copy(c.media); } });
         }
         if (c.selection !== "") {
             sep();
             items.push({ label: "Copy", trigger: function(){ view.triggerWebAction(WebEngineView.Copy); } });
-            var q = c.selection.length > 24 ? c.selection.substring(0, 24) + "…" : c.selection;
+            var q = c.selection.length > 24 ? c.selection.substring(0, 24) + "..." : c.selection;
             items.push({ label: "Search for \"" + q + "\"",
                          trigger: function(){ win.newTab("https://duckduckgo.com/?q=" + encodeURIComponent(c.selection)); } });
         }
@@ -618,7 +618,7 @@ Window {
         items.push({ label: "Forward", enabled: view.canGoForward, trigger: function(){ view.goForward(); } });
         items.push({ label: "Reload",                              trigger: function(){ view.reload(); } });
         items.push({ separator: true });
-        items.push({ label: "Save page as…",    trigger: function(){ view.triggerWebAction(WebEngineView.SavePage); } });
+        items.push({ label: "Save page as...",    trigger: function(){ view.triggerWebAction(WebEngineView.SavePage); } });
         items.push({ label: "View page source", trigger: function(){ win.newTab("view-source:" + view.url); } });
         items.push({ separator: true });
         items.push({ label: "Copy page address", trigger: function(){ Clip.copy("" + view.url); } });
