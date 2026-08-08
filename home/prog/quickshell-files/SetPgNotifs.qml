@@ -1,7 +1,13 @@
 import QtQuick
 
-// Notifications & Sounds — the toast server behaviour and the per-event sound
-// map (urgency maps directly to a sound file, so they belong together).
+// Notifications & Sounds — the toast server behaviour, when it stays quiet, the
+// per-sender rules, and the per-event sound map (urgency maps directly to a
+// sound file, so they belong together).
+//
+// Structured after Plasma's kcm_notifications, which splits the question into
+// global conditions and a per-application block; the divergences (no history,
+// no badges, no per-event table, and criticals default to piercing DND) are
+// noted where they sit, and in Notifications.qml at the enforcement point.
 Column {
     id: page
     width: parent ? parent.width : 480
@@ -9,16 +15,60 @@ Column {
 
     property var d: SettingsStore.d
 
+    // The per-app list, built from the senders the panel has actually seen.
+    // Derived through a JSON string rather than straight off `notifSeen`: the
+    // store re-reads settings.json a few times a second, and rebuilding this
+    // array on every one of those reloads would collapse an expanded row under
+    // the pointer. The string only changes when the contents do.
+    readonly property string seenJson: JSON.stringify(page.d.notifSeen || {})
+    property var seenApps: []
+    function _rebuildSeen() {
+        const seen = page.d.notifSeen || {};
+        const out = [];
+        for (const k in seen)
+            if (k !== "@other")
+                out.push({ key: k, label: (seen[k] || k) });
+        out.sort((a, b) => a.label.toLowerCase() < b.label.toLowerCase() ? -1 : 1);
+        page.seenApps = out;
+    }
+    onSeenJsonChanged: page._rebuildSeen()
+    Component.onCompleted: page._rebuildSeen()
+
+    // Timed do-not-disturb. The picker's value is the stored duration; arming
+    // it stamps the instant the server actually obeys.
+    readonly property var dndMins: ({ "off": 0, "15m": 15, "30m": 30, "1h": 60, "2h": 120, "4h": 240, "8h": 480 })
+    function _dndLabel() {
+        const m = page.d.notifDndFor;
+        for (const k in page.dndMins) if (page.dndMins[k] === m) return k;
+        return "off";
+    }
+    function _setDnd(optionLabel) {
+        const mins = page.dndMins[optionLabel] || 0;
+        page.d.notifDndFor = mins;
+        page.d.notifDndUntil = mins > 0 ? Date.now() + mins * 60000 : 0;
+        SettingsStore.save();
+    }
+    // What the armed timer says, refreshed on its own clock so the row does not
+    // sit claiming "lifts in 1h" for the whole hour.
+    property double now: Date.now()
+    Timer {
+        interval: 30000
+        repeat: true
+        running: page.d.notifDndUntil > 0
+        onTriggered: page.now = Date.now()
+    }
+    function _dndRemaining() {
+        const left = page.d.notifDndUntil - page.now;
+        if (page.d.notifDndUntil <= 0 || left <= 0)
+            return "";
+        const mins = Math.ceil(left / 60000);
+        return mins >= 60
+            ? "quiet for another " + Math.floor(mins / 60) + "h " + (mins % 60) + "m"
+            : "quiet for another " + mins + "m";
+    }
+
     SetSection {
         title: "notifications"
-        SetRow {
-            label: "do not disturb"
-            desc: "suppress non-critical toasts"
-            SetToggle {
-                checked: page.d.doNotDisturb
-                onToggled: (v) => { page.d.doNotDisturb = v; SettingsStore.save(); }
-            }
-        }
         SetRow {
             label: "auto-dismiss after"
             desc: "critical toasts always stay until clicked"
@@ -53,6 +103,14 @@ Column {
             }
         }
         SetRow {
+            label: "low priority popups"
+            desc: "urgency 0 - a background job's chatter"
+            SetToggle {
+                checked: page.d.notifLowPopup
+                onToggled: (v) => { page.d.notifLowPopup = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
             label: "show images"
             desc: "advertise image support to apps"
             SetToggle {
@@ -67,6 +125,82 @@ Column {
                 checked: page.d.notifActions
                 onToggled: (v) => { page.d.notifActions = v; SettingsStore.save(); }
             }
+        }
+    }
+
+    SetSection {
+        title: "do not disturb"
+        SetRow {
+            label: "do not disturb"
+            desc: "suppress toasts until you turn this back off"
+            SetToggle {
+                checked: page.d.doNotDisturb
+                onToggled: (v) => { page.d.doNotDisturb = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
+            label: "for a while"
+            desc: page._dndRemaining()
+            SetSelect {
+                options: ["off", "15m", "30m", "1h", "2h", "4h", "8h"]
+                value: page._dndLabel()
+                onChanged: (v) => page._setDnd(v)
+            }
+        }
+        SetRow {
+            label: "while fullscreen"
+            desc: "quiet for as long as a fullscreen window is up"
+            SetToggle {
+                checked: page.d.notifDndFullscreen
+                onToggled: (v) => { page.d.notifDndFullscreen = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
+            label: "let critical through"
+            desc: "urgency 2 ignores do not disturb"
+            SetToggle {
+                checked: page.d.notifCriticalInDnd
+                onToggled: (v) => { page.d.notifCriticalInDnd = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
+            label: "mute notification sound"
+            desc: "keep the toast, drop the chime"
+            SetToggle {
+                checked: page.d.notifSoundMute
+                onToggled: (v) => { page.d.notifSoundMute = v; SettingsStore.save(); }
+            }
+        }
+    }
+
+    SetSection {
+        title: "per-app"
+
+        // The default every unlisted sender inherits — Plasma's "@other"
+        // ("Other Applications") row, which serves the same purpose there.
+        SetNotifApp {
+            appKey: "@other"
+            label: "all other senders"
+            isDefault: true
+        }
+
+        Repeater {
+            model: page.seenApps
+            SetNotifApp {
+                appKey: modelData.key
+                label: modelData.label
+            }
+        }
+
+        // Nothing is enumerable up front: there is no notification-capability
+        // declaration to read, so the list is the senders that have actually
+        // toasted since the panel started keeping the list.
+        PixelText {
+            visible: page.seenApps.length === 0
+            width: parent.width
+            wrapMode: Text.WordWrap
+            color: Theme.textDim
+            text: "no app has sent a notification yet - each one appears here the first time it does"
         }
     }
 

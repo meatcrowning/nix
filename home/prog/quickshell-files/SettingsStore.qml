@@ -89,7 +89,16 @@ Singleton {
     // Reset every key to its shipped default, then persist.
     function restoreDefaults() {
         const def = root.defaults;
-        for (const k in def) file.adapter[k] = def[k];
+        // Copy the container-valued defaults rather than handing out the
+        // literal itself (worldClocks, defaultWidgets, notifRules, notifSeen):
+        // `defaults` is readonly, but the OBJECT it holds is not, and a
+        // consumer that edits the value in place would rewrite the default it
+        // was restored from.
+        for (const k in def) {
+            const v = def[k];
+            file.adapter[k] = (v !== null && typeof v === "object")
+                ? JSON.parse(JSON.stringify(v)) : v;
+        }
         file.writeAdapter();
     }
 
@@ -365,6 +374,45 @@ Singleton {
             property bool   notifImages: false
             property bool   notifActions: false
             property bool   doNotDisturb: false
+            // DND that lifts on its own: epoch ms at which it expires, 0 for
+            // the plain toggle above. Plasma's [DoNotDisturb] Until — a mode
+            // you can leave on by accident is the one that eats a notification
+            // you wanted. Notifications.qml clears it once the moment passes.
+            property real   notifDndUntil: 0
+            // The duration the timed DND above was armed FOR, in minutes, 0
+            // for off. The instant is what the server obeys; this is what the
+            // control shows, because a picker cannot display a value that
+            // counts down out of its own option list. Cleared with the instant.
+            property int    notifDndFor: 0
+            // Plasma's WhenFullscreen: DND for as long as a fullscreen window
+            // is up. (Its two siblings, WhenScreensMirrored/WhenScreenSharing,
+            // are portal-level state this desktop has no reader for.)
+            property bool   notifDndFullscreen: false
+            // Whether urgency 2 still gets through DND. Plasma defaults this
+            // OFF; ours has always let critical through and quietly reversing
+            // that would lose an alert, so the default here is the behaviour
+            // that already shipped.
+            property bool   notifCriticalInDnd: true
+            // Plasma's LowPriorityPopups: urgency 0 is a "you may care later"
+            // notification, and a background sync's chatter is exactly that.
+            property bool   notifLowPopup: true
+            // Mute the notification SOUND without suppressing the toast
+            // (Plasma's NotificationSoundsMuted). Orthogonal to soundsEnabled,
+            // which is every system sound including login and volume.
+            property bool   notifSoundMute: false
+            // Per-app rules, Plasma's [Applications][<desktop entry>] block:
+            //   key -> { popup: bool, dnd: bool, sound: bool }
+            // The key is Notifications.keyFor() — the sender's desktop entry
+            // when it sends one, else its lowercased app name. "@other" is the
+            // rule inherited by any sender with no entry of its own. An absent
+            // field means the default, so a rule only ever stores a divergence.
+            property var    notifRules: ({})
+            // Senders that have actually toasted, key -> display name. Plasma
+            // reads its equivalent (Seen=true) out of .desktop files plus a
+            // seen-list; we have no notification-capability declaration to
+            // read, so the seen-list is the whole list. Written by the panel's
+            // notification server, read by the Settings window's notifs page.
+            property var    notifSeen: ({})
             property bool   soundsEnabled: true
             property string soundTheme: "vista"
             property string soundLogin: "Windows Logon Sound.wav"
@@ -481,7 +529,10 @@ Singleton {
         smartSsdOnly: true, volumeStep: 5, audioSink: "@DEFAULT_AUDIO_SINK@",
         vuSmoothing: 10, vuFramerate: 60, mediaSpectrumBars: 16, mediaPreferPlaying: true,
         notifTimeoutMs: 5000, notifMaxVisible: 4, notifWidth: 300, notifCorner: "bottom-right",
-        notifImages: false, notifActions: false, doNotDisturb: false, soundsEnabled: true,
+        notifImages: false, notifActions: false, doNotDisturb: false,
+        notifDndUntil: 0, notifDndFor: 0, notifDndFullscreen: false, notifCriticalInDnd: true,
+        notifLowPopup: true, notifSoundMute: false, notifRules: ({}), notifSeen: ({}),
+        soundsEnabled: true,
         soundTheme: "vista", soundLogin: "Windows Logon Sound.wav", soundVolume: "Windows Ding.wav",
         soundNotify: "Windows Balloon.wav", soundCritical: "Windows Exclamation.wav",
         launcherTerminal: "kitty", launcherMaxResults: 0, launcherPlaceholder: "search programs",

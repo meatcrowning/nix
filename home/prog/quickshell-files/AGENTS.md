@@ -2005,6 +2005,71 @@ suffixes) for both the thumbnail and, again, at click time just before
 
 ---
 
+### Who gets a toast: one gate, modelled on Plasma's
+
+`Notifications.onNotification` is the ONLY place that decides whether a
+notification appears and whether it makes a sound. The shape is lifted from
+Plasma 6's `kcm_notifications` / `plasmanotifyrc`, which splits the question
+into global conditions and a per-sender rule; keeping the same split means the
+settings page reads like the one he already knows, and the parts we *cannot*
+do are visible as omissions rather than as invented alternatives.
+
+The branch order, which is the whole specification:
+
+1. **Learn the sender** (`_recordSeen`) — before any decision, so an app whose
+   popups you switched off still has a row to switch them back on.
+2. **`rule.popup`** — the sender's own switch, and it **binds even for
+   critical**. Plasma's `ShowPopups` does the same. A toggle a notification can
+   talk its way past is a dishonest control (§10).
+3. **Urgency 0** vs `notifLowPopup` (Plasma's `LowPriorityPopups`).
+4. **`dndNow()`** — suppress unless this sender has `rule.dnd`
+   (`ShowPopupsInDndMode`), or it is critical and `notifCriticalInDnd` is on.
+5. **The sound**, gated separately on `rule.sound` and `notifSoundMute`, so
+   silencing a sender never costs you the toast.
+
+Three things to know before editing it:
+
+- **`dndNow()` is a function, not a property, and that is deliberate.**
+  `notifDndUntil` is a wall-clock instant, and a binding over `Date.now()` never
+  re-evaluates. Everything asks at the moment a notification arrives. The
+  minute-timer beside it only *retires* a lapsed value so the Settings window is
+  not left claiming a quiet hour that ended; the gate is exact without it.
+- **The seen registry IS the app list.** Plasma enumerates candidates from
+  `.desktop` files carrying `X-GNOME-UsesNotifications` and merges in a
+  `Seen=true` list; we have no capability declaration to read on this desktop, so
+  the learned list is all there is. It stores a display name once, on first
+  sight — never re-stamped, both to keep the panel off the disk during a burst
+  and because the name a rule was made under should not shift under it.
+- **`notifRules` / `notifSeen` are rewritten wholesale, never mutated.**
+  `SettingsStore` diffs each key by `JSON.stringify` against its last-seen-on-disk
+  snapshot; editing the object it handed back changes both sides of that
+  comparison and the save finds nothing to write.
+
+**What Plasma has and we deliberately do not**, so nobody "restores" it:
+`ShowInHistory` (there is no notification history in this panel) and
+`ShowBadges` (no taskbar badge), which is why the per-app row has three
+switches and not five; the per-*event* table under a service (that exists
+because KNotification apps ship an event catalogue in a `.notifyrc` — our apps
+send plain `notify-send` and have none); and `WhenScreensMirrored` /
+`WhenScreenSharing`, portal-level state nothing here reads. One default is
+inverted on purpose: Plasma's `CriticalInDndMode` ships **off**, ours ships
+**on**, because letting critical through is what this panel has always done and
+quietly reversing it would lose an alert.
+
+**Test it with `tools/notif-rules-test.sh`, never by firing a toast.** A
+notification is his screen, and the failure mode here is *silence* — a wrong
+branch does not throw, it eats a notification. The harness copies the shell
+files to a temp dir and runs the gate and the settings page offscreen on a
+private DBus session (private because these files include a notification
+*server*, which must never contest the name his panel owns). It transcribes the
+branch order above; reorder the real gate and you reorder the harness too.
+
+`SetNotifApp.qml` is the per-app row — Plasma's master/detail pane will not fit
+a 640px single-column page, so the app is a row and its rules are an indented
+disclosure under it (docs/DESIGN.md §9.1).
+
+---
+
 ## The bar dims itself for the sudo modal (`Askpass.qml`)
 
 Hyprland's `dim_around` — the `askpass-dim` window rule that gives the `sudo -A`
