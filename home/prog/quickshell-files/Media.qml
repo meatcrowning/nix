@@ -36,6 +36,12 @@ Singleton {
         if (!ps || ps.length === 0) return null;
         if (SettingsStore.d.mediaPreferPlaying)
             for (let i = 0; i < ps.length; i++) if (ps[i].isPlaying) return ps[i];
+        // A controllable player that HOLDS a track beats an idle one: surfer's
+        // QtWebEngine exports a "chromium" MPRIS instance that sits Stopped
+        // with empty metadata yet canControl=true, and picking it while the
+        // real player was merely paused blanked the whole widget.
+        for (let i = 0; i < ps.length; i++)
+            if (ps[i].canControl && ps[i].trackTitle) return ps[i];
         for (let i = 0; i < ps.length; i++) if (ps[i].canControl) return ps[i];
         return ps[0];
     }
