@@ -153,7 +153,8 @@ PanelWindow {
                     width: parent.width
                     height: 32
                     color: index === root.selected ? Theme.bgAlt : "transparent"
-                    border.width: index === root.selected ? 2 : 1
+                    radius: Theme.windowRounding
+                    border.width: index === root.selected ? Theme.ctrlBorder + 1 : Theme.ctrlBorder
                     border.color: index === root.selected ? Theme.accent : Theme.border
 
                     PixelText {

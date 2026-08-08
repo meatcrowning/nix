@@ -31,7 +31,8 @@ Rectangle {
     width: fieldWidth
     height: 24
     color: Theme.bgAlt
-    border.width: 1
+    radius: Theme.windowRounding
+    border.width: Theme.ctrlBorder
     border.color: field.activeFocus ? Theme.accent : (ma.containsMouse ? Theme.dim : Theme.border)
 
     TextInput {

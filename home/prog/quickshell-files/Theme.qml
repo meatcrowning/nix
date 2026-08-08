@@ -95,4 +95,10 @@ Singleton {
     readonly property color windowBorderInactive: Qt.rgba(0x59 / 255, 0x59 / 255, 0x59 / 255, 0xaa / 255)
     readonly property int   windowBorderWidth: SettingsStore.d.windowBorderWidth
     readonly property int   windowRounding:    SettingsStore.d.windowRounding
+    // The global frame at CONTROL scale (docs/DESIGN.md §4): buttons, toggles,
+    // fields and cells follow the two global numbers too — the full rounding
+    // (Rectangle clamps radius to half-size itself) and a half-scale border
+    // with a 1px floor, so controls keep a visible edge while windows carry
+    // the weight. 0 stays 0: "no borders" means everywhere.
+    readonly property int   ctrlBorder: windowBorderWidth > 0 ? Math.max(1, Math.round(windowBorderWidth / 2)) : 0
 }

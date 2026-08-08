@@ -46,12 +46,12 @@ PanelWindow {
         x: Osd.active ? shown : hidden
         Behavior on x { NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing } }
 
-        radius: 0
+        radius: Theme.windowRounding
         // Pure black card, like the runner / power menu / cheatsheet (they all
         // use Theme.bg). This was the one popup still on the tinted bgAlt.
         color: Theme.bg
         border.color: Theme.accent
-        border.width: 2
+        border.width: Theme.windowBorderWidth
 
         readonly property color tint: Osd.kind === "brightness"
                                     ? (Osd.negative ? Theme.crit : Theme.warn)

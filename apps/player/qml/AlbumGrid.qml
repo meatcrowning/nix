@@ -289,7 +289,13 @@ Item {
                             // foreground and fades (§3.1.1) — unlike a
                             // `Theme.border` hairline, which does not.
                             border.color: root.fgAccent
-                            border.width: 1
+                            // Floored at 1: this border IS the hover/open
+                            // indicator, so borders-off must not erase the
+                            // feedback the way it strips a decorative outline.
+                            border.width: Math.max(1, Theme.ctrlBorder)
+                            // No radius: the frame sits flush over the ART's
+                            // edge, and the cover underneath stays square — a
+                            // rounded frame would leave its corners poking out.
                         }
 
                         MouseArea {

@@ -882,8 +882,9 @@ Rectangle {
                 width: Math.min(badgeText.implicitWidth + 16, 320)
                 height: badgeText.implicitHeight + 10
                 color: Theme.bgAlt
+                radius: Theme.rounding
                 border.color: Theme.accent
-                border.width: 1
+                border.width: Theme.ctrlBorder
                 layer.enabled: true
                 PixelText {
                     id: badgeText

@@ -40,7 +40,8 @@ Item {
         anchors.fill: parent
         anchors.topMargin: 4
         color: Theme.bg
-        border.width: 1
+        radius: Theme.rounding
+        border.width: Theme.ctrlBorder
         border.color: drop.containsDrag ? Theme.accent : Theme.border
 
         Image {

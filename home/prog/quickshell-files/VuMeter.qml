@@ -60,7 +60,7 @@ Item {
         Rectangle {
             anchors.fill: parent
             color: "transparent"
-            border.width: 1
+            border.width: Theme.ctrlBorder
             border.color: Theme.border
         }
 
@@ -69,7 +69,7 @@ Item {
         // up to the full inner width, whatever the rounding.
         Item {
             anchors.fill: parent
-            anchors.margins: 1
+            anchors.margins: Theme.ctrlBorder
 
             Repeater {
                 model: 2

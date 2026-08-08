@@ -1,7 +1,8 @@
 import QtQuick
 
 // The one in-window button (surfer's BrowserButton, unchanged in behaviour):
-// 1px border, no rounding, hover tints to bgAlt, and every foreground greys to
+// hairline border and rounding off the global frame tokens (Theme.ctrlBorder /
+// Theme.rounding), hover tints to bgAlt, and every foreground greys to
 // the titlebar's own inactive tone when the window is unfocused — docs/DESIGN.md
 // §3.1.1 fades the WHOLE window, not just its chrome.
 //
@@ -21,7 +22,8 @@ Rectangle {
     height: Theme.lineHeight + 7
     color: lit ? (winActive ? Theme.accent : Theme.inactive)
          : (ma.containsMouse && enabled ? Theme.bgAlt : "transparent")
-    border.width: 1
+    radius: Theme.rounding
+    border.width: Theme.ctrlBorder
     border.color: !enabled ? Theme.border
                  : danger ? Theme.crit
                  : ma.containsMouse ? (winActive ? Theme.accent : Theme.inactive)

@@ -212,8 +212,9 @@ Item {
                 width: Math.min(badgeText.implicitWidth + 16, 320)
                 height: badgeText.implicitHeight + 10
                 color: Theme.bgAlt
+                radius: Theme.rounding
                 border.color: Theme.accent
-                border.width: 1
+                border.width: Theme.ctrlBorder
                 layer.enabled: true
                 PixelText {
                     id: badgeText
@@ -251,7 +252,7 @@ Item {
                 color: view.isSelected(path) ? Theme.highlight : Theme.bgAlt
                 border.color: (view.isSelected(path) || tileMa.containsMouse)
                               ? Theme.accent : Theme.border
-                border.width: 1
+                border.width: Theme.ctrlBorder
 
                 // A video tile shows its poster frame, extracted once into
                 // ~/.cache/painter/posters (main.py, Gallery). Until that lands
@@ -326,7 +327,8 @@ Item {
                         width: 15
                         height: 15
                         color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.72)
-                        border.width: 1
+                        radius: Theme.rounding
+                        border.width: Theme.ctrlBorder
                         border.color: root.winActive ? Theme.border : Theme.inactive
                         Item {
                             anchors.centerIn: parent

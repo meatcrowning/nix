@@ -130,7 +130,7 @@ Item {
         anchors.fill: parent
         color: Theme.bgAlt
         border.color: Theme.border
-        border.width: 1
+        border.width: Theme.ctrlBorder
 
         // What will be returned, and where you type one instead: the name when
         // it is one thing, the count when it is a multi-selection, and a full
@@ -144,7 +144,8 @@ Item {
             }
             height: Theme.lineHeight + 10
             color: Theme.bg
-            border.width: 1
+            radius: Theme.rounding
+            border.width: Theme.ctrlBorder
             // Says whether what is in it is an answer — the accept button is
             // greyed for the same reason, but the box is where the eye is.
             border.color: !root.winActive ? Theme.inactive
@@ -214,7 +215,8 @@ Item {
             width: btnText.implicitWidth + 22
             height: Theme.lineHeight + 10
             color: ma.containsMouse && btn.enabled ? Theme.highlight : "transparent"
-            border.width: 1
+            radius: Theme.rounding
+            border.width: Theme.ctrlBorder
             border.color: !root.winActive ? Theme.inactive
                           : !btn.enabled ? Theme.border
                           : (btn.danger ? Theme.border : Theme.accent)

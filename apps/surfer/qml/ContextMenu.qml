@@ -68,7 +68,8 @@ Item {
         width: contentWidth + 2
         height: col.implicitHeight + 2
         color: Theme.bgAlt
-        border.width: 1
+        radius: Theme.rounding
+        border.width: Theme.ctrlBorder
         border.color: Theme.windowBorder
 
         property real contentWidth: 24

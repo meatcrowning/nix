@@ -3,7 +3,7 @@ import QtQuick
 Rectangle {
     color: Theme.bgAlt
     border.color: Theme.border
-    border.width: 1
+    border.width: Theme.ctrlBorder
 
     // Progress fills the bar behind the text.
     Rectangle {

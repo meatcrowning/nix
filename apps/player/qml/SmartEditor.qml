@@ -195,6 +195,7 @@ Item {
         height: Math.min(head.height + body.contentHeight + foot.height + 24,
                          root.height - 16)
         color: Theme.bg
+        radius: Theme.windowRounding
         border.width: Theme.windowBorderWidth
         border.color: Theme.windowBorder
 
@@ -251,7 +252,8 @@ Item {
                     width: parent.width
                     height: 24
                     color: Theme.bgAlt
-                    border.width: 1
+                    radius: Theme.rounding
+                    border.width: Theme.ctrlBorder
                     border.color: nameField.activeFocus ? root.fgAccent : Theme.border
                     TextInput {
                         id: nameField
@@ -367,7 +369,8 @@ Item {
                                 visible: ruleRow.kind === "text" || ruleRow.kind === "count"
                                          || ruleRow.kind === "minutes" || ruleRow.kind === "date"
                                 color: Theme.bgAlt
-                                border.width: 1
+                                radius: Theme.rounding
+                                border.width: Theme.ctrlBorder
                                 border.color: valueField.activeFocus ? root.fgAccent : Theme.border
                                 TextInput {
                                     id: valueField
@@ -495,7 +498,8 @@ Item {
                         width: 60
                         height: 24
                         color: Theme.bgAlt
-                        border.width: 1
+                        radius: Theme.rounding
+                        border.width: Theme.ctrlBorder
                         border.color: limitField.activeFocus ? root.fgAccent : Theme.border
                         TextInput {
                             id: limitField

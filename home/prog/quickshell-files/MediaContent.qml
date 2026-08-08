@@ -108,7 +108,8 @@ Item {
         color: btn.heart
             ? ((mba.containsMouse && active) ? Theme.bgAlt : "transparent")
             : btn.toggled ? Theme.accent : ((mba.containsMouse && active) ? Theme.bgAlt : "transparent")
-        border.width: 1
+        radius: Theme.windowRounding
+        border.width: Theme.ctrlBorder
         border.color: !active ? Theme.border
             : btn.heart ? ((mba.containsMouse ? Theme.accent : Theme.border))
             : (btn.toggled ? Theme.accent : ((mba.containsMouse) ? Theme.accent : Theme.border))
@@ -313,7 +314,7 @@ Item {
         Rectangle {                       // the overlay surface
             anchors.fill: parent
             color: Theme.bgAlt
-            border.width: 1
+            border.width: Theme.ctrlBorder
             border.color: Theme.border
         }
 
@@ -565,14 +566,15 @@ Item {
             readonly property real frac: SysInfo.volume < 0 ? 0 : SysInfo.volume / 100
 
             Rectangle {
+                id: volFrame
                 anchors.fill: parent
                 color: Theme.bgAlt
-                border.width: 1
+                border.width: Theme.ctrlBorder
                 border.color: Theme.border
             }
             Rectangle {
-                anchors { left: parent.left; right: parent.right; bottom: parent.bottom; margins: 1 }
-                height: Math.round((parent.height - 2) * vol.frac)
+                anchors { left: parent.left; right: parent.right; bottom: parent.bottom; margins: volFrame.border.width }
+                height: Math.round((parent.height - 2 * volFrame.border.width) * vol.frac)
                 color: SysInfo.muted ? Theme.textDim : Theme.accent
             }
             // level line, so the exact setting is readable even at a glance
@@ -610,12 +612,12 @@ Item {
             Rectangle {
                 anchors.fill: parent
                 color: Theme.bgAlt
-                border.width: 1
+                border.width: Theme.ctrlBorder
                 border.color: Theme.border
             }
             Image {
                 id: art
-                anchors { fill: parent; margins: 1 }
+                anchors { fill: parent; margins: Theme.ctrlBorder }
                 source: Media.dispArt
                 fillMode: Image.PreserveAspectCrop
                 asynchronous: true
@@ -883,11 +885,11 @@ Item {
                 width: parent.width
                 height: 6
                 color: Theme.bgAlt
-                border.width: 1
+                border.width: Theme.ctrlBorder
                 border.color: Theme.border
                 Rectangle { // fill
-                    anchors { left: parent.left; top: parent.top; bottom: parent.bottom; margins: 1 }
-                    width: Math.round((parent.width - 2) * seek.shownFrac)
+                    anchors { left: parent.left; top: parent.top; bottom: parent.bottom; margins: parent.border.width }
+                    width: Math.round((parent.width - 2 * parent.border.width) * seek.shownFrac)
                     color: Theme.accent
                 }
             }

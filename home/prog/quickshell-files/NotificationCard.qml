@@ -287,11 +287,13 @@ Rectangle {
     implicitHeight: Math.max(Theme.cell,
                              (thumb.visible ? thumbSize : 0) + 20,
                              content.implicitHeight + 20)
-    radius: 0
+    // Attached cards stay square: their border is the three-rectangle notch
+    // construction below, which only meets the panel seam with square corners.
+    radius: attached ? 0 : Theme.windowRounding
     color: Theme.bgAlt
     // Attached, the border is the three rectangles below (the notch's
     // construction); a four-sided border would close the mouth.
-    border.width: attached ? 0 : lineW
+    border.width: attached ? 0 : Theme.windowBorderWidth
     border.color: tint
 
     // fade in on arrival (removal mirrors it — the exit animation above).

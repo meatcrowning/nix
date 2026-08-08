@@ -302,7 +302,8 @@ Item {
                 visible: card.editing
                 height: editor.implicitHeight + hint.height + 14
                 color: Theme.bgAlt
-                border.width: 1
+                radius: Theme.rounding
+                border.width: Theme.ctrlBorder
                 border.color: card.fgAccent
 
                 TextEdit {

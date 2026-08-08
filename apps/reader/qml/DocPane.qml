@@ -346,7 +346,8 @@ Item {
         anchors.fill: parent
         visible: dz.containsDrag && dz.takes
         color: "transparent"
-        border.width: 2
+        radius: Theme.rounding
+        border.width: Theme.windowBorderWidth
         border.color: Theme.accent
         z: 20
     }

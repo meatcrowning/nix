@@ -499,7 +499,8 @@ Window {
                 width: win.pane === paneL ? paneL.width : paneRLoader.width
                 height: win.pane === paneL ? paneL.height : paneRLoader.height
                 color: "transparent"
-                border.width: 1
+                radius: Theme.rounding
+                border.width: Theme.ctrlBorder
                 border.color: win.active ? Theme.accent : Theme.dim
             }
 
@@ -533,7 +534,8 @@ Window {
                     width: searchClip.chipW
                     height: parent.height
                     color: Theme.bgAlt
-                    border.width: 1
+                    radius: Theme.rounding
+                    border.width: Theme.ctrlBorder
                     border.color: win.fgAccent
 
                     TextInput {
@@ -613,7 +615,8 @@ Window {
                     width: gotoClip.chipW
                     height: parent.height
                     color: Theme.bgAlt
-                    border.width: 1
+                    radius: Theme.rounding
+                    border.width: Theme.ctrlBorder
                     border.color: win.fgAccent
 
                     PixelText {

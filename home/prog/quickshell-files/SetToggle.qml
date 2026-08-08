@@ -14,10 +14,10 @@ Rectangle {
 
     width: 44
     height: 20
-    radius: 0
+    radius: Theme.windowRounding
     opacity: enabled ? 1.0 : 0.4
     color: checked ? Theme.bgAlt : "transparent"
-    border.width: 1
+    border.width: Theme.ctrlBorder
     border.color: (checked || ma.containsMouse) ? Theme.accent : Theme.border
 
     // No on/off ghost text — [his, 2026-08-08] "on off toggles should not

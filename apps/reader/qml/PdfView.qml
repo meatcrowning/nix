@@ -286,6 +286,10 @@ Item {
                 width: pageItem.pxW + 2
                 height: pageItem.pxH + 2
                 color: Theme.bgAlt
+                // Deliberately NOT on the global frame tokens (Theme.ctrlBorder
+                // / Theme.rounding): the page Image sits flush 1px inside this
+                // frame, so a wider border would vanish under the raster and a
+                // radius would leave the square page corners poking out.
                 border.width: 1
                 border.color: pageItem.isMatch
                               ? (pdfv.winActive ? Theme.accent : Theme.inactive)

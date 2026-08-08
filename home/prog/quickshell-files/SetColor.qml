@@ -22,7 +22,8 @@ Row {
         height: 22
         anchors.verticalCenter: parent.verticalCenter
         color: root._valid(root.value) ? root.value : Theme.bgAlt
-        border.width: 1
+        radius: Theme.windowRounding
+        border.width: Theme.ctrlBorder
         border.color: sw.containsMouse ? Theme.accent : Theme.border
         MouseArea {
             id: sw

@@ -230,7 +230,8 @@ Rectangle {
     x: parent ? Math.max(0, parent.width - width - 8) : 0
     y: -height + slide * (height + dockY)
     color: Theme.bgAlt
-    border.width: 1
+    radius: Theme.rounding
+    border.width: Theme.ctrlBorder
     border.color: Theme.accent
 
     // the page must not receive clicks aimed at the bar
@@ -249,7 +250,8 @@ Rectangle {
             width: 200
             height: parent.height
             color: Theme.bg
-            border.width: 1
+            radius: Theme.rounding
+            border.width: Theme.ctrlBorder
             border.color: input.activeFocus ? Theme.accent : Theme.border
 
             TextInput {

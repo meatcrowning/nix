@@ -1237,7 +1237,8 @@ Scope {
                         width: Theme.wsCell
                         height: 16
                         color: shell.allRevealed ? Theme.bgAlt : "transparent"
-                        border.width: shell.allRevealed ? 2 : 1
+                        radius: Theme.windowRounding
+                        border.width: shell.allRevealed ? Theme.ctrlBorder + 1 : Theme.ctrlBorder
                         border.color: (shell.allRevealed || revealMa.containsMouse) ? Theme.accent : Theme.border
                         PixelText {
                             anchors.centerIn: parent

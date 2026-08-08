@@ -484,8 +484,8 @@ PanelWindow {
                     height: 34
                     color: Theme.bgAlt
                     border.color: Theme.border
-                    border.width: 1
-                    radius: 2
+                    border.width: Theme.ctrlBorder
+                    radius: Math.max(2, Theme.windowRounding)
 
                     Row {
                         anchors.fill: parent

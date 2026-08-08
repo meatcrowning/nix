@@ -85,12 +85,12 @@ Rectangle {
 
     width: Theme.wsCell
     height: Theme.wsCell
-    radius: 0
+    radius: Theme.windowRounding
     // The filled background stays the FOCUS marker alone — it is the one thing
     // you look for to answer "where am I typing", and folding roll/minimize into
     // it would cost that reading. Those speak through the border colour instead.
     color: focusedWin && !cell.offScreen ? Theme.bgAlt : "transparent"
-    border.width: focusedWin ? 2 : 1
+    border.width: focusedWin ? Theme.ctrlBorder + 1 : Theme.ctrlBorder
     border.color: cell.stateColor
 
     // The icon is never drawn straight (AppIcon tints it to the state colour,

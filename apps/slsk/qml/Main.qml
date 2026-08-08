@@ -137,7 +137,8 @@ Window {
                 Layout.fillWidth: true
                 Layout.preferredHeight: win.rowH - 4
                 color: Theme.bgAlt
-                border { color: Theme.border; width: 1 }
+                radius: Theme.rounding
+                border { color: Theme.border; width: Theme.ctrlBorder }
                 TextInput {
                     id: queryField
                     anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter }
@@ -266,7 +267,9 @@ Window {
                         Layout.preferredWidth: win.cell(18) - 2
                         Layout.preferredHeight: Math.round(Theme.fontSize * 2.2)
                         color: Theme.bgAlt
-                        border { color: Theme.border; width: 1 }
+                        // radius deliberately unbound: the progress fill below
+                        // sits flush in this trough and stays square.
+                        border { color: Theme.border; width: Theme.ctrlBorder }
                         Rectangle {
                             anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
                             width: parent.width * (modelData.percent / 100)
@@ -305,7 +308,8 @@ Window {
         height: Math.round(Theme.fontSize * 2.2)
         width: Math.min(win.width - 40, Math.max(120, toastText.length * Theme.fontSize * 0.62))
         color: Theme.bgAlt
-        border { color: toastColor; width: 1 }
+        radius: Theme.rounding
+        border { color: toastColor; width: Theme.ctrlBorder }
         Text {
             anchors.centerIn: parent
             text: toastText
@@ -340,7 +344,8 @@ Window {
         Layout.preferredWidth: Math.round(Theme.fontSize * (label.length + 2))
         Layout.preferredHeight: Math.round(Theme.fontSize * 2)
         color: active ? Theme.accent : Theme.bgAlt
-        border { color: Theme.border; width: 1 }
+        radius: Theme.rounding
+        border { color: Theme.border; width: Theme.ctrlBorder }
         Text {
             anchors.centerIn: parent
             text: label
@@ -356,7 +361,8 @@ Window {
         property color textColor
         signal clicked()
         color: fill
-        border { color: Theme.border; width: 1 }
+        radius: Theme.rounding
+        border { color: Theme.border; width: Theme.ctrlBorder }
         Text {
             anchors.centerIn: parent
             text: label

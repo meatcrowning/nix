@@ -83,4 +83,25 @@ QtObject {
 
     // The exact grey the hyprvtb titlebar fades to when the window is unfocused.
     readonly property color inactive: Qt.rgba(0x59 / 255, 0x59 / 255, 0x59 / 255, 0xaa / 255)
+
+    // The desktop's GLOBAL corner rounding (DeskStyle.rounding, the radius the
+    // compositor clips every window to) — bind it on every corner drawn here.
+    // Guarded like lineHeight above (harnesses stub DeskStyle, and a pylib
+    // momentarily older than this QML publishes neither key); the shipped
+    // defaults are rounding 0, border width 2.
+    readonly property int rounding: {
+        const r = (typeof DeskStyle !== "undefined" && DeskStyle)
+                ? Number(DeskStyle.rounding) : NaN;
+        return (isFinite(r) && r > 0) ? r : 0;
+    }
+
+    // Control-weight border: half the global window border width
+    // (DeskStyle.borderWidth), but never 0 unless the setting itself is 0 —
+    // the hairline every in-window control (button, field, tab, toast) takes.
+    readonly property int ctrlBorder: {
+        const w = (typeof DeskStyle !== "undefined" && DeskStyle)
+                ? Number(DeskStyle.borderWidth) : NaN;
+        const b = (isFinite(w) && w >= 0) ? w : 2;
+        return b > 0 ? Math.max(1, Math.round(b / 2)) : 0;
+    }
 }

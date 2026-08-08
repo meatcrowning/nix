@@ -112,7 +112,8 @@ Row {
         Rectangle {
             anchors.fill: parent
             color: "transparent"
-            border.width: 1
+            radius: Theme.windowRounding
+            border.width: Theme.ctrlBorder
             border.color: refuse.running ? Theme.crit
                         : ma.containsMouse ? Theme.accent : Theme.border
         }
@@ -174,7 +175,8 @@ Row {
         height: 20
         color: "transparent"
         opacity: root.dropped.length > 0 ? 1.0 : 0.4
-        border.width: 1
+        radius: Theme.windowRounding
+        border.width: Theme.ctrlBorder
         border.color: rma.containsMouse && root.dropped.length > 0 ? Theme.accent : Theme.border
         PixelText {
             id: resetLabel

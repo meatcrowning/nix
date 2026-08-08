@@ -257,7 +257,8 @@ Column {
                 Rectangle {
                     width: 24; height: 24
                     color: rmMa.containsMouse ? Theme.bgAlt : "transparent"
-                    border.width: 1
+                    radius: Theme.windowRounding
+                    border.width: Theme.ctrlBorder
                     border.color: rmMa.containsMouse ? Theme.crit : Theme.border
                     PixelText {
                         anchors.centerIn: parent
@@ -280,7 +281,8 @@ Column {
             width: addT.implicitWidth + 20
             height: 24
             color: addMa.containsMouse ? Theme.bgAlt : "transparent"
-            border.width: 1
+            radius: Theme.windowRounding
+            border.width: Theme.ctrlBorder
             border.color: addMa.containsMouse ? Theme.accent : Theme.border
             PixelText {
                 id: addT

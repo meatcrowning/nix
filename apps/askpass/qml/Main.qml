@@ -123,7 +123,8 @@ Window {
             width: parent.width
             height: reasonCol.implicitHeight + 16
             color: Theme.highlight
-            border.width: 2
+            radius: Theme.rounding
+            border.width: Theme.windowBorderWidth
             border.color: Theme.border
 
             Column {
@@ -176,7 +177,8 @@ Window {
             width: parent.width
             height: Theme.lineHeight + 14
             color: Theme.bgAlt
-            border.width: 2
+            radius: Theme.rounding
+            border.width: Theme.windowBorderWidth
             border.color: field.activeFocus ? Theme.accent : Theme.border
 
             TextInput {
@@ -247,7 +249,8 @@ Window {
                         width: Math.max(96, btnLabel.implicitWidth + 24)
                         height: Theme.lineHeight + 14
                         color: mouse.containsMouse ? Theme.highlight : Theme.bgAlt
-                        border.width: 2
+                        radius: Theme.rounding
+                        border.width: Theme.windowBorderWidth
                         border.color: primary ? Theme.accent : Theme.border
 
                         PixelText {

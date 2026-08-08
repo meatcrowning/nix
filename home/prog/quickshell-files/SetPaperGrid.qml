@@ -233,7 +233,8 @@ Item {
                                                 : root.pageIdx < root.pageCount - 1
         width: root.btnW
         color: pma.pressed && live ? Theme.bgAlt : "transparent"
-        border.width: 1
+        radius: Theme.windowRounding
+        border.width: Theme.ctrlBorder
         border.color: (pma.containsMouse || pma.pressed) && live ? Theme.accent : Theme.border
 
         // 5x9 pixel triangle, five 1px columns — geometry, never a glyph (§2.3).
@@ -328,8 +329,8 @@ Item {
                                     anchors.fill: parent
                                     anchors.margins: 4   // gutter between tiles
                                     color: Theme.bgAlt
-                                    radius: 0
-                                    border.width: cell.isCurrent ? 2 : 1
+                                    radius: Theme.windowRounding
+                                    border.width: cell.isCurrent ? Theme.ctrlBorder + 1 : Theme.ctrlBorder
                                     border.color: cell.isCurrent ? Theme.accent : Theme.border
 
                                     Image {

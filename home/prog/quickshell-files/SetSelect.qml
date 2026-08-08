@@ -38,7 +38,8 @@ Rectangle {
     width: label.implicitWidth + 16
     height: 22
     color: (ma.containsMouse || root._menu) ? Theme.bgAlt : "transparent"
-    border.width: 1
+    radius: Theme.windowRounding
+    border.width: Theme.ctrlBorder
     border.color: (ma.containsMouse || root._menu) ? Theme.accent : Theme.border
 
     PixelText {
@@ -108,9 +109,9 @@ Rectangle {
                 width: Math.max(root.width, col.implicitWidth + 2)
                 height: col.implicitHeight + 2
                 color: Theme.bgAlt
-                border.width: 1
+                border.width: Theme.ctrlBorder
                 border.color: Theme.border
-                radius: 3
+                radius: Math.max(3, Theme.windowRounding)
 
                 // Close a beat after the pointer leaves the menu (§7.2).
                 HoverHandler {

@@ -34,7 +34,7 @@ Row {
         height: 8
         anchors.verticalCenter: parent.verticalCenter
         color: Theme.bgAlt
-        border.width: 1
+        border.width: Theme.ctrlBorder
         border.color: ma.containsMouse ? Theme.accent : Theme.border
 
         // filled portion

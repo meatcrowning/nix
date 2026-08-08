@@ -69,7 +69,7 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: "transparent"
-        border.width: 1
+        border.width: Theme.ctrlBorder
         border.color: Theme.border
         radius: Theme.windowRounding
     }

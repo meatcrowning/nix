@@ -76,10 +76,13 @@ Item {
         // propagated and the panel collapsed to ~2px ("menu smaller than the
         // cursor"). implicitWidth is text-only and independent of the filled
         // width, so measuring it directly breaks the loop.
-        width: contentWidth + 2
-        height: col.implicitHeight + 2
+        // The +2s and the Column's margins are the border, counted once per
+        // side, so the frame width can follow the global token.
+        width: contentWidth + 2 * border.width
+        height: col.implicitHeight + 2 * border.width
         color: Theme.bgAlt
-        border.width: 1
+        radius: Theme.rounding
+        border.width: Theme.ctrlBorder
         border.color: Theme.windowBorder
 
         property real contentWidth: 24
@@ -106,7 +109,7 @@ Item {
 
         Column {
             id: col
-            anchors { top: parent.top; left: parent.left; margins: 1 }
+            anchors { top: parent.top; left: parent.left; margins: panel.border.width }
 
             Repeater {
                 id: menuRepeater

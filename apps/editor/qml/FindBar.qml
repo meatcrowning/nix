@@ -93,7 +93,8 @@ Rectangle {
     x: parent ? Math.max(6, parent.width - width - 8) : 0
     y: -height + slide * (height + 8)
     color: Theme.bgAlt
-    border.width: 1
+    radius: Theme.rounding
+    border.width: Theme.ctrlBorder
     border.color: winActive ? Theme.accent : Theme.inactive
 
     Behavior on height { NumberAnimation { duration: motion.ms(motion.slideMs)
@@ -117,7 +118,8 @@ Rectangle {
                 width: 22 * root.oneW
                 height: parent.height
                 color: Theme.bg
-                border.width: 1
+                radius: Theme.rounding
+                border.width: Theme.ctrlBorder
                 border.color: input.activeFocus ? (root.winActive ? Theme.accent : Theme.inactive)
                                                 : Theme.border
 
@@ -223,7 +225,8 @@ Rectangle {
                 width: 22 * root.oneW
                 height: parent.height
                 color: Theme.bg
-                border.width: 1
+                radius: Theme.rounding
+                border.width: Theme.ctrlBorder
                 border.color: repInput.activeFocus ? (root.winActive ? Theme.accent : Theme.inactive)
                                                    : Theme.border
 

@@ -53,8 +53,9 @@ Rectangle {
     height: visible ? boxHeight : 0
 
     color: Theme.bg
+    radius: Theme.rounding
     border.color: input.activeFocus ? Theme.accent : Theme.border
-    border.width: 1
+    border.width: Theme.ctrlBorder
 
     KineticFlickable {
         id: flick

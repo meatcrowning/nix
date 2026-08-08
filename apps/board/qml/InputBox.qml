@@ -131,7 +131,8 @@ Item {
         implicitHeight: editor.implicitHeight + hint.height + 14
         height: box.height
         color: Theme.bgAlt
-        border.width: 1
+        radius: Theme.rounding
+        border.width: Theme.ctrlBorder
         border.color: box.fgAccent
 
         TextEdit {

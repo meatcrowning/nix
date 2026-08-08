@@ -28,7 +28,8 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: mouse.containsMouse ? Theme.highlight : Theme.bgAlt
-        border.width: 1
+        radius: Theme.rounding
+        border.width: Theme.ctrlBorder
         border.color: Theme.border
 
         PixelText {

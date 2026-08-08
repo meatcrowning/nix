@@ -118,7 +118,8 @@ Item {
                         width: root.cellW - 2
                         height: root.cellH - 2
                         color: Theme.bgAlt
-                        border.width: 2
+                        radius: Theme.windowRounding
+                        border.width: Theme.ctrlBorder + 1
                         border.color: Theme.accent
                     }
                     PixelText {

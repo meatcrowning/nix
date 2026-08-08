@@ -267,7 +267,8 @@ Item {
         width: noticeText.implicitWidth + 12
         height: noticeText.implicitHeight + 8
         color: Theme.bgAlt
-        border.width: 1
+        radius: Theme.rounding
+        border.width: Theme.ctrlBorder
         border.color: Theme.border
         opacity: 0
         visible: opacity > 0.01
