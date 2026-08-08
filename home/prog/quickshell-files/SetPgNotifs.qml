@@ -116,6 +116,16 @@ Column {
         for (const k in byKey)
             out.push({ key: k, label: byKey[k] });
         out.sort((a, b) => a.label.toLowerCase().localeCompare(b.label.toLowerCase()));
+
+        // Reassign ONLY on a real change. Three things call this — the learned
+        // registry, the plasmanotifyrc read, and the DesktopEntries scan, which
+        // rescans on its own when the application dirs change — and a
+        // reassignment rebuilds the Repeater, which collapses `implicitHeight`
+        // for a frame. The scroller's contentHeight is bound straight to that,
+        // and a Flickable clamps contentY on the way down and does NOT put it
+        // back on the way up: the page silently loses your place. Measured.
+        if (JSON.stringify(out) === JSON.stringify(page.seenApps))
+            return;
         page.seenApps = out;
     }
     onSeenJsonChanged: page._rebuildSeen()
