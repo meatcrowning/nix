@@ -23,6 +23,7 @@ each other. This guide owns the *mechanics*; that one owns the *look*.
 | [`reader/`](reader/AGENTS.md) | markdown reader (browse + read `.md`) | `home/prog/reader.nix` |
 | [`board/`](board/AGENTS.md) | **goetia** — decision board over `docs/board.<hostname>.md` | `home/prog/board.nix` |
 | [`editor/`](editor/AGENTS.md) | text editor with Kate's core editing | `home/prog/editor.nix` |
+| [`slsk/`](slsk/AGENTS.md) | Soulseek search + downloads over the local slskd daemon | `home/prog/slsk.nix` |
 | `pylib/` | shared helpers — see below | (imported, not packaged) |
 | `qmlcommon/` | shared QML components — see below | (imported, not packaged) |
 
