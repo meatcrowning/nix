@@ -14,6 +14,9 @@ import "../../qmlcommon"
 Window {
     id: win
 
+    // display-site px() for foreign text (docs/DESIGN.md 2.3)
+    Glyphs { id: glyphs }
+
     width: 1100
     height: 720
     minimumWidth: 480
@@ -376,7 +379,7 @@ Window {
         t = t.replace(/^\s*[\(\[]\s*\d+\s*[\)\]]\s*/, "");
         t = t.replace(/^\s*[•·*•●✱]\s*/, "").trim();
         if (t.length === 0) return seedLabel(seed);
-        return t.substring(0, 2);
+        return glyphs.px(t).substring(0, 2);
     }
 
 

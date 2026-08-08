@@ -32,6 +32,9 @@ import "../../qmlcommon"
 
 Rectangle {
     id: view
+
+    // display-site px() for foreign text (docs/DESIGN.md 2.3)
+    Glyphs { id: glyphs }
     color: Theme.bg
 
     // ---- what the window supplies (see the header) ----
@@ -928,7 +931,7 @@ Rectangle {
                 id: nameText
                 anchors { left: parent.left; leftMargin: 6 + row.indent + 20; right: szText.left; rightMargin: 4; verticalCenter: parent.verticalCenter }
                 elide: Text.ElideRight
-                text: row.modelData.name
+                text: glyphs.px(row.modelData.name)
                 color: !view.winActive ? Theme.inactive : (row.modelData.isDir ? Theme.accent : Theme.text)
             }
             // columns: size | modified | created. The timestamps are fixed

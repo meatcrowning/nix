@@ -1,4 +1,5 @@
 import QtQuick
+import "../../qmlcommon"
 
 // The inline album section: opens INSIDE the gallery, directly under the row
 // holding the clicked cover (AlbumGrid instantiates one for the open row and
@@ -17,6 +18,9 @@ import QtQuick
 // zero-width sliver on a narrow window.
 Item {
     id: root
+
+    // display-site px() for foreign text (docs/DESIGN.md 2.3)
+    Glyphs { id: glyphs }
     property int albumId: 0
     property var info: ({})
     // Foreground tones, handed in already faded by the gallery
@@ -123,14 +127,14 @@ Item {
 
         PixelText {
             width: parent.width
-            text: root.info.album || ""
+            text: glyphs.px(root.info.album || "")
             wrapMode: Text.Wrap
             maximumLineCount: root.stacked ? 2 : 3
             color: root.fgText
         }
         PixelText {
             width: parent.width
-            text: root.info.artist || ""
+            text: glyphs.px(root.info.artist || "")
             clip: true
             height: Theme.lineHeight + 2  // descender room: one cell + 1px each side
             color: root.fgDim

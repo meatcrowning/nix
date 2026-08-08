@@ -44,6 +44,7 @@ QML = HERE / "qml"
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
+from glyphs import Glyphs  # noqa: E402  (pylib; docs/DESIGN.md 2.3 display-site px())
 from handoff import send as handoff_send, took as handoff_took  # noqa: E402  (pylib)
 
 from notify import tool, toast  # noqa: E402  (next to this file; filer's one toast path)
@@ -1063,6 +1064,8 @@ def main():
     ctx.setContextProperty("DirWatch", dirwatch)
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("DeskStyle", style)
+    glyphs = Glyphs()          # keep the ref: a GC'd context property nulls its bindings
+    ctx.setContextProperty("GlyphMap", glyphs)   # qmlcommon/Glyphs.qml wraps it
     ctx.setContextProperty("WinCtl", winctl)
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Settings", settings)

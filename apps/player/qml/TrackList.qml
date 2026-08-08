@@ -9,6 +9,9 @@ import "../../qmlcommon"
 // missing (library drive unplugged). Double-click plays from that row.
 Item {
     id: root
+
+    // display-site px() for foreign text (docs/DESIGN.md 2.3)
+    Glyphs { id: glyphs }
     property alias model: list.model
     // The three foreground tones, handed in ALREADY FADED by the owning pane
     // (docs/DESIGN.md §3.1.1) — a row must not know whether the window is
@@ -239,7 +242,7 @@ Item {
                     width: Math.max(0, Math.min(implicitWidth, nameCell.width))
                     height: parent.height
                     clip: true
-                    text: title
+                    text: glyphs.px(title)
                     color: row.fg
                 }
                 PixelText {
@@ -267,7 +270,7 @@ Item {
                     anchors.right: parent.right
                     clip: true
                     height: parent.height
-                    text: nameCell.artistText
+                    text: glyphs.px(nameCell.artistText)
                     color: available ? root.fgDim : Theme.inactive
                 }
             }

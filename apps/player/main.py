@@ -64,6 +64,7 @@ QML = HERE / "qml"
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
+from glyphs import Glyphs  # noqa: E402  (pylib; docs/DESIGN.md 2.3 display-site px())
 
 import atomicsave  # noqa: E402  (sibling module; also used by lyrics.py)
 import lyrics as lyricslib  # noqa: E402  (sibling module; also used by tools/)
@@ -3676,6 +3677,8 @@ def main():
     ctx.setContextProperty("OnAir", socket.gethostname().split(".")[0] == "book")
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("DeskStyle", style)
+    glyphs = Glyphs()          # keep the ref: a GC'd context property nulls its bindings
+    ctx.setContextProperty("GlyphMap", glyphs)   # qmlcommon/Glyphs.qml wraps it
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Prefs", prefs)
     ctx.setContextProperty("Library", bridge)

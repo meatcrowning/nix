@@ -68,6 +68,7 @@ ON_AIR = os.path.realpath(sys.executable).startswith("/usr/")
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
+from glyphs import Glyphs  # noqa: E402  (pylib; docs/DESIGN.md 2.3 display-site px())
 from kinetic import (WHEEL_GAIN, QML_WHEEL_GAIN,  # noqa: E402
                      is_wheel_detent as _is_wheel_detent)
 
@@ -3955,6 +3956,8 @@ def main():
         pass
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("DeskStyle", style)
+    glyphs = Glyphs()          # keep the ref: a GC'd context property nulls its bindings
+    ctx.setContextProperty("GlyphMap", glyphs)   # qmlcommon/Glyphs.qml wraps it
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Clip", clip)
     ctx.setContextProperty("Session", session)
