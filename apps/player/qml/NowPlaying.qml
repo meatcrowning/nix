@@ -1,4 +1,5 @@
 import QtQuick
+import "../../qmlcommon"
 
 // Now playing, in two parts: the cover art, and everything else. The art is
 // edge to edge — it meets the window's outline with no margins, and square
@@ -15,6 +16,9 @@ import QtQuick
 // LRCLIB).
 Item {
     id: root
+
+    // display-site px() for foreign text (docs/DESIGN.md 2.3)
+    Glyphs { id: glyphs }
     signal openAlbum(int albumId)
     // "show me this artist": the window lands on the gallery with the search
     // bar carrying that name, exactly as if it had been typed.
@@ -278,7 +282,7 @@ Item {
                         anchors.left: parent.left
                         anchors.right: rateBits.left
                         anchors.rightMargin: 8
-                        text: root.cur.title || "nothing playing"
+                        text: glyphs.px(root.cur.title || "") || "nothing playing"
                         wrapMode: Text.Wrap
                         maximumLineCount: 2
                         color: root.cur.title ? root.fgText : root.fgDim
@@ -316,7 +320,7 @@ Item {
                 }
                 PixelText {
                     width: parent.width
-                    text: root.cur.artist || ""
+                    text: glyphs.px(root.cur.artist || "")
                     clip: true
                     height: Theme.lineHeight + 2  // descender room: one cell + 1px each side
                     color: root.fgDim
@@ -330,7 +334,7 @@ Item {
                     spacing: 6
 
                     PixelText {
-                        text: root.cur.album || ""
+                        text: glyphs.px(root.cur.album || "")
                         clip: true
                         width: Math.max(0, Math.min(implicitWidth,
                                         parent.width - (albumYear.visible

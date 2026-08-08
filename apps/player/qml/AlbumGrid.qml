@@ -17,6 +17,9 @@ import "../../qmlcommon"
 Item {
     id: root
 
+    // display-site px() for foreign text (docs/DESIGN.md 2.3)
+    Glyphs { id: glyphs }
+
     // The desktop's motion, from the plugin's published key. ONE instance for
     // the whole grid — a delegate-owned copy would be one file read per album
     // row (qmlcommon/Motion.qml).
@@ -260,14 +263,14 @@ Item {
 
                                 PixelText {
                                     width: parent.width
-                                    text: tile.a ? tile.a.album : ""
+                                    text: tile.a ? glyphs.px(tile.a.album) : ""
                                     clip: true
                                     height: Theme.lineHeight + 2  // descender room: one cell + 1px each side
                                     color: root.fgText
                                 }
                                 PixelText {
                                     width: parent.width
-                                    text: tile.a ? ((tile.a.year > 0 ? tile.a.year + "  " : "") + tile.a.artist) : ""
+                                    text: tile.a ? ((tile.a.year > 0 ? tile.a.year + "  " : "") + glyphs.px(tile.a.artist)) : ""
                                     clip: true
                                     height: Theme.lineHeight + 2  // descender room: one cell + 1px each side
                                     color: root.fgDim

@@ -31,6 +31,8 @@ title turned into question marks is worse than one drawn in the wrong font.
 """
 import re
 
+from PySide6.QtCore import QObject, Slot
+
 # Keys that are invisible or confusable are written as escapes; the visible ones
 # stay literal so the table reads.
 PX_MAP = {
@@ -101,3 +103,34 @@ def px(s):
     if not s:
         return s or ""
     return _PX_RE.sub(lambda m: PX_MAP[m.group(0)], s)
+
+
+class Glyphs(QObject):
+    """`px()` for QML, as a context property — the DISPLAY-SITE half of §2.3.
+
+    §2.3 prefers mapping at INGEST, one pass per data change, and where an app
+    owns its own parse that is what it does (`reader`, `board`, `slsk`, and
+    `viewer`'s `{name, path}` rows). This exists for the case §2.3 also allows —
+    "map at the display site only where the model belongs to Qt or Quickshell" —
+    and, more importantly, for the case ingest CANNOT serve:
+
+    **the drawn string is also a key.** Measured across the tree 2026-08-07:
+    filer's `name` is matched by `Picker.accepts()` for the file-type filter and
+    is the rename dialog's prefill (written back by `mv`); player's `artist` is
+    handed straight to `Library.setAlbumFilter()` when you pick "search for
+    artist"; surfer's page title is Chromium's and never passes through Python
+    at all. Mapping any of those at ingest would filter, rename or search for a
+    string the user never typed — the exact failure §2.3 calls out.
+
+    So the MODEL keeps the raw value and only the `text:` binding is mapped. The
+    cost is a call per realised delegate rather than one per load, which is
+    bounded by what is on screen; the safety is that nothing downstream of the
+    model ever sees a mapped string.
+
+        ctx.setContextProperty("Glyphs", Glyphs())     # keep a python ref
+        PixelText { text: Glyphs.px(modelData.name) }
+    """
+
+    @Slot(str, result=str)
+    def px(self, s):
+        return px(s)

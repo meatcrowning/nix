@@ -1,4 +1,5 @@
 import QtQuick
+import "../../qmlcommon"
 
 // One cell of the directory's preview grid (the strip of thumbnails filer pins
 // above the file list). Renders images and video poster frames — both straight
@@ -10,6 +11,9 @@ import QtQuick
 // a new kind still renders something before its preview branch exists.
 Rectangle {
     id: tile
+
+    // display-site px() for foreign text (docs/DESIGN.md 2.3)
+    Glyphs { id: glyphs }
 
     required property var entry     // a listDir row: { name, path, kind, ... }
     // Everything the thumbnail provider can serve. Video differs from an image
@@ -87,7 +91,7 @@ Rectangle {
     // with QRawFont.glyphIndexesForString, all three return glyph 0 — so every
     // not-ready and every failed tile in the grid took a fallback font's taller
     // ascent and clipped. U+25A0 IS in the font (it is what the dot-matrix clock
-    // is built from, §3.4); the other two use the same ASCII forms Glyphs.px()
+    // is built from, §3.4); the other two use the same ASCII forms glyphs.px()
     // maps them to.
     PixelText {
         anchors.centerIn: parent
@@ -154,7 +158,7 @@ Rectangle {
         PixelText {
             id: nameLabel
             anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: 3; rightMargin: 3 }
-            text: tile.entry.name
+            text: glyphs.px(tile.entry.name)
             elide: Text.ElideMiddle
             horizontalAlignment: Text.AlignHCenter
             color: !tile.winActive ? Theme.inactive : (tile.selected ? Theme.accent : Theme.text)
