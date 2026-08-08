@@ -336,6 +336,24 @@ def main():
     print(("  ok   " if dl.sends[-1]["path"] is None else "  FAIL ")
           + "non-image done carries no image path")
 
+    # save-name repair: Chromium names a download from the URL PATH, so a
+    # twitter image (…/media/<id>?format=jpg) arrives extensionless. The bridge
+    # fills it in from the Content-Type — and leaves an already-typed name alone.
+    print()
+    for label, suggested, mime, want in [
+        ("twitter jpg -> .jpg",       "Gs9dkPXsAA1abc", "image/jpeg", "Gs9dkPXsAA1abc.jpg"),
+        ("twitter png -> .png",       "Gs9dkPXsAA2xyz", "image/png",  "Gs9dkPXsAA2xyz.png"),
+        ("already typed -> untouched", "kitten.png",    "image/png",  "kitten.png"),
+        ("dot that is not an ext",    "pbs.twimg.com-id", "image/jpeg", "pbs.twimg.com-id.jpg"),
+        ("charset on the type",       "clip",           "video/mp4;codecs=avc1", "clip.mp4"),
+        ("octet-stream invents nothing", "blob",        "application/octet-stream", "blob"),
+        ("empty name still names something", "",        "image/png",  "download.png"),
+    ]:
+        got = dl.fileName(suggested, mime)
+        ok &= got == want
+        print(("  ok   " if got == want else "  FAIL ")
+              + "%-32s %r -> %r" % (label, suggested, got))
+
     print("\n-- Main.qml wiring (must not drift from the bridge) --")
     main_qml = (HERE.parent / "qml" / "Main.qml").read_text(encoding="utf-8")
     wiring_ok = True
@@ -344,6 +362,9 @@ def main():
          r"Downloads\.progress\(key, name, download\.receivedBytes,\s*\n\s*download\.totalBytes, Date\.now\(\) - started\)"),
         ("sets downloadDirectory and accepts",
          r"download\.downloadDirectory = downloadDir;"),
+        ("repairs the save name from the mime type, BEFORE accept()",
+         r"download\.downloadFileName = Downloads\.fileName\(download\.downloadFileName,"
+         r"\s*\n\s*download\.mimeType\);\s*\n\s*download\.accept\(\);"),
         ("done/failed on finish",
          "Downloads.done(key, name, path);" in main_qml and
          "Downloads.failed(key, name);" in main_qml),

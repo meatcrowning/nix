@@ -171,6 +171,24 @@ thumbnail and click-to-open in the viewer. A progress toast (file still partial)
 or a non-image download carries no path. See
 `home/prog/quickshell-files/AGENTS.md` for the panel side.
 
+### The save name comes from the URL path, so it can arrive with no extension
+
+Chromium derives `downloadFileName` from the URL **path** alone and ignores the
+`Content-Type` — so a host that serves images from an extensionless path with
+the type in the query lands as a bare id with no extension at all. That is every
+image saved from twitter (`pbs.twimg.com/media/<id>?format=jpg&name=large` →
+`Gs9dkPXsAA1abc`), and an extensionless file is one nothing else on this desktop
+will touch: not the viewer, not filer's thumbnailer, and not the completion
+toast's own `IMAGE_EXTS` check above. Measured offscreen — `image/jpeg` on the
+wire, still no suffix on disk.
+
+`Downloads.fileName(suggested, mime)` repairs it from the type (`MIME_EXTS`,
+falling back to `mimetypes`), and `Main.qml` calls it **before `accept()`** —
+after accept the name is fixed. It only fills in a name that has no plausible
+extension of its own (`_looks_like_ext`: ≤5 alphanumeric chars, so
+`pbs.twimg.com-id` counts as untyped while `kitten.png` is left alone), and
+`application/octet-stream` invents nothing.
+
 Verified headlessly by **[`tools/download-test.py`](tools/download-test.py)**: a
 real offscreen QtWebEngine download of a 320 KB file streamed slowly over
 loopback — `--old` replays the pre-fix size gate and reproduces the missing
@@ -178,9 +196,10 @@ toast; the default path asserts the same slow small download now emits a
 persisted, in-place-morphed progress toast, and drives the `Downloads` decision
 gate directly (fast-small silent, slow-small toasts, same-percent throttled,
 large-fast toasts on size, unknown total never toasts, an image `done()` threads
-the path while a non-image one carries none) plus a drift-guard that
-`Main.qml` still calls the bridge with elapsed time. Run it after touching
-either half.
+the path while a non-image one carries none), asserts the save-name repair
+above, plus a drift-guard that `Main.qml` still calls the bridge with elapsed
+time and still repairs the name before `accept()`. Run it after touching either
+half.
 
 ## Ad blocking — the engine is only half of it
 
