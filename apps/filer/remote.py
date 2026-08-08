@@ -28,9 +28,26 @@ Address syntax, all of it:
     :top/dl/iso          ... and a subdirectory of it
     :root@top            another user's home (/root for root, /home/<u> else)
     :top:/etc/nixos      an absolute path on the remote, home not assumed
+    :SSD                 the removable drive mounted at /run/media/lam/SSD
+    :SSD/flac/x          ... and a subdirectory of it
 
 An address naming THIS machine resolves locally with no mount at all, so
 `:book` on book is simply /home/lam.
+
+A bare `:NAME` that is not a host is looked for among the **drives** —
+`/run/media/<user>/NAME`, where udisks mounts removable media on both machines.
+It is the same address on either one: mounted here, it is that local directory
+and nothing connects; not mounted here, it is the same directory on `DRIVE_HOST`
+(the desktop, `top`, where the external disks actually live) reached through the
+sshfs mount above. So `:SSD` means "the drive called SSD" from wherever it is
+typed, and `pretty()` writes both forms back as `:SSD`.
+
+Precedence, in order, because a drive name could in principle also be a
+hostname: a drive mounted locally wins outright (it needs no network and is what
+`:NAME` most plainly means where it is plugged in); otherwise a live mount to
+`NAME` or a name that RESOLVES is the host it always was; only a name that
+resolves to nothing is looked for on the drive host. Case is folded, so `:ssd`
+finds `SSD`, and the on-disk spelling is what comes back.
 
 Requirements, and they differ per host: `sshfs` comes from the nix wrapper on
 `top` (`home/prog/filer.nix`) and from Fedora's `fuse-sshfs` on `book`, which
@@ -62,6 +79,15 @@ MOUNT_ROOT = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp",
                           "filer-remote")
 
 DEFAULT_USER = os.environ.get("USER") or "lam"
+
+# Where udisks mounts removable media, on NixOS and on Fedora alike — so the
+# same address means the same drive on both machines.
+DRIVE_ROOT = "/run/media/" + DEFAULT_USER
+
+# Whose drives a `:NAME` means when no drive of that name is mounted here. The
+# external disks hang off the desktop; from the laptop they are reached over the
+# same sshfs mount `:top` uses.
+DRIVE_HOST = "top"
 
 _HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
@@ -123,10 +149,53 @@ def _local_names():
     return names
 
 
+def drive_match(name, root=None):
+    """The on-disk name of the drive `name` under `root` (default: this
+    machine's `DRIVE_ROOT`), matched case-insensitively, or None.
+
+    Case folding is the whole reason this is not a path join: the labels are
+    whatever the filesystem was formatted with — `SSD`, `arc`, `bak` — and
+    nobody typing an address holds that in their head. A listdir is all it
+    costs, and never a stat of the mountpoints themselves: a dead removable
+    mount answers `stat` slowly or not at all, and this runs on the GUI thread.
+    """
+    low = (name or "").lower()
+    if not low:
+        return None
+    try:
+        entries = os.listdir(root if root is not None else DRIVE_ROOT)
+    except OSError:
+        return None
+    for d in entries:
+        if d.lower() == low:
+            return d
+    return None
+
+
+def drive_path(name, root=None):
+    """`DRIVE_ROOT/<real name>` for a drive that is there, else None."""
+    real = drive_match(name, root)
+    if not real:
+        return None
+    return os.path.join(root if root is not None else DRIVE_ROOT, real)
+
+
+def _self_name():
+    """This machine's short hostname — a host that `_local_names()` answers to,
+    so a spec carrying it resolves with no mount."""
+    return (socket.gethostname() or "localhost").split(".")[0].lower()
+
+
 def parse(text):
     """`:`-address -> (user, host, path) with `path` absolute on the remote, or
     None if `text` is not a remote address at all (the ordinary local-path case,
-    which the caller must keep handling itself)."""
+    which the caller must keep handling itself).
+
+    A bare `:NAME` naming a drive mounted HERE comes back as a spec on this
+    machine, which the caller resolves locally without connecting to anything.
+    A bare name that is not a local drive stays a host spec: whether it is
+    really a host or a drive on `DRIVE_HOST` cannot be settled without the
+    network, so `Remote.open()` settles it on its worker thread."""
     t = (text or "").strip()
     if not t.startswith(":"):
         return None
@@ -145,9 +214,33 @@ def parse(text):
     if not host or not _HOST_RE.match(host):
         return None
     if not path:
+        if "@" not in hostpart:         # a bare `:NAME` may be a drive
+            here = drive_path(host)
+            if here:
+                return DEFAULT_USER, _self_name(), os.path.normpath(
+                    here + ("/" + sub if sub else ""))
         home = "/root" if user == "root" else "/home/" + user
         path = home + ("/" + sub if sub else "")
     return user, host.lower(), os.path.normpath(path)
+
+
+def drive_addr(text):
+    """The `(name, sub)` of a bare `:NAME[/sub]` address, or None.
+
+    Called for an address `parse()` handed back as a host spec: it says what to
+    look for among the drive host's drives if that host turns out not to exist.
+    Only the bare form qualifies — `:joe@x` and `:x:/etc` both name a machine
+    explicitly and are never reinterpreted."""
+    t = (text or "").strip()
+    if not t.startswith(":"):
+        return None
+    t = t[1:]
+    if "@" in t or ":" in t:
+        return None
+    name, _, sub = t.partition("/")
+    if not name or not _HOST_RE.match(name):
+        return None
+    return name, sub.strip("/")
 
 
 def mountpoint(user, host):
@@ -159,8 +252,20 @@ def pretty_of(path):
     that would be typed to reach it. Round-trips — feed the result back to
     `parse()` and you land on the same path again — which is what makes it safe
     to put in the address bar, where pressing Enter on the unchanged text must
-    not navigate somewhere else. Anything not under a mount is returned as-is."""
+    not navigate somewhere else. Anything not under a mount is returned as-is.
+
+    Drives are checked first and on both machines' terms — `/run/media/lam/SSD`
+    here and the same path under the drive host's mount are one drive and read
+    `:SSD` either way — so the bar shows the address that works from wherever it
+    is being read, rather than one host's spelling of it."""
     p = str(path or "")
+    for base in (DRIVE_ROOT,
+                 mountpoint(DEFAULT_USER, DRIVE_HOST) + DRIVE_ROOT):
+        b = os.path.normpath(base) + "/"
+        if p.startswith(b):
+            rest = p[len(b):].strip("/")
+            if rest:
+                return ":" + rest
     root = MOUNT_ROOT.rstrip("/") + "/"
     if not p.startswith(root):
         return p
@@ -187,6 +292,28 @@ def _live(mp):
         return True
     except OSError:
         return False
+
+
+def _resolves(host):
+    """Does this name mean a machine at all? The one question that decides
+    whether a bare `:NAME` is a host or a drive, and the reason that decision
+    happens on a worker thread: a lookup can block for as long as the resolver
+    wants to. A name that resolves keeps the meaning it has always had."""
+    if host in _local_names():
+        return True
+    try:
+        socket.getaddrinfo(host, None)
+        return True
+    except OSError:
+        return False
+
+
+def _drive_on_mount(mp, name, sub):
+    """Where drive `name` is under a live mount of the drive host, or None."""
+    here = drive_path(name, os.path.normpath(mp + DRIVE_ROOT))
+    if not here:
+        return None
+    return os.path.normpath(here + ("/" + sub if sub else ""))
 
 
 def _unmount(mp):
@@ -216,6 +343,13 @@ class Remote(QObject):
         self._busy = set()      # hosts with a mount attempt in flight
         self._warming = set()   # paths a prefetch thread is already pulling
         self._lock = threading.Lock()
+        # One sshfs at a time. `_busy` keys on the name that was TYPED, which is
+        # no longer the host that gets mounted: `:SSD` and `:arc` are two
+        # different addresses that both end up mounting the drive host, and a
+        # second sshfs over a mountpoint the first is still setting up fails
+        # with a bare "Permission denied". Serialised, the loser finds the mount
+        # live and returns.
+        self._mount_lock = threading.Lock()
 
     @Slot(str, result=bool)
     def isAddr(self, text):
@@ -274,36 +408,82 @@ class Remote(QObject):
             return
         user, host, path = spec
         if host in _local_names() and user == DEFAULT_USER:
-            self.ready.emit(path)       # ":book" on book is just a local path
+            # ":book" on book is just a local path — and so is a drive plugged
+            # in here, which parse() has already resolved to its real name.
+            self.ready.emit(path)
             return
         mp = mountpoint(user, host)
         target = os.path.normpath(mp + path)
         if _live(mp):
             self.ready.emit(target)
             return
+        # Not a local drive and no mount to a host of that name: it may still be
+        # a drive on the drive host. If THAT mount is already up the answer is
+        # free, so it is worth asking before spending a thread on it.
+        drive = drive_addr(text)
+        if drive:
+            dmp = mountpoint(DEFAULT_USER, DRIVE_HOST)
+            if _live(dmp):
+                hit = _drive_on_mount(dmp, drive[0], drive[1])
+                if hit:
+                    self.ready.emit(hit)
+                    return
         if host in self._busy:          # a second Enter while the first connects
             return
         self._busy.add(host)
-        threading.Thread(target=self._mount, args=(user, host, mp, target),
+        threading.Thread(target=self._mount,
+                         args=(user, host, mp, target, drive),
                          daemon=True).start()
 
     # ---- worker thread ----
     # Signals emitted from here are queued onto the GUI thread by Qt, the same
     # way VtbClient's reader thread delivers a titlebar click.
-    def _mount(self, user, host, mp, target):
-        tid = toast("connecting to " + host, "mounting over ssh", persist=True)
+    def _mount(self, user, host, mp, target, drive=None):
+        """Bring the mount up and emit `ready` with a path under it.
+
+        `drive` is the `(name, sub)` of a bare `:NAME` that no local drive
+        answered: if `name` turns out to name no machine either, this is a drive
+        address and the mount to make is the drive host's. That reinterpretation
+        happens before the first toast, so what the user is told is what is
+        actually being done."""
+        key = host                      # what `open()` put in `_busy`
         try:
-            ok, err = self._do_mount(user, host, mp)
-        finally:
-            self._busy.discard(host)
-        if ok:
+            if drive and not _resolves(host):
+                name, sub = drive
+                user, host, target = DEFAULT_USER, DRIVE_HOST, None
+                if host in _local_names():
+                    # the drive host is this machine and the drive is not here:
+                    # there is nothing to connect to and nothing to report but
+                    # the plain fact (docs/DESIGN.md 10.4)
+                    toast("no drive named " + name,
+                          "nothing is mounted at " + DRIVE_ROOT,
+                          urgency="critical")
+                    self.failed.emit(name)
+                    return
+                mp = mountpoint(user, host)
+            tid = toast("connecting to " + host, "mounting over ssh",
+                        persist=True)
+            with self._mount_lock:
+                ok, err = self._do_mount(user, host, mp)
+            if not ok:
+                toast("cannot reach " + host, err[:400] or "sshfs failed",
+                      urgency="critical", replace_id=tid)
+                self.failed.emit(host)
+                return
+            if target is None:          # the drive route: find it on the mount
+                name, sub = drive
+                target = _drive_on_mount(mp, name, sub)
+                if target is None:
+                    toast("no drive named " + name,
+                          "not mounted on " + host, urgency="critical",
+                          replace_id=tid)
+                    self.failed.emit(name)
+                    return
             if tid:
                 toast("connecting to " + host, "mounted", replace_id=tid)
             self.ready.emit(target)
-        else:
-            toast("cannot reach " + host, err[:400] or "sshfs failed",
-                  urgency="critical", replace_id=tid)
-            self.failed.emit(host)
+        finally:
+            self._busy.discard(key)
 
     def _do_mount(self, user, host, mp):
         # Already up — two windows, or two panes, can ask at once, and sshfs

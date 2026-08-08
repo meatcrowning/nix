@@ -146,7 +146,8 @@ Window {
     //
     // Remote.pretty() shows a directory on another machine as the `:top/...`
     // that was typed to reach it, rather than the sshfs mountpoint under
-    // $XDG_RUNTIME_DIR that nobody asked for and could not usefully retype. It
+    // $XDG_RUNTIME_DIR that nobody asked for and could not usefully retype, and
+    // a removable drive as `:SSD/...` whichever machine it is plugged into. It
     // round-trips — submitting the bar unchanged lands back where it is — and
     // a purely local path comes back untouched. See remote.py.
     title: Remote.pretty(pane.path)
@@ -273,7 +274,8 @@ Window {
         // the in-bar path editor was submitted: navigate if it's a directory
         // (expanding a leading ~ / ~user first).
         //
-        // `:host` first, though — `:top` browses lam's home on top, over an
+        // `:host` first, though — `:top` browses lam's home on top, and `:SSD`
+        // the drive of that name wherever it is plugged in, over an
         // sshfs mount Remote brings up on demand (remote.py). That can take an
         // ssh handshake, so it is asynchronous: remember which pane asked and
         // navigate on `ready`, whose payload is an ordinary local path under

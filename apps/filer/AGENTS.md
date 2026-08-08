@@ -502,7 +502,7 @@ row's own JS closure runs one `kdeconnect-cli -d <id> --share <file>` per file
 inside one batch, and where the entry lands relative to the separators.
 **It never runs the real binary and never sends anything to a real device.**
 
-## `:top` in the address bar — browsing the other machine
+## `:top` and `:SSD` in the address bar — the other machine, and the drives
 
 Type `:top` into the path bar and filer shows lam's home on `top`. It is an
 sshfs mount and a name rewrite, and everything else in the app is untouched:
@@ -524,7 +524,9 @@ before changing it.
   must land where it already is. `tools/remote-test.py` asserts the round trip
   for every shape (home, subpath, explicit `:host:/abs`, non-default user, and
   the `/home/lambda` near-miss that must NOT be read as a subpath of
-  `/home/lam`). It is offline: nothing mounts, connects or resolves a name.
+  `/home/lam`, and both halves of a drive address). It is offline: nothing
+  mounts, connects or resolves a name — the drive checks point `DRIVE_ROOT` at
+  a temp tree, so the result does not depend on what is plugged in.
 - **Mounting is off the GUI thread**, because an ssh handshake to a sleeping
   machine takes as long as `ConnectTimeout`. `Remote.open()` returns at once;
   `Main.qml` remembers *which pane asked* (not `focusPane` — a click in the
@@ -535,6 +537,39 @@ before changing it.
   forbids.
 - **An address naming this machine needs no mount** — `:book` on book is just
   `/home/lam`, resolved locally.
+- **A bare `:NAME` that is not a host is a DRIVE** — `/run/media/<user>/NAME`,
+  where udisks mounts removable media on NixOS and on Fedora alike, so `:SSD`
+  is the same address from either machine. Plugged in here it is that local
+  directory and nothing connects; not here, it is the same directory on
+  `DRIVE_HOST` (`top`, where the external disks hang) through the sshfs mount
+  above — and `pretty()` writes both forms back as `:SSD`, so the bar shows the
+  address that works from wherever it is being read.
+  - **Precedence is drive-here, then host, then drive-there.** A local drive
+    wins outright: it needs no network and is plainly what `:NAME` means where
+    it is plugged in. Otherwise the name keeps the meaning it has always had —
+    a live mount to it, or a name that RESOLVES, is a host — and only a name
+    that resolves to nothing is looked for on the drive host. So no existing
+    `:host` address can change meaning because a disk was labelled after it.
+  - **The drive-or-host question is answered on the worker thread**, by
+    `_resolves()`, for the reason everything else here is: a name lookup can
+    block for as long as the resolver wants to, and `parse()` runs on the GUI
+    thread from `isAddr()`. `parse()` therefore settles only the local-drive
+    case and leaves the rest a host spec; `Remote.open()` re-reads the typed
+    text with `drive_addr()` and hands the worker the fallback. The free case
+    (the drive host is already mounted) is taken in `open()` before a thread is
+    spent.
+  - **Case is folded and the on-disk spelling comes back** (`:ssd` -> `SSD`) —
+    the labels are whatever the filesystem was formatted with, and nobody
+    typing an address holds that in their head. The remote half folds case the
+    same way, against the mount, after it is up.
+  - **A drive that is nowhere says so** — "no drive named X" rather than a
+    silent no-op or an 8-second "cannot reach ssd" from an sshfs to a host that
+    was never meant (docs/DESIGN.md 10.4).
+  - **`_busy` keys on the name that was TYPED, which is no longer the host that
+    gets mounted**: `:SSD` and `:arc` are two addresses that both end in
+    mounting the drive host, so a `_mount_lock` serialises sshfs — a second one
+    over a mountpoint the first is still setting up fails with a bare
+    "Permission denied" that reads as an auth problem and is not one.
 - **A false positive in `parse()` costs a local directory.** Anything it
   claims stops being treated as a path, so the "must stay local" half of
   `remote-test.py` matters as much as the accepting half.
@@ -560,7 +595,9 @@ before changing it.
   not an address. `:book` from `top` does NOT: book runs no sshd. That is
   Fedora state this repo cannot declare (`systemctl enable --now sshd` there);
   until then the address fails with a "cannot reach book / connection refused"
-  toast, which is the honest answer.
+  toast, which is the honest answer. `:SSD` and the other drive addresses ride
+  the same connection, so they work from `book` exactly when `:top` does, and
+  on `top` they are local and always work.
 ### Why it is as fast as it is — measure before you retune
 
 All numbers book -> top, 5 GHz wifi, 7 ms RTT. **The link is the ceiling**: raw
