@@ -306,8 +306,10 @@ Item {
                                 } else if (m.button === Qt.RightButton) {
                                     var p = tileMouse.mapToItem(root, m.x, m.y);
                                     ctxMenu.open(p.x, p.y, [
-                                        { label: "play",          trigger: function() { Player.playAlbum(aid, 0); } },
-                                        { label: "play shuffled", trigger: function() { Player.setShuffle(true); Player.playAlbum(aid, 0); } },
+                                        // start=-1: no chosen track, so shuffle
+                                        // (if on) pins nothing — see playTracks.
+                                        { label: "play",          trigger: function() { Player.playAlbum(aid, -1); } },
+                                        { label: "play shuffled", trigger: function() { Player.setShuffle(true); Player.playAlbum(aid, -1); } },
                                         // The track menu's "play next" is the
                                         // whole-album twin of this — both insert
                                         // after the playing row, and both grey
@@ -328,7 +330,7 @@ Item {
                                 }
                             }
                             onDoubleClicked: function(m) {
-                                if (m.button === Qt.LeftButton) Player.playAlbum(tile.a.albumId, 0);
+                                if (m.button === Qt.LeftButton) Player.playAlbum(tile.a.albumId, -1);
                             }
                         }
                     }

@@ -208,5 +208,66 @@ p = mk([2, 1, 3], 0, shuffle=True, orig=[1, 2, 3])
 p.removeFromQueue([2])
 check("shuffled: orig loses it too", [t["id"] for t in p._orig_queue], [1, 2])
 
+print("playTracks under shuffle (the 'same shuffled order every time' bug)")
+ALL = list(range(1, 13))
+p = mk([], -1, shuffle=True)
+firsts, orders = set(), set()
+for _ in range(40):
+    p.playTracks(ALL, -1)          # play-all: no chosen track
+    firsts.add(p._queue[0]["id"])
+    orders.add(tuple(ids(p)))
+check("same tracks, reordered", sorted(ids(p)), ALL)
+check("plays from row 0", p._index, 0)
+check("first track is not pinned", len(firsts) > 1, True)
+check("order differs between plays", len(orders) > 1, True)
+
+p = mk([], -1, shuffle=True)
+pinned = all(
+    (p.playTracks(ALL, 5) or p._queue[0]["id"]) == 6 for _ in range(10))
+check("a CLICKED track stays first", pinned, True)
+
+p = mk([], -1, shuffle=False)
+p.playTracks(ALL, -1)
+check("no shuffle: play-all keeps order", ids(p), ALL)
+check("...from the top", p._index, 0)
+
+print("loop-all wrap reshuffles")
+p = mk(ALL, len(ALL) - 1, shuffle=True, orig=ALL)
+p._loop = P.Player.LOOP_ALL
+orders, repeats = set(), 0
+for _ in range(30):
+    p._index = len(p._queue) - 1
+    last = p._queue[-1]["id"]
+    p.next()
+    orders.add(tuple(ids(p)))
+    if p._queue[0]["id"] == last:
+        repeats += 1
+check("wrapped to 0", p._index, 0)
+check("same tracks each cycle", sorted(ids(p)), ALL)
+check("fresh order per cycle", len(orders) > 1, True)
+check("never replays the track that just ended", repeats, 0)
+check("orig order untouched by the wraps", [t["id"] for t in p._orig_queue], ALL)
+p.setShuffle(False)
+check("unshuffle still restores the real order", ids(p), ALL)
+
+p = mk([1, 2, 3], 2, shuffle=False)
+p._loop = P.Player.LOOP_ALL
+p.next()
+check("no shuffle: wrap keeps order", ids(p), [1, 2, 3])
+check("...back at 0", p._index, 0)
+
+# the idle path (mpv's playlist ran out) wraps through the same reshuffle
+p = mk(ALL, len(ALL) - 1, shuffle=True, orig=ALL)
+p._loop = P.Player.LOOP_ALL
+p._mpv_paused = False
+p._idle = False
+orders = set()
+for _ in range(10):
+    p._index = len(p._queue) - 1
+    p._on_idle(True)
+    orders.add(tuple(ids(p)))
+check("idle wrap: back at 0", p._index, 0)
+check("idle wrap: fresh orders", len(orders) > 1, True)
+
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

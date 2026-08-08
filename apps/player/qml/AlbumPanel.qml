@@ -151,7 +151,7 @@ Item {
             HeaderButton {
                 label: "> play"
                 fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
-                onClicked: Player.playAlbum(root.albumId, 0)
+                onClicked: Player.playAlbum(root.albumId, -1)  // -1: nothing pinned under shuffle
             }
             HeaderButton {
                 label: "+ queue"
