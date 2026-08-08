@@ -317,6 +317,20 @@ def main():
           sorted(pidx(win3, i) for i in range(3)) == [0, 1, 2],
           [pidx(win3, i) for i in range(3)])
 
+    # ---- 13. `q` and Escape quit ----
+    # LAST, deliberately: Qt.quit() reaches QCoreApplication::quit through
+    # QQmlApplicationEngine's own connection, so anything after this would be
+    # running in an app that has been asked to stop. What is asserted is the
+    # engine's `quit` signal, which is that request. Note it quits with three
+    # panes open — a bare key that closed one pane and quit only on the last
+    # would be the surprise Ctrl+W already covers.
+    quits = []
+    engine3.quit.connect(lambda: quits.append(1))
+    key(win3, Qt.Key_Q)
+    check("`q` quits the viewer", len(quits) == 1, quits)
+    key(win3, Qt.Key_Escape)
+    check("...and so does Escape", len(quits) == 2, quits)
+
     print()
     if FAILS:
         print("FAILED:", ", ".join(FAILS))
