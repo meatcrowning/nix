@@ -81,6 +81,12 @@ Singleton {
     // can see this one", which is also the right answer before the first poll.
     property var offOutputByKey: ({})
 
+    // Is a real fullscreen window up on a workspace the user is looking at?
+    // Hyprland's `fullscreen` is 0 none / 1 maximized / 2 fullscreen, and only
+    // 2 is the "something is playing, do not toast over it" case a maximized
+    // editor is not. Notifications.qml reads it for auto-DND.
+    property bool fullscreenShown: false
+
     function keyOf(appId, title) { return (appId || "") + "\n" + (title || ""); }
     // Reading root.byKey inside the call is what registers the binding
     // dependency, so cells recolour when a poll changes something.
@@ -239,6 +245,7 @@ Singleton {
         const next = {};
         const addrs = {};
         const frames = [];
+        let fs = false;
         // key -> {v: on a virtual output, r: on a real one}. A key is
         // only off-screen when NOTHING under it is on a real output.
         const tally = {};
@@ -251,6 +258,13 @@ Singleton {
             const tk = root.keyOf(c.class, c.title);
             const t = tally[tk] || (tally[tk] = { v: 0, r: 0 });
             if (virt[c.monitor]) t.v++; else t.r++;
+
+            // A fullscreen window the user is actually in front of — not one
+            // parked on a workspace he has switched away from, and not one on
+            // the agents' sandbox output.
+            if (!c.hidden && c.fullscreen === 2 && !virt[c.monitor]
+                    && (!c.workspace || shown[c.workspace.id]))
+                fs = true;
 
             // Frames: everything mapped and actually on screen. A rolled
             // (hidden) window is not something anything can be flush
@@ -298,6 +312,7 @@ Singleton {
         root.addrByKey = addrs;
         root.offOutputByKey = off;
         root.frames = frames;
+        root.fullscreenShown = fs;
     }
 
     // The fast half: one persistent process on Hyprland's request socket,

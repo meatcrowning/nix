@@ -45,6 +45,102 @@ Singleton {
                 .trim());
     }
 
+    // ---- who may toast, and when ---------------------------------------------
+    //
+    // Modelled on Plasma's kcm_notifications / plasmanotifyrc, which splits the
+    // question in two: a handful of global conditions, and a per-sender rule.
+    // Ours keeps the same split and the same defaults, with two deliberate
+    // divergences, both because the feature underneath does not exist here:
+    // there is no notification history (so no ShowInHistory) and no taskbar
+    // badge (so no ShowBadges).
+    //
+    // Plasma's other trick we DO take: it cannot know which apps notify, so it
+    // remembers the ones that have. `Seen=true` there, `notifSeen` here — and
+    // since this desktop has nothing like .desktop's X-GNOME-UsesNotifications
+    // to enumerate from, that learned list IS the per-app list the Settings
+    // window draws.
+
+    // The rule key for a sender: its desktop entry when it sends one (stable
+    // across a rename of the app's display name), else its app name. Both
+    // lowercased, since neither is case-stable across sends.
+    function keyFor(n) {
+        if (!n)
+            return "@other";
+        const de = (n.desktopEntry || "").trim().toLowerCase();
+        if (de)
+            return de;
+        const an = (n.appName || "").trim().toLowerCase();
+        return an || "@other";
+    }
+
+    // A rule holds only its divergences, so an absent field means the default.
+    // A sender with no rule of its own inherits "@other" — the one row in the
+    // Settings list that is not a real app.
+    function ruleFor(key) {
+        const rules = SettingsStore.d.notifRules || {};
+        const r = rules[key] || rules["@other"] || {};
+        return {
+            popup: r.popup !== false,
+            dnd: r.dnd === true,
+            sound: r.sound !== false
+        };
+    }
+
+    // Is do-not-disturb in force right now? Deliberately a function, not a
+    // property: `notifDndUntil` is a wall-clock instant and a binding over
+    // Date.now() would never re-evaluate. Everything that asks, asks at the
+    // moment a notification arrives.
+    function dndNow() {
+        const d = SettingsStore.d;
+        if (d.doNotDisturb)
+            return true;
+        if (d.notifDndUntil > 0 && Date.now() < d.notifDndUntil)
+            return true;
+        return d.notifDndFullscreen && WinState.fullscreenShown;
+    }
+
+    // Retire an expired timed DND, so the Settings window is never left showing
+    // a "until 14:30" that lapsed an hour ago. A minute's granularity is enough
+    // for a control whose shortest step is 15 minutes; dndNow() is exact
+    // regardless, so a late tick can never suppress a toast it should not.
+    Timer {
+        interval: 60000
+        repeat: true
+        running: true
+        onTriggered: {
+            const until = SettingsStore.d.notifDndUntil;
+            if (until > 0 && Date.now() >= until) {
+                SettingsStore.d.notifDndUntil = 0;
+                SettingsStore.d.notifDndFor = 0;
+                SettingsStore.save();
+            }
+        }
+    }
+
+    // Remember a sender the first time it toasts. Only the first time: the
+    // display name is not re-recorded on every notification, both to keep the
+    // panel off the disk in a burst and because the name a rule was made under
+    // should not shift under it. Capped so a runaway sender inventing a new
+    // app name per notification cannot grow settings.json without bound.
+    readonly property int maxSeen: 200
+    function _recordSeen(n) {
+        const key = root.keyFor(n);
+        const seen = SettingsStore.d.notifSeen || {};
+        if (seen[key] !== undefined)
+            return;
+        let count = 0;
+        const next = {};
+        for (const k in seen) { next[k] = seen[k]; count++; }
+        if (count >= root.maxSeen)
+            return;
+        next[key] = (n.appName || key);
+        // Reassigned wholesale, never mutated in place: SettingsStore diffs by
+        // JSON.stringify against its last-seen-on-disk snapshot, and an
+        // in-place edit of the object it handed back changes both sides.
+        SettingsStore.d.notifSeen = next;
+        SettingsStore.save();
+    }
+
     // ---- who a toast is FROM -------------------------------------------------
     //
     // Every notification his phone relays arrives with appName "KDE Connect" —
@@ -203,15 +299,36 @@ Singleton {
                      "x-download-image", "x-open-path"]
 
         onNotification: function (n) {
-            // Do Not Disturb: suppress toasts, but let critical (urgency 2)
-            // through — standard DND behaviour.
-            if (SettingsStore.d.doNotDisturb && n.urgency !== 2)
+            // Learn the sender before deciding anything, so an app whose
+            // popups you switched off still has a row to switch them back on.
+            root._recordSeen(n);
+
+            const rule = root.ruleFor(root.keyFor(n));
+            const critical = n.urgency === 2;
+
+            // The sender's own rule comes first and binds even for critical:
+            // "show popups: off" is an explicit choice about THAT app, and a
+            // toggle a notification can talk its way past is a dishonest one.
+            if (!rule.popup)
+                return;
+
+            // Urgency 0 is "you may care later" — a background sync's chatter.
+            if (n.urgency === 0 && !SettingsStore.d.notifLowPopup)
+                return;
+
+            // Do Not Disturb: suppress, unless this sender is allowed through
+            // it, or it is critical and criticals are allowed through (which
+            // is the shipped default, and the standard behaviour).
+            if (root.dndNow()
+                    && !(critical ? SettingsStore.d.notifCriticalInDnd : rule.dnd))
                 return;
 
             n.tracked = true;
 
-            // Vista sounds: critical vs. normal, both user-configurable.
-            Sounds.playThrottled(n.urgency === 2 ? SettingsStore.d.soundCritical : SettingsStore.d.soundNotify, 300);
+            // Vista sounds: critical vs. normal, both user-configurable, and
+            // both silenceable per sender or globally without losing the toast.
+            if (rule.sound && !SettingsStore.d.notifSoundMute)
+                Sounds.playThrottled(critical ? SettingsStore.d.soundCritical : SettingsStore.d.soundNotify, 300);
 
             // Enforce maxVisible: retire the oldest expendable toast (lowest
             // id == earliest). Critical toasts and ones that asked never to
