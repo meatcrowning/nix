@@ -32,10 +32,16 @@ Text {
 
     // Match kitty's line packing. The font's line box is exactly 1 em, but Qt
     // rounds ascent/descent UP separately (at 15px: 11.25→12 + 3.75→4 = 16px per
-    // line), so multi-line/wrapped text leads ~1px wider than kitty's 15px cell
-    // and it compounds down a paragraph. Pin the per-line height to the pixel
-    // size (== kitty's cell) so every line sits flush like a terminal row.
-    // (filer/viewer/qs PixelText already do this — surfer's was the odd one out.)
-    lineHeight: Theme.fontSize
+    // line), so multi-line/wrapped text leads ~1px wider than the face's own
+    // cell and it compounds down a paragraph. Pin the per-line height to that
+    // cell so every line sits flush like a terminal row.
+    //
+    // The cell is Theme.lineHeight, MEASURED off the live face — not
+    // Theme.fontSize. For the DOS faces the two are the same 15px at the default;
+    // for Botis 4x6 the cell is 12px at that size, and pinning the em size here
+    // padded every label in every app with leading it did not ask for. The panel's
+    // copy of this file was fixed when Theme.lineHeight was added there; the apps
+    // had no such property until 2026-08-07, which is why they kept the old pin.
+    lineHeight: Theme.lineHeight
     lineHeightMode: Text.FixedHeight
 }
