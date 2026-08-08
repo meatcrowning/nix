@@ -82,6 +82,19 @@ Item {
         }
     }
 
+    // The GLOBAL window frame (Settings > appearance > theme): the border
+    // width every window is drawn with and the radius every window is clipped
+    // to, compositor-wide. Live over the same hl.config path; persisted in
+    // hyprland.lua by wal-set.sh (the autoreload lesson — see applyVtb).
+    function applyFrame() {
+        const d = SettingsStore.d;
+        const lua = "hl.config({"
+            + "general = { border_size = " + Math.round(d.windowBorderWidth) + " }, "
+            + "decoration = { rounding = " + Math.round(d.windowRounding) + " }"
+            + "})";
+        Quickshell.execDetached(["hyprctl", "eval", lua]);
+    }
+
     // loadNow() first: this handler branches on persisted values (the palette
     // signature below), and a one-shot handler cannot be gated — at completion
     // the adapter still holds the shipped defaults unless the read is forced.
@@ -92,6 +105,7 @@ Item {
         // flush: bars may have rendered before this re-assert landed, and a
         // stored "horizontal" would otherwise wait for the next repaint
         applyVtb(true);
+        applyFrame();
         sunsetProbe.running = true;
     }
 
@@ -104,6 +118,8 @@ Item {
         function onTapToClickChanged() { root.applyInput(); }
         function onShadowAlphaChanged() { root.applyVtb(false); }
         function onTitleOrientationChanged() { root.applyVtb(true); }
+        function onWindowBorderWidthChanged() { root.applyFrame(); }
+        function onWindowRoundingChanged() { root.applyFrame(); }
 
         // ---- pixel-font propagation (kitty / titlebar / kdeglobals) ----
         // The panel + Qt apps read the pick live themselves; this pushes it to

@@ -192,6 +192,8 @@ pkill -USR1 -x kitty >/dev/null 2>&1
 SETTINGS="$CONFIG/quickshell/settings.json"
 SHADOW_ALPHA=0.6
 TITLE_ROTATED=false
+BORDER_W=2
+ROUNDING=0
 if [ -f "$SETTINGS" ]; then
     v="$(sed -n 's/.*"shadowAlpha"[[:space:]]*:[[:space:]]*\([0-9.]*\).*/\1/p' "$SETTINGS" | head -n1)"
     [ -n "$v" ] && SHADOW_ALPHA="$v"
@@ -199,9 +201,16 @@ if [ -f "$SETTINGS" ]; then
     # as shadow_alpha above): re-asserted live and persisted in hyprland.lua so
     # a `hyprctl reload` keeps the sideways title instead of reverting it.
     grep -q '"titleOrientation"[[:space:]]*:[[:space:]]*"horizontal"' "$SETTINGS" && TITLE_ROTATED=true
+    # ...and the GLOBAL frame (Settings > appearance > theme): border width and
+    # corner rounding for every window on the desktop. Same persistence story.
+    v="$(sed -n 's/.*"windowBorderWidth"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$SETTINGS" | head -n1)"
+    [ -n "$v" ] && BORDER_W="$v"
+    v="$(sed -n 's/.*"windowRounding"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$SETTINGS" | head -n1)"
+    [ -n "$v" ] && ROUNDING="$v"
 fi
 hyprctl eval 'hl.config({
-    general = { col = { active_border = "rgba('"${ACCENT}"'ee)" } },
+    general = { border_size = '"${BORDER_W}"', col = { active_border = "rgba('"${ACCENT}"'ee)" } },
+    decoration = { rounding = '"${ROUNDING}"' },
     plugin = { hyprvtb = {
         ["bg_color"]          = "rgba('"${BG}"'ff)",
         ["col.text"]          = "rgba('"${TEXTDIM}"'ff)",
@@ -230,6 +239,11 @@ if [ -f "$LUA" ]; then
     # reload and a restart, exactly as the colour lines do.
     sed -i -E 's/(\["shadow_alpha"\][[:space:]]*=[[:space:]]*)[0-9.]+/\1'"${SHADOW_ALPHA}"'/' "$LUA"
     sed -i -E 's/(\["title_rotated"\][[:space:]]*=[[:space:]]*)(true|false)/\1'"${TITLE_ROTATED}"'/' "$LUA"
+    # The global frame. Anchored at line start so the commented-out examples
+    # further down cannot match; `rounding[[:space:]]` cannot reach
+    # rounding_power.
+    sed -i -E 's/^([[:space:]]*border_size[[:space:]]*=[[:space:]]*)[0-9]+/\1'"${BORDER_W}"'/' "$LUA"
+    sed -i -E 's/^([[:space:]]*rounding[[:space:]]+=[[:space:]]*)[0-9]+/\1'"${ROUNDING}"'/' "$LUA"
 fi
 
 # ---- 6. KDE / Qt apps (kdeglobals colours + pixel font; live-reloaded) --------
