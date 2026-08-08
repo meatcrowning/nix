@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""remote-test — the `:host` address syntax, offline.
+"""remote-test — the `:host` and `:DRIVE` address syntax, offline.
 
 Exercises remote.py's two pure halves: `parse()` (typed text -> user, host,
 absolute remote path) and `pretty()` (mounted local path -> the address that
-would be typed to reach it). Nothing here mounts, connects or resolves a name —
-the only I/O is reading this machine's hostname, so it runs anywhere and
-touches nothing the user can see.
+would be typed to reach it), plus the drive lookup on either side of a mount.
+Nothing here mounts, connects or resolves a name — the only I/O is reading this
+machine's hostname and listing a temp tree that stands in for `DRIVE_ROOT`, so
+it runs anywhere, gives the same answer whatever is plugged in, and touches
+nothing the user can see.
 
 The property that matters most is the ROUND TRIP: the address bar shows
 `pretty(path)` and submits it back through `parse()`, so a path that does not
@@ -76,6 +78,81 @@ def main():
           spec is not None and spec[1] == me)
     check("own hostname is a local name", me in remote._local_names())
     check("localhost is a local name", "localhost" in remote._local_names())
+
+    # ---- drives: `:SSD` on either machine ------------------------------------
+    # DRIVE_ROOT is redirected at a temp tree so the result does not depend on
+    # what happens to be plugged into the machine running the test.
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        droot = os.path.join(td, "media")
+        os.makedirs(os.path.join(droot, "SSD"))
+        os.makedirs(os.path.join(droot, "arc"))
+        remote.DRIVE_ROOT = droot
+        me = socket.gethostname().split(".")[0].lower()
+        dmp = remote.mountpoint("lam", remote.DRIVE_HOST)
+
+        check("a mounted drive resolves locally, no host",
+              remote.parse(":SSD") == ("lam", me, droot + "/SSD"),
+              repr(remote.parse(":SSD")))
+        check("drive case is folded, the on-disk name comes back",
+              remote.parse(":ssd") == ("lam", me, droot + "/SSD"))
+        check("a subpath hangs off the drive",
+              remote.parse(":arc/flac/x") == ("lam", me, droot + "/arc/flac/x"))
+        check("an unmounted name stays a host",
+              remote.parse(":nope") == ("lam", "nope", "/home/lam"))
+        check("an explicit user is never a drive",
+              remote.parse(":joe@SSD") == ("joe", "ssd", "/home/joe"))
+        check("an explicit remote path is never a drive",
+              remote.parse(":SSD:/etc") == ("lam", "ssd", "/etc"))
+
+        # what open()'s worker consults once a name has failed to resolve
+        check("drive_addr reads a bare name", remote.drive_addr(":SSD") == ("SSD", ""))
+        check("drive_addr keeps the subpath",
+              remote.drive_addr(":SSD/a/b") == ("SSD", "a/b"))
+        for bad in (":joe@x", ":x:/etc", "/tmp", "", ":", ":/tmp"):
+            check("drive_addr declines %r" % bad, remote.drive_addr(bad) is None)
+
+        # pretty: one drive, two paths to it, one address
+        check("a local drive is ':NAME'", remote.pretty_of(droot + "/SSD") == ":SSD")
+        check("a local drive subpath keeps its tail",
+              remote.pretty_of(droot + "/SSD/flac/x") == ":SSD/flac/x")
+        check("the drive root itself is not an address",
+              remote.pretty_of(droot) == droot)
+        check("the drive host's copy reads as the SAME drive address",
+              remote.pretty_of(dmp + droot + "/SSD/flac/x") == ":SSD/flac/x")
+        check("a drive missing from the drive host's mount is still an address",
+              remote.pretty_of(dmp + droot + "/usb") == ":usb")
+
+        # round trip, local half: what the bar shows lands back where it was
+        for p in (droot + "/SSD", droot + "/arc/flac/x"):
+            addr = remote.pretty_of(p)
+            spec = remote.parse(addr)
+            check("round trip %s -> %s" % (p.replace(droot, "$D"), addr),
+                  spec is not None and spec[1] == me and spec[2] == p, repr(spec))
+        # ... and the remote half, which parse() alone cannot finish: the
+        # address must at least still NAME that drive to the worker.
+        check("a remote drive address round-trips as a drive name",
+              remote.drive_addr(remote.pretty_of(dmp + droot + "/SSD/x"))
+              == ("SSD", "x"))
+
+        # the remote half of the lookup, against a stand-in for a mounted
+        # drive host: this is what the worker calls once sshfs is up.
+        fmp = os.path.join(td, "mnt")
+        os.makedirs(fmp + droot + "/SSD/flac")
+        check("a drive is found under the mount, case folded",
+              remote._drive_on_mount(fmp, "ssd", "flac")
+              == fmp + droot + "/SSD/flac")
+        check("a drive that is not on the mount is None",
+              remote._drive_on_mount(fmp, "usb", "") is None)
+
+        # an unreadable DRIVE_ROOT (nothing plugged in, on either machine) must
+        # leave every address a host address rather than raising
+        remote.DRIVE_ROOT = os.path.join(td, "nothing-here")
+        check("no drive root: names stay hosts",
+              remote.parse(":SSD") == ("lam", "ssd", "/home/lam"))
+        check("no drive root: drive_match is None, not an error",
+              remote.drive_match("SSD") is None)
+    remote.DRIVE_ROOT = "/run/media/lam"
 
     # ---- pretty: the reverse map --------------------------------------------
     check("a local path is returned unchanged",
