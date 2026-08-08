@@ -1109,62 +1109,96 @@ def test_paste(win, ctl, tmp):
               ctl.property("inputImage") == "" and said and said[0][0] == why
               and said[0][1] is True, (said, ctl.property("inputImage")))
 
-    # ---- Ctrl+V goes to the well under the POINTER, and nowhere else ----
+    # ---- Ctrl+V, with the pointer wherever it happens to be ----
     md = QMimeData()
     md.setUrls([QUrl.fromLocalFile(src)])
     clip.setMimeData(md)
     ctl.clearInputImage()
-    # With a text box holding the keyboard, Ctrl+V is ITS paste — a focused
-    # QQuickTextEdit accepts the ShortcutOverride, so the window shortcut never
-    # matches. That is checked below on purpose; here we want the other case.
     win.metaObject().invokeMethod(win, "releaseFocus")
     spin(60)
+
+    # No hover needed. Requiring one is what made this do nothing at all for
+    # anyone pressing Ctrl+V the ordinary way, silently, since a disabled
+    # shortcut has no failure to report.
     win.setProperty("hoveredWell", "")
     paste_key()
-    check("Ctrl+V over nothing pastes nothing",
-          ctl.property("inputImage") == "", ctl.property("inputImage"))
+    check("Ctrl+V with the pointer nowhere near still pastes",
+          ctl.property("inputImage") == src, ctl.property("inputImage"))
 
-    win.setProperty("hoveredWell", "input")
+    # Both wells on and the first one full: the next paste goes to the empty one
+    # rather than replacing what is already there.
+    ctl.clearLastImage()
     paste_key()
-    check("Ctrl+V over a well pastes into it", ctl.property("inputImage") == src,
-          ctl.property("inputImage"))
+    check("...into the EMPTY well when the other is taken",
+          ctl.property("lastImage") == src and ctl.property("inputImage") == src,
+          (ctl.property("inputImage"), ctl.property("lastImage")))
 
+    # The pointer still wins when it is on a well — that is the unambiguous case.
+    ctl.clearInputImage()
     ctl.clearLastImage()
     win.setProperty("hoveredWell", "last")
     paste_key()
-    check("...and the LAST-frame well is its own target",
-          ctl.property("lastImage") == src and ctl.property("inputImage") == src,
-          (ctl.property("lastImage"), ctl.property("inputImage")))
+    check("the hovered well wins",
+          ctl.property("lastImage") == src and ctl.property("inputImage") == "",
+          (ctl.property("inputImage"), ctl.property("lastImage")))
+    win.setProperty("hoveredWell", "")
     ctl.clearLastImage()
 
-    # THE REGRESSION THIS GUARDS: an unconditional window Shortcut would have
-    # eaten the prompt boxes' own paste. With the pointer over no well it must
-    # not exist, and Ctrl+V must reach the text box that has the keyboard.
-    win.setProperty("hoveredWell", "")
+    # A last frame alone: one well on screen, so Ctrl+V can only mean that one.
+    g = prop(win, "gen")
+    g.update({"useInputImage": False, "useLastFrame": True})
+    win.setProperty("gen", g)
+    spin(120)
+    paste_key()
+    check("with only the last-frame well up, Ctrl+V means it",
+          ctl.property("lastImage") == src and ctl.property("inputImage") == "",
+          (ctl.property("inputImage"), ctl.property("lastImage")))
+    ctl.clearLastImage()
+
+    # Text-to-video has no well at all, and a shortcut with no target must not
+    # invent one.
+    g = prop(win, "gen")
+    g.update({"useInputImage": False, "useLastFrame": False})
+    win.setProperty("gen", g)
+    spin(120)
+    paste_key()
+    check("with no well on screen, Ctrl+V does nothing",
+          ctl.property("inputImage") == "" and ctl.property("lastImage") == "",
+          (ctl.property("inputImage"), ctl.property("lastImage")))
+    g = prop(win, "gen")
+    g.update({"useInputImage": True, "useLastFrame": True})
+    win.setProperty("gen", g)
+    spin(120)
+
+    # THE REGRESSION THIS GUARDS: a window Shortcut sees a key before the
+    # focused item, so an unguarded Ctrl+V would eat the prompt boxes' paste.
     box = find_all(content, "PromptBox")[0]
     ed = find(box, "QQuickTextEdit")
     ed.forceActiveFocus()
     ed.setProperty("text", "")
     spin(60)
+    check("a focused prompt box is seen as one", win.property("textFocused") is True)
     clip.setText("pasted into the prompt")
     paste_key()
     check("Ctrl+V still pastes TEXT into a focused prompt box",
           ed.property("text") == "pasted into the prompt", ed.property("text"))
 
-    # ...and it keeps it even with the pointer parked on a well: a focused text
-    # box owns Ctrl+V, which is why `[ paste ]` exists and is the route that
-    # always works.
+    # ...even with the pointer parked on a well. That is why [ paste ] exists.
     ed.setProperty("text", "")
     ctl.clearInputImage()
+    md = QMimeData()
+    md.setUrls([QUrl.fromLocalFile(src)])
+    clip.setMimeData(md)
     win.setProperty("hoveredWell", "input")
     paste_key()
     check("a focused text box wins Ctrl+V over a hovered well",
-          ed.property("text") == "pasted into the prompt"
-          and ctl.property("inputImage") == "",
-          (ed.property("text"), ctl.property("inputImage")))
+          ctl.property("inputImage") == "", ctl.property("inputImage"))
     win.setProperty("hoveredWell", "")
     ed.setProperty("text", "")
     win.metaObject().invokeMethod(win, "releaseFocus")
+    spin(60)
+    check("...and letting go of the box gives Ctrl+V back",
+          win.property("textFocused") is False)
 
     # Put the column back the way test_video expects to find it.
     ctl.clearInputImage()

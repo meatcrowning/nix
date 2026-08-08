@@ -337,16 +337,19 @@ they fail differently:
   is only knowable once the compositor has handed the offer to a focused
   window, so a disabled state would grey a button that is about to work — and a
   paste with nothing behind it toasts (docs/DESIGN.md §10).
-- **Ctrl+V, and ONLY while the pointer is over a well.** A window-level
-  `Shortcut` sees a key before the focused item does, so an unconditional
-  Ctrl+V would take paste away from the prompt boxes. `enabled:
-  root.hoveredWell !== ""` makes that impossible — the pointer cannot be inside
-  a prompt box and over a well at once — and it is also how "which well?" is
-  answered with no focus model and no invisible state. **A focused text box
-  still wins**, even with the pointer on a well: a `QQuickTextEdit` accepts the
-  ShortcutOverride for Ctrl+V. That is deliberate (a text box owns its own
-  paste) and is why the button exists; `ui-test.py`'s `test_paste` pins both
-  halves.
+- **Ctrl+V, with the pointer wherever it happens to be.** A window-level
+  `Shortcut` sees a key before the focused item does, so the guard is
+  `!textFocused` — the active focus item having a `selectedText` — and nothing
+  else. It was *also* gated on hovering a well for a few hours on 2026-08-07,
+  and that made the shortcut do nothing at all for anyone pressing Ctrl+V the
+  way people press Ctrl+V, **silently**, because a disabled shortcut has no
+  failure to report. Discoverability beat the tidier rule.
+  `root.pasteWell()` picks the target: the hovered well, else the only one on
+  screen, else the empty one, else the first frame; no well on screen (plain
+  text-to-video, or an image family) means the shortcut is not enabled at all.
+  **A focused text box still wins** — a `QQuickTextEdit` accepts the
+  ShortcutOverride for Ctrl+V — which is deliberate, and is why the button
+  exists. `ui-test.py`'s `test_paste` pins every branch of it.
 
 **Reading the clipboard IS `QClipboard`** — only *owning* a selection needs
 `pylib/clipfile.py`, for the reasons above. `App._clipboard_offer()` answers
@@ -541,7 +544,7 @@ behind. Re-run it after touching `comfy-tunnel.sh`.
 
 ## `tools/ui-test.py` — the offscreen UI harness
 
-253 checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
+257 checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
 synthetic model root and no backend (`unit_cmd` neutered, client stubbed), so it
 can never start ComfyUI on top or open a window on his screen:
 
