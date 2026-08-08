@@ -56,6 +56,7 @@ sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient, close_animated  # noqa: E402  (needs the path insert above)
 from handoff import Listener  # noqa: E402  (pylib; the running-app socket)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
+from glyphs import px  # noqa: E402  (pylib; docs/DESIGN.md 2.3 - map at INGEST)
 
 # Same set filer classifies as images, so anything filer shows a thumbnail for
 # opens here (keep the two in sync — filer/main.py IMAGE_EXTS).
@@ -80,6 +81,24 @@ def is_video(name):
 
 def is_media(name):
     return is_image(name) or is_video(name)
+
+def entry(path, name=None):
+    """One `{name, path}` row: the DRAWN name mapped, the path left alone.
+
+    docs/DESIGN.md 2.3 - text from outside is mapped at INGEST, once per data
+    change, not once per delegate per scroll. A filename is foreign text: a
+    curly quote or an en dash in it makes Qt fall back to another font for that
+    character, the line takes the fallback's taller ascent, and under
+    PixelText's FixedHeight the whole row clips.
+
+    ONLY `name` is mapped, and that is the whole safety argument. `path` is
+    handed to QMediaPlayer, to the Image source, to Clip.copyFile and to
+    filer/the handoff socket; `name` is drawn in the footer and on the
+    can't-display card and is a key for nothing (viewer dedupes on `path`).
+    Mapping the path would open, copy or hand over the wrong file.
+    """
+    return {"name": px(name if name is not None else os.path.basename(path)),
+            "path": path}
 
 
 def natkey(name):
@@ -133,7 +152,7 @@ def order_from(order_file, target):
     # asked to see. `is_media` is a string test and stays; a path that really
     # has vanished now shows as a broken image if you flip to it, which is a
     # rare, visible and honest failure rather than a guaranteed one.
-    entries = [{"name": os.path.basename(p), "path": p}
+    entries = [entry(p)
                for p in (os.path.abspath(q) for q in raw.split("\0") if q)
                if is_media(p)]
     idx = next((i for i, e in enumerate(entries) if e["path"] == target), -1)
@@ -195,13 +214,13 @@ def images_for(argv):
             names = sorted((e.name for e in os.scandir(d) if e.is_file() and is_media(e.name)), key=natkey)
         except OSError:
             names = [os.path.basename(target)]
-        entries = [{"name": n, "path": os.path.join(d, n)} for n in names]
+        entries = [entry(os.path.join(d, n), n) for n in names]
         idx = next((i for i, e in enumerate(entries) if e["path"] == target), -1)
         if idx < 0:  # target isn't a recognised media ext — show it anyway
-            entries.insert(0, {"name": os.path.basename(target), "path": target})
+            entries.insert(0, entry(target))
             idx = 0
         return entries, idx, 1
-    entries = [{"name": os.path.basename(p), "path": p} for p in paths]
+    entries = [entry(p) for p in paths]
     return entries, 0, panes
 
 
@@ -353,7 +372,7 @@ class Files(QObject):
             if p in seen or not is_media(p) or not os.path.isfile(p):
                 continue
             seen.add(p)
-            out.append({"name": os.path.basename(p), "path": p})
+            out.append(entry(p))
         return out
 
 
