@@ -193,7 +193,7 @@ Rectangle {
                         :                        ad / 4;     // touchpad sub-pixel
                 viewer.zoomAround(Math.exp(Math.log(1.2) / 120 * d), e.x, e.y);
                 // zooming a pane is using it: the chrome follows the wheel, so
-                // ‹ / › and the titlebar's zoom buttons mean the pane the user
+                // << / >> and the titlebar's zoom buttons mean the pane the user
                 // was just scrolling over.
                 if (!viewer.paneFocused) viewer.focusRequested();
             }

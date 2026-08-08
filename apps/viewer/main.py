@@ -9,9 +9,9 @@ that filer and every other app get. Being its own process means it outlives the
 file browser and can grow into a general media viewer without bloating filer.
 
 Given one image path it scans that file's directory for the rest (the sibling
-images, name-sorted) so ‹ / › flip through the folder; given several paths it
+images, name-sorted) so << / >> flip through the folder; given several paths it
 uses exactly those. `--order FILE` overrides the scan with a caller-supplied
-order — that is how filer makes ‹ / › follow the sort the user is actually
+order — that is how filer makes << / >> follow the sort the user is actually
 looking at. `--split` opens one PANE per path instead of a flip list.
 
 The window is a GRID of panes (one is the ordinary case): each pane holds its
@@ -63,7 +63,7 @@ IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg",
               ".avif", ".jxl", ".tif", ".tiff", ".ico", ".ppm", ".pgm"}
 
 # Video/animation formats played through QtMultimedia (ffmpeg backend). Mixed in
-# with the images when scanning a folder so ‹ / › (skip prev/next) flip across
+# with the images when scanning a folder so << / >> (skip prev/next) flip across
 # both; the QML tells video from image by extension and swaps the surface + the
 # titlebar controls (play/pause + scrub bar) accordingly.
 VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v", ".mpg",
