@@ -412,7 +412,9 @@ together, and all three are in `shell.qml`:
   constant, which that comment requires),
 - the input `mask`, which needs a second `Region` for the notch or its icons
   take no clicks,
-- the inner-edge accent strip, drawn as TWO segments with the gap at the notch.
+- the inner-edge accent strip — UNCUT even where the notch crosses it; the
+  notch's slab is drawn over it and hides the stretch behind its mouth
+  (cutting it into two segments left an unpainted block at each corner).
 
 `NotchModel.flushOn(screen)` is the ONE test for "is a window up against the
 notch on this screen" — the seam paints over the join and the notch shifts its
