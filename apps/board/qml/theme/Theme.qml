@@ -35,7 +35,20 @@ QtObject {
     // at the slider's low end. Bind this for anything that means "one text
     // row"; bind `fontSize` only for an actual font size. (The panel has had
     // the same property, off a QML FontMetrics, since it was written.)
-    readonly property int lineHeight: DeskStyle.lineHeight
+    readonly property int lineHeight: {
+        // GUARDED, not assumed — the same typeof shape qmlcommon/Motion.qml uses
+        // on DeskStyle's motion keys, and for a sharper reason. A bare
+        // `DeskStyle.lineHeight` resolves to 0 against any DeskStyle that does
+        // not publish it — an offscreen harness with a stub, or an app whose
+        // pylib is momentarily older than its QML (the two sync separately). On
+        // an `int` property that 0 is not an error, it is a LAYOUT: every text
+        // row on the surface collapses to nothing. That is exactly what happened
+        // to player/tools/album-playnext-test.py the day this property landed —
+        // a menu row went to height 0 and the click passed through it.
+        const lh = (typeof DeskStyle !== "undefined" && DeskStyle)
+                 ? Number(DeskStyle.lineHeight) : NaN;
+        return (isFinite(lh) && lh > 0) ? Math.round(lh) : fontSize;
+    }
 
     // The same font, as a whole QFont with NoAntialias pinned — bound as
     // `font:` on the TextEdit/TextInput he types into. Editable items ignore
@@ -43,7 +56,23 @@ QtObject {
     // grey-fringed; only the font's style strategy reaches the rasteriser
     // (docs/DESIGN.md 2.2). Labels keep `font: Theme.font` — `Text` is crisp
     // already.
-    readonly property font editorFont: DeskStyle.editorFont
+    readonly property font editorFont: {
+        // Guarded for the same reason `lineHeight` above is: a DeskStyle that
+        // does not publish this (a harness stub, or a pylib momentarily older
+        // than the QML) would otherwise assign `undefined` to a `font` property,
+        // which Qt reports as "Unable to assign [undefined] to QFont" and leaves
+        // the editor drawing in the SYSTEM font — the one thing docs/DESIGN.md
+        // §2.1 says must never appear on this desktop.
+        //
+        // The fallback cannot carry NoAntialias (the QML `font` group has no way
+        // to express a style strategy — that is the whole reason this property
+        // exists), so it degrades to the right family at the right size and
+        // loses only the crispness. Wrong-but-legible beats unset.
+        if (typeof DeskStyle !== "undefined" && DeskStyle && DeskStyle.editorFont)
+            return DeskStyle.editorFont;
+        return Qt.font({ family: font, pixelSize: fontSize,
+                         hintingPreference: Font.PreferFullHinting });
+    }
 
     // Panel geometry (logical px) — kept for component compatibility.
     readonly property int barWidth: 48
