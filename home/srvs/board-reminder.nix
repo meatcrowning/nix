@@ -32,6 +32,16 @@
 # reminder has fired the script does nothing at all for the rest of time; that
 # is the intended resting state, not a leak.
 
+# Must run under the board's python: it shells out to boardctl.py, which imports
+# the whole board module set (boardparse -> glyphs -> PySide6). Bare pkgs.python3
+# has no PySide6, so this failed at import on every tick. Same host split as
+# home/prog/board.nix (nixpkgs python3+PySide6 on top, Fedora's on book).
+let
+  reminderPython =
+    if host == "top"
+    then "${pkgs.python3.withPackages (ps: [ ps.pyside6 ])}/bin/python3"
+    else "/usr/bin/python3";
+in
 {
   xdg.configFile."scripts/board-reminder.py" = {
     source = ./board-reminder-files/board-reminder.py;
@@ -56,7 +66,7 @@
       Environment = [
         "PATH=${lib.makeBinPath [ pkgs.coreutils ]}:${config.home.homeDirectory}/.nix-profile/bin:/run/current-system/sw/bin:/etc/profiles/per-user/lam/bin:/usr/bin:/bin"
       ];
-      ExecStart = "${pkgs.python3}/bin/python3 %h/.config/scripts/board-reminder.py";
+      ExecStart = "${reminderPython} %h/.config/scripts/board-reminder.py";
       TimeoutStartSec = "2min";
     };
   };
