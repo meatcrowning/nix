@@ -93,6 +93,39 @@ bash "$RECON" --dry-run theme-qml "$TMP/qs" "$TMP/ql" >/dev/null 2>&1
 want "live wal block empty -> 2" "$?" 2
 
 # --------------------------------------------------------------------------
+sec "runtime-owned values survive a real reconcile"
+
+# THE 2026-08-08 REGRESSION. carry()'s sed used `|` as its delimiter, which the
+# alternation in `(true|false)` terminated — so both boolean carries errored
+# (stderr only) and carried nothing, and every switch reverted title_rotated
+# in the live hyprland.lua to the seed's value. Hyprland autoreloads that file,
+# so the user's "horizontal" pick undid itself on every rebuild, silently:
+# seed-drift masks these values on both sides, so no tripwire ever fired.
+d="$TMP/carry"; rm -rf "$d"; mkdir -p "$d"
+cp "$LUA_SRC" "$d/live.lua"
+sed -i -E \
+    -e 's/(\["title_rotated"\][[:space:]]*=[[:space:]]*)(true|false)/\1true/' \
+    -e 's/(\["font_smooth"\][[:space:]]*=[[:space:]]*)(true|false)/\1true/' \
+    -e 's/(\["shadow_alpha"\][[:space:]]*=[[:space:]]*)[0-9.]+/\10.35/' \
+    -e 's/(\["font"\][[:space:]]*=[[:space:]]*)"[^"]*"/\1"Botis"/' \
+    "$d/live.lua"
+# Something structural only the source has, so the reconcile genuinely rewrites.
+grep -v 'repo-updates.service' "$d/live.lua" >"$d/live2.lua" && mv "$d/live2.lua" "$d/live.lua"
+XDG_CACHE_HOME="$d/cache" bash "$RECON" hyprland-lua "$LUA_SRC" "$d/live.lua" >/dev/null 2>&1
+want "reconcile ran -> 0" "$?" 0
+for probe in '\["title_rotated"\][[:space:]]*=[[:space:]]*true,' \
+             '\["font_smooth"\][[:space:]]*=[[:space:]]*true,' \
+             '\["shadow_alpha"\][[:space:]]*=[[:space:]]*0\.35,' \
+             '\["font"\][[:space:]]*=[[:space:]]*"Botis",'; do
+    grep -qE "$probe" "$d/live.lua" \
+        && ok "carried: $probe" \
+        || bad "NOT carried (or line corrupted): $probe"
+done
+grep -q 'repo-updates.service' "$d/live.lua" \
+    && ok "structure still comes from the source" \
+    || bad "source line missing after reconcile"
+
+# --------------------------------------------------------------------------
 sec "--pre-switch: benign drift is reported, not blocked"
 
 cfg=$(mkcfg sync)

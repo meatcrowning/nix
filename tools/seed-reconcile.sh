@@ -63,12 +63,21 @@ cp "$SRC" "$TMP" || exit 2
 # prefix must anchor tightly enough to name exactly one line: a loose one (say,
 # any rgba) would also drag across values nix owns — hyprland.lua's
 # inactive_border is right next to a colour wal-set.sh does own.
+#
+# Two constraints on the patterns, both paid for (title_rotated reverted to the
+# seed's `false` on every switch until 2026-08-08, and the sed never said why):
+#   * neither may contain a literal `%` — it is the sed delimiter here. The old
+#     `|` delimiter was terminated by the alternation in `(true|false)`, so
+#     both boolean carries errored to stderr and silently carried nothing.
+#   * <ere-value> must contain no capture groups — carry's own parens are the
+#     only ones, or \3 stops being "the rest of the line". Alternate with a
+#     bare `true|false`; carry's wrap gives it its scope.
 carry() {
     local pre="$1" val="$2" v esc
-    v=$(sed -nE "s|^(${pre})(${val})(.*)\$|\2|p" "$LIVE" | head -1)
+    v=$(sed -nE "s%^(${pre})(${val})(.*)\$%\2%p" "$LIVE" | head -1)
     [ -n "$v" ] || return 0
-    esc=${v//\\/\\\\}; esc=${esc//|/\\|}; esc=${esc//&/\\&}
-    sed -i -E "s|^(${pre})(${val})(.*)\$|\1${esc}\3|" "$TMP"
+    esc=${v//\\/\\\\}; esc=${esc//%/\\%}; esc=${esc//&/\\&}
+    sed -i -E "s%^(${pre})(${val})(.*)\$%\1${esc}\3%" "$TMP"
 }
 
 case "$KIND" in
@@ -82,10 +91,10 @@ case "$KIND" in
         carry "[[:space:]]*\\[\"${k}\"\\][[:space:]]*=[[:space:]]*\"" 'rgba\([0-9a-fA-F]+\)'
     done
     carry '[[:space:]]*\["shadow_alpha"\][[:space:]]*=[[:space:]]*' '[0-9.]+'
-    carry '[[:space:]]*\["title_rotated"\][[:space:]]*=[[:space:]]*' '(true|false)'
+    carry '[[:space:]]*\["title_rotated"\][[:space:]]*=[[:space:]]*' 'true|false'
     carry '[[:space:]]*\["font"\][[:space:]]*=[[:space:]]*' '"[^"]*"'
     carry '[[:space:]]*\["font_size"\][[:space:]]*=[[:space:]]*' '[0-9]+'
-    carry '[[:space:]]*\["font_smooth"\][[:space:]]*=[[:space:]]*' '(true|false)'
+    carry '[[:space:]]*\["font_smooth"\][[:space:]]*=[[:space:]]*' 'true|false'
     carry '[[:space:]]*border_size[[:space:]]*=[[:space:]]*' '[0-9]+'
     carry '[[:space:]]*rounding[[:space:]]+=[[:space:]]*' '[0-9]+'
     # cursor-recolor.sh: the generated GoogleDot-<accent><outline> theme name.
