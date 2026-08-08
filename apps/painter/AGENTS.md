@@ -503,6 +503,48 @@ The divider between the panes is dragged (`splitRatio`, saved on release,
 double-click to reset), clamped so neither side starves — the same shape as
 filer's splitter.
 
+## A batch he cannot see finishes as a TOAST, with the picture on it
+
+A generation is a wait long enough to walk away from, so painter says so
+itself rather than leaving the result to be discovered: when a batch finishes
+behind a window he is not looking at, one desktop toast — `completed in 1:23`
+(the queue bar's own m:ss clock), the output's name, and a **48px thumbnail of
+what it made**, which clicking opens (docs/DESIGN.md §8.1, the same
+`x-download-image` hint surfer's downloads and the screenshots wear).
+
+Four rules hold it together, and each is a way of not being noise:
+
+- **"He cannot see it" is `isActive() and isExposed()`, on the window** —
+  unfocused, or not on screen at all. `isExposed()` is false for a window
+  rolled up, minimised or on another workspace, because a compositor sends no
+  frame callbacks to a surface nobody can see: it is the same test viewer
+  refuses a handoff on (`pylib/handoff.py`), and **the only way a rolled-up
+  window is visible to the app at all** — hyprvtb tells a client when it is
+  UN-hidden (vtbclient's `WAKE`), never when it is rolled away. `main()` hands
+  the window to the controller; **no window means no toast**, which is what
+  keeps every harness off his screen.
+- **One toast per BATCH, not per image**, timed from the press rather than
+  from the last job's own start (`_batch_start`) — four images asked for in
+  one click are one wait. Four outputs read as `4 outputs, newest <name>`.
+- **It waits for the file.** The toast carries a path, so it cannot go out
+  until every download has landed; `_maybe_notify` is called from both ends
+  (the last download, and the last job to finish) because either can be the
+  one that completes the batch. A clip additionally waits up to
+  `POSTER_WAIT_MS` for the poster frame the gallery is already extracting —
+  QML cannot decode an mp4, so a clip thumbnails the poster and `x-open-path`
+  points the click at the video. Whichever arrives first, the timeout or the
+  frame, takes the pending toast with it, so it is sent exactly once.
+- **A failure gets that one toast instead**, at critical urgency — the outputs
+  that did land are still in the gallery, but the thing worth coming back for
+  is that it stopped.
+
+The in-window `done in 4.0s` still fires either way; it is simply invisible
+when he is elsewhere, which is the whole reason this exists. `notify-send`
+comes from `libnotify` on the wrapper's PATH (`home/prog/painter.nix`) because
+painter is launched from a .desktop entry / the runner, whose PATH need not
+carry the profile dirs; book takes Fedora's, and a missing one degrades to no
+toast rather than to an error.
+
 ## Starting fast is a property of the launch path
 
 ~0.45s from click to window on book (0.23s launcher + 0.22s app), against a
@@ -575,7 +617,11 @@ would otherwise be every later test's selection), pasting into a frame well
 pixels, and that Ctrl+V reaches a well only under the pointer and never out of
 a focused prompt box — the offscreen platform's clipboard is in-process, so it
 cannot touch his), save-and-restore through a
-SECOND window on the same prefs file, that
+SECOND window on the same prefs file, the completion toast (silent while the
+window is focused, sent when it is unfocused OR unexposed, one per batch
+whatever it made, a clip waiting for its poster frame, a failure taking that
+one toast — all against a stand-in window and the harness's recorded
+`subprocess`, so nothing reaches a real notification server), that
 `startBackend` returns immediately, and a wiring audit that submits a job and
 compares every field. **A QML warning fails the run** — a binding loop shows
 as nothing at all on screen.
