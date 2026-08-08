@@ -192,9 +192,7 @@ Window {
                 verticalAlignment: TextInput.AlignVCenter
                 clip: true
 
-                font.family: Theme.font
-                font.pixelSize: Theme.fontSize
-                font.hintingPreference: Font.PreferFullHinting
+                font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
                 renderType: Text.NativeRendering
                 color: Theme.text
                 selectionColor: Theme.accent

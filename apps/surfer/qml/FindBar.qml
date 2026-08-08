@@ -252,8 +252,7 @@ Rectangle {
                 anchors { fill: parent; margins: 4 }
                 verticalAlignment: TextInput.AlignVCenter
                 color: Theme.text
-                font.family: Theme.font
-                font.pixelSize: Theme.fontSize
+                font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
                 renderType: Text.NativeRendering
                 clip: true
                 selectByMouse: true
