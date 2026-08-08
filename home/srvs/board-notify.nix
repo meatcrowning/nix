@@ -38,6 +38,15 @@
 # until it is. `Restart=on-failure` keeps it alive across a transient crash.
 # Kill switch: `touch ~/.local/state/board-notify/off`, no rebuild.
 
+# Must run under the board's python: board-notify.py imports the board module set
+# (boardparse -> glyphs -> PySide6). Bare pkgs.python3 crash-looped it (Type=simple
+# + Restart=on-failure => hundreds of restarts). Same host split as board.nix.
+let
+  boardPython =
+    if host == "top"
+    then "${pkgs.python3.withPackages (ps: [ ps.pyside6 ])}/bin/python3"
+    else "/usr/bin/python3";
+in
 {
   xdg.configFile."scripts/board-notify.py" = {
     source = ./board-notify-files/board-notify.py;
@@ -65,7 +74,7 @@
       Environment = [
         "PATH=${lib.makeBinPath [ pkgs.coreutils pkgs.util-linux pkgs.libnotify ]}:${config.home.homeDirectory}/.nix-profile/bin:/run/current-system/sw/bin:/etc/profiles/per-user/lam/bin:/usr/bin:/bin"
       ];
-      ExecStart = "${pkgs.python3}/bin/python3 %h/.config/scripts/board-notify.py";
+      ExecStart = "${boardPython} %h/.config/scripts/board-notify.py";
     };
     Install.WantedBy = [ "default.target" ];
   };
