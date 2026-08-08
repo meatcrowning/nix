@@ -29,11 +29,12 @@ PanelWindow {
 
     readonly property bool barLeft: SettingsStore.d.barEdge === "left"
 
-    // "No wallpaper" (Settings > wallpaper): paint the theme's background colour
-    // as the desktop instead of an image. The window already clears to Theme.bg
-    // (below), so this just hides the image layers and skips the decode. The
-    // palette — and therefore Theme.bg — still comes from a wallpaper picked in
-    // the meta+w switcher; only the IMAGE is suppressed.
+    // "No wallpaper" (Settings > wallpaper, or Meta+Shift+W): paint the theme's
+    // background colour as the desktop instead of an image. The window already
+    // clears to Theme.bg (below), so this just fades the image layers out — at
+    // the desktop's slide timing (DESIGN.md §6.2), since a reload snaps it via
+    // the settle gate. The palette — and therefore Theme.bg — still comes from
+    // a wallpaper picked in the meta+w switcher; only the IMAGE is suppressed.
     readonly property bool solid: SettingsStore.d.wallpaperSolid
     // Re-load the image when the user turns the image back on. While solid, _apply
     // no-ops on every Wall change, so the front frame is either EMPTY (a reload
@@ -74,7 +75,9 @@ PanelWindow {
     Image {
         anchors.fill: parent
         z: -1
-        source: root.solid ? "" : (root.haveBlur ? Wall.blurUrl : Wall.url)
+        // Source stays bound while solid (it keeps tracking Wall, so the fade
+        // back in never waits on a decode) — hiding is the opacity's job.
+        source: root.haveBlur ? Wall.blurUrl : Wall.url
         // PreserveAspectCrop over the FULL monitor, so the blur reads as a
         // continuation of the sharp copy rather than a squashed one.
         fillMode: Image.PreserveAspectCrop
@@ -84,7 +87,12 @@ PanelWindow {
         smooth: true
         asynchronous: true
         cache: false
-        visible: source.toString().length > 0
+        visible: source.toString().length > 0 && opacity > 0
+        opacity: root.solid ? 0 : 1
+        Behavior on opacity {
+            enabled: !ViewMode.settling
+            NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing }
+        }
     }
 
     // The desktop the user can actually see. Everything is centred in HERE.
@@ -102,8 +110,15 @@ PanelWindow {
         x: root.barLeft ? ViewMode.barWidth : 0
         width: Math.max(1, parent.width - ViewMode.barWidth)
         clip: true
-        // Hidden in "no wallpaper" mode — the window's Theme.bg shows through.
-        visible: !root.solid
+        // "No wallpaper" mode fades the image away and the window's Theme.bg
+        // shows through. `visible` follows the fade's END so the layers drop
+        // out of compositing once fully hidden, not mid-animation.
+        visible: opacity > 0
+        opacity: root.solid ? 0 : 1
+        Behavior on opacity {
+            enabled: !ViewMode.settling
+            NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing }
+        }
 
         // Gated on the reload settle. A fresh tree is built before the settings
         // have been read back and before the surface has been told its size, so
