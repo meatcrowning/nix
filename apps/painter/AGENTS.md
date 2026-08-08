@@ -298,7 +298,9 @@ three files behind, and hidden from the history — `is_muted_copy()` filters bo
 the initial scan and anything that lands while running, or every clip would be
 listed twice.
 
-**The clipboard goes through `pylib/clipfile.py`, never `QClipboard`.** A
+**COPYING OUT goes through `pylib/clipfile.py`, never `QClipboard`** (reading
+the clipboard, which is what the frame wells' paste does, is ordinary
+`QClipboard` — see "A frame well takes a PASTE" below). A
 Wayland selection dies with the process that offered it, so the copy is owned by
 a forked holder that outlives painter; and `QClipboard.setMimeData` takes a
 Python-built `QMimeData` whose wrapper Qt's global-static clipboard frees AFTER
@@ -323,6 +325,44 @@ and a clip is never offered it, its metadata being ComfyUI's graph rather than
 painter's parameters (`GalleryView.commonItems`, gated on the params the menu
 already read — docs/DESIGN.md §10, an action with nothing to act on is not
 offered greyed, it is not offered).
+
+## A frame well takes a PASTE as well as a drop
+
+`FrameWell.qml` is the drop target for the video's first/last frame and for
+edit mode's image, and the clipboard reaches all three. Two routes, because
+they fail differently:
+
+- **`[ paste ]`, in the well.** Needs no keyboard and cannot be aimed at the
+  wrong well. Always offered, never greyed: whether there is anything to paste
+  is only knowable once the compositor has handed the offer to a focused
+  window, so a disabled state would grey a button that is about to work — and a
+  paste with nothing behind it toasts (docs/DESIGN.md §10).
+- **Ctrl+V, and ONLY while the pointer is over a well.** A window-level
+  `Shortcut` sees a key before the focused item does, so an unconditional
+  Ctrl+V would take paste away from the prompt boxes. `enabled:
+  root.hoveredWell !== ""` makes that impossible — the pointer cannot be inside
+  a prompt box and over a well at once — and it is also how "which well?" is
+  answered with no focus model and no invisible state. **A focused text box
+  still wins**, even with the pointer on a well: a `QQuickTextEdit` accepts the
+  ShortcutOverride for Ctrl+V. That is deliberate (a text box owns its own
+  paste) and is why the button exists; `ui-test.py`'s `test_paste` pins both
+  halves.
+
+**Reading the clipboard IS `QClipboard`** — only *owning* a selection needs
+`pylib/clipfile.py`, for the reasons above. `App._clipboard_offer()` answers
+what a paste means without writing anything: **files** first (`text/uri-list`,
+what clipfile and every file manager put there — the picture is already on disk
+under its own name, so nothing is copied), then **pixels** (a screenshot, a
+browser's "copy image"), then **text that names an image** (filer's "copy
+path"). `_usable_image()` is the one rule the drop and the paste share, so the
+two cannot come to disagree about what an image is.
+
+Pixels have no file, so `_paste_target()` writes one into
+`~/.cache/painter/pasted` **named by content** (`pasted-<sha1[:12]>.png`):
+pasting the same screenshot twice is one file, and — since the upload cache is
+keyed on the path — one upload to the backend. They are pruned to the newest 20,
+and cannot simply be temporary: the backend uploads the file at generate time,
+and prefs remember it across a launch.
 
 ## The history is BOTH machines', with nothing shown twice
 
@@ -501,7 +541,7 @@ behind. Re-run it after touching `comfy-tunnel.sh`.
 
 ## `tools/ui-test.py` — the offscreen UI harness
 
-237 checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
+253 checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
 synthetic model root and no backend (`unit_cmd` neutered, client stubbed), so it
 can never start ComfyUI on top or open a window on his screen:
 
@@ -527,7 +567,11 @@ beside the local root, the file both machines hold shown once and shown as the
 LOCAL copy, an unmountable peer root costing the local scan nothing), the video
 column (a synthetic video family written into the scratch
 root and removed again — a fully paired model sorts to the top of the list and
-would otherwise be every later test's selection), save-and-restore through a
+would otherwise be every later test's selection), pasting into a frame well
+(each of the three clipboard shapes, both refusals, the content-named file for
+pixels, and that Ctrl+V reaches a well only under the pointer and never out of
+a focused prompt box — the offscreen platform's clipboard is in-process, so it
+cannot touch his), save-and-restore through a
 SECOND window on the same prefs file, that
 `startBackend` returns immediately, and a wiring audit that submits a job and
 compares every field. **A QML warning fails the run** — a binding loop shows

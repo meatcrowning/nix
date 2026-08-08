@@ -21,8 +21,16 @@ Panel {
         active: true
         path: App.inputImage
         url: App.inputImageUrl
-        emptyText: "drag the image to edit here"
+        emptyText: "drag or paste the image to edit here"
+        winActive: root.winActive
         accepts: function (u) { return App.setInputImage(u) }
+        paste: function () { return App.pasteInputImage() }
+        // Order-independent: moving straight from one well to the other must
+        // not have the leave clear the target the enter just set.
+        onHoveredChanged: {
+            if (hovered) root.hoveredWell = "input"
+            else if (root.hoveredWell === "input") root.hoveredWell = ""
+        }
     }
 
     Row {
