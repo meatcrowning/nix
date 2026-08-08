@@ -6585,10 +6585,16 @@ def test_placed_window(app, tmp):
     check("folding an authored message puts author and time on ONE line",
           authored is not None and bool(amark) and len(combos) == 1,
           (combined, [str(c.property("text")) for c in combos]))
+    # ONE ROW is the live FACE's cell, not 15 and not the em size — the same
+    # Theme.lineHeight PixelText pins its line box to (docs/DESIGN.md §2.1). This
+    # asserted a literal 15.0 until 2026-08-07, so it passed only while the font
+    # setting happened to be a DOS face at 15px and failed on the machine as
+    # actually configured (Botis 4x6 at 14, whose cell is 11).
+    oneRow = float(keepB[1].lineHeight)          # the live face's cell, via DeskStyle
     check("...and the message is now exactly one row tall",
           authored is not None and authored.height() < openH
-          and authored.height() == 15.0,
-          (openH, authored is not None and authored.height()))
+          and authored.height() == oneRow,
+          (openH, authored is not None and authored.height(), oneRow))
     check("...the two-row gutter gone: only the decision's author still draws one",
           len(filledAfter) == 1
           and all(str(it.property("text")) == who for it in filledAfter),
