@@ -215,9 +215,14 @@ in
   # get one. Installed into the hicolor theme so `Icon=settings` above resolves
   # to it; the runner tints its currentColor strokes to the live theme.
   home.file.".local/share/icons/hicolor/scalable/apps/settings.svg".source = ./app-icons/settings.svg;
-  # …and declare it a SEAL, so the panel paints its currentColor strokes in
+  # The desktop shell's own seal (Malphas, the builder of houses and towers) —
+  # the icon the reload toasts send (`-i quickshell`, shell.qml). Not tied to
+  # any desktop entry; it exists so the shell's own notifications carry a seal
+  # like every bespoke app's do.
+  home.file.".local/share/icons/hicolor/scalable/apps/quickshell.svg".source = ./app-icons/quickshell.svg;
+  # …and declare both SEALS, so the panel paints their currentColor strokes in
   # the focus colour instead of the file's baked fallback (app-icons/seals.nix).
-  my.appSeals = [ "settings" ];
+  my.appSeals = [ "settings" "quickshell" ];
 
   # Seeded once and then RECONCILED on every switch: the nix source wins on
   # structure, the live `// >>> wal palette` block is carried across. Seeding it

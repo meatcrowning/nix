@@ -41,10 +41,10 @@ Scope {
                 "sleep 0.3; " +
                 "f=\"$HOME/.cache/wal/.suppress-reload\"; " +
                 "if [ -f \"$f\" ] && [ $(( $(date +%s) - $(stat -c %Y \"$f\" 2>/dev/null || echo 0) )) -le 3 ]; then exit 0; fi; " +
-                "notify-send -a quickshell Quickshell 'config reloaded'"]);
+                "notify-send -a desktop -i quickshell desktop reloaded"]);
         }
         function onReloadFailed(error) {
-            Quickshell.execDetached(["notify-send", "-a", "quickshell", "-u", "critical", "Quickshell reload failed", error]);
+            Quickshell.execDetached(["notify-send", "-a", "desktop", "-i", "quickshell", "-u", "critical", "reload failed", error]);
         }
     }
 

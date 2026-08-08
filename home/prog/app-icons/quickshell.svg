@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" color="#ffffff">
+  <!-- desktop shell icon - the seal of Malphas, thirty-ninth spirit of the Ars
+       Goetia (a president). Malphas builds houses and high towers: the spirit
+       of the desktop itself, torn down and raised again on every reload.
+       Redrawn as clean geometry in the house style - a crenellated tower over
+       its foundation, footings curling into the ground.
+
+       ONE transparent, theme-tracking variant. No filled tile: the sigil
+       sits on transparency so it reads on any surface (DESIGN.md S3.1). The
+       strokes are `currentColor` so the sigil IS the live theme's foreground
+       (body text = the accent); the panel tints it per surface (AppIcon.qml).
+       The root `color` above is only the fallback external consumers resolve
+       currentColor to when they draw the file raw. IT IS WHITE ON PURPOSE:
+       the panel tints through MultiEffect, whose colorization scales the tint
+       by the SOURCE's own luminance, so only a white sigil comes out the exact
+       theme colour (measured - a #cc4400 fallback landed at 36% of it).
+       Uniform 44-unit stroke = the 2px edge weight scaled to icon size
+       (DESIGN.md S4). -->
+  <g fill="none" stroke="currentColor" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="256" cy="256" r="218"/>
+    <path d="M160 180 L352 180"/>
+    <path d="M160 180 L160 118"/>
+    <path d="M256 180 L256 100"/>
+    <path d="M352 180 L352 118"/>
+    <path d="M256 180 L256 352"/>
+    <path d="M190 352 L322 352"/>
+    <path d="M190 352 C168 376 162 394 168 414"/>
+    <path d="M322 352 C344 376 350 394 344 414"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="160" cy="118" r="16"/>
+    <circle cx="256" cy="100" r="16"/>
+    <circle cx="352" cy="118" r="16"/>
+  </g>
+</svg>
