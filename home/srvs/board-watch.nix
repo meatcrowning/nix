@@ -113,6 +113,13 @@ let
   # where the flake attribute is the only name available.
   boardHost = if host == "air" then "book" else host;
   boardFile = "%h/nix/docs/board.${boardHost}.md";
+  # Must run under the board's python: board-watch.py imports the whole board
+  # module set (boardparse -> glyphs -> PySide6), so bare pkgs.python3 crashed it
+  # on every trigger. Same host split as home/prog/board.nix.
+  boardPython =
+    if host == "top"
+    then "${pkgs.python3.withPackages (ps: [ ps.pyside6 ])}/bin/python3"
+    else "/usr/bin/python3";
 in
 {
   xdg.configFile."scripts/board-watch.py" = {
@@ -235,7 +242,7 @@ in
           pkgs.nix
         ] ++ lib.optionals (host == "top") [ pkgs.systemd pkgs.openssh ])}:/run/wrappers/bin:${config.home.homeDirectory}/.nix-profile/bin:/run/current-system/sw/bin:/etc/profiles/per-user/lam/bin:${config.home.homeDirectory}/.local/bin:/usr/bin:/bin"
       ];
-      ExecStart = "${pkgs.python3}/bin/python3 %h/.config/scripts/board-watch.py";
+      ExecStart = "${boardPython} %h/.config/scripts/board-watch.py";
       # Outer guard only. The script caps the agent itself at 45 minutes so the
       # failure is one it can write onto the board; this is what catches the
       # script wedging somewhere else.
