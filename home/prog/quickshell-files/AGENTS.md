@@ -354,7 +354,11 @@ with the desktop widgets pinned out on the wallpaper. `dock` turns the panel
 into a wide column (14–33% of screen, default 15%): `DockHeader.qml` (task icons
 flowing across and wrapping, uptime at the right) over `DockGrid.qml`
 (the widget grid). There is no toggle button — you grab the bar's inner edge
-(`edgeGrip` in `shell.qml`) and pull.
+(`EdgeGrip.qml`, instantiated per screen in `shell.qml`) and pull. The grip's
+strip and its hover highlight follow the inner-edge border — shortcut-notch
+detour included — and fall back to the straight full-height strip while the
+runner drawer is out (the drawer's Overlay surface is below the grip's, so a
+strip over the notch would steal the open drawer's clicks).
 
 ```bash
 qs ipc call view toggle|dock|classic|mode

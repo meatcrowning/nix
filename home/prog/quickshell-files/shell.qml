@@ -1318,10 +1318,13 @@ Scope {
     }
 
     // The panel's resize / mode-switch handle. A separate full-screen surface
-    // per monitor, masked to an 8px strip over the panel's inner edge — see
-    // EdgeGrip.qml for why it cannot live inside the panel it resizes.
+    // per monitor, masked to an 8px strip following the panel's inner-edge
+    // border, shortcut-notch detour included — see EdgeGrip.qml for why it
+    // cannot live inside the panel it resizes.
     Variants {
         model: Quickshell.screens
-        EdgeGrip {}
+        EdgeGrip {
+            drawerOut: launcher.out
+        }
     }
 }
