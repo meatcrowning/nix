@@ -311,6 +311,41 @@ def _is_image(name):
     return os.path.splitext(name or "")[1].lower() in IMAGE_EXTS
 
 
+# Content-Type -> the extension a human expects. `mimetypes.guess_extension`
+# is the fallback but is not usable alone: it answers ".jpe" for image/jpeg and
+# ".htm" for text/html on some tables, which is technically right and useless.
+MIME_EXTS = {
+    "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif",
+    "image/webp": ".webp", "image/avif": ".avif", "image/jxl": ".jxl",
+    "image/bmp": ".bmp", "image/x-icon": ".ico", "image/vnd.microsoft.icon": ".ico",
+    "image/svg+xml": ".svg", "image/tiff": ".tif", "image/apng": ".apng",
+    "video/mp4": ".mp4", "video/webm": ".webm", "video/quicktime": ".mov",
+    "audio/mpeg": ".mp3", "audio/ogg": ".ogg", "audio/wav": ".wav",
+    "audio/flac": ".flac", "audio/mp4": ".m4a",
+    "application/pdf": ".pdf", "application/zip": ".zip",
+    "application/gzip": ".gz", "application/json": ".json",
+    "text/plain": ".txt", "text/html": ".html", "text/css": ".css",
+}
+
+
+def _looks_like_ext(suffix):
+    """Is this trailing `.xxx` an extension, or just a dot in the name?
+    `pbs.twimg.com`-style ids and version strings ("clip.v2") should not be
+    mistaken for a typed file."""
+    s = (suffix or "").lstrip(".")
+    return bool(s) and len(s) <= 5 and s.isalnum()
+
+
+def _ext_for_mime(mime):
+    mime = (mime or "").split(";")[0].strip().lower()
+    if not mime or mime == "application/octet-stream":
+        return ""      # the server said nothing useful — don't invent a type
+    if mime in MIME_EXTS:
+        return MIME_EXTS[mime]
+    import mimetypes
+    return mimetypes.guess_extension(mime) or ""
+
+
 class Downloads(QObject):
     """Desktop toasts for downloads, driven from Main.qml's onDownloadRequested.
     A SLOW or LARGE download gets a live progress toast that updates IN PLACE
@@ -388,6 +423,23 @@ class Downloads(QObject):
         if total > self.LARGE_BYTES:
             return True
         return elapsed_ms >= self.SLOW_MS
+
+    @Slot(str, str, result=str)
+    def fileName(self, suggested, mime):
+        """The name to save under, given what QtWebEngine suggested.
+
+        Chromium derives `downloadFileName` from the URL PATH alone, so a host
+        that serves images from an extensionless path with the type in the
+        query — `pbs.twimg.com/media/<id>?format=jpg&name=large`, i.e. every
+        image saved from twitter — lands as a bare id with no extension, which
+        no image viewer or thumbnailer will touch. Chrome itself repairs this
+        from the Content-Type; we do the same, and only when the suggested name
+        has no plausible extension of its own, so a correctly-named download is
+        never second-guessed."""
+        name = (suggested or "").strip() or "download"
+        if _looks_like_ext(os.path.splitext(name)[1]):
+            return name
+        return name + _ext_for_mime(mime)
 
     @Slot(str, str, float, float, float)
     def progress(self, key, name, received, total, elapsed_ms=0.0):

@@ -876,6 +876,11 @@ Window {
         // see the Downloads bridge in main.py.
         onDownloadRequested: (download) => {
             download.downloadDirectory = downloadDir;
+            // BEFORE accept(): Chromium names the file from the URL path only,
+            // so a twitter image (…/media/<id>?format=jpg) arrives with no
+            // extension at all. The bridge repairs it from the Content-Type.
+            download.downloadFileName = Downloads.fileName(download.downloadFileName,
+                                                           download.mimeType);
             download.accept();
             var key = "dl" + (win.dlSeq++);
             var name = download.downloadFileName;
