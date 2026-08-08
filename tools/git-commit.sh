@@ -53,7 +53,12 @@ paths=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --hunks) mode="hunks"; shift ;;
-    -m) msg="${2:-}"; shift 2 ;;
+    # Repeated -m are PARAGRAPHS, exactly as git itself treats them (subject,
+    # body, trailer). It used to keep only the last one, so a commit written
+    # with a subject and a body landed with the BODY as its subject line.
+    -m) if [ -z "$msg" ]; then msg="${2:-}"; else msg="$msg
+
+${2:-}"; fi; shift 2 ;;
     --yes-file) yes="$yes $2"; shift 2 ;;
     --) shift; paths="$paths $*"; break ;;
     -a|-A|--all) echo "ERROR: -a stages everything and sweeps the shared index; forbidden here." >&2; usage; exit 2 ;;
@@ -64,6 +69,9 @@ done
 
 if [ -z "$msg" ]; then echo "ERROR: -m MSG is required." >&2; usage; exit 2; fi
 if [ -z "$paths" ]; then echo "ERROR: at least one path is required (never a bare commit)." >&2; usage; exit 2; fi
+# Every echo about the commit shows the SUBJECT only — a body printed into a
+# "=== committing: … ===" banner (or into a suggested command line) is noise.
+subj=$(printf '%s\n' "$msg" | head -1)
 set -- $paths
 
 # A single large uncommitted change is legitimate; the danger is a change that is
@@ -106,7 +114,7 @@ if [ "$mode" = "hunks" ]; then
 
   echo "=== will commit from the index (only your hunks): ==="
   git diff --cached --stat
-  echo "=== committing: $msg ==="
+  echo "=== committing: $subj ==="
   git commit -m "$msg"
   rc=$?
   echo "--- done. Their WIP is still in the working tree (uncommitted, unstaged). ==="
@@ -148,7 +156,7 @@ if [ -n "$flagged" ]; then
   echo " REFUSING — a pathspec commit takes the WHOLE working-tree copy, so this"
   echo " would sweep the other minister's half-finished edits into one commit."
   echo " Do one of:"
-  echo "   tools/git-commit.sh -m '$msg' --hunks -- <path>   # commit only YOUR hunks"
+  echo "   tools/git-commit.sh -m '$subj' --hunks -- <path>   # commit only YOUR hunks"
   echo "   drop the path / narrow the pathspec                # leave that file alone"
   echo "   add --yes-file <path>                              # reviewed the diff above,"
   echo "                                                     # accept the whole file"
@@ -157,7 +165,7 @@ if [ -n "$flagged" ]; then
   exit 1
 fi
 
-echo "=== committing: $msg ==="
+echo "=== committing: $subj ==="
 git commit -m "$msg" -- "$@"
 rc=$?
 if [ "$rc" -eq 0 ]; then

@@ -56,7 +56,21 @@ echo "== 4) rejects bare / -a / no -m / empty diff =="
 git reset -q --hard HEAD
 "$HC" -m x -- boardwork.py >/dev/null 2>&1 && bad "empty diff not rejected" || ok "rejects empty diff"
 
-echo "== 5) preflight still passes (lint) and exits 0 on the live tree =="
+echo "== 5) repeated -m are paragraphs, not last-one-wins =="
+# The bug: a subject + body commit landed with the BODY as its subject line.
+printf 'another line\n' >> boardwork.py
+"$HC" -m "subj: the short one" -m "the why, on its own line." \
+      -m "Co-Authored-By: X <x@y>" --yes-file boardwork.py -- boardwork.py >out5.txt 2>&1
+[ "$(git log -1 --format=%s)" = "subj: the short one" ] \
+  && ok "the subject is the FIRST -m" || bad "subject is $(git log -1 --format=%s)"
+git log -1 --format=%b | grep -q "the why, on its own line." \
+  && ok "the second -m is the body" || bad "body missing: $(git log -1 --format=%b)"
+git log -1 --format=%b | grep -q "^Co-Authored-By: X" \
+  && ok "the third is the trailer" || bad "trailer missing"
+grep -q "committing: subj: the short one ===$" out5.txt \
+  && ok "the banner shows the subject alone" || bad "banner: $(grep committing: out5.txt)"
+
+echo "== 6) preflight still passes (lint) and exits 0 on the live tree =="
 if timeout 120 "$REPO/tools/preflight.sh" >/tmp/pf-valac.log 2>&1; then
   ok "preflight exits 0"
 else
