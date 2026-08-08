@@ -49,6 +49,71 @@ Scope {
         { key: "display",    label: "display",    glyph: "ds", src: "SetPgDisplay.qml" }
     ]
     property string current: "appearance"
+
+    // ---- per-page scroll memory ------------------------------------------
+    // page key -> contentY. In-process only: the window is one process per open
+    // (see the NON-RESIDENT note above), and where you were in a settings page
+    // an hour ago is not state worth a disk write. What it fixes is the switch
+    // BETWEEN pages, which is where the position was being lost.
+    property var scrollPos: ({})
+    // Which page the loaded item belongs to, "" while the Loader is between
+    // pages. The recorder writes against this, never against `current`, so the
+    // clamp-to-0 that happens during the swap cannot be recorded as the
+    // outgoing page's position.
+    property string loadedPage: ""
+    // The position waiting to be re-applied, or -1 for "not restoring".
+    // Recording is suspended while it is set, so the settle does not overwrite
+    // what it is settling towards.
+    property real pendingY: -1
+
+    function rememberScroll() {
+        // `loadedPage !== current` IS the swap detector, and it has to be:
+        // a synchronous Loader can go Ready -> Ready without ever reporting a
+        // status change, so the obvious hook does not fire and the clamp that
+        // happens mid-swap gets recorded as the OUTGOING page's position —
+        // measured, and it defeated the whole feature (every page came back
+        // to 0). Between `current` moving and the new item announcing itself,
+        // nothing is recorded at all.
+        if (loadedPage === "" || loadedPage !== current
+                || pendingY >= 0 || scroller.contentHeight <= 0)
+            return;
+        scrollPos[loadedPage] = scroller.contentY;
+    }
+    function restoreScroll() {
+        if (pageLoader.status !== Loader.Ready)
+            return;
+        if (loadedPage !== current) {
+            root.loadedPage = current;
+            const saved = root.scrollPos[current];
+            root.pendingY = (saved === undefined) ? 0 : saved;
+            settleScroll.restart();
+        }
+        if (pendingY < 0 || scroller.contentHeight <= 0)
+            return;
+        scroller.contentY = Math.max(0, Math.min(pendingY,
+                                     scroller.contentHeight - scroller.height));
+    }
+    // Hand scrolling back to the user once the page has stopped growing.
+    Timer {
+        id: settleScroll
+        interval: 250
+        onTriggered: root.pendingY = -1
+    }
+
+    // The body scroller is private to the window's tree, and this root is a
+    // Scope — not walkable from outside, as a harness discovered the hard way.
+    // These three are how anything else asks about or drives it, and they are
+    // what `tools/settings-scroll-test.sh` uses. `page()` is the same act as a
+    // titlebar button, refusing an unknown key rather than silently landing on
+    // page one.
+    function page(key) {
+        for (const p of pages)
+            if (p.key === key) { root.current = key; return true; }
+        return false;
+    }
+    function scrollAt() { return scroller.contentY; }
+    function scrollMax() { return Math.max(0, scroller.contentHeight - scroller.height); }
+    function scrollTo(y) { scroller.contentY = Math.max(0, Math.min(y, root.scrollMax())); }
     function srcFor(k) {
         for (const p of pages) if (p.key === k) return p.src;
         return pages[0].src;
@@ -67,6 +132,20 @@ Scope {
         function toggle(): void { Qt.quit(); }
         function show(): void {}
         function hide(): void { Qt.quit(); }
+
+        // Open a page by key — the same act as a titlebar button, reachable
+        // from a keybind or a script.
+        function page(key: string): string {
+            return root.page(key) ? "ok " + key : "no such page: " + key;
+        }
+
+        // Where the body is scrolled: the settings window's answer to
+        // `qs ipc call view geom`. Read-only on purpose — nothing outside this
+        // window has any business scrolling it while he is reading it.
+        function scroll(): string {
+            return root.current + " y=" + Math.round(root.scrollAt())
+                 + " max=" + Math.round(root.scrollMax());
+        }
     }
 
     // ---- hyprvtb titlebar buttons ----------------------------------------
@@ -187,6 +266,28 @@ Scope {
                     // gutter rather than a control nearly touching the bar.
                     width: scroller.width - vscroll.barW - scroller.anchors.margins
                     source: root.srcFor(root.current)
+
+                    // Not the only restore path, deliberately: the height a
+                    // page reports the instant it loads is not always final, and
+                    // a synchronous swap may never report a status change at
+                    // all, so the contentHeight connection below re-drives this.
+                    onLoaded: root.restoreScroll()
+                }
+
+                // ONE contentY, NINE pages — the scroll position was shared, so
+                // every page switch clamped it against the new page's height and
+                // nothing ever put it back. Leaving a long page for a short one
+                // and returning left you somewhere neither page chose, which is
+                // "the settings scroll keeps getting hijacked". Each page now
+                // keeps its own place (docs/DESIGN.md §14: return the user to
+                // the exact spot they were at).
+                Connections {
+                    target: scroller
+                    function onContentYChanged() { root.rememberScroll() }
+                    // The height a page reports at Loader.onLoaded is not always
+                    // its final one — a Repeater's delegates land a frame later —
+                    // so the restore re-applies until the settle timer disarms it.
+                    function onContentHeightChanged() { root.restoreScroll() }
                 }
             }
 
