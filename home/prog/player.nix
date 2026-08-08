@@ -89,6 +89,7 @@ in
     Icon=player
     Terminal=false
     Categories=AudioVideo;Audio;Player;
+    X-GNOME-UsesNotifications=true
     Keywords=bespoke;
     MimeType=audio/flac;audio/mpeg;audio/mp4;audio/x-m4a;audio/ogg;audio/opus;audio/x-dsf;audio/x-wavpack;audio/x-ape;audio/x-aiff;audio/vnd.wave;audio/x-wav;audio/wav;audio/x-musepack;audio/x-tta;audio/x-dff;audio/x-vorbis+ogg;audio/x-opus+ogg;audio/x-flac+ogg;audio/x-speex+ogg;
   '';

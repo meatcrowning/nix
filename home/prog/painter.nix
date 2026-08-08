@@ -182,6 +182,7 @@ in
     Icon=painter
     Terminal=false
     Categories=Graphics;2DGraphics;
+    X-GNOME-UsesNotifications=true
     Keywords=bespoke;
   '';
 }
