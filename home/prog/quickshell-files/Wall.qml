@@ -47,11 +47,20 @@ Singleton {
 
     // The clusters wal-extract.py quantised the current wallpaper into —
     // bare rrggbb, dominant first, dropped ones included — published by
-    // wal-set.sh to current.clusters. Drawn by the Settings swatch row
+    // wal-set.sh to current.clusters. Drawn by the Settings swatch strip
     // (SetSwatches.qml); empty until the first theme apply writes the file.
+    //
+    // Gated on the RAW STRING changing: the poll timer below re-reads the file
+    // twice a second, and re-assigning a `var` array signals every time even
+    // when the value is identical (strings don't — the three properties above
+    // are safe bare). Unguarded, every consumer's Repeater rebuilt its
+    // delegates each tick, which swallowed any click that straddled one.
     property var clusters: []
+    property string _clustersRaw: ""
     function _setClusters(t) {
         const s = (t || "").trim();
+        if (s === root._clustersRaw) return;
+        root._clustersRaw = s;
         root.clusters = s.length ? s.split(",") : [];
     }
 
