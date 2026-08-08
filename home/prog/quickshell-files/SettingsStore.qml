@@ -293,6 +293,12 @@ Singleton {
             // by SettingsApply.qml — the native decoration.shadow stays disabled,
             // so this is the ONE shadow there is and the control cannot no-op.
             property real   shadowAlpha: 0.6
+            // How the hyprvtb outer-column title runs: "vertical" = the stacked
+            // column of upright letters (the shipped look), "horizontal" = the
+            // whole title turned 90° clockwise (read with the head tilted
+            // right). Live-applied over `hl.config` (plugin:hyprvtb:
+            // title_rotated) by SettingsApply.qml, like shadowAlpha.
+            property string titleOrientation: "vertical"
             // Which scrollbar the seven Qt apps draw (docs/DESIGN.md 9.2).
             // win31 | beveled | flat. The panel itself draws no scrollbar at
             // all — its one page never scrolls — so this key exists here purely
@@ -536,7 +542,7 @@ Singleton {
         themeMode: "auto", accentOverride: "#5c9fcc", fontFamily: "More Perfect DOS VGA",
         fontSize: 15, fontSizeByFamily: ({}), paletteColorCount: 16, pureBlackBg: true, pureBlackBgDark: true, lightMode: false,
         paletteVariant: "pastel", windowBorderWidth: 2,
-        windowRounding: 0, trayTint: true, desktopIcons: true, shadowAlpha: 0.6, scrollbarStyle: "win31",
+        windowRounding: 0, trayTint: true, desktopIcons: true, shadowAlpha: 0.6, titleOrientation: "vertical", scrollbarStyle: "win31",
         rgbFollowTheme: true, reduceMotion: false, animSpeed: 1.0,
         wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",
         wallpaperSolid: false,

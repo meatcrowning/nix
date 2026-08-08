@@ -42,15 +42,19 @@ Item {
         Quickshell.execDetached(["hyprctl", "eval", lua]);
     }
 
-    // The hyprvtb drop-shadow opacity (Settings > Appearance). Same live-config
-    // path as the input keys: `hl.config`, NOT `hyprctl keyword` (the lua parser
-    // rejects the keyword form — see wal-set.sh step 5). A config reload damages
-    // every monitor, so the shadow layer repaints at the new alpha with no window
-    // touched. Re-applied at startup so the pick survives a reboot without
-    // editing seed-once hyprland.lua.
-    function applyShadow() {
-        const v = SettingsStore.d.shadowAlpha;
-        const lua = "hl.config({plugin = { hyprvtb = { shadow_alpha = " + v + " } }})";
+    // The hyprvtb keys (Settings > Appearance): drop-shadow opacity + title
+    // orientation. Same live-config path as the input keys: `hl.config`, NOT
+    // `hyprctl keyword` (the lua parser rejects the keyword form — see
+    // wal-set.sh step 5). A config reload damages every monitor and nulls the
+    // plugin's title-texture cache, so both take effect with no window touched.
+    // Re-applied at startup so the picks survive a reboot without editing
+    // seed-once hyprland.lua.
+    function applyVtb() {
+        const d = SettingsStore.d;
+        const lua = "hl.config({plugin = { hyprvtb = { "
+            + "shadow_alpha = " + d.shadowAlpha + ", "
+            + "title_rotated = " + _b(d.titleOrientation === "horizontal")
+            + " } }})";
         Quickshell.execDetached(["hyprctl", "eval", lua]);
     }
 
@@ -77,7 +81,7 @@ Item {
         SettingsStore.loadNow();
         root._paletteSig = root._sig();
         applyInput();
-        applyShadow();
+        applyVtb();
         sunsetProbe.running = true;
     }
 
@@ -88,7 +92,8 @@ Item {
         function onPointerSpeedChanged() { root.applyInput(); }
         function onNaturalScrollChanged() { root.applyInput(); }
         function onTapToClickChanged() { root.applyInput(); }
-        function onShadowAlphaChanged() { root.applyShadow(); }
+        function onShadowAlphaChanged() { root.applyVtb(); }
+        function onTitleOrientationChanged() { root.applyVtb(); }
 
         // ---- pixel-font propagation (kitty / titlebar / kdeglobals) ----
         // The panel + Qt apps read the pick live themselves; this pushes it to
