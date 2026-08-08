@@ -61,6 +61,21 @@ let
     python3 ${./font-files/build-4x6.py} $out/share/fonts/truetype/Botis4x6.ttf
   '';
 
+  # Phenex 6x8 — the hand-authored connected-script (cursive) pixel face, the
+  # flowing counterpart to Botis's blocky one; same rule override, same
+  # no-donor provenance, same scalable-outline output for the same
+  # silent-substitution reason. Authored grid 6x8, baseline under row 5,
+  # advance 6 with ZERO side bearing so lowercase entry/exit stubs touch and
+  # words connect at the baseline like one pen stroke. Named for the goetia's
+  # poet, in Botis's demon-plus-grid pattern. Grid, metrics and the connector
+  # convention are documented in the script docstring.
+  phenex6x8 = pkgs.runCommand "phenex-6x8" {
+    nativeBuildInputs = [ (pkgs.python3.withPackages (ps: [ ps.fonttools ])) ];
+  } ''
+    mkdir -p $out/share/fonts/truetype
+    python3 ${./font-files/build-phenex-6x8.py} $out/share/fonts/truetype/Phenex6x8.ttf
+  '';
+
   # The desktop's SELECTABLE faces — the single source of truth for the
   # Settings "pixel font" dropdown (see FontFaces.qml generation below and
   # SetPgAppearance.qml). Each of these ships via the home.file installs and
@@ -74,6 +89,7 @@ let
     { family = "More Perfect DOS VGA"; label = "more perfect"; }
     { family = "Perfect DOS VGA 437"; label = "perfect dos vga 437"; }
     { family = "Botis 4x6"; label = "botis 4x6"; }
+    { family = "Phenex 6x8"; label = "phenex 6x8"; }
   ];
 
   # The Settings dropdown reads its options from a generated singleton rather
@@ -121,6 +137,11 @@ in
   # point is that it is invented here.
   home.file.".local/share/fonts/Botis4x6.ttf".source =
     "${botis4x6}/share/fonts/truetype/Botis4x6.ttf";
+
+  # The fourth face — the hand-authored cursive script (see the derivation
+  # comment above). Same selectable-face pattern as the other three.
+  home.file.".local/share/fonts/Phenex6x8.ttf".source =
+    "${phenex6x8}/share/fonts/truetype/Phenex6x8.ttf";
 
   # Generated singleton the Settings "pixel font" dropdown reads its options
   # from (SetPgAppearance.qml -> FontFaces). Built from `selectableFaces` above,
@@ -188,6 +209,27 @@ in
       </match>
       <match target="font">
         <test name="family"><string>Botis 4x6</string></test>
+        <edit name="embolden" mode="assign"><bool>false</bool></edit>
+      </match>
+    </fontconfig>
+  '';
+
+  # Phenex 6x8 ships Regular-only like the other three, so it gets the same
+  # guard: pin any request for it to upright regular and kill synthetic
+  # emboldening — a faux-bold or oblique shear would smear the connected
+  # baseline stroke that makes it read as cursive at all.
+  xdg.configFile."fontconfig/conf.d/50-phenex-6x8-regular.conf".text = ''
+    <?xml version="1.0"?>
+    <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+    <fontconfig>
+      <match target="pattern">
+        <test name="family"><string>Phenex 6x8</string></test>
+        <edit name="weight"   mode="assign"><const>regular</const></edit>
+        <edit name="slant"    mode="assign"><const>roman</const></edit>
+        <edit name="embolden" mode="assign"><bool>false</bool></edit>
+      </match>
+      <match target="font">
+        <test name="family"><string>Phenex 6x8</string></test>
         <edit name="embolden" mode="assign"><bool>false</bool></edit>
       </match>
     </fontconfig>
