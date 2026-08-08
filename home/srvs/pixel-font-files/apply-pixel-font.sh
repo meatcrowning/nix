@@ -69,7 +69,15 @@ pkill -USR1 -x kitty >/dev/null 2>&1 || true
 # the raw pick size is used here. Set via the running compositor; re-applied at
 # each login by the autostart call, so it survives a restart without touching
 # the seed-once hyprland.lua.
+#
 hyprctl eval "hl.config({ plugin = { hyprvtb = { [\"font\"] = \"$FAMILY\", [\"font_size\"] = $SIZE } } })" >/dev/null 2>&1 || true
+# refresh_fonts AFTER the family set (plugin >= 3.19): pango caches the
+# process's font map, so a face INSTALLED after the compositor started
+# (Phenex, 2026-08-08) never appeared on the bars — the pick silently fell
+# back. The refresh re-reads fontconfig AND flushes every bar's cached
+# textures (a font config change alone never invalidates them), so the bars
+# repaint in the new face immediately.
+hyprctl eval "hl.plugin.hyprvtb.refresh_fonts()" >/dev/null 2>&1 || true
 
 # ---- 3. KDE/Qt system font (kdeglobals) ------------------------------------
 # Same writer wal-set.sh uses for the colour groups; only the font role lines

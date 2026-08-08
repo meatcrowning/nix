@@ -902,6 +902,25 @@ static int luaClosePid(lua_State* L) {
     return 0;
 }
 
+// lua: hyprvtb.refresh_fonts() — re-read fontconfig and rebuild pango's font
+// map (vtbRefreshFontMap), then flush every bar's cached textures and damage
+// them, so a font installed AFTER the compositor started shows up on the bars
+// without a plugin hot-swap. The flush matters as much as the refresh: a
+// `font` config change alone never invalidates m_pTitleTex (only
+// title/runlen/scale do), so without it the bars keep drawing the old
+// family's textures and the new face is never even looked up. Called by
+// apply-pixel-font.sh AFTER it pushes the new family.
+static int luaRefreshFonts(lua_State*) {
+    vtbRefreshFontMap();
+    if (g_pGlobalState) {
+        for (auto& b : g_pGlobalState->bars) {
+            if (b)
+                b->onConfigReloaded();
+        }
+    }
+    return 0;
+}
+
 // The last window rolled up through the no-arg keybind path, so a second press
 // of the same key un-shades it: a rolled window is hidden and can't be the
 // active window, so the toggle can't find it through focus — we remember it.
@@ -1626,6 +1645,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // with `hyprctl eval "hl.plugin.hyprvtb.<fn>()"`, keybinds with
     // `hl.plugin.hyprvtb.<fn>()` directly. See PORTING.md.
     if (Hl::luaConfig()) {
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "refresh_fonts", ::luaRefreshFonts);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "minimize_active", ::luaMinimizeActive);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "toggle_maximize_active", ::luaToggleMaximizeActive);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "close_active", ::luaCloseActive);
@@ -1698,7 +1718,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / program icon / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.17"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / program icon / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.19"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

@@ -53,11 +53,19 @@ let
   # SMOOTH face: the `smooth` flag below drives antialiased rendering in
   # PixelText/deskstyle (a smooth face under the pixel pipeline is a jagged
   # staircase). Skeletons, joins and metrics: the script docstring.
+  # Two stages: FontForge draws and strokes the glyphs (incl. the .a1/.a2/.fin
+  # lowercase variants); fontTools then compiles the `calt` feature that
+  # cycles the alternates and substitutes word-final forms — FontForge's own
+  # python cannot host feaLib, hence the split.
   phenex = pkgs.runCommand "phenex" {
-    nativeBuildInputs = [ pkgs.fontforge ];
+    nativeBuildInputs = [
+      pkgs.fontforge
+      (pkgs.python3.withPackages (ps: [ ps.fonttools ]))
+    ];
   } ''
     mkdir -p $out/share/fonts/truetype
-    fontforge -lang=py -script ${./font-files/build-phenex.py} \
+    fontforge -lang=py -script ${./font-files/build-phenex.py} --draw base.ttf
+    python3 ${./font-files/build-phenex.py} --features base.ttf \
       $out/share/fonts/truetype/Phenex.ttf
   '';
 
