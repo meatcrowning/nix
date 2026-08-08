@@ -70,7 +70,16 @@ pkill -USR1 -x kitty >/dev/null 2>&1 || true
 # each login by the autostart call, so it survives a restart without touching
 # the seed-once hyprland.lua.
 #
-hyprctl eval "hl.config({ plugin = { hyprvtb = { [\"font\"] = \"$FAMILY\", [\"font_size\"] = $SIZE } } })" >/dev/null 2>&1 || true
+# font_smooth (plugin >= 3.21) rides along with the family: a smooth face
+# (Phenex) must NOT get the plugin's hardcoded cairo ANTIALIAS_NONE — that
+# option outranks the face's fontconfig AA rule, so the cursive rendered as a
+# staircase on the bars. The flag comes from the generated font-faces.json
+# (font.nix selectableFaces), never a family name hardcoded here.
+SMOOTH=false
+FACES="$CONFIG/quickshell/font-faces.json"
+[ -f "$FACES" ] && SMOOTH="$(jq -r --arg f "$FAMILY" '.[$f].smooth // false' "$FACES" 2>/dev/null)"
+case "$SMOOTH" in true|false) ;; *) SMOOTH=false ;; esac
+hyprctl eval "hl.config({ plugin = { hyprvtb = { [\"font\"] = \"$FAMILY\", [\"font_size\"] = $SIZE, [\"font_smooth\"] = $SMOOTH } } })" >/dev/null 2>&1 || true
 # refresh_fonts AFTER the family set (plugin >= 3.19): pango caches the
 # process's font map, so a face INSTALLED after the compositor started
 # (Phenex, 2026-08-08) never appeared on the bars — the pick silently fell

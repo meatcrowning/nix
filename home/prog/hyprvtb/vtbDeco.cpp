@@ -541,8 +541,14 @@ SP<Render::ITexture> CVtbDeco::renderStackedTex(const std::string& text, int run
     auto SURF = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, BARW, runLenPx);
     auto CR   = cairo_create(SURF);
 
+    // Pixel faces are forced mono — but only pixel faces: an explicit cairo
+    // ANTIALIAS_NONE outranks the face's own fontconfig rule, so a smooth face
+    // (font_smooth, i.e. Phenex) leaves the options at DEFAULT and fontconfig's
+    // grayscale-AA/no-hinting pin decides — measured, NONE turned the cursive
+    // into a staircase on the bars while every other surface antialiased it.
     cairo_font_options_t* fo = cairo_font_options_create();
-    cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_NONE);
+    if (!Vtb::Cfg::fontSmooth())
+        cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_NONE);
 
     PangoLayout* layout = pango_cairo_create_layout(CR);
     pango_cairo_context_set_font_options(pango_layout_get_context(layout), fo);
@@ -659,8 +665,10 @@ SP<Render::ITexture> CVtbDeco::renderRotatedTex(const std::string& text, int run
     auto SURF = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, BARW, runLenPx);
     auto CR   = cairo_create(SURF);
 
+    // mono for pixel faces only — see renderStackedTex for the rule
     cairo_font_options_t* fo = cairo_font_options_create();
-    cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_NONE);
+    if (!Vtb::Cfg::fontSmooth())
+        cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_NONE);
 
     // user -> device: the reading direction runs DOWN the bar, line height
     // from the right edge leftward — the whole line turned 90° clockwise.

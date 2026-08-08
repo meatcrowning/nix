@@ -1466,6 +1466,13 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pGlobalState->config.fontSize          = makeShared<Config::Values::CIntValue>("plugin:hyprvtb:font_size", "Text size in px", 15);
     g_pGlobalState->config.maximizeGap       = makeShared<Config::Values::CIntValue>("plugin:hyprvtb:maximize_gap", "Extra margin kept around a maximized window", 0);
     g_pGlobalState->config.font              = makeShared<Config::Values::CStringValue>("plugin:hyprvtb:font", "Titlebar font", "More Perfect DOS VGA");
+    // Whether that font is a smooth outline face (Phenex) rather than a pixel
+    // one. A smooth face keeps its fontconfig rasterisation (grayscale AA, no
+    // hinting) instead of the forced ANTIALIAS_NONE the pixel faces get —
+    // cairo's explicit option outranks fontconfig, so without this flag the
+    // cursive rendered as a staircase on the bars. Set alongside `font` by
+    // apply-pixel-font.sh from the generated font-faces.json.
+    g_pGlobalState->config.fontSmooth        = makeShared<Config::Values::CBoolValue>("plugin:hyprvtb:font_smooth", "Titlebar font is a smooth (antialiased) face, not a pixel one", false);
     g_pGlobalState->config.bgColor           = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:bg_color", "Bar background", 0xff000000);
     g_pGlobalState->config.bgAltColor        = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.bg_alt", "Hovered button fill", 0xff080e12);
     g_pGlobalState->config.textColor         = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.text", "Title / glyph colour", 0xff3f6d8c);
@@ -1508,6 +1515,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.fontSize);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.maximizeGap);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.font);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.fontSmooth);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.bgColor);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.bgAltColor);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.textColor);
@@ -1724,7 +1732,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / program icon / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.20"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / program icon / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.21"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
