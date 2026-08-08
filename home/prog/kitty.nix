@@ -35,6 +35,14 @@
   # behaviour until they are restarted.
   xdg.configFile."kitty/notifications.py".source = ./kitty-files/notifications.py;
 
+  # Splits-layout drag fix: kitty.conf's `watcher` line loads this into every
+  # kitty process, where it monkeypatches Splits.drag_resize_window so a
+  # border drag moves only the grabbed handle (see the file's header). Like
+  # notifications.py it is not followed by `kitten __watch_conf__`, so a plain
+  # store symlink is safe. Both hosts — book's Fedora kitty reads the same
+  # config dir, which is why this is a watcher and not a package patch.
+  xdg.configFile."kitty/free-handles.py".source = ./kitty-files/free-handles.py;
+
   # Startup session: a background launch of the hyprvtb titlebar-button client
   # (~/nix/apps/pylib/kitty-vtb.py, run from the live repo) plus the normal shell
   # window. See the startup_session note in kitty.conf.
