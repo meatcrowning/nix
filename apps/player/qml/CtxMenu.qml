@@ -18,7 +18,21 @@ Item {
 
     property var items: []
 
+    // WHOEVER HAD THE KEYBOARD GETS IT BACK. Opening the menu has to take the
+    // active focus — that is how Escape and the outside-click reach the sink
+    // below — so the item it was taken from is remembered and handed it back on
+    // close. Without this, every row that edits a text box acted on an editor
+    // the keyboard was no longer pointed at: `select all` in painter's prompt
+    // box selected the text, drew it selected, and then Backspace did nothing
+    // at all, because the keystroke had nowhere to land.
+    //
+    // Restoring BEFORE the row's trigger runs (see rowMa below) is deliberate:
+    // a trigger that wants the focus somewhere else — an inline rename, a
+    // dialog — just takes it, and wins by running last.
+    property Item prevFocus: null
+
     function open(x, y, list) {
+        root.prevFocus = root.Window.activeFocusItem;
         root.items = list || [];
         panel.x = x;
         panel.y = y;
@@ -30,6 +44,11 @@ Item {
     function close() {
         root.visible = false;
         root.items = [];
+        // The property is typed `Item`, so a focus holder destroyed while the
+        // menu was open reads back as null rather than as a dangling pointer.
+        if (root.prevFocus)
+            root.prevFocus.forceActiveFocus();
+        root.prevFocus = null;
     }
 
     // outside-click / right-click scrim: dismiss and swallow the event so it
