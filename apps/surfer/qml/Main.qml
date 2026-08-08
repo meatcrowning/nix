@@ -1388,8 +1388,9 @@ Window {
             // divider
             Rectangle { width: parent.width; height: 1; color: Theme.border }
 
-            // system font: force the desktop pixel font on this site's text
-            // (family only; per-site, combines with dark mode).
+            // system font: the desktop font family forced on page text —
+            // GLOBAL by default, this row is the per-site exception (family
+            // only; combines with dark mode). checked = active on this site.
             Item {
                 width: parent.width
                 height: 22

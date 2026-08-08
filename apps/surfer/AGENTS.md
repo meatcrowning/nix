@@ -498,8 +498,14 @@ The style it carries has three parts (all computed by `DarkMode`):
   `docs/DESIGN.md` §16's family-only settlement. Rasterisation parity comes
   from the faces' fontconfig pins, which Chromium honours.
 - **the dark filter** (global toggle, per-site exceptions), top frame only;
-- **the per-site system-font force** (family only + `font-synthesis:none`,
-  never sizes — the full reskin was retracted, `ad868e4` / DESIGN.md §16).
+- **the system-font force** — the desktop family imposed on page text so ALL
+  of a page reads in the pick, not just the runs a site left unstyled.
+  GLOBAL with per-site exceptions (`fontOff`, dark mode's whitelist shape;
+  it was opt-in per-site until 2026-08-08 — his: the inherit layer alone
+  *"fails to capture all the text in a given webpage"*). Family only +
+  `font-synthesis:none`, never sizes — the full reskin was retracted,
+  `ad868e4` / DESIGN.md §16 — and icon-font elements (`_ICON_CARVE`) are
+  excluded by class so pictogram fonts don't render as tofu.
 
 The plumbing:
 

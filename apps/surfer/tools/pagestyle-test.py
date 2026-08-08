@@ -25,8 +25,9 @@ courier, points it at a local http server, and asserts:
   5. FONT INHERIT: unstyled page text takes the desktop face at the desktop
      size, a page's own font styling beats the layer, and a subframe gets the
      fonts-only body — the face, never the dark filter (no double-invert);
-  6. FORCE: opting the site into the system-font override imposes the family
-     over the page's own styling while its font-size survives (family only).
+  6. FORCE: the system-font force (GLOBAL by default, per-site exceptions)
+     imposes the family over the page's own styling while its font-size
+     survives (family only), and icon-font elements are carved out.
 
 Deliberately only the page-style courier is installed here — cosmetic
 ad-blocking has its own harness (cosmetic-test.py) and must not interfere.
@@ -74,6 +75,7 @@ INDEX = b"""<!doctype html><html><head><title>t</title>
 <div id="probe" style="background:#fff">content</div>
 <p id="u">unstyled text</p>
 <p id="s" style="font-family:serif;font-size:20px">page-styled text</p>
+<span id="ic" class="material-icons" style="font-family:'Material Icons'">star</span>
 <iframe id="fr" src="/f.html"></iframe>
 <script src="/app.js"></script>
 </body></html>"""
@@ -191,6 +193,10 @@ def main():
     dm.setEnabled(True)          # on, 100/100 — a hostless file:// has no host,
     dm.setBrightness(100)        # so serve over loopback where isSiteEnabled true
     dm.setContrast(100)
+    # The system-font force is GLOBAL by default; except this host so phases
+    # 0-3 exercise the inherit layer alone. Phase 4 un-excepts it to test the
+    # force. The default itself is asserted in phase4b (isSystemFontSite).
+    dm.toggleSystemFontSite("http://127.0.0.1/")
     ps = surfer.PageStyle(app)
     handler = surfer.PageStyleHandler(dm, app)
     cosinject = surfer.CosmeticInjector(StubCosmetic(app), app)
@@ -290,27 +296,35 @@ def main():
         read_title()
         check("disabling dark mode strips the theme from an open page (filter 'none')",
               (out.get("late") or "x") == "none")
-        # phase 4: the per-site FORCE — family imposed over the page's own
-        # styling, the page's size kept (family only, DESIGN.md 16)
+        # phase 4: the FORCE (global by default; this host was excepted at
+        # setup, so un-excepting it restores the default state) — family
+        # imposed over the page's own styling, the page's size kept (family
+        # only, DESIGN.md 16), icon-font elements carved out.
         dm.toggleSystemFontSite(base)
         view.runJavaScript("window.__surferPageStyleRefresh()", lambda r: None)
         QTimer.singleShot(400, phase4)
 
     def phase4():
         view.runJavaScript(
-            "document.title=JSON.stringify({s:(function(){"
-            "var c=getComputedStyle(document.getElementById('s'));"
-            "return c.fontFamily+'|'+c.fontSize;})()});",
+            "document.title=JSON.stringify((function(){"
+            "function cs(id){var c=getComputedStyle(document.getElementById(id));"
+            "return c.fontFamily+'|'+c.fontSize;}"
+            "return {s:cs('s'),ic:cs('ic')};})());",
             lambda r: None)
         QTimer.singleShot(400, phase4b)
 
     def phase4b():
         read_title()
-        check("per-site force imposes the family but keeps the page's size",
+        check("the force is GLOBAL by default (an un-excepted host is on)",
+              dm.isSystemFontSite("http://somewhere-never-toggled.example/"))
+        check("force imposes the family but keeps the page's size",
               "More Perfect DOS VGA" in (out.get("s") or "")
               and "20px" in (out.get("s") or ""))
+        check("icon-font elements are carved out of the force",
+              "More Perfect DOS VGA" not in (out.get("ic") or "ERR")
+              and "Material Icons" in (out.get("ic") or ""))
         print("probe:", json.dumps(out, sort_keys=True))
-        n = 11
+        n = 13
         print("%d/%d checks passed" % (n - len(fails), n))
         app.quit()
 
