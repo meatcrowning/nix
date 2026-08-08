@@ -406,7 +406,7 @@ Window {
             PixelText {
                 visible: !parent.text && !parent.activeFocus
                 anchors.verticalCenter: parent.verticalCenter
-                text: "search…"
+                text: "search..."
                 color: Theme.dim
             }
         }
