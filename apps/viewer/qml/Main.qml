@@ -35,6 +35,38 @@ Window {
     // Focus-aware foreground, in lock-step with the titlebar (see filer).
     readonly property bool act: win.active
 
+    Motion { id: motion }
+
+    // ---- nothing plays until the window has finished appearing ----
+    // hyprvtb reveals a freshly-mapped window in two beats: the titlebar fades
+    // in (VTB_FADE_DURATION, 160ms in vtbDeco.cpp) and then the window rolls out
+    // from behind it (plugin:hyprvtb:slide_duration_ms). A clip that autoplayed
+    // at map time was already most of a second in — with its audio — behind a
+    // window still unrolling, which is the thing this exists to stop.
+    //
+    // Deliberately NOT `motion.ms()`: that scales by the PANEL's animSpeed and
+    // zeroes under reduceMotion, and what is being waited on here is the
+    // COMPOSITOR's own animation, which neither setting touches. `slideMs` is
+    // hyprvtb's published number (qmlcommon/Motion.qml), so retuning the key
+    // moves this with it.
+    readonly property int revealMs: motion.slideMs + 160
+    property bool revealed: false
+    Timer {
+        interval: win.revealMs
+        running: true
+        onTriggered: win.revealed = true
+    }
+
+    // ---- mute, remembered across sessions ----
+    // The `mu` titlebar toggle. It is the WINDOW's, not a pane's: the panes
+    // already mute themselves when they are not the focused one, and a per-pane
+    // mute would mean four answers to "is this window making noise".
+    property bool muted: Prefs.muted
+    function toggleMuted() {
+        muted = !muted;
+        Prefs.setMuted(muted);
+    }
+
     // ---- panes ----
     // One row per pane; `idx` is its position in `images`. Bumped `paneRev`
     // re-evaluates anything reading paneRep.itemAt() (a Repeater's items are not
@@ -277,6 +309,10 @@ Window {
                   tip: current.videoPlaying ? "pause" : "play" },
                 { id: "prev",  label: "‹", state: multi, tip: "previous" },
                 { id: "next",  label: "›", state: multi, tip: "next" },
+                // Lit means muted — an active toggle inverts (docs/DESIGN.md
+                // §12.1). Only on a video: a still has nothing to silence.
+                { id: "mute",  label: "mu", state: win.muted ? 1 : 0,
+                  tip: win.muted ? "unmute" : "mute" },
             ].concat(split, [{ id: "close", label: "×", state: 0, tip: "close" }]);
         }
         return [
@@ -351,6 +387,7 @@ Window {
             case "prev":      win.prev();                    break;
             case "next":      win.next();                    break;
             case "playpause": if (win.current) win.current.togglePlay();   break;
+            case "mute":      win.toggleMuted();             break;
             case "zoomout":   if (win.current) win.current.zoomBy(0.8);    break;
             case "zoomin":    if (win.current) win.current.zoomBy(1.25);   break;
             case "fit":       if (win.current) win.current.fit();          break;
@@ -470,6 +507,8 @@ Window {
                     anchors.fill: parent
                     winActive: win.active
                     paneFocused: pane.focused
+                    canPlay: win.revealed
+                    appMuted: win.muted
                     source: (pane.idx >= 0 && pane.idx < win.images.length)
                             ? ("file://" + encodeURI(win.images[pane.idx].path)) : ""
                     name: (pane.idx >= 0 && pane.idx < win.images.length)

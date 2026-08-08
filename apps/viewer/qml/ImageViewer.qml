@@ -27,6 +27,12 @@ Rectangle {
     property string name: ""       // basename, for the "can't display" card
     property bool winActive: true
     property bool paneFocused: true
+    // False until the compositor has finished revealing the window (Main.qml):
+    // a clip that autoplays at map time is already seconds in, with its audio,
+    // behind a window that is still rolling out.
+    property bool canPlay: true
+    // The window's mute toggle (titlebar `mu`), remembered across sessions.
+    property bool appMuted: false
 
     // the wheel zoomed this pane — Main.qml moves the chrome here
     signal focusRequested()
@@ -48,6 +54,9 @@ Rectangle {
             || s.endsWith(".3gp") || s.endsWith(".m2ts");
     }
     readonly property bool videoPlaying:  player.playbackState === MediaPlayer.PlayingState
+    // Is this pane making a sound? Both reasons folded into one answer, for the
+    // chrome and for tools/video-test.py.
+    readonly property bool silent:        audioOut.muted
     readonly property int  videoPosition: player.position
     readonly property int  videoDuration: player.duration
 
@@ -197,15 +206,29 @@ Rectangle {
     // folder like the images do. Audio plays through the default output — but
     // only for the FOCUSED pane: a split full of clips would otherwise mix
     // every soundtrack together, and the titlebar can only pause one of them.
-    AudioOutput { id: audioOut; muted: !viewer.paneFocused }
+    AudioOutput {
+        id: audioOut
+        // Two independent reasons to be silent: this is not the focused pane
+        // (four clips would be four soundtracks), or the window is muted.
+        muted: !viewer.paneFocused || viewer.appMuted
+    }
     MediaPlayer {
         id: player
         source: viewer.isVideo ? viewer.source : ""
         videoOutput: videoOut
         audioOutput: audioOut
         loops: MediaPlayer.Infinite
-        // autoplay on load / on flipping to a new clip
-        onSourceChanged: if (viewer.isVideo && source != "") play()
+        // autoplay on load / on flipping to a new clip — but never before the
+        // window has finished appearing (see `canPlay`).
+        onSourceChanged: if (viewer.isVideo && source != "" && viewer.canPlay) play()
+    }
+    // ...and the moment it has, start whatever was waiting. Only from the
+    // false->true edge, which happens once per window: a later change of mind
+    // about playing is the user's, and this must not overrule it.
+    onCanPlayChanged: {
+        if (canPlay && isVideo && player.source != ""
+                && player.playbackState !== MediaPlayer.PlayingState)
+            player.play();
     }
     VideoOutput {
         id: videoOut
