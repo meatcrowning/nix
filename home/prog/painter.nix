@@ -17,6 +17,10 @@
 #     PATH at all any more — `pylib/clipfile.py` is stdlib-only and owns the
 #     selection itself, because wl-copy can offer only one mime type and a file
 #     paste needs two (apps/AGENTS.md → pylib).
+#   * libnotify on PATH — a generation that finishes behind a rolled-up or
+#     unfocused window is announced with a desktop toast carrying its
+#     thumbnail, and painter is launched from a .desktop entry / the runner,
+#     whose PATH need not carry the profile dirs. book takes Fedora's.
 #   * qtmultimedia — the preview viewport plays clips (looped and muted) as well
 #     as showing stills, the same QtMultimedia surface viewer uses, including
 #     its NVDEC pin: Qt's ffmpeg backend probes VAAPI first and top's VAAPI
@@ -99,7 +103,7 @@ let
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/painter \
             --add-flags /home/lam/nix/apps/painter/main.py \
-            --prefix PATH : ${lib.makeBinPath [ pkgs.ffmpeg ]} \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.ffmpeg pkgs.libnotify ]} \
             --set-default QT_FFMPEG_DECODING_HW_DEVICE_TYPES cuda \
             --set-default SPELL_HUNSPELL ${pkgs.hunspell}/bin/hunspell \
             --set-default SPELL_DICPATH ${pkgs.hunspellDicts.en_US}/share/hunspell \

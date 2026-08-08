@@ -408,6 +408,13 @@ def is_muted_copy(path) -> bool:
     return p.suffix.lower() in VIDEO_SUFFIXES and p.stem.endswith(MUTED_TAG)
 
 
+def _clock_text(seconds) -> str:
+    """m:ss — the queue bar's own clock, so the completion toast reports a run
+    in the same shape the window does ("took 1:23" / "completed in 1:23")."""
+    s = max(0, int(seconds))
+    return "%d:%02d" % (s // 60, s % 60)
+
+
 class LivePreview(QQuickImageProvider):
     """The sampler's own preview frames, handed to QML without touching disk.
 
@@ -436,6 +443,10 @@ class Gallery(QAbstractListModel):
     PosterRole = Qt.UserRole + 5
 
     countChanged = Signal()
+    # A clip's poster frame landed: (the clip, the .jpg). The completion toast
+    # waits on this — QML cannot decode an mp4, so a clip's toast thumbnails the
+    # poster and points the click at the video (docs/DESIGN.md §8.1).
+    posterReady = Signal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -596,7 +607,18 @@ class Gallery(QAbstractListModel):
                               "-i", path, "-frames:v", "1",
                               "-vf", "scale=420:-1", str(dest)])
 
+    def poster_ready(self, path):
+        """The poster frame this clip ALREADY has, or "" while one is still
+        being made (or cannot be). Never starts an extraction — the caller is
+        asking what exists, not asking for one; `_want_poster` is that."""
+        try:
+            dest = self._poster_path(path)
+        except OSError:
+            return ""
+        return str(dest) if dest.exists() else ""
+
     def _poster_ready(self, path, dest):
+        self.posterReady.emit(str(path), str(dest))
         for i, r in enumerate(self._rows):
             if r["path"] == path:
                 r["poster"] = QUrl.fromLocalFile(str(dest)).toString()
@@ -705,6 +727,19 @@ class Painter(QObject):
         self._collage_lock = threading.Lock()
         self._collage_jobs = {}
 
+        # A batch he is not watching finishes as a desktop toast (see
+        # `_maybe_notify`). The window is what decides that, so main() hands it
+        # over once it exists; None means "no window yet", and a run with no
+        # window toasts nothing at all — which is also what keeps every harness
+        # off his screen.
+        self.window = None
+        self._batch_start = 0.0           # when the batch in flight was asked for
+        self._batch_elapsed = 0.0         # ...and what it took, once it is over
+        self._batch_saved = []            # the outputs it has written so far
+        self._batch_pending = 0           # downloads still in the air
+        self._batch_toasted = False       # this batch has had its one toast
+        self._pending_toast = None        # a clip toast waiting on its poster
+
         self.reg = None
         self.client = C.ComfyClient()
         self.client.statusChanged.connect(self._on_queue)
@@ -715,6 +750,7 @@ class Painter(QObject):
         self.client.jobFinished.connect(self._on_finished)
         self.client.jobFailed.connect(self._on_failed)
         self.client.connected.connect(self._on_ws_connected)
+        self.gallery.posterReady.connect(self._on_poster)
 
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         self.gallery.load_existing()
@@ -1441,6 +1477,14 @@ class Painter(QObject):
         self.client.upload_image(path, uploaded)
 
     def _start_jobs(self, entry, params, count):
+        if self._jobs == 0:
+            # A fresh batch. Its clock starts HERE and not at the last job's own
+            # start: four images asked for in one press are one wait to the
+            # person who pressed it, and the toast at the end reports that wait.
+            self._batch_start = time.time()
+            self._batch_saved = []
+            self._batch_pending = 0
+            self._batch_toasted = False
         base = dict(params)
         base["loras"] = self.loras.active()
         seed = int(base.get("seed", 0))
@@ -1472,6 +1516,12 @@ class Painter(QObject):
     def cancel(self):
         self.client.cancel_all()
         self._jobs = 0
+        # A cancelled batch has nothing to announce, and nothing of its may
+        # leak into the next one's toast.
+        self._batch_toasted = True
+        self._batch_saved = []
+        self._batch_pending = 0
+        self._pending_toast = None
         self._busy = False
         self._clock.stop()
         self._progress = 0.0
@@ -1536,27 +1586,37 @@ class Painter(QObject):
 
         def save_one(img):
             def got(data):
-                if not data:
-                    return
-                # Only a PNG can carry the job that made it. A video goes down
-                # verbatim — SaveVideo has already written ComfyUI's own graph
-                # into its container metadata — and keeps the subfolder the
-                # backend filed it under (video/), which is where the gallery
-                # looks for it.
-                if str(img["filename"]).lower().endswith(".png"):
-                    try:
-                        data = pngmeta.upsert_text(
-                            data, pngmeta.describe(job.meta.get("params", {}),
-                                                   job.meta.get("pairing")))
-                    except ValueError:
-                        pass
-                dest = OUT_DIR / (img.get("subfolder") or "") / img["filename"]
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(data)
-                self.gallery.add(str(dest))
+                # The toast at the end of the batch carries a thumbnail, so it
+                # cannot be sent until the file it points at is on disk. Every
+                # exit from here — no data, a write that failed — decrements,
+                # or a batch that lost one download would never toast at all.
+                try:
+                    if not data:
+                        return
+                    # Only a PNG can carry the job that made it. A video goes down
+                    # verbatim — SaveVideo has already written ComfyUI's own graph
+                    # into its container metadata — and keeps the subfolder the
+                    # backend filed it under (video/), which is where the gallery
+                    # looks for it.
+                    if str(img["filename"]).lower().endswith(".png"):
+                        try:
+                            data = pngmeta.upsert_text(
+                                data, pngmeta.describe(job.meta.get("params", {}),
+                                                       job.meta.get("pairing")))
+                        except ValueError:
+                            pass
+                    dest = OUT_DIR / (img.get("subfolder") or "") / img["filename"]
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_bytes(data)
+                    self.gallery.add(str(dest))
+                    self._batch_saved.append(str(dest))
+                finally:
+                    self._batch_pending = max(0, self._batch_pending - 1)
+                    self._maybe_notify()
 
             self.client.download(img, got)
 
+        self._batch_pending += len(pending)
         for img in pending:
             save_one(img)
 
@@ -1571,11 +1631,17 @@ class Painter(QObject):
             # leaves a time behind rather than a blank.
             wall = max(0.0, time.time() - self._job_start) if self._job_start else 0.0
             self._last_elapsed = job.duration or wall
+            # What the TOAST reports: the whole batch, measured from the press.
+            self._batch_elapsed = (max(0.0, time.time() - self._batch_start)
+                                   if self._batch_start else self._last_elapsed)
             self.previewChanged.emit()
             self.busyChanged.emit()
         took = f" in {job.duration:.1f}s" if job.duration else ""
         self.toast.emit(f"done{took}", False)
         self.statusChanged.emit()
+        # A job with no images at all reaches zero here rather than in a
+        # download callback, so the last word on the batch is asked for twice.
+        self._maybe_notify()
 
     def _on_failed(self, _job, message):
         self._jobs = max(0, self._jobs - 1)
@@ -1584,8 +1650,107 @@ class Painter(QObject):
             self._clock.stop()
             self.previewChanged.emit()
             self.busyChanged.emit()
+            # One toast per batch, and a failure is the one it gets: the
+            # outputs that DID land are still in the gallery, but "generation
+            # failed" is the thing he needs to come back for.
+            if not self._batch_toasted:
+                self._batch_toasted = True
+                self._batch_saved = []
+                self._post_toast("", "", "generation failed",
+                                 message.split("\n")[0][:200], urgent=True)
         self.toast.emit(message.split("\n")[0][:200], True)
         self.statusChanged.emit()
+
+    # -- the toast for a batch he is not watching ---------------------------
+
+    # How long a finished CLIP waits for its poster frame before its toast goes
+    # out without a thumbnail. The gallery starts extracting one the moment it
+    # takes the clip; ffmpeg pulling a single frame is fast, and a toast that
+    # arrives late is worse than one that arrives plain.
+    POSTER_WAIT_MS = 8000
+
+    def _onscreen(self):
+        """Can he see this window right now?
+
+        Two states say he cannot, and each is his own doing: another window has
+        the keyboard (unfocused), or the surface is not on screen at all —
+        `isExposed()` is false for a window rolled up, minimised or on another
+        workspace, because a compositor sends no frame callbacks to a surface
+        nobody can see. That is the same test viewer refuses a handoff on
+        (pylib/handoff.py), and the only one hyprvtb's roll-up is visible
+        through: the plugin tells an app when it is UN-hidden (vtbclient's
+        WAKE), never when it is rolled away.
+
+        No window means no toast — a headless run has nobody to interrupt.
+        """
+        win = self.window
+        if win is None:
+            return True
+        try:
+            return bool(win.isActive() and win.isExposed())
+        except (RuntimeError, AttributeError):
+            return True
+
+    def _maybe_notify(self):
+        """One toast per batch, once every job is done AND every output it made
+        is on disk. Called from both ends — the last download to land and the
+        last job to finish — because either can be the one that finishes it."""
+        if self._batch_toasted or self._jobs or self._batch_pending:
+            return
+        if not self._batch_saved:
+            return
+        paths, self._batch_saved = self._batch_saved, []
+        self._batch_toasted = True
+        newest = paths[-1]
+        name = Path(newest).name
+        summary = "completed in " + _clock_text(self._batch_elapsed)
+        body = name if len(paths) == 1 else "%d outputs, newest %s" % (len(paths), name)
+        if Path(newest).suffix.lower() in VIDEO_SUFFIXES:
+            # A clip thumbnails its poster frame and opens the video itself
+            # (docs/DESIGN.md §8.1). The gallery is already extracting one.
+            poster = self.gallery.poster_ready(newest)
+            if poster:
+                self._post_toast(poster, newest, summary, body)
+                return
+            self._pending_toast = (newest, summary, body)
+            QTimer.singleShot(self.POSTER_WAIT_MS, lambda: self._flush_toast(""))
+            return
+        self._post_toast(newest, newest, summary, body)
+
+    def _on_poster(self, path, dest):
+        if self._pending_toast and self._pending_toast[0] == path:
+            self._flush_toast(dest)
+
+    def _flush_toast(self, poster):
+        """Send the clip toast that was waiting on a poster frame — with the
+        thumbnail if it landed, without it if the wait ran out. Whichever
+        arrives first takes the pending toast with it, so it goes out once."""
+        wait, self._pending_toast = self._pending_toast, None
+        if wait is None:
+            return
+        path, summary, body = wait
+        self._post_toast(poster, path, summary, body)
+
+    def _post_toast(self, thumb, open_path, summary, body, urgent=False):
+        """Put one toast on the panel's notification server — and only if he is
+        still elsewhere. The check is here rather than at the call sites so it
+        is made at the last possible moment: a clip's toast can be a few seconds
+        behind its batch, and coming back to the window in the meantime is
+        exactly the case that should cancel it."""
+        if self._onscreen():
+            return
+        args = ["notify-send", "-a", "painter"]
+        if thumb:
+            args += ["-h", "string:x-download-image:" + str(thumb)]
+        if open_path and str(open_path) != str(thumb):
+            args += ["-h", "string:x-open-path:" + str(open_path)]
+        if urgent:
+            args += ["-u", "critical"]
+        args += [summary, body]
+        try:
+            subprocess.run(args, capture_output=True, timeout=2)
+        except (OSError, subprocess.SubprocessError):
+            pass   # no notification daemon, or no notify-send: nothing to say
 
     # -- the words that made it, on the clipboard ---------------------------
 
@@ -2042,6 +2207,11 @@ def main():
         for w in warnings:
             print(f"  {w}", file=sys.stderr)
         return 2
+
+    # The window is how the controller knows whether he is watching: a batch
+    # that finishes behind a rolled-up or unfocused painter says so with a
+    # desktop toast instead (Painter._onscreen).
+    ctl.window = engine.rootObjects()[0]
 
     if selftest:
         rc = [0]

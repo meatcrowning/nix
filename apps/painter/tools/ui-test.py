@@ -16,7 +16,9 @@ needed for:
   5. aspect (two integers) + MP produce the pixels shown in the header and the
      pixels actually submitted — one number, three places;
   6. a dropdown opens in the scene overlay, inside the window, above everything;
-  7. every control in the left column reaches the submitted job.
+  7. every control in the left column reaches the submitted job;
+  8. a batch that finishes behind an unfocused or rolled-up window toasts —
+     once, with its thumbnail — and is silent when he is looking at it.
 
 Run it with painter's own Qt env (book has PySide6 from Fedora):
 
@@ -2257,6 +2259,159 @@ def test_restore(tmp):
     return eng, win2, ctl2, keep2
 
 
+def test_done_toast(win, ctl, tmp):
+    """A generation that lands while he is elsewhere says so on the desktop.
+
+    Nothing here can reach a real notification server: `subprocess` is the
+    harness's `_NoLaunch`, so `notify-send` is recorded in RAN and never run.
+    The window is a stand-in with the two answers that decide it — `isActive`
+    (focus) and `isExposed` (rolled up, minimised, another workspace).
+    """
+    import main as P
+
+    class FakeWin:
+        def __init__(self, active=True, exposed=True):
+            self.active, self.exposed = active, exposed
+
+        def isActive(self):
+            return self.active
+
+        def isExposed(self):
+            return self.exposed
+
+    fake = FakeWin()
+    ctl.window = fake
+
+    real_download = ctl.client.download
+    ctl.client.download = lambda img, cb: cb(fake_png_bytes())
+
+    class FakeJob:
+        duration = 4.0
+
+        def __init__(self, names):
+            self.images = [{"filename": n, "subfolder": "video" if n.endswith(".mp4") else ""}
+                           for n in names]
+            self.meta = {"params": {"seed": 1}, "pairing": None}
+
+    def batch(names, seconds=63.0):
+        """Run one batch through the controller, as a press would."""
+        RAN.clear()
+        ctl._jobs = 1
+        ctl._batch_start = time.time() - seconds
+        ctl._batch_saved = []
+        ctl._batch_pending = 0
+        ctl._batch_toasted = False
+        ctl._pending_toast = None
+        ctl._on_finished(FakeJob(names))
+        spin(80)
+        return [a for a in RAN if os.path.basename(a[0]) == "notify-send"]
+
+    # ---- he is watching: the window already said "done", so nothing else does
+    fake.active, fake.exposed = True, True
+    check("a finished batch is silent while the window is focused",
+          not batch(["a_00001_.png"]), RAN)
+
+    # ---- unfocused, and rolled up: the two ways he is not looking
+    fake.active, fake.exposed = False, True
+    sent = batch(["a_00002_.png"])
+    check("an unfocused painter toasts the finished batch", len(sent) == 1, sent)
+    args = sent[0] if sent else []
+    check("...it says how long it took, in the queue bar's own clock",
+          "completed in 1:03" in args, args)
+    check("...and names the output it made",
+          "a_00002_.png" in args, args)
+    thumb = [a for a in args if a.startswith("string:x-download-image:")]
+    check("...and carries the picture, so the toast thumbnails it",
+          len(thumb) == 1 and thumb[0].endswith("/a_00002_.png")
+          and os.path.exists(thumb[0].split(":", 2)[2]), (thumb, args))
+
+    fake.active, fake.exposed = True, False
+    sent = batch(["a_00003_.png"])
+    check("a rolled-up painter toasts it too (isExposed, not focus)",
+          len(sent) == 1, sent)
+
+    # ---- one toast per batch, whatever it made
+    fake.active, fake.exposed = False, True
+    sent = batch(["b_00001_.png", "b_00002_.png"])
+    check("a batch of four images is ONE toast, not four", len(sent) == 1, sent)
+    check("...counting them, and naming the newest",
+          any("2 outputs, newest b_00002_.png" == a for a in (sent[0] if sent else [])),
+          sent)
+
+    # ---- a clip cannot be thumbnailed: it waits for its poster frame.
+    # Both halves are driven here rather than left to the real extraction: a
+    # QML Image cannot decode an mp4 and ffmpeg's timing is not the harness's
+    # to depend on (it wins the race about as often as it loses it).
+    clip = os.path.join(tmp, "out", "video", "clip_00001_.mp4")
+    poster = noisy_png(os.path.join(tmp, "cache", "painter", "posters",
+                                    "clip_00001_.jpg"), 4, 4)
+    real_want, real_ready = ctl.gallery._want_poster, ctl.gallery.poster_ready
+    ctl.gallery._want_poster = lambda p: None          # no ffmpeg in this test
+    ctl.gallery.poster_ready = lambda p: ""            # ...so none is ready yet
+
+    sent = batch(["clip_00001_.mp4"])
+    check("a clip's toast waits for the poster frame rather than going out bare",
+          not sent and ctl._pending_toast is not None, (sent, ctl._pending_toast))
+    ctl.gallery._poster_ready(clip, poster)            # the extraction lands
+    spin(80)
+    sent = [a for a in RAN if os.path.basename(a[0]) == "notify-send"]
+    check("...and goes out when it lands", len(sent) == 1, sent)
+    args = sent[0] if sent else []
+    check("...thumbnailing the poster and opening the VIDEO (DESIGN 8.1)",
+          "string:x-download-image:" + poster in args
+          and "string:x-open-path:" + clip in args, args)
+
+    # ...and a clip whose poster is already cached does not wait at all.
+    ctl.gallery.poster_ready = lambda p: poster
+    sent = batch(["clip_00002_.mp4"])
+    check("a clip with its poster already cached toasts straight away",
+          len(sent) == 1 and "string:x-download-image:" + poster in (sent[0] if sent else []),
+          sent)
+    ctl.gallery._want_poster, ctl.gallery.poster_ready = real_want, real_ready
+
+    # ---- a failure is the one toast that batch gets
+    sent = batch(["c_00001_.png"])
+    check("a batch that finished already had its toast", len(sent) == 1, sent)
+    RAN.clear()
+    ctl._on_failed(None, "CUDA out of memory\nnode 12")
+    spin(60)
+    check("...so a later failure does not toast a second time",
+          not [a for a in RAN if os.path.basename(a[0]) == "notify-send"], RAN)
+
+    RAN.clear()
+    ctl._jobs = 1
+    ctl._batch_toasted = False
+    ctl._batch_saved = []
+    ctl._on_failed(None, "CUDA out of memory\nnode 12")
+    spin(60)
+    failed = [a for a in RAN if os.path.basename(a[0]) == "notify-send"]
+    check("a batch that FAILED while he was away says so, critically",
+          len(failed) == 1 and "generation failed" in failed[0]
+          and "critical" in failed[0], failed)
+
+    # ---- and a run with no window (every harness, including this one) is mute
+    ctl.window = None
+    check("no window means no toast at all", not batch(["d_00001_.png"]), RAN)
+
+    ctl.window = fake
+    fake.active, fake.exposed = True, True
+    ctl.client.download = real_download
+    ctl.window = None
+
+
+def fake_png_bytes():
+    """A real 1x1 PNG, as the backend would hand one back."""
+    import zlib
+
+    def chunk(t, body):
+        return (struct.pack(">I", len(body)) + t + body
+                + struct.pack(">I", zlib.crc32(t + body) & 0xFFFFFFFF))
+
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 0, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"\x00\x00\x00\x00")) + chunk(b"IEND", b""))
+
+
 def test_startup(ctl):
     """Nothing on the launch path may block the GUI thread."""
     import main as P
@@ -2368,6 +2523,7 @@ def main():
     print("== copy prompt ==");       test_copy_prompt(win, ctl, tmp)
     print("== peer history ==");      test_peer_history(win, ctl, tmp)
     print("== muted copies ==");      test_muted(win, ctl, tmp)
+    print("== done toast ==");        test_done_toast(win, ctl, tmp)
     print("== split + state ==");     test_split_and_state(win, ctl, keep)
     print("== restore ==");           keep2 = test_restore(tmp)
     print("== startup ==");           test_startup(ctl)
