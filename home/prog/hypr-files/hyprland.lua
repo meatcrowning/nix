@@ -650,6 +650,18 @@ hl.device({
 
 local mainMod = "SUPER" -- Sets "Windows" key as main modifier
 
+-- How far the pointer may travel before a press counts as a DRAG rather than a
+-- click. Hyprland's default is 0, which means "no threshold" — and with no
+-- threshold the Super-tap bind below (a `click` bind) would be cancelled by a
+-- single pixel of mouse jitter. A few pixels is also the ordinary desktop
+-- behaviour for picking a window up: the move starts once you have actually
+-- moved, not on the press.
+hl.config({
+    binds = {
+        drag_threshold = 6,
+    },
+})
+
 -- Example binds, see https://wiki.hypr.land/Configuring/Basics/Binds/ for more
 hl.bind(mainMod .. " + Q", hl.dsp.exec_cmd(terminal), { description = "Open terminal" })
 -- Close via the hyprvtb close path (roll-up + fade close animation, exactly as
@@ -689,7 +701,18 @@ hl.bind(mainMod .. " + comma", hl.dsp.exec_cmd("$HOME/.nix-profile/bin/settings"
 -- where `qs ipc call launcher toggle` forked a shell and exec'd Quickshell's CLI
 -- to say the same thing — 20-30ms of process, measured on book, on every tap.
 -- The IPC path still exists and still works; it is just not on the key any more.
-hl.bind(mainMod .. " + Super_L", hl.dsp.global("quickshell:launcher"), { release = true })
+--
+-- `click`, not plain `release`: it still fires at key-up (the flag implies
+-- release), but ONLY if the pointer has not moved more than
+-- `binds:drag_threshold` since Super went down. Holding Super to resize a
+-- window with the right button used to pop the runner the moment Super came
+-- back up — the resize is the plugin's, so Hyprland never saw a bind to shadow,
+-- and a `global` handler is exempt from shadowing anyway
+-- (`KeybindManager.cpp`'s shadowKeybinds: "can't be shadowed"). The pointer
+-- having travelled across the screen is the signal that Super was a MODIFIER
+-- and not a tap, and it costs the tap nothing: a hand on the keyboard moves the
+-- mouse zero pixels.
+hl.bind(mainMod .. " + Super_L", hl.dsp.global("quickshell:launcher"), { click = true })
 hl.bind(mainMod .. " + P", hl.dsp.window.pseudo(), { description = "Pseudo-tile" })
 hl.bind(mainMod .. " + J", hl.dsp.layout("togglesplit"), { description = "Toggle split" })    -- dwindle only
 
