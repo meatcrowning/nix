@@ -135,9 +135,20 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
     obvious way to clear a stale socket) makes every later instance steal the
     name from the running one; `tools/handoff-test.py` stands up two Listeners
     to catch precisely that.
-  - Harnesses: `apps/pylib/tools/handoff-test.py` (the transport, both halves)
-    and `apps/viewer/tools/handoff-test.py` (what viewer does with a request —
-    the exposure refusal, `--order`, caller-relative paths).
+  - **It runs the other way too, and filer listens as well as sends.** filer
+    opens viewer with `--select-back <sock>:<pane>`; viewer echoes each image it
+    flips to at that socket and filer selects it, so closing the viewer leaves
+    the browser on the picture you stopped at. filer's socket is `filer-<pid>`,
+    per process and per pane key, because two filer windows are two processes
+    and an echo landing in the wrong one moves a selection nobody is looking at.
+    See `filer/AGENTS.md` → "Flipping in viewer moves filer's selection".
+  - Harnesses: `apps/pylib/tools/handoff-test.py` (the transport, both halves),
+    `apps/viewer/tools/handoff-test.py` (what viewer does with a request —
+    the exposure refusal, `--order`, caller-relative paths),
+    `apps/viewer/tools/select-back-test.py` and
+    `apps/filer/tools/viewer-select-test.py` (the return leg, viewer's half and
+    filer's — the latter drives viewer's real client against filer's real
+    listener).
 
 - **`vtbclient.py`** — the hyprvtb titlebar-button socket bridge. Every app's
   chrome (transport buttons, close/zoom, view switchers) is drawn by the

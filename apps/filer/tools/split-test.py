@@ -486,5 +486,10 @@ def main():
     print("all split checks passed")
 
 
-QTimer.singleShot(0, lambda: None)
-main()
+# Guarded, so this file can be IMPORTED for its build()/spin() helpers — which
+# is how viewer-select-test.py stands a real filer window up. Without the guard
+# the import runs the whole suite and then dies constructing a second
+# QGuiApplication (the same reason viewer's split-test.py is guarded).
+if __name__ == "__main__":
+    QTimer.singleShot(0, lambda: None)
+    main()

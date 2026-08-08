@@ -293,6 +293,25 @@ Window {
         return (i >= 0 && i < images.length) ? images[i].name : "";
     }
 
+    // ---- tell filer where we got to ----
+    // Flipping through a folder here moves filer's selection with us, so
+    // closing the window leaves the browser on the picture you stopped at
+    // rather than the one you opened. Only when filer asked for it (it passes
+    // `--select-back`, main.py FilerLink); a viewer opened any other way echoes
+    // nowhere.
+    //
+    // DEBOUNCED, not per change: holding › walks the folder as fast as the
+    // images decode, and each echo is a synchronous round trip on the GUI
+    // thread. One at rest is what filer needs — the intermediate images were
+    // never looked at.
+    readonly property string curPath: current ? current.path : ""
+    onCurPathChanged: filerEcho.restart()
+    Timer {
+        id: filerEcho
+        interval: 120
+        onTriggered: FilerLink.echo(win.curPath)
+    }
+
     title: curName !== "" ? curName : "viewer"
     width: 900
     height: 620
@@ -585,6 +604,8 @@ Window {
                             ? ("file://" + encodeURI(win.images[pane.idx].path)) : ""
                     name: (pane.idx >= 0 && pane.idx < win.images.length)
                           ? win.images[pane.idx].name : ""
+                    path: (pane.idx >= 0 && pane.idx < win.images.length)
+                          ? win.images[pane.idx].path : ""
                     onFocusRequested: win.focusPane = pane.index
                 }
 

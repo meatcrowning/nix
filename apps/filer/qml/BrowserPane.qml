@@ -239,6 +239,35 @@ Rectangle {
         if (ord.length) { selected = ord[0]; anchor = ord[0]; }
     }
 
+    // Select `p` and scroll whichever view holds it into sight, if this pane is
+    // showing it at all. True if it was; false is a no-op, not an error — the
+    // caller is a viewer flipping through images (Main.qml selectFromViewer),
+    // and it can perfectly well land on a file this pane has navigated away
+    // from or never listed. Moving the pane to go and find it would be a
+    // window the person is not looking at rearranging itself.
+    //
+    // The preview grid first, because that is where an image opened from here
+    // came from; the tree list second, which is where one in an expanded
+    // subdirectory lives. `Contain` and not `Center`: an entry already on
+    // screen must not make the view jump, which is what flipping through a
+    // folder would otherwise do on every single image.
+    function revealPath(p) {
+        if (!p) return false;
+        for (let i = 0; i < previews.length; i++) {
+            if (previews[i].path !== p) continue;
+            selectSingle(p, false);
+            pgrid.positionViewAtIndex(i, GridView.Contain);
+            return true;
+        }
+        for (let j = 0; j < rows.length; j++) {
+            if (rows[j].path !== p) continue;
+            selectSingle(p, rows[j].isDir === true);
+            list.positionViewAtIndex(j, ListView.Contain);
+            return true;
+        }
+        return false;
+    }
+
     // ---- context menu ----
     // The entry (preview-grid image or tree row) under a view-space point,
     // or null for empty space. Uses the views' own indexAt hit-testing, so
@@ -444,7 +473,14 @@ Rectangle {
         Remote.prefetch(p);
         if (kind === "image" || kind === "video") {
             const order = FileOps.writeOrder(orderPaths());
-            const argv = order ? ["viewer", "--order", order, p] : ["viewer", p];
+            // …and the return leg: viewer echoes each image it flips to back at
+            // this pane, which selects it (main.py selectBackToken). Unlike the
+            // order file this is NOT a launch-time snapshot — it is a live link
+            // for as long as that window is open, so closing the viewer leaves
+            // this pane on the picture you stopped at.
+            const back = FileOps.selectBackToken(view.watchKey);
+            const argv = ["viewer"].concat(order ? ["--order", order] : [],
+                                           back ? ["--select-back", back] : [], [p]);
             // Ask a viewer that is already on screen to show it — that is the
             // difference between ~0.05s and ~0.5s, because the 0.5s was almost
             // entirely a new python + Qt + QML + GL. It declines when it is not

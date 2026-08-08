@@ -162,9 +162,9 @@ def run(app, tmp):
     check("...and the window still shows what it did", shown() == before, shown())
 
     # ---- --new-window is a flag, never a path ------------------------------
-    o, s, rest = viewermain.split_args(["--new-window", names[0]])
+    o, s, b, rest = viewermain.split_args(["--new-window", names[0]])
     check("--new-window is consumed, not treated as a file",
-          rest == [names[0]] and o is None and s is False, rest)
+          rest == [names[0]] and o is None and s is False and b == "", rest)
 
 
 def _take(win, payload):

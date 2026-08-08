@@ -103,6 +103,44 @@ must also set every `startSplit*` context property (`drop-test.py`,
 `pick-test.py` do) — an unqualified read of a missing one is a `ReferenceError`
 that takes the whole `Component.onCompleted` with it.
 
+## Flipping in viewer moves filer's selection
+
+The return leg of the handoff socket (`pylib/handoff.py`, and the outbound half
+under "Why it is as fast as it is"). `openFile` passes
+`--select-back <sock>:<pane>` alongside `--order`; viewer echoes every image it
+flips to at that socket, and `Main.qml selectFromViewer` → `revealPath` selects
+it and scrolls it into sight. **Open an image, flip through the folder, close
+the viewer, and filer is on the picture you stopped at** — it used to be on the
+one you opened.
+
+- **`--order` is a launch-time snapshot; this is a LIVE link** for as long as
+  that viewer window is open. The two are deliberately opposite: re-sorting
+  filer must not disturb an open viewer's flip order, but flipping must move
+  filer's selection, because that selection is what you come back to.
+- **The socket is `filer-<pid>`, not `filer`** (`main.py
+  _start_select_listener`, `FileOps.selectBackToken`). Two filer windows are two
+  processes — a single well-known name would land one window's echoes in the
+  other's selection. The pane half of the token is the `watchKey`, so a viewer
+  opened from the right-hand pane never moves the left one; a pane that has
+  since closed falls back to the focused one.
+- **filer always takes the request** — unlike viewer's half, which refuses when
+  it is not visible. There is nothing to be invisibly wrong about here, and the
+  whole point is that the selection has already moved by the time you come back
+  to the window, which may well be on another workspace while you flip.
+- **A path the pane is not showing moves nothing.** Navigating the pane to go
+  and find it would be a window you are not looking at rearranging itself.
+  `revealPath` searches the preview grid first (where an opened image came from)
+  and the tree list second (where one in an expanded subdirectory lives), and
+  positions `Contain`, not `Center`, so an entry already on screen does not make
+  the view jump on every flip.
+- A **picker takes no socket name**, so a transient file chooser is never what a
+  viewer reports to.
+
+Harness: `tools/viewer-select-test.py` — viewer's real `FilerLink` client
+against filer's real `Listener` and the real QML, off the GUI thread because the
+echo is a synchronous round trip. viewer's own half is
+`../viewer/tools/select-back-test.py`.
+
 ## The preview grid: images AND video poster frames
 
 `preview_kind` (`main.py`) sorts every entry into `dir | image | video | file`;
