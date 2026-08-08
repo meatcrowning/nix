@@ -218,7 +218,7 @@ Item {
             HeaderButton {
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                label: "×"
+                label: "x"
                 fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                 onClicked: root.cancel()
             }
@@ -435,7 +435,7 @@ Item {
                         HeaderButton {
                             anchors.right: parent.right
                             anchors.verticalCenter: pickers.verticalCenter
-                            label: "×"
+                            label: "x"
                             fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                             onClicked: root.removeRule(ruleRow.index)
                         }

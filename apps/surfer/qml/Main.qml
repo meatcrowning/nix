@@ -1284,7 +1284,7 @@ Window {
                 }
                 BrowserButton {
                     anchors.right: parent.right
-                    label: "×"
+                    label: "x"
                     onClicked: win.dmPanelOpen = false
                 }
             }

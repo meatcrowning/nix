@@ -34,7 +34,7 @@ Rectangle {
             onClicked: Library.playFromModel(SearchModel, 0)
         }
         HeaderButton {
-            label: "× close"
+            label: "x close"
             fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
             onClicked: root.closed()
         }
