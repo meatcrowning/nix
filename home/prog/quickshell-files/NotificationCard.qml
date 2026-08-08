@@ -52,6 +52,56 @@ Rectangle {
     property bool mouthOnLeft: false
     // The notch's own mouth depth, so the two attachments read as one.
     readonly property int mouth: attached ? NotchModel.overlap : 0
+    // Which side a FLOATING card's exit retreats toward — the corner's own
+    // edge, reversing the entry nudge. Attached cards exit into the panel and
+    // take their side from mouthOnLeft instead.
+    property bool floatLeft: false
+
+    // Set while the card plays its exit: the notification is already gone from
+    // the tracked model (the lock below is what keeps the object readable), so
+    // nothing here may act on it any more.
+    property bool closing: false
+
+    // The exit slide landed; NotificationWindow drops the card from its stack.
+    signal departed()
+
+    // Keeps the Notification object alive after the server untracks it, for
+    // exactly as long as the exit animation needs it: the lock dies with the
+    // card, which is when the object is finally dropped.
+    RetainableLock { object: card.notif; locked: true }
+
+    // Leave the way the card arrived, in reverse: attached, roll back INTO the
+    // panel behind the holder's clip (the add transition's from-value, as a
+    // destination); floating, retreat the ±48 nudge and fade. Same slide, same
+    // clock as the window roll (docs/DESIGN.md §6.2) — dismissal and arrival
+    // must read as one mechanism.
+    function leave() {
+        if (card.closing)
+            return;
+        card.closing = true;
+        exit.start();
+    }
+
+    ParallelAnimation {
+        id: exit
+        NumberAnimation {
+            target: card; property: "x"
+            to: (card.attached ? card.mouthOnLeft : card.floatLeft)
+                ? -(card.attached ? card.width : 48)
+                : (card.attached ? card.width : 48)
+            duration: ViewMode.ms(ViewMode.slideMs)
+            easing.type: ViewMode.slideEasing
+        }
+        // The floating card's 160ms entry fade, mirrored. An attached card
+        // stays opaque — the clip is the exit, as it was the entrance.
+        NumberAnimation {
+            target: card; property: "opacity"
+            to: card.attached ? 1 : 0
+            duration: ViewMode.ms(160)
+            easing.type: ViewMode.slideEasing
+        }
+        onFinished: card.departed()
+    }
     readonly property int lineW: 2
     // The arms run to the panel's face plus one line width: the corner is
     // painted over the strip rather than shared between two shapes abutting.
@@ -201,7 +251,7 @@ Rectangle {
     // prints the key and exits), and a toast whose action has been taken has
     // nothing left to say.
     function fire(a) {
-        if (!a)
+        if (!a || card.closing)
             return;
         a.invoke();
         if (card.notif)
@@ -244,7 +294,7 @@ Rectangle {
     border.width: attached ? 0 : lineW
     border.color: tint
 
-    // fade in on arrival (removal is instant when the model drops the item).
+    // fade in on arrival (removal mirrors it — the exit animation above).
     // Attached cards slide out of the panel instead (NotificationWindow's add
     // transition), so they arrive at full opacity — a fade under the clip
     // would just dim the emerging card.
@@ -454,8 +504,8 @@ Rectangle {
     Timer {
         id: expiry
         interval: card.expiryMs
-        running: !card.persistent && !hover.containsMouse
-        onTriggered: if (card.notif) card.notif.expire()
+        running: !card.persistent && !hover.containsMouse && !card.closing
+        onTriggered: if (card.notif && !card.closing) card.notif.expire()
     }
 
     // A --replace-id update reuses the SAME Notification object, so no new card
@@ -470,6 +520,9 @@ Rectangle {
     MouseArea {
         id: hover
         anchors.fill: parent
+        // A departing card's notification is already closed — nothing left to
+        // dismiss, open or invoke on it.
+        enabled: !card.closing
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
         // An image-download toast also OPENS the downloaded image in the viewer
