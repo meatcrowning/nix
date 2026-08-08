@@ -146,40 +146,45 @@ still on the GPU and decode in software (free on this CPU). Two things that do
 `Accelerated…` name. `SURFER_GPU=hwvideo` puts the decoder back for a re-test
 after an NVIDIA or Qt bump; `SURFER_GPU`'s other modes are air's.
 
-## The file picker is OURS, and its location bar is editable
+## The file dialog IS filer
 
-A page's `<input type=file>` is answered by `qml/FilePicker.qml`, not by filer,
-not by the portal — with no `onFileDialogRequested` handler the QML
-`WebEngineView` auto-rejects, and `QtQuick.Dialogs`' `FileDialog` would pop an
-unthemed GTK window over a pixel-font browser. It handles all four modes
-Chromium asks for (one file, many, a folder, save-as) and queues per view.
+A page's `<input type=file>` opens **filer**, as `filer --pick <spec.json>` —
+the same subprocess protocol the FileChooser portal backend speaks
+(`apps/filer/pick.py`), the way KDE hands its file dialogs to Dolphin.
+`qml/FilePicker.qml` is the queue and the plumbing; there is no UI in it, and
+`Files.pick(token, spec)` / `Files.picked(token, paths)` (main.py) are the seam.
 
-**The folder line is a `TextInput`.** It was a read-only label until
-2026-08-07, so the only way to a folder was to walk there from `~/Downloads` a
-click at a time, and a path copied from anywhere else could not be used at all
-(his report: *"i am unable to edit the location bar"*).
+Until 2026-08-07 surfer drew its own picker, and it was a second, worse file
+browser: no tree, no thumbnails, no preview grid, no sort, no `:top` remote
+browsing, and a path line you could not even type into — which is what surfaced
+it (*"really FilePicker.qml should just be a version of filer proper… like how
+kde plasma does it with dolphin"*). Every fix had to be made twice; now there is
+one file manager and one dialog.
 
-- **`Files.resolve(text, folder)` / `kindOf(path)` in `main.py` decide what the
-  text means** — `~` expansion, an absolute path as it stands, anything else
-  relative to the folder on screen. Not in QML, the same rule that keeps
-  uri-list decoding in python.
-- **A folder navigates; an existing file is picked outright** (in save-as it
-  fills the name box instead and the choice stays with the save button); a path
-  that is not there marks the box `crit` and changes nothing. Silence would be
-  the one unacceptable answer (docs/DESIGN.md §10).
-- **The text is set imperatively in `cd()`, never bound.** The first keystroke
-  in a `TextInput` destroys a binding on its own `text`, and the box would then
-  stop following the folder for the rest of the dialog.
-- After a typed folder the keyboard goes back to the key sink, so Enter means
-  "accept" again rather than "navigate to where I already am".
+- **Chromium's four modes map onto filer's three**: `FileModeOpen` /
+  `OpenMultiple` → `open` (with `multiple`), `UploadFolder` → `dir`, `Save` →
+  `save`. **`save` was added to filer's picker for this** — the portal backend
+  never asks for it (it proxies SaveFile to the gtk/kde delegate), so the mode
+  did not exist before. `defaultFileName` goes over as `current_name`.
+- **A subprocess, not an embedded view**, for portal.py's reason: a crash or a
+  wedge costs one dialog rather than the browser, and a tab closing under it has
+  something to kill (`Files.cancelPick`, which leaves no result file — already
+  a cancel in that protocol).
+- **Every failure path answers.** No filer on PATH, an unwritable spec, a dead
+  picker: all `dialogReject`. A page whose request never comes back leaves its
+  `<input>` disabled for good.
+- **Still queued per view, still only the current tab's.** A file request does
+  not block a page's JS, so a page can have several outstanding — and a
+  background tab must not throw a *window* in front of what you are reading.
+- `Files.listDir`/`isDir`/`parentOf` are what is left of the old picker; only
+  `startDir`/`rememberDir` still matter (where filer opens, and remembering it).
 
-Verify with `tools/filepicker-test.py` (offscreen, 16 checks over the REAL
-component and a scratch tree; it types with real key events, so `onTextEdited`
-and `onAccepted` are what run). It creates **no `WebEngineView`** — the picker
-needs QtWebEngine only for the mode enum — so it cannot contend with his
-browser's profile, and it borrows the wrapper's Qt env by READING it, never
-running it (the wrapper's last line would hand its arguments to the live
-browser).
+Verify with `tools/filepicker-test.py` (offscreen, 17 checks). **`FILER_BIN` is
+pointed at a stub** that records the spec and answers on command, so no window
+opens and the real filer never runs; the fixture mints stand-in
+`FileDialogRequest`s, since only a live Chromium can make a real one. filer's
+half — the bar, the editable name box, save mode, the overwrite confirm — is
+`apps/filer/tools/pick-test.py`.
 
 ## Downloads — the progress toast gate is TIME, not size
 

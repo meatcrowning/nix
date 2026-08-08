@@ -20,6 +20,7 @@ import io
 import json
 import os
 import re
+import shutil
 import ssl
 import subprocess
 import sys
@@ -44,7 +45,8 @@ if __name__ == "__main__":
     singleton.try_handoff(sys.argv[1:])   # exits 0 if a running surfer took it
 
 from PySide6.QtCore import (QObject, Slot, Signal, QUrl, QFileSystemWatcher, Property,
-                            QBuffer, QIODevice, QEvent, Qt, QPoint, QCoreApplication)
+                            QBuffer, QIODevice, QEvent, Qt, QPoint, QCoreApplication,
+                            QProcess, QTimer)
 from PySide6.QtGui import QGuiApplication, QColor, QWheelEvent
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtWebEngineQuick import QtWebEngineQuick
@@ -1962,18 +1964,19 @@ class Prefs(QObject):
 
 
 class Files(QObject):
-    """Filesystem access for the in-window file picker (FilePicker.qml), which
-    serves a page's ``<input type=file>`` / upload button.
+    """The file dialog behind a page's ``<input type=file>`` / upload button.
 
-    QtWebEngine has no built-in picker for the QML view: with no
-    onFileDialogRequested handler Chromium auto-rejects the request and the
-    picker simply never opens (the click registers, `onchange` never fires). We
-    draw our own — hence a directory lister here rather than QtQuick.Dialogs'
-    FileDialog, which would pop an unthemed GTK/portal window."""
+    QtWebEngine has no picker for the QML view: with no onFileDialogRequested
+    handler Chromium auto-rejects the request and nothing opens at all (the
+    click registers, `onchange` never fires). Surfer answered that by drawing a
+    small browser of its own; it now runs **filer** instead — `pick()` below —
+    the way KDE hands a file dialog to Dolphin. `listDir` and friends are what
+    is left of the old one, still used for the starting folder.""" 
 
     def __init__(self, prefs, parent=None):
         super().__init__(parent)
         self._prefs = prefs
+        self._pickers = {}      # token -> QProcess, so a closing tab can kill it
 
     @Slot(str, result="QVariantList")
     def listDir(self, path):
@@ -2025,33 +2028,92 @@ class Files(QObject):
         if path and os.path.isdir(str(path)):
             self._prefs.savePickerDir(str(path))
 
-    # -- the picker's editable location bar ----------------------------------
-    # Typed or pasted, a path is resolved HERE and not in QML, the same rule
-    # that keeps uri-list decoding in python: `~` expansion, an absolute path
-    # taken as it stands, anything else relative to the folder on screen.
+    # -- the file dialog IS filer ---------------------------------------------
+    # A page's <input type=file> used to open a small browser surfer drew
+    # itself: its own listing, its own sort, its own everything, and none of
+    # filer's — no tree, no thumbnails, no `:top`, no editable path. It is now
+    # `filer --pick <spec.json>`, the same subprocess protocol the FileChooser
+    # portal backend uses (apps/filer/pick.py), which is how KDE hands its file
+    # dialogs to Dolphin's. One file manager, one dialog, one place to fix.
+    #
+    # A SUBPROCESS, not an embedded view, for the reason portal.py gives: a
+    # crash or a wedge costs one dialog rather than the browser, and there is
+    # something to kill when a tab closes under it.
 
-    @Slot(str, str, result=str)
-    def resolve(self, text, folder):
-        """`text` as an absolute path, or "" for nothing usable. Existence is
-        `kindOf`'s question — "no such path" and "that is a file" send the
-        picker two different ways."""
-        text = str(text).strip()
-        if not text:
-            return ""
-        path = os.path.expanduser(text)
-        if not os.path.isabs(path):
-            path = os.path.join(str(folder) or str(Path.home()), path)
-        return os.path.normpath(path)
+    picked = Signal(str, "QVariantList")   # (token, paths) — [] means cancelled
 
-    @Slot(str, result=str)
-    def kindOf(self, path):
-        """`"dir"`, `"file"` or `"missing"`."""
-        p = str(path)
-        if not p:
-            return "missing"
-        if os.path.isdir(p):
-            return "dir"
-        return "file" if os.path.exists(p) else "missing"
+    def _filer_bin(self):
+        """filer's wrapper. surfer's own PATH is a packaged one and need not
+        carry the nix profile, so fall back to it explicitly (portal.py resolves
+        it the same way, and for the same reason)."""
+        env = os.environ.get("FILER_BIN")
+        if env:
+            return env if os.path.exists(env) else None
+        found = shutil.which("filer")
+        if found:
+            return found
+        cand = os.path.expanduser("~/.nix-profile/bin/filer")
+        return cand if os.path.exists(cand) else None
+
+    @Slot(str, "QVariantMap")
+    def pick(self, token, spec):
+        """Open filer as a file dialog. Answers exactly once on `picked`.
+
+        Every failure path answers with `[]` (a cancel): a page whose dialog
+        never comes back is stuck for good, and Chromium keeps the `<input>`
+        disabled until the request is settled."""
+        token = str(token)
+        binary = self._filer_bin()
+        if not binary:
+            print("surfer: filer not found — cannot open a file dialog",
+                  file=sys.stderr, flush=True)
+            QTimer.singleShot(0, lambda: self.picked.emit(token, []))
+            return
+        spec = {str(k): v for k, v in dict(spec).items()}
+        try:
+            fd, specfile = tempfile.mkstemp(prefix="surfer-pick-", suffix=".json")
+            os.close(fd)
+            resultfile = specfile[:-5] + ".result.json"
+            spec["result"] = resultfile
+            with open(specfile, "w", encoding="utf-8") as f:
+                json.dump(spec, f)
+        except OSError as e:
+            print("surfer: could not write a pick spec:", e, file=sys.stderr, flush=True)
+            QTimer.singleShot(0, lambda: self.picked.emit(token, []))
+            return
+
+        proc = QProcess(self)
+        self._pickers[token] = proc
+
+        def finished(_code, _status):
+            paths = []
+            try:
+                with open(resultfile, encoding="utf-8") as f:
+                    out = json.load(f)
+                paths = [QUrl(str(u)).toLocalFile() for u in out.get("uris", [])]
+            except (OSError, ValueError):
+                pass          # no result file: cancelled, or the picker died
+            for p in (specfile, resultfile):
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+            self._pickers.pop(token, None)
+            proc.deleteLater()
+            self.picked.emit(token, [p for p in paths if p])
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(lambda _e: finished(1, 0))
+        proc.start(binary, ["--pick", specfile])
+
+    @Slot(str)
+    def cancelPick(self, token):
+        """The tab that asked went away — take the dialog with it. Killing it
+        leaves no result file, which filer's protocol already reads as a
+        cancel, so `finished` still answers."""
+        proc = self._pickers.get(str(token))
+        if proc is not None:
+            proc.kill()
 
 
 class Zoom(QObject):

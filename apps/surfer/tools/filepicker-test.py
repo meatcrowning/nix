@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
-"""Headless check of surfer's file picker — `apps/surfer/tools/filepicker-test.py`.
+"""Headless check of surfer's file dialog — `apps/surfer/tools/filepicker-test.py`.
 
-The picker a page's `<input type=file>` pops is surfer's own (`qml/FilePicker.qml`),
-not filer's and not the portal's, and this drives the REAL component offscreen
-over a scratch directory tree. What it proves is the LOCATION BAR, which was a
-read-only label until 2026-08-07 — so the only way to a folder was to walk there
-from ~/Downloads one click at a time, and a path copied from anywhere else could
-not be used at all:
+The dialog behind a page's `<input type=file>` is **filer**, run as
+`filer --pick <spec.json>` (the same protocol the FileChooser portal backend
+uses), not a picker surfer draws itself. What this proves is the seam:
 
-  * it follows `cd` (and keeps following it after being typed into — a bound
-    `text` would have been destroyed by the first keystroke);
-  * a typed folder navigates, and Enter in the field is what does it;
-  * a typed FILE is picked outright (and in save-as fills the name instead);
-  * a path that is not there marks the box and changes nothing;
-  * `~` expands, and a relative name resolves against the folder on screen.
+  * the spec surfer writes says what Chromium asked for — all four modes map
+    onto filer's three, the suggested name and the starting folder go with it;
+  * an answer comes back as local paths and reaches `dialogAccept`;
+  * no result file (a cancel, or a dead picker) is a `dialogReject`, never a
+    page left waiting;
+  * requests QUEUE per view: a background tab's dialog is not run over the page
+    you are on, and closing a tab kills the dialog it opened;
+  * `filer` missing is a cancel, not a hang.
 
-Nothing here opens a window on his screen, touches his browser profile, or
-answers a real page: no WebEngineView is created at all.
+**`FILER_BIN` is pointed at a stub** that writes a result file and exits, so no
+window opens anywhere and the real filer is never started. The stub records the
+spec it was handed, which is the assertion surface.
 """
+import json
 import os
 import re
 import shutil
@@ -27,7 +28,6 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-FIXTURE = HERE / "filepicker-test.qml"
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"   # hard, never setdefault
 os.environ.pop("WAYLAND_DISPLAY", None)  # no way back to his session: with no
@@ -78,9 +78,33 @@ for var in ("XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"):
     d.mkdir(parents=True, exist_ok=True)
     os.environ[var] = str(d)
 
+# ---- the stub that stands in for `filer --pick` -----------------------------
+# It records the spec and answers with whatever ANSWER holds: a JSON list of
+# paths to return, or "cancel" (write nothing, which filer's protocol reads as a
+# cancel), or "hang" (sleep until killed, for the tab-closed case).
+SPECS = scratch / "specs.jsonl"
+ANSWER = scratch / "answer"
+stub = scratch / "filer-stub"
+stub.write_text("""#!/usr/bin/env python3
+import json, os, sys, time
+spec = json.load(open(sys.argv[2]))
+open(%r, "a").write(json.dumps(spec) + "\\n")
+want = open(%r).read().strip()
+if want == "hang":
+    time.sleep(120)
+    sys.exit(0)
+if want == "cancel":
+    sys.exit(0)
+uris = ["file://" + p for p in json.loads(want)]
+json.dump({"uris": uris}, open(spec["result"], "w"))
+""" % (str(SPECS), str(ANSWER)))
+stub.chmod(0o755)
+os.environ["FILER_BIN"] = str(stub)
+ANSWER.write_text("cancel")
+
 sys.path.insert(0, str(HERE.parent))
-from PySide6.QtCore import QUrl, Qt, QObject, QEvent  # noqa: E402
-from PySide6.QtGui import QGuiApplication, QKeyEvent  # noqa: E402
+from PySide6.QtCore import QUrl, QObject, QTimer  # noqa: E402
+from PySide6.QtGui import QGuiApplication  # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlExpression  # noqa: E402
 from PySide6.QtWebEngineQuick import QtWebEngineQuick  # noqa: E402
 
@@ -95,17 +119,46 @@ def check(name, cond, detail=""):
         FAILS.append(name)
 
 
+def spin(ms=120):
+    import time
+    end = time.time() + ms / 1000.0
+    while time.time() < end:
+        QGuiApplication.processEvents()
+        time.sleep(0.005)
+
+
+def wait_for(fn, ms=6000):
+    import time
+    end = time.time() + ms / 1000.0
+    while time.time() < end:
+        if fn():
+            return True
+        spin(50)
+    return False
+
+
+def unwrap(v):
+    return list(v.toVariant()) if hasattr(v, "toVariant") else (list(v) if v else v)
+
+
+def specs():
+    if not SPECS.exists():
+        return []
+    return [json.loads(l) for l in SPECS.read_text().splitlines() if l.strip()]
+
+
+def answer(v):
+    ANSWER.write_text(v if isinstance(v, str) else json.dumps(v))
+
+
 QtWebEngineQuick.initialize()
 app = QGuiApplication(sys.argv)
 if app.platformName() != "offscreen":   # a mapped window would be HIS screen
     raise SystemExit("refusing to run on platform %r, not offscreen" % app.platformName())
 
-# ---- a tree to browse -------------------------------------------------------
 tree = scratch / "tree"
-(tree / "sub" / "deep").mkdir(parents=True)
-for n in ("a.txt", "b.png"):
-    (tree / n).write_text("x")
-(tree / "sub" / "inner.txt").write_text("x")
+tree.mkdir()
+(tree / "a.txt").write_text("x")
 
 engine = QQmlApplicationEngine()
 ctx = engine.rootContext()
@@ -125,122 +178,100 @@ if theme is None:
 theme.setParent(app)
 ctx.setContextProperty("Theme", theme)
 
-engine.load(QUrl.fromLocalFile(str(FIXTURE)))
+engine.load(QUrl.fromLocalFile(str(HERE / "filepicker-test.qml")))
 roots = engine.rootObjects()
 if not roots:
     raise SystemExit("the fixture failed to load")
 win = roots[0]
 picker = win.findChild(QObject, "picker")
-if picker is None:
-    raise SystemExit("no FilePicker in the fixture")
+fake = win.findChild(QObject, "requests")
+if picker is None or fake is None:
+    raise SystemExit("fixture is missing the picker or the request factory")
 
 
-def spin(ms=80):
-    import time
-    end = time.time() + ms / 1000.0
-    while time.time() < end:
-        QGuiApplication.processEvents()
-        time.sleep(0.005)
-
-
-def qml(js):
-    """Evaluate JS in the picker's own scope — a QML `function` is not a slot."""
-    expr = QQmlExpression(engine.contextForObject(picker), picker, js)
+def qml(js, obj=None):
+    o = obj if obj is not None else picker
+    expr = QQmlExpression(engine.contextForObject(o), o, js)
     val = expr.evaluate()
     if expr.hasError():
         raise SystemExit("QML expression %r: %s" % (js, expr.error().toString()))
     return val[0] if isinstance(val, tuple) else val
 
 
-def type_location(text):
-    """Put the keyboard in the location bar and TYPE, then press Return — the
-    whole gesture, so `onTextEdited` and `onAccepted` are what run."""
-    from PySide6.QtTest import QTest
-    picker.setProperty("locationText", "")
-    qml("focusLocation()")
-    for ch in text:
-        QTest.keyClick(win, ch)
-    QTest.keyClick(win, Qt.Key_Return)
-    spin(80)
+def request(mode=0, name="", view="v1"):
+    """Make a stub FileDialogRequest in the fixture and hand it to the picker."""
+    return qml("makeRequest(%d, '%s', '%s')" % (mode, name, view), fake)
 
 
-MODE_OPEN, MODE_MULTI, MODE_FOLDER, MODE_SAVE = 0, 1, 2, 3   # FileDialogRequest
+MODE_OPEN, MODE_MULTI, MODE_FOLDER, MODE_SAVE = 0, 1, 2, 3
 
-spin(200)
-qml("mode = %d" % MODE_OPEN)
-qml("cd('%s')" % tree)
-spin(80)
+print("\n== the spec surfer hands filer ==")
+prefs.savePickerDir(str(tree))
+answer([str(tree / "a.txt")])
+qml("currentView = 'v1'")
+request(MODE_OPEN, "", "v1")
+check("filer was run", wait_for(lambda: len(specs()) == 1), specs())
+sp = specs()[-1]
+check("...in open mode, single", sp["mode"] == "open" and sp["multiple"] is False, sp)
+check("...starting where the last pick came from",
+      sp["current_folder"] == str(tree), sp["current_folder"])
+check("...and the answer reaches dialogAccept",
+      wait_for(lambda: qml("acceptedWith", fake) is not None)
+      and unwrap(qml("acceptedWith", fake)) == [str(tree / "a.txt")],
+      qml("acceptedWith", fake))
 
-print("\n== the location bar follows the folder ==")
-check("it shows where you are", picker.property("locationText") == str(tree),
-      picker.property("locationText"))
-qml("cd('%s')" % (tree / "sub"))
-spin(60)
-check("...and keeps up with a click into a folder",
-      picker.property("locationText") == str(tree / "sub"),
-      picker.property("locationText"))
+print("\n== the other three modes ==")
+for mode, want, multi in ((MODE_MULTI, "open", True),
+                          (MODE_FOLDER, "dir", False),
+                          (MODE_SAVE, "save", False)):
+    qml("reset()", fake)
+    before = len(specs())
+    answer("cancel")
+    request(mode, "note.txt" if mode == MODE_SAVE else "", "v1")
+    check("mode %d asks filer for %r" % (mode, want),
+          wait_for(lambda: len(specs()) > before)
+          and specs()[-1]["mode"] == want and specs()[-1]["multiple"] is multi,
+          specs()[-1] if specs() else None)
+    if mode == MODE_SAVE:
+        check("...carrying the suggested name",
+              specs()[-1]["current_name"] == "note.txt", specs()[-1])
+    check("...and a cancel rejects, so the page is not left waiting",
+          wait_for(lambda: qml("rejected", fake) is True))
 
-print("\n== typing a folder navigates ==")
-type_location(str(tree))
-check("an absolute folder path goes there", qml("dir") == str(tree), qml("dir"))
-check("...and the box shows the new folder, still following after an edit",
-      picker.property("locationText") == str(tree),
-      picker.property("locationText"))
-type_location("sub")
-check("a RELATIVE folder name resolves against the folder on screen",
-      qml("dir") == str(tree / "sub"), qml("dir"))
-type_location("~")
-check("~ expands", qml("dir") == os.path.expanduser("~"), qml("dir"))
+print("\n== one at a time, and only for the tab you are looking at ==")
+qml("reset()", fake)
+answer("hang")
+before = len(specs())
+request(MODE_OPEN, "", "v1")
+check("the front request runs", wait_for(lambda: len(specs()) == before + 1))
+request(MODE_OPEN, "", "v1")
+spin(300)
+check("a second one waits its turn", len(specs()) == before + 1, specs())
+check("...and the tab's badge counts both", qml("countFor('v1')") == 2,
+      qml("countFor('v1')"))
+request(MODE_OPEN, "", "v2")
+spin(300)
+check("a BACKGROUND tab's request does not run over you",
+      len(specs()) == before + 1, specs())
 
-print("\n== typing a file picks it ==")
-qml("cd('%s')" % tree)
-spin(60)
-type_location("a.txt")
-sel = qml("selected")
-sel = sel.toVariant() if hasattr(sel, "toVariant") else sel
-check("a typed file becomes the selection", sel == [str(tree / "a.txt")], sel)
-qml("cd('%s')" % tree)
-spin(60)
-type_location(str(tree / "sub" / "inner.txt"))
-sel = qml("selected")
-sel = sel.toVariant() if hasattr(sel, "toVariant") else sel
-check("...from anywhere, and the listing follows it there",
-      sel == [str(tree / "sub" / "inner.txt")] and qml("dir") == str(tree / "sub"),
-      (sel, qml("dir")))
+print("\n== closing the tab takes its dialog with it ==")
+answer("cancel")
+qml("dropView('v1')")
+check("the running dialog is killed and answered",
+      wait_for(lambda: qml("countFor('v1')") == 0), qml("countFor('v1')"))
+# v2 was the only bucket left; with v1 gone and v2 current, its request runs
+qml("currentView = 'v2'")
+check("...and the next tab's request gets its turn",
+      wait_for(lambda: len(specs()) >= before + 2), specs())
 
-print("\n== a path that is not there ==")
-qml("cd('%s')" % tree)
-spin(60)
-type_location("nope/missing.txt")
-check("says so instead of doing nothing in silence", qml("dirBad") is True)
-check("...and did not move", qml("dir") == str(tree), qml("dir"))
-qml("cd('%s')" % tree)
-check("cd clears the mark", qml("dirBad") is False)
-
-print("\n== save-as: a typed file is a NAME, not an answer ==")
-qml("mode = %d" % MODE_SAVE)
-qml("cd('%s')" % tree)
-spin(60)
-type_location(str(tree / "a.txt"))
-res = qml("result()")
-res = res.toVariant() if hasattr(res, "toVariant") else res
-check("the name box takes it and the folder follows",
-      res == [str(tree / "a.txt")], res)
-sel = qml("selected")
-sel = sel.toVariant() if hasattr(sel, "toVariant") else sel
-check("...and nothing was 'picked' behind it", sel == [], sel)
-
-print("\n== folder mode: only folders ==")
-qml("mode = %d" % MODE_FOLDER)
-qml("cd('%s')" % tree)
-spin(60)
-type_location("sub")
-check("a folder still navigates", qml("dir") == str(tree / "sub"), qml("dir"))
-qml("cd('%s')" % tree)
-spin(60)
-type_location("a.txt")
-check("a file is refused, not silently accepted",
-      qml("dirBad") is True and qml("dir") == str(tree), (qml("dirBad"), qml("dir")))
+print("\n== filer missing is a cancel, not a hang ==")
+qml("reset()", fake)
+files.setProperty("x", 0)      # no-op; keep the object referenced
+os.environ["FILER_BIN"] = str(scratch / "does-not-exist")
+qml("currentView = 'v3'")
+request(MODE_OPEN, "", "v3")
+check("the page is told no", wait_for(lambda: qml("rejected", fake) is True))
+os.environ["FILER_BIN"] = str(stub)
 
 print("")
 if FAILS:

@@ -1384,9 +1384,10 @@ Window {
         anchors.fill: parent
         currentView: win.current
     }
+    // No `anchors.fill` and nothing on screen: the file dialog is filer, in its
+    // own window (see FilePicker.qml). This is the queue that runs it.
     FilePicker {
         id: filePicker
-        anchors.fill: parent
         currentView: win.current
     }
 
