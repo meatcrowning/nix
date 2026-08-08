@@ -1,8 +1,9 @@
 import QtQuick
 import Quickshell.Io
 
-// Appearance = Paper + theme (the embedded chooser) + Wallpaper + Theme +
-// Palette generation + RGB lighting + Window decorations + Motion.
+// Appearance = Paper + theme (the embedded chooser) + Wallpaper + Theme
+// (accent, font, palette + the swatch picker, rgb) + Window decorations +
+// Motion.
 // (The wallpaper DRIVES this palette via wal, so it leads: it is the top
 // section, not a separate page.)
 Column {
@@ -62,7 +63,7 @@ Column {
         }
     }
 
-    // The RGB section is drawn ONLY on top — book is a MacBook with no OpenRGB
+    // The rgb row is drawn ONLY on top — book is a MacBook with no OpenRGB
     // devices and no openrgb.service, so the toggle there would be the inert
     // control docs/DESIGN.md §10 forbids. Read via `hostname`, same as
     // SetPgSession.qml's lid gate: absent until the answer arrives, never
@@ -149,18 +150,13 @@ Column {
                 onToggled: (v) => SettingsStore.setLightMode(v)
             }
         }
-    }
-
-    SetSection {
-        title: "palette generation"
         SetRow {
-            label: "colour count"
-            desc: "clusters wal quantises the wallpaper into"
-            SetSlider {
-                from: 8; to: 32; step: 1
-                value: page.d.paletteColorCount
-                onMoved: (v) => { page.d.paletteColorCount = v; SettingsStore.save(); }
-            }
+            // The colour-count slider this replaced set how finely wal
+            // quantises the wallpaper (paletteColorCount, still in the store,
+            // no UI); this shows the resulting clusters themselves and lets
+            // the actual colours be picked (paletteDropped -> wal-extract.py).
+            label: "colours"
+            SetSwatches { }
         }
         SetRow {
             // Dark-mode only. In light mode the toggle is greyed out and inert:
@@ -170,9 +166,6 @@ Column {
             // dark mode the background is now light mode's foreground and the
             // foreground light mode's background (wal-extract.py's fg/bg swap).
             label: "pure black background"
-            desc: page.d.lightMode
-                ? "dark mode only — light mode's analogue is pure white, chosen automatically"
-                : "off = dark mode becomes light mode inverted (bg/fg swapped); on = pure black"
             SetToggle {
                 checked: page.d.pureBlackBg
                 enabled: !page.d.lightMode
@@ -183,21 +176,17 @@ Column {
             // A global chroma/value transform over the wallpaper-derived palette
             // (docs/DESIGN.md 3.1.2 — the full palette is always on now).
             label: "variant"
-            desc: "palette style: vivid = punchy, muted = washed, pastel = soft (default)"
             SetSelect {
                 options: ["vivid", "muted", "pastel"]
                 value: page.d.paletteVariant
                 onChanged: (v) => { page.d.paletteVariant = v; SettingsStore.save(); }
             }
         }
-    }
-
-    SetSection {
-        title: "rgb lighting"
-        visible: page.hasRgb
         SetRow {
-            label: "follow the theme"
-            desc: "off = the DRAM and case lights keep their current colour instead of taking each new accent"
+            // Drawn ONLY on top (hasRgb) — book has no OpenRGB devices and an
+            // inert toggle is what docs/DESIGN.md §10 forbids.
+            label: "rgb follows theme"
+            visible: page.hasRgb
             SetToggle {
                 checked: page.d.rgbFollowTheme
                 onToggled: (v) => { page.d.rgbFollowTheme = v; SettingsStore.save(); }
@@ -209,7 +198,6 @@ Column {
         title: "window decorations"
         SetRow {
             label: "title orientation"
-            desc: "vertical = upright letters stacked down the bar; horizontal = the whole title turned clockwise, read with your head tilted right"
             SetSelect {
                 options: ["vertical", "horizontal"]
                 value: page.d.titleOrientation

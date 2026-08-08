@@ -117,6 +117,12 @@ fi
 eval "$(cat "$THEMES/$KEY.env")"
 echo "wal-set: source = ${IW}x${IH}, mode = $MODE, accent = #$ACCENT"
 
+# Publish the quantised cluster list (dominant first, comma-separated bare hex)
+# for the Settings swatch row (SetSwatches.qml) — the display the user picks
+# palette colours from. In place, same inode rule as $STATE.mode above. An env
+# cached before CLUSTERS existed publishes empty; the next re-extract fills it.
+printf '%s' "${CLUSTERS:-}" > "$STATE.clusters"
+
 # NOTE: the Quickshell palette write (Theme.qml) is deliberately the LAST apply
 # step (step 7 below), NOT here. Writing Theme.qml triggers a Quickshell
 # hot-reload that tears down the entire QML tree — including WallpaperPicker.qml
@@ -185,9 +191,14 @@ pkill -USR1 -x kitty >/dev/null 2>&1
 # so a theme switch RETAINS the chosen opacity instead of resetting it.
 SETTINGS="$CONFIG/quickshell/settings.json"
 SHADOW_ALPHA=0.6
+TITLE_ROTATED=false
 if [ -f "$SETTINGS" ]; then
     v="$(sed -n 's/.*"shadowAlpha"[[:space:]]*:[[:space:]]*\([0-9.]*\).*/\1/p' "$SETTINGS" | head -n1)"
     [ -n "$v" ] && SHADOW_ALPHA="$v"
+    # titleOrientation is the other USER key riding this block (same reasoning
+    # as shadow_alpha above): re-asserted live and persisted in hyprland.lua so
+    # a `hyprctl reload` keeps the sideways title instead of reverting it.
+    grep -q '"titleOrientation"[[:space:]]*:[[:space:]]*"horizontal"' "$SETTINGS" && TITLE_ROTATED=true
 fi
 hyprctl eval 'hl.config({
     general = { col = { active_border = "rgba('"${ACCENT}"'ee)" } },
@@ -200,6 +211,7 @@ hyprctl eval 'hl.config({
         ["col.crit"]          = "rgba('"${CRIT}"'ff)",
         ["col.warn"]          = "rgba('"${WARN}"'ff)",
         ["shadow_alpha"]      = '"${SHADOW_ALPHA}"',
+        ["title_rotated"]     = '"${TITLE_ROTATED}"',
     } },
 })' >/dev/null 2>&1
 LUA="$CONFIG/hypr/hyprland.lua"
@@ -217,6 +229,7 @@ if [ -f "$LUA" ]; then
     # the shadow did not. Rewriting the seed line here makes it survive a
     # reload and a restart, exactly as the colour lines do.
     sed -i -E 's/(\["shadow_alpha"\][[:space:]]*=[[:space:]]*)[0-9.]+/\1'"${SHADOW_ALPHA}"'/' "$LUA"
+    sed -i -E 's/(\["title_rotated"\][[:space:]]*=[[:space:]]*)(true|false)/\1'"${TITLE_ROTATED}"'/' "$LUA"
 fi
 
 # ---- 6. KDE / Qt apps (kdeglobals colours + pixel font; live-reloaded) --------
