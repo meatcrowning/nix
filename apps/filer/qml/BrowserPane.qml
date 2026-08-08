@@ -1060,6 +1060,15 @@ Rectangle {
         }
         // A folder typed into the name box is somewhere to go, not an answer.
         onNavigate: (dir) => view.go(dir)
+        // The filter dropdown fills the pane's ONE menu (§7.3) — the bar owns
+        // no popup. The current filter's row is just picked again harmlessly.
+        onFilterMenuRequested: (sx, sy) => {
+            const items = [];
+            for (const n of Picker.filterNames)
+                items.push({ label: n, trigger: () => Picker.setFilter(n) });
+            const p = view.mapFromItem(null, sx, sy);
+            ctxMenu.open(p.x, p.y, items);
+        }
         // ...and a save-as onto a file that is already there is asked about.
         onConfirmOverwrite: (path) => {
             saveOverDlg.text = dirNameOf(path) + " already exists.\nReplace it?";

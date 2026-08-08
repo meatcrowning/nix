@@ -438,7 +438,9 @@ characters anywhere**. goetia's inbox is a separate decision; see
 Not in `qmlcommon/` (it needs `PixelText`, which a shared component cannot
 reach): filer, player, reader, editor, board, painter and viewer each hold a
 **verbatim copy**, and surfer holds the ancestor as `ContextMenu.qml`. Retune
-all eight or none.
+all eight or none. `SelectButton.qml` — the dropdown face every enum pick wears
+(docs/DESIGN.md §7.2) — is under the same rule: player and filer each hold a
+verbatim copy.
 
 **Opening the menu takes the active focus** — that is how Escape and the
 outside-click scrim reach its sink — so it remembers the item it took the focus

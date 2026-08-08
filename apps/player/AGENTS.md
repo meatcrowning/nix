@@ -219,8 +219,10 @@ hard-coded thresholds came from in the first place.
 **The view**: `PlaylistsView.qml` (sidebar + right-click menu + "+ new" +
 "restore built-in playlists"), `SmartEditor.qml` (the modal, §7.2's spec) and
 `SelectButton.qml` (a "pick one" box that opens the app's own `CtxMenu` — there
-is no combo box on this desktop). Three things in the editor that are load
-bearing:
+is no combo box on this desktop; since 2026-08-08 the dropdown is the shape of
+EVERY enum pick desktop-wide, and filer holds a verbatim copy for its picker's
+filter chooser — retune both or neither, like CtxMenu). Three things in the
+editor that are load bearing:
 
 - It holds a **working copy**; the store never sees a keystroke. Cancel is then
   free, and the list behind the modal keeps showing what it currently is.

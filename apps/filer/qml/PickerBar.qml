@@ -18,6 +18,10 @@ Item {
     // explicitly selected, which is how every other file chooser behaves
     property string currentDir: ""
     property bool winActive: true
+    // The filter dropdown was clicked: asks the PANE to open its shared
+    // CtxMenu at this scene point with the filter choices (§7.3 — the bar
+    // owns no menu; see BrowserPane's handler).
+    signal filterMenuRequested(real sceneX, real sceneY)
 
     // THE NAME BOX IS EDITABLE, so an answer can be typed or pasted as well as
     // clicked — a path from somewhere else is the whole reason a file dialog
@@ -183,28 +187,22 @@ Item {
             }
         }
 
-        // filter chooser: only when the app offered more than one. Cycles on
-        // click rather than opening a popup — there is rarely more than a
-        // handful, and a popup here would fight the context-menu layer.
-        PixelText {
+        // filter chooser: only when the app offered more than one. A dropdown
+        // — the desktop's pick-one-of-N (docs/DESIGN.md §7.2) — opening the
+        // pane's own shared CtxMenu through the signal below, so the bar owns
+        // no popup of its own (§7.3, one menu per pane).
+        SelectButton {
             id: filterBox
             visible: Picker.filterNames.length > 1
-            anchors { right: cancelBtn.left; rightMargin: 14; verticalCenter: parent.verticalCenter }
-            text: visible ? "[" + Picker.filterName + "]" : ""
-            color: !root.winActive ? Theme.inactive
-                   : (filterMa.containsMouse ? Theme.accent : Theme.textDim)
-            MouseArea {
-                id: filterMa
-                anchors.fill: parent
-                anchors.margins: -4
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    const names = Picker.filterNames;
-                    const i = names.indexOf(Picker.filterName);
-                    Picker.setFilter(names[(i + 1) % names.length]);
-                }
-            }
+            // Collapse when hidden: nameBox anchors to our left edge, and an
+            // invisible item still anchors — a dir-mode picker must not lose
+            // 110px of name box to a chooser that is not there.
+            width: visible ? 110 : 0
+            anchors { right: cancelBtn.left; rightMargin: visible ? 14 : 0; verticalCenter: parent.verticalCenter }
+            label: Picker.filterName
+            fgText: root.winActive ? Theme.text : Theme.inactive
+            fgAccent: root.winActive ? Theme.accent : Theme.inactive
+            onPicked: (sx, sy) => root.filterMenuRequested(sx, sy)
         }
 
         component BarButton: Rectangle {
