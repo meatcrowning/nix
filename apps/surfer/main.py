@@ -2025,6 +2025,34 @@ class Files(QObject):
         if path and os.path.isdir(str(path)):
             self._prefs.savePickerDir(str(path))
 
+    # -- the picker's editable location bar ----------------------------------
+    # Typed or pasted, a path is resolved HERE and not in QML, the same rule
+    # that keeps uri-list decoding in python: `~` expansion, an absolute path
+    # taken as it stands, anything else relative to the folder on screen.
+
+    @Slot(str, str, result=str)
+    def resolve(self, text, folder):
+        """`text` as an absolute path, or "" for nothing usable. Existence is
+        `kindOf`'s question — "no such path" and "that is a file" send the
+        picker two different ways."""
+        text = str(text).strip()
+        if not text:
+            return ""
+        path = os.path.expanduser(text)
+        if not os.path.isabs(path):
+            path = os.path.join(str(folder) or str(Path.home()), path)
+        return os.path.normpath(path)
+
+    @Slot(str, result=str)
+    def kindOf(self, path):
+        """`"dir"`, `"file"` or `"missing"`."""
+        p = str(path)
+        if not p:
+            return "missing"
+        if os.path.isdir(p):
+            return "dir"
+        return "file" if os.path.exists(p) else "missing"
+
 
 class Zoom(QObject):
     """The single shared page-zoom level (all tabs), persisted to prefs.json and

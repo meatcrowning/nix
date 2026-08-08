@@ -146,6 +146,41 @@ still on the GPU and decode in software (free on this CPU). Two things that do
 `Accelerated…` name. `SURFER_GPU=hwvideo` puts the decoder back for a re-test
 after an NVIDIA or Qt bump; `SURFER_GPU`'s other modes are air's.
 
+## The file picker is OURS, and its location bar is editable
+
+A page's `<input type=file>` is answered by `qml/FilePicker.qml`, not by filer,
+not by the portal — with no `onFileDialogRequested` handler the QML
+`WebEngineView` auto-rejects, and `QtQuick.Dialogs`' `FileDialog` would pop an
+unthemed GTK window over a pixel-font browser. It handles all four modes
+Chromium asks for (one file, many, a folder, save-as) and queues per view.
+
+**The folder line is a `TextInput`.** It was a read-only label until
+2026-08-07, so the only way to a folder was to walk there from `~/Downloads` a
+click at a time, and a path copied from anywhere else could not be used at all
+(his report: *"i am unable to edit the location bar"*).
+
+- **`Files.resolve(text, folder)` / `kindOf(path)` in `main.py` decide what the
+  text means** — `~` expansion, an absolute path as it stands, anything else
+  relative to the folder on screen. Not in QML, the same rule that keeps
+  uri-list decoding in python.
+- **A folder navigates; an existing file is picked outright** (in save-as it
+  fills the name box instead and the choice stays with the save button); a path
+  that is not there marks the box `crit` and changes nothing. Silence would be
+  the one unacceptable answer (docs/DESIGN.md §10).
+- **The text is set imperatively in `cd()`, never bound.** The first keystroke
+  in a `TextInput` destroys a binding on its own `text`, and the box would then
+  stop following the folder for the rest of the dialog.
+- After a typed folder the keyboard goes back to the key sink, so Enter means
+  "accept" again rather than "navigate to where I already am".
+
+Verify with `tools/filepicker-test.py` (offscreen, 16 checks over the REAL
+component and a scratch tree; it types with real key events, so `onTextEdited`
+and `onAccepted` are what run). It creates **no `WebEngineView`** — the picker
+needs QtWebEngine only for the mode enum — so it cannot contend with his
+browser's profile, and it borrows the wrapper's Qt env by READING it, never
+running it (the wrapper's last line would hand its arguments to the live
+browser).
+
 ## Downloads — the progress toast gate is TIME, not size
 
 Downloads land in `~/Downloads`. Every download gets a completion/failure toast;

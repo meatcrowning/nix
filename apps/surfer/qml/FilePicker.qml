@@ -101,21 +101,55 @@ Item {
             mode = request.mode;
             selected = [];
             nameField.text = (request.defaultFileName && !folder) ? request.defaultFileName : "";
+            dirBad = false;
             cd(Files.startDir());
         }
         root.visible = true;
         keySink.forceActiveFocus();
     }
 
+    // The location bar said something unusable — it stays marked until edited.
+    property bool dirBad: false
+    // Its text, and a way to put the keyboard in it. The component's public
+    // surface for the folder line (tools/filepicker-test.py drives both).
+    property alias locationText: dirField.text
+    function focusLocation() { dirField.forceActiveFocus(); dirField.selectAll(); }
+
     function cd(path) {
         if (!Files.isDir(path)) return;
         dir = path;
+        dirField.text = path;
+        dirBad = false;
         selected = [];
         refresh();
         list.currentIndex = -1;
         list.positionViewAtBeginning();
     }
     function up() { cd(Files.parentOf(dir)); }
+
+    // Enter in the location bar. A folder is somewhere to GO; an existing file
+    // is the answer outright everywhere except save-as, where it is a name to
+    // overwrite and the choice still belongs to the save button.
+    function goTyped() {
+        var p = Files.resolve(dirField.text, dir);
+        var kind = Files.kindOf(p);
+        if (kind === "dir") {
+            cd(p);
+            keySink.forceActiveFocus();     // Enter means "accept" again
+            return;
+        }
+        if (kind === "file" && !folder) {
+            cd(Files.parentOf(p));
+            if (saving) {
+                nameField.text = p.substring(p.lastIndexOf("/") + 1);
+            } else {
+                selected = [p];
+                root.accept();
+            }
+            return;
+        }
+        dirBad = true;                      // no such path: say so, do nothing
+    }
 
     // Dirs first, then files, both case-insensitively by name — the ordering a
     // file list is read in, not scandir's arbitrary one.
@@ -237,11 +271,42 @@ Item {
                 }
             }
 
-            PixelText {
+            // THE LOCATION BAR, and it is EDITABLE: type or paste a path and
+            // press Enter. It was a read-only label, which meant the only way
+            // to reach a folder was to walk to it from ~/Downloads one click at
+            // a time — and a path copied from somewhere else could not be used
+            // at all. `Files.resolve`/`kindOf` (main.py) decide what the text
+            // means; a folder navigates, an existing file is picked outright
+            // (that IS the answer in every mode but save-as), and anything else
+            // marks the box rather than doing nothing in silence.
+            Rectangle {
                 width: parent.width
-                elide: Text.ElideLeft      // keep the deepest part of the path visible
-                text: root.dir
-                color: Theme.textDim
+                height: 24
+                color: Theme.bgAlt
+                border.width: 1
+                border.color: dirField.activeFocus ? Theme.accent
+                              : root.dirBad ? Theme.crit : Theme.border
+
+                TextInput {
+                    id: dirField
+                    anchors { fill: parent; margins: 4 }
+                    verticalAlignment: TextInput.AlignVCenter
+                    color: root.dirBad ? Theme.crit : Theme.textDim
+                    font.family: Theme.font
+                    font.pixelSize: Theme.fontSize
+                    renderType: Text.NativeRendering
+                    clip: true
+                    selectByMouse: true
+                    selectionColor: Theme.accent
+                    selectedTextColor: Theme.bg
+                    persistentSelection: true
+                    // Set imperatively (cd), never bound: the first keystroke
+                    // in a TextInput destroys a binding on its own `text`, and
+                    // the box would then stop following the folder for good.
+                    onTextEdited: root.dirBad = false
+                    onAccepted: root.goTyped()
+                    Keys.onEscapePressed: root.cancel()
+                }
             }
         }
 
