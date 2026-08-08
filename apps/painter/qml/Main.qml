@@ -559,24 +559,40 @@ Window {
     }
     Shortcut { sequence: "Ctrl+R"; onActivated: App.rescan() }
 
-    // Ctrl+V INTO A FRAME WELL, and only while the pointer is over one.
+    // Ctrl+V INTO A FRAME WELL.
     //
     // A window-level Shortcut sees a key before the focused item's own handler
-    // (see Escape above), so an unconditional Ctrl+V here would take paste away
-    // from the prompt boxes — the one place in painter where Ctrl+V already
-    // meant something. `enabled` is what keeps that impossible: the pointer
-    // cannot be over a well and inside a prompt box at once, and with the
-    // pointer elsewhere this shortcut does not exist. It also answers "which
-    // well?" with no focus model and no invisible state — the wells are
-    // hovering-highlighted anyway, and `[ paste ]` on each covers the
-    // keyboardless route.
+    // (see Escape above), so an unconditional Ctrl+V would take paste away from
+    // the prompt boxes — the one place in painter where Ctrl+V already meant
+    // something. `textFocused` is what keeps that impossible, and it is the ONLY
+    // condition: requiring the pointer to be over a well as well (which this
+    // was until 2026-08-07) made the shortcut do nothing at all for anyone who
+    // pressed Ctrl+V the way people press Ctrl+V — pointer wherever it happened
+    // to be — with no message, because a shortcut that is not enabled is not a
+    // failure to report. Discoverability beat the tidier rule.
     property string hoveredWell: ""
+    readonly property bool textFocused: activeFocusItem !== null
+                                        && activeFocusItem.selectedText !== undefined
+
+    // Which well Ctrl+V means: the one under the pointer if there is one, then
+    // the only one on screen, then the empty one — and with both frames set, the
+    // first, which is the one a single pasted image is nearly always for.
+    function pasteWell() {
+        if (hoveredWell !== "") return hoveredWell
+        if (App.isEdit) return "input"
+        if (!App.isVideo) return ""
+        var first = gen.useInputImage, last = gen.useLastFrame
+        if (first !== last) return first ? "input" : "last"
+        if (!first) return ""                       // text-to-video: no well
+        return App.inputImage === "" || App.lastImage !== "" ? "input" : "last"
+    }
+
     Shortcut {
         // Spelled out rather than StandardKey.Paste: the standard key resolves
         // to a set, and a Shortcut given one matched nothing here.
         sequences: ["Ctrl+V", "Shift+Ins"]
-        enabled: root.hoveredWell !== ""
-        onActivated: root.hoveredWell === "last" ? App.pasteLastImage()
+        enabled: !root.textFocused && root.pasteWell() !== ""
+        onActivated: root.pasteWell() === "last" ? App.pasteLastImage()
                                                  : App.pasteInputImage()
     }
 
