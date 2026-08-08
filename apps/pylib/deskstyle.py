@@ -99,7 +99,8 @@ def settings_path():
 
 
 class DeskStyle(QObject):
-    """Live `fontFamily` / `fontSize` / `reduceMotion` / `animSpeed` / `scrollbarStyle`.
+    """Live `fontFamily` / `fontSize` / `reduceMotion` / `animSpeed` /
+    `scrollbarStyle` / `borderWidth` / `rounding`.
 
     Watches the file AND its directory. The directory watch is the load-bearing
     one: SettingsStore writes atomically (temp file + rename), which swaps the
@@ -118,6 +119,8 @@ class DeskStyle(QObject):
         self._reduce = DEFAULT_REDUCE_MOTION
         self._speed = DEFAULT_ANIM_SPEED
         self._scrollbar = DEFAULT_SCROLLBAR_STYLE
+        self._border = 2
+        self._rounding = 0
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(self._on_change)
         self._watcher.directoryChanged.connect(self._on_change)
@@ -162,10 +165,19 @@ class DeskStyle(QObject):
         bar = data.get("scrollbarStyle")
         if bar not in SCROLLBAR_STYLES:
             bar = DEFAULT_SCROLLBAR_STYLE
-        now = (family, size, reduce_motion, speed, bar)
-        if now != (self._family, self._size, self._reduce, self._speed, self._scrollbar):
-            (self._family, self._size, self._reduce,
-             self._speed, self._scrollbar) = now
+        border = data.get("windowBorderWidth")
+        if isinstance(border, bool) or not isinstance(border, (int, float)):
+            border = 2
+        border = max(0, min(6, int(border)))
+        rounding = data.get("windowRounding")
+        if isinstance(rounding, bool) or not isinstance(rounding, (int, float)):
+            rounding = 0
+        rounding = max(0, min(20, int(rounding)))
+        now = (family, size, reduce_motion, speed, bar, border, rounding)
+        if now != (self._family, self._size, self._reduce, self._speed,
+                   self._scrollbar, self._border, self._rounding):
+            (self._family, self._size, self._reduce, self._speed,
+             self._scrollbar, self._border, self._rounding) = now
             self.changed.emit()
 
     @Property(str, notify=changed)
@@ -175,6 +187,21 @@ class DeskStyle(QObject):
     @Property(int, notify=changed)
     def fontSize(self):
         return self._size
+
+    @Property(int, notify=changed)
+    def borderWidth(self):
+        """The desktop's global border width (Settings > appearance > theme >
+        border width, settings.json windowBorderWidth) — the same number the
+        compositor draws real window borders at and the panel draws its
+        surfaces with. For any border an app draws itself."""
+        return self._border
+
+    @Property(int, notify=changed)
+    def rounding(self):
+        """The desktop's global corner rounding (windowRounding) — the radius
+        the compositor clips every window to. For any corner an app rounds
+        itself."""
+        return self._rounding
 
     @Property(bool, notify=changed)
     def smooth(self):

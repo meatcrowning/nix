@@ -64,7 +64,9 @@ normalize() {
                    -e 's/(\["title_rotated"\][[:space:]]*=[[:space:]]*)(true|false)/\1<WAL>/g' \
                    -e 's/(\["font"\][[:space:]]*=[[:space:]]*)"[^"]*"/\1<WAL>/g' \
                    -e 's/(\["font_size"\][[:space:]]*=[[:space:]]*)[0-9]+/\1<WAL>/g' \
-                   -e 's/(\["font_smooth"\][[:space:]]*=[[:space:]]*)(true|false)/\1<WAL>/g'
+                   -e 's/(\["font_smooth"\][[:space:]]*=[[:space:]]*)(true|false)/\1<WAL>/g' \
+                   -e 's/^([[:space:]]*border_size[[:space:]]*=[[:space:]]*)[0-9]+/\1<WAL>/' \
+                   -e 's/^([[:space:]]*rounding[[:space:]]+=[[:space:]]*)[0-9]+/\1<WAL>/'
             ;;
         *Theme.qml)
             sed -E -e 's/"#[0-9a-fA-F]{3,8}"/"<WAL>"/g'

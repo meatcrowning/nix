@@ -183,6 +183,28 @@ Column {
             }
         }
         SetRow {
+            // GLOBAL, not just the panel's own surfaces: the same number is
+            // the compositor's general:border_size (every program's window
+            // border — SettingsApply.applyFrame + wal-set.sh persistence)
+            // and the apps' DeskStyle.borderWidth.
+            label: "border width"
+            SetSlider {
+                from: 0; to: 6; step: 1; unit: "px"
+                value: page.d.windowBorderWidth
+                onMoved: (v) => { page.d.windowBorderWidth = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
+            // GLOBAL likewise: decoration:rounding clips every window on the
+            // desktop to this radius; the panel and apps read the same key.
+            label: "corner rounding"
+            SetSlider {
+                from: 0; to: 20; step: 1; unit: "px"
+                value: page.d.windowRounding
+                onMoved: (v) => { page.d.windowRounding = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
             // Drawn ONLY on top (hasRgb) — book has no OpenRGB devices and an
             // inert toggle is what docs/DESIGN.md §10 forbids.
             label: "rgb follows theme"
@@ -202,22 +224,6 @@ Column {
                 options: ["vertical", "horizontal"]
                 value: page.d.titleOrientation
                 onChanged: (v) => { page.d.titleOrientation = v; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "border width"
-            SetSlider {
-                from: 0; to: 6; step: 1; unit: "px"
-                value: page.d.windowBorderWidth
-                onMoved: (v) => { page.d.windowBorderWidth = v; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "corner rounding"
-            SetSlider {
-                from: 0; to: 20; step: 1; unit: "px"
-                value: page.d.windowRounding
-                onMoved: (v) => { page.d.windowRounding = v; SettingsStore.save(); }
             }
         }
         SetRow {

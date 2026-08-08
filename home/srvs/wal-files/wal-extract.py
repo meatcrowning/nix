@@ -58,10 +58,13 @@ DEFAULTS = {"themeMode": "auto", "accentOverride": "#5c9fcc",
 # chroma of the dark structural tones (which glow less, so may carry more);
 # `status_s` is the status ramp's saturation.
 VARIANTS = {
-    # name       light_cap  accent_v  struct_mul  status_s
-    "pastel":  {"light_cap": 0.34, "accent_v": 0.92, "struct_mul": 1.00, "status_s": 0.42},
-    "muted":   {"light_cap": 0.20, "accent_v": 0.78, "struct_mul": 0.55, "status_s": 0.30},
-    "vivid":   {"light_cap": 0.85, "accent_v": 1.00, "struct_mul": 1.45, "status_s": 0.90},
+    # name       light_cap  accent_v  struct_mul  status_s  light_ink
+    # light_ink caps the LIGHT-MODE ink saturation. It exists because the old
+    # formula (max(light_cap, 0.40)) collapsed pastel and muted onto the same
+    # 0.40 — in light mode the variant control visibly did nothing (§10.1).
+    "pastel":  {"light_cap": 0.34, "accent_v": 0.92, "struct_mul": 1.00, "status_s": 0.42, "light_ink": 0.40},
+    "muted":   {"light_cap": 0.20, "accent_v": 0.78, "struct_mul": 0.55, "status_s": 0.30, "light_ink": 0.26},
+    "vivid":   {"light_cap": 0.85, "accent_v": 1.00, "struct_mul": 1.45, "status_s": 0.90, "light_ink": 0.85},
 }
 
 
@@ -175,8 +178,10 @@ def full_palette(h, s, v, clusters, pure_bg, variant, light=False):
         h2, s2 = pick_secondary(clusters, h, s)
         # Dark ink accent on white; the variant's chroma character still applies
         # (a vivid full theme carries more chroma in its ink), but the value is
-        # pinned dark rather than lifted by `accent_v`.
-        INK = min(s, max(lcap, 0.40))
+        # pinned dark rather than lifted by `accent_v`. The cap is the
+        # variant's own light_ink — see VARIANTS for why it is not
+        # max(lcap, 0.40).
+        INK = min(s, vp["light_ink"])
         accent = hsv_hex(h, INK, min(max(v, 0.28), 0.42))
 
         def lstruct(cap, val):
