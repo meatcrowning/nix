@@ -501,7 +501,7 @@ behind. Re-run it after touching `comfy-tunnel.sh`.
 
 ## `tools/ui-test.py` — the offscreen UI harness
 
-231 checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
+237 checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
 synthetic model root and no backend (`unit_cmd` neutered, client stubbed), so it
 can never start ComfyUI on top or open a window on his screen:
 
@@ -550,6 +550,14 @@ wiring are deliberate:
   this; folding the six into `qmlcommon/` is docs/DESIGN.md Open question 3 and is
   blocked on `PixelText`, which a shared component cannot reach. Do not "improve"
   this copy — retune all six or none.
+- **A row acts on a box that still has the keyboard.** The menu takes the active
+  focus while it is open, so the box takes it on the right-press and the menu
+  hands it back on close, and `persistentSelection` keeps the selection alive
+  across that — otherwise `select all` selected text nothing could then delete,
+  and `cut`/`copy` ran against an emptied selection. The contract is
+  `apps/AGENTS.md` → `CtxMenu.qml`; the regression is `ui-test.py`'s
+  `menu_pick`, which picks the ROW rather than calling the editor's method (the
+  check that did the latter passed throughout the bug).
 
 The numeric `Spin`/`Field` controls are not spellchecked and must not be.
 

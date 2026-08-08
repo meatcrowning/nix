@@ -410,6 +410,31 @@ editor's find bar and path bar, surfer's find bar and file-picker fields (its
 characters anywhere**. goetia's inbox is a separate decision; see
 `board/AGENTS.md`.
 
+### `CtxMenu.qml` — a menu row acts on a box that still has the keyboard
+
+Not in `qmlcommon/` (it needs `PixelText`, which a shared component cannot
+reach): filer, player, reader, editor, board and painter each hold a **verbatim
+copy**, and surfer holds the ancestor as `ContextMenu.qml`. Retune all seven or
+none.
+
+**Opening the menu takes the active focus** — that is how Escape and the
+outside-click scrim reach its sink — so it remembers the item it took the focus
+from (`Window.activeFocusItem`) and gives it back in `close()`, *before* the
+chosen row's `trigger` runs. A trigger that wants the focus elsewhere (an inline
+rename, a dialog) still wins, by running last.
+
+Two things a text box must do to survive that round trip, both landed in
+painter's `PromptBox` on 2026-08-07 after `select all` in a prompt box left the
+text drawn selected and Backspace doing nothing:
+
+- **`persistentSelection: true` on the editor.** A `TextEdit` drops its
+  selection the moment it loses active focus, so `cut`/`copy` rows were offered
+  from the selection as it stood at the right-click and then ran against
+  nothing.
+- **`forceActiveFocus()` on the right-press**, in the same MouseArea that raises
+  the menu. A right-click is how a box that was never clicked into gets a menu,
+  and without this the keyboard is handed back to wherever it actually was.
+
 ### `VScroll.qml` — the one scrollbar
 
 `ScrollBar.vertical: VScroll {}` on every scrollable view, and **the call site

@@ -132,6 +132,29 @@ def click(win, item, dx=None, dy=None, button=None):
     spin(60)
 
 
+def menu_pick(win, item, label, dx=None, dy=None):
+    """Right-click `item`, then click the row called `label` — the real path.
+
+    Everything a right-click menu does to a text box goes through here, because
+    invoking the editor's own method instead skips the part that broke: opening
+    the menu moves the active focus off the editor.
+    """
+    from PySide6.QtCore import Qt
+    click(win, item, dx=dx, dy=dy, button=Qt.RightButton)
+    menu = find(win.contentItem(), "CtxMenu")
+    if menu is None or not menu.isVisible():
+        FAILS.append("the context menu opened on " + label)
+        print("FAIL  the context menu opened on " + label)
+        return None
+    row = find(menu, "PixelText", pred=lambda it: it.property("text") == label)
+    if row is None:
+        FAILS.append("the context menu offers " + label)
+        print("FAIL  the context menu offers " + label)
+        return None
+    click(win, row)
+    return menu
+
+
 def key(win, k, mods=None, text=""):
     """One key, delivered to the WINDOW — never to the item under test.
 
@@ -463,6 +486,43 @@ def test_text_boxes(win, ctl):
     key(win, Qt.Key_Backspace)
     check("...and Backspace clears that selection too", edit.property("text") == "",
           edit.property("text"))
+
+    # ...and that is NOT the same test as picking the row. Calling `selectAll()`
+    # on an editor that still has focus is the one path that always worked; the
+    # real one goes through `CtxMenu`, which takes the focus to its own sink to
+    # get Escape. Selecting into an editor the keyboard is no longer pointed at
+    # left the text looking selected and Backspace doing nothing — the whole bug.
+    edit.setProperty("text", "one two three")
+    spin(60)
+    menu_pick(win, box, "select all")
+    check("the menu row selects the whole prompt",
+          edit.property("selectedText") == "one two three",
+          edit.property("selectedText"))
+    check("...and hands the keyboard back to the editor",
+          edit.property("activeFocus") is True)
+    key(win, Qt.Key_Backspace)
+    check("...so Backspace after the MENU's select all clears it",
+          edit.property("text") == "", edit.property("text"))
+
+    # Every other row on that menu edits the same document, so each one owes the
+    # keyboard back too — typing after `paste` must land in the box.
+    edit.setProperty("text", "one two")
+    spin(60)
+    edit.metaObject().invokeMethod(edit, "selectAll")
+    menu_pick(win, box, "copy")
+    check("copy leaves the editor focused", edit.property("activeFocus") is True)
+    key(win, Qt.Key_Z, Qt.NoModifier, "z")
+    check("...and the next keystroke goes into the box",
+          edit.property("text") == "z", edit.property("text"))
+    # `cut` is where a dropped selection SHOWS: a TextEdit deselects when it
+    # loses focus to the menu, so the row ran against nothing and the text
+    # stayed put (hence `persistentSelection` on the editor).
+    edit.setProperty("text", "cut me")
+    spin(60)
+    edit.metaObject().invokeMethod(edit, "selectAll")
+    menu_pick(win, box, "cut")
+    check("the menu's cut takes the selection with it",
+          edit.property("text") == "", edit.property("text"))
 
     # The NEGATIVE box is a second editor, and the keys are not the positive
     # one's by accident.

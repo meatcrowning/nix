@@ -96,6 +96,13 @@ Rectangle {
             // 16px rather than kitty's 15px cell; that is an accepted loss and
             // NOT an invitation to re-add these two lines.
             selectByMouse: true
+            // The selection SURVIVES the menu that acts on it. A TextEdit drops
+            // its selection the moment it loses active focus, and opening
+            // `CtxMenu` does exactly that — so `cut` and `copy` were offered
+            // (the rows are enabled from the selection as it stood at the
+            // right-click) and then ran against nothing. Same setting, same
+            // reason, as editor's `CodeView`.
+            persistentSelection: true
             selectionColor: Theme.accent
             selectedTextColor: Theme.bg
             onTextChanged: if (!box.syncing) box.edited(text)
@@ -121,6 +128,13 @@ Rectangle {
                 anchors.fill: parent
                 acceptedButtons: Qt.RightButton
                 onPressed: function (m) {
+                    // A right-click puts the keyboard in this box, exactly as a
+                    // left-click does. The menu takes the focus while it is open
+                    // and gives it back to whatever held it (`CtxMenu`), so
+                    // without this a menu opened on an UNFOCUSED box handed the
+                    // keyboard back to wherever it had been — and `select all`
+                    // there is a selection nothing can then delete.
+                    input.forceActiveFocus()
                     var pos = input.positionAt(m.x, m.y)
                     var hasSel = input.selectionEnd > input.selectionStart
                     var items = marks.menuItems(pos).concat([

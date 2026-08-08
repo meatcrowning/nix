@@ -16,7 +16,14 @@ Item {
 
     property var items: []
 
+    // WHOEVER HAD THE KEYBOARD GETS IT BACK — see the same block in the apps'
+    // `CtxMenu.qml`. Opening the menu takes the active focus (that is how
+    // Escape and the outside-click reach the sink below), so a row that acts on
+    // a text box acted on one the keyboard was no longer pointed at.
+    property Item prevFocus: null
+
     function open(x, y, list) {
+        root.prevFocus = root.Window.activeFocusItem;
         root.items = list || [];
         panel.x = x;
         panel.y = y;
@@ -28,6 +35,9 @@ Item {
     function close() {
         root.visible = false;
         root.items = [];
+        if (root.prevFocus)
+            root.prevFocus.forceActiveFocus();
+        root.prevFocus = null;
     }
 
     // outside-click / right-click scrim: dismiss and swallow the event so it
