@@ -20,6 +20,14 @@ QtObject {
     // the same property, off a QML FontMetrics, since it was written.)
     readonly property int lineHeight: DeskStyle.lineHeight
 
+    // The same font, as a whole QFont with NoAntialias pinned — bound as
+    // `font:` on the TextEdit/TextInput he types into. Editable items ignore
+    // `antialiasing:false`/`renderType` and draw a scalable pixel font
+    // grey-fringed; only the font's style strategy reaches the rasteriser
+    // (docs/DESIGN.md 2.2). Labels keep `font: Theme.font` — `Text` is crisp
+    // already.
+    readonly property font editorFont: DeskStyle.editorFont
+
     readonly property int barWidth: 48
     readonly property int cell: 40
     readonly property int gap: 8

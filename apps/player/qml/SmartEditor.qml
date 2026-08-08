@@ -258,9 +258,7 @@ Item {
                         anchors.fill: parent
                         anchors.margins: 4
                         verticalAlignment: TextInput.AlignVCenter
-                        font.family: Theme.font
-                        font.pixelSize: Theme.fontSize
-                        font.hintingPreference: Font.PreferFullHinting
+                        font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
                         renderType: Text.NativeRendering
                         color: root.fgText
                         clip: true
@@ -376,9 +374,7 @@ Item {
                                     anchors.fill: parent
                                     anchors.margins: 4
                                     verticalAlignment: TextInput.AlignVCenter
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.fontSize
-                                    font.hintingPreference: Font.PreferFullHinting
+                                    font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
                                     renderType: Text.NativeRendering
                                     color: root.fgText
                                     clip: true
@@ -506,9 +502,7 @@ Item {
                             anchors.fill: parent
                             anchors.margins: 4
                             verticalAlignment: TextInput.AlignVCenter
-                            font.family: Theme.font
-                            font.pixelSize: Theme.fontSize
-                            font.hintingPreference: Font.PreferFullHinting
+                            font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
                             renderType: Text.NativeRendering
                             color: root.fgText
                             clip: true

@@ -156,8 +156,7 @@ Item {
                 color: !root.winActive ? Theme.inactive
                        : (root.typed && !root.canAccept) ? Theme.crit
                        : root.canAccept ? Theme.text : Theme.textDim
-                font.family: Theme.font
-                font.pixelSize: Theme.fontSize
+                font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
                 renderType: Text.NativeRendering
                 selectByMouse: true
                 selectionColor: Theme.accent

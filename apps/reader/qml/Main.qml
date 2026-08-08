@@ -543,9 +543,7 @@ Window {
                             right: count.left; rightMargin: 6
                             verticalCenter: parent.verticalCenter
                         }
-                        font.family: Theme.font
-                        font.pixelSize: Theme.fontSize
-                        font.hintingPreference: Font.PreferFullHinting
+                        font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
                         renderType: Text.NativeRendering
                         color: win.fgText
                         // accent/bg, not the near-black `highlight` fill: a
@@ -634,9 +632,7 @@ Window {
                             right: ofN.left; rightMargin: 6
                             verticalCenter: parent.verticalCenter
                         }
-                        font.family: Theme.font
-                        font.pixelSize: Theme.fontSize
-                        font.hintingPreference: Font.PreferFullHinting
+                        font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
                         renderType: Text.NativeRendering
                         color: win.fgText
                         selectionColor: Theme.accent

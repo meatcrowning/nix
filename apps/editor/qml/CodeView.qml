@@ -312,19 +312,23 @@ Item {
             // no-wrap path did) loops, because wrapping makes contentWidth depend
             // on width in turn.
             width: flick.width
-            // The BODY is not PixelText (that is a Text subclass), so the four
-            // things PixelText pins for the chrome are pinned again here — and
-            // for the same reasons (§2.2): native rasterisation at an integer
-            // pixel size, full hinting, no antialiasing. `lineHeightMode` does
-            // not exist on TextEdit, so the line box is Qt's own
-            // ascent+descent; measured with this font it comes out exactly
-            // `Theme.fontSize`, i.e. kitty's cell, which is why the gutter lines
-            // up at all.
-            font.family: Theme.font
-            font.pixelSize: Theme.fontSize
-            font.hintingPreference: Font.PreferFullHinting
+            // The BODY is not PixelText (that is a Text subclass), and until
+            // 2026-08-07 it hand-copied PixelText's four pins on the theory that
+            // they did the same job here. They do not: §2.2 measured that an
+            // EDITABLE item ignores `antialiasing`/`renderType`/`hintingPreference`
+            // for glyph rasterisation and draws grey-fringed AA whatever they
+            // say, so this file was drawing the one surface he types into all
+            // day at 17-48 greys per glyph while asserting the opposite. The
+            // only lever that reaches the rasteriser is `QFont::NoAntialias` on
+            // the style strategy, which the QML `font` group cannot express —
+            // hence a whole QFont, built in `pylib/deskstyle.py`.
+            //
+            // `lineHeightMode` does not exist on TextEdit, so the line box is
+            // Qt's own ascent+descent — which is exactly `Theme.lineHeight`,
+            // the same quantity the gutter asks the document's layout for, so
+            // the two stay lined up on any face.
+            font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
             renderType: Text.NativeRendering
-            antialiasing: false
 
             // PLAIN TEXT, ALWAYS — §2.6, and here it is not merely a security
             // rule but a correctness one: `AutoText` would sniff an HTML file
