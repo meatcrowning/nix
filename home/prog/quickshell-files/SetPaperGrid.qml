@@ -11,6 +11,14 @@ import Quickshell.Io
 // effect live (docs/DESIGN.md §10). The apply rewrites Theme.qml, which
 // hot-reloads this settings instance; the grid re-lands on the page holding
 // the (new) current wallpaper, so the reload returns you to where you were.
+//
+// The box is also a DROP TARGET: local image files dragged onto it are COPIED
+// into the browsed wallpaper folder (auto-versioned, never clobbering) and
+// their theme/thumbnail pre-extracted (wal-prepare.sh), then the view flips to
+// the page the new paper appears on. Copy-only — an upload box, so there is no
+// move/copy ambiguity to ask about (§10.2); non-image and non-local payloads
+// are refused at the border so the source shows a declined drop, and the box
+// outlines in accent while a valid drag hovers it (§13).
 Item {
     id: root
     width: parent ? parent.width : 480
@@ -22,8 +30,8 @@ Item {
     // the viewport exactly at any window size (§2.7 layouts survive resizing).
     readonly property int btnW: 16          // page button, SetScroll's win31 bar width
     readonly property int btnGap: 4         // button -> viewport breath
-    readonly property int cols: 3
-    readonly property int rows: 2
+    readonly property int cols: 4
+    readonly property int rows: 3
     readonly property int cellW: Math.max(1, Math.floor((width - 2 * (btnW + btnGap)) / cols))
     readonly property int cellH: Math.round(cellW * 158 / 225)
     readonly property int vpW: cellW * cols
@@ -42,12 +50,18 @@ Item {
     // Land the view on the page holding the current wallpaper ONCE, when both
     // lists have arrived — the 3s poll below must never yank the view off the
     // page the user flipped to (the picker's _openSync lesson, WallpaperPicker.qml).
+    // Until then the run of pages is HIDDEN and its slide Behavior disarmed: a
+    // (re)build starts at page 0, and landing from there with the Behavior live
+    // sent the whole grid flying left and back on every tile pick (the apply's
+    // hot-reload rebuilds this component) — a reload must look like a state
+    // change in place, never a re-entry animation (AGENTS.md).
     property bool _landed: false
+    property bool _gotList: false
+    property bool _gotCurrent: false
     function tryLand() {
-        if (_landed || images.length === 0) return;
+        if (_landed || !_gotList || !_gotCurrent) return;
         const i = images.indexOf(currentPath);
-        if (i < 0) return;
-        pageIdx = Math.floor(i / perPage);
+        if (i >= 0) pageIdx = Math.floor(i / perPage);
         _landed = true;
     }
 
@@ -98,7 +112,9 @@ Item {
                     root.images = nextImages;
                 root.thumbs = nextThumbs;
                 root.palettes = nextPalettes;
+                root._gotList = true;
                 root.tryLand();
+                root.tryReveal();
             }
         }
     }
@@ -109,6 +125,7 @@ Item {
         stdout: StdioCollector {
             onStreamFinished: {
                 root.currentPath = this.text.trim();
+                root._gotCurrent = true;
                 root.tryLand();
             }
         }
@@ -143,6 +160,67 @@ Item {
             + "exec \"$HOME/.config/scripts/wal-set.sh\" \"$1\" >>\"$HOME/.cache/wal/wallpaper-picker.log\" 2>&1",
             "_", path];
         applyProc.running = true;
+    }
+
+    // ---- drop-to-upload --------------------------------------------------
+    // Accept only local image files, judged by the same extensions
+    // list-wallpapers.sh globs — anything else is refused at onEntered so the
+    // drag source draws a declined drop instead of a dead one (§10.2).
+    function isImageUrl(u) {
+        const s = String(u);
+        return /^file:\/\//i.test(s) && /\.(png|jpe?g|webp|bmp)$/i.test(s);
+    }
+    // The first dropped file's destination: once it appears in `images`
+    // (ingest done, poll caught up), flip to its page — the one view move that
+    // is feedback for a user act, not a background yank. One-shot.
+    property string revealPath: ""
+    function tryReveal() {
+        if (!revealPath) return;
+        const i = images.indexOf(revealPath);
+        if (i < 0) return;
+        pageIdx = Math.floor(i / perPage);
+        revealPath = "";
+    }
+    Process {
+        id: ingestProc
+        // Copy each dropped file into the browsed folder under a free name
+        // (auto-versioned suffix — never clobber, §10.2), then pre-extract its
+        // theme + thumbnail so the tile arrives with its palette strip. The
+        // folder is resolved exactly like list-wallpapers.sh resolves it, so
+        // the drop lands where the grid is looking. file:// URLs are decoded
+        // by python, once — never a uri-list in QML (§13).
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const first = (this.text || "").split("\n").map(s => s.trim()).filter(s => s.length > 0)[0];
+                if (first) root.revealPath = first;
+                root.refresh();
+            }
+        }
+    }
+    function ingest(urls) {
+        // Plain loop: `urls` is a QML sequence, not guaranteed a full JS Array.
+        const args = [];
+        for (let i = 0; i < urls.length; i++)
+            if (isImageUrl(urls[i])) args.push(String(urls[i]));
+        if (args.length === 0) return;
+        ingestProc.command = ["sh", "-c",
+              'SETTINGS="$HOME/.config/quickshell/settings.json"; '
+            + 'DIR="$(jq -r \'.wallpaperDir // empty\' "$SETTINGS" 2>/dev/null)"; '
+            + '[ -n "$DIR" ] || DIR="~/Pictures/wall"; '
+            + 'case "$DIR" in "~") DIR="$HOME";; "~/"*) DIR="$HOME/${DIR#\\~/}";; esac; '
+            + 'mkdir -p "$DIR"; '
+            + 'for u in "$@"; do '
+            +   'p="$(python3 -c \'import sys; from urllib.parse import urlparse, unquote; print(unquote(urlparse(sys.argv[1]).path))\' "$u")" || continue; '
+            +   '[ -f "$p" ] || continue; '
+            +   'base="$(basename "$p")"; stem="${base%.*}"; ext="${base##*.}"; '
+            +   'dest="$DIR/$base"; n=2; '
+            +   'while [ -e "$dest" ]; do dest="$DIR/$stem-$n.$ext"; n=$((n+1)); done; '
+            +   'cp -- "$p" "$dest" || continue; '
+            +   '"$HOME/.config/scripts/wal-prepare.sh" "$dest" >>"$HOME/.cache/wal/wallpaper-picker.log" 2>&1; '
+            +   'printf "%s\\n" "$dest"; '
+            + 'done',
+            "_"].concat(args);
+        ingestProc.running = true;
     }
 
     // ---- a page button: full-height, geometry arrow, honesty ladder ------
@@ -209,9 +287,13 @@ Item {
 
         Row {
             // The whole run of pages, slid by whole page widths — the
-            // desktop's one slide (§6.2), instant under reduce motion.
+            // desktop's one slide (§6.2), instant under reduce motion. Hidden
+            // and unanimated until the initial landing has happened, so a
+            // rebuild appears already ON its page rather than flying there.
+            visible: root._landed
             x: -root.pageIdx * root.vpW
             Behavior on x {
+                enabled: root._landed
                 NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing }
             }
 
@@ -314,5 +396,36 @@ Item {
                 }
             }
         }
+    }
+
+    // ---- the drop target: the whole box ----------------------------------
+    DropArea {
+        id: dropZone
+        anchors.fill: parent
+        keys: ["text/uri-list"]
+        onEntered: (drag) => {
+            // Refuse at the border unless something droppable is aboard, so
+            // the source cursor shows the decline (§10.2).
+            let ok = false;
+            if (drag.hasUrls)
+                for (let i = 0; i < drag.urls.length && !ok; i++)
+                    ok = root.isImageUrl(drag.urls[i]);
+            drag.accepted = ok;
+        }
+        onDropped: (drop) => {
+            if (!drop.hasUrls) return;
+            root.ingest(drop.urls);
+            drop.accept(Qt.CopyAction);
+        }
+    }
+    // The target highlights while a (valid) drag hovers it — §13. An outline
+    // around the whole box, over the tiles, so the target reads as "this box",
+    // not any one tile.
+    Rectangle {
+        anchors.fill: parent
+        visible: dropZone.containsDrag
+        color: "transparent"
+        border.width: 2
+        border.color: Theme.accent
     }
 }
