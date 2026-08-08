@@ -23,8 +23,15 @@
 # runtime-owned. tools/seed-drift.sh is the tripwire that says this script is
 # not doing its job; the two must agree on that list.
 #
-# Exit: 0 = in sync, seeded, or reconciled. 1 = something went wrong.
-#       With --dry-run: 0 = in sync, 1 = would change.
+# Exit: 0 = in sync, seeded, or reconciled.
+#       1 = (--dry-run only) would seed or would reconcile — the normal state
+#           between an edit and the next switch, and NOT a fault.
+#       2 = cannot do it: a missing source, or a carry that would have written
+#           the template value over a runtime-owned one. Activation runs this
+#           with `|| true`, so 2 is a SILENT no-op there — it is the code
+#           tools/seed-drift.sh --pre-switch fails preflight on. The two must
+#           stay distinct: conflating them is what deadlocked the rebuild until
+#           2026-08-07.
 
 set -uo pipefail
 
@@ -35,20 +42,20 @@ KIND="${1:?usage: seed-reconcile.sh [--dry-run] <kind> <src> <live>}"
 SRC="${2:?}"
 LIVE="${3:?}"
 
-[ -f "$SRC" ] || { echo "seed-reconcile: missing source $SRC" >&2; exit 1; }
+[ -f "$SRC" ] || { echo "seed-reconcile: missing source $SRC" >&2; exit 2; }
 
 # Never seeded yet (fresh install): install the source verbatim and stop. There
 # are no runtime values to carry, and wal-set.sh will write its own on first run.
 if [ ! -e "$LIVE" ]; then
     [ "$DRY" -eq 1 ] && { echo "seed-reconcile: would SEED $LIVE"; exit 1; }
-    install -D -m644 "$SRC" "$LIVE" || exit 1
+    install -D -m644 "$SRC" "$LIVE" || exit 2
     echo "seed-reconcile: seeded $LIVE"
     exit 0
 fi
 
-TMP="$(mktemp)" || exit 1
+TMP="$(mktemp)" || exit 2
 trap 'rm -f "$TMP" "$TMP.blk" "$TMP.out"' EXIT
-cp "$SRC" "$TMP" || exit 1
+cp "$SRC" "$TMP" || exit 2
 
 # carry <ere-prefix> <ere-value>
 # Read the value the live file currently holds for the line matching
@@ -95,7 +102,7 @@ case "$KIND" in
         # home/prog/quickshell.nix, which now supplies gawk).
         if [ ! -s "$TMP.blk" ]; then
             echo "seed-reconcile: the live wal palette block is empty; leaving $LIVE alone" >&2
-            exit 1
+            exit 2
         fi
         if ! awk -v inc="$TMP.blk" '
             /\/\/ >>> wal palette/ { print; while ((getline line < inc) > 0) print line; skip=1; next }
@@ -104,13 +111,13 @@ case "$KIND" in
         ' "$TMP" > "$TMP.out"; then
             echo "seed-reconcile: cannot carry the live wal palette across; leaving $LIVE alone" >&2
             rm -f "$TMP.out"
-            exit 1
+            exit 2
         fi
         mv "$TMP.out" "$TMP"
     fi
     ;;
   *)
-    echo "seed-reconcile: unknown kind '$KIND'" >&2; exit 1 ;;
+    echo "seed-reconcile: unknown kind '$KIND'" >&2; exit 2 ;;
 esac
 
 if cmp -s "$TMP" "$LIVE"; then
@@ -134,5 +141,5 @@ cp "$LIVE" "$BAK/$(basename "$LIVE").$STAMP.bak" 2>/dev/null
 # by inode, so `mv` over Theme.qml leaves the panel watching the old unlinked
 # one and the change is never seen. (Harmless for hyprland.lua; done the same
 # way so there is one rule.)
-cat "$TMP" > "$LIVE" || exit 1
+cat "$TMP" > "$LIVE" || exit 2
 echo "seed-reconcile: reconciled $LIVE from nix source (was backed up to $BAK/$(basename "$LIVE").$STAMP.bak)"
