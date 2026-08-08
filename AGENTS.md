@@ -107,7 +107,8 @@ qs ipc call wallpaper status      # path, mode, and whether the frame actually d
 hyprctl plugin list               # exactly one hyprvtb, at the new Version
 hyprctl configerrors              # must be empty
 hyprctl layers                    # layer namespaces + sizes
-./tools/seed-drift.sh             # tripwire: source vs live for both mutable dotfiles; exit 1 = drift, --quiet for scripts
+./tools/seed-drift.sh             # AFTER a switch: did the reconciler miss a value? exit 1 = it did
+./tools/seed-drift.sh --pre-switch # BEFORE one: what this switch will do to the two mutable dotfiles
 nix-pull                          # what origin/main has that this checkout does not, and what applying costs
 nix-pull apply                    # pull --ff-only, rebuild through this host's wrapper, reload
 qmllint -I <import paths> qml/Main.qml
@@ -418,7 +419,10 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
 - `tools/` — the maintenance scripts the documented workflows depend on:
   `preflight.sh`, `seed-drift.sh` and `seed-reconcile.sh` (the pair that keeps
   the two runtime-mutable dotfiles level with their nix source — the reconciler
-  runs from activation, the drift check is the tripwire behind it),
+  runs from activation, the drift check is the tripwire behind it; **preflight
+  must never block on drift the switch itself resolves**, which deadlocked
+  every commit touching `hyprland.lua` until 2026-08-07 — harness
+  `seed-gate-test.sh`),
   `prune-worktrees.sh` (aliased `wtprune`),
   `sandbox.sh`, `leak-check.sh` (a test that leaked into his live session —
   residue *and* the live symptoms; preflight runs it) and `lib/session-guard.sh`

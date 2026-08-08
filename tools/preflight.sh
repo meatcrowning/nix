@@ -14,8 +14,9 @@
 #      only, never fatal: staging is legitimate, leaving it staged is the risk.
 #   2. Rootless eval of the top system — catches syntax/option errors before the
 #      passwordless switch (~10s, no sudo needed).
-#   3. seed-drift.sh — seed-once files (Theme.qml, hyprland.lua)
-#      must have source and live copies in step.
+#   3. seed-drift.sh --pre-switch — what this switch will do to the seed-once
+#      files (Theme.qml, hyprland.lua). Reported, not blocked: the switch
+#      reconciles them itself. Fatal only if the reconciler cannot run.
 # Exit nonzero on any failure; safe to run repeatedly.
 set -u
 REPO="${PREFLIGHT_REPO:-$HOME/nix}"
@@ -72,10 +73,23 @@ if ! nix eval --raw "$REPO#nixosConfigurations.top.config.system.build.toplevel.
   fail=1
 fi
 
-if ! "$REPO/tools/seed-drift.sh" --quiet; then
-  echo "FAIL: seed-once drift (run tools/seed-drift.sh for details)"
-  fail=1
-fi
+# 3. The seed-once pair (hyprland.lua, Theme.qml) — but asked as "what will THIS
+#    switch do?", not "is there drift?". Since 2026-08-05 the switch's own
+#    activation reconciles both files, so source-ahead-of-live is the normal
+#    state of any commit that touched one, and failing on it deadlocked the
+#    repo: preflight gates `sudo rebuild-top`, and the switch was the only
+#    thing that could clear the drift. Commit 4c1ed09 (four lines added to
+#    hyprland.lua) was unlandable on top for that reason, and `nix-pull apply`
+#    — which rebuilds unattended through this same wrapper — could never have
+#    landed such a commit at all. So: exit 1 is informational, and only exit 2
+#    (the reconciler CANNOT run, i.e. the switch would silently skip the file)
+#    is fatal.
+"$REPO/tools/seed-drift.sh" --pre-switch
+case "$?" in
+  0|1) ;;
+  *)   echo "FAIL: the switch cannot reconcile a seed-once file (see above)"
+       fail=1 ;;
+esac
 
 # 6. A deployed board-watch.py that is not the repo's. The watcher is a
 #    home-manager unit, so a fix in the repo does NOTHING until the next

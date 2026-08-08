@@ -74,6 +74,20 @@ live file. `tools/seed-drift.sh`'s `PAIRS` and `normalize()` are the tripwire
 for exactly that mistake; keep the two in step. Never trust a written claim
 about current drift state — run the script.
 
+**Drift BEFORE a switch is normal and must never block the switch.** Between
+editing the source and switching, the live copy is behind by construction —
+that is the state the reconciler exists to resolve. Until 2026-08-07
+`preflight.sh` hard-failed on it, and since preflight gates `sudo rebuild-top`
+while only the switch clears the drift, every commit touching `hyprland.lua`
+was unlandable: commit 4c1ed09 sat unapplied on `top` for a day, and
+`nix-pull apply` — which rebuilds unattended through the same wrapper — could
+not have landed one at all. Preflight now asks `seed-drift.sh --pre-switch`,
+which reports what the switch will do and fails only when the reconciler
+**cannot run** (exit 2 — activation calls it with `|| true`, so that case would
+silently skip the file, as book's missing `awk` once did). Keep the two exit
+codes distinct; `tools/seed-gate-test.sh` is the regression harness, and
+collapsing them restores the deadlock with no error anywhere.
+
 ---
 
 ## Powering the display off DESTROYS the output
