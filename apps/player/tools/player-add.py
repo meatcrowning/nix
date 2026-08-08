@@ -200,15 +200,25 @@ def safe_name(s, fallback):
     return s[:150]
 
 
+_RESERVED_NAMES = {"con", "prn", "aux", "nul"} | {f"com{i}" for i in range(1, 10)} \
+    | {f"lpt{i}" for i in range(1, 10)}
+
+
 def safe_file(name):
     """An exFAT-legal filename for the destination. Downloads keep the remote
     peer's filename, which is bound by the PEER's filesystem rules — a
     netlabel named '<_body>' makes the raw name unmovable into aud/ (exFAT
     rejects it with EINVAL, which used to abort the whole import cycle).
     Same sanitizer as safe_name, so '<_body> - Dial Up.flac' lands as
-    'body - Dial Up.flac', the same way its album folder did."""
+    'body - Dial Up.flac', the same way its album folder did. Also guards
+    the reserved device names (CON/PRN/COM1/...) exFAT refuses outright."""
     stem, ext = os.path.splitext(name or "")
-    return safe_name(stem, "track") + (ext.lower() or "")
+    stem = safe_name(stem, "track")
+    if stem.lower() in _RESERVED_NAMES:
+        stem = "_" + stem
+    if not stem.strip("."):
+        stem = "track"  # an all-dots stem is a '.'/'..' alias, unusable
+    return stem + (ext.lower() or "")
 
 
 # --- album placement ---------------------------------------------------------
