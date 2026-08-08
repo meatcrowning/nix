@@ -8,6 +8,11 @@ Row {
     property string value: "#000000"
     signal changed(string hex)
 
+    // `enabled` is the built-in Item property — it already blocks the swatch
+    // and the field (input cascades); this adds the greyed look, so a caller
+    // gating on a sibling setting gets both halves of "greyed out" (§10.1).
+    opacity: enabled ? 1.0 : 0.4
+
     spacing: 8
 
     function _valid(s) { return /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test((s || "").trim()); }
