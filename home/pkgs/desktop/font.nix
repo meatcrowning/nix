@@ -19,24 +19,6 @@ let
       "More Perfect DOS VGA"
   '';
 
-  # Perfect DOS VGA 437 — the other face in the same 8x16 DOS VGA family (the one
-  # Zeh Fernando made first; More Perfect is its refinement). Vendored, because
-  # it is not in nixpkgs: source _home/pkgs/desktop/font-files/PerfectDOSVGA437.ttf_
-  # (.ttf pulled from bh/cool-old-term@master, itself Zeh Fernando's
-  # fatorcaos.com.br face — free for personal and commercial use). Like More
-  # Perfect it covers only its 437-page glyphs, so the same PxPlus import applies
-  # (256 -> 788, existing glyphs untouched) — otherwise switching to it would
-  # reintroduce the DESIGN.md S2.3 clipping. Exposed as its own family name.
-  perfectDOSVGA437 = pkgs.runCommand "perfect-dos-vga-437-merged" {
-    nativeBuildInputs = [ (pkgs.python3.withPackages (ps: [ ps.fonttools ])) ];
-  } ''
-    python3 ${./font-files/merge-vga.py} \
-      ${./font-files/PerfectDOSVGA437.ttf} \
-      ${pkgs.ultimate-oldschool-pc-font-pack}/share/fonts/truetype/PxPlus_IBM_VGA_9x16.ttf \
-      $out/share/fonts/truetype/PerfectDOSVGA437.ttf \
-      "Perfect DOS VGA 437"
-  '';
-
   # Botis 4x6 — a hand-authored 4-wide blocky pixel face. There is NO 4x4 pixel
   # font on this system to merge or import from (the repo ships only the 8x16
   # DOS VGA pair, and fontconfig has only loose 8px IBM CGA faces), and the
@@ -61,19 +43,22 @@ let
     python3 ${./font-files/build-4x6.py} $out/share/fonts/truetype/Botis4x6.ttf
   '';
 
-  # Phenex 6x8 — the hand-authored connected-script (cursive) pixel face, the
-  # flowing counterpart to Botis's blocky one; same rule override, same
-  # no-donor provenance, same scalable-outline output for the same
-  # silent-substitution reason. Authored grid 6x8, baseline under row 5,
-  # advance 6 with ZERO side bearing so lowercase entry/exit stubs touch and
-  # words connect at the baseline like one pen stroke. Named for the goetia's
-  # poet, in Botis's demon-plus-grid pattern. Grid, metrics and the connector
-  # convention are documented in the script docstring.
-  phenex6x8 = pkgs.runCommand "phenex-6x8" {
-    nativeBuildInputs = [ (pkgs.python3.withPackages (ps: [ ps.fonttools ])) ];
+  # Phenex — the hand-authored connected-script (cursive) face, the flowing
+  # counterpart to Botis's blocky one; same rule override, same no-donor
+  # provenance. Unlike the pixel faces it is a NORMAL smooth outline font:
+  # every glyph is authored as a pen-skeleton of cubic strokes and FontForge's
+  # stroke expansion sweeps a round nib along it (monoline script). Lowercase
+  # share join anchors with zero side bearing, so words render as one
+  # connected pen stroke. Named for the goetia's poet. It is the desktop's one
+  # SMOOTH face: the `smooth` flag below drives antialiased rendering in
+  # PixelText/deskstyle (a smooth face under the pixel pipeline is a jagged
+  # staircase). Skeletons, joins and metrics: the script docstring.
+  phenex = pkgs.runCommand "phenex" {
+    nativeBuildInputs = [ pkgs.fontforge ];
   } ''
     mkdir -p $out/share/fonts/truetype
-    python3 ${./font-files/build-phenex-6x8.py} $out/share/fonts/truetype/Phenex6x8.ttf
+    fontforge -lang=py -script ${./font-files/build-phenex.py} \
+      $out/share/fonts/truetype/Phenex.ttf
   '';
 
   # The desktop's SELECTABLE faces — the single source of truth for the
@@ -84,12 +69,14 @@ let
   # DeskStyle.fontFamily resolve; label is the short lowercase name the
   # dropdown shows. Keep this list in step with the home.file/fontconfig
   # entries below: the Settings window enumerates from HERE, never its own
-  # hardcoded copy.
+  # hardcoded copy. `smooth` marks a face that must be ANTIALIASED (a normal
+  # outline face, not a pixel one): PixelText and deskstyle branch their
+  # render path on it, via the generated singleton below and its deskstyle
+  # twin (SMOOTH_FAMILIES in apps/pylib/deskstyle.py — keep the two in step).
   selectableFaces = [
-    { family = "More Perfect DOS VGA"; label = "more perfect"; }
-    { family = "Perfect DOS VGA 437"; label = "perfect dos vga 437"; }
-    { family = "Botis 4x6"; label = "botis 4x6"; }
-    { family = "Phenex 6x8"; label = "phenex 6x8"; }
+    { family = "More Perfect DOS VGA"; label = "more perfect"; smooth = false; }
+    { family = "Botis 4x6"; label = "botis 4x6"; smooth = false; }
+    { family = "Phenex"; label = "phenex"; smooth = true; }
   ];
 
   # The Settings dropdown reads its options from a generated singleton rather
@@ -103,6 +90,7 @@ let
     QtObject {
         readonly property var families: [${lib.concatMapStringsSep "," (f: " \"${f.family}\"") selectableFaces} ]
         readonly property var labels: ({${lib.concatMapStringsSep "," (f: " \"${f.family}\": \"${f.label}\"") selectableFaces} })
+        readonly property var smooth: ({${lib.concatMapStringsSep "," (f: " \"${f.family}\": ${lib.boolToString f.smooth}") selectableFaces} })
     }
   '';
 in
@@ -123,13 +111,7 @@ in
   home.file.".local/share/fonts/MorePerfectDOSVGA.ttf".source =
     "${morePerfectDOSVGA}/share/fonts/truetype/MorePerfectDOSVGA.ttf";
 
-  # The second pixel face. Same runtime-dir pattern, its own family name, on
-  # both hosts (this is home/, not sys/). settings.json's fontFamily points at
-  # whichever face is live; both resolve here.
-  home.file.".local/share/fonts/PerfectDOSVGA437.ttf".source =
-    "${perfectDOSVGA437}/share/fonts/truetype/PerfectDOSVGA437.ttf";
-
-  # The third, hand-authored pixel face — a 4-wide blocky pixel face shipped as
+  # The second, hand-authored pixel face — a 4-wide blocky pixel face shipped as
   # a SCALABLE outline TTF (see the derivation comment: a bitmap here was
   # silently substituted by Pango and the GL scenegraph). Not the live desktop
   # font; shipped as a selectable face like the two DOS ones, with its own
@@ -138,10 +120,10 @@ in
   home.file.".local/share/fonts/Botis4x6.ttf".source =
     "${botis4x6}/share/fonts/truetype/Botis4x6.ttf";
 
-  # The fourth face — the hand-authored cursive script (see the derivation
-  # comment above). Same selectable-face pattern as the other three.
-  home.file.".local/share/fonts/Phenex6x8.ttf".source =
-    "${phenex6x8}/share/fonts/truetype/Phenex6x8.ttf";
+  # The third face — the hand-authored cursive script (see the derivation
+  # comment above). Same selectable-face pattern as the pixel pair.
+  home.file.".local/share/fonts/Phenex.ttf".source =
+    "${phenex}/share/fonts/truetype/Phenex.ttf";
 
   # Generated singleton the Settings "pixel font" dropdown reads its options
   # from (SetPgAppearance.qml -> FontFaces). Built from `selectableFaces` above,
@@ -175,25 +157,6 @@ in
     </fontconfig>
   '';
 
-  # Perfect DOS VGA 437 also ships Regular-only, so the same faux-bold rule must
-  # cover it — otherwise a switch to the second face brings the smearing back.
-  xdg.configFile."fontconfig/conf.d/50-perfect-dos-vga-437-regular.conf".text = ''
-    <?xml version="1.0"?>
-    <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
-    <fontconfig>
-      <match target="pattern">
-        <test name="family"><string>Perfect DOS VGA 437</string></test>
-        <edit name="weight"   mode="assign"><const>regular</const></edit>
-        <edit name="slant"    mode="assign"><const>roman</const></edit>
-        <edit name="embolden" mode="assign"><bool>false</bool></edit>
-      </match>
-      <match target="font">
-        <test name="family"><string>Perfect DOS VGA 437</string></test>
-        <edit name="embolden" mode="assign"><bool>false</bool></edit>
-      </match>
-    </fontconfig>
-  '';
-
   # Botis 4x6 ships Regular-only too (a single outline face), so it gets the
   # same guard: pin any request for it to upright regular and kill synthetic
   # emboldening, so the pixel squares are never faux-bolded/obliqued into a smear.
@@ -214,23 +177,31 @@ in
     </fontconfig>
   '';
 
-  # Phenex 6x8 ships Regular-only like the other three, so it gets the same
-  # guard: pin any request for it to upright regular and kill synthetic
-  # emboldening — a faux-bold or oblique shear would smear the connected
-  # baseline stroke that makes it read as cursive at all.
-  xdg.configFile."fontconfig/conf.d/50-phenex-6x8-regular.conf".text = ''
+  # Phenex ships Regular-only too, and gets the same upright-regular pin — but
+  # the OPPOSITE rasterisation: it is the desktop's one smooth face, so every
+  # fontconfig consumer (Pango titlebar, kitty, GTK, qutebrowser) must
+  # antialias it and must NOT hint it. It ships unhinted, and the autohinter
+  # visibly kinks the connected baseline joins at small sizes (its strong
+  # vertical-stem model fights a monoline script); grayscale AA rather than
+  # subpixel keeps the thick curved strokes free of colour fringes.
+  xdg.configFile."fontconfig/conf.d/50-phenex-regular.conf".text = ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
     <fontconfig>
       <match target="pattern">
-        <test name="family"><string>Phenex 6x8</string></test>
+        <test name="family"><string>Phenex</string></test>
         <edit name="weight"   mode="assign"><const>regular</const></edit>
         <edit name="slant"    mode="assign"><const>roman</const></edit>
         <edit name="embolden" mode="assign"><bool>false</bool></edit>
       </match>
       <match target="font">
-        <test name="family"><string>Phenex 6x8</string></test>
-        <edit name="embolden" mode="assign"><bool>false</bool></edit>
+        <test name="family"><string>Phenex</string></test>
+        <edit name="embolden"  mode="assign"><bool>false</bool></edit>
+        <edit name="antialias" mode="assign"><bool>true</bool></edit>
+        <edit name="autohint"  mode="assign"><bool>false</bool></edit>
+        <edit name="hinting"   mode="assign"><bool>false</bool></edit>
+        <edit name="hintstyle" mode="assign"><const>hintnone</const></edit>
+        <edit name="rgba"      mode="assign"><const>none</const></edit>
       </match>
     </fontconfig>
   '';

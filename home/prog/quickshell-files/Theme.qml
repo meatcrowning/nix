@@ -25,6 +25,15 @@ Singleton {
     // guard again; canvas text binds this rather than `font` for that reason.
     readonly property string fontCanvas: font
 
+    // True when the live face is a normal SMOOTH outline (Phenex, the cursive)
+    // rather than a pixel one. Read from the generated FontFaces singleton
+    // (home/pkgs/desktop/font.nix), so the flag ships with the face list and
+    // cannot drift. PixelText branches its whole render path on this: pixel
+    // faces keep NativeRendering + antialiasing:false + full hinting; a smooth
+    // face is antialiased and unhinted (the pixel pipeline turns cursive
+    // curves into a jagged staircase).
+    readonly property bool fontSmooth: FontFaces.smooth[font] === true
+
     // Text size in PIXELS (not points). Matched to kitty's on-screen size:
     // kitty is font_size 11pt, which at 96 DPI (1080p, scale 1.0) rasterises to
     // ~14.67px, so 15px here matches the terminal. NOTE: the font's native cell

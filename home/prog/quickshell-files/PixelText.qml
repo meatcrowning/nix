@@ -13,12 +13,20 @@ import QtQuick
 // Sizes are pixels (Theme.fontSize), not points: point sizes get scaled by DPI
 // to a fractional pixel height that lands between the font's design grid and
 // reintroduces blur. Integer pixel sizes on the 16px grid stay sharp.
+//
+// ALL OF THAT IS FOR PIXEL FACES. When the live face is a smooth outline
+// (Theme.fontSmooth — Phenex, the cursive), the same settings are exactly
+// wrong: NativeRendering + no AA + full hinting turns its curves into a
+// jagged staircase and kinks the connected joins. A smooth face keeps
+// NativeRendering (FreeType honours the face's fontconfig rule: grayscale AA,
+// no hinting — the same rasterisation kitty and the titlebar give it) but
+// with antialiasing on and hinting off.
 Text {
     font.family: Theme.font
     font.pixelSize: Theme.fontSize
-    font.hintingPreference: Font.PreferFullHinting
+    font.hintingPreference: Theme.fontSmooth ? Font.PreferNoHinting : Font.PreferFullHinting
     renderType: Text.NativeRendering
-    antialiasing: false
+    antialiasing: Theme.fontSmooth
 
     // Text defaults to AutoText, which SNIFFS for HTML and renders it as rich
     // text. Nearly everything the panel draws is a string from somewhere else —

@@ -24,9 +24,14 @@ Text {
 
     font.family: Theme.font
     font.pixelSize: Theme.fontSize
-    font.hintingPreference: Font.PreferFullHinting
+    // PIXEL-FACE settings — except when the live face is a smooth outline
+    // (Theme.fontSmooth <- DeskStyle.smooth: Phenex, the cursive). Then the
+    // crisp pipeline is exactly wrong (staircased curves, kinked joins):
+    // keep NativeRendering but antialias and drop hinting, matching the
+    // face's fontconfig rule and docs/DESIGN.md 2.2.
+    font.hintingPreference: Theme.fontSmooth ? Font.PreferNoHinting : Font.PreferFullHinting
     renderType: Text.NativeRendering
-    antialiasing: false
+    antialiasing: Theme.fontSmooth
 
     // Match kitty's line packing. The font's line box is exactly 1 em, but Qt
     // rounds ascent/descent UP separately (at 15px: 11.25→12 + 3.75→4 = 16px per
