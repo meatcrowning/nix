@@ -589,10 +589,16 @@ def test_chrome(win, ctl):
     check("the badge names the model", bool(badge), ctl.property("selectedName"))
     if badge:
         b = badge[0]
+        # Metrics-honest: the harness runs under the LIVE font pick, and at
+        # some family/size pairs the name simply fits at this width (Phenex@14
+        # measured 193px in a 217px slot). The invariant is "never spills":
+        # contained, and elided whenever the natural width would not fit.
         check("...and is elided inside the panel, not spilling out of it",
               b.x() + b.width() <= panel.width() + 0.5
-              and b.property("truncated") is True,
-              (b.x(), b.width(), panel.width(), b.property("truncated")))
+              and (b.property("truncated") is True
+                   or b.property("implicitWidth") <= b.width() + 0.5),
+              (b.x(), b.width(), panel.width(), b.property("truncated"),
+               b.property("implicitWidth")))
     win.setWidth(was)
     panel.setProperty("collapsed", False)
     spin(120)

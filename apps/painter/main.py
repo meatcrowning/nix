@@ -239,6 +239,13 @@ class ModelList(QAbstractListModel):
     PathRole = Qt.UserRole + 9
     OverriddenRole = Qt.UserRole + 10
 
+    # QML reads `Models.count` (the model-panel badge, the settings drawer).
+    # A QAbstractListModel exposed as a context property has NO implicit
+    # `count` the way a QML ListModel does — the binding silently evaluates to
+    # `undefined`, which coerced into a string drew "undefined found" on the
+    # panel header. Same shape on LoraStack and Gallery below.
+    countChanged = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._rows = []
@@ -261,10 +268,13 @@ class ModelList(QAbstractListModel):
         row = self._rows[index.row()]
         return row.get(self.roleNames().get(role, b"").decode() or "name")
 
+    count = Property(int, rowCount, notify=countChanged)
+
     def set_rows(self, rows):
         self.beginResetModel()
         self._rows = rows
         self.endResetModel()
+        self.countChanged.emit()
 
     def entry_at(self, i):
         if 0 <= i < len(self._rows):
@@ -305,6 +315,10 @@ class LoraStack(QAbstractListModel):
         r = self._rows[index.row()]
         return {self.NameRole: r["name"], self.StrengthRole: r["strength"],
                 self.EnabledRole: r["enabled"], self.ClipRole: r["patches_clip"]}.get(role)
+
+    # QML reads `Loras.count` (the stack badge, the empty hint, LoraRow's
+    # move-down enable) — see ModelList.count for why this must be explicit.
+    count = Property(int, rowCount, notify=countChanged)
 
     @Slot(str, bool)
     def add(self, name, patches_clip=False):
@@ -463,6 +477,10 @@ class Gallery(QAbstractListModel):
 
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(self._rows)
+
+    # QML reads `Gallery.count` (the outputs tally, the empty-state hint,
+    # PreviewPane's click-through) — see ModelList.count for why.
+    count = Property(int, rowCount, notify=countChanged)
 
     def data(self, index, role=Qt.DisplayRole):
         if not index.isValid():
