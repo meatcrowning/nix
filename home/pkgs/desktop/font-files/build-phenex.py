@@ -77,10 +77,18 @@ K = 0.5523         # circle-approximation handle factor
 
 # The pen. An elliptical (calligraphic) nib: verticals stroke ~NIB_W thick,
 # horizontals ~NIB_MINOR, held at NIB_ANGLE — the copperplate-ish contrast.
-# NIB_MINOR is the floor: 55/1000 * 15px ≈ 0.8 px, antialiased grey but
-# present at the desktop default size.
+# NIB_MINOR is the floor and it must stay >= 1 device px at the desktop's
+# 15px (>= 1000/15 ≈ 67 units). At the original 52 (0.78px) the thin shallow
+# strokes antialiased down to faint grey and visually DROPPED OUT — and the
+# mid-word exit sweep is exactly such a stroke, carrying the whole lower body
+# of f/g/y/s out of the descender, while the word-final flick is steep
+# (thick-axis) and survived. Result: letters mid-word read noticeably smaller
+# than at word end ("gggggg: all but the last are smaller", 2026-08-08),
+# with every variant measured geometrically identical. 70 ≈ 1.05px keeps
+# every stroke on the pixel grid; the contrast (104:70) stays visibly
+# calligraphic.
 NIB_W = 104
-NIB_MINOR = 52
+NIB_MINOR = 70
 NIB_ANGLE_DEG = -18
 
 # Italic lean, as a shear (x += y * SLANT). Applied to EVERYTHING including
