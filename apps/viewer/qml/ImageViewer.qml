@@ -26,6 +26,12 @@ Rectangle {
     property url source: ""
     property string name: ""       // basename, for the "can't display" card
     property bool winActive: true
+    // How much of the PICTURE shows while the window is unfocused (docs/DESIGN.md
+    // §3.1.1, his call 2026-08-07). Handed down from the window rather than
+    // derived per pane, and applied at the one item both the still and the video
+    // path draw into — a per-delegate ternary is the performance mistake §3.1.1
+    // names for colours, and it is the same mistake here.
+    property real fgArt: 1.0
     property bool paneFocused: true
     // False until the compositor has finished revealing the window (Main.qml):
     // a clip that autoplays at map time is already seconds in, with its audio,
@@ -156,6 +162,7 @@ Rectangle {
             Loader {
                 id: imgLoader
                 anchors.centerIn: parent
+                opacity: viewer.fgArt      // fades toward the bgAlt behind it (§3.1.1)
                 width:  flick.width  * flick.zoom
                 height: flick.height * flick.zoom
                 // null for videos — those play on the VideoOutput below, not here
@@ -234,6 +241,7 @@ Rectangle {
         id: videoOut
         anchors.fill: parent
         visible: viewer.isVideo
+        opacity: viewer.fgArt      // a video is content too (§3.1.1)
         fillMode: VideoOutput.PreserveAspectFit
     }
 

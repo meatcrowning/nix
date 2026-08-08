@@ -28,6 +28,11 @@ Rectangle {
     property var searched: null
 
     property bool shown: false
+
+    // The window's focus state, handed down (docs/DESIGN.md §3.1.1). A leaf
+    // never reads Window.active itself: `Qt.application.state` is per-APPLICATION
+    // and stays Active while another of surfer's windows takes focus.
+    property bool winActive: true
     // how far down the top edge the bar docks — the permission bar takes the
     // first 36px when it is up, and two overlapping bars at the top edge is
     // exactly the dead-space defect docs/DESIGN.md 5.2 names
@@ -307,16 +312,19 @@ Rectangle {
         // both are in the pixel font's cmap. Dimmed AND refusing while there is
         // nothing to step through — 10.2 wants both halves.
         BrowserButton {
+            winActive: root.winActive
             label: "<"
             enabled: root.canStep
             onClicked: root.search(true)
         }
         BrowserButton {
+            winActive: root.winActive
             label: ">"
             enabled: root.canStep
             onClicked: root.search(false)
         }
         BrowserButton {
+            winActive: root.winActive
             label: "x"
             onClicked: root.closeFind()
         }

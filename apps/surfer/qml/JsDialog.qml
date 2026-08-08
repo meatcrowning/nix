@@ -24,6 +24,11 @@ import QtWebEngine
 // tab's titlebar tooltip advertises that it's waiting (see win.waitingFor).
 Item {
     id: root
+
+    // The window's focus state, handed down (docs/DESIGN.md §3.1.1). A leaf
+    // never reads Window.active itself: `Qt.application.state` is per-APPLICATION
+    // and stays Active while another of surfer's windows takes focus.
+    property bool winActive: true
     visible: false
     z: 2800
 
@@ -209,11 +214,13 @@ Item {
                 anchors.right: parent.right
                 spacing: 6
                 BrowserButton {
+                    winActive: root.winActive
                     visible: !root.isAlert
                     label: root.dtype === JavaScriptDialogRequest.DialogTypeBeforeUnload ? "stay" : "cancel"
                     onClicked: root.reject()
                 }
                 BrowserButton {
+                    winActive: root.winActive
                     label: root.dtype === JavaScriptDialogRequest.DialogTypeBeforeUnload ? "leave" : "ok"
                     onClicked: root.accept()
                 }

@@ -32,8 +32,24 @@ Window {
     property var images: startImages    // [{ name, path }] — shared by all panes
     readonly property int paneMax: maxPanes
 
-    // Focus-aware foreground, in lock-step with the titlebar (see filer).
+    // Focus-aware foreground, in lock-step with the titlebar (filer's idiom,
+    // docs/DESIGN.md §3.1.1). Derived ONCE here and handed down: a leaf never
+    // reads Window.active itself, so a focus change re-evaluates these four
+    // bindings rather than one per drawn item.
     readonly property bool act: win.active
+    readonly property color fgAccent: win.active ? Theme.accent  : Theme.inactive
+    readonly property color fgText:   win.active ? Theme.text    : Theme.inactive
+    readonly property color fgDim:    win.active ? Theme.textDim : Theme.inactive
+
+    // ...and the PICTURE fades with them. [his, 2026-08-07] — the same answer he
+    // gave for player's cover art: "dim it with everything else — the window
+    // reads as one unfocused surface". An image has no `Theme.inactive` version,
+    // so it composites toward the bgAlt it is drawn on at plain item opacity —
+    // no shader, no extra scene-graph item. A grey SCRIM would be wrong: it is
+    // lighter than a dark photograph and would BRIGHTEN half of them. 0.55 is
+    // player's measured number, reused rather than re-picked, because both
+    // surfaces sit on the same near-black fill.
+    readonly property real fgArt: win.active ? 1.0 : 0.55
 
     Motion { id: motion }
 
@@ -561,6 +577,7 @@ Window {
                     id: iv
                     anchors.fill: parent
                     winActive: win.active
+                    fgArt: win.fgArt
                     paneFocused: pane.focused
                     canPlay: win.revealed
                     appMuted: win.muted
@@ -639,7 +656,7 @@ Window {
             height: win.paneH(win.focusPane)
             color: "transparent"
             border.width: 1
-            border.color: win.act ? Theme.accent : Theme.dim
+            border.color: win.act ? Theme.accent : Theme.dim   // Theme.dim is BELOW the grey (§3.1.1)
         }
 
         // The dividers: drag one to trade space between the two panes it

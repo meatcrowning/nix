@@ -21,6 +21,26 @@ Window {
     visible: true
     color: Theme.bg
 
+    // Focus-aware foreground, in lock-step with the titlebar (filer's idiom,
+    // docs/DESIGN.md §3.1.1). hyprvtb greys a titlebar's text and glyphs the
+    // moment the window loses focus, so a window whose chrome is still lit under
+    // a dead bar reads as one bright thing under one grey thing, not as one
+    // unfocused window.
+    //
+    // `BrowserButton.qml` has taken a `winActive` for its whole life and its own
+    // comment says "the parent passes the window's active state in" — and until
+    // 2026-08-07 no parent did, at any of the eleven call sites, so the property
+    // sat at its `true` default and surfer's chrome never greyed. A mechanism
+    // nothing drives is the §10 failure in slow motion: it looks wired.
+    //
+    // Only surfer's OWN chrome follows this. The page is Chromium's and keeps
+    // its own colours — dimming a web page on focus loss is not what §3.1.1
+    // asks for, and §16 already says the desktop imposes only the font there.
+    readonly property bool winActive: win.active
+    readonly property color fgAccent: win.active ? Theme.accent  : Theme.inactive
+    readonly property color fgText:   win.active ? Theme.text    : Theme.inactive
+    readonly property color fgDim:    win.active ? Theme.textDim : Theme.inactive
+
     // The window title IS the address bar: the plugin renders it as the stacked
     // outer-column text and seeds its editor from it. Keep it the live URL.
     title: current ? current.url.toString() : "surfer"
@@ -1207,8 +1227,8 @@ Window {
             id: permBtns
             anchors { right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
             spacing: 8
-            BrowserButton { label: "allow"; onClicked: win.grantPermission() }
-            BrowserButton { label: "block"; onClicked: win.denyPermission() }
+            BrowserButton { winActive: win.winActive; label: "allow"; onClicked: win.grantPermission() }
+            BrowserButton { winActive: win.winActive; label: "block"; onClicked: win.denyPermission() }
         }
     }
 
@@ -1220,6 +1240,7 @@ Window {
     // other pane-agnostic control, and docks below the permission bar while that
     // one is up rather than under it.
     FindBar {
+        winActive: win.winActive
         id: findBar
         view: win.current
         dockY: permBar.visible ? permBar.height : 0
@@ -1283,6 +1304,7 @@ Window {
                     color: Theme.accent
                 }
                 BrowserButton {
+                    winActive: win.winActive
                     anchors.right: parent.right
                     label: "x"
                     onClicked: win.dmPanelOpen = false
@@ -1301,6 +1323,7 @@ Window {
                 height: 22
                 PixelText { anchors.verticalCenter: parent.verticalCenter; text: "extension"; color: Theme.text }
                 BrowserButton {
+                    winActive: win.winActive
                     anchors.right: parent.right
                     label: DarkMode.enabled ? "on" : "off"
                     onClicked: DarkMode.setEnabled(!DarkMode.enabled)
@@ -1313,6 +1336,7 @@ Window {
                 height: 22
                 PixelText { anchors.verticalCenter: parent.verticalCenter; text: "this site"; color: Theme.text }
                 BrowserButton {
+                    winActive: win.winActive
                     anchors.right: parent.right
                     enabled: win.dmHost !== ""
                     label: win.dmSiteOn ? "on" : "off"
@@ -1366,6 +1390,7 @@ Window {
                 height: 22
                 PixelText { anchors.verticalCenter: parent.verticalCenter; text: "system font"; color: Theme.text }
                 BrowserButton {
+                    winActive: win.winActive
                     anchors.right: parent.right
                     enabled: win.dmHost !== ""
                     label: win.dmFontOn ? "on" : "off"
@@ -1380,6 +1405,7 @@ Window {
     // currentView is what makes the queues per-tab: each panel shows only the
     // current view's front request, and re-syncs when the current tab changes.
     JsDialog {
+        winActive: win.winActive
         id: jsDialog
         anchors.fill: parent
         currentView: win.current
