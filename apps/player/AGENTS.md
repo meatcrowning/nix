@@ -166,6 +166,88 @@ over `bg` composites to exactly `#404040`; and Qt caches a directory's file
 listing on first load, so a scratch `.qml` written afterwards fails with "File
 name case mismatch".
 
+## Smart playlists are RULES the user owns (2026-08-07)
+
+They were seven hard-coded `(name, SQL, params)` tuples in `main.py` under a
+comment saying "one tuple to add another" — true for an agent editing this
+file, useless to the person using the app. A list is now a **spec**:
+
+```json
+{"name": "4+ starred & liked", "match": "any",
+ "rules": [{"field": "rating", "op": "at least", "value": 4},
+           {"field": "favorite", "op": "is", "value": true}],
+ "sort": "rating", "desc": true, "limit": 0}
+```
+
+stored in `$XDG_STATE_HOME/player/smartlists.json`. The **built-ins are only
+the seed** (`DEFAULT_SMART_LISTS`): once a machine has the file they are the
+user's, editable and deletable like any list they wrote, and
+`restore_defaults()` puts back only the ones whose NAME is missing so it can
+never overwrite an edit to one that is still there. Nothing stores membership —
+opening a list re-runs the query, so it is live by construction.
+
+The vocabulary lives in `main.py` and NOWHERE else: `SMART_FIELDS` (key, label,
+kind), `SMART_OPS` (per kind), `SMART_SORTS`. The editor asks for all three at
+open (`Library.smartFields()` / `smartOps(field)` / `smartSorts()`), so adding a
+field there is enough to make it appear in the menus — there is no second list
+in QML to keep level.
+
+Four rules, each paid for:
+
+- **A value never reaches the SQL as text.** Every rule contributes a `?` and a
+  bound parameter; only the ORDER BY (looked up in `_SORT_COLS`) and the LIMIT
+  (through `int()`) are interpolated. The specs are user-editable JSON that
+  syncs between the machines — treating one as SQL is an injection into the
+  library's own database, and the harness asserts it both ways.
+- **A spec that makes no sense is skipped, never raised.** Unknown field, op or
+  sort key drops that one rule and the list still opens. The file can be hand
+  edited, badly merged, or written by a future build of this app.
+- **Text compares through `cfold()`, not `lower()`.** SQLite's `lower()` is
+  ASCII-only and a good slice of this library is Japanese; `Library.__init__`
+  registers Python's `str.casefold` on its connection. `cfold(NULL)` is `''`,
+  which is what keeps "does not contain" true for a track with no genre.
+- **`desc` flips the FIRST sort column only.** The tie-breakers stay ascending —
+  that is the difference between "best rated first, then alphabetically" and
+  "…then backwards alphabetically", and it is what the hard-coded
+  `ORDER BY rating DESC, artist, album` did.
+
+Stars are the one unit conversion: the column is FMPS 0..1, the UI is 0..5, and
+`_STAR_EPS = 0.01` is why "at least 4 stars" means `rating >= 0.79`. Ratings
+written by fooyin/Strawberry land on 0.79/0.99, which is where the old
+hard-coded thresholds came from in the first place.
+
+**The view**: `PlaylistsView.qml` (sidebar + right-click menu + "+ new" +
+"restore built-in playlists"), `SmartEditor.qml` (the modal, §7.2's spec) and
+`SelectButton.qml` (a "pick one" box that opens the app's own `CtxMenu` — there
+is no combo box on this desktop). Three things in the editor that are load
+bearing:
+
+- It holds a **working copy**; the store never sees a keystroke. Cancel is then
+  free, and the list behind the modal keeps showing what it currently is.
+- `rules` is reassigned (`rules = rules.slice()`) only when a row's SHAPE
+  changes. A value edit mutates in place — reassigning rebuilds the delegates
+  and would take the focus out of the box being typed into after one character.
+  The clicked value controls (stars, yes/no) pass `rebuild = true`, because
+  their value is a binding onto the rule.
+- The window's global `Space` and `Escape` **stand down while it is up**
+  (`PlaylistsView.modal`, read by `Main.qml`). A `Shortcut` is matched before
+  the key reaches the focused item, so without that the name box can never
+  contain a space — it pauses the music instead.
+
+```bash
+QT_QPA_PLATFORM=offscreen apps/player/tools/smartlist-test.py    # the rules
+apps/player/tools/smartlist-ui-test.py                          # the editor
+```
+
+Both run in a throwaway XDG root with their own scratch `library.db` and
+`smartlists.json`; the live library, the live lists and the running player are
+never touched, and the UI one builds no `Player` at all (mpv, the MPRIS name
+and the queue socket are exactly what a harness must not take). Both resolve
+PySide6 by READING the `player` wrapper for its python env — never by sourcing
+it, which runs the wrapper's body, i.e. launches the app. The UI harness treats
+**every QML warning as a failure**: "the control is drawn and clicking it does
+nothing" shows up as a TypeError and nowhere else.
+
 ## Right-click: one menu for every listing (`qml/TrackMenu.qml`)
 
 player draws a track in five places — the queue, an album's inline section, a

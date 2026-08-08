@@ -847,18 +847,404 @@ def _artist_sortkey(s):
     return s[4:] if s.startswith("the ") else s
 
 
-# Smart playlists: name → (SQL, params). One tuple to add another. All return
-# full track rows ordered for direct queueing.
-_T = "SELECT * FROM tracks"
-SMART_PLAYLISTS = [
-    ("5 starred",      _T + " WHERE rating >= 0.99 ORDER BY artist, album, disc, track", ()),
-    ("4+ starred",     _T + " WHERE rating >= 0.79 ORDER BY rating DESC, artist, album", ()),
-    ("favorites",      _T + " WHERE favorite = 1 ORDER BY artist, album, disc, track", ()),
-    ("recently added", _T + " ORDER BY added_at DESC, album, disc, track LIMIT 250", ()),
-    ("most played",    _T + " WHERE play_count > 0 ORDER BY play_count DESC LIMIT 250", ()),
-    ("recently played", _T + " WHERE last_played IS NOT NULL ORDER BY last_played DESC LIMIT 250", ()),
-    ("unrated",        _T + " WHERE rating IS NULL ORDER BY artist, album, disc, track", ()),
+# ---------------------------------------------------------------------------
+# Smart playlists — a rule language the user owns
+# ---------------------------------------------------------------------------
+#
+# These were seven hard-coded (name, SQL, params) tuples until 2026-08-07, with
+# a comment saying "one tuple to add another" — true for an agent editing this
+# file, useless to the person using the app. They are now RULES: a spec is
+# plain JSON, the SQL is built from it here, and the built-in seven are just
+# the seed of the user's own file, editable and deletable like anything they
+# add. Everything is re-queried on open, so a list is always live — there is no
+# stored membership to go stale.
+#
+# Three rules for anything added below:
+#
+#   * A VALUE NEVER REACHES THE SQL AS TEXT. Every rule contributes a `?` and a
+#     bound parameter; only the ORDER BY and the LIMIT are interpolated, and
+#     both come from this file's own tables (a sort key is looked up, the limit
+#     goes through int()). The specs are user-editable JSON, so treating one as
+#     SQL would be an injection into the library's own database.
+#   * A SPEC THAT MAKES NO SENSE IS SKIPPED, NEVER RAISED. The file can be
+#     hand-edited, and can arrive from a future version of this app through the
+#     docs/state syncs; an unknown field, op or sort key drops that one rule
+#     rather than taking the playlists view down.
+#   * TEXT COMPARES THROUGH cfold(), NOT lower(). SQLite's lower() is ASCII
+#     only, and a good slice of this library is Japanese — Library registers
+#     `cfold` (Python's str.casefold) on its connection for exactly this.
+
+# Rating is stored FMPS 0..1 and shown as 0..5 stars. The epsilon is what makes
+# "at least 4 stars" mean rating >= 0.79 rather than >= 0.8: ratings written by
+# other taggers (fooyin, Strawberry) land on 0.79/0.99, and those files are the
+# reason the old hard-coded thresholds were 0.79 and 0.99 in the first place.
+_STAR_EPS = 0.01
+_STAR_NEAR = 0.05          # "is 4 stars" — a quarter-star either side
+
+# key → (label, kind). The kind picks the operators and how a value is read.
+SMART_FIELDS = [
+    ("anytext",      "any text",     "text"),
+    ("title",        "title",        "text"),
+    ("artist",       "artist",       "text"),
+    ("album",        "album",        "text"),
+    ("album_artist", "album artist", "text"),
+    ("genre",        "genre",        "text"),
+    ("codec",        "format",       "text"),
+    ("rating",       "rating",       "stars"),
+    ("favorite",     "liked",        "bool"),
+    ("has_art",      "has cover",    "bool"),
+    ("play_count",   "play count",   "count"),
+    ("year",         "year",         "count"),
+    ("duration",     "length",       "minutes"),
+    ("added_at",     "date added",   "date"),
+    ("last_played",  "last played",  "date"),
 ]
+_FIELD_KIND = {k: kind for k, _, kind in SMART_FIELDS}
+
+# The SQL expression a field compares against, where it is not just the column.
+_FIELD_EXPR = {"year": "COALESCE(orig_year, year)"}
+
+# The searchable haystack behind the "any text" field — the same four tags the
+# header search box matches on, so a rule reads like typing in that box does.
+_ANYTEXT = "(cfold(title)||' '||cfold(artist)||' '||cfold(album)||' '||cfold(album_artist))"
+
+SMART_OPS = {
+    "text":    ["contains", "does not contain", "is", "is not",
+                "starts with", "ends with", "is set", "is unset"],
+    "stars":   ["at least", "at most", "is", "is not", "is set", "is unset"],
+    "count":   ["at least", "at most", "is", "is not"],
+    "minutes": ["at least", "at most"],
+    "bool":    ["is"],
+    "date":    ["in the last", "not in the last", "is set", "is unset"],
+}
+# Operators that take no value at all — the editor draws no value box for these.
+SMART_NULLARY_OPS = ("is set", "is unset")
+
+# key → (label, ORDER BY columns). `desc` on the spec flips every column; the
+# tie-breakers keep a one-column sort deterministic between two runs.
+_TIEBREAK = ["artist", "album", "disc", "track"]
+SMART_SORTS = [
+    ("artist",   "artist",      ["artist", "album", "disc", "track"]),
+    ("album",    "album",       ["album", "disc", "track"]),
+    ("title",    "title",       ["title"]),
+    ("year",     "year",        ["COALESCE(orig_year, year)"] + _TIEBREAK),
+    ("rating",   "rating",      ["rating"] + _TIEBREAK),
+    ("plays",    "play count",  ["play_count"] + _TIEBREAK),
+    ("added",    "date added",  ["added_at"] + _TIEBREAK),
+    ("played",   "last played", ["last_played"] + _TIEBREAK),
+    ("duration", "length",      ["duration"] + _TIEBREAK),
+    ("random",   "random",      ["RANDOM()"]),
+]
+_SORT_COLS = {k: cols for k, _, cols in SMART_SORTS}
+
+DEFAULT_SMART_LISTS = [
+    {"name": "5 starred", "match": "all", "sort": "artist",
+     "rules": [{"field": "rating", "op": "at least", "value": 5}]},
+    {"name": "4+ starred", "match": "all", "sort": "rating", "desc": True,
+     "rules": [{"field": "rating", "op": "at least", "value": 4}]},
+    # HIS request, 2026-08-07: the 4+ star list WITH the liked tracks in it —
+    # so `any`, a union, not an intersection. Flipping it to `all` in the
+    # editor turns it into "4+ stars AND liked", which is the whole point of
+    # the rules being editable.
+    {"name": "4+ starred & liked", "match": "any", "sort": "rating", "desc": True,
+     "rules": [{"field": "rating", "op": "at least", "value": 4},
+               {"field": "favorite", "op": "is", "value": True}]},
+    {"name": "favorites", "match": "all", "sort": "artist",
+     "rules": [{"field": "favorite", "op": "is", "value": True}]},
+    {"name": "recently added", "match": "all", "sort": "added", "desc": True,
+     "limit": 250, "rules": []},
+    {"name": "most played", "match": "all", "sort": "plays", "desc": True,
+     "limit": 250, "rules": [{"field": "play_count", "op": "at least", "value": 1}]},
+    {"name": "recently played", "match": "all", "sort": "played", "desc": True,
+     "limit": 250, "rules": [{"field": "last_played", "op": "is set"}]},
+    {"name": "unrated", "match": "all", "sort": "artist",
+     "rules": [{"field": "rating", "op": "is unset"}]},
+]
+
+
+def _cfold(s):
+    """SQLite's `cfold` — Unicode-correct casefolding, registered by Library.
+
+    NULL folds to '' rather than back to NULL, so "does not contain" is TRUE
+    for a track with no genre tag instead of dropping it on a NULL comparison.
+    """
+    return "" if s is None else str(s).casefold()
+
+
+def _like_escape(s):
+    """A user's literal text, safe inside a LIKE pattern (ESCAPE '\\')."""
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _num(v, default=0.0):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _rule_sql(rule):
+    """One rule → (sql fragment, params), or None if it cannot be honoured.
+
+    None is not an error: specs are user-editable JSON and sync between the two
+    machines, so an unreadable rule is dropped and the rest of the list stands.
+    """
+    if not isinstance(rule, dict):
+        return None
+    key = rule.get("field")
+    op = rule.get("op")
+    kind = _FIELD_KIND.get(key)
+    if kind is None or op not in SMART_OPS.get(kind, ()):
+        return None
+    col = _FIELD_EXPR.get(key, key)
+    val = rule.get("value")
+
+    if kind == "text":
+        expr = _ANYTEXT if key == "anytext" else f"cfold({col})"
+        if op == "is set":
+            return f"{expr} <> ''", ()
+        if op == "is unset":
+            return f"{expr} = ''", ()
+        text = _cfold(val)
+        if op == "is":
+            return f"{expr} = ?", (text,)
+        if op == "is not":
+            return f"{expr} <> ?", (text,)
+        pat = {"contains": "%{}%", "does not contain": "%{}%",
+               "starts with": "{}%", "ends with": "%{}"}[op].format(_like_escape(text))
+        neg = " NOT" if op == "does not contain" else ""
+        return f"{expr}{neg} LIKE ? ESCAPE '\\'", (pat,)
+
+    if kind == "bool":
+        # `has_art`/`favorite` are 0/1 INTEGER columns that default to 0, but a
+        # row written before the column existed can still be NULL.
+        return f"IFNULL({col}, 0) = ?", (1 if val else 0,)
+
+    if kind == "date":
+        if op == "is set":
+            return f"{col} IS NOT NULL", ()
+        if op == "is unset":
+            return f"{col} IS NULL", ()
+        cutoff = time.time() - max(0.0, _num(val)) * 86400.0
+        if op == "in the last":
+            return f"{col} >= ?", (cutoff,)
+        return f"IFNULL({col}, 0) < ?", (cutoff,)   # not in the last
+
+    # Numeric kinds. `stars` is the user's 0..5 over the column's FMPS 0..1;
+    # `minutes` is the user's minutes over the column's seconds.
+    if op == "is set":
+        return f"{col} IS NOT NULL", ()
+    if op == "is unset":
+        return f"{col} IS NULL", ()
+    n = _num(val)
+    if kind == "stars":
+        n = max(0.0, min(5.0, n)) / 5.0
+        lo, hi, near = n - _STAR_EPS, n + _STAR_EPS, _STAR_NEAR / 5.0
+    elif kind == "minutes":
+        n = n * 60.0
+        lo = hi = n
+        near = 30.0                      # "is 4 minutes" — within half a minute
+    else:
+        lo = hi = n
+        near = 0.5
+    if op == "at least":
+        return f"{col} >= ?", (lo,)
+    if op == "at most":
+        return f"{col} <= ?", (hi,)
+    if op == "is":
+        return f"ABS({col} - ?) <= ?", (n, near)
+    # "is not" — an unset column is not that value either, so it stays in.
+    return f"({col} IS NULL OR ABS({col} - ?) > ?)", (n, near)
+
+
+def normalize_smart(spec, name=""):
+    """A stored/incoming spec, cleaned into the exact shape everything reads.
+
+    Every consumer (SQL builder, editor, the JSON file) goes through this, so
+    there is one definition of a valid spec and no caller has to defend itself.
+    """
+    spec = spec if isinstance(spec, dict) else {}
+    rules = []
+    for r in (spec.get("rules") if isinstance(spec.get("rules"), list) else []):
+        if not isinstance(r, dict):
+            continue
+        key = r.get("field")
+        kind = _FIELD_KIND.get(key)
+        if kind is None:
+            continue
+        op = r.get("op")
+        if op not in SMART_OPS[kind]:
+            op = SMART_OPS[kind][0]
+        out = {"field": key, "op": op}
+        if op not in SMART_NULLARY_OPS:
+            v = r.get("value")
+            if kind == "text":
+                out["value"] = "" if v is None else str(v)
+            elif kind == "bool":
+                out["value"] = bool(v)
+            else:
+                out["value"] = _num(v)
+        rules.append(out)
+    nm = str(spec.get("name") or name or "").strip() or "new playlist"
+    return {"name": nm[:64],
+            "match": "any" if spec.get("match") == "any" else "all",
+            "rules": rules,
+            "sort": spec.get("sort") if spec.get("sort") in _SORT_COLS else "artist",
+            "desc": bool(spec.get("desc")),
+            "limit": max(0, min(100000, int(_num(spec.get("limit"), 0))))}
+
+
+def smart_sql(spec, select="*"):
+    """A normalized spec → (SQL, params) returning full track rows, ordered."""
+    frags, params = [], []
+    for r in spec.get("rules") or []:
+        got = _rule_sql(r)
+        if got:
+            frags.append("(" + got[0] + ")")
+            params.extend(got[1])
+    joiner = " OR " if spec.get("match") == "any" else " AND "
+    where = (" WHERE " + joiner.join(frags)) if frags else ""
+    # `desc` flips the FIRST column only; the tie-breakers stay ascending. That
+    # is the difference between "best rated first, then alphabetically" and
+    # "best rated first, then backwards alphabetically" — and it is what the
+    # hard-coded "4+ starred" did (`ORDER BY rating DESC, artist, album`).
+    cols = list(_SORT_COLS.get(spec.get("sort"), _SORT_COLS["artist"]))
+    if spec.get("desc"):
+        cols[0] += " DESC"
+    order = " ORDER BY " + ", ".join(cols)
+    limit = int(spec.get("limit") or 0)
+    return (f"SELECT {select} FROM tracks{where}{order}"
+            + (f" LIMIT {limit}" if limit > 0 else ""), tuple(params))
+
+
+class SmartLists:
+    """The user's smart playlists, persisted whole to
+    `$XDG_STATE_HOME/player/smartlists.json`.
+
+    Seeded from DEFAULT_SMART_LISTS on a machine that has never had one, and
+    the built-ins carry no flag afterwards: once seeded they are the user's,
+    editable and deletable like any list they wrote. `restore_defaults()`
+    puts back only the ones whose NAME is missing, so it can never overwrite an
+    edit made to a list that is still there.
+    """
+
+    def __init__(self, path=None):
+        self._path = Path(path) if path else (STATE / "smartlists.json")
+        self._lists = []
+        self._load()
+
+    # ---- store ----
+
+    def _load(self):
+        raw = None
+        try:
+            raw = json.loads(self._path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            pass
+        got = raw.get("lists") if isinstance(raw, dict) else None
+        if not isinstance(got, list):
+            self._lists = [normalize_smart(s) for s in DEFAULT_SMART_LISTS]
+            self._write()
+            return
+        for s in got:
+            if not isinstance(s, dict):
+                continue          # a hand edit or a bad merge; not a playlist
+            spec = normalize_smart(s)
+            spec["name"] = self._unique(spec["name"])
+            self._lists.append(spec)
+
+    def _write(self):
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps({"version": 1, "lists": self._lists}, indent=1),
+                           encoding="utf-8")
+            os.replace(tmp, self._path)
+        except OSError as e:
+            print("smartlists: save failed:", e, flush=True)
+
+    def _unique(self, name, skip=-1):
+        """`name`, suffixed until no OTHER list holds it. Names are the key the
+        view, the queue's 'play all' and prefs all address a list by."""
+        taken = {s["name"] for i, s in enumerate(self._lists) if i != skip}
+        if name not in taken:
+            return name
+        n = 2
+        while f"{name} {n}" in taken:
+            n += 1
+        return f"{name} {n}"
+
+    # ---- read ----
+
+    def names(self):
+        return [s["name"] for s in self._lists]
+
+    def specs(self):
+        return [dict(s) for s in self._lists]
+
+    def get(self, name):
+        for s in self._lists:
+            if s["name"] == name:
+                return dict(s)
+        return None
+
+    def _index(self, name):
+        for i, s in enumerate(self._lists):
+            if s["name"] == name:
+                return i
+        return -1
+
+    # ---- write ----
+
+    def save(self, spec, old_name=""):
+        """Create (old_name "") or replace (old_name = the list being edited);
+        returns the name it was actually stored under.
+
+        A NEW list whose name is taken is suffixed, never merged into the one
+        already there — §10.2, never silently clobber. Only `old_name` says
+        "replace this", and the name it carries is the one the view addresses
+        the list by.
+        """
+        spec = normalize_smart(spec)
+        i = self._index(old_name) if old_name else -1
+        spec["name"] = self._unique(spec["name"], skip=i)
+        if i >= 0:
+            self._lists[i] = spec
+        else:
+            self._lists.append(spec)
+        self._write()
+        return spec["name"]
+
+    def remove(self, name):
+        i = self._index(name)
+        if i < 0:
+            return False
+        del self._lists[i]
+        self._write()
+        return True
+
+    def duplicate(self, name):
+        i = self._index(name)
+        if i < 0:
+            return ""
+        spec = dict(self._lists[i])
+        spec["name"] = self._unique(spec["name"] + " copy")
+        self._lists.insert(i + 1, spec)
+        self._write()
+        return spec["name"]
+
+    def restore_defaults(self):
+        """Put back every built-in the user has deleted, keeping their own and
+        keeping any edit to a built-in they still have. Returns how many came
+        back, so the caller can say nothing happened rather than nothing
+        appearing to."""
+        have = set(self.names())
+        added = [normalize_smart(s) for s in DEFAULT_SMART_LISTS
+                 if s["name"] not in have]
+        if added:
+            self._lists.extend(added)
+            self._write()
+        return len(added)
 
 
 class Library(QObject):
@@ -875,6 +1261,11 @@ class Library(QObject):
     def __init__(self, tagwriter, parent=None):
         super().__init__(parent)
         self._con = open_db()
+        # Unicode-correct casefolding for the smart playlists' text rules.
+        # SQLite's own lower()/upper() are ASCII-only, which in this library
+        # means every Japanese title compares as if it were already folded.
+        self._con.create_function("cfold", 1, _cfold, deterministic=True)
+        self.smart = SmartLists()
         # Cache hygiene at startup: purge oversized bodies (scraped-webpage
         # tagger garbage) and STALE negative results, so "no lyrics found"
         # gets another go online eventually. The age check matters: a full
@@ -970,13 +1361,33 @@ class Library(QObject):
                 if hit(r["artist"]) or hit(r["album_artist"])]
 
     def smart_names(self):
-        return [name for name, _, _ in SMART_PLAYLISTS]
+        return self.smart.names()
 
     def smart_tracks(self, name):
-        for n, sql, params in SMART_PLAYLISTS:
-            if n == name:
-                return self._rows(sql, params)
-        return []
+        """A smart playlist's tracks, re-queried now — membership is never
+        stored, so a list is live by construction."""
+        spec = self.smart.get(name)
+        return self.smart_rows(spec) if spec else []
+
+    def smart_rows(self, spec):
+        """The rows an (unsaved) spec matches — what the editor previews."""
+        sql, params = smart_sql(normalize_smart(spec))
+        try:
+            return self._rows(sql, params)
+        except sqlite3.Error as e:
+            # A rule this build cannot run must not take the view down; the
+            # list reads empty and the reason is on stderr.
+            print("smart playlist query failed:", sql, e, flush=True)
+            return []
+
+    def smart_count(self, spec):
+        sql, params = smart_sql(normalize_smart(spec), select="id")
+        try:
+            row = self._con.execute(
+                f"SELECT COUNT(*) c FROM ({sql})", params).fetchone()
+        except sqlite3.Error:
+            return 0
+        return int(row["c"]) if row else 0
 
     def tracks_by_ids(self, ids):
         if not ids:
@@ -2379,6 +2790,7 @@ class Bridge(QObject):
 
     scanStatus = Signal(str)
     scanRunning = Signal(bool)
+    smartListsChanged = Signal()
 
     def __init__(self, library, player, lyrics, parent=None):
         super().__init__(parent)
@@ -2473,11 +2885,93 @@ class Bridge(QObject):
                 "fullArt": str(ART / a["full_art"]) if a.get("full_art") else "",
                 "trackCount": len(self._library.album_tracks(album_id))}
 
-    # ---- playlists / search ----
+    # ---- smart playlists ----
+    #
+    # The view binds to `smartLists` (a property, so the sidebar redraws when
+    # one is added, renamed or deleted) and calls the rest as slots. The editor
+    # holds a plain JS object of exactly the shape normalize_smart() returns and
+    # hands it back whole — nothing here keeps a half-edited spec, so cancelling
+    # is free and there is no draft to get out of step with the store.
+
+    @Property("QVariantList", notify=smartListsChanged)
+    def smartLists(self):
+        return self._library.smart.specs()
 
     @Slot(result="QVariantList")
     def smartNames(self):
         return self._library.smart_names()
+
+    @Slot(str, result="QVariant")
+    def smartSpec(self, name):
+        return self._library.smart.get(name) or {}
+
+    @Slot(result="QVariant")
+    def newSmartSpec(self):
+        """The spec the "+ new" button starts from — one rule already there,
+        because an empty rule list means "every track" and reads as broken."""
+        return normalize_smart({"name": "new playlist",
+                                "rules": [{"field": "artist", "op": "contains",
+                                           "value": ""}]})
+
+    @Slot(result="QVariantList")
+    def smartFields(self):
+        return [{"key": k, "label": lab, "kind": kind} for k, lab, kind in SMART_FIELDS]
+
+    @Slot(str, result="QVariantList")
+    def smartOps(self, field):
+        return list(SMART_OPS.get(_FIELD_KIND.get(field, ""), ()))
+
+    @Slot(result="QVariantList")
+    def smartSorts(self):
+        return [{"key": k, "label": lab} for k, lab, _ in SMART_SORTS]
+
+    @Slot(str, result=str)
+    def smartFieldKind(self, field):
+        return _FIELD_KIND.get(field, "")
+
+    @Slot(str, result=bool)
+    def smartOpTakesValue(self, op):
+        return op not in SMART_NULLARY_OPS
+
+    @Slot("QVariantMap", result=int)
+    def smartPreviewCount(self, spec):
+        """How many tracks the spec being edited matches, right now — the
+        editor's one honest readout that the rules do something."""
+        return self._library.smart_count(spec)
+
+    @Slot("QVariantMap", str, result=str)
+    def saveSmart(self, spec, oldName=""):
+        name = self._library.smart.save(spec, oldName)
+        self.smartListsChanged.emit()
+        # Renaming or re-ruling the list that is open must land in the view it
+        # was edited from, not the next time it is selected.
+        if self._current_smart in (oldName, name):
+            self.openSmart(name)
+        return name
+
+    @Slot(str, result=bool)
+    def deleteSmart(self, name):
+        if not self._library.smart.remove(name):
+            return False
+        if self._current_smart == name:
+            self._current_smart = ""
+            self.playlistModel.set_rows([])
+        self.smartListsChanged.emit()
+        return True
+
+    @Slot(str, result=str)
+    def duplicateSmart(self, name):
+        made = self._library.smart.duplicate(name)
+        if made:
+            self.smartListsChanged.emit()
+        return made
+
+    @Slot(result=int)
+    def restoreSmartDefaults(self):
+        n = self._library.smart.restore_defaults()
+        if n:
+            self.smartListsChanged.emit()
+        return n
 
     @Slot(str)
     def openSmart(self, name, merge=False):

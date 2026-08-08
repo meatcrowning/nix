@@ -238,10 +238,53 @@ class FakeLibrary(QObject):
     def albumInfo(self, _a):
         return {"album": "An Album", "artist": "Some Artist", "year": 1999,
                 "trackCount": 8, "fullArt": self._art}
+    # The smart-playlist surface PlaylistsView/SmartEditor bind to. `smartLists`
+    # is a PROPERTY (the sidebar redraws when a list is added or deleted), so a
+    # fake that offers only the old smartNames() slot leaves the sidebar empty
+    # and the Connections block warning about a signal that does not exist.
+    smartListsChanged = Signal()
+
+    @Property("QVariantList", notify=smartListsChanged)
+    def smartLists(self):
+        return [{"name": n, "match": "all", "rules": [], "sort": "artist",
+                 "desc": False, "limit": 0}
+                for n in ("5 starred", "favourites", "recently added")]
     @Slot(result="QVariantList")
     def smartNames(self): return ["5 starred", "favourites", "recently added"]
+    @Slot(str, result="QVariant")
+    def smartSpec(self, n):
+        return {"name": n, "match": "all", "rules": [], "sort": "artist",
+                "desc": False, "limit": 0}
+    @Slot(result="QVariant")
+    def newSmartSpec(self):
+        return {"name": "new playlist", "match": "all", "sort": "artist",
+                "desc": False, "limit": 0,
+                "rules": [{"field": "artist", "op": "contains", "value": ""}]}
+    @Slot(result="QVariantList")
+    def smartFields(self):
+        return [{"key": "artist", "label": "artist", "kind": "text"}]
+    @Slot(str, result="QVariantList")
+    def smartOps(self, _f): return ["contains"]
+    @Slot(result="QVariantList")
+    def smartSorts(self): return [{"key": "artist", "label": "artist"}]
+    @Slot(str, result=str)
+    def smartFieldKind(self, _f): return "text"
+    @Slot(str, result=bool)
+    def smartOpTakesValue(self, _o): return True
+    @Slot("QVariantMap", result=int)
+    def smartPreviewCount(self, _s): return 0
+    @Slot("QVariantMap", str, result=str)
+    def saveSmart(self, spec, _old=""): return spec.get("name", "")
+    @Slot(str, result=bool)
+    def deleteSmart(self, _n): return True
+    @Slot(str, result=str)
+    def duplicateSmart(self, n): return n + " copy"
+    @Slot(result=int)
+    def restoreSmartDefaults(self): return 0
     @Slot(str)
     def openSmart(self, _n): pass
+    @Slot()
+    def refreshSmart(self): pass
     @Slot("QVariant", int)
     def playFromModel(self, _m, _i): pass
     @Slot(int, float)
