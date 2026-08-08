@@ -28,6 +28,21 @@ sg_require_offscreen
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/notif-rules-test.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
+# The page reads ~/.config/plasmanotifyrc for candidates. Point that at a
+# synthetic one: his real file differs per machine (and book may not have Plasma
+# at all), and a test whose expectation depends on which apps have notified him
+# this week is not a test. The two keys below are deliberately not installed
+# programs, so nothing can rename them out from under the assertion.
+export XDG_CONFIG_HOME="$WORK/config"
+mkdir -p "$XDG_CONFIG_HOME"
+cat >"$XDG_CONFIG_HOME/plasmanotifyrc" <<'RC'
+[Applications][test.notifier.one]
+Seen=true
+
+[Applications][test.notifier.two]
+Seen=true
+RC
+
 cp "$SRC"/*.qml "$WORK/"
 [ -d "$SRC/scripts" ] && cp -r "$SRC/scripts" "$WORK/"
 
@@ -53,7 +68,7 @@ Scope {
     // The singleton's own handler cannot be called directly (it wants a real
     // Notification off the bus), but every predicate in it is a helper below.
     function wouldPopup(n) {
-        const rule = Notifications.ruleFor(Notifications.keyFor(n));
+        const rule = Notifications.ruleFor(n);
         const critical = n.urgency === 2;
         if (!rule.popup) return false;
         if (n.urgency === 0 && !SettingsStore.d.notifLowPopup) return false;
@@ -63,7 +78,7 @@ Scope {
     }
     function wouldSound(n) {
         if (!wouldPopup(n)) return false;
-        const rule = Notifications.ruleFor(Notifications.keyFor(n));
+        const rule = Notifications.ruleFor(n);
         return rule.sound && !SettingsStore.d.notifSoundMute;
     }
 
@@ -76,6 +91,30 @@ Scope {
                 Notifications.keyFor(t.fake("KDE Connect", "", 1)), "kde connect");
         t.check("keyFor of an anonymous sender is @other",
                 Notifications.keyFor(t.fake("", "", 1)), "@other");
+        t.check("keysFor offers both names, entry first",
+                Notifications.keysFor(t.fake("Vivaldi", "vivaldi-stable", 1)),
+                ["vivaldi-stable", "vivaldi"]);
+        t.check("keysFor does not repeat one name twice",
+                Notifications.keysFor(t.fake("filer", "filer", 1)), ["filer"]);
+
+        // A rule added from the installed-apps picker is keyed on the desktop
+        // entry id; a sender that names itself differently must still match it,
+        // and the reverse — that is the whole point of the two-key lookup.
+        d.notifRules = { "vivaldi-stable": { popup: false } };
+        t.check("a desktop-entry rule catches a sender that sends the entry",
+                t.wouldPopup(t.fake("Vivaldi", "vivaldi-stable", 1)), false);
+        t.check("...and one that sends only the matching app name",
+                t.wouldPopup(t.fake("vivaldi-stable", "", 1)), false);
+        d.notifRules = { "vivaldi": { popup: false } };
+        t.check("an app-name rule catches a sender that also sends an entry",
+                t.wouldPopup(t.fake("Vivaldi", "vivaldi-stable", 1)), false);
+        t.check("the entry wins when BOTH names carry a rule",
+                (function () {
+                    d.notifRules = { "vivaldi-stable": { popup: true },
+                                     "vivaldi": { popup: false } };
+                    return t.wouldPopup(t.fake("Vivaldi", "vivaldi-stable", 1));
+                })(), true);
+        d.notifRules = ({});
 
         t.check("default: normal pops", t.wouldPopup(t.fake("a", "a", 1)), true);
         t.check("default: low pops", t.wouldPopup(t.fake("a", "a", 0)), true);
@@ -179,10 +218,42 @@ Scope {
             t.check("the page instantiated", page !== null, true);
             if (!page) { Qt.exit(1); return; }
             t.check("the page has height", page.implicitHeight > 200, true);
-            t.check("seen senders are listed",
-                    page.seenApps.map(a => a.key), ["kde connect", "vivaldi-stable"]);
-            t.check("labels come from the registry",
-                    page.seenApps.map(a => a.label), ["KDE Connect", "Vivaldi"]);
+            // The merged candidate list: this desktop's own senders, the apps
+            // Plasma recorded as notifiers, and anything learned or added.
+            // The plasmanotifyrc keys below are deliberately not installed
+            // programs, so no DesktopEntries lookup can rename them and the
+            // expectation holds on either machine.
+            t.check("the list merges all three sources",
+                    page.seenApps.map(a => a.key),
+                    ["filer", "goetia", "kde connect", "painter", "player",
+                     "nix", "recording", "screenshot", "surfer",
+                     "test.notifier.one", "test.notifier.two", "quickshell",
+                     "vivaldi-stable"]);
+            t.check("this desktop's own senders are named, not keyed",
+                    page.seenApps.filter(a => a.key === "quickshell")[0].label, "the panel");
+            t.check("a learned sender keeps the name it sent",
+                    page.seenApps.filter(a => a.key === "vivaldi-stable")[0].label, "Vivaldi");
+            t.check("a plasma key with no installed entry stays the key",
+                    page.seenApps.filter(a => a.key === "test.notifier.one")[0].label,
+                    "test.notifier.one");
+
+            // The picker: too short a query matches nothing, and an app already
+            // in the list is never offered twice.
+            page.appQuery = "f";
+            t.check("a one-character query offers nothing", page.matches.length, 0);
+            page.appQuery = "filer";
+            t.check("an app already listed is not offered",
+                    page.matches.filter(m => m.key === "filer").length, 0);
+            page.appQuery = "";
+
+            // Adding puts a row in the list with no rule attached.
+            page.addApp("added.example", "Added Example");
+            t.check("adding registers the app",
+                    (SettingsStore.d.notifSeen || {})["added.example"], "Added Example");
+            t.check("the added app is now in the list",
+                    page.seenApps.filter(a => a.key === "added.example").length, 1);
+            t.check("adding wrote no rule",
+                    (SettingsStore.d.notifRules || {})["added.example"], undefined);
 
             let row = null;
             function walk(o) {

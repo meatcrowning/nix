@@ -60,25 +60,40 @@ Singleton {
     // to enumerate from, that learned list IS the per-app list the Settings
     // window draws.
 
-    // The rule key for a sender: its desktop entry when it sends one (stable
-    // across a rename of the app's display name), else its app name. Both
-    // lowercased, since neither is case-stable across sends.
-    function keyFor(n) {
+    // BOTH names a sender might be known by, most specific first: its desktop
+    // entry, then its app name, both lowercased (neither is case-stable across
+    // sends). A rule under either one matches, and that is not pedantry — the
+    // two disagree constantly. Vivaldi's desktop entry is `vivaldi-stable`
+    // while a rule added from the installed-apps picker is keyed on that id,
+    // and this desktop's own programs send `-a filer` with no desktop entry at
+    // all. Matching one name only would mean a rule that silently never fires.
+    function keysFor(n) {
         if (!n)
-            return "@other";
+            return ["@other"];
         const de = (n.desktopEntry || "").trim().toLowerCase();
-        if (de)
-            return de;
         const an = (n.appName || "").trim().toLowerCase();
-        return an || "@other";
+        const out = [];
+        if (de)
+            out.push(de);
+        if (an && an !== de)
+            out.push(an);
+        return out.length ? out : ["@other"];
     }
 
+    // The one key a sender is RECORDED under, when it has to be just one.
+    function keyFor(n) { return root.keysFor(n)[0]; }
+
     // A rule holds only its divergences, so an absent field means the default.
-    // A sender with no rule of its own inherits "@other" — the one row in the
-    // Settings list that is not a real app.
-    function ruleFor(key) {
+    // A sender matching no rule inherits "@other" — the one row in the Settings
+    // list that is not a real app.
+    function ruleFor(n) { return root.ruleForKeys(root.keysFor(n)); }
+    function ruleForKeys(keys) {
         const rules = SettingsStore.d.notifRules || {};
-        const r = rules[key] || rules["@other"] || {};
+        let r = null;
+        for (const k of keys)
+            if (rules[k]) { r = rules[k]; break; }
+        if (!r)
+            r = rules["@other"] || {};
         return {
             popup: r.popup !== false,
             dnd: r.dnd === true,
@@ -303,7 +318,7 @@ Singleton {
             // popups you switched off still has a row to switch them back on.
             root._recordSeen(n);
 
-            const rule = root.ruleFor(root.keyFor(n));
+            const rule = root.ruleFor(n);
             const critical = n.urgency === 2;
 
             // The sender's own rule comes first and binds even for critical:

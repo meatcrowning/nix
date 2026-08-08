@@ -2034,12 +2034,17 @@ Three things to know before editing it:
   re-evaluates. Everything asks at the moment a notification arrives. The
   minute-timer beside it only *retires* a lapsed value so the Settings window is
   not left claiming a quiet hour that ended; the gate is exact without it.
-- **The seen registry IS the app list.** Plasma enumerates candidates from
-  `.desktop` files carrying `X-GNOME-UsesNotifications` and merges in a
-  `Seen=true` list; we have no capability declaration to read on this desktop, so
-  the learned list is all there is. It stores a display name once, on first
-  sight — never re-stamped, both to keep the panel off the disk during a burst
-  and because the name a rule was made under should not shift under it.
+- **A rule matches on EITHER of a sender's two names**, entry first
+  (`keysFor`). The desktop entry and the app name disagree constantly — Vivaldi
+  is `vivaldi-stable` / `Vivaldi`, and this desktop's own programs send
+  `-a filer` with no entry at all — so matching one only would mean a rule that
+  silently never fires, which is the exact failure this feature exists to
+  prevent. `keyFor` (the first of the two) is the key a sender is *recorded*
+  under; `ruleFor(n)` takes the notification, not a key.
+- **The seen registry is one of four sources for the app list, not the list.**
+  It stores a display name once, on first sight — never re-stamped, both to keep
+  the panel off the disk during a burst and because the name a rule was made
+  under should not shift under it.
 - **`notifRules` / `notifSeen` are rewritten wholesale, never mutated.**
   `SettingsStore` diffs each key by `JSON.stringify` against its last-seen-on-disk
   snapshot; editing the object it handed back changes both sides of that
@@ -2067,6 +2072,51 @@ branch order above; reorder the real gate and you reorder the harness too.
 `SetNotifApp.qml` is the per-app row — Plasma's master/detail pane will not fit
 a 640px single-column page, so the app is a row and its rules are an indented
 disclosure under it (docs/DESIGN.md §9.1).
+
+#### The app list must be populated BEFORE an app interrupts you
+
+A list you can only edit after the fact is useless exactly when you want it, and
+the first cut of this got that wrong: it listed only learned senders. Plasma
+draws on three sources, and **both of the ones we lack were measured, not
+assumed**, on `top` 2026-08-07:
+
+- **`.desktop` files declaring `X-GNOME-UsesNotifications`** — Plasma's primary
+  source, and here it yields **zero**. Not one of the 299 entries across
+  `/run/current-system/sw/share/applications` and `~/.local/share/applications`
+  sets that key; it is a GNOME convention nixpkgs does not carry. (Which also
+  means Plasma's *own* list on this machine is built almost entirely from the
+  other two.) Do not "fix" the enumeration by reaching for it.
+- **`.notifyrc` services** — 31 installed, every one of them a Plasma/KDE
+  internal (`kwin`, `powerdevil`, `akonadi_*`, `plasma_workspace`) that a
+  Hyprland session never runs. Listing them is 31 rows of noise for zero real
+  senders, so they are deliberately **not** a source.
+
+What `SetPgNotifs.qml` merges instead, weakest label first so the best name wins:
+
+1. **`~/.config/plasmanotifyrc`** `[Applications][…]`, read once by a `Process`,
+   best-effort — an absent file is simply no extra candidates. This is the one
+   place on the machine that knows firefox, discord, nheko and vivaldi notify
+   him, because Plasma learned it over months.
+2. **`ownApps`** — this desktop's own senders, hardcoded, because they are
+   knowable: each passes its own `-a` name to `notify-send` (`filer`, `goetia`,
+   `nix`, `painter`, `player`, `quickshell`, `recording`, `screenshot`,
+   `surfer`). **Keep that list in step with the `notify-send` call sites** under
+   `apps/` and `home/srvs/` — `grep -rn 'notify-send' apps home` finds them.
+3. **`notifSeen`** — what the panel has learned since.
+4. **The picker**: a live search over `DesktopEntries.applications.values`,
+   adding any installed program by its `.id`. This is what replaces source one,
+   and it needs no declaration from the app, so it cannot go stale. Adding
+   writes the app into `notifSeen` and **no rule** — the row appears reading its
+   inherited defaults.
+
+`SetTextField.liveText` exists for that search field and nothing else: the
+component still commits only on Enter/focus-out, because every other user of it
+persists a setting and must not see keystrokes.
+
+The harness pins `XDG_CONFIG_HOME` at a synthetic `plasmanotifyrc` with two keys
+that are deliberately not installed programs. A test whose expectation depends
+on which apps have notified him this week is not a test, and `book` may have no
+Plasma config at all.
 
 ---
 
