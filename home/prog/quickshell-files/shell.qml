@@ -678,6 +678,14 @@ Scope {
         function toggle(): void { wallpaperPicker.open = !wallpaperPicker.open; }
         function show(): void { wallpaperPicker.open = true; }
         function hide(): void { wallpaperPicker.open = false; }
+        // Meta+Shift+W (hyprland.lua): flip the "no wallpaper" setting — hides
+        // or restores the IMAGE only; the palette, and so the whole theme,
+        // stays. Same store write as the Settings > Appearance toggle, and
+        // save() is read-modify-write, so neither writer clobbers the other.
+        function toggleSolid(): void {
+            SettingsStore.d.wallpaperSolid = !SettingsStore.d.wallpaperSolid;
+            SettingsStore.save();
+        }
         // What the panel is actually drawing as the wallpaper, and whether it
         // decoded: `qs ipc call wallpaper status`.
         function status(): string {
