@@ -162,14 +162,18 @@ not NVIDIA and keeps Qt's default.
 
 **Keys**: ‹ / › flip · Space play/next · `+` `-` `0` zoom/fit (with or without
 Ctrl) · Ctrl+wheel or plain wheel zooms the pane under the cursor · `\` add pane
-· Ctrl+W close pane (quits on the last one) · Tab / Shift+Tab · Ctrl+1..9.
+· Ctrl+W close pane (quits on the last one) · Escape or `q` quit · Tab /
+Shift+Tab · Ctrl+1..9.
 **Right-click** copies the image (above).
 
 Verified by **[`tools/split-test.py`](tools/split-test.py)** — offscreen, scratch
 `XDG_CONFIG_HOME`, real `QDragEnter`/`QDrop` and key events posted at the real
-`qml/Main.qml`; 41 checks covering pane layout, the spanning last pane, drop
+`qml/Main.qml`; 44 checks covering pane layout, the spanning last pane, drop
 routing to the pane under the cursor, the multi-file fan-out, the pane cap, the
-divider clamp and the persisted weights. Re-run it after touching the split
+divider clamp, the persisted weights and the quit keys — that last section is
+last on purpose, since `Qt.quit()` reaches `QCoreApplication::quit` through
+`QQmlApplicationEngine`'s own connection and what it asserts is the engine's
+`quit` signal. Re-run it after touching the split
 block; the *appearance* is the user's visual check. Run it with viewer's own Qt
 env, not the bare system python:
 

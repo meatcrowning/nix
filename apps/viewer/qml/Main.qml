@@ -456,7 +456,13 @@ Window {
                 if (win.current && win.current.isVideo) win.current.togglePlay();
                 else win.next();
                 e.accepted = true; break;
-            case Qt.Key_Escape:                    Qt.quit();  e.accepted = true; break;
+            // Escape and `q` both close the whole viewer. `q` because that is
+            // what every image/video viewer has bound it to since feh, and
+            // there is not one text field in this app for it to be swallowed
+            // by; unlike Ctrl+W it does not stop at the pane — a bare key that
+            // closed one of several panes and quit on the last would be a
+            // surprise, and Ctrl+W is already there for that.
+            case Qt.Key_Escape: case Qt.Key_Q:     Qt.quit();  e.accepted = true; break;
             case Qt.Key_Plus: case Qt.Key_Equal:
                 if (win.current) win.current.zoomBy(1.25); e.accepted = true; break;
             case Qt.Key_Minus:
