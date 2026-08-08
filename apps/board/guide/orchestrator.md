@@ -405,8 +405,9 @@ the standing constraints the old orchestrator briefing had and this system
 lost for a while: **every rebuild is serialized behind the shared flock**
 (`/tmp/claude-1000/-home-lam-nix/rebuild.lock` — up to five agents may rebuild
 here and two switches must not race), **the per-area ritual for getting an
-edit live** (seed-once files edited in BOTH copies with `seed-drift.sh` before
-and after, the `Theme.qml` bump, `hyprctl reload`, the hyprvtb version bump,
+edit live** (seed-once files edited in the nix source only — the switch
+reconciles the live copy — with `seed-drift.sh` after as the tripwire, the
+`Theme.qml` bump, `hyprctl reload`, the hyprvtb version bump,
 never bare `qs`, never scripting hyprvtb Lua actions), **the IPC/log
 verification toolbox**, and **saying what the other host must run**.
 

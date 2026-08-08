@@ -833,9 +833,9 @@ shared rebuild lock and runs preflight itself; only a RAW switch run outside \
 the wrappers still needs the manual `mkdir -p /tmp/claude-1000/-home-lam-nix \
 && flock /tmp/claude-1000/-home-lam-nix/rebuild.lock <the rebuild command>`. **Getting an edit LIVE has a \
 per-area ritual**: a seed-once file (`Theme.qml`, `hyprland.lua`) is edited in \
-BOTH copies — nix source AND the live file — with `./tools/seed-drift.sh` run \
-before and after (editing one side is the single most common way a change here \
-appears to do nothing); panel QML goes live by rebuilding, then appending a \
+the NIX SOURCE ONLY — the switch reconciles the live copy, and an edit made to \
+the live file instead is overwritten by the next one — with \
+`./tools/seed-drift.sh` run AFTER, as the tripwire; panel QML goes live by rebuilding, then appending a \
 comment line to `~/.config/quickshell/Theme.qml` and restoring the file; \
 `hyprland.lua` needs `hyprctl reload`; hyprvtb C++ needs its `main.cpp` version \
 bump, then rebuild + `hyprctl reload`. Never run bare `qs` — it launches a \
