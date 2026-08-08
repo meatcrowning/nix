@@ -143,6 +143,7 @@ Item {
                 color: index === root.currentLine ? root.fgText : root.fgDim
             }
             MouseArea {
+                cursorShape: Qt.PointingHandCursor
                 anchors.fill: parent
                 onClicked: Player.seek(modelData.t)
             }

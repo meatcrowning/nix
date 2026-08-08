@@ -30,6 +30,7 @@ Item {
         color: root.lit ? root.fgAccent : (mouse.containsMouse ? root.fgText : root.fgDim)
     }
     MouseArea {
+        cursorShape: Qt.PointingHandCursor
         id: mouse
         anchors.fill: parent
         hoverEnabled: true
