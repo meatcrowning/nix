@@ -682,6 +682,9 @@ hl.bind(mainMod .. " + M", hl.dsp.exec_cmd("qs ipc call powermenu toggle"), { de
 -- Wallpaper picker: flip through ~/Pictures/wall with arrow keys, each
 -- highlight live-applies (wal-set.sh) as both wallpaper and theme.
 hl.bind(mainMod .. " + W", hl.dsp.exec_cmd("qs ipc call wallpaper toggle"), { description = "Wallpaper picker" })
+-- Hide/show the wallpaper image (the "no wallpaper" setting); the palette and
+-- theme derived from it stay.
+hl.bind(mainMod .. " + SHIFT + W", hl.dsp.exec_cmd("qs ipc call wallpaper toggleSolid"), { description = "Wallpaper on/off" })
 -- Flip the desktop between light and dark from the same wallpaper hue; the
 -- panel re-runs wal-set.sh and the whole desktop re-themes live (theme IPC).
 hl.bind(mainMod .. " + D", hl.dsp.exec_cmd("qs ipc call theme toggle"), { description = "Toggle light/dark theme" })
