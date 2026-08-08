@@ -28,7 +28,8 @@ PanelWindow {
     // width). A 1px top/bottom line vanishes on a scale-1.0 1080p monitor — it's
     // a single physical pixel pinned to the screen edge — whereas 2px stays
     // visible there and matches the left/right stripe.
-    property int thickness: 2
+    // follows the global border width, floored at the legible 2px
+    property int thickness: Math.max(2, Theme.windowBorderWidth)
 
     // The horizontal stripes span the desktop the panel does NOT cover, so they
     // have to follow the panel edge exactly while it is dragged.

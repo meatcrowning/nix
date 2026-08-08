@@ -1106,7 +1106,11 @@ Scope {
                         left: bar.barLeft ? undefined : parent.left
                         right: bar.barLeft ? parent.right : undefined
                     }
-                    width: 2
+                    // the global border width, floored at 2: a 1px line pinned
+                    // to a screen edge vanishes on a 1.0-scale monitor (see
+                    // EdgeAccent's thickness note), and 0 must not erase the
+                    // panel's face — this strip is the panel's one edge.
+                    width: Math.max(2, Theme.windowBorderWidth)
                     color: Theme.accent
                 }
 
