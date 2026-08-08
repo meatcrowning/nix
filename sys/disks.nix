@@ -7,6 +7,11 @@ let
   driveLabel = pkgs.writeShellScriptBin "drive-label" ''
     dev="$1"; fstype="$2"; label="$3"
     [ -n "$dev" ] && [ -n "$fstype" ] || { echo "usage: drive-label <dev> <fstype> <label>" >&2; exit 2; }
+    # Same guard as drive-smart: resolve and require a real block device before
+    # relabelling anything as root.
+    dev=$(${pkgs.coreutils}/bin/realpath -e -- "$dev" 2>/dev/null) \
+      || { echo "drive-label: no such device" >&2; exit 2; }
+    [ -b "$dev" ] || { echo "drive-label: not a block device: $dev" >&2; exit 2; }
     case "$fstype" in
       btrfs)
         mp=$(${pkgs.util-linux}/bin/findmnt -n -o TARGET --source "$dev" | head -n1)
@@ -26,12 +31,14 @@ let
   # block node — closing the "arbitrary smartctl args as root" hole while
   # serving the only invocation quickshell actually makes (disk-smart.sh).
   driveSmart = pkgs.writeShellScriptBin "drive-smart" ''
-    dev="$1"
-    case "$dev" in
-      /dev/sd[a-z]|/dev/sd[a-z][0-9]*|/dev/nvme[0-9]*|/dev/disk/by-*/*) ;;
-      *) echo "drive-smart: refusing non-block-device argument" >&2; exit 2 ;;
-    esac
     [ "$#" -eq 1 ] || { echo "usage: drive-smart <device>" >&2; exit 2; }
+    # Canonicalise (resolve symlinks + `..`) then require a real BLOCK device.
+    # A shell `case` glob would let `/dev/disk/by-id/../../../dev/watchdog`
+    # through — a char device whose open() arms the watchdog and reboots the
+    # box — so match on the resolved node's type, not on the string.
+    dev=$(${pkgs.coreutils}/bin/realpath -e -- "$1" 2>/dev/null) \
+      || { echo "drive-smart: no such path" >&2; exit 2; }
+    [ -b "$dev" ] || { echo "drive-smart: not a block device: $dev" >&2; exit 2; }
     exec ${pkgs.smartmontools}/bin/smartctl -a -j "$dev"
   '';
 in
