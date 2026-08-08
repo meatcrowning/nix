@@ -110,6 +110,9 @@ Column {
             SetSelect {
                 options: FontFaces.families
                 labels: FontFaces.labels
+                // the values are the family names themselves, so every row of
+                // the dropdown is a specimen of the face it picks
+                optionsAreFonts: true
                 value: page.d.fontFamily
                 onChanged: (v) => { page.d.fontFamily = v; SettingsStore.save(); }
             }
