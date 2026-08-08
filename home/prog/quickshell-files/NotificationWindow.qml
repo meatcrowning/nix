@@ -10,7 +10,10 @@ import Quickshell.Wayland
 // and a new card enters by sliding OUT of the panel, clipped at the mouth, so
 // it emerges rather than appears. [his] "toasts should appear as if sliding
 // out from the panel while still being 'attached' like how the program icon
-// bar is."
+// bar is." A leaving card plays the same slide in reverse — back INTO the
+// panel behind the clip — on the same clock ([his] "toasts should roll up
+// like how they roll out ... animation timing is the same as the window
+// rolls", docs/DESIGN.md §6.2).
 //
 // That needs the panel's FACE, which the layer-shell reserve cannot give us:
 // the reserve includes the notch's protrusion and is frozen mid-drag. So on
@@ -56,6 +59,45 @@ PanelWindow {
     // A card's full width, mouth included; the desktop sees stackW of it.
     readonly property int cardW: stackW + mouth
 
+    // What the cards render: the tracked list, plus any card still playing its
+    // exit. Quickshell drops a closed notification from trackedNotifications
+    // the same frame, and a Repeater bound to that model destroys the card
+    // with it — an exit animation needs the card to LINGER. So the window
+    // mirrors the tracked list here, each card holds a RetainableLock on its
+    // notification (NotificationCard.qml) so the object stays readable, and a
+    // removal only STARTS the card's roll back into the panel; the card falls
+    // out of this array when its slide lands.
+    property var stack: []
+
+    function retire(n) {
+        win.stack = win.stack.filter(x => x !== n);
+    }
+
+    Component.onCompleted: {
+        // Anything already tracked when the window comes up (a toast arriving
+        // in the same frame the panel builds).
+        const vals = Notifications.model.values;
+        for (let i = 0; i < vals.length; i++)
+            win.stack = win.stack.concat([vals[i]]);
+    }
+
+    Connections {
+        target: Notifications.model
+        function onObjectInsertedPost(object, index) {
+            win.stack = win.stack.concat([object]);
+        }
+        function onObjectRemovedPost(object, index) {
+            for (let i = 0; i < col.children.length; i++) {
+                const c = col.children[i];
+                if (c && c.notif === object) {
+                    c.leave();
+                    return;
+                }
+            }
+            win.retire(object);   // no card built for it: nothing to animate
+        }
+    }
+
     anchors { top: win._top; bottom: !win._top; left: win._left; right: !win._left }
     margins {
         top: Theme.gap; bottom: Theme.gap
@@ -75,8 +117,9 @@ PanelWindow {
     exclusiveZone: 0
 
     // Stay unmapped while empty so the transparent surface can't eat stray
-    // clicks in the corner.
-    visible: Notifications.count > 0
+    // clicks in the corner. Follows the lingering stack, not the tracked
+    // count: unmapping on dismissal would cut the exit slide off mid-frame.
+    visible: win.stack.length > 0
 
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "qs-notifications"
@@ -139,13 +182,19 @@ PanelWindow {
             }
 
             Repeater {
-                model: Notifications.model
+                // ScriptModel diffs against the previous array: an arrival
+                // builds one new delegate, a retirement destroys one — a plain
+                // JS array as the model would rebuild every card on each
+                // change, restarting their expiry timers and animations.
+                model: ScriptModel { values: win.stack }
                 delegate: NotificationCard {
                     required property var modelData
                     width: col.width
                     notif: modelData
                     attached: win.attached
                     mouthOnLeft: win.barLeft
+                    floatLeft: win._left
+                    onDeparted: win.retire(modelData)
                 }
             }
         }
