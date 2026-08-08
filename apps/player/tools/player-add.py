@@ -447,7 +447,7 @@ def main():
             print(f"  moved           {src.name} -> {root.name}/{safe_name(artist, 'Unknown Artist')}/{safe_name(album, 'Unknown Album')}/")
         moved += 1
 
-    print(f"\n{moved} download(s) imported into {root}" + ("" if args.dry_run else "; skipped {skipped} already present" if skipped else ""))
+    print(f"\n{moved} download(s) imported into {root}" + ("" if args.dry_run else f"; skipped {skipped} already present" if skipped else ""))
     if parked:
         print(f"  {parked} file(s) parked in {dl_dir.name}/{NEEDS_ATTENTION}/ "
               f"-- no pipeline record and no usable tags; fix by hand")
