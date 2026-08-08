@@ -66,20 +66,27 @@ Rectangle {
             || s.endsWith(".flv") || s.endsWith(".ts") || s.endsWith(".ogv")
             || s.endsWith(".3gp") || s.endsWith(".m2ts");
     }
-    readonly property bool videoPlaying:  player.playbackState === MediaPlayer.PlayingState
+    readonly property bool videoPlaying:  videoLoader.item !== null
+        && videoLoader.item.player.playbackState === MediaPlayer.PlayingState
     // Is this pane making a sound? Both reasons folded into one answer, for the
-    // chrome and for tools/video-test.py.
-    readonly property bool silent:        audioOut.muted
-    readonly property int  videoPosition: player.position
-    readonly property int  videoDuration: player.duration
+    // chrome and for tools/video-test.py. The fallback is the same expression
+    // the AudioOutput binds, so the answer does not change with the loader.
+    readonly property bool silent:        videoLoader.item
+        ? videoLoader.item.audioOut.muted
+        : (!viewer.paneFocused || viewer.appMuted)
+    readonly property int  videoPosition: videoLoader.item ? videoLoader.item.player.position : 0
+    readonly property int  videoDuration: videoLoader.item ? videoLoader.item.player.duration : 0
 
     function togglePlay() {
-        if (!isVideo) return;
+        if (!isVideo || !videoLoader.item) return;
+        const player = videoLoader.item.player;
         if (player.playbackState === MediaPlayer.PlayingState) player.pause();
         else player.play();
     }
     function seekFraction(f) {
-        if (isVideo && player.duration > 0)
+        if (!isVideo || !videoLoader.item) return;
+        const player = videoLoader.item.player;
+        if (player.duration > 0)
             player.position = Math.max(0, Math.min(1, f)) * player.duration;
     }
 
@@ -220,48 +227,76 @@ Rectangle {
     // folder like the images do. Audio plays through the default output — but
     // only for the FOCUSED pane: a split full of clips would otherwise mix
     // every soundtrack together, and the titlebar can only pause one of them.
-    AudioOutput {
-        id: audioOut
-        // Two independent reasons to be silent: this is not the focused pane
-        // (four clips would be four soundtracks), or the window is muted.
-        muted: !viewer.paneFocused || viewer.appMuted
-    }
-    MediaPlayer {
-        id: player
-        source: viewer.isVideo ? viewer.source : ""
-        videoOutput: videoOut
-        audioOutput: audioOut
-        loops: MediaPlayer.Infinite
-        // autoplay on load / on flipping to a new clip — but never before the
-        // window has finished appearing (see `canPlay`).
-        onSourceChanged: if (viewer.isVideo && source != "" && viewer.canPlay) play()
-    }
-    // ...and the moment it has, start whatever was waiting. Only from the
-    // false->true edge, which happens once per window: a later change of mind
-    // about playing is the user's, and this must not overrule it.
-    onCanPlayChanged: {
-        if (canPlay && isVideo && player.source != ""
-                && player.playbackState !== MediaPlayer.PlayingState)
-            player.play();
-    }
-    VideoOutput {
-        id: videoOut
+    //
+    // Behind a Loader, ON DEMAND: the process's FIRST QtMultimedia object costs
+    // ~460ms (the ffmpeg backend + the CUDA hw-decode probe load then, not at
+    // `import QtMultimedia`), which was most of viewer's cold start — paid on
+    // every still image that never plays anything. Only a pane showing a video
+    // builds this; every later build in the process is <1ms, so flipping
+    // image<->video churns nothing that costs. Destroy-on-flip-away equals the
+    // old `source: ""` unload: playback stopped either way.
+    Loader {
+        id: videoLoader
         anchors.fill: parent
-        visible: viewer.isVideo
-        opacity: viewer.fgArt      // a video is content too (§3.1.1)
-        fillMode: VideoOutput.PreserveAspectFit
+        active: viewer.isVideo
+        sourceComponent: videoComp
+    }
+    Component {
+        id: videoComp
+        Item {
+            property alias player: player
+            property alias audioOut: audioOut
+
+            AudioOutput {
+                id: audioOut
+                // Two independent reasons to be silent: this is not the focused
+                // pane (four clips would be four soundtracks), or the window is
+                // muted.
+                muted: !viewer.paneFocused || viewer.appMuted
+            }
+            MediaPlayer {
+                id: player
+                source: viewer.source
+                videoOutput: videoOut
+                audioOutput: audioOut
+                loops: MediaPlayer.Infinite
+                // autoplay on flipping video->video — but never before the
+                // window has finished appearing (see `canPlay`).
+                onSourceChanged: if (source != "" && viewer.canPlay) play()
+            }
+            // The initial source is set during creation, before onSourceChanged
+            // can fire — so the flip TO a video (which is what created this
+            // item) starts here instead.
+            Component.onCompleted: if (player.source != "" && viewer.canPlay) player.play()
+            VideoOutput {
+                id: videoOut
+                anchors.fill: parent
+                opacity: viewer.fgArt      // a video is content too (§3.1.1)
+                fillMode: VideoOutput.PreserveAspectFit
+            }
+        }
+    }
+    // ...and the moment the window is out, start whatever was waiting. Only
+    // from the false->true edge, which happens once per window: a later change
+    // of mind about playing is the user's, and this must not overrule it.
+    onCanPlayChanged: {
+        if (canPlay && isVideo && videoLoader.item && videoLoader.item.player.source != ""
+                && videoLoader.item.player.playbackState !== MediaPlayer.PlayingState)
+            videoLoader.item.player.play();
     }
 
     // loading / error state, centred over the (empty) canvas. For images it
     // tracks the Image/AnimatedImage status; for video, the MediaPlayer's.
+    readonly property bool videoError: videoLoader.item !== null
+        && videoLoader.item.player.error !== MediaPlayer.NoError
     PixelText {
         anchors.centerIn: parent
         horizontalAlignment: Text.AlignHCenter
         visible: viewer.isVideo
-            ? (player.error !== MediaPlayer.NoError)
+            ? viewer.videoError
             : (viewer.imgStatus !== Image.Ready)
         text: viewer.isVideo
-            ? (player.error !== MediaPlayer.NoError ? ("can't play\n" + viewer.name) : "")
+            ? (viewer.videoError ? ("can't play\n" + viewer.name) : "")
             : (viewer.imgStatus === Image.Error ? ("can't display\n" + viewer.name)
               // "..." not U+2026 — the pixel font has no ellipsis, and a
               // fallback glyph clips the line (docs/DESIGN.md §2.3).
