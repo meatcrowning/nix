@@ -147,22 +147,27 @@ Item {
 
                 Item {
                     width: parent.width
-                    height: 20
+                    height: 24
                     PixelText {
                         anchors.verticalCenter: parent.verticalCenter
                         text: "volume levelling"
                         color: root.fgText
                     }
-                    HeaderButton {
+                    // A dropdown, not a cycler — every pick-one-of-N enum on
+                    // the desktop opens its menu now (docs/DESIGN.md §7.2).
+                    SelectButton {
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
+                        width: 90
                         label: Player.replayGain
                         fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
-                        lit: Player.replayGain !== "off"
-                        onClicked: {
-                            var modes = ["auto", "track", "album", "off"];
-                            var i = modes.indexOf(Player.replayGain);
-                            root.replayGainRequested(modes[(i + 1) % modes.length]);
+                        onPicked: function (x, y) {
+                            var items = [];
+                            ["auto", "track", "album", "off"].forEach(function (m) {
+                                items.push({ label: m, trigger: function () { root.replayGainRequested(m); } });
+                            });
+                            var p = root.mapFromItem(null, x, y);
+                            rgMenu.open(p.x, p.y, items);
                         }
                     }
                 }
@@ -232,4 +237,9 @@ Item {
             }
         }
     }
+
+    // One menu for the drawer's pickers (§7.3). It fills the panel root —
+    // which fills the window — so the dropdown clamps against the whole
+    // window, not the drawer it slides in from.
+    CtxMenu { id: rgMenu; anchors.fill: parent }
 }
