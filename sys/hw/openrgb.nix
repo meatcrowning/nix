@@ -10,5 +10,20 @@
   systemd.services.openrgb.serviceConfig = {
     IPAddressDeny = "any";
     IPAddressAllow = "localhost";
+    # Defense-in-depth on a root daemon: it can only be driven locally, but it
+    # still runs as root, so fence off everything it demonstrably does not need.
+    # Deliberately conservative — NOT PrivateDevices/RestrictAddressFamilies/
+    # SystemCallFilter/CapabilityBoundingSet, any of which can break its
+    # i2c/hidraw/SMBus or netlink device access, which can't be re-verified
+    # without touching the LEDs. These only lock down the rest of the system.
+    ProtectSystem = true;          # /usr, /boot read-only (state stays in /var/lib/OpenRGB)
+    PrivateTmp = true;
+    ProtectControlGroups = true;
+    ProtectKernelLogs = true;
+    ProtectClock = true;
+    ProtectHostname = true;
+    RestrictRealtime = true;
+    LockPersonality = true;
+    NoNewPrivileges = true;
   };
 }
