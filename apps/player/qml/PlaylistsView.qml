@@ -265,7 +265,6 @@ Item {
         anchors.margins: 8
         width: noticeText.implicitWidth + 12
         height: noticeText.implicitHeight + 8
-        radius: 3
         color: Theme.bgAlt
         border.width: 1
         border.color: Theme.border

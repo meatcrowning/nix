@@ -120,7 +120,6 @@ Rectangle {
         sourceComponent: Rectangle {
             width: 15
             height: 15
-            radius: 2
             color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.72)
             border.width: 1
             border.color: tile.winActive ? Theme.border : Theme.inactive

@@ -354,7 +354,6 @@ Column {
                             y: (slot % 7) * (chart.cell + chart.gap)
                             width: chart.cell
                             height: chart.cell
-                            radius: 1
                             color: spendRoot.hoveredDay === index
                                    ? Theme.accent
                                    : chart.cellColor(modelData.total)
