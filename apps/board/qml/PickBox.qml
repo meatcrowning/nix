@@ -69,7 +69,6 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        radius: 3
         color: hov.hovered ? Theme.highlight : "transparent"
         border.width: 1
         border.color: hov.hovered ? Theme.accent : Theme.border
