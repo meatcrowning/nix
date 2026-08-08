@@ -138,6 +138,11 @@ struct SGlobalState {
         SP<Config::Values::CIntValue>    fontSize;
         SP<Config::Values::CIntValue>    maximizeGap;
         SP<Config::Values::CStringValue> font;
+        // The pushed face is a smooth outline (Phenex), not a pixel one: the
+        // bar text must NOT be rendered with cairo ANTIALIAS_NONE — that
+        // option outranks the face's own fontconfig AA rule. Set alongside
+        // `font` by apply-pixel-font.sh from font.nix's selectableFaces.
+        SP<Config::Values::CBoolValue>   fontSmooth;
         SP<Config::Values::CColorValue>  bgColor;
         SP<Config::Values::CColorValue>  bgAltColor;
         SP<Config::Values::CColorValue>  textColor;
@@ -225,6 +230,9 @@ namespace Vtb::Cfg {
     }
     inline auto font() {
         return g_pGlobalState->config.font->value();
+    }
+    inline auto fontSmooth() {
+        return g_pGlobalState->config.fontSmooth->value();
     }
     inline auto bgColor() {
         return g_pGlobalState->config.bgColor->value();

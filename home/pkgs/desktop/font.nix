@@ -139,6 +139,13 @@ in
   # drift. Quickshell loads it from the config dir like any other singleton.
   xdg.configFile."quickshell/FontFaces.qml".text = fontFacesQml;
 
+  # The same list for SCRIPTS (family -> smooth flag): apply-pixel-font.sh
+  # jq's it to tell the hyprvtb titlebar whether the pushed face is smooth
+  # (plugin:hyprvtb:font_smooth), so the plugin's cairo AA choice follows the
+  # face without hardcoding a family name anywhere outside this file.
+  xdg.configFile."quickshell/font-faces.json".text = builtins.toJSON
+    (lib.listToAttrs (map (f: lib.nameValuePair f.family { inherit (f) smooth; }) selectableFaces));
+
   # "More Perfect DOS VGA" ships ONLY a Regular face. Without this, KDE/Qt apps
   # faux-bold (and oblique-shear) it wherever the UI asks for bold/italic text —
   # info-panel labels, selected tabs, section headers, etc. On a pixel font
@@ -148,6 +155,17 @@ in
   # explains the size/format mismatch). Pin every request for this family to
   # upright regular and kill synthetic emboldening, so all its text stays
   # uniform. Trade-off: bold emphasis is intentionally dropped for this font.
+  #
+  # The rasterisation pins are the fontconfig half of the pixel pipeline
+  # (docs/DESIGN.md §2.2): PixelText and deskstyle keep Qt-land crisp, and
+  # hyprvtb forces its own cairo options, but every OTHER fontconfig consumer
+  # (GTK, qutebrowser, kdialog…) fell to platform defaults — measured through
+  # Pango: 26 grey levels on this face at 15px. Platform defaults also DIFFER
+  # per host (NixOS vs book's Fedora), so without the pins the same face
+  # renders differently on the two machines — and on book's 1.67-scale Retina
+  # the default grayscale AA smears the fractionally-scaled squares outright.
+  # antialias off + hintnone + rgba none = the authored squares, mono-rendered,
+  # identically everywhere.
   xdg.configFile."fontconfig/conf.d/50-more-perfect-dos-vga-regular.conf".text = ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
@@ -160,14 +178,20 @@ in
       </match>
       <match target="font">
         <test name="family"><string>More Perfect DOS VGA</string></test>
-        <edit name="embolden" mode="assign"><bool>false</bool></edit>
+        <edit name="embolden"  mode="assign"><bool>false</bool></edit>
+        <edit name="antialias" mode="assign"><bool>false</bool></edit>
+        <edit name="autohint"  mode="assign"><bool>false</bool></edit>
+        <edit name="hinting"   mode="assign"><bool>false</bool></edit>
+        <edit name="hintstyle" mode="assign"><const>hintnone</const></edit>
+        <edit name="rgba"      mode="assign"><const>none</const></edit>
       </match>
     </fontconfig>
   '';
 
   # Botis 4x6 ships Regular-only too (a single outline face), so it gets the
   # same guard: pin any request for it to upright regular and kill synthetic
-  # emboldening, so the pixel squares are never faux-bolded/obliqued into a smear.
+  # emboldening, so the pixel squares are never faux-bolded/obliqued into a
+  # smear. Same rasterisation pins as the VGA face above, same reason.
   xdg.configFile."fontconfig/conf.d/50-botis-4x6-regular.conf".text = ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
@@ -180,7 +204,12 @@ in
       </match>
       <match target="font">
         <test name="family"><string>Botis 4x6</string></test>
-        <edit name="embolden" mode="assign"><bool>false</bool></edit>
+        <edit name="embolden"  mode="assign"><bool>false</bool></edit>
+        <edit name="antialias" mode="assign"><bool>false</bool></edit>
+        <edit name="autohint"  mode="assign"><bool>false</bool></edit>
+        <edit name="hinting"   mode="assign"><bool>false</bool></edit>
+        <edit name="hintstyle" mode="assign"><const>hintnone</const></edit>
+        <edit name="rgba"      mode="assign"><const>none</const></edit>
       </match>
     </fontconfig>
   '';
