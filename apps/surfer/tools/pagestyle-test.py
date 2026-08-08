@@ -20,8 +20,13 @@ courier, points it at a local http server, and asserts:
      exists;
   3. LIVE refresh: changing brightness and re-asking the courier updates an
      already-painted page with no reload;
-  4. STRIP: turning dark mode off and refreshing strips the sheet (filter
-     back to 'none').
+  4. STRIP: turning dark mode off and refreshing strips the dark filter
+     (filter back to 'none');
+  5. FONT INHERIT: unstyled page text takes the desktop face at the desktop
+     size, a page's own font styling beats the layer, and a subframe gets the
+     fonts-only body — the face, never the dark filter (no double-invert);
+  6. FORCE: opting the site into the system-font override imposes the family
+     over the page's own styling while its font-size survives (family only).
 
 Deliberately only the page-style courier is installed here — cosmetic
 ad-blocking has its own harness (cosmetic-test.py) and must not interfere.
@@ -67,17 +72,37 @@ INDEX = b"""<!doctype html><html><head><title>t</title>
 </script>
 </head><body>
 <div id="probe" style="background:#fff">content</div>
+<p id="u">unstyled text</p>
+<p id="s" style="font-family:serif;font-size:20px">page-styled text</p>
+<iframe id="fr" src="/f.html"></iframe>
 <script src="/app.js"></script>
 </body></html>"""
+
+# The subframe: takes the fonts-only body ('f' on surferstyle://) — its text
+# must inherit the desktop font while the dark filter must NOT run here (the
+# top frame's html filter already composites over it).
+FRAME = b"""<!doctype html><html><head><title>f</title></head>
+<body><p id="fu">frame text</p></body></html>"""
 
 APP_JS = b"""\
 setTimeout(function(){
   function f(){ try { return getComputedStyle(document.documentElement).filter || 'none'; }
                catch(e){ return 'ERR'; } }
+  function cs(id, d){ try { d = d || document; var e = d.getElementById(id);
+      var c = d.defaultView.getComputedStyle(e);
+      return c.fontFamily + '|' + c.fontSize; } catch(e){ return 'ERR'; } }
+  var fdoc = null, ffilter = 'ERR';
+  try { fdoc = document.getElementById('fr').contentDocument;
+        ffilter = fdoc.defaultView.getComputedStyle(fdoc.documentElement).filter || 'none'; }
+  catch(e){}
   document.title = JSON.stringify({
       early: window.__early || 'unset',
       frame: window.__frame || 'unset',
       late: f(),
+      u: cs('u'),
+      s: cs('s'),
+      fu: fdoc ? cs('fu', fdoc) : 'ERR',
+      ffilter: ffilter,
       hasRefresh: typeof window.__surferPageStyleRefresh === 'function'
   });
 }, 700);
@@ -86,7 +111,8 @@ setTimeout(function(){
 
 class Page(BaseHTTPRequestHandler):
     def do_GET(self):
-        body = APP_JS if self.path == "/app.js" else INDEX
+        body = (APP_JS if self.path == "/app.js"
+                else FRAME if self.path == "/f.html" else INDEX)
         ctype = "application/javascript" if self.path == "/app.js" else "text/html"
         self.send_response(200)
         self.send_header("Content-Type", ctype)
@@ -216,6 +242,21 @@ def main():
               "invert(1) hue-rotate(180deg)" in (out.get("frame") or ""))
         check("theme still applied after everything settled", "invert(" in f)
         check("live refresh hook installed", out.get("hasRefresh") is True)
+        # the font-inherit layer: unstyled text takes the desktop face at the
+        # desktop size; a page's own font styling beats the layer (@layer
+        # loses to any unlayered rule); the subframe inherits the face too but
+        # never the dark filter.
+        check("unstyled text inherits the desktop font at the desktop size",
+              "More Perfect DOS VGA" in (out.get("u") or "")
+              and "15px" in (out.get("u") or ""))
+        check("a page's own font styling beats the inherit layer",
+              "serif" in (out.get("s") or "").split("|")[0]
+              and "More Perfect DOS VGA" not in (out.get("s") or "")
+              and "20px" in (out.get("s") or ""))
+        check("subframe inherits the desktop font (fonts-only body)",
+              "More Perfect DOS VGA" in (out.get("fu") or ""))
+        check("subframe never takes the dark filter (no double-invert)",
+              (out.get("ffilter") or "x") == "none")
         # phase 2: change brightness and live-refresh the open page
         dm.setBrightness(150)
         view.runJavaScript("window.__surferPageStyleRefresh()", lambda r: None)
@@ -249,8 +290,28 @@ def main():
         read_title()
         check("disabling dark mode strips the theme from an open page (filter 'none')",
               (out.get("late") or "x") == "none")
+        # phase 4: the per-site FORCE — family imposed over the page's own
+        # styling, the page's size kept (family only, DESIGN.md 16)
+        dm.toggleSystemFontSite(base)
+        view.runJavaScript("window.__surferPageStyleRefresh()", lambda r: None)
+        QTimer.singleShot(400, phase4)
+
+    def phase4():
+        view.runJavaScript(
+            "document.title=JSON.stringify({s:(function(){"
+            "var c=getComputedStyle(document.getElementById('s'));"
+            "return c.fontFamily+'|'+c.fontSize;})()});",
+            lambda r: None)
+        QTimer.singleShot(400, phase4b)
+
+    def phase4b():
+        read_title()
+        check("per-site force imposes the family but keeps the page's size",
+              "More Perfect DOS VGA" in (out.get("s") or "")
+              and "20px" in (out.get("s") or ""))
         print("probe:", json.dumps(out, sort_keys=True))
-        print("%d/%d checks passed" % (6 - len(fails), 6))
+        n = 11
+        print("%d/%d checks passed" % (n - len(fails), n))
         app.quit()
 
     # phase1 re-checks every 200ms until the probe lands; start it at load+700ms
