@@ -35,6 +35,11 @@
 //     LOADING <0|1>
 //         Page loading? While 1 (and titleEdit is on), an animated | \ - /
 //         spinner is drawn in a reserved slot above the address bar. surfer.
+//     ICON <name>
+//         Icon name (or absolute path) for the titlebar's program-icon cell,
+//         overriding the class -> .desktop -> Icon= lookup — for a program
+//         whose window class is not its own to resolve through (Settings:
+//         every Quickshell window is `org.quickshell`). Empty clears it.
 //     PLAYBAR <0|1> <pos>
 //         Media scrub bar. While 1, a VERTICAL progress track is drawn in the
 //         inner column below the footer (position/name) readout; <pos> is the
@@ -89,6 +94,9 @@ struct SVtbAppReg {
     // apps that say nothing about it.
     bool                       titleText = true;
     bool                       loading   = false; // page loading (spinner above the address bar)
+    // Program-icon override for the titlebar's icon cell; empty means resolve
+    // from the window class as always (settings — see ICON above).
+    std::string                icon;
     bool                       playbar   = false; // media scrub bar shown (viewer video)
     float                      playPos   = 0.f;   // playback fraction 0..1 (fill length)
     // Where the footer sits when a scrub bar is shown. Default false keeps the

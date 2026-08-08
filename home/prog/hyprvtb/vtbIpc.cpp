@@ -149,6 +149,7 @@ namespace {
             reg.playbar      = it->second.playbar;
             reg.playPos      = it->second.playPos;
             reg.footerBottom = it->second.footerBottom;
+            reg.icon         = it->second.icon;
         }
         c.pid          = pid;
         g_regs[pid]    = std::move(reg);
@@ -257,6 +258,19 @@ namespace {
         VtbIpc::serial.fetch_add(1, std::memory_order_relaxed);
     }
 
+    void handleIcon(SClient& c, const std::string& name) {
+        if (c.pid <= 0)
+            return;
+        std::lock_guard lk(g_lk);
+        auto&           reg = g_regs[c.pid];
+        if (g_regFd.find(c.pid) == g_regFd.end())
+            g_regFd[c.pid] = c.fd;
+        if (reg.icon == name)
+            return;
+        reg.icon = name;
+        VtbIpc::serial.fetch_add(1, std::memory_order_relaxed);
+    }
+
     void handleLine(SClient& c, const std::string& line) {
         if (line.starts_with("REGISTER "))
             handleRegister(c, line.substr(9));
@@ -274,6 +288,10 @@ namespace {
             handleLoading(c, line.substr(8));
         else if (line.starts_with("PLAYBAR "))
             handlePlaybar(c, line.substr(8));
+        else if (line.starts_with("ICON "))
+            handleIcon(c, line.substr(5));
+        else if (line == "ICON")
+            handleIcon(c, "");
     }
 
     void dropClient(SClient& c) {
@@ -543,7 +561,8 @@ std::string VtbIpc::dumpJson() {
         out += "{\"pid\":" + std::to_string(pid) + ",\"buttons\":" + std::to_string(reg.buttons.size()) +
             ",\"titleEdit\":" + (reg.titleEdit ? "true" : "false") + ",\"titleText\":" + (reg.titleText ? "true" : "false") +
             ",\"loading\":" + (reg.loading ? "true" : "false") +
-            ",\"playbar\":" + (reg.playbar ? "true" : "false") + ",\"footer\":" + (reg.footer.empty() ? "false" : "true") + "}";
+            ",\"playbar\":" + (reg.playbar ? "true" : "false") + ",\"footer\":" + (reg.footer.empty() ? "false" : "true") +
+            ",\"icon\":\"" + reg.icon + "\"}";
     }
     out += "]}";
     return out;
