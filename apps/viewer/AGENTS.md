@@ -164,6 +164,18 @@ not NVIDIA and keeps Qt's default.
 Ctrl) · Ctrl+wheel or plain wheel zooms the pane under the cursor · `\` add pane
 · Ctrl+W close pane (quits on the last one) · Escape or `q` quit · Tab /
 Shift+Tab · Ctrl+1..9.
+
+**Quitting goes through the compositor, not `Qt.quit()`.** `win.quit()` asks
+hyprvtb to close this window with the same roll-up + fade the titlebar `[x]`
+runs (`Titlebar.requestClose` → `pylib/vtbclient.close_animated()` →
+`hl.plugin.hyprvtb.close_pid(<pid>)`, see `home/prog/AGENTS.md`), and the
+`sendClose()` that ends the animation arrives as the ordinary close `onClosing`
+already quits on. `Qt.quit()` tears the surface down where it stands, so all
+Hyprland had left to animate was a fade of the last frame — the key looked
+visibly different from the button beside it. It falls back to `Qt.quit()`
+whenever the compositor declines (an offscreen harness, an unloaded plugin) and
+a 1200 ms timer quits anyway if the close never comes: a quit key that leaves
+the window standing is worse than an unanimated one.
 **Right-click** copies the image (above).
 
 Verified by **[`tools/split-test.py`](tools/split-test.py)** — offscreen, scratch

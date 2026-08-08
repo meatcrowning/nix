@@ -53,7 +53,7 @@ QML = HERE / "qml"
 CLIPFILE = HERE.parent / "pylib" / "clipfile.py"
 
 sys.path.insert(0, str(HERE.parent / "pylib"))
-from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
+from vtbclient import VtbClient, close_animated  # noqa: E402  (needs the path insert above)
 from handoff import Listener  # noqa: E402  (pylib; the running-app socket)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
 
@@ -320,6 +320,13 @@ class Titlebar(QObject):
     @Slot(bool, float)
     def setPlaybar(self, shown, pos):
         self._client.set_playbar(shown, pos)
+
+    @Slot(result=bool)
+    def requestClose(self):
+        """Quit the way the titlebar's [x] does — rolled up into the bar, not
+        faded out. False means the compositor did not take it and QML must call
+        Qt.quit() itself; see vtbclient.close_animated."""
+        return close_animated()
 
 
 class Files(QObject):
