@@ -68,6 +68,40 @@ same time" is not two.
 - Only the **focused** pane's video is audible (`AudioOutput.muted`); four clips
   at once would otherwise be four soundtracks, and the titlebar can pause one.
 
+## Right-click → "copy image"
+
+viewer's only context menu, one row, on whichever pane the click landed in
+(which the same tap focuses, so the row acts on what the chrome says it does).
+`qml/CtxMenu.qml` is the desktop's verbatim copy — see [`../AGENTS.md`](../AGENTS.md),
+and retune all eight or none.
+
+- **The copy is `pylib/clipfile.py`, never `QClipboard`** (`Clip` in `main.py`).
+  A Wayland selection dies with the process that offered it, so a copy made in
+  Qt would stop being pasteable the moment the viewer closed — the one thing a
+  copy must not do. clipfile forks a holder that outlives us. `QClipboard`
+  additionally SIGSEGVs PySide on exit; the whole argument is in `../AGENTS.md`
+  → `pylib/`.
+- **An image is offered BOTH ways**, via clipfile's `--image`: as a file (name
+  and all — an upload field, a chat client) and as its own image mime (an
+  editor, a canvas). No conversion, so a JPEG goes on as `image/jpeg` and a
+  consumer that will only take `image/png` gets the file paste instead.
+- **A video says "copy file"**, because there is no picture to hand over and a
+  row labelled "copy image" that pasted a path would be a lie.
+- **The outcome goes to the titlebar FOOTER** — `win.flash()`, 2.5s for a
+  success and 5s for a failure, carrying clipfile's own last stderr line. The
+  footer and not a desktop toast: it is already viewer's one status surface,
+  and a notification server is one more thing that can be absent. A copy that
+  silently did nothing would look exactly like one that worked, right up until
+  the paste (docs/DESIGN.md §10).
+
+Verify with `tools/copy-test.py` (offscreen, 15 checks): it posts a real
+right-click at a pane, clicks the row that comes up, and asserts the argv, the
+footer text and each refusal. **It cannot touch his clipboard** — `CLIPFILE` is
+repointed at a stub that records argv and exits with a chosen code, so nothing
+in it speaks the data-control protocol. That clipfile really owns the selection
+and offers what it claims is `apps/pylib/tools/clipfile-test.sh`, in a headless
+sway of its own. Run both the way `split-test.py` is run (below).
+
 ## Video decodes on NVDEC, never VAAPI (`top`)
 
 `home/prog/viewer.nix` sets `QT_FFMPEG_DECODING_HW_DEVICE_TYPES=cuda` on the
@@ -95,6 +129,7 @@ not NVIDIA and keeps Qt's default.
 **Keys**: ‹ / › flip · Space play/next · `+` `-` `0` zoom/fit (with or without
 Ctrl) · Ctrl+wheel or plain wheel zooms the pane under the cursor · `\` add pane
 · Ctrl+W close pane (quits on the last one) · Tab / Shift+Tab · Ctrl+1..9.
+**Right-click** copies the image (above).
 
 Verified by **[`tools/split-test.py`](tools/split-test.py)** — offscreen, scratch
 `XDG_CONFIG_HOME`, real `QDragEnter`/`QDrop` and key events posted at the real

@@ -294,12 +294,27 @@ Window {
     // playback time isn't put here — a fast-changing footer would re-raster the
     // stacked text every tick; the scrub bar shows position instead.)
     readonly property string footerStr: {
+        if (flashMsg !== "") return flashMsg;
         var i = paneIdx(focusPane);
         if (i < 0 || i >= images.length) return "";
         var pfx = panes.count > 1 ? ("p" + (focusPane + 1) + "/" + panes.count + "  ") : "";
         return pfx + (i + 1) + "/" + images.length + "  " + images[i].name;
     }
     onFooterStrChanged: Titlebar.setFooter(footerStr)
+
+    // A one-off message in place of the footer, for the handful of actions that
+    // happen outside the window and would otherwise be silent — today just the
+    // clipboard (docs/DESIGN.md §10: an action that can fail must say so). It is
+    // the footer and not a desktop toast because the footer is already viewer's
+    // one status surface, and a notification server is one more thing that can
+    // be missing. A failure lingers twice as long as a success.
+    property string flashMsg: ""
+    function flash(msg, bad) {
+        flashMsg = msg;
+        flashTimer.interval = bad ? 5000 : 2500;
+        flashTimer.restart();
+    }
+    Timer { id: flashTimer; onTriggered: win.flashMsg = "" }
 
     // Push the scrub bar: shown at the focused pane's position for a video,
     // hidden for an image. Driven by a timer while playing (position moves) and
@@ -346,6 +361,32 @@ Window {
         }
         // scrub bar dragged/scrolled in the titlebar → seek the focused pane
         function onSeek(frac) { if (win.current) win.current.seekFraction(frac); }
+    }
+
+    // ---- right-click: put what you are looking at on the clipboard ----
+    // One row, because there is one thing to do with the picture that the
+    // titlebar cannot already do. `Clip` (main.py) shells out to
+    // pylib/clipfile.py, which owns the selection in a forked holder — so the
+    // copy survives closing the viewer — and offers the image BOTH as a file
+    // (name and all, what a chat client or an upload field wants) and as its
+    // own image mime (what an editor wants). A video has no picture to hand
+    // over, so it is offered as the file alone and the row says so.
+    function paneMenuItems(p, isVideo) {
+        var i = paneIdx(p);
+        if (i < 0 || i >= images.length) return [];
+        var path = images[i].path;
+        return isVideo
+            ? [{ label: "copy file", trigger: () => Clip.copyFile(path) }]
+            : [{ label: "copy image", trigger: () => Clip.copyImage(path) }];
+    }
+    function openPaneMenu(p, isVideo, pos) {
+        var items = paneMenuItems(p, isVideo);
+        if (items.length) ctxMenu.open(pos.x, pos.y, items);
+    }
+
+    Connections {
+        target: Clip
+        function onDone(msg, bad) { win.flash(msg, bad); }
     }
 
     // The mouse's back/forward side buttons step through the flip order — the
@@ -439,10 +480,17 @@ Window {
                 // Clicking a pane points the chrome at it. DragThreshold so the
                 // Flickable underneath keeps drag-panning a zoomed image: the
                 // tap is cancelled the moment the press turns into a drag.
+                // A right-tap also opens the menu, on the pane it landed in —
+                // which is now the focused one, so the row acts on what the
+                // chrome says it does.
                 TapHandler {
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     gesturePolicy: TapHandler.DragThreshold
-                    onTapped: win.focusPane = pane.index
+                    onTapped: (ep, button) => {
+                        win.focusPane = pane.index;
+                        if (button === Qt.RightButton)
+                            win.openPaneMenu(pane.index, iv.isVideo, ep.scenePosition);
+                    }
                 }
 
                 // ---- drop target ----
@@ -536,6 +584,14 @@ Window {
                     onReleased: Prefs.saveWeights(win.shapeKey, win.colW, win.rowW)
                 }
             }
+        }
+
+        // Over everything, including the dividers and the focus frame. Its own
+        // scrim dismisses it, so nothing underneath sees the closing click.
+        CtxMenu {
+            id: ctxMenu
+            objectName: "ctxMenu"   // tools/copy-test.py finds it by name
+            anchors.fill: parent
         }
     }
 }

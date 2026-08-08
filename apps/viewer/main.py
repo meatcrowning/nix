@@ -43,12 +43,14 @@ if __name__ == "__main__" and "--new-window" not in sys.argv[1:]:
                                               "cwd": os.getcwd()})):
         raise SystemExit(0)
 
-from PySide6.QtCore import QObject, Slot, Signal, Property, QUrl, QFileSystemWatcher
+from PySide6.QtCore import (QObject, QProcess, Slot, Signal, Property, QUrl,
+                            QFileSystemWatcher)
 from PySide6.QtGui import QGuiApplication, QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 
 HERE = Path(__file__).resolve().parent
 QML = HERE / "qml"
+CLIPFILE = HERE.parent / "pylib" / "clipfile.py"
 
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
@@ -348,6 +350,78 @@ class Files(QObject):
         return out
 
 
+class Clip(QObject):
+    """The context menu's "copy image" — `pylib/clipfile.py`, never QClipboard.
+
+    Two reasons it is a subprocess and not `QClipboard.setImage`, both already
+    paid for elsewhere on this desktop (apps/AGENTS.md → `pylib/`):
+
+      * **A Wayland selection dies with the process that offered it.** Copy an
+        image, close the viewer, paste — nothing. clipfile forks a holder that
+        outlives us and lets go when something else takes the clipboard, which
+        is what makes a copy behave like a copy.
+      * `QClipboard.setMimeData` takes a Python-built `QMimeData` that Qt's
+        global-static clipboard frees AFTER the interpreter is gone — a SIGSEGV
+        on exit from any run that copied, which is how painter's harness exited
+        139 with every check passing.
+
+    `--image` additionally offers the file's bytes under its image mime, so a
+    paste lands as the picture in an editor and as the file (with its name)
+    anywhere that understands one. A video gets the file offer alone — there is
+    no "the picture" to hand over.
+
+    The outcome is REPORTED, always (docs/DESIGN.md §10): `done(message, bad)`
+    goes to the titlebar footer, which is where viewer already talks. A copy
+    that silently did nothing would look exactly like one that worked, right up
+    until the paste."""
+
+    done = Signal(str, bool)      # message for the footer, and whether it failed
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._procs = set()       # a QProcess with no Python ref is collected
+
+    @Slot(str)
+    def copyImage(self, path):
+        self._copy(path, True)
+
+    @Slot(str)
+    def copyFile(self, path):
+        self._copy(path, False)
+
+    def _copy(self, path, as_image):
+        src = str(path)
+        name = os.path.basename(src)
+        if not os.path.exists(src):
+            self.done.emit("can't copy " + name + ": it is gone", True)
+            return
+        argv = [sys.executable, str(CLIPFILE)] + (["--image"] if as_image else []) + [src]
+        proc = QProcess(self)
+        self._procs.add(proc)
+
+        def finished(code, _status):
+            err = bytes(proc.readAllStandardError()).decode("utf-8", "replace").strip()
+            if code == 0:
+                self.done.emit("copied " + name, False)
+            else:
+                self.done.emit("copy failed: " + (err.splitlines()[-1] if err
+                                                  else "exit %d" % code), True)
+            self._procs.discard(proc)
+            proc.deleteLater()
+
+        def failed(_e):
+            # clipfile could not be started at all — a different sentence,
+            # because the fix is a packaging one and not the clipboard's.
+            if proc in self._procs:
+                self.done.emit("copy failed: cannot run clipfile", True)
+                self._procs.discard(proc)
+                proc.deleteLater()
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(failed)
+        proc.start(argv[0], argv[1:])
+
+
 class Prefs(QObject):
     """viewer's own settings file, `$XDG_CONFIG_HOME/viewer/prefs.json`.
 
@@ -417,11 +491,13 @@ def main():
     titlebar = Titlebar()
     files = Files()
     prefs = Prefs()
+    clip = Clip()
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("DeskStyle", style)
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Files", files)
     ctx.setContextProperty("Prefs", prefs)
+    ctx.setContextProperty("Clip", clip)
     ctx.setContextProperty("startImages", entries)
     ctx.setContextProperty("startIndex", index)
     ctx.setContextProperty("startPanes", panes)

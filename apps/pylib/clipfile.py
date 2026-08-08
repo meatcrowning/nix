@@ -2,6 +2,7 @@
 """clipfile — put FILES on the Wayland clipboard, as files.
 
     python3 clipfile.py FILE [FILE...]      # exit 0 once the selection is ours
+    python3 clipfile.py --image IMAGE       # ...and as the picture itself
 
 Why this exists instead of `wl-copy --type text/uri-list`, which is what
 painter used until it turned out that pasting the copy gave TEXT rather than
@@ -26,6 +27,15 @@ owner may be a headless background process. `QClipboard` cannot do this job —
 `wl_data_device.set_selection` wants an input-event serial, which only a
 focused window has.
 
+`--image` (viewer's "copy image") ADDS the file's own bytes under its image
+mime type, after the two file types and before the text ones. Additive on
+purpose: a consumer that understands a file paste still gets the file, with its
+name — which is what painter's copy has always relied on — while one that only
+understands pixels (an image editor, a canvas) now gets the picture instead of
+nothing. The bytes are the file's, unconverted, because this is stdlib-only and
+has no decoder: a JPEG is offered as `image/jpeg`, so a consumer that insists on
+`image/png` falls back to the file paste rather than being handed a lie.
+
 It forks once the compositor has acknowledged the selection: the parent exits
 0 (so a caller can report success or failure honestly) and the child stays on
 as the holder, because a Wayland selection dies with the process that offered
@@ -47,10 +57,31 @@ REGISTRY_GLOBAL = 0  # wl_registry.global
 SOURCE_SEND = 0      # zwlr_data_control_source_v1.send
 SOURCE_CANCELLED = 1 # zwlr_data_control_source_v1.cancelled
 
+# What `--image` can offer the bytes of. Extension-keyed because there is no
+# decoder here and none is wanted: the payload is the file, verbatim.
+IMAGE_MIMES = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+    ".tif": "image/tiff", ".tiff": "image/tiff", ".ico": "image/x-icon",
+    ".avif": "image/avif", ".jxl": "image/jxl", ".svg": "image/svg+xml",
+}
+# The holder keeps every payload in memory for as long as it owns the
+# selection, so a 300 MB TIFF would be 300 MB resident until the clipboard
+# moves on. Past this the image offer is simply dropped and the file paste —
+# which costs a path — carries it.
+IMAGE_MAX = 64 << 20
+
+
+def image_mime(path):
+    """The image mime for `path`, or None if it is not one we offer bytes for."""
+    return IMAGE_MIMES.get(os.path.splitext(str(path))[1].lower())
+
+
 # In offer order. gnome-copied-files first because a consumer that scans the
 # list and takes the first thing it understands should land on the file
-# interpretation, not on the text one.
-def payloads(paths):
+# interpretation, not on the text one; the image type sits between the file
+# types and the text ones, so `--image` never costs an app the file paste.
+def payloads(paths, as_image=False):
     uris = ["file://" + quote(os.path.abspath(p), safe="/") for p in paths]
     text = "\n".join(os.path.abspath(p) for p in paths)
     body = {
@@ -58,8 +89,17 @@ def payloads(paths):
         "x-special/gnome-copied-files": ("copy\n" + "\n".join(uris)).encode(),
         # RFC 2483: every entry CRLF-terminated, the last one included.
         "text/uri-list": "".join(u + "\r\n" for u in uris).encode(),
-        "text/plain": text.encode(),
     }
+    # ONE path only: two images cannot both be "the" image/png on the
+    # clipboard, and offering the first would be a silent wrong answer.
+    if as_image and len(paths) == 1:
+        mime = image_mime(paths[0])
+        try:
+            if mime and os.path.getsize(paths[0]) <= IMAGE_MAX:
+                body[mime] = open(paths[0], "rb").read()
+        except OSError:
+            pass                        # the file paste still works
+    body["text/plain"] = text.encode()
     # The aliases X11-era clients still ask for, same content as text/plain.
     for alias in ("text/plain;charset=utf-8", "UTF8_STRING", "STRING", "TEXT"):
         body[alias] = body["text/plain"]
@@ -143,8 +183,8 @@ class Wire:
 MANAGERS = ("zwlr_data_control_manager_v1", "ext_data_control_manager_v1")
 
 
-def copy(paths):
-    body = payloads(paths)
+def copy(paths, as_image=False):
+    body = payloads(paths, as_image)
     w = Wire()
 
     registry = w.nid()
@@ -216,16 +256,18 @@ def serve(w, source, body):
 
 
 def main(argv):
-    paths = [a for a in argv[1:] if not a.startswith("-")]
+    args = argv[1:]
+    as_image = "--image" in args
+    paths = [a for a in args if not a.startswith("-")]
     if not paths:
-        print("usage: clipfile.py FILE [FILE...]", file=sys.stderr)
+        print("usage: clipfile.py [--image] FILE [FILE...]", file=sys.stderr)
         return 2
     missing = [p for p in paths if not os.path.exists(p)]
     if missing:
         print("no such file: " + ", ".join(missing), file=sys.stderr)
         return 1
     try:
-        w, source, body = copy(paths)
+        w, source, body = copy(paths, as_image)
     except Exception as exc:                              # noqa: BLE001
         print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
         return 1

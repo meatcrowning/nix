@@ -130,6 +130,59 @@ else
   ok "the holder exits when something else takes the clipboard"
 fi
 
+printf '\n\033[1m== --image: the picture AS WELL AS the file\033[0m\n'
+# viewer's "copy image". The bytes are the file's own, unconverted, so this is
+# also the check that the image offer never costs an app the file paste.
+PIC="$RUN/shot.png"
+python3 - "$PIC" <<'PY'
+import struct, sys, zlib
+# a 2x2 PNG, hand-rolled: this harness has no image library and needs none
+raw = b"".join(b"\0" + b"\xff\x00\x00\x00\xff\x00" for _ in range(2))
+def chunk(t, d):
+    return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d))
+open(sys.argv[1], "wb").write(
+    b"\x89PNG\r\n\x1a\n"
+    + chunk(b"IHDR", struct.pack(">IIBBBBB", 2, 2, 8, 2, 0, 0, 0))
+    + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+PY
+if n python3 "$CLIPFILE" --image "$PIC" 2>"$RUN/err"; then
+  ok "clipfile --image exits 0"
+else
+  bad "clipfile --image failed: $(cat "$RUN/err")"
+fi
+types="$(n wl-paste --list-types 2>/dev/null)"
+for want in image/png text/uri-list x-special/gnome-copied-files; do
+  case "$types" in
+    *"$want"*) ok "offers $want" ;;
+    *) bad "does NOT offer $want (offered: $(echo "$types" | tr '\n' ' '))" ;;
+  esac
+done
+# the file interpretation still comes FIRST: a consumer that takes the first
+# type it understands must not lose the filename to the image offer
+if [ "$(echo "$types" | head -1)" = "x-special/gnome-copied-files" ]; then
+  ok "...with the file types still ahead of it"
+else
+  bad "offer order changed: $(echo "$types" | tr '\n' ' ')"
+fi
+if n wl-paste --no-newline --type image/png > "$RUN/pasted.png" 2>/dev/null \
+   && cmp -s "$PIC" "$RUN/pasted.png"; then
+  ok "the pasted image/png is the file, byte for byte"
+else
+  bad "image/png did not round-trip"
+fi
+# ...and without the flag it is a file copy exactly as before
+n python3 "$CLIPFILE" "$PIC" 2>/dev/null
+case "$(n wl-paste --list-types 2>/dev/null)" in
+  *image/png*) bad "a plain copy offered image/png — the flag is not opt-in" ;;
+  *) ok "a plain copy offers no image type (painter's copy is unchanged)" ;;
+esac
+# two paths cannot both be "the" image on the clipboard
+n python3 "$CLIPFILE" --image "$PIC" "$CLIP" 2>/dev/null
+case "$(n wl-paste --list-types 2>/dev/null)" in
+  *image/png*) bad "--image offered one file's bytes for a multi-file copy" ;;
+  *) ok "--image is dropped for a multi-file copy" ;;
+esac
+
 printf '\n'
 [ "$FAILED" = 0 ] && { printf '\033[32mall good\033[0m\n'; exit 0; }
 printf '\033[31msomething failed\033[0m\n'; exit 1
