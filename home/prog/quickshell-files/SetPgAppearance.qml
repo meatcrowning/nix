@@ -1,8 +1,8 @@
 import QtQuick
 import Quickshell.Io
 
-// Appearance = Wallpaper + Theme + Palette generation + RGB lighting +
-// Window frame + Motion.
+// Appearance = Paper + theme (the embedded chooser) + Wallpaper + Theme +
+// Palette generation + RGB lighting + Window frame + Motion.
 // (The wallpaper DRIVES this palette via wal, so it leads: it is the top
 // section, not a separate page.)
 Column {
@@ -12,30 +12,18 @@ Column {
 
     property var d: SettingsStore.d
 
-    // Toggle the panel's wallpaper/theme switcher (meta+w). It lives in the
-    // PANEL process, so the button reaches it the same way the keybind does —
-    // `qs ipc call wallpaper toggle` — rather than instantiating a second copy
-    // here. A fresh run each click: set running false first so a second press
-    // re-fires even if the last spawn hasn't been reaped.
-    Process { id: pickerProc; command: ["qs", "ipc", "call", "wallpaper", "toggle"] }
+    // The Meta+W picker's tiles, embedded in the page: a horizontally
+    // paginated grid of paper + palette, flipped by the full-height page
+    // buttons on its edges. Clicking a tile applies that wallpaper and its
+    // theme — in solid mode ("display wallpaper" off) the palette changes and
+    // the image simply stays hidden (WallpaperLayer.qml), same as the picker.
+    SetSection {
+        title: "paper + theme"
+        SetPaperGrid { }
+    }
 
     SetSection {
         title: "wallpaper"
-        SetRow {
-            // "no wallpaper" paints Theme.bg as the desktop instead of an image
-            // (WallpaperLayer.qml); the palette still comes from a wallpaper —
-            // each one has generated one — so the same picker chooses WHICH
-            // palette colours the desktop, and in that mode the switcher shows
-            // theme swatches instead of thumbnails (WallpaperPicker.qml).
-            label: page.d.wallpaperSolid ? "choose colour theme" : "change wallpaper"
-            desc: page.d.wallpaperSolid
-                ? "opens the switcher — pick a swatch to recolour the whole desktop"
-                : "opens the switcher — flip through your wallpapers; each one also recolours the whole desktop"
-            SetButton {
-                text: "open picker"
-                onClicked: { pickerProc.running = false; pickerProc.running = true; }
-            }
-        }
         SetRow {
             // The ONE control for this feature: show the wallpaper image, or fill
             // the desktop with a solid block of the theme's background colour
