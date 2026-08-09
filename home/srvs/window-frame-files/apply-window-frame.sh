@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # apply-window-frame.sh — push the Settings frame + hyprvtb runtime picks
-# (windowBorderWidth / windowRounding, plus titlebarEdge and dimUnfocused) at
+# (windowBorderWidth / windowRounding, plus titlebarEdge, dimUnfocused, compact) at
 # the compositor AND PERSIST them into the live hyprland.lua.
 #
 # The panel already sets all of these live over `hyprctl eval hl.config(...)`
@@ -37,6 +37,7 @@ BORDER_W=2
 ROUNDING=0
 TITLEBAR_EDGE=right
 DIM=true
+COMPACT=false
 if [ -f "$SETTINGS" ]; then
     v="$(sed -n 's/.*"windowBorderWidth"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$SETTINGS" | head -n1)"
     [ -n "$v" ] || exit 0
@@ -50,9 +51,11 @@ if [ -f "$SETTINGS" ]; then
     # dimUnfocused drives BOTH the plugin titlebar scrim (plugin:hyprvtb:
     # dim_unfocused) and Hyprland's native body dim (decoration:dim_inactive).
     grep -q '"dimUnfocused"[[:space:]]*:[[:space:]]*false' "$SETTINGS" && DIM=false
+    # compact collapses the two-column bar into one (plugin:hyprvtb:compact).
+    grep -q '"compact"[[:space:]]*:[[:space:]]*true' "$SETTINGS" && COMPACT=true
 fi
 
-hyprctl eval "hl.config({ general = { border_size = ${BORDER_W} }, decoration = { rounding = ${ROUNDING}, dim_inactive = ${DIM} }, plugin = { hyprvtb = { [\"titlebar_edge\"] = \"${TITLEBAR_EDGE}\", [\"dim_unfocused\"] = ${DIM} } } })" >/dev/null 2>&1 || true
+hyprctl eval "hl.config({ general = { border_size = ${BORDER_W} }, decoration = { rounding = ${ROUNDING}, dim_inactive = ${DIM} }, plugin = { hyprvtb = { [\"titlebar_edge\"] = \"${TITLEBAR_EDGE}\", [\"dim_unfocused\"] = ${DIM}, [\"compact\"] = ${COMPACT} } } })" >/dev/null 2>&1 || true
 
 if [ -f "$LUA" ]; then
     # Anchored at line start so the commented-out examples further down cannot
@@ -71,8 +74,10 @@ if [ -f "$LUA" ]; then
         sed -i -E 's/(\["titlebar_edge"\][[:space:]]*=[[:space:]]*")[^"]*"/\1'"$TITLEBAR_EDGE"'"/' "$LUA"
     grep -qE '^\s*\["dim_unfocused"\]\s*=\s*'"$DIM"'\b' "$LUA" || \
         sed -i -E 's/(\["dim_unfocused"\][[:space:]]*=[[:space:]]*)(true|false)/\1'"$DIM"'/' "$LUA"
+    grep -qE '^\s*\["compact"\]\s*=\s*'"$COMPACT"'\b' "$LUA" || \
+        sed -i -E 's/(\["compact"\][[:space:]]*=[[:space:]]*)(true|false)/\1'"$COMPACT"'/' "$LUA"
     grep -qE '^[[:space:]]*dim_inactive[[:space:]]*=[[:space:]]*'"$DIM"'\b' "$LUA" || \
         sed -i -E 's/^([[:space:]]*dim_inactive[[:space:]]*=[[:space:]]*)(true|false)/\1'"$DIM"'/' "$LUA"
 fi
 
-echo "apply-window-frame: border=${BORDER_W}px rounding=${ROUNDING}px titlebar=${TITLEBAR_EDGE} dim=${DIM}"
+echo "apply-window-frame: border=${BORDER_W}px rounding=${ROUNDING}px titlebar=${TITLEBAR_EDGE} dim=${DIM} compact=${COMPACT}"

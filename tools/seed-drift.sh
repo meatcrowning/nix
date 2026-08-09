@@ -64,6 +64,7 @@ normalize() {
                    -e 's/(\["title_rotated"\][[:space:]]*=[[:space:]]*)(true|false)/\1<WAL>/g' \
                    -e 's/(\["titlebar_edge"\][[:space:]]*=[[:space:]]*)"[^"]*"/\1<WAL>/g' \
                    -e 's/(\["dim_unfocused"\][[:space:]]*=[[:space:]]*)(true|false)/\1<WAL>/g' \
+                   -e 's/(\["compact"\][[:space:]]*=[[:space:]]*)(true|false)/\1<WAL>/g' \
                    -e 's/^([[:space:]]*dim_inactive[[:space:]]*=[[:space:]]*)(true|false)/\1<WAL>/' \
                    -e 's/(\["font"\][[:space:]]*=[[:space:]]*)"[^"]*"/\1<WAL>/g' \
                    -e 's/(\["font_size"\][[:space:]]*=[[:space:]]*)[0-9]+/\1<WAL>/g' \

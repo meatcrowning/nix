@@ -62,7 +62,8 @@ Item {
             + "shadow_alpha = " + d.shadowAlpha + ", "
             + "title_rotated = " + _b(d.titleOrientation === "horizontal") + ", "
             + "dim_unfocused = " + _b(d.dimUnfocused) + ", "
-            + "titlebar_edge = \"" + d.titlebarEdge + "\""
+            + "titlebar_edge = \"" + d.titlebarEdge + "\", "
+            + "compact = " + _b(d.compact)
             + " } }, "
             // The unfocus dim covers the WHOLE window, not just the hyprvtb
             // titlebar: dim_unfocused also drives Hyprland's native content
@@ -155,6 +156,7 @@ Item {
         function onTitleOrientationChanged() { root.applyVtb(true); }
         function onDimUnfocusedChanged() { root.applyVtb(false); }
         function onTitlebarEdgeChanged() { root.applyVtb(true); }
+        function onCompactChanged() { root.applyVtb(true); }
         function onWindowBorderWidthChanged() { root.applyFrame(); }
         function onWindowRoundingChanged() { root.applyFrame(); }
 

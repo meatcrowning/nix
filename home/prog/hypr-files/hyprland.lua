@@ -345,6 +345,7 @@ hl.config({
             -- Masked in seed-drift.sh so the runtime rewrite is not flagged.
             ["titlebar_edge"]     = "right",
             ["dim_unfocused"]     = true,
+            ["compact"]           = false,
             -- The desktop font pick — persisted like shadow_alpha above
             -- because this file AUTO-RELOADS: wal-set.sh seds the palette in
             -- on every theme apply, the re-run lua reverted any key living
