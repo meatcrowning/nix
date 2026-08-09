@@ -1812,19 +1812,23 @@ minimized ones, parked off-screen deliberately.
   first.
 - **Push the FRAME, not the client rect.** `at`/`size` from `hyprctl clients`
   exclude the chrome, and `hyprctl` reports decoration extents nowhere. The
-  hyprvtb titlebar is VERTICAL on the window's RIGHT edge
-  (`DECORATION_EDGE_RIGHT`, `desiredExtents` right = `bar_width * 2` = 64px) —
-  the same side the panel is on — so client-rect math leaves exactly the
-  titlebar covered, the bug reported on 2026-07-26. Reconstruct the frame from
-  `plugin:hyprvtb:{enabled,bar_width}` + `general:border_size` via
-  `hyprctl getoption -j` (`enabled` is a global bool, not per-window).
+  hyprvtb titlebar is a strip `totalBarW() = bar_width * 2` thick on ONE of the
+  window's four edges (`plugin:hyprvtb:titlebar_edge`, default right —
+  `DECORATION_EDGE_RIGHT`, `desiredExtents` right = 64px, the same side the
+  panel is on, so client-rect math leaves exactly the titlebar covered, the bug
+  reported on 2026-07-26). Reconstruct the frame from
+  `plugin:hyprvtb:{enabled,bar_width,titlebar_edge}` +
+  `general:border_size` via `hyprctl getoption -j` (`enabled` is a global
+  bool, not per-window). A left/right bar adds to the frame's WIDTH on its own
+  side; a top/bottom bar adds to its HEIGHT and contributes nothing to the
+  width arithmetic.
 - **`bar_width` is ONE column of two, and that is the trap.** The bar is
   double-wide — `totalBarW() = bar_width * 2`, the inner column the app's own
   buttons and the outer one the system controls — so a reconstruction that adds
   `bar_width` covers half of it and looks almost right. `Screenshot.qml`'s
   "window" mode shipped with a hardcoded `+ 32` and cut the outer bar off every
   window shot (reported 2026-07-29). **Every consumer of the frame rect reads
-  those three keys** — there are two now, this script and that one — and no
+  those four keys** — there are two now, this script and that one — and no
   consumer writes a pixel literal.
 
   The two other things a captured frame needs, in `Screenshot.qml`: it is
