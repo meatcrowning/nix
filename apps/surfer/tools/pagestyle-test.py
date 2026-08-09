@@ -22,12 +22,17 @@ courier, points it at a local http server, and asserts:
      already-painted page with no reload;
   4. STRIP: turning dark mode off and refreshing strips the dark filter
      (filter back to 'none');
-  5. FONT INHERIT: unstyled page text takes the desktop face at the desktop
-     size, a page's own font styling beats the layer, and a subframe gets the
-     fonts-only body — the face, never the dark filter (no double-invert);
+  5. FONT INHERIT: unstyled page text takes the desktop face at the desktop's
+     APPARENT size (the face is a size-adjusted @font-face alias, so the
+     computed px is divided by the adjust and the ink still matches the raw
+     15px face), a page's own font styling beats the layer, and a subframe
+     gets the fonts-only body — the face, never the dark filter
+     (no double-invert);
   6. FORCE: the system-font force (GLOBAL by default, per-site exceptions)
      imposes the family over the page's own styling while its font-size
-     survives (family only), and icon-font elements are carved out.
+     survives (family only), the forced face is the size-adjusted alias (its
+     ink ~1.14x the raw face at the same size — the proportional x-height),
+     and icon-font elements are carved out.
 
 Deliberately only the page-style courier is installed here — cosmetic
 ad-blocking has its own harness (cosmetic-test.py) and must not interfere.
@@ -93,6 +98,24 @@ setTimeout(function(){
   function cs(id, d){ try { d = d || document; var e = d.getElementById(id);
       var c = d.defaultView.getComputedStyle(e);
       return c.fontFamily + '|' + c.fontSize; } catch(e){ return 'ERR'; } }
+  // ink width of 'x' at (family, size) - the pixel-level check. The
+  // size-adjusted face must render SITE text ~1.14x wider at the same
+  // font-size (the whole point) while INHERITED text renders exactly the
+  // desktop's size despite its smaller computed px.
+  function ink(fam, size){
+    var c = document.createElement('canvas'); c.width=200; c.height=80;
+    var g = c.getContext('2d');
+    g.fillStyle='#000'; g.font = size + 'px ' + fam; g.textBaseline='alphabetic';
+    g.fillText('x', 10, 60);
+    var d = g.getImageData(0,0,200,80).data;
+    var minX=200, maxX=-1;
+    for (var y=0;y<80;y++) for (var xx=0;xx<200;xx++){
+      if (d[(y*200+xx)*4+3] > 40){ if (xx<minX)minX=xx; if (xx>maxX)maxX=xx; }
+    }
+    return maxX<0 ? 0 : maxX-minX+1;
+  }
+  var cu = cs('u').split('|');
+  var cs_ = cs('s').split('|');
   var fdoc = null, ffilter = 'ERR';
   try { fdoc = document.getElementById('fr').contentDocument;
         ffilter = fdoc.defaultView.getComputedStyle(fdoc.documentElement).filter || 'none'; }
@@ -105,7 +128,11 @@ setTimeout(function(){
       s: cs('s'),
       fu: fdoc ? cs('fu', fdoc) : 'ERR',
       ffilter: ffilter,
-      hasRefresh: typeof window.__surferPageStyleRefresh === 'function'
+      hasRefresh: typeof window.__surferPageStyleRefresh === 'function',
+      uInk: ink(cu[0], parseFloat(cu[1])),
+      raw15Ink: ink('"More Perfect DOS VGA"', 15),
+      sInk: ink(cs_[0], parseFloat(cs_[1])),
+      raw20Ink: ink('"More Perfect DOS VGA"', 20)
   });
 }, 700);
 """
@@ -252,9 +279,20 @@ def main():
         # desktop size; a page's own font styling beats the layer (@layer
         # loses to any unlayered rule); the subframe inherits the face too but
         # never the dark filter.
-        check("unstyled text inherits the desktop font at the desktop size",
-              "More Perfect DOS VGA" in (out.get("u") or "")
-              and "15px" in (out.get("u") or ""))
+        #
+        # The face is now the size-ADJUSTED alias (size-adjust:114%, DESIGN.md
+        # 16 / 2026-08-09): the computed font-size of inherited text is
+        # divided by the adjust (13.158 px, so the 1.14x face renders the
+        # desktop's 15 px), while a SITE-styled run keeps the site's numbers
+        # and renders ~1.14x wider ink - the whole point of the adjust. The
+        # canvas ink checks below are the honest assertions: inherited text's
+        # ink equals the raw 15px face, site text's ink exceeds the raw 20px
+        # face.
+        check("unstyled text inherits the adjusted desktop face",
+              "(web)" in (out.get("u") or "")
+              and "More Perfect DOS VGA" in (out.get("u") or ""))
+        check("inherited text renders the desktop's apparent size (ink = raw 15px)",
+              abs((out.get("uInk") or 0) - (out.get("raw15Ink") or 0)) <= 1)
         check("a page's own font styling beats the inherit layer",
               "serif" in (out.get("s") or "").split("|")[0]
               and "More Perfect DOS VGA" not in (out.get("s") or "")
@@ -319,22 +357,31 @@ def main():
               dm.isSystemFontSite("http://somewhere-never-toggled.example/"))
         # zoom compensation: the inherit layer divides its size by the shared
         # page zoom, so inherited text holds the desktop's DEVICE pixel size.
-        # 0.826446... = 1/1.21 (two Ctrl+- steps); 15 / it = 18.15 CSS px.
+        # 0.826446... = 1/1.21 (two Ctrl+- steps); the desktop 15px divided by
+        # the 1.14x x-height adjust = 13.1579, and 13.1579 / it = 15.9211 CSS
+        # px, which the 1.14x face renders as 18.15 device px = 15 / 0.8264.
         class FakeZoom:
             level = 1.0 / 1.21
         dmz = surfer.DarkMode(prefs, dm, zoom=FakeZoom())
         check("inherit layer zoom-compensates (15 device px at 0.826 zoom)",
-              "font-size:18.15px" in dmz._inherit_css())
-        check("inherit layer emits integer px at zoom 1 (no zoom object)",
-              "font-size:15px" in dm._inherit_css())
+              "font-size:15.9211px" in dmz._inherit_css())
+        check("inherit layer divides the desktop size by the x-height adjust",
+              "font-size:13.1579px" in dm._inherit_css())
+        check("the forced face is a size-adjusted @font-face alias (114%)",
+              "size-adjust:114%" in dm._face_css()
+              and "@font-face" in dm.css(base)
+              and "@font-face" in dm.fontsCss(base))
         check("force imposes the family but keeps the page's size",
-              "More Perfect DOS VGA" in (out.get("s") or "")
+              "(web)" in (out.get("s") or "")
+              and "More Perfect DOS VGA" in (out.get("s") or "")
               and "20px" in (out.get("s") or ""))
+        check("site text renders at the proportional x-height (~1.14x ink)",
+              (out.get("sInk") or 0) > (out.get("raw20Ink") or 0))
         check("icon-font elements are carved out of the force",
               "More Perfect DOS VGA" not in (out.get("ic") or "ERR")
               and "Material Icons" in (out.get("ic") or ""))
         print("probe:", json.dumps(out, sort_keys=True))
-        n = 15
+        n = 18
         print("%d/%d checks passed" % (n - len(fails), n))
         app.quit()
 
