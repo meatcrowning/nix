@@ -164,8 +164,20 @@ in
   # per host (NixOS vs book's Fedora), so without the pins the same face
   # renders differently on the two machines — and on book's 1.67-scale Retina
   # the default grayscale AA smears the fractionally-scaled squares outright.
-  # antialias off + hintnone + rgba none = the authored squares, mono-rendered,
-  # identically everywhere.
+  # antialias off + FULL autohinting + rgba none = the authored squares,
+  # mono-rendered, identically everywhere. The hint mode matters: hintnone
+  # (the first cut, bc631b5) matched "the authored squares" reasoning but
+  # contradicted the desktop's own reference pipeline — PixelText and
+  # deskstyle.editorFont rasterise with PreferFullHinting, which is where the
+  # 8px advance of DESIGN §2.1's 8x15 kitty cell comes from (the face is
+  # authored 9 units wide per 16: advance 2304/4096 em = 8.4375 at 15px, and
+  # only grid-fitting rounds it to 8). kitty honours the hinting pin, so
+  # hintnone gave it the unhinted 8.4375 -> a 9px cell and ragged fractional
+  # glyphs — [his] "more perfect ... no longer look[s] sharp and crisp in
+  # kitty". Measured on the sandbox output 2026-08-08: hintnone = 9px
+  # advances, uneven stems; autohint+hintfull = uniform 8px advances, near-
+  # mono edges, and Chromium canvas parity with QML holds (tools/../
+  # font-parity: greys 1, identical ink and advances).
   xdg.configFile."fontconfig/conf.d/50-more-perfect-dos-vga-regular.conf".text = ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
@@ -180,9 +192,9 @@ in
         <test name="family"><string>More Perfect DOS VGA</string></test>
         <edit name="embolden"  mode="assign"><bool>false</bool></edit>
         <edit name="antialias" mode="assign"><bool>false</bool></edit>
-        <edit name="autohint"  mode="assign"><bool>false</bool></edit>
-        <edit name="hinting"   mode="assign"><bool>false</bool></edit>
-        <edit name="hintstyle" mode="assign"><const>hintnone</const></edit>
+        <edit name="autohint"  mode="assign"><bool>true</bool></edit>
+        <edit name="hinting"   mode="assign"><bool>true</bool></edit>
+        <edit name="hintstyle" mode="assign"><const>hintfull</const></edit>
         <edit name="rgba"      mode="assign"><const>none</const></edit>
       </match>
     </fontconfig>
@@ -206,9 +218,9 @@ in
         <test name="family"><string>Botis 4x6</string></test>
         <edit name="embolden"  mode="assign"><bool>false</bool></edit>
         <edit name="antialias" mode="assign"><bool>false</bool></edit>
-        <edit name="autohint"  mode="assign"><bool>false</bool></edit>
-        <edit name="hinting"   mode="assign"><bool>false</bool></edit>
-        <edit name="hintstyle" mode="assign"><const>hintnone</const></edit>
+        <edit name="autohint"  mode="assign"><bool>true</bool></edit>
+        <edit name="hinting"   mode="assign"><bool>true</bool></edit>
+        <edit name="hintstyle" mode="assign"><const>hintfull</const></edit>
         <edit name="rgba"      mode="assign"><const>none</const></edit>
       </match>
     </fontconfig>
