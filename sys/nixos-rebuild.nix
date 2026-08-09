@@ -84,66 +84,74 @@ let
       fi
     fi
 
-    # Don't start a long local compile on top of a GPU job he is watching.
+    # A heavy build and a ComfyUI render never run at the same time.
     #
     # The freeze on 2026-08-09 was a rebuild that pulled in ollama-cuda — not
     # in any substituter at that revision, so nvcc started compiling ggml's
     # kernels locally — while a ComfyUI video run held the other half of the
     # RAM. sys/nix-build-limits.nix makes that survivable; this makes it not
-    # happen. An agent has no way to know a one-line nix change means half an
-    # hour of nvcc, so the wrapper works it out and WAITS rather than refusing:
-    # his render keeps the machine, and the rebuild lands by itself afterwards.
+    # happen, which is better: rationing two heavy jobs against each other just
+    # makes both of them bad. An agent has no way to know a one-line nix change
+    # means half an hour of nvcc, so the wrapper works it out itself — waits for
+    # any render to finish, gets comfy out of the way, builds, puts it back.
     #
-    # "Busy" is read off the GPU itself (any compute client holding >1 GiB), not
-    # off comfy-painter, so a game, an ollama load or a CUDA notebook count too.
-    # "Heavy" is name-matched against the dry-run plan: every switch builds a
-    # handful of tiny units (etc, system-path, unit-*.drv) and blocking on those
-    # would mean blocking always. Skip the whole thing with REBUILD_IGNORE_GPU=1.
-    # The GPU is checked FIRST because it is free and almost always idle; the
-    # plan costs an eval, so it is only computed when there is something to
-    # collide with.
-    gpu_used() {
-      nvidia-smi --query-compute-apps=used_memory --format=csv,noheader,nounits 2>/dev/null \
-        | ${pkgs.gawk}/bin/awk '{s+=$1} END {print s+0}'
-    }
-    if [ "''${REBUILD_IGNORE_GPU:-0}" != 1 ] && command -v nvidia-smi >/dev/null 2>&1 \
-       && [ "$(gpu_used)" -ge 1024 ]; then
+    # WHICH SIGNAL, and this one is easy to get wrong: comfy keeps its weights
+    # resident after a run, so VRAM in use says nothing about whether it is
+    # working. The question is only ever "is a job in flight", which is comfy's
+    # own queue (`/prompt` -> queue_remaining). Weights merely sitting there are
+    # freed, not waited on.
+    #
+    # "Heavy" is name-matched against the dry-run plan, because every switch
+    # builds a handful of tiny units (etc, system-path, unit-*.drv) and gating
+    # on those would mean gating always. The plan costs ~12s of eval, paid only
+    # when comfy is actually up. Skip the whole thing with REBUILD_IGNORE_GPU=1.
+    GATE=/home/lam/nix/tools/comfy-gate.sh
+    resume_needed=0
+    throttle=
+    cleanup() { [ "$resume_needed" = 1 ] && "$GATE" resume; }
+    trap cleanup EXIT INT TERM
+
+    if [ "''${REBUILD_IGNORE_GPU:-0}" != 1 ] && [ -x "$GATE" ] \
+       && [ "$("$GATE" status)" != down ]; then
       heavy=$(${pkgs.nixos-rebuild}/bin/nixos-rebuild dry-build --flake /home/lam/nix#top 2>&1 \
         | ${pkgs.gnugrep}/bin/grep -oE '/nix/store/[^ ]*\.drv' \
         | ${pkgs.gnugrep}/bin/grep -Ei 'cuda|cudnn|torch|llama|ollama|hyprland|qtwebengine|chromium|llvm|linux-[0-9]|mesa|blender|rustc|gcc-[0-9]' \
         | head -5 || true)
       if [ -n "$heavy" ]; then
-        waited=0
-        while :; do
-          used=$(gpu_used)
-          [ "''${used:-0}" -lt 1024 ] && break
-          if [ "$waited" -eq 0 ]; then
-            echo "rebuild-top: a GPU job is holding ''${used}MiB and this switch has heavy local builds:" >&2
-            printf '  %s\n' "$heavy" >&2
-            echo "rebuild-top: waiting for the GPU to go idle (REBUILD_IGNORE_GPU=1 to build anyway)" >&2
-          fi
-          if [ "$waited" -ge 3600 ]; then
-            echo "rebuild-top: GPU still busy after 60 min — building anyway" >&2
-            break
-          fi
-          sleep 30; waited=$((waited + 30))
-        done
-        [ "$waited" -gt 0 ] && echo "rebuild-top: GPU idle after ''${waited}s, proceeding" >&2
+        echo "rebuild-top: this switch compiles locally:" >&2
+        printf '  %s\n' "$heavy" >&2
+        # A render in flight is waited out, never interrupted. If it is STILL
+        # going an hour later, we do not suspend and do not wait forever — the
+        # build goes ahead beside it, where sys/nix-build-limits.nix is what
+        # keeps the machine alive. That is the only path that still throttles.
+        if "$GATE" wait 3600 && "$GATE" suspend; then
+          resume_needed=1
+        else
+          throttle="-p MemoryHigh=8G -p MemoryMax=14G -p CPUWeight=20 -p IOWeight=20"
+          echo "rebuild-top: building alongside comfy, throttled to 8G/14G at a fifth of the CPU and I/O weight" >&2
+        fi
       fi
     fi
 
-    # exec keeps fd 9 (and therefore the lock) held for the whole switch.
+    # NOT exec'd, unlike every other path here: the trap above has to survive
+    # the switch so comfy comes back whatever happens to it — a failed build, a
+    # Ctrl-C, a killed agent. fd 9 stays open in this shell, so the lock is held
+    # exactly as long as it was before.
     #
     # ROOT builds in-process, so without this scope the builders would inherit
     # whatever cgroup the caller happened to sit in — a kitty or claude scope,
-    # unbounded. The slice is sys/nix-build-limits.nix; --scope keeps fd 9, the
-    # exit status and stdio, so the lock and the caller's view are unchanged.
-    scope="${pkgs.systemd}/bin/systemd-run --scope --quiet --slice=nix-build.slice --collect"
+    # unbounded. The slice is sys/nix-build-limits.nix.
+    # $throttle is empty unless we failed to get comfy out of the way — the
+    # slice's own ceilings are a backstop, not a tax on every build.
+    scope="${pkgs.systemd}/bin/systemd-run --scope --quiet --slice=nix-build.slice --collect ''${throttle:-}"
     if [ "$upgrade" = 1 ]; then
-      exec $scope ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --upgrade --flake /home/lam/nix#top
+      $scope ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --upgrade --flake /home/lam/nix#top
     else
-      exec $scope ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake /home/lam/nix#top
+      $scope ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake /home/lam/nix#top
     fi
+    rc=$?
+    cleanup; resume_needed=0
+    exit $rc
   '';
 in
 {

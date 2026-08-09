@@ -424,6 +424,12 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   every commit touching `hyprland.lua` until 2026-08-07 — harness
   `seed-gate-test.sh`),
   `prune-worktrees.sh` (aliased `wtprune`),
+  `comfy-gate.sh` (**a heavy build and a ComfyUI render never overlap**: called
+  by `rebuild-top` when the plan has local compiles in it, it waits out any
+  render in flight — never interrupts one — then frees the weights, stops and
+  masks `comfy-painter`, and puts it back afterwards whatever happens to the
+  build, telling him each way. A power-cycle on 2026-08-09 is why. Harness
+  `comfy-gate-test.sh`, which drives a stub queue and never his backend),
   `sandbox.sh`, `leak-check.sh` (a test that leaked into his live session —
   residue *and* the live symptoms; preflight runs it) and `lib/session-guard.sh`
   (sourced by the harnesses; the anti-fall-through guards, see "Testing without

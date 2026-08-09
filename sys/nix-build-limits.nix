@@ -23,11 +23,13 @@
 #   MemoryMax   is the backstop for the case reclaim cannot keep up with. A
 #               builder dies and the rebuild fails loudly — recoverable, unlike
 #               a livelock.
-#   CPU/IOWeight  the freeze is not purely memory: 32 concurrent compilers
-#               starve the session of CPU and the swap storm starves it of I/O.
-#               Default weight is 100, so this makes builds yield five to one.
 #   OOMScoreAdjust  if the kernel killer does fire, it picks a builder rather
 #               than the compositor or ComfyUI.
+#
+# CPUWeight/IOWeight are deliberately NOT set here — the freeze is not purely
+# memory (32 concurrent compilers starve the session of CPU, and the swap storm
+# starves it of I/O), but a build running alone should have all of both. They
+# are applied per-run by rebuild-top on the one path that needs them.
 #
 # Deliberately NOT done here: arming oomd on `system.slice` wholesale. That
 # trades a freeze for a killed system daemon of oomd's choosing, which is the
@@ -45,24 +47,32 @@
 #
 # NixOS-only, so `book` does not get it. Its ceilings would be wrong there
 # anyway (16 GiB, and it compiles Hyprland from source on every pin bump).
+# WHAT IS SET HERE IS A BACKSTOP, NOT A THROTTLE. A build that has the machine
+# to itself should use it: 20G of headroom is more than anything in this flake
+# has ever needed, so these ceilings cost nothing in the normal case and only
+# stop a build that has genuinely run away. The real collision — a build and a
+# ComfyUI render at once — is not rationed, it is avoided: `rebuild-top` waits
+# out any render in flight, then stops and masks comfy for the duration
+# (tools/comfy-gate.sh, with a notification each way). The tight numbers live
+# THERE, applied to that one scope, on the one path where comfy could not be
+# got out of the way — a render still running an hour later.
 { ... }:
 
+let
+  # Equal on both cgroups on purpose: which one a build lands in depends only on
+  # who asked, and the machine has the same amount of RAM either way.
+  ceiling = {
+    MemoryHigh = "20G";
+    MemoryMax = "26G";
+  };
+in
 {
-  systemd.services.nix-daemon.serviceConfig = {
-    MemoryHigh = "8G";
-    MemoryMax = "14G";
-    CPUWeight = 20;
-    IOWeight = 20;
+  systemd.services.nix-daemon.serviceConfig = ceiling // {
     OOMScoreAdjust = 500;
   };
 
   systemd.slices.nix-build = {
     description = "Nix builds started by rebuild-top";
-    sliceConfig = {
-      MemoryHigh = "8G";
-      MemoryMax = "14G";
-      CPUWeight = 20;
-      IOWeight = 20;
-    };
+    sliceConfig = ceiling;
   };
 }
