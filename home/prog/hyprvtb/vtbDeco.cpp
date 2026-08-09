@@ -1103,6 +1103,11 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
 
     const auto SCALE   = pMonitor->m_scale;
     const bool FOCUSED = PWINDOW == Hl::focusedWindow();
+    // The focus a bar TINTS to. With dim_unfocused off (Settings > appearance)
+    // an unfocused window's bar reads as if focused — accent labels, full-colour
+    // icon — instead of greying. Only the focused<->unfocused tint is gated;
+    // roll-up's own grey (SHADED_REST) is a separate signal and stays.
+    const bool TINT_FOCUSED = FOCUSED || !Cfg::dimUnfocused();
 
     auto       bgColor       = configColor(Cfg::bgColor());
     auto       bgAltColor    = configColor(Cfg::bgAltColor());
@@ -1120,7 +1125,7 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
 
     // Buttons + title follow the window's frame: accent (active-border
     // colour) when focused, the inactive-border grey otherwise.
-    auto textColor = FOCUSED ? accentColor : inactiveColor;
+    auto textColor = TINT_FOCUSED ? accentColor : inactiveColor;
 
     // ...except a window rolled up AT REST: its text reads in the unfocused
     // grey, same as the tucked end of the roll animation below (rollSlideT->1).
@@ -1332,7 +1337,7 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
         // dim tracks the same focused<->unfocused transition the title tint does:
         // full while focused/opening, ICON_UNFOCUS_DIM at rest unfocused or shaded,
         // crossfading with the slide (rollSlideT) mid-roll.
-        float focusMix = FOCUSED ? 0.f : 1.f; // 0 focused .. 1 unfocused
+        float focusMix = TINT_FOCUSED ? 0.f : 1.f; // 0 focused .. 1 unfocused
         if (SHADED_REST)
             focusMix = 1.f;
         if (m_bOpening)
@@ -1468,7 +1473,7 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
         if (appReg(lreg) && lreg.titleEdit && lreg.loading) {
             static const char* FRAMES[4] = {"|", "\\", "-", "/"};
             const long         ms        = std::chrono::duration_cast<std::chrono::milliseconds>(Time::steadyNow().time_since_epoch()).count();
-            drawGlyphXY(sysColX(), titleTop(), FRAMES[(ms / 120) % 4], FOCUSED ? accentColor : inactiveColor);
+            drawGlyphXY(sysColX(), titleTop(), FRAMES[(ms / 120) % 4], TINT_FOCUSED ? accentColor : inactiveColor);
             damageEntire(); // keep it spinning
         }
     }
@@ -1512,7 +1517,7 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
             // lit cells grey to the inactive tone on unfocused windows, like
             // the old in-window strip did (win.fgAccent) — and a rolled-up bar
             // at rest reads as unfocused too, matching its title/glyphs.
-            const CHyprColor litCol = FOCUSED ? accentColor : inactiveColor;
+            const CHyprColor litCol = TINT_FOCUSED ? accentColor : inactiveColor;
 
             // an active (state==1) cell holds the full inverted look — accent
             // fill + bg glyph — persistently, like a click-flash that never
@@ -1568,7 +1573,7 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
             const double frac  = playbarFrac(reg);
             const double cx    = innerColX() + CELL / 2.0;
             const double trkX  = cx - VTB_PLAYBAR_W / 2.0;
-            const auto   fillC = FOCUSED ? accentColor : inactiveColor;
+            const auto   fillC = TINT_FOCUSED ? accentColor : inactiveColor;
             auto         grooveC = borderColor;
 
             grooveC.a *= a;
@@ -1604,8 +1609,8 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
             const auto   MOUSELOCAL = Hl::mouse() - assignedBoxGlobal().pos();
             const double liftY      = std::clamp(MOUSELOCAL.y - CELL / 2.0, (double)VTB_PAD, CONTENTH - VTB_PAD - CELL);
             if (m_iAppPressIdx >= 0 && m_iAppPressIdx < (int)reg.buttons.size()) {
-                drawCellXY(innerColX(), liftY, FOCUSED ? accentColor : inactiveColor, true, false);
-                drawGlyphXY(innerColX(), liftY, reg.buttons[m_iAppPressIdx].label, FOCUSED ? accentColor : inactiveColor);
+                drawCellXY(innerColX(), liftY, TINT_FOCUSED ? accentColor : inactiveColor, true, false);
+                drawGlyphXY(innerColX(), liftY, reg.buttons[m_iAppPressIdx].label, TINT_FOCUSED ? accentColor : inactiveColor);
             }
             damageEntire();
         }

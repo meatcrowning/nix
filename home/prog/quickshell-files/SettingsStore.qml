@@ -299,6 +299,11 @@ Singleton {
             // right). Live-applied over `hl.config` (plugin:hyprvtb:
             // title_rotated) by SettingsApply.qml, like shadowAlpha.
             property string titleOrientation: "vertical"
+            // Whether an unfocused window's titlebar greys out. true (the
+            // shipped look) dims it to the inactive tone; false keeps every bar
+            // lit. Live-applied over `hl.config` (plugin:hyprvtb:dim_unfocused)
+            // by SettingsApply.qml, like titleOrientation.
+            property bool   dimUnfocused: true
             // Which scrollbar the seven Qt apps draw (docs/DESIGN.md 9.2).
             // win31 | beveled | flat. The panel itself draws no scrollbar at
             // all — its one page never scrolls — so this key exists here purely
@@ -548,7 +553,7 @@ Singleton {
         themeMode: "auto", accentOverride: "#5c9fcc", fontFamily: "More Perfect DOS VGA",
         fontSize: 15, fontSizeByFamily: ({}), paletteColorCount: 16, pureBlackBg: true, pureBlackBgDark: true, lightMode: false,
         paletteVariant: "pastel", windowBorderWidth: 2,
-        windowRounding: 0, trayTint: true, desktopIcons: true, shadowAlpha: 0.6, titleOrientation: "vertical", scrollbarStyle: "win31",
+        windowRounding: 0, trayTint: true, desktopIcons: true, shadowAlpha: 0.6, titleOrientation: "vertical", dimUnfocused: true, scrollbarStyle: "win31",
         paletteDropped: ({}),
         rgbFollowTheme: true, reduceMotion: false, animSpeed: 1.0,
         wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",

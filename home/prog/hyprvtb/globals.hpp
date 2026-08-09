@@ -174,6 +174,14 @@ struct SGlobalState {
         // tilted right). Settings > appearance > title orientation.
         SP<Config::Values::CBoolValue>   titleRotated;
 
+        // ---- unfocused dimming (see CVtbDeco::renderBar's TINT_FOCUSED) ----
+        // true (default, the shipped look) greys an unfocused window's titlebar
+        // to the inactive-border tone and fades its full-colour icon; false
+        // keeps every bar drawn as if focused. Settings > appearance > dim
+        // unfocused windows. Roll-up's own grey is a separate signal and is not
+        // gated by this.
+        SP<Config::Values::CBoolValue>   dimUnfocused;
+
         // ---- kinetic scrolling (see vtbKinetic.hpp) ----
         // Flat underscore names, matching bar_width / font_size. The dotted
         // `col.*` group exists only because wal-set.sh writes those keys.
@@ -283,6 +291,10 @@ namespace Vtb::Cfg {
     // The drop shadow's opacity. 0..1; 0 draws nothing at all (honest "off").
     inline float shadowAlpha() {
         return std::clamp(g_pGlobalState->config.shadowAlpha->value(), 0.f, 1.f);
+    }
+    // Unfocused titlebar dimming: true greys an unfocused bar, false keeps it lit.
+    inline auto dimUnfocused() {
+        return g_pGlobalState->config.dimUnfocused->value();
     }
     // Title text: false = stacked upright letters, true = rotated 90° CW.
     inline auto titleRotated() {
