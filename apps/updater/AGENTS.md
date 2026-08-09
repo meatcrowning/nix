@@ -41,6 +41,7 @@ bump is on his ask-first list** (root `AGENTS.md` → Boundaries).
 | `c+` | `tools/nix-upgradable.sh` (full) | same, but builds the closures and diffs them (slow) |
 | `up` | `nix flake update <non-pinned…>` then the rebuild wrapper | the actual apply |
 | a row's `update` | `nix flake update <one>` then the rebuild wrapper | a single input, pins behind the second confirm |
+| a row's `diff` | `tools/nix-upgradable.sh --input <one>` | the per-input package delta: exactly which packages that one input moves, `pkg: old -> new` |
 | `x` | terminates the running job | — |
 
 - **Checking is `tools/nix-upgradable.sh`, streamed verbatim** into the log
@@ -48,6 +49,20 @@ bump is on his ask-first list** (root `AGENTS.md` → Boundaries).
   app calls it and reinvents none of it. (It cleans its own temp dir, so a
   per-row "update available" marker would need its own small lock-diff — left
   out for now precisely to avoid a second copy of what that tool does.)
+- **A row's `diff` is the per-input package delta, reusing the same tool.**
+  `nix-upgradable.sh` grew a `--input <name>` flag that runs `nix flake update
+  <name>` in its throwaway copy instead of the bare all-inputs update;
+  everything else (build CUR from the repo, build NEW from the copy, `nix store
+  diff-closures`) is unchanged, so the exact `pkg: old -> new` lines it already
+  prints ARE the per-input delta. `Runner.previewInput(name)` runs it through
+  the one job queue, captures stdout, `_parse_diff()` pulls the rows out of the
+  `== nix store diff-closures` section (dropping the `, ±size` suffix) and
+  `packagesReady(name, rows)` fills an expandable list under that row. It is
+  **on-demand only** — expanding a row that has not been diffed BUILDS the
+  updated closure (a real download/build, a from-source hyprland on book), so it
+  never runs on list load and the whole run streams to the log so the cost is
+  visible (docs/DESIGN.md §10). A failed/stopped build is forgotten so a later
+  click retries.
 - **Applying is `nix flake update` then this host's wrapper** — `sudo
   rebuild-top` on top, `rebuild-air` on book (`rebuild_cmd()` picks by
   `platform.machine()`). Both wrappers own preflight and the shared rebuild
