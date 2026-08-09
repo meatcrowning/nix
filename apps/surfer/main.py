@@ -1813,6 +1813,16 @@ class OneeTheme(QObject):
         unread = p("warn")           # unreadColor
         post_hl = p("highlight")     # postHLColor
         replyslct = p("accent")      # replyslctColor
+        # On a LIGHT palette, OneeChan's inset surfaces should read as the plain
+        # PAGE background, not the `bgAlt`/`highlight` shades: those are tuned as
+        # insets against a DARK page (DESIGN.md §3.1's value ladder), so on a
+        # light wallpaper they land as dark/near-black patches behind post
+        # headers, open reply chains, catalog panels, post bodies and text
+        # fields. Collapse reply/header/field backgrounds to `bg` there; a dark
+        # palette keeps the inset treatment. Same light-ness test as
+        # _legible_link (which conversely leaves the light-palette link alone).
+        if _rel_lum(QColor(bg)) > 0.2:
+            reply = header_bg = inp = bg
         i = "!important"
         return "".join([
             # --- text colours ---
