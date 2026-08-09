@@ -923,10 +923,10 @@ SMART_NULLARY_OPS = ("is set", "is unset")
 
 # key → (label, ORDER BY columns). `desc` on the spec flips every column; the
 # tie-breakers keep a one-column sort deterministic between two runs.
-_TIEBREAK = ["artist", "album", "disc", "track"]
+_TIEBREAK = ["artist", "album", "COALESCE(disc, 1)", "track"]
 SMART_SORTS = [
-    ("artist",   "artist",      ["artist", "album", "disc", "track"]),
-    ("album",    "album",       ["album", "disc", "track"]),
+    ("artist",   "artist",      ["artist", "album", "COALESCE(disc, 1)", "track"]),
+    ("album",    "album",       ["album", "COALESCE(disc, 1)", "track"]),
     ("title",    "title",       ["title"]),
     ("year",     "year",        ["COALESCE(orig_year, year)"] + _TIEBREAK),
     ("rating",   "rating",      ["rating"] + _TIEBREAK),
@@ -1334,7 +1334,7 @@ class Library(QObject):
 
     def album_tracks(self, album_id):
         return self._rows(
-            "SELECT * FROM tracks WHERE album_id=? ORDER BY disc, track, title",
+            "SELECT * FROM tracks WHERE album_id=? ORDER BY COALESCE(disc, 1), track, title",
             (album_id,))
 
     def artist_tracks(self, artist):
@@ -1358,7 +1358,7 @@ class Library(QObject):
                        for v in trackmatch.artist_variants(s or ""))
 
         return [r for r in self._rows(
-                    "SELECT * FROM tracks ORDER BY album_id, disc, track, title")
+                    "SELECT * FROM tracks ORDER BY album_id, COALESCE(disc, 1), track, title")
                 if hit(r["artist"]) or hit(r["album_artist"])]
 
     def smart_names(self):
