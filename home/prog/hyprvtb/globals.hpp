@@ -174,6 +174,13 @@ struct SGlobalState {
         // tilted right). Settings > appearance > title orientation.
         SP<Config::Values::CBoolValue>   titleRotated;
 
+        // ---- compact single-column bar (see vtbDeco.cpp's totalBarW/walkAppLayout) ----
+        // false (default, the shipped double-wide look) draws the two parallel
+        // columns (system cells + title, and the app-button column). true
+        // collapses them into ONE column: window controls at the window-adjacent
+        // end, app buttons at the far end, title between. Settings > appearance.
+        SP<Config::Values::CBoolValue>   compact;
+
         // ---- unfocused dimming (see CVtbDeco::renderBar's TINT_FOCUSED) ----
         // true (default, the shipped look) greys an unfocused window's titlebar
         // to the inactive-border tone and fades its full-colour icon; false
@@ -310,6 +317,12 @@ namespace Vtb::Cfg {
     // Title text: false = stacked upright letters, true = rotated 90° CW.
     inline auto titleRotated() {
         return g_pGlobalState->config.titleRotated->value();
+    }
+    // Compact bar: false (default) is the double-wide two-column bar; true draws
+    // ONE column, window controls at the window-adjacent end and the app buttons
+    // at the far end, with the title running the space between them.
+    inline auto compact() {
+        return g_pGlobalState->config.compact->value();
     }
     // Which window edge the titlebar anchors to. Anything unrecognised reads
     // as the right edge, so an unknown value never breaks layout.
