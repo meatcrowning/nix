@@ -108,12 +108,27 @@ let
   # preference over an incumbent.
   readerTypes = [ "text/markdown" "text/x-markdown" "application/pdf" ];
 
+  # Plain text and source code, to `editor`. Mirrors editor.desktop's own
+  # MimeType= line (home/prog/editor.nix) verbatim — that line only made editor
+  # ELIGIBLE, this is what makes it the default. text/markdown and text/html
+  # are deliberately excluded even though editor could open them: they already
+  # belong to reader and surfer respectively, and editor.desktop does not
+  # claim either.
+  editorTypes = [
+    "text/plain" "text/x-python" "text/x-nix" "text/x-lua" "text/x-c"
+    "text/x-c++src" "text/x-c++hdr" "text/x-chdr" "text/x-csrc"
+    "text/x-shellscript" "application/json" "application/x-shellscript"
+    "text/x-qml" "text/x-diff" "text/x-patch" "text/csv" "application/xml"
+    "text/xml"
+  ];
+
   assoc =
     (map (t: "${t}=filer.desktop") filerTypes)
     ++ (map (t: "${t}=viewer.desktop") viewerTypes)
     ++ (map (t: "${t}=player.desktop") playerTypes)
     ++ (map (t: "${t}=surfer.desktop") surferTypes)
-    ++ (map (t: "${t}=reader.desktop") readerTypes);
+    ++ (map (t: "${t}=reader.desktop") readerTypes)
+    ++ (map (t: "${t}=editor.desktop") editorTypes);
 
   setDefaults = "${pkgs.python3}/bin/python3 ${./mime-files/set-defaults.py}";
 in

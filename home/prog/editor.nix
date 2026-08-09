@@ -63,12 +63,10 @@ in
   home.packages = [ editor ];
 
   # Desktop entry, so editor is in the runner and is ELIGIBLE for the text types
-  # it can actually edit. Being the DEFAULT for any of them is set centrally, in
-  # home/prog/mime-defaults.nix — and this app is deliberately NOT in that list
-  # yet: `text/markdown` already belongs to reader and `text/html` to surfer, and
-  # quietly taking either would change what double-clicking a file does without
-  # him asking for it. `xdg-mime default editor.desktop text/x-python` (or a line
-  # in mime-defaults.nix) is the one-line change if he wants it.
+  # it can actually edit. Being the DEFAULT for them is set centrally, in
+  # home/prog/mime-defaults.nix (editorTypes, mirroring the MimeType= line
+  # below) — `text/markdown` and `text/html` stay out of both lists on purpose,
+  # since those already belong to reader and surfer.
   #
   # `%F` and not `%f`: editor is genuinely multi-document — several files open as
   # several tabs in one window — and `main.py` honours every path it is handed
