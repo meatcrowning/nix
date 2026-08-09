@@ -1,17 +1,36 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" color="#ffffff" fill="none"
-     stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
-     stroke-linejoin="round">
-  <!-- updater app icon - a refresh glyph: circular arrowhead over a ring.
-       One transparent, theme-tracking variant: the strokes are currentColor
-       so the sigil IS the live theme's foreground. The titlebar tints it via
-       a user stylesheet (home/prog/hyprvtb/vtbDeco.cpp); the panel tints it
-       per cell state (TaskCell.qml -> AppIcon.qml); the desktop entry /
-       launcher resolve currentColor to the root `color` fallback above.
-       THAT FALLBACK IS WHITE ON PURPOSE: the panel tints through
-       MultiEffect, whose colorization scales the tint by the SOURCE's own
-       luminance, so only a white sigil comes out the exact theme colour
-       (measured - a black fallback rendered the icon invisible). -->
-  <circle cx="12" cy="12" r="8.5"/>
-  <path d="M12 6.5 v5.5 l3.5 2"/>
-  <path d="M16.5 5.5 l1.6 -1 l-0.2 1.9"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" color="#ffffff">
+  <!-- updater app icon — the seal of Zagan, sixty-first spirit of the Ars
+       Goetia (a king and president). Zagan's office is TRANSMUTATION: he
+       turns metal into coin, water into wine, and a fool into a wise man —
+       the spirit of turning the old into the new, which is what a package
+       updater does (apps/updater checks the flake, pulls newer inputs and
+       rebuilds the machine on them). Redrawn as clean geometry in the house
+       style — a coin/spirit on a stem, crossed by the transmutation bar,
+       descending into the crucible that renews it.
+
+       ONE transparent, theme-tracking variant. No filled tile: the sigil
+       sits on transparency so it reads on any surface (DESIGN.md §3.1). The
+       strokes are `currentColor` so the sigil IS the live theme's foreground
+       (body text = the accent); the titlebar tints it via a librsvg
+       stylesheet (home/prog/hyprvtb/vtbDeco.cpp), the panel tints it per cell
+       state (TaskCell.qml → AppIcon.qml), and the desktop entry / launcher /
+       notification card resolve currentColor to the root `color` fallback
+       below when they draw the file raw. IT IS WHITE ON PURPOSE: the panel
+       tints through MultiEffect, whose colorization scales the tint by the
+       SOURCE's own luminance, so only a white sigil comes out the exact theme
+       colour (measured — a black fallback rendered the icon invisible).
+       Uniform 44-unit stroke = the 2px edge weight scaled to icon size
+       (DESIGN.md §4). -->
+  <g fill="none" stroke="currentColor" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="256" cy="256" r="218"/>
+    <circle cx="256" cy="128" r="38"/>
+    <path d="M256 166 L256 300"/>
+    <path d="M196 224 L316 224"/>
+    <path d="M186 300 Q256 372 326 300"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="256" cy="128" r="15"/>
+    <circle cx="186" cy="300" r="18"/>
+    <circle cx="326" cy="300" r="18"/>
+  </g>
 </svg>
