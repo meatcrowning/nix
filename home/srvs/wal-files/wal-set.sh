@@ -176,6 +176,15 @@ fi
 # live-reload every running kitty
 pkill -USR1 -x kitty >/dev/null 2>&1
 
+# ---- 4b. ly login greeter colours (read at his next login) ------------------
+# /etc/ly/config.ini is a symlink to /var/lib/ly/config.ini, seeded from the
+# NixOS module by sys/dsk/plasma.nix's activation; the six colour keys there
+# are OURS to rewrite (the activation carries them forward across rebuilds),
+# the rest is root-owned module state. No-op where the file does not exist
+# (book). Must stay before step 7 like everything else — a quick local file
+# write, but the Theme.qml reload tears the script down mid-run.
+"$SCRIPTS/ly-theme.sh" "$ACCENT" "$DIM" "$CRIT"
+
 # ---- 5. Hyprland focused-window border + hyprvtb titlebars (live + persisted)
 # `hyprctl keyword` doesn't exist on the lua-config parser ("use eval"), so
 # both the border and the hyprvtb titlebar-plugin colours go through one

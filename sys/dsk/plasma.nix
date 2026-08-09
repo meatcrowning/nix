@@ -13,17 +13,19 @@
     displayManager.sddm.enable = false;
     displayManager.ly.enable = true;
     # The "wavy" colormix shader animation, themed to the desktop's wal
-    # palette. NOTE: this is a static snapshot of the palette (orange, as of
-    # 2026-07) — ly's config is system-level and can't follow wallpaper
-    # changes. Colors are 0xSSRRGGBB (SS = styling; 01 = bold).
+    # palette. These are the SEED colours only: the greeter's colours are
+    # runtime-owned by ~/.config/scripts/ly-theme.sh (wal-set.sh on every
+    # palette change), and the activation below carries them across rebuilds,
+    # so these values just make the first seed match the current wallpaper.
+    # Colors are 0xSSRRGGBB (SS = styling; 01 = bold).
     displayManager.ly.settings = {
       animation = "colormix";
-      colormix_col1 = "0x00CC4400"; # accent
-      colormix_col2 = "0x0054382A"; # dim
+      colormix_col1 = "0x00EBCD9B"; # accent
+      colormix_col2 = "0x00544C3A"; # dim
       colormix_col3 = "0x20000000"; # near-black (hi-black style)
-      fg = "0x00E08E65";            # input text — palette "ok", readable on the waves
-      border_fg = "0x00CC4400";     # box border = accent
-      error_fg = "0x01FA5C0C";      # bold crit
+      fg = "0x00EBCD9B";            # input text = accent (body-text convention)
+      border_fg = "0x00EBCD9B";     # box border = accent
+      error_fg = "0x01DF8964";      # bold crit
     };
     desktopManager.plasma6.enable = true;
     # Hyprland is the default session; aerotheme (when enabled) takes over instead.
@@ -32,6 +34,32 @@
     displayManager.defaultSession =
       if config.my.aerotheme.enable then "aerothemeplasma" else "hyprland";
   };
+
+  # Greeter theming at the system level: the ly module's config.ini is a
+  # root-owned store symlink (via /etc/static) bundling load-bearing session
+  # keys with the colours, so wal-set cannot write it. Point /etc/ly/config.ini
+  # at a lam-writable /var/lib/ly/config.ini, re-derived from the module output
+  # on every switch (session paths and commands move between store paths) with
+  # the colour keys — the ones ly-theme.sh owns, keep the list in step with
+  # home/srvs/wal-files/ly-theme.sh — carried forward, so a rebuild does not
+  # revert the greeter to the seed colours. Failure is benign: ly falls back
+  # to its defaults, login still works, and the next switch re-seeds the file.
+  system.activationScripts.lyRuntimeConfig = lib.stringAfter [ "etc" ] ''
+    [ -f /etc/ly/config.ini ] || exit 0
+    mkdir -p /var/lib/ly
+    chown lam:users /var/lib/ly
+    cp -f /etc/ly/config.ini /var/lib/ly/config.ini.new
+    if [ -f /var/lib/ly/config.ini ]; then
+      for k in border_fg colormix_col1 colormix_col2 colormix_col3 error_fg fg; do
+        v="$(sed -n "s/^$k=//p" /var/lib/ly/config.ini | head -n1)"
+        [ -n "$v" ] && sed -i "s|^$k=.*|$k=$v|" /var/lib/ly/config.ini.new
+      done
+    fi
+    chown lam:users /var/lib/ly/config.ini.new
+    chmod 664 /var/lib/ly/config.ini.new
+    mv -f /var/lib/ly/config.ini.new /var/lib/ly/config.ini
+    ln -sfn /var/lib/ly/config.ini /etc/ly/config.ini
+  '';
 
   # Mask DrKonqi's crash-reporter units. Under Hyprland (not a Plasma/X
   # session) the coredump *launcher* is spawned by systemd-coredump with no
