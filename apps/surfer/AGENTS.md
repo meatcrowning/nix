@@ -557,6 +557,59 @@ imposes the family while the page's font-size survives. Run it after touching
 dark-mode block, `PAGE_STYLE_RUNTIME_JS`, `PageStyle`/`PageStyleHandler`, or the
 `Main.qml` profile/courier wiring.
 
+## OneeChan inherits the live wallpaper palette
+
+The **OneeChan** userscript themes 4chan pages, but it bakes its own hex colours
+(not CSS vars) into one `<style id=ch4SS>` it builds from its private `$SS`
+theme — a var in a top-level IIFE, unreachable from outside, so its theme cannot
+be re-driven without a **page reload** (which loses scroll position and
+half-typed replies). So rather than poke OneeChan, surfer adopts its OWN
+stylesheet from the live wallpaper palette (the same `WalPalette` the chrome and
+the dark-mode courier read) and lets the CASCADE win: an adopted stylesheet
+orders AFTER any document `<style>`, so with the SAME selectors + `!important` it
+beats `ch4SS` on ties. No OneeChan internals are touched; **his tabs are never
+reloaded.**
+
+Exactly the dark-mode courier's shape, on a parallel scheme:
+
+- `ONEE_THEME_RUNTIME_JS` in `main.py` + `OneeTheme.scripts` (a
+  `QWebEngineScript`, `DocumentCreation` / `MainWorld`, `RunsOnSubFrames`
+  **off** — OneeChan themes the board page, not its iframes) is `.concat`-ed
+  after `PageStyle.scripts` onto `sharedProfile.userScripts.collection` in
+  `Main.qml`.
+- It pulls the palette-derived CSS from Python over the **`surferonee://`**
+  scheme (`OneeThemeHandler` fed by `OneeTheme.css(url)`) and adopts it as a
+  constructed `CSSStyleSheet` via `document.adoptedStyleSheets` (CSP-proof,
+  concat-only so it never clobbers cosmetic/page-style sheets).
+- **Two guards.** It runs only on 4chan hosts (`boards.4chan(nel)?.org`), and it
+  **self-gates**: it adopts only once `document.documentElement` carries the
+  `oneechan` class (OneeChan sets `html.oneechan` on init) — so the re-skin
+  rides ONLY when OneeChan is actually active, never on bare 4chan. It polls for
+  the class (~60s cap) since OneeChan marks the page after document-creation.
+- **Live**: `WalPalette.onChanged` → `win.reinjectOnee()` → each view runs
+  `window.__surferOneeThemeRefresh()`, which re-fetches + re-adopts (or strips
+  the sheet if OneeChan went away) — no reload. Same `Connections{target:
+  WalPalette}` block that drives `reinjectScrollbar`/`reinjectDark`.
+
+The role→palette map (`OneeTheme._css`, selectors mirroring `ch4SS` verbatim so
+specificity ties and cascade order decides): body bg=`bg`, reply/dialog
+bg=`bgAlt`, borders=`border`, field bg=`highlight`, post text=`text`,
+links=`dim` (hover `accent`), greentext + names=`ok`, tripcodes=`warn`,
+subjects/board titles/quotelinks=`accent`, backlinks=`info`, post
+highlight=`highlight`. Every rule is `!important`, because `ch4SS`'s are.
+
+Verified headlessly by
+**[`tools/oneechan-theme-test.py`](tools/oneechan-theme-test.py)** — a real
+offscreen profile carrying the exact `concat` line, `boards.4chan.org` mapped to
+loopback (`--host-resolver-rules`) so the host gate passes: over a baked
+ch4SS-style baseline the palette colours win on body/reply/links/quotelinks
+(proving adopted-after-`<style>` + `!important` beats ch4SS on ties), a
+`WalPalette` change (the watched `Theme.qml` rewritten) live-re-skins the open
+page, and a page WITHOUT `html.oneechan` keeps its baked baseline untouched (the
+self-gate). Run it after touching `main.py`'s `ONEE_THEME_RUNTIME_JS`,
+`OneeTheme`/`OneeThemeHandler`, the `surferonee://` registration, or the
+`Main.qml` `reinjectOnee`/courier wiring.
+
 ## Split view — two tabs in one window, kitty's two buttons
 
 **`|` splits right (side by side) and `_` splits down (stacked)** — kitty's own
