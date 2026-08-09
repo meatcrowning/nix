@@ -490,6 +490,21 @@ hl.config({
         active_opacity   = 1.0,
         inactive_opacity = 1.0,
 
+        -- Whole-window unfocus dim (Settings > Appearance > "dim unfocused").
+        -- The hyprvtb titlebar already greys on unfocus (plugin:hyprvtb:
+        -- dim_unfocused) and every Qt app fades its own foreground to
+        -- Theme.inactive (docs/DESIGN.md 3.1.1) — but an arbitrary window's
+        -- CONTENT (a browser, a terminal) has no such hook, so its body stayed
+        -- lit while its titlebar and border read unfocused. This is the native
+        -- content dim that closes that gap: "the setting should affect the
+        -- window itself, the border, EVERYTHING, not only the titlebar." Floor
+        -- is ON to match plugin dim_unfocused's default-true; SettingsApply.qml
+        -- toggles it live over hl.config when the setting flips (a reload
+        -- reverts to this floor, exactly like dim_unfocused itself). Retune
+        -- dim_strength to taste — 0.5 is Hyprland's default.
+        dim_inactive = true,
+        dim_strength = 0.5,
+
         -- Native soft shadow off: hyprvtb draws its own hard bottom-left drop
         -- shadow, and this blurred halo layered a faint second shadow around the
         -- whole focused frame on top of it.

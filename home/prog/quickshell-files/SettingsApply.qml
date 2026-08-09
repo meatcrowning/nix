@@ -63,7 +63,13 @@ Item {
             + "title_rotated = " + _b(d.titleOrientation === "horizontal") + ", "
             + "dim_unfocused = " + _b(d.dimUnfocused) + ", "
             + "titlebar_edge = \"" + d.titlebarEdge + "\""
-            + " } }})"
+            + " } }, "
+            // The unfocus dim covers the WHOLE window, not just the hyprvtb
+            // titlebar: dim_unfocused also drives Hyprland's native content
+            // dim so an arbitrary window's body greys with its chrome (the
+            // titlebar tint is the plugin's dim_unfocused key above; this is
+            // the content half). hyprland.lua carries the persisted floor.
+            + "decoration = { dim_inactive = " + _b(d.dimUnfocused) + " }})"
             + (flush ? " hl.plugin.hyprvtb.refresh_fonts()" : "");
         Quickshell.execDetached(["hyprctl", "eval", lua]);
     }
