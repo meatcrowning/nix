@@ -145,6 +145,7 @@ namespace {
         if (auto it = g_regs.find(pid); it != g_regs.end()) {
             reg.footer       = it->second.footer;
             reg.titleEdit    = it->second.titleEdit;
+            reg.editSeed     = it->second.editSeed;
             reg.titleText    = it->second.titleText;
             reg.playbar      = it->second.playbar;
             reg.playPos      = it->second.playPos;
@@ -200,6 +201,25 @@ namespace {
         if (reg.titleEdit == on)
             return;
         reg.titleEdit = on;
+        VtbIpc::serial.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    // EDITSEED <text>: what the address editor opens WITH, when it must differ
+    // from the drawn title. Stored per-registration; enterEdit() reads it from
+    // the deco's own snapshot (never off the render path). A repaint is not
+    // needed — nothing on screen changes until the editor opens — but bump the
+    // serial anyway so the deco re-snapshots and has the seed ready by the time
+    // a click enters edit. Empty clears it (fall back to the window title).
+    void handleEditSeed(SClient& c, const std::string& seed) {
+        if (c.pid <= 0)
+            return;
+        std::lock_guard lk(g_lk);
+        auto&           reg = g_regs[c.pid];
+        if (g_regFd.find(c.pid) == g_regFd.end())
+            g_regFd[c.pid] = c.fd;
+        if (reg.editSeed == seed)
+            return;
+        reg.editSeed = seed;
         VtbIpc::serial.fetch_add(1, std::memory_order_relaxed);
     }
 
@@ -282,6 +302,10 @@ namespace {
             handleFooter(c, "");
         else if (line.starts_with("TITLEEDIT "))
             handleTitleEdit(c, line.substr(10));
+        else if (line.starts_with("EDITSEED "))
+            handleEditSeed(c, line.substr(9));
+        else if (line == "EDITSEED")
+            handleEditSeed(c, "");
         else if (line.starts_with("TITLETEXT "))
             handleTitleText(c, line.substr(10));
         else if (line.starts_with("LOADING "))
@@ -559,7 +583,7 @@ std::string VtbIpc::dumpJson() {
             out += ",";
         first = false;
         out += "{\"pid\":" + std::to_string(pid) + ",\"buttons\":" + std::to_string(reg.buttons.size()) +
-            ",\"titleEdit\":" + (reg.titleEdit ? "true" : "false") + ",\"titleText\":" + (reg.titleText ? "true" : "false") +
+            ",\"titleEdit\":" + (reg.titleEdit ? "true" : "false") + ",\"editSeed\":" + (reg.editSeed.empty() ? "false" : "true") + ",\"titleText\":" + (reg.titleText ? "true" : "false") +
             ",\"loading\":" + (reg.loading ? "true" : "false") +
             ",\"playbar\":" + (reg.playbar ? "true" : "false") + ",\"footer\":" + (reg.footer.empty() ? "false" : "true") +
             ",\"icon\":\"" + reg.icon + "\"}";

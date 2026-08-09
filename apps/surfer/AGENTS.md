@@ -26,6 +26,18 @@ initial snapshot in the deco constructor, so a window mapping with its
 registration already present draws its real chrome on the first frame. Both
 halves are `docs/hyprvtb-titlebar-flash.md`.
 
+**The address bar shows the page TITLE but edits the URL.** The bar the plugin
+draws is the window title (`TITLEEDIT`), so at rest it reads as the page's
+title, like any browser's address field when unfocused. The real URL reaches
+the plugin on a separate channel: `Window.title` is bound to the page title
+(falling back to the URL for a cold/titleless page), and `Main.qml` pushes the
+live URL with `Titlebar.setEditSeed(curUrl)` on every `curUrl` change. The
+plugin stores that per-registration (`EDITSEED` verb, `SVtbAppReg::editSeed`)
+and `CVtbDeco::enterEdit()` opens the editor on it instead of the title;
+submitting still returns `ADDR <url>`, and blur reverts the bar to the title.
+An empty seed makes the editor open on the title as before — the pre-3.34
+behaviour for any app that never sends `EDITSEED`. Needs hyprvtb ≥ 3.34.
+
 **QtWebEngine spellcheck is imperative-only**: the declarative QML
 `WebEngineProfile` `spellCheck*` properties are silently dropped — set
 `setSpellCheckEnabled`/`setSpellCheckLanguages` imperatively in `_wire_profile`.

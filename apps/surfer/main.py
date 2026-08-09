@@ -238,6 +238,11 @@ class Titlebar(QObject):
         """Page loading — the plugin draws a spinner above the address bar."""
         self._client.set_loading(on)
 
+    @Slot(str)
+    def setEditSeed(self, url):
+        """The bar shows the page title; open the editor on this real URL."""
+        self._client.set_edit_seed(url)
+
 
 class Clip(QObject):
     """Clipboard access for the 'copy url' titlebar button."""

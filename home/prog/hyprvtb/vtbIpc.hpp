@@ -92,6 +92,10 @@ struct SVtbAppReg {
     std::vector<SVtbAppButton> buttons;
     std::string                footer;
     bool                       titleEdit = false; // title region is an editable address bar
+    // What the address editor opens WITH, when it must differ from the drawn
+    // title (surfer: the bar shows the page title, but the editor opens the
+    // real URL). Empty means seed the editor from the window title as before.
+    std::string                editSeed;
     // Draw the stacked title at all? Default TRUE — a client that never sends
     // TITLETEXT keeps the bar it always had, so this cannot regress the six
     // apps that say nothing about it.

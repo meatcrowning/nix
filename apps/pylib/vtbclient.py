@@ -11,6 +11,11 @@ the server side):
     -> TITLEEDIT <0|1>                           title region is an address bar
     -> TITLETEXT <0|1>                           draw the stacked window title at all
                                                  (default 1; goetia sends 0)
+    -> EDITSEED <text>                           what the address editor opens WITH,
+                                                 when it must differ from the shown
+                                                 title (surfer: bar shows the page
+                                                 title, editor opens the real URL);
+                                                 empty falls back to the title
     -> LOADING <0|1>                             page loading (draws a spinner)
     -> PLAYBAR <0|1> <pos>                       media scrub bar + playback fraction
     <- CLICK <id>                                a button was clicked
@@ -95,6 +100,7 @@ class VtbClient:
         self._footer_bottom = False
         self._title_edit = bool(title_edit)
         self._title_text = True    # the bar draws the window title unless told not to
+        self._edit_seed = ""       # what the address editor opens with (empty == the title)
         self._loading = False
         self._playbar = None       # (shown, pos) or None if never set
         self._stop = False
@@ -149,6 +155,18 @@ class VtbClient:
                 return
             self._title_edit = bool(on)
             self._send_title_edit_locked()
+
+    def set_edit_seed(self, text):
+        """Seed the address editor with `text` instead of the shown title.
+
+        surfer shows the page title in the bar but must open the editor on the
+        real URL. Empty restores the default (edit whatever the title shows)."""
+        text = text or ""
+        with self._lock:
+            if text == self._edit_seed:
+                return
+            self._edit_seed = text
+            self._send_edit_seed_locked()
 
     def set_title_text(self, on):
         """Draw the stacked window title in the bar at all? Default on.
@@ -240,6 +258,8 @@ class VtbClient:
             out.append("TITLETEXT 0")   # first, so it is the least deferrable
         if self._title_edit:
             out.append("TITLEEDIT 1")
+        if self._edit_seed:
+            out.append("EDITSEED " + self._edit_seed)
         if self._footer_bottom:
             out.append("FOOTERPOS 1")
         if self._footer:
@@ -281,6 +301,9 @@ class VtbClient:
 
     def _send_title_text_locked(self):
         self._send_locked("TITLETEXT " + ("1" if self._title_text else "0"))
+
+    def _send_edit_seed_locked(self):
+        self._send_locked("EDITSEED " + self._edit_seed)
 
     def _send_loading_locked(self):
         self._send_locked("LOADING " + ("1" if self._loading else "0"))
