@@ -43,7 +43,7 @@ Item {
     }
 
     // The hyprvtb keys (Settings > Appearance): drop-shadow opacity + title
-    // orientation. Same live-config path as the input keys: `hl.config`, NOT
+    // orientation + unfocused dimming. Same live-config path as the input keys: `hl.config`, NOT
     // `hyprctl keyword` (the lua parser rejects the keyword form — see
     // wal-set.sh step 5). A config reload damages every monitor and nulls the
     // plugin's title-texture cache, so both take effect with no window touched.
@@ -60,7 +60,8 @@ Item {
         const d = SettingsStore.d;
         const lua = "hl.config({plugin = { hyprvtb = { "
             + "shadow_alpha = " + d.shadowAlpha + ", "
-            + "title_rotated = " + _b(d.titleOrientation === "horizontal")
+            + "title_rotated = " + _b(d.titleOrientation === "horizontal") + ", "
+            + "dim_unfocused = " + _b(d.dimUnfocused)
             + " } }})"
             + (flush ? " hl.plugin.hyprvtb.refresh_fonts()" : "");
         Quickshell.execDetached(["hyprctl", "eval", lua]);
@@ -139,6 +140,7 @@ Item {
         function onTapToClickChanged() { root.applyInput(); }
         function onShadowAlphaChanged() { root.applyVtb(false); }
         function onTitleOrientationChanged() { root.applyVtb(true); }
+        function onDimUnfocusedChanged() { root.applyVtb(false); }
         function onWindowBorderWidthChanged() { root.applyFrame(); }
         function onWindowRoundingChanged() { root.applyFrame(); }
 

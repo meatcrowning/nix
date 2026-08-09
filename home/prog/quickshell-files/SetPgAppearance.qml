@@ -267,6 +267,14 @@ Column {
                 onToggled: (v) => { page.d.desktopIcons = v; SettingsStore.save(); }
             }
         }
+        SetRow {
+            label: "dim unfocused windows"
+            desc: "grey an unfocused window's titlebar; off keeps every bar lit"
+            SetToggle {
+                checked: page.d.dimUnfocused
+                onToggled: (v) => { page.d.dimUnfocused = v; SettingsStore.save(); }
+            }
+        }
     }
 
     SetSection {
