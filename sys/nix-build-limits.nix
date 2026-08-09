@@ -33,6 +33,16 @@
 # trades a freeze for a killed system daemon of oomd's choosing, which is the
 # trade sys/oomd.nix already refused. This reaches one unit, on purpose.
 #
+# TWO cgroups, because a build lands in one of two places depending on who
+# asked. Measured 2026-08-09 rather than assumed: an unprivileged `nix build`
+# goes over the socket and its builders are children of `nix-daemon.service`,
+# but ROOT owns the store, so `sudo rebuild-top` builds in-process — its
+# builders inherit the CALLER's cgroup, which for an agent is whatever kitty or
+# claude scope it happened to be started from. Capping the daemon alone would
+# have left the exact rebuild that froze the box uncapped. So `rebuild-top`
+# (sys/nixos-rebuild.nix) runs its switch inside a transient scope in the slice
+# below, and the two ceilings are kept equal on purpose.
+#
 # NixOS-only, so `book` does not get it. Its ceilings would be wrong there
 # anyway (16 GiB, and it compiles Hyprland from source on every pin bump).
 { ... }:
@@ -44,5 +54,15 @@
     CPUWeight = 20;
     IOWeight = 20;
     OOMScoreAdjust = 500;
+  };
+
+  systemd.slices.nix-build = {
+    description = "Nix builds started by rebuild-top";
+    sliceConfig = {
+      MemoryHigh = "8G";
+      MemoryMax = "14G";
+      CPUWeight = 20;
+      IOWeight = 20;
+    };
   };
 }
