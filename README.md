@@ -13,4 +13,4 @@ https://github.com/user-attachments/assets/fecfa97c-5697-407a-9291-020ac69e7bf4
 
 my adventures with agents. 
 
-bundles my **system config**, **desktop**, **file manager**, **web browser**, **media viewer**, **music player**, **t2i front end**, **markdown reader**, **agent harness (goetia)**, and **text editor**. in place theme reloads and psudo relogs for testing. vertical titlebars. cool roll up animations. the works. intended for use on my nixos system and MBA running asahi, YMWV. 
+bundles my **system config**, **desktop**, **file manager**, **web browser**, **media viewer**, **music player**, **t2i front end**, **markdown reader**, ** agent-task-handler (goetia)**, and **text editor**. in place theme reloads and psudo relogs for testing. vertical titlebars. cool roll up animations. the works. intended for use on my nixos system and MBA running asahi, YMWV. 
