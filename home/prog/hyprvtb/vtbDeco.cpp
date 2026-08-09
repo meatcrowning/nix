@@ -1822,24 +1822,89 @@ bool CVtbDeco::rollBarBoxDev(PHLMONITOR pMonitor, CBox& out) {
 void CVtbDeco::drawRollSnapshot(const CBox& barBoxDev, float scale, float slideT, float a) {
     if (!m_rollSnapTex || m_rollSnapTex->m_texID == 0 || slideT >= 0.999f)
         return;
+    const double clientW    = m_rollWinBox.w * scale;
+    const double contentLft = barBoxDev.x - clientW * (1.f - slideT);
+    if (clientW < 1.0)
+        return;
+    drawRollSnapshotClipped(barBoxDev, scale, slideT, a, CBox{contentLft, barBoxDev.y, barBoxDev.x - contentLft, barBoxDev.h}.round());
+}
+
+// The radius the sliding content carries: the window's own rounding, clamped to
+// half the emerged strip — the two corner arcs of a barely-emerged strip would
+// otherwise overlap and the shader draws a lens instead of a rounded rect. So the
+// radius grows over the first `rounding` px of the reveal, which is also what
+// Hyprland does to a window narrower than its own rounding.
+int CVtbDeco::rollSnapRounding(const CBox& barBoxDev, float scale, float slideT) {
+    const int    WANT    = std::max(0, (int)std::round(Hl::windowRounding(m_pWindow.lock()) * scale));
+    const double clientW = m_rollWinBox.w * scale;
+    const double drawW   = clientW * (1.f - slideT) + WANT;
+    return std::min(WANT, (int)std::floor(std::min(drawW, barBoxDev.h) / 2.0));
+}
+
+void CVtbDeco::drawRollSnapshotClipped(const CBox& barBoxDev, float scale, float slideT, float a, const CRegion& clip) {
+    if (!m_rollSnapTex || m_rollSnapTex->m_texID == 0 || slideT >= 0.999f)
+        return;
     const double clientW = m_rollWinBox.w * scale;
     if (clientW < 1.0)
         return;
 
     // The snapshot is a MONITOR-sized texture with the window at m_rollSnapOrigin,
     // so we can't just stretch the whole thing into the content box (that shrinks
-    // the entire screen into the bar). Instead draw the full texture 1:1, offset so
-    // the window's sub-rect lands exactly where the content should be, and clip to
-    // the still-visible strip (its sliding left edge to the bar's left edge) so no
-    // neighbouring desktop leaks in and the drawer-into-bar occlusion is preserved.
-    const double                        contentLeft = barBoxDev.x - clientW * (1.f - slideT);
-    CBox                                fullBox     = {contentLeft - m_rollSnapOrigin.x, barBoxDev.y - m_rollSnapOrigin.y,
-                                                       m_rollSnapTex->m_size.x, m_rollSnapTex->m_size.y};
-    CRegion                             clip        = CBox{contentLeft, barBoxDev.y, barBoxDev.x - contentLeft, barBoxDev.h}.round();
+    // the entire screen into the bar). Draw only the window's sub-rect — mapped by
+    // custom UV, so the visible part still lands 1:1 — into the content box, and
+    // clip to the still-visible strip (its sliding left edge to the bar's left
+    // edge) so no neighbouring desktop leaks in and the drawer-into-bar occlusion
+    // is preserved.
+    //
+    // THE SUB-RECT IS WHY THIS IS NOT A 1:1 FULL-TEXTURE DRAW ANY MORE: renderTexture
+    // computes its corner rounding against the box it is handed, so a monitor-sized
+    // box could only ever round corners that are off-screen — the sliding content
+    // drew SQUARE while the window it stands in for is clipped round, and the
+    // capture had baked the desktop that showed through those rounded corners into
+    // them, so the square corners carried a frozen scrap of wallpaper across the
+    // screen. Rounding needs a box that IS the content.
+    //
+    // Only the LEADING (left) corners may round: the trailing edge abuts the bar,
+    // and the two are one frame. Same trick as the bar background — overshoot the
+    // seam by the radius so the trailing rounding falls outside the clip — and the
+    // UV rect is widened to match so the visible pixels stay 1:1 rather than
+    // stretching by RND.
+    const int    RND         = rollSnapRounding(barBoxDev, scale, slideT);
+    const double contentLeft = barBoxDev.x - clientW * (1.f - slideT);
+    const double drawW       = barBoxDev.x - contentLeft + RND; // to the seam, plus the overshoot
+    if (drawW < 1.0)
+        return;
+
+    const Vector2D TS = m_rollSnapTex->m_size;
+    if (TS.x < 1 || TS.y < 1)
+        return;
+
+    // Source rect in the snapshot, device px: the window's top-left plus however
+    // much of it is currently out. Clamped into the texture (the overshoot can run
+    // past the monitor's right edge on a window flush to it); WRAP_CLAMP_TO_EDGE
+    // makes the last column repeat there, and it is inside the discarded overshoot
+    // in any case.
+    const double u0 = m_rollSnapOrigin.x / TS.x;
+    const double v0 = m_rollSnapOrigin.y / TS.y;
+    const double u1 = std::min(1.0, (m_rollSnapOrigin.x + drawW) / TS.x);
+    const double v1 = std::min(1.0, (m_rollSnapOrigin.y + barBoxDev.h) / TS.y);
+
+    // The strip is the hard limit whatever the caller asked for: the box overshoots
+    // the seam by RND (so the trailing rounding falls outside), and only this clip
+    // keeps that overshoot — and the tucked part of the window — off the bar column.
+    CRegion visible = CRegion{CBox{contentLeft, barBoxDev.y, barBoxDev.x - contentLeft, barBoxDev.h}.round()}.intersect(clip);
+    if (visible.empty())
+        return;
+
+    CBox                                box = CBox{contentLeft, barBoxDev.y, drawW, barBoxDev.h}.round();
     CHyprOpenGLImpl::STextureRenderData data;
-    data.a          = a;
-    data.clipRegion = clip;
-    Hl::texture(m_rollSnapTex, fullBox.round(), data);
+    data.a                           = a;
+    data.round                       = RND;
+    data.clipRegion                  = visible;
+    data.allowCustomUV               = true;
+    data.primarySurfaceUVTopLeft     = {u0, v0};
+    data.primarySurfaceUVBottomRight = {u1, v1};
+    Hl::texture(m_rollSnapTex, box, data);
 }
 
 // The emerging window's border during a roll animation, framing the WHOLE
@@ -1871,10 +1936,52 @@ void CVtbDeco::drawRollBorder(const CBox& barBoxDev, float scale, float slideT, 
                             unfocused.b + (focused.b - unfocused.b) * revealT, unfocused.a + (focused.a - unfocused.a) * revealT};
     bc.a *= a;
 
-    Hl::rect(CBox{cl - bs, ct - bs, fw + 2 * bs, bs}.round(), bc, {});   // top
-    Hl::rect(CBox{cl - bs, ct + ch, fw + 2 * bs, bs}.round(), bc, {});   // bottom
-    Hl::rect(CBox{cl - bs, ct - bs, bs, ch + 2 * bs}.round(), bc, {});   // left
-    Hl::rect(CBox{cr, ct - bs, bs, ch + 2 * bs}.round(), bc, {});        // right (bar's outer edge)
+    // The frame's LEADING corners follow the desktop's rounding, like the content
+    // they wrap: with rounding on, four straight segments left an accent right-angle
+    // sticking out past the sliding content's arc for the whole animation (his
+    // report — "the roll struggles with keeping the corner rounding"). The ring is
+    // built the only way the render API allows, since a rect cannot be punched out:
+    // an outer rounded rect in the border colour, then the window's own rounded
+    // corner painted back over its inside — both clipped to the corner squares, so
+    // nothing else on the frame is touched. The TRAILING corners stay square: that
+    // edge abuts the bar, and the frame is continuous through it.
+    const int RND = rollSnapRounding(barBoxDev, scale, slideT);
+    if (RND > 0) {
+        const double CS    = RND + bs; // corner square: the outer arc's bounding box
+        const int    OUTRND = std::min((int)std::round(CS), (int)std::floor(std::min(fw + 2 * bs, ch + 2 * bs) / 2.0));
+        CRegion      corners{CBox{cl - bs, ct - bs, CS, CS}.round()};
+        corners.add(CBox{cl - bs, ct + ch + bs - CS, CS, CS}.round());
+        // clipRegion is not a field on SRectRenderData; renderRect clips to the
+        // damage it is handed, so intersect the corner squares into that instead.
+        CRegion clipped = Hl::renderDamage().intersect(corners);
+
+        CHyprOpenGLImpl::SRectRenderData rd;
+        rd.round  = OUTRND;
+        rd.damage = &clipped;
+        Hl::rect(CBox{cl - bs, ct - bs, fw + 2 * bs, ch + 2 * bs}.round(), bc, rd);
+
+        // ...and the interior back over the ring's inside. That is the sliding
+        // content whenever there is any; on the lone bar (the open reveal's fade,
+        // before the content starts moving) it is the bar's own background, which
+        // renderBar has already drawn with this same radius.
+        if (m_rollSnapTex && m_rollSnapTex->m_texID != 0 && slideT < 0.999f)
+            drawRollSnapshotClipped(barBoxDev, scale, slideT, a, corners);
+        else {
+            auto bg = configColor(Cfg::bgColor());
+            bg.a *= a;
+            CHyprOpenGLImpl::SRectRenderData bd;
+            bd.round  = RND;
+            bd.damage = &clipped;
+            Hl::rect(CBox{cl, ct, fw, ch}.round(), bg, bd);
+        }
+    }
+
+    // The straight runs, held clear of the corner squares so they cannot re-square
+    // what the ring just rounded (no-op at RND 0, where they meet as before).
+    Hl::rect(CBox{cl - bs + RND, ct - bs, fw + 2 * bs - RND, bs}.round(), bc, {});      // top
+    Hl::rect(CBox{cl - bs + RND, ct + ch, fw + 2 * bs - RND, bs}.round(), bc, {});      // bottom
+    Hl::rect(CBox{cl - bs, ct - bs + RND, bs, ch + 2 * bs - 2 * RND}.round(), bc, {});  // left
+    Hl::rect(CBox{cr, ct - bs, bs, ch + 2 * bs}.round(), bc, {});                       // right (bar's outer edge)
 }
 
 // Hover text for a cell: fixed strings for the five system cells, the

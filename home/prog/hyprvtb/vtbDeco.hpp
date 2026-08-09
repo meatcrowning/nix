@@ -453,6 +453,12 @@ class CVtbDeco : public IHyprWindowDecoration {
     // the sliding snapshot AFTER (clipped at the bar's left edge). Both take the
     // bar's device-space box (already dropped by the set-down).
     void                 drawRollSnapshot(const CBox& barBoxDev, float scale, float slideT, float a);
+    // The same draw, clipped to a caller's region — drawRollBorder re-paints the
+    // window's rounded leading corners over its own corner ring.
+    void                 drawRollSnapshotClipped(const CBox& barBoxDev, float scale, float slideT, float a, const CRegion& clip);
+    // Radius (device px) the sliding content is clipped to, i.e. the window's own
+    // rounding clamped to what the emerged strip can carry.
+    int                  rollSnapRounding(const CBox& barBoxDev, float scale, float slideT);
     void                 drawRollBorder(const CBox& barBoxDev, float scale, float slideT, const CHyprColor& focused, const CHyprColor& unfocused, float a);
 
     Vector2D             cursorRelativeToBar();
