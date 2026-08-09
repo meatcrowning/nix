@@ -1821,10 +1821,11 @@ class OneeTheme(QObject):
         # fields. Collapse reply/header/field backgrounds to `bg` there; a dark
         # palette keeps the inset treatment. Same light-ness test as
         # _legible_link (which conversely leaves the light-palette link alone).
-        if _rel_lum(QColor(bg)) > 0.2:
+        light = _rel_lum(QColor(bg)) > 0.2
+        if light:
             reply = header_bg = inp = bg
         i = "!important"
-        return "".join([
+        parts = [
             # --- text colours ---
             "html,body,div.boardBanner,#menu,input:not(.jsColor),textarea,"
             "#qr-filename-container,#post-preview,.post-last,.pln,select,"
@@ -1880,7 +1881,20 @@ class OneeTheme(QObject):
             "border-left-color:%s%s}" % (post_hl, i),
             "#unread-line{background-image:linear-gradient(to left,"
             "transparent,%s,transparent)%s}" % (unread, i),
-        ])
+        ]
+        if light:
+            # The per-post header strip. OneeChan paints `.postInfo` from
+            # `mainColor` too — `background:rgba(mainColor,.2)` plus a near-black
+            # `border-bottom` (ch4SS) — and the `.reply` collapse above only
+            # reaches the post body, so on a light page the strip stays a grey
+            # tint over cream with a dark line under it: "post headers still
+            # darker than the background". Collapse the tint to the page `bg` and
+            # drop the border to the theme `border`; light-palette only, so a
+            # dark palette keeps OneeChan's header-vs-body inset.
+            parts.append(
+                ".postInfo{background:%s%s;border-bottom-color:%s%s}"
+                % (bg, i, border, i))
+        return "".join(parts)
 
     @Slot(str, result=str)
     def css(self, url):

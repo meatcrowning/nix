@@ -156,13 +156,14 @@ INDEX_LIGHT = """<!doctype html>
 html,body{color:#000 !important}
 body{background:#000 !important}
 .reply,body.is_catalog .panel,.dialog{background:rgba(0,0,0,1)!important}
+.postInfo{background:rgba(0,0,0,1)!important;border-bottom:2px solid rgb(0,0,0)!important}
 :root.header-gradient #header-bar{background:linear-gradient(rgb(15,15,15),rgba(0,0,0,0.9))!important}
 input:not(.jsColor),textarea,.captcha-root{background:#000 !important}
 .inline{background:rgba(0,0,0,.8)!important}
 :root.catalog-background #threads div.thread,:root.catalog-background .catalog-thread{background:rgba(0,0,0,1)!important}
 </style></head><body>
 <div id="header-bar" class="dialog">header</div>
-<div class="reply postContainer" id="r">reply</div>
+<div class="reply postContainer" id="r"><div class="postInfo" id="pi">post header</div>reply</div>
 <input id="inp" type="text">
 <div id="threads"><div class="thread catalog-thread" id="ct">catalog cell</div></div>
 <div class="inline" id="il">inline expand</div>
@@ -178,7 +179,7 @@ setTimeout(function(){
       return s.backgroundColor+'|'+s.backgroundImage; } catch(e){ return 'ERR'; } }
   document.title = JSON.stringify({
       header: bg('#header-bar'), reply: bg('#r'), input: bg('#inp'),
-      catalog: bg('#ct'), inline: bg('#il')
+      catalog: bg('#ct'), inline: bg('#il'), postheader: bg('#pi')
   });
 }, 900);
 """
@@ -461,6 +462,8 @@ def main():
               bgimage(out.get("header")) == "none")
         check("light render: reply chain collapses to bg",
               bgcolor(out.get("reply")) == want)
+        check("light render: post header strip (.postInfo) collapses to bg",
+              bgcolor(out.get("postheader")) == want)
         check("light render: text field collapses to bg",
               bgcolor(out.get("input")) == want)
         check("light render: catalog cell (Show Background) collapses to bg",
