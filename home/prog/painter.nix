@@ -159,30 +159,24 @@ in
       # Model loading is slow; do not let systemd give up on startup.
       TimeoutStartSec = "infinity";
 
-      # A CEILING, because this unit froze `top` on 2026-08-08. ComfyUI's
-      # dynamic VRAM loading stages weights in SYSTEM RAM and streams them to
-      # the card, so the pressure lands here, not in the 12G of VRAM: a
-      # MiniMaxH3 video run staged 19995M + 14956M + 2677M against 30G of RAM
-      # while kitty, a nix eval and the panel were already swapping. Nothing
-      # crashed — the box livelocked, reclaiming just fast enough that the
-      # kernel OOM killer never fired, so the screen froze with no TTY to
-      # escape to and the only way out was the power button.
-      #
-      # `High` is the throttle and does the real work: past it the cgroup is
-      # put under reclaim pressure and slows down. `Max` is the backstop that
-      # kills. Most of what a big model run holds here is mmap'd weight file,
-      # i.e. reclaimable page cache that counts against the cgroup and is
-      # simply evicted at the limit — so these cap the blast radius without
-      # capping the model, and a run that genuinely needs more gets slower
-      # rather than taking the desktop with it. Raise them if a workload
-      # legitimately needs it; do not remove them.
-      # Raised High 16G -> 20G on 2026-08-09 (his call): at 16G the throttle
-      # bit even a single MiniMaxH3 stage (~19.5G), so heavy loads stalled the
-      # server past painter's startup timeout. 20G clears the single-stage
-      # load; Max stays 24G as the kill backstop with a 4G throttle band.
-      MemoryAccounting = true;
-      MemoryHigh = "20G";
-      MemoryMax = "24G";
+      # No MemoryHigh/MemoryMax here any more. This unit froze `top` on
+      # 2026-08-08 — ComfyUI's dynamic VRAM loading stages weights in SYSTEM
+      # RAM and streams them to the card, so a MiniMaxH3 video run staged
+      # 19995M + 14956M + 2677M against 30G of RAM while kitty, a nix eval and
+      # the panel were already swapping, and the box livelocked (reclaiming
+      # just fast enough that the kernel OOM killer never fired) rather than
+      # crashing outright. The MemoryHigh throttle tried here afterwards
+      # (16G, then 20G) fought the wrong problem: it slowed comfy down
+      # *before* there was any real pressure, stalling legitimate large loads
+      # past painter's startup timeout, without doing anything for the case
+      # that actually froze the box — a nixos-rebuild's memory use landing at
+      # the same time, entirely outside this cgroup, that no per-unit ceiling
+      # here can see.
+      # The real fix is `sys/oomd.nix`: systemd-oomd now watches PSI (memory
+      # pressure, not allocation failure — the kernel killer's blind spot is
+      # exactly the livelock this unit hit) across `user.slice` and kills the
+      # worst offender there before the box stops responding, whoever is
+      # holding the memory and regardless of which cgroup made it scarce.
     };
     # No Install section: never auto-started at boot.
   };

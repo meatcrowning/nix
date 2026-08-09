@@ -4,8 +4,11 @@
 # `ManagedOOM*=auto`, which means "off unless something opts in" — so on
 # 2026-08-08 `top` had oomd running, watching, and empowered to do nothing
 # while the machine livelocked under memory pressure and had to be power-cycled
-# (the trigger was a ComfyUI video run; its own ceiling is in
-# home/prog/painter.nix).
+# (the trigger was a ComfyUI video run). comfy-painter briefly carried its own
+# MemoryHigh/MemoryMax ceiling as a stopgap (home/prog/painter.nix) but that
+# only capped one cgroup's blast radius and did nothing for a nixos-rebuild's
+# memory use landing at the same time — this is the actual anti-lockup
+# mechanism and the ceiling was removed once it was armed.
 #
 # The kernel OOM killer is not the safety net people assume it is. It fires on
 # ALLOCATION FAILURE, and a box thrashing against swap never quite fails an
