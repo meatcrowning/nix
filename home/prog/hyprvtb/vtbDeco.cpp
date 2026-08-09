@@ -237,7 +237,8 @@ static int colW() {
     return Cfg::barWidth();
 }
 static int totalBarW() {
-    return colW() * 2;
+    // Compact: one column. Otherwise the double-wide two-column bar.
+    return Cfg::compact() ? colW() : colW() * 2;
 }
 static int           cellSize() {
     return colW() - VTB_PAD * 2;
@@ -273,8 +274,13 @@ static int titleTop() {
 static int gridLeftMargin() {
     return (totalBarW() - (2 * cellSize() + VTB_CELL_GAP)) / 2;
 }
-static int    innerColX() { return gridLeftMargin(); }
-static int    sysColX() { return gridLeftMargin() + cellSize() + VTB_CELL_GAP; }
+// Compact: a single cell centred in the one-column bar — both the app and the
+// system column collapse onto it, so innerColX()==sysColX() and every column-x
+// helper below (titleTexX/footerTexX, which centre a colW slot on the cell)
+// resolves to the full-width slot for free.
+static int    singleColX() { return (totalBarW() - cellSize()) / 2; }
+static int    innerColX() { return Cfg::compact() ? singleColX() : gridLeftMargin(); }
+static int    sysColX() { return Cfg::compact() ? singleColX() : gridLeftMargin() + cellSize() + VTB_CELL_GAP; }
 // The stacked title / footer are colW-wide textures centered on their column.
 static double titleTexX() { return sysColX() + cellSize() / 2.0 - colW() / 2.0; }
 static double footerTexX() { return innerColX() + cellSize() / 2.0 - colW() / 2.0; }
@@ -285,10 +291,48 @@ static double footerTexX() { return innerColX() + cellSize() / 2.0 - colW() / 2.
 // top down; buttons flagged `bottom` stack anchored to the bottom of the column
 // (the settings button), never overlapping the top group. `contentH` is the
 // bar's logical height.
+// Compact single-column bar: the along-bar height the whole app-button group
+// occupies (no trailing gap past the last cell), and the along-bar y at which it
+// starts — anchored to the FAR end so the buttons sit opposite the window
+// controls.
+static double appGroupHCompact(const std::vector<SVtbAppButton>& btns) {
+    const int CELL = cellSize();
+    double    total = 0;
+    for (const auto& b : btns)
+        total += b.isSep() ? (VTB_SEP_H + VTB_CELL_GAP) : (CELL + VTB_CELL_GAP);
+    if (!btns.empty())
+        total -= VTB_CELL_GAP;
+    return total;
+}
+static double appGroupTopCompact(const std::vector<SVtbAppButton>& btns, double contentH) {
+    return std::max((double)VTB_PAD, contentH - VTB_PAD - appGroupHCompact(btns));
+}
+
 template <typename F>
 static void walkAppLayout(const std::vector<SVtbAppButton>& btns, double contentH, F&& cb) {
     const int  CELL = cellSize();
     const auto adv  = [&](const SVtbAppButton& b) { return b.isSep() ? (VTB_SEP_H + VTB_CELL_GAP) : (CELL + VTB_CELL_GAP); };
+
+    if (Cfg::compact()) {
+        // One column: the app buttons live at the far end, opposite the window
+        // controls. The whole group anchors to the bottom and stacks upward —
+        // normal buttons first, then the bottom-flagged ones (settings) last, so
+        // settings ends flush against the far edge.
+        double y = appGroupTopCompact(btns, contentH);
+        for (size_t i = 0; i < btns.size(); i++) {
+            if (btns[i].bottom)
+                continue;
+            cb(i, y);
+            y += adv(btns[i]);
+        }
+        for (size_t i = 0; i < btns.size(); i++) {
+            if (!btns[i].bottom)
+                continue;
+            cb(i, y);
+            y += adv(btns[i]);
+        }
+        return;
+    }
 
     double y = VTB_PAD; // top group
     for (size_t i = 0; i < btns.size(); i++) {
@@ -1610,10 +1654,20 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     // feature — on a horizontal bar the title region is display-only (the
     // editor's stacked geometry does not transpose).
     const int    TITLETOP = titleTopEff();
-    const int    RUNLEN = std::round((barLenOf(DECOBOX) - TITLETOP - VTB_PAD) * SCALE);
+    // Where the title's run ends. Normally the bar's far edge; in compact mode
+    // the title shares its column with the far-end app buttons, so it stops just
+    // above them instead of running under them.
+    double       titleEnd = barLenOf(DECOBOX) - VTB_PAD;
+    if (Cfg::compact()) {
+        SVtbAppReg treg;
+        if (appReg(treg))
+            titleEnd = std::min(titleEnd, appGroupTopCompact(treg.buttons, barLenOf(DECOBOX)) - VTB_PAD);
+    }
+    const double TITLELEN = std::max(0.0, titleEnd - TITLETOP);
+    const int    RUNLEN = std::round(TITLELEN * SCALE);
     // The title's device box, from bar-local coords (titleTexX across,
     // TITLETOP along) so it lands in the OUTER band whatever the edge.
-    const CBox   TITLEBOX = localBox(titleTexX(), TITLETOP, colW(), std::max(0.0, barLenOf(DECOBOX) - TITLETOP - VTB_PAD));
+    const CBox   TITLEBOX = localBox(titleTexX(), TITLETOP, colW(), TITLELEN);
     const double TITLEX = TITLEBOX.x;
     const double TITLEY = TITLEBOX.y;
 
@@ -1796,6 +1850,9 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
         // room below it (bounded run length reserves that track space). On a
         // horizontal bar the stacked column would read sideways, so the footer
         // is one horizontal line there (same anchor logic, transposed).
+        // Suppressed in compact mode: the single column has no lower inner area —
+        // that space is the title's — so the footer and its scrub track drop out.
+        if (!Cfg::compact()) {
         const double BH      = bottomGroupH(reg.buttons);
         const double lowerTop = appBottom + VTB_PAD;              // top of the lower area (logical)
         const double lowerBot = CONTENTH - BH - VTB_PAD;          // bottom (above the bottom group)
@@ -1838,6 +1895,7 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
             fbox.h = TSZ.y;
             Hl::texture(m_pFooterTex, fbox.round(), {.a = a});
         }
+        } // !compact
 
         // media scrub bar: a vertical progress track filling top->bottom with the
         // playback fraction, drawn below the footer. Click/drag/scroll it seeks
@@ -2768,6 +2826,11 @@ int CVtbDeco::appCellAt(const Vector2D& c, const SVtbAppReg& reg) {
 // even though the drawn groove is thin. False if no scrub bar or too short.
 bool CVtbDeco::playbarTrackLocal(const SVtbAppReg& reg, double contentH, double scale, CBox& out) {
     if (!reg.playbar)
+        return false;
+    // The compact single-column bar has no lower inner column for a scrub track;
+    // its space is the title's. Returning false here disables the playbar draw
+    // AND every hit-test that funnels through this one helper.
+    if (Cfg::compact())
         return false;
     double appBottom = VTB_PAD;
     walkAppLayout(reg.buttons, contentH, [&](size_t i, double y) {
