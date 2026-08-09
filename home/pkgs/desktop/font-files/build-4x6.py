@@ -27,9 +27,9 @@ Hand-audited character set: all 95 printable ASCII (U+0020..U+007E), plus the
 non-ASCII glyphs the desktop actually draws in this face as hardcoded labels
 (see the block after the ASCII table).
 
-OUTPUT IS A SCALABLE OUTLINE TTF, not a bitmap. Every authored pixel becomes a
-filled square contour, so the face is a normal scalable font that any renderer
-can rasterise. This is deliberate and load-bearing: as a non-scalable BDF the
+OUTPUT IS A SCALABLE OUTLINE TTF, not a bitmap. Each glyph is the MERGED union
+outline of its authored pixel squares (see merged_contours), so the face is a
+normal scalable font that any renderer can rasterise. This is deliberate and load-bearing: as a non-scalable BDF the
 face was SILENTLY SUBSTITUTED by every text stack that asks fontconfig for a
 scalable face — proven, `fc-match "Botis 4x6:scalable=true"` returned Noto Sans,
 and Pango (the hyprvtb titlebar) and the Quickshell GL scenegraph both dropped
@@ -214,20 +214,84 @@ DESCENT_U = DESCENT * PX_UNITS       # 100 units below the baseline
 ADVANCE_U = ADVANCE * PX_UNITS       # 500 units
 
 
-def pixel_square(pen, r, c):
-    """Emit one authored pixel (row r from the top, col c) as a filled square
-    contour. y is baseline-relative and up-positive: the cell spans ASCENT_U
-    above the baseline down to -DESCENT_U below it. Row 0 is the top row, so its
-    top edge is at ASCENT_U and each row is PX_UNITS tall."""
-    x0 = c * PX_UNITS
-    x1 = x0 + PX_UNITS
-    y1 = ASCENT_U - r * PX_UNITS         # top edge of this row
-    y0 = y1 - PX_UNITS                   # bottom edge
-    pen.moveTo((x0, y0))
-    pen.lineTo((x1, y0))
-    pen.lineTo((x1, y1))
-    pen.lineTo((x0, y1))
-    pen.closePath()
+def merged_contours(rows):
+    """Trace a glyph's ink as MERGED rectilinear contours — the union outline,
+    not one square per pixel. Coordinates are font units, y up, baseline 0:
+    row 0's top edge is at ASCENT_U and each row is PX_UNITS tall.
+
+    Why merged (2026-08-08): as per-pixel squares, every seam between two
+    vertically adjacent ink pixels was a pair of coincident edges, and any
+    grid-fitting rasteriser that snaps those edges independently pulls them
+    apart — Chromium (surfer) FORCE-enables the FreeType autohinter whenever a
+    face is fontconfig-pinned antialias=off, no matter what the hinting pin
+    says (measured: hintnone honoured with AA on, forced autohint with AA
+    off), and at any size off the exact 15px grid every glyph was sliced by
+    blank horizontal stripes. A union outline has no interior edges, so there
+    is nothing to pull apart; More Perfect survives the same autohint because
+    its outlines are merged, and now Botis matches.
+
+    Boundary edges are emitted ink-on-left, so outer contours come out CCW —
+    the same winding the old squares had — and holes CW, both filled by
+    nonzero winding. At a checkerboard corner (two ink pixels touching
+    diagonally) four edges meet at one vertex; taking the leftmost turn keeps
+    the two squares as separate loops touching at a point instead of a
+    self-crossing bowtie."""
+    ink = set()
+    for r, row in enumerate(rows):
+        for c, ch in enumerate(row):
+            if ch == "#":
+                ink.add((r, c))
+
+    def corners(r, c):
+        x0 = c * PX_UNITS
+        y1 = ASCENT_U - r * PX_UNITS     # top edge of this row
+        return x0, x0 + PX_UNITS, y1 - PX_UNITS, y1   # x0 x1 y0 y1
+
+    edges = set()                        # directed (start, end), ink on the left
+    for (r, c) in ink:
+        x0, x1, y0, y1 = corners(r, c)
+        if (r + 1, c) not in ink:        # bottom edge, ink above -> +x
+            edges.add(((x0, y0), (x1, y0)))
+        if (r - 1, c) not in ink:        # top edge, ink below -> -x
+            edges.add(((x1, y1), (x0, y1)))
+        if (r, c - 1) not in ink:        # left edge, ink right -> -y
+            edges.add(((x0, y1), (x0, y0)))
+        if (r, c + 1) not in ink:        # right edge, ink left -> +y
+            edges.add(((x1, y0), (x1, y1)))
+
+    out = {}
+    for s, e in edges:
+        out.setdefault(s, []).append(e)
+
+    def direction(a, b):
+        return (b[0] - a[0]) // PX_UNITS or 0, (b[1] - a[1]) // PX_UNITS or 0
+
+    contours = []
+    unused = set(edges)
+    while unused:
+        start, nxt = min(unused)         # deterministic output
+        unused.discard((start, nxt))
+        pts = [start]
+        cur = nxt
+        d = direction(start, nxt)
+        while cur != start:
+            pts.append(cur)
+            outs = [e for e in out[cur] if (cur, e) in unused]
+            # leftmost turn first: max cross(d, candidate direction)
+            nxt_pt = max(outs, key=lambda e: d[0] * direction(cur, e)[1]
+                         - d[1] * direction(cur, e)[0])
+            unused.discard((cur, nxt_pt))
+            d = direction(cur, nxt_pt)
+            cur = nxt_pt
+        # drop collinear midpoints (runs of unit edges in one direction)
+        slim = []
+        n = len(pts)
+        for i, p in enumerate(pts):
+            a, b = pts[i - 1], pts[(i + 1) % n]
+            if direction(a, p) != direction(p, b):
+                slim.append(p)
+        contours.append(slim)
+    return contours
 
 
 def glyph_name(cp):
@@ -235,9 +299,9 @@ def glyph_name(cp):
 
 
 def build_ttf(out):
-    """Build the scalable outline TTF: every '#' pixel becomes a PX_UNITS square.
-    Abutting squares share edges of the same winding, so the rasteriser fills the
-    union — no seams — while non-adjacent ink stays separate."""
+    """Build the scalable outline TTF: each glyph is the merged union outline
+    of its PX_UNITS ink squares (see merged_contours for why per-pixel square
+    contours were replaced)."""
     from fontTools.fontBuilder import FontBuilder
     from fontTools.pens.ttGlyphPen import TTGlyphPen
 
@@ -256,10 +320,11 @@ def build_ttf(out):
     metrics[".notdef"] = (ADVANCE_U, 0)
     for cp in cps:
         pen = TTGlyphPen(None)
-        for r, row in enumerate(G[cp]):
-            for c, ch in enumerate(row):
-                if ch == "#":
-                    pixel_square(pen, r, c)
+        for contour in merged_contours(G[cp]):
+            pen.moveTo(contour[0])
+            for p in contour[1:]:
+                pen.lineTo(p)
+            pen.closePath()
         glyphs[glyph_name(cp)] = pen.glyph()
         # Mono: every glyph advances ADVANCE_U; LSB left at 0 (the grid origin).
         metrics[glyph_name(cp)] = (ADVANCE_U, 0)

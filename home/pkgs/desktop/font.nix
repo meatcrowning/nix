@@ -204,15 +204,19 @@ in
   # same guard: pin any request for it to upright regular and kill synthetic
   # emboldening, so the pixel squares are never faux-bolded/obliqued into a
   # smear. Same antialias/rgba pins as the VGA face above — but UNHINTED,
-  # unlike it. Botis's glyphs are disconnected per-pixel square contours, and
-  # the autohinter snaps each square's horizontal edges independently: at any
-  # size off the exact 2x2 grid (15px), adjacent rows round apart and every
-  # glyph is sliced by blank horizontal lines (measured 2026-08-08: 'H' at
-  # 11-20px carries 2-4 full white rows under autohint+hintfull; unhinted is
-  # contiguous at every size, and at 15px the two are pixel-identical). The
-  # VGA face keeps hintfull because kitty's 8x15 cell needs the grid-fitted
-  # 8px advance; nothing pins Botis to a size, so it must survive arbitrary
-  # ones instead.
+  # unlike it. Any grid fit (auto- or light hinting) snaps this face's
+  # horizontal edges to the device grid, and at any size off the exact 2x2
+  # grid (15px) that sliced every glyph with blank horizontal lines (measured
+  # 2026-08-08: 'H' at 11-20px carried 2-4 full white rows under
+  # autohint+hintfull; unhinted is contiguous at every size, and at 15px the
+  # two are pixel-identical). The VGA face keeps hintfull because kitty's
+  # 8x15 cell needs the grid-fitted 8px advance; nothing pins Botis to a
+  # size, so it must survive arbitrary ones instead. Two consumers needed
+  # more than this pin: build-4x6.py now emits MERGED union outlines (per-
+  # pixel square contours had seams a hinting rasteriser pulls apart), and
+  # Chromium ignores hinting pins outright for aliased faces — surfer layers
+  # its own Botis antialias carve-out over this config (home/prog/surfer.nix,
+  # the measurements are there).
   xdg.configFile."fontconfig/conf.d/50-botis-4x6-regular.conf".text = ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
