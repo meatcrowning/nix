@@ -1285,6 +1285,10 @@ void vtbPublishMotion() {
 
 static void onConfigReloadedInner() {
     vtbPublishMotion();
+    // Reload already repositions every bar below, so record the edge it
+    // applied — the tick's own change-detector must not fire a second,
+    // redundant reposition for the same change.
+    g_pGlobalState->lastBarSide = Cfg::barSideRaw();
     for (auto& b : g_pGlobalState->bars) {
         if (!b)
             continue;
@@ -1340,6 +1344,25 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                                                            for (auto& b : g_pGlobalState->bars) {
                                                                if (b)
                                                                    b->mainThreadTick(SERIAL);
+                                                           }
+                                                           // Titlebar edge changed with no config-reload event to
+                                                           // notify the decos — a bare `hl.config` runtime override
+                                                           // (apply-window-frame.sh / wal-set.sh persist the edge that
+                                                           // way) sets the value but never repositions, so the bars
+                                                           // kept drawing on the old edge until a reload or a
+                                                           // refresh_fonts poke moved them. Reposition here so the
+                                                           // pick takes effect whatever set it.
+                                                           {
+                                                               const std::string SIDE = Cfg::barSideRaw();
+                                                               if (g_pGlobalState->lastBarSide.empty())
+                                                                   g_pGlobalState->lastBarSide = SIDE;
+                                                               else if (SIDE != g_pGlobalState->lastBarSide) {
+                                                                   g_pGlobalState->lastBarSide = SIDE;
+                                                                   for (auto& b : g_pGlobalState->bars) {
+                                                                       if (b)
+                                                                           b->onConfigReloaded();
+                                                                   }
+                                                               }
                                                            }
                                                            // The pointer device list has no add/remove event on
                                                            // either pin, so kinetic's per-touchpad listeners are
@@ -1746,7 +1769,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / program icon / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.34"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / program icon / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.35"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

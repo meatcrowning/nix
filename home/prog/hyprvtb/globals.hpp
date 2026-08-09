@@ -119,6 +119,15 @@ struct SGlobalState {
     // bottom of the z-order. Toggled by hl.plugin.hyprvtb.toggle_scratch().
     bool scratchVisible = false;
 
+    // Last titlebar edge the tick repositioned the bars to (plugin:hyprvtb:
+    // titlebar_edge). The edge can change by a path that fires no
+    // config-reload event — a bare `hl.config` runtime override, which is how
+    // apply-window-frame.sh and wal-set.sh persist the pick — so that value
+    // moved but the bars stayed on the old edge until something else forced a
+    // reposition. The tick compares against this and repositions on a change.
+    // Empty until the first tick seeds it (or onConfigReloadedInner does).
+    std::string lastBarSide;
+
     // Main-thread heartbeat (150ms): damages bars whose app-button
     // registration changed (the IPC thread can't touch the renderer) and pops
     // hover tooltips after their dwell even when the cursor sits perfectly
