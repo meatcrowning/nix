@@ -120,6 +120,7 @@ class ComfyClient(QtCore.QObject):
         self.connected.emit()
 
     def _on_disconnected(self):
+        self.logged.emit("websocket disconnected")
         self.disconnected.emit()
         if self._want_ws:
             self._reconnect.start(self._backoff)
@@ -304,6 +305,7 @@ class ComfyClient(QtCore.QObject):
                 self._active = job
                 job.started_at = time.time()
                 self.jobStarted.emit(job)
+                self.logged.emit(f"started {job.prompt_id}")
             return
 
         if kind == "execution_cached":
@@ -322,7 +324,9 @@ class ComfyClient(QtCore.QObject):
                 self._complete(job)
             else:
                 job.current_node = node
-                self.jobNode.emit(job, job.role_of(node))
+                role = job.role_of(node)
+                self.jobNode.emit(job, role)
+                self.logged.emit(f"running {role}")
             return
 
         if kind in ("progress", "progress_state"):
@@ -376,6 +380,7 @@ class ComfyClient(QtCore.QObject):
             self._jobs.pop(job.prompt_id, None)
             if self._active is job:
                 self._active = None
+            self.logged.emit(f"error: {msg}")
             self.jobFailed.emit(job, msg)
             return
 
@@ -399,6 +404,7 @@ class ComfyClient(QtCore.QObject):
         if self._active is job:
             self._active = None
         if job.images:
+            self.logged.emit(f"finished {job.prompt_id} ({len(job.images)} image(s))")
             self.jobFinished.emit(job)
             return
         # No images seen on the socket: reconcile once against history, which also

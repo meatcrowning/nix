@@ -21,6 +21,7 @@ ComfyUI itself runs as a systemd --user unit, started on demand and left running
 so weights stay warm between launches:  journalctl --user -u comfy-painter -f
 """
 
+import collections
 import hashlib
 import json
 import os
@@ -704,6 +705,7 @@ class Painter(QObject):
     modeChanged = Signal()
     previewChanged = Signal()
     toast = Signal(str, bool)          # message, isError
+    logChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -711,6 +713,11 @@ class Painter(QObject):
         self.loras = LoraStack(self)
         self.choices = LoraChoices(self)
         self.gallery = Gallery(self)
+
+        # What comfy.py's ComfyClient.logged has said, newest last, for a small
+        # live panel in the settings drawer — bounded so a long session cannot
+        # grow this without limit.
+        self._log = collections.deque(maxlen=200)
 
         self._status = "starting backend..."
         self._busy = False
@@ -768,6 +775,7 @@ class Painter(QObject):
         self.client.jobFinished.connect(self._on_finished)
         self.client.jobFailed.connect(self._on_failed)
         self.client.connected.connect(self._on_ws_connected)
+        self.client.logged.connect(self._on_log)
         self.gallery.posterReady.connect(self._on_poster)
 
         OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -850,6 +858,9 @@ class Painter(QObject):
     # What systemd says about comfy-painter.service, so start/stop can be lit
     # from the world instead of from intent (docs/DESIGN.md §10).
     unitState = Property(str, lambda self: self._unit_state, notify=statusChanged)
+    # Recent comfy.py websocket activity (queued/started/running/finished/error),
+    # newest last, for the settings drawer's live log panel.
+    logLines = Property("QStringList", lambda self: list(self._log), notify=logChanged)
     backendRunning = Property(bool, lambda self: self._unit_state in ("active", "activating"),
                               notify=statusChanged)
     samplers = Property("QStringList", lambda self: self._samplers, notify=optionsChanged)
@@ -1157,6 +1168,10 @@ class Painter(QObject):
     def _on_ws_connected(self):
         if self._object_info is None:
             self.client.fetch_object_info(self._on_object_info)
+
+    def _on_log(self, line):
+        self._log.append(time.strftime("%H:%M:%S") + "  " + line)
+        self.logChanged.emit()
 
     def _on_object_info(self, oi):
         if not oi:
