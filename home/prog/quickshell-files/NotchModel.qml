@@ -99,10 +99,13 @@ Singleton {
     // The whole slab, overlap included...
     readonly property int protrusion0: columnInset + iconSize + gapRight
     readonly property int slabW: protrusion0 + overlap
-    readonly property int slabH: shown
-        ? apps.length * iconSize + Math.max(0, apps.length - 1) * gap
-          + 2 * (lineW + gap)
-        : 0
+    // The slab's INTRINSIC height, independent of `shown` — what the notch would
+    // stand at if enabled. `slabH` is 0 while disabled, but the edge handle needs
+    // this span even then, to place the re-enable double-click target where the
+    // notch would sit (EdgeGrip.qml).
+    readonly property int slabH0: apps.length * iconSize
+        + Math.max(0, apps.length - 1) * gap + 2 * (lineW + gap)
+    readonly property int slabH: shown ? slabH0 : 0
     // ...and the part of it that sticks out past the bar, which is what the
     // panel has to reserve and what a window can be flush against.
     readonly property int protrusion: shown ? protrusion0 : 0

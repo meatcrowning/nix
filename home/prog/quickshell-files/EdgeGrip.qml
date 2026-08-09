@@ -86,6 +86,13 @@ PanelWindow {
     readonly property int jogX: barLeft ? edgeX : notchX + gripW
     readonly property int jogW: notchPx
 
+    // The vertical span the notch WOULD occupy, centred on the surface, even
+    // while it is disabled (notchH is 0 then). This is the target the RE-ENABLE
+    // double-click aims at — the plain edge strip at the notch's would-be height.
+    readonly property int reNotchH: NotchModel.slabH0
+    readonly property int reNotchTop: Math.round((height - reNotchH) / 2)
+    readonly property int reNotchBottom: reNotchTop + reNotchH
+
     // Input region: only the contour is clickable, so the rest of the desktop
     // is untouched by this window despite it covering the screen.
     mask: Region {
@@ -166,8 +173,23 @@ PanelWindow {
                 && mx >= root.notchX && mx < root.notchX + root.gripW
                 && my >= root.notchTop && my < root.notchBottom;
         }
+
+        // ...and the INVERSE: with the notch disabled there is no face to hit, so
+        // double-clicking the plain edge strip at the span the notch would occupy
+        // (reNotchTop..reNotchBottom) turns it back on — fully reversible and
+        // symmetric with onNotchFace above. The mask exposes that strip
+        // full-height already, so the click lands with no change to the input
+        // region. Guarded so the two can never both fire: this needs the notch
+        // OFF, onNotchFace needs it up. Held off while the drawer is out, matching
+        // the notch-face gate (notchPx is 0 then too).
+        function onNotchReenable(mx, my) {
+            return !NotchModel.enabled && !root.drawerOut
+                && mx >= root.edgeX && mx < root.edgeX + root.gripW
+                && my >= root.reNotchTop && my < root.reNotchBottom;
+        }
         onDoubleClicked: (mouse) => {
-            if (!onNotchFace(mouse.x, mouse.y)) return;
+            if (!onNotchFace(mouse.x, mouse.y) && !onNotchReenable(mouse.x, mouse.y))
+                return;
             SettingsStore.d.desktopIcons = !SettingsStore.d.desktopIcons;
             SettingsStore.save();
         }
