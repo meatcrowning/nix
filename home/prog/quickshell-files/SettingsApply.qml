@@ -72,6 +72,12 @@ Item {
             + "decoration = { dim_inactive = " + _b(d.dimUnfocused) + " }})"
             + (flush ? " hl.plugin.hyprvtb.refresh_fonts()" : "");
         Quickshell.execDetached(["hyprctl", "eval", lua]);
+        // The titlebar edge and the unfocus dim are RUNTIME overrides that a
+        // config reload drops (a theme change reloads hyprland.lua), so the side
+        // snapped back to "right" and the dim to default-true on every theme
+        // tweak. Persist them into hyprland.lua too — same script/timer the
+        // frame uses, which now writes these keys as well.
+        framePersist.restart();
     }
 
     // Push the "pixel font" pick (Settings > Appearance) out beyond the panel

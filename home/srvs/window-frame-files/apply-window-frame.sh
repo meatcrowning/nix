@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
-# apply-window-frame.sh — push the Settings "border width" / "corner rounding"
-# pick (settings.json windowBorderWidth / windowRounding) at the compositor AND
-# PERSIST it into the live hyprland.lua.
+# apply-window-frame.sh — push the Settings frame + hyprvtb runtime picks
+# (windowBorderWidth / windowRounding, plus titlebarEdge and dimUnfocused) at
+# the compositor AND PERSIST them into the live hyprland.lua.
 #
-# The panel already sets both live over `hyprctl eval hl.config(...)`
-# (SettingsApply.applyFrame). That is a RUNTIME OVERRIDE and Hyprland drops it
-# on any config reload — and a reload happens for reasons that have nothing to
-# do with the frame: apply-pixel-font.sh seds the font keys into hyprland.lua,
-# which Hyprland AUTO-RELOADS, so changing the pixel font threw the corner
-# radius (and the border width) back to the values still written in that file.
-# Fixing the corner-rounding slider by nudging it off its value and back is what
-# that looked like from the outside. Same story as shadow_alpha / title_rotated /
-# the titlebar font, all of which are persisted for this reason.
+# The panel already sets all of these live over `hyprctl eval hl.config(...)`
+# (SettingsApply.applyFrame / applyVtb). That is a RUNTIME OVERRIDE and Hyprland
+# drops it on any config reload — and a reload happens for reasons that have
+# nothing to do with the setting: apply-pixel-font.sh seds the font keys into
+# hyprland.lua, which Hyprland AUTO-RELOADS, so changing the pixel font threw the
+# corner radius (and the border width) back to the values still written in that
+# file. Fixing the corner-rounding slider by nudging it off its value and back is
+# what that looked like from the outside. The titlebar anchor edge and the
+# unfocus dim had the identical bug: the side snapped back to "right" and the dim
+# to default-true on every theme change (a theme apply reloads the config).
+# Same story as shadow_alpha / title_rotated / the titlebar font, all persisted
+# for this reason.
 #
 # wal-set.sh writes the same two lines on every theme apply; this is the same
 # write, on the change itself, so the file is never stale in between. Run:
@@ -32,6 +35,8 @@ LUA="$CONFIG/hypr/hyprland.lua"
 # a read that lands inside the panel's debounced settings.json write.
 BORDER_W=2
 ROUNDING=0
+TITLEBAR_EDGE=right
+DIM=true
 if [ -f "$SETTINGS" ]; then
     v="$(sed -n 's/.*"windowBorderWidth"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$SETTINGS" | head -n1)"
     [ -n "$v" ] || exit 0
@@ -39,9 +44,15 @@ if [ -f "$SETTINGS" ]; then
     v="$(sed -n 's/.*"windowRounding"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$SETTINGS" | head -n1)"
     [ -n "$v" ] || exit 0
     ROUNDING="$v"
+    # right | left | top | bottom — anything else is left as the default.
+    v="$(sed -n 's/.*"titlebarEdge"[[:space:]]*:[[:space:]]*"\(right\|left\|top\|bottom\)".*/\1/p' "$SETTINGS" | head -n1)"
+    [ -n "$v" ] && TITLEBAR_EDGE="$v"
+    # dimUnfocused drives BOTH the plugin titlebar scrim (plugin:hyprvtb:
+    # dim_unfocused) and Hyprland's native body dim (decoration:dim_inactive).
+    grep -q '"dimUnfocused"[[:space:]]*:[[:space:]]*false' "$SETTINGS" && DIM=false
 fi
 
-hyprctl eval "hl.config({ general = { border_size = ${BORDER_W} }, decoration = { rounding = ${ROUNDING} } })" >/dev/null 2>&1 || true
+hyprctl eval "hl.config({ general = { border_size = ${BORDER_W} }, decoration = { rounding = ${ROUNDING}, dim_inactive = ${DIM} }, plugin = { hyprvtb = { [\"titlebar_edge\"] = \"${TITLEBAR_EDGE}\", [\"dim_unfocused\"] = ${DIM} } } })" >/dev/null 2>&1 || true
 
 if [ -f "$LUA" ]; then
     # Anchored at line start so the commented-out examples further down cannot
@@ -52,6 +63,16 @@ if [ -f "$LUA" ]; then
     }
     lua_num '[[:space:]]*border_size[[:space:]]*=[[:space:]]*' "$BORDER_W"
     lua_num '[[:space:]]*rounding[[:space:]]+=[[:space:]]*' "$ROUNDING"
+    # The two hyprvtb block keys are `["key"] = value`; the native dim is a
+    # bare `dim_inactive = <bool>` at line start (the commented dim examples
+    # further down are prefixed, so the ^ anchor cannot reach them). All guarded
+    # so an already-correct value fires no needless autoreload.
+    grep -qE '^\s*\["titlebar_edge"\]\s*=\s*"'"$TITLEBAR_EDGE"'"' "$LUA" || \
+        sed -i -E 's/(\["titlebar_edge"\][[:space:]]*=[[:space:]]*")[^"]*"/\1'"$TITLEBAR_EDGE"'"/' "$LUA"
+    grep -qE '^\s*\["dim_unfocused"\]\s*=\s*'"$DIM"'\b' "$LUA" || \
+        sed -i -E 's/(\["dim_unfocused"\][[:space:]]*=[[:space:]]*)(true|false)/\1'"$DIM"'/' "$LUA"
+    grep -qE '^[[:space:]]*dim_inactive[[:space:]]*=[[:space:]]*'"$DIM"'\b' "$LUA" || \
+        sed -i -E 's/^([[:space:]]*dim_inactive[[:space:]]*=[[:space:]]*)(true|false)/\1'"$DIM"'/' "$LUA"
 fi
 
-echo "apply-window-frame: border=${BORDER_W}px rounding=${ROUNDING}px"
+echo "apply-window-frame: border=${BORDER_W}px rounding=${ROUNDING}px titlebar=${TITLEBAR_EDGE} dim=${DIM}"
