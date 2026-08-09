@@ -2220,8 +2220,16 @@ bool CVtbDeco::rollShadowBoxDev(PHLMONITOR pMonitor, CBox& out) {
     if (barBox.w < 1 || barBox.h < 1)
         return false;
 
-    const double clientW = m_rollWinBox.w * SCALE;
-    const double emerged = clientW * (1.f - slideT);
+    // Client extent along the slide axis: width for a vertical (left/right) bar,
+    // height for a horizontal (top/bottom) one — the same discriminator the
+    // snapshot draw uses. Keying on width unconditionally made the roll-out
+    // shadow track the content only for left/right bars; with a top/bottom bar
+    // the shadow's growing edge advanced by the window's WIDTH while the content
+    // emerged by its HEIGHT, so on a window taller than it is wide the bottom of
+    // the shadow lagged the window all through the reveal and snapped to full
+    // extent only when the animation ended and the flat shadow loop took over.
+    const double clientC = (barVertical() ? m_rollWinBox.w : m_rollWinBox.h) * SCALE;
+    const double emerged = clientC * (1.f - slideT);
     // The composite is content + bar; the shadow spans both. The span runs
     // ACROSS the bar's axis (left/right of a vertical bar, above/below a
     // horizontal one), mirrored for LEFT/TOP so the content side stays on the
