@@ -596,6 +596,13 @@ Item {
             visible: row.saysDetail !== ""
             height: visible ? implicitHeight : 0
             color: row.fgDim
+            // ONE LINE, tail elided — [his, 2026-08-08] a long claim detail wrapped
+            // across the card and sprawled. `Text.elide` is the desktop's own
+            // single-line clip and draws a real one-cell U+2026 (docs/DESIGN.md §2,
+            // now in the family); short text is untouched. `untick` still strips the
+            // agent's own trailing dots first, so the line never sits on frozen ones.
+            wrapMode: Text.NoWrap
+            elide: Text.ElideRight
             // NO dots, animated or frozen: they are the top line's (see the tick
             // note above), and this is never the top line - it is only drawn at
             // all when the verb line above it is.
@@ -711,6 +718,14 @@ Item {
                 x: parent.nameW
                 y: 0
                 width: parent.width - x - whereT.width - (whereT.width > 0 ? 8 : 0)
+                // ONE LINE, tail elided — [his, 2026-08-08] the dispatched task text
+                // was long enough to wrap and sprawl across the card. The brief is
+                // fixed for the card's life and the two lines above it are the ones
+                // worth re-reading (§the ladder note), so it is clipped to a single
+                // line with `Text.elide` — the desktop's real one-cell U+2026
+                // (docs/DESIGN.md §2), like `whereT` beside it. Short titles unchanged.
+                wrapMode: Text.NoWrap
+                elide: Text.ElideRight
                 color: row.titleFirst ? row.leadTone : Theme.dim
                 text: row.agent ? row.agent.title : ""
             }
