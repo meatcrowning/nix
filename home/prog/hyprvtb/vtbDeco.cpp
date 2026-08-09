@@ -876,8 +876,8 @@ SP<Render::ITexture> CVtbDeco::renderHorizTex(const std::string& text, int runLe
     return tex;
 }
 
-SP<Render::ITexture> CVtbDeco::glyphTex(const std::string& glyph, const CHyprColor& color, float scale) {
-    const auto key = glyph + "|" + std::format("{:08x}", color.getAsHex());
+SP<Render::ITexture> CVtbDeco::glyphTex(const std::string& glyph, const CHyprColor& color, float scale, int quarter) {
+    const auto key = glyph + "|" + std::format("{:08x}", color.getAsHex()) + (quarter > 0 ? "|cw" : quarter < 0 ? "|ccw" : "");
     auto       it  = m_glyphCache.find(key);
     if (it != m_glyphCache.end() && it->second)
         return it->second;
@@ -885,8 +885,77 @@ SP<Render::ITexture> CVtbDeco::glyphTex(const std::string& glyph, const CHyprCol
     const auto FONT = Cfg::font();
     const int  SIZE = std::round(Cfg::fontSize() * scale);
 
-    auto       tex = Hl::renderText(glyph, color, SIZE, false, FONT, 0);
+    auto       tex = quarter == 0 ? Hl::renderText(glyph, color, SIZE, false, FONT, 0) : renderQuarterGlyph(glyph, color, SIZE, quarter > 0);
     m_glyphCache[key] = tex;
+    return tex;
+}
+
+// A single glyph turned a quarter-turn, drawn with cairo/pango. Used only for
+// the roll cell on a horizontal (top/bottom) bar, where the roll axis is
+// vertical and `>>`/`<<` must point up/down instead of along their reading
+// direction. A 90° turn keeps the pixel grid axis-aligned (integer offsets
+// below), so the pixel font stays crisp — same ANTIALIAS_NONE rule as the
+// title renderers. clockwise=false turns CCW (`>>` points UP, a TOP bar);
+// clockwise=true turns CW (`>>` points DOWN, a BOTTOM bar).
+SP<Render::ITexture> CVtbDeco::renderQuarterGlyph(const std::string& glyph, const CHyprColor& COLOR, int SIZE, bool clockwise) {
+    const auto FONT = Cfg::font();
+    if (glyph.empty() || SIZE < 1)
+        return nullptr;
+
+    cairo_font_options_t* fo = cairo_font_options_create();
+    if (!Vtb::Cfg::fontSmooth())
+        cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_NONE);
+
+    PangoFontDescription* fd = pango_font_description_new();
+    pango_font_description_set_family(fd, FONT.c_str());
+    pango_font_description_set_absolute_size(fd, SIZE * PANGO_SCALE);
+
+    // measure the upright glyph on a scratch surface
+    auto  MSURF = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+    auto  MCR   = cairo_create(MSURF);
+    auto* ml    = pango_cairo_create_layout(MCR);
+    pango_cairo_context_set_font_options(pango_layout_get_context(ml), fo);
+    pango_layout_set_font_description(ml, fd);
+    pango_layout_set_text(ml, glyph.c_str(), -1);
+    int tw = 0, th = 0;
+    pango_layout_get_pixel_size(ml, &tw, &th);
+    g_object_unref(ml);
+    cairo_destroy(MCR);
+    cairo_surface_destroy(MSURF);
+    if (tw < 1 || th < 1) {
+        pango_font_description_free(fd);
+        cairo_font_options_destroy(fo);
+        return nullptr;
+    }
+
+    // rotated surface: the axes swap, so it is th wide × tw tall
+    auto SURF = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, th, tw);
+    auto CR   = cairo_create(SURF);
+    if (clockwise) {
+        cairo_translate(CR, th, 0);
+        cairo_rotate(CR, M_PI / 2.0);
+    } else {
+        cairo_translate(CR, 0, tw);
+        cairo_rotate(CR, -M_PI / 2.0);
+    }
+
+    auto* layout = pango_cairo_create_layout(CR);
+    pango_cairo_context_set_font_options(pango_layout_get_context(layout), fo);
+    pango_layout_set_font_description(layout, fd);
+    pango_layout_set_text(layout, glyph.c_str(), -1);
+    cairo_set_source_rgba(CR, COLOR.r, COLOR.g, COLOR.b, COLOR.a);
+    cairo_move_to(CR, 0, 0);
+    pango_cairo_show_layout(CR, layout);
+
+    pango_font_description_free(fd);
+    g_object_unref(layout);
+    cairo_font_options_destroy(fo);
+    cairo_surface_flush(SURF);
+
+    auto tex = Hl::textureFromCairo(SURF);
+
+    cairo_destroy(CR);
+    cairo_surface_destroy(SURF);
     return tex;
 }
 
@@ -1434,8 +1503,8 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
                  {.round = std::max(0, CELLRND - (int)std::round(bw * SCALE))});
     };
 
-    auto drawGlyphXY = [&](double x, double y, const std::string& glyph, const CHyprColor& color) {
-        auto tex = glyphTex(glyph, color, SCALE);
+    auto drawGlyphXY = [&](double x, double y, const std::string& glyph, const CHyprColor& color, int quarter = 0) {
+        auto tex = glyphTex(glyph, color, SCALE, quarter);
         if (!tex || tex->m_texID == 0)
             return;
         const auto TSZ = tex->m_size;
@@ -1457,9 +1526,9 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
         drawCellXY(sysColX(), y, hot, hoverLit, cellFlashing(idx) || active);
     };
 
-    auto drawGlyph = [&](int idx, const std::string& glyph, const CHyprColor& color, bool active = false) {
+    auto drawGlyph = [&](int idx, const std::string& glyph, const CHyprColor& color, bool active = false, int quarter = 0) {
         const bool inverted = cellFlashing(idx) || active;
-        drawGlyphXY(sysColX(), VTB_PAD + idx * (CELL + VTB_CELL_GAP), glyph, inverted ? bgColor : color);
+        drawGlyphXY(sysColX(), VTB_PAD + idx * (CELL + VTB_CELL_GAP), glyph, inverted ? bgColor : color, quarter);
     };
 
     // close [x] — crit on hover, like the QS bar had
@@ -1474,7 +1543,13 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     // mid-animation) without the user having shaded anything.
     const bool SHADED = m_bRolledUp && !m_bOpening && !m_bClosing;
     drawCell(1, warnColor, SHADED);
-    drawGlyph(1, SHADED ? "<<" : ">>", (SHADED || m_iHoverCell == 1) ? warnColor : textColor, SHADED);
+    // On a horizontal bar the roll axis is vertical, so the `>>`/`<<` chevrons
+    // turn a quarter-turn to point along it: UP into a TOP bar (-1, CCW), DOWN
+    // into a BOTTOM bar (+1, CW). The >>/<< flip still carries collapse-vs-expand
+    // — a TOP bar shows `>>` up to shade, `<<` down to unshade. Vertical bars
+    // (right/left) keep the upright chevrons they always had. DESIGN §12.1.
+    const int ROLLQ = barVertical() ? 0 : (barSide() == eBarSide::TOP ? -1 : +1);
+    drawGlyph(1, SHADED ? "<<" : ">>", (SHADED || m_iHoverCell == 1) ? warnColor : textColor, SHADED, ROLLQ);
 
     // maximize [=] — inverted while maximized (held), accent while hovered
     drawCell(2, accentColor, m_bMaximized);

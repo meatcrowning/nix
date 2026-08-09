@@ -370,7 +370,15 @@ class CVtbDeco : public IHyprWindowDecoration {
     // texture for a TOP/BOTTOM bar, whose run goes ALONG the bar (horizontal).
     // Surface is runLenPx wide × one bar-column tall.
     SP<Render::ITexture> renderHorizTex(const std::string& text, int runLenPx, float scale, const CHyprColor& color);
-    SP<Render::ITexture> glyphTex(const std::string& glyph, const CHyprColor& color, float scale);
+    // A button glyph texture. `quarter` turns it a quarter-turn for a horizontal
+    // (top/bottom) bar: 0 upright (the default, every vertical-bar and letter
+    // glyph), -1 counter-clockwise (roll on a TOP bar -> `>>` points UP),
+    // +1 clockwise (roll on a BOTTOM bar -> `>>` points DOWN). Only the roll
+    // cell uses a non-zero turn — see renderBar and DESIGN §12.1.
+    SP<Render::ITexture> glyphTex(const std::string& glyph, const CHyprColor& color, float scale, int quarter = 0);
+    // Renders `glyph` turned a quarter-turn (clockwise or CCW) via cairo, so the
+    // pixel grid stays axis-aligned and crisp. Backs glyphTex's `quarter` path.
+    SP<Render::ITexture> renderQuarterGlyph(const std::string& glyph, const CHyprColor& color, int sizePx, bool clockwise);
     // The window's own program icon (resolved from its class -> .desktop -> icon
     // theme), rendered square at sizePx device px. `color` styles currentColor
     // SVGs (e.g. goetia's sigil) so they don't render black-on-black. Cached.
