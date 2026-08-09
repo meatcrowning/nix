@@ -176,8 +176,12 @@ in
       # capping the model, and a run that genuinely needs more gets slower
       # rather than taking the desktop with it. Raise them if a workload
       # legitimately needs it; do not remove them.
+      # Raised High 16G -> 20G on 2026-08-09 (his call): at 16G the throttle
+      # bit even a single MiniMaxH3 stage (~19.5G), so heavy loads stalled the
+      # server past painter's startup timeout. 20G clears the single-stage
+      # load; Max stays 24G as the kill backstop with a 4G throttle band.
       MemoryAccounting = true;
-      MemoryHigh = "16G";
+      MemoryHigh = "20G";
       MemoryMax = "24G";
     };
     # No Install section: never auto-started at boot.
