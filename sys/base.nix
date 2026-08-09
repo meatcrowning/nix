@@ -12,8 +12,9 @@
       cores = 8;
       # These must be in `substituters` (the active query list), NOT only
       # `trusted-substituters` — the latter merely *permits* opting in and is
-      # never consulted, so the CUDA deps of the git-CUDA ollama overlay were
-      # compiling locally. Listing them here makes them actual download sources.
+      # never consulted, so the CUDA deps of ollama-cuda (sys/ai/ollama.nix)
+      # would otherwise compile locally. Listing them here makes them actual
+      # download sources.
       substituters = [
         "https://cache.nixos.org"
         "https://cuda-maintainers.cachix.org"
