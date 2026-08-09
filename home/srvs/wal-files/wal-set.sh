@@ -207,9 +207,16 @@ if [ -f "$SETTINGS" ]; then
     [ -n "$v" ] && BORDER_W="$v"
     v="$(sed -n 's/.*"windowRounding"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$SETTINGS" | head -n1)"
     [ -n "$v" ] && ROUNDING="$v"
+    # dimUnfocused also decides the unfocused-window BORDER (the third surface
+    # the dim moves — see apply-window-frame.sh / docs/DESIGN.md §3.1.1). ON: the
+    # static grey. OFF: match the active accent so nothing distinguishes an
+    # unfocused window. Recomputed here because a theme change moves the accent,
+    # and the OFF border must follow it.
+    grep -q '"dimUnfocused"[[:space:]]*:[[:space:]]*false' "$SETTINGS" && DIM_UNFOCUSED=false
 fi
+if [ "${DIM_UNFOCUSED:-true}" = false ]; then IB="${ACCENT}ee"; else IB="595959aa"; fi
 hyprctl eval 'hl.config({
-    general = { border_size = '"${BORDER_W}"', col = { active_border = "rgba('"${ACCENT}"'ee)" } },
+    general = { border_size = '"${BORDER_W}"', col = { active_border = "rgba('"${ACCENT}"'ee)", inactive_border = "rgba('"${IB}"')" } },
     decoration = { rounding = '"${ROUNDING}"' },
     plugin = { hyprvtb = {
         ["bg_color"]          = "rgba('"${BG}"'ff)",
@@ -226,6 +233,7 @@ hyprctl eval 'hl.config({
 LUA="$CONFIG/hypr/hyprland.lua"
 if [ -f "$LUA" ]; then
     sed -i -E 's/(\<active_border[[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${ACCENT}"'ee)\2/' "$LUA"
+    sed -i -E 's/(^[[:space:]]*inactive_border[[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${IB}"')\2/' "$LUA"
     sed -i -E 's/(\["bg_color"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${BG}"'ff)\2/' "$LUA"
     sed -i -E 's/(\["col\.text"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${TEXTDIM}"'ff)\2/' "$LUA"
     sed -i -E 's/(\["col\.button_border"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${BORDER}"'ff)\2/' "$LUA"

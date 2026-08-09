@@ -55,7 +55,18 @@ if [ -f "$SETTINGS" ]; then
     grep -q '"compact"[[:space:]]*:[[:space:]]*true' "$SETTINGS" && COMPACT=true
 fi
 
-hyprctl eval "hl.config({ general = { border_size = ${BORDER_W} }, decoration = { rounding = ${ROUNDING}, dim_inactive = ${DIM} }, plugin = { hyprvtb = { [\"titlebar_edge\"] = \"${TITLEBAR_EDGE}\", [\"dim_unfocused\"] = ${DIM}, [\"compact\"] = ${COMPACT} } } })" >/dev/null 2>&1 || true
+# inactive_border is the THIRD surface the unfocus dim moves (titlebar + body +
+# border, all as one — his call, docs/DESIGN.md §3.1.1): dim ON gives an
+# unfocused window the static grey border; dim OFF distinguishes nothing, so the
+# border matches the active accent. wal-set.sh owns the accent, so read the
+# CURRENT active_border out of hyprland.lua rather than re-derive the palette.
+IB_HEX=595959aa
+if [ "$DIM" = false ] && [ -f "$LUA" ]; then
+    ab="$(sed -n 's/^[[:space:]]*active_border[[:space:]]*=[[:space:]]*"rgba(\([0-9a-fA-F]*\))".*/\1/p' "$LUA" | head -n1)"
+    [ -n "$ab" ] && IB_HEX="$ab"
+fi
+
+hyprctl eval "hl.config({ general = { border_size = ${BORDER_W}, col = { inactive_border = \"rgba(${IB_HEX})\" } }, decoration = { rounding = ${ROUNDING}, dim_inactive = ${DIM} }, plugin = { hyprvtb = { [\"titlebar_edge\"] = \"${TITLEBAR_EDGE}\", [\"dim_unfocused\"] = ${DIM}, [\"compact\"] = ${COMPACT} } } })" >/dev/null 2>&1 || true
 
 if [ -f "$LUA" ]; then
     # Anchored at line start so the commented-out examples further down cannot
@@ -78,6 +89,10 @@ if [ -f "$LUA" ]; then
         sed -i -E 's/(\["compact"\][[:space:]]*=[[:space:]]*)(true|false)/\1'"$COMPACT"'/' "$LUA"
     grep -qE '^[[:space:]]*dim_inactive[[:space:]]*=[[:space:]]*'"$DIM"'\b' "$LUA" || \
         sed -i -E 's/^([[:space:]]*dim_inactive[[:space:]]*=[[:space:]]*)(true|false)/\1'"$DIM"'/' "$LUA"
+    # inactive_border floor — a bare `inactive_border = "rgba(...)"` at line start
+    # (the commented col examples are prefixed, so ^ cannot reach them). Guarded.
+    grep -qE '^[[:space:]]*inactive_border[[:space:]]*=[[:space:]]*"rgba\('"$IB_HEX"'\)"' "$LUA" || \
+        sed -i -E 's/(^[[:space:]]*inactive_border[[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"$IB_HEX"')\2/' "$LUA"
 fi
 
-echo "apply-window-frame: border=${BORDER_W}px rounding=${ROUNDING}px titlebar=${TITLEBAR_EDGE} dim=${DIM} compact=${COMPACT}"
+echo "apply-window-frame: border=${BORDER_W}px rounding=${ROUNDING}px titlebar=${TITLEBAR_EDGE} dim=${DIM} compact=${COMPACT} inactive_border=rgba(${IB_HEX})"

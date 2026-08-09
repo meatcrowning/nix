@@ -61,8 +61,9 @@ cp "$SRC" "$TMP" || exit 2
 # Read the value the live file currently holds for the line matching
 # ^<prefix><value>, and write it into the same line of the working copy. The
 # prefix must anchor tightly enough to name exactly one line: a loose one (say,
-# any rgba) would also drag across values nix owns — hyprland.lua's
-# inactive_border is right next to a colour wal-set.sh does own.
+# any rgba) would drag across the WRONG line — hyprland.lua's active_border and
+# inactive_border sit two lines apart and are both runtime-owned now, so each
+# needs its own line-start-anchored prefix rather than a shared rgba match.
 #
 # Two constraints on the patterns, both paid for (title_rotated reverted to the
 # seed's `false` on every switch until 2026-08-08, and the sed never said why):
@@ -87,6 +88,11 @@ case "$KIND" in
     # cannot match inside `inactive_border`, and requiring `= "` so it cannot
     # match the commented-out gradient form on the next line.
     carry '[[:space:]]*active_border[[:space:]]*=[[:space:]]*"' 'rgba\([0-9a-fA-F]+\)'
+    # inactive_border became runtime-owned 2026-08-09 — it follows the
+    # dimUnfocused pick (grey when on, the accent when off; wal-set.sh /
+    # apply-window-frame.sh). Distinct line from active_border above (the ^
+    # anchor makes `active_border` unable to match inside `inactive_border`).
+    carry '[[:space:]]*inactive_border[[:space:]]*=[[:space:]]*"' 'rgba\([0-9a-fA-F]+\)'
     for k in bg_color 'col\.text' 'col\.button_border' 'col\.accent' 'col\.bg_alt' 'col\.crit' 'col\.warn'; do
         carry "[[:space:]]*\\[\"${k}\"\\][[:space:]]*=[[:space:]]*\"" 'rgba\([0-9a-fA-F]+\)'
     done
