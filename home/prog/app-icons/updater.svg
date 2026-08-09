@@ -1,6 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" color="#ffffff" fill="none"
      stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
      stroke-linejoin="round">
+  <!-- updater app icon - a refresh glyph: circular arrowhead over a ring.
+       One transparent, theme-tracking variant: the strokes are currentColor
+       so the sigil IS the live theme's foreground. The titlebar tints it via
+       a user stylesheet (home/prog/hyprvtb/vtbDeco.cpp); the panel tints it
+       per cell state (TaskCell.qml -> AppIcon.qml); the desktop entry /
+       launcher resolve currentColor to the root `color` fallback above.
+       THAT FALLBACK IS WHITE ON PURPOSE: the panel tints through
+       MultiEffect, whose colorization scales the tint by the SOURCE's own
+       luminance, so only a white sigil comes out the exact theme colour
+       (measured - a black fallback rendered the icon invisible). -->
   <circle cx="12" cy="12" r="8.5"/>
   <path d="M12 6.5 v5.5 l3.5 2"/>
   <path d="M16.5 5.5 l1.6 -1 l-0.2 1.9"/>
