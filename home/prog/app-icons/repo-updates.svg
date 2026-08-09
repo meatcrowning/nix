@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" color="#ffffff">
+  <!-- repo-updates icon — the seal of Gaap, thirty-third spirit of the Ars
+       Goetia (a prince and president). Gaap's office is to carry and re-carry
+       men very swiftly from one kingdom to another: the spirit of a change
+       borne between this desktop's two machines (home/srvs/repo-updates.nix
+       raises "the other machine pushed to ~/nix" and, on a click, fetches it
+       across). Redrawn as clean geometry in the house style — a crowned head
+       over a bidirectional conduit, one arrow each way, the commit carried
+       top->book and book->top alike.
+
+       ONE transparent, theme-tracking variant. No filled tile: the sigil
+       sits on transparency so it reads on any surface (DESIGN.md S3.1). The
+       strokes are `currentColor` so the sigil IS the live theme's foreground
+       (body text = the accent); the panel tints it per surface (AppIcon.qml),
+       and the notification card resolves currentColor to the root `color`
+       fallback below when it draws the file raw. IT IS WHITE ON PURPOSE: the
+       panel tints through MultiEffect, whose colorization scales the tint by
+       the SOURCE's own luminance, so only a white sigil comes out the exact
+       theme colour (measured — a #cc4400 fallback landed at 36% of it).
+       Uniform 44-unit stroke = the 2px edge weight scaled to icon size
+       (DESIGN.md S4). -->
+  <g fill="none" stroke="currentColor" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="256" cy="256" r="218"/>
+    <circle cx="256" cy="128" r="38"/>
+    <path d="M256 166 L256 226"/>
+    <path d="M150 300 L362 300"/>
+    <path d="M198 258 L150 300 L198 342"/>
+    <path d="M314 258 L362 300 L314 342"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="256" cy="128" r="15"/>
+    <circle cx="150" cy="300" r="18"/>
+    <circle cx="362" cy="300" r="18"/>
+  </g>
+</svg>

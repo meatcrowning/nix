@@ -40,6 +40,15 @@
     executable = true;
   };
 
+  # The toast's own seal — Gaap, who carries a change from one machine to the
+  # other (home/prog/app-icons/repo-updates.svg). The daemon sends it with
+  # `-i repo-updates`; installed into hicolor so the name resolves, and declared
+  # a SEAL so the panel paints its currentColor strokes in the focus colour
+  # instead of the file's baked fallback (home/prog/app-icons/seals.nix).
+  home.file.".local/share/icons/hicolor/scalable/apps/repo-updates.svg".source =
+    ../prog/app-icons/repo-updates.svg;
+  my.appSeals = [ "repo-updates" ];
+
   home.packages = [
     (pkgs.writeShellScriptBin "nix-pull" ''
       # nix-pull            — show what origin/main has that this checkout does not
