@@ -14,6 +14,8 @@ the server side):
     -> LOADING <0|1>                             page loading (draws a spinner)
     -> PLAYBAR <0|1> <pos>                       media scrub bar + playback fraction
     <- CLICK <id>                                a button was clicked
+    <- RCLICK <id> <x> <y>                       a button was right-clicked
+                                                 (x/y window-local, for a menu)
     <- REORDER <srcId> <dstId>                   a draggable button was dropped
     <- ADDR <text>                               the title editor was submitted
     <- SEEK <frac>                               the scrub bar was dragged/scrolled
@@ -42,7 +44,8 @@ the plugin, so a "|" or ":" glyph label survives intact.
 
 All I/O runs on a daemon thread that reconnects forever (start the app before
 the plugin loads and the buttons appear once it does; plugin reloads re-register
-automatically). on_click/on_reorder/on_addr/on_seek/on_wake fire ON THAT THREAD
+automatically). on_click/on_rclick/on_reorder/on_addr/on_seek/on_wake fire ON
+THAT THREAD
 — Qt apps should bounce them through a Signal (queued across threads) before
 touching any UI.
 """
@@ -70,9 +73,10 @@ class VtbClient:
     _RETRY_MIN = 0.05
     _RETRY_MAX = 3.0
 
-    def __init__(self, on_click=None, pid=None, on_reorder=None, on_addr=None,
+    def __init__(self, on_click=None, on_rclick=None, pid=None, on_reorder=None, on_addr=None,
                  on_wake=None, on_seek=None, buttons=None, title_edit=False):
         self._on_click = on_click
+        self._on_rclick = on_rclick
         self._on_reorder = on_reorder
         self._on_addr = on_addr
         self._on_wake = on_wake
@@ -335,6 +339,13 @@ class VtbClient:
                 try:
                     if text.startswith("CLICK ") and self._on_click:
                         self._on_click(text[6:])
+                    elif text.startswith("RCLICK ") and self._on_rclick:
+                        parts = text[7:].split(" ", 2)
+                        if len(parts) == 3:
+                            try:
+                                self._on_rclick(parts[0], float(parts[1]), float(parts[2]))
+                            except ValueError:
+                                pass
                     elif text.startswith("REORDER ") and self._on_reorder:
                         rest = text[8:].split(" ", 1)
                         if len(rest) == 2:

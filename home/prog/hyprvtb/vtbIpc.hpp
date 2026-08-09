@@ -47,6 +47,9 @@
 //         scrolling the track sends SEEK back. 0 hides it (viewer's images).
 //   server -> client:
 //     CLICK <id>                a button was clicked (fires on release)
+//     RCLICK <id> <x> <y>       a button was right-clicked (fires on press);
+//                               x/y are WINDOW-LOCAL logical px, the point the
+//                               client should pop its context menu at
 //     REORDER <srcId> <dstId>   draggable button srcId dropped onto dstId's slot
 //     ADDR <text>               the title editor was submitted with <text>
 //     SEEK <frac>               the media scrub bar was dragged/scrolled to frac
@@ -125,6 +128,10 @@ namespace VtbIpc {
     // Send CLICK <id> to whoever registered pid's buttons. Non-blocking; a
     // wedged client just misses clicks, it can never stall the compositor.
     void sendClick(pid_t pid, const std::string& id);
+
+    // Send RCLICK <id> <x> <y> — a button was right-clicked, with the
+    // window-local point of the press. Same non-blocking guarantees.
+    void sendRClick(pid_t pid, const std::string& id, double x, double y);
 
     // Other server -> client notifications (all non-blocking, same guarantees
     // as sendClick): a draggable button was reordered, the title editor was

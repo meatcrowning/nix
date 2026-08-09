@@ -160,15 +160,17 @@ class Palette(QObject):
 
 class Titlebar(QObject):
     """hyprvtb app-button bridge. QML pushes button sets; the titlebar sends
-    back four things, each bounced through a Qt signal (queued across the
+    back five things, each bounced through a Qt signal (queued across the
     VtbClient I/O thread onto the GUI thread before any UI is touched):
       clicked(id)          a button was clicked
+      rclicked(id, x, y)   a button was right-clicked (x/y window-local px)
       reordered(src, dst)  a draggable tab button was dropped on another's slot
       addrSubmitted(text)  the in-bar address editor was submitted (Enter)
       wake()               the window was un-hidden (roll-up restore) — a cue to
                            repaint (QtWebEngine blacks out after a hide)."""
 
     clicked = Signal(str)
+    rclicked = Signal(str, float, float)
     reordered = Signal(str, str)
     addrSubmitted = Signal(str)
     wake = Signal()
@@ -202,6 +204,7 @@ class Titlebar(QObject):
         # before the window maps — see _SEED_BUTTONS.
         self._client = VtbClient(
             on_click=self.clicked.emit,
+            on_rclick=lambda i, x, y: self.rclicked.emit(i, float(x), float(y)),
             on_reorder=lambda s, d: self.reordered.emit(s, d),
             on_addr=self.addrSubmitted.emit,
             on_wake=self.wake.emit,

@@ -665,6 +665,13 @@ needed no change.
   focused pane, `focus · right · …` for the other) and the window draws a 1px
   accent frame round the focused pane. Clicking a lit tab that is *not* focused
   moves the focus rather than swapping the panes.
+- **Right-clicking a tab pops a tab menu** (Close / Close others / Close to
+  right / Reload / Duplicate) at the click point. The tabs are plugin-drawn —
+  no QML MouseArea ever sees a right-click on one — so the menu rides a new
+  `RCLICK <id> <x> <y>` verb the plugin sends on the press (window-local
+  coords); see `vtbclient.py`'s docstring and `Main.qml`'s `showTabMenu`.
+  Triggers re-resolve the tab by tid, so a list that shifted between the
+  right-click and the menu click still acts on the same tab.
 - `newTab()` opens in the **focused** pane; `splitTab` is tracked by tid across
   a drag-reorder exactly as `currentTab` is.
 - **`focusPane` cannot be driven by active focus alone.** Swapping a pane's tab
