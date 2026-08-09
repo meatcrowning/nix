@@ -33,10 +33,12 @@ INVENTORY_TSV = C.STATE / "album-inventory.tsv"
 def _dup_clusters(rows):
     """Same shape as curate.cmd_dupes' clustering, count-only. Kept in sync
     by construction: both key on trackmatch over (artist, title-with-edition-
-    stripped), duration-bucketed at 6s, variant-signature split."""
+    stripped), duration-bucketed at 6s, variant-signature split. Includes the
+    union-find pass: a file can sit in several fold-keys (album_artist AND
+    artist), and counting per key without merging transitively double-counts
+    one pair under every key it shares (measured 2026-08-09: 55 -> 39)."""
     import curate as curmod
     groups = collections.defaultdict(list)
-    by = {}
     for r in rows:
         if not r.get("title"):
             continue
@@ -47,12 +49,36 @@ def _dup_clusters(rows):
         for artist in artists:
             for t in curmod._dedupe_titles(r["title"]):
                 for k in curmod.trackmatch.keys(artist, t):
-                    groups.setdefault(k, []).append(r)
-    # dedupe rows per key, bucket by duration, split by variant signature
-    n = redundant = 0
+                    groups.setdefault(k, []).append(r["path"])
+    # union-find across fold-keys, exactly like curate.cmd_dupes
+    parent = {}
+
+    def find(x):
+        if x not in parent:
+            parent[x] = x
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
     for members in groups.values():
-        seen = {id(m): m for m in members}
-        recs = sorted(seen.values(), key=lambda r: r.get("dur") or 0)
+        for m in members[1:]:
+            union(members[0], m)
+    clusters = collections.defaultdict(list)
+    for path in {p for ms in groups.values() for p in ms}:
+        clusters[find(path)].append(path)
+    by_path = {r["path"]: r for r in rows}
+    n = redundant = 0
+    for paths in clusters.values():
+        recs = sorted((by_path[p] for p in set(paths)),
+                      key=lambda r: r.get("dur") or 0)
+        if len(recs) < 2:
+            continue
         bucket, buckets = [], []
         for r in recs:
             if bucket and abs((r.get("dur") or 0) - (bucket[-1].get("dur") or 0)) > 6.0:
