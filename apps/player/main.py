@@ -804,25 +804,46 @@ class Scanner(QThread):
 
     def _art_pass(self, con):
         """Give every album art: embedded (authoritative — folder images in the
-        shared root lie) then folder art. Only albums with no cached thumb."""
-        rows = con.execute("""
-            SELECT a.id, a.thumb FROM albums a WHERE a.thumb IS NULL
-        """).fetchall()
+        shared root lie) then folder art. Covers albums with no cached thumb
+        AND albums whose cached art's donor path is dead (a file move orphans
+        the donor; the thumb stays frozen from it). The donor is the MAJORITY
+        embedded art among the album's tracks, so one stray track cannot bleed
+        another album's cover in (the Tabu box set bug). An album with no
+        current art gets its stale art cleared rather than left wrong."""
+        rows = con.execute(
+            "SELECT a.id, a.thumb, a.art_src FROM albums a").fetchall()
+
+        def dead(src):
+            p = src[9:] if src.startswith("embedded:") else (
+                src[5:] if src.startswith("file:") else None)
+            return p is not None and not os.path.exists(p)
+
+        targets = [r for r in rows if r["thumb"] is None or dead(r["art_src"])]
         n = 0
-        for r in rows:
+        for r in targets:
             aid = r["id"]
-            donor = con.execute(
-                "SELECT path FROM tracks WHERE album_id=? AND has_art=1 LIMIT 1",
-                (aid,)).fetchone()
+            donors = con.execute(
+                "SELECT path FROM tracks WHERE album_id=? AND has_art=1",
+                (aid,)).fetchall()
+            counts, first = {}, {}
+            for d in donors:
+                data = embedded_art(d["path"])
+                if not data:
+                    continue
+                h = hashlib.sha1(data).hexdigest()
+                counts[h] = counts.get(h, 0) + 1
+                first.setdefault(h, (data, d["path"]))
             thumb = full = src = None
-            if donor:
-                data = embedded_art(donor["path"])
-                if data:
-                    src = "embedded:" + donor["path"]
-                    thumb, full = cache_art(data=data, src_id=hashlib.sha1(data).hexdigest())
+            if counts:
+                h, _ = max(counts.items(), key=lambda kv: kv[1])
+                data, p = first[h]
+                src = "embedded:" + p
+                thumb, full = cache_art(
+                    data=data, src_id=hashlib.sha1(data).hexdigest())
             if not thumb:
                 anyt = con.execute(
-                    "SELECT path FROM tracks WHERE album_id=? LIMIT 1", (aid,)).fetchone()
+                    "SELECT path FROM tracks WHERE album_id=? LIMIT 1",
+                    (aid,)).fetchone()
                 if anyt:
                     fa = folder_art(os.path.dirname(anyt["path"]))
                     if fa:
@@ -832,9 +853,16 @@ class Scanner(QThread):
                 con.execute("UPDATE albums SET art_src=?, thumb=?, full_art=? WHERE id=?",
                             (src, thumb, full, aid))
                 n += 1
-                if n % 25 == 0:
-                    con.commit()
-                    self.batch.emit()
+            elif r["thumb"] is not None:
+                # stale art and nothing to replace it with: show no art
+                # honestly instead of a frozen thumb from a dead donor
+                con.execute(
+                    "UPDATE albums SET art_src=NULL, thumb=NULL, full_art=NULL WHERE id=?",
+                    (aid,))
+                n += 1
+            if n % 25 == 0:
+                con.commit()
+                self.batch.emit()
         con.commit()
         self.batch.emit()
 
