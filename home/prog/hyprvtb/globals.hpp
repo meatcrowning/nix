@@ -309,11 +309,15 @@ namespace Vtb::Cfg {
     inline auto titleRotated() {
         return g_pGlobalState->config.titleRotated->value();
     }
+    // Which window edge the titlebar anchors to. Anything unrecognised reads
+    // as the right edge, so an unknown value never breaks layout.
+    inline std::string barSideRaw() {
+        return g_pGlobalState->config.titlebarEdge->value();
+    }
     // True when the titlebar sits on the window's LEFT edge instead of the
-    // default right. Anything unrecognised (incl. the not-yet-built top/bottom)
-    // reads as the right edge, so an unknown value never breaks layout.
+    // default right.
     inline bool barOnLeft() {
-        return g_pGlobalState->config.titlebarEdge->value() == "left";
+        return barSideRaw() == "left";
     }
 
     // ---- kinetic scrolling ----

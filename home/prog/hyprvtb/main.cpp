@@ -1513,10 +1513,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // false leaves every bar lit as if focused.
     g_pGlobalState->config.dimUnfocused      = makeShared<Config::Values::CBoolValue>(
         "plugin:hyprvtb:dim_unfocused", "Grey an unfocused window's titlebar (false keeps it lit)", true);
-    // Which window edge the titlebar anchors to: "right" (default) or "left".
-    // top/bottom are not yet implemented and fall back to the right edge.
+    // Which window edge the titlebar anchors to: right (default), left, top or
+    // bottom. Anything unrecognised reads as the right edge (see barSide()).
     g_pGlobalState->config.titlebarEdge      = makeShared<Config::Values::CStringValue>(
-        "plugin:hyprvtb:titlebar_edge", "Window edge the titlebar anchors to (right/left)", "right");
+        "plugin:hyprvtb:titlebar_edge", "Window edge the titlebar anchors to (right/left/top/bottom)", "right");
 
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.enabled);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.barWidth);
@@ -1742,7 +1742,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / program icon / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.27"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / program icon / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.29"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
