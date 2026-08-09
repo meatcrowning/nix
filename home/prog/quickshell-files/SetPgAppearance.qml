@@ -227,6 +227,15 @@ Column {
             }
         }
         SetRow {
+            label: "titlebar side"
+            desc: "which window edge the titlebar sits on; top/bottom turn the title text horizontal"
+            SetSelect {
+                options: ["right", "left", "top", "bottom"]
+                value: page.d.titlebarEdge
+                onChanged: (v) => { page.d.titlebarEdge = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
             label: "drop shadow"
             desc: "opacity of the shadow cast to a window's bottom-left; 0 = none"
             SetSlider {
