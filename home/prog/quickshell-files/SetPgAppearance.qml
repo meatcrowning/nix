@@ -19,10 +19,12 @@ Column {
     // theme — in solid mode ("display wallpaper" off) the palette changes and
     // the image simply stays hidden (WallpaperLayer.qml), same as the picker.
     SetSection {
+        title: "paper + theme"
         SetPaperGrid { }
     }
 
     SetSection {
+        title: "wallpaper"
         SetRow {
             // The ONE control for this feature: show the wallpaper image, or fill
             // the desktop with a solid block of the theme's background colour
@@ -74,6 +76,7 @@ Column {
     }
 
     SetSection {
+        title: "theme"
         SetRow {
             // The stored key is still themeMode ("auto"/"manual") — the toggle
             // is just its face: on = manual, the fixed accent below; off =
@@ -214,6 +217,7 @@ Column {
     }
 
     SetSection {
+        title: "window decorations"
         SetRow {
             label: "title orientation"
             SetSelect {
@@ -224,7 +228,6 @@ Column {
         }
         SetRow {
             label: "titlebar side"
-            desc: "which window edge the titlebar sits on; top/bottom turn the title text horizontal"
             SetSelect {
                 options: ["right", "left", "top", "bottom"]
                 value: page.d.titlebarEdge
@@ -233,7 +236,6 @@ Column {
         }
         SetRow {
             label: "compact titlebar"
-            desc: "collapse the two-column bar into one, half the thickness; drops the footer and scrub track"
             SetToggle {
                 checked: page.d.compact
                 onToggled: (v) => { page.d.compact = v; SettingsStore.save(); }
@@ -241,7 +243,6 @@ Column {
         }
         SetRow {
             label: "drop shadow"
-            desc: "opacity of the shadow cast to a window's bottom-left; 0 = none"
             SetSlider {
                 from: 0; to: 1; step: 0.05
                 value: page.d.shadowAlpha
@@ -256,7 +257,6 @@ Column {
             // way; the panel draws no scrollbar of its own.
             // Labels rather than raw keys: "win 3.1" is what he called it.
             label: "scrollbars"
-            desc: "win 3.1 = arrows + bevel; beveled = no arrows; flat = plain pixel block"
             SetSelect {
                 options: ["win31", "beveled", "flat"]
                 labels: ({ win31: "win 3.1", beveled: "beveled", flat: "flat" })
@@ -266,7 +266,6 @@ Column {
         }
         SetRow {
             label: "tint tray icons"
-            desc: "recolour system-tray icons to the accent"
             SetToggle {
                 checked: page.d.trayTint
                 onToggled: (v) => { page.d.trayTint = v; SettingsStore.save(); }
@@ -274,7 +273,6 @@ Column {
         }
         SetRow {
             label: "shortcut notch"
-            desc: "a notch on the panel's inner edge holding the desktop's own programs"
             SetToggle {
                 checked: page.d.desktopIcons
                 onToggled: (v) => { page.d.desktopIcons = v; SettingsStore.save(); }
@@ -291,9 +289,9 @@ Column {
     }
 
     SetSection {
+        title: "motion"
         SetRow {
             label: "reduce motion"
-            desc: "disable slide/fan animations"
             SetToggle {
                 checked: page.d.reduceMotion
                 onToggled: (v) => { page.d.reduceMotion = v; SettingsStore.save(); }
@@ -301,7 +299,6 @@ Column {
         }
         SetRow {
             label: "animation speed"
-            desc: "multiplier on the 220ms base slide"
             SetSlider {
                 from: 0.5; to: 2.0; step: 0.1; unit: "x"
                 value: page.d.animSpeed

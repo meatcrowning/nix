@@ -10,15 +10,9 @@ Column {
     width: parent ? parent.width : 480
     spacing: 6
 
-    // An empty title drops the whole header band (word AND rule) and the
-    // trailing gap below, so a page of empty-titled sections reads as one
-    // continuous list rather than titled groups (his call for the Appearance
-    // page, 2026-08-09). `visible: false` makes the Column skip the item
-    // entirely, contributing no spacing — height 0 alone would not.
     Item {
         width: parent.width
         height: 20
-        visible: root.title !== ""
         PixelText {
             id: t
             anchors { left: parent.left; verticalCenter: parent.verticalCenter }
@@ -42,6 +36,6 @@ Column {
         rightPadding: 4
     }
 
-    // breathing room under each section (dropped with the header when untitled)
-    Item { width: parent.width; height: 10; visible: root.title !== "" }
+    // breathing room under each section
+    Item { width: parent.width; height: 10 }
 }
