@@ -109,8 +109,25 @@ _VARIANT_MARKER = re.compile(
 
 
 def _variant_sig(title):
-    return frozenset(m.group(1).lower()
-                     for m in _VARIANT_MARKER.finditer(title or ""))
+    """Identity of a variant recording. Two copies dedupe only when these
+    match. Markers alone are not enough: '(Jimmy Edgar Remix)' and '(remix)'
+    both yield {'remix'} and would dedupe two DIFFERENT recordings that
+    happen to sit in one duration bucket (measured 2026-08-09: Machine Drum
+    'I Know Your Kind' pair, chromaprint 0.003, would have lost the Jimmy
+    Edgar remix). Include the normalized containing parenthetical, so a
+    variant is identified by its full label, not its category."""
+    t = title or ""
+    sig = set()
+    for m in _VARIANT_MARKER.finditer(t):
+        word = m.group(1).lower()
+        sig.add(word)
+        start = t.rfind("(", 0, m.start())
+        end = t.find(")", m.end())
+        if start != -1 and end != -1:
+            phrase = re.sub(r"\s+", " ", t[start + 1:end].strip().lower())
+            if phrase:
+                sig.add(phrase)
+    return frozenset(sig)
 
 
 def cmd_dupes(args):
