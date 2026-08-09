@@ -613,7 +613,8 @@ Window {
         sequences: ["Ctrl+V", "Shift+Ins"]
         enabled: !root.textFocused && root.pasteWell() !== ""
         onActivated: root.pasteWell() === "last" ? App.pasteLastImage()
-                                                 : App.pasteInputImage()
+                     : root.pasteWell() === "editadd" ? App.pasteEditImage()
+                     : App.pasteInputImage()
     }
 
     // ------------------------------------------------------- injecting params
@@ -683,6 +684,7 @@ Window {
         Prefs.set("model", App.selectedName)
         Prefs.set("mode", App.mode)
         Prefs.set("inputImage", App.inputImage)
+        Prefs.set("editExtra", JSON.stringify(App.editExtraImages))
         Prefs.set("lastImage", App.lastImage)
     }
 
@@ -690,6 +692,11 @@ Window {
         id: saveSoon
         interval: 700
         onTriggered: root.saveState()
+    }
+    Connections {
+        target: App
+        function onInputImageChanged() { if (root.restored) saveSoon.restart() }
+        function onEditExtraChanged() { if (root.restored) saveSoon.restart() }
     }
     onGenChanged: if (root.restored) saveSoon.restart()
     onViewChanged: { pushButtons(); if (root.restored) saveSoon.restart() }
@@ -726,6 +733,8 @@ Window {
         // The dropped first frame comes back too, quietly: a file that has since
         // moved just leaves the well empty.
         App.restoreInputImage(Prefs.get("inputImage") || "")
+        try { App.restoreEditImages(JSON.parse(Prefs.get("editExtra") || "[]")) }
+        catch (e) { /* a corrupt list just leaves the extras empty */ }
         App.restoreLastImage(Prefs.get("lastImage") || "")
         root.restored = true
     }

@@ -124,9 +124,21 @@ be a box to drop the image in and a prompt box"*:
   `scheduler`/`denoise`/`add_noise`/`width`/`height` from the recorded
   parameters, since Flux2Scheduler reads none of them and a PNG must not claim
   settings that were not used.
-- **The image is the same slot as the video first frame** (`App.inputImage`),
-  uploaded the same way, and required: with nothing dropped `generate()`
-  refuses before uploading anything.
+- **The PRIMARY image is the same slot as the video first frame**
+  (`App.inputImage`), uploaded the same way, and required: with nothing dropped
+  `generate()` refuses before uploading anything.
+- **N images, not one.** Flux 2 Klein takes multiple reference images —
+  `comfy/model_base.py`'s `Flux.extra_conds` collects `reference_latents` into a
+  `CONDList`, and `ReferenceLatent`'s own schema says *"chain multiple to set
+  multiple reference images"*. So `_build_edit` chains one `ReferenceLatent` per
+  image (each its own `LoadImage → ImageScaleToTotalPixels → VAEEncode`) onto
+  BOTH conditioning tails, and repoints the guider to the tail. **Only the
+  primary sizes the output** (`GetImageSize` still feeds the latent and the
+  scheduler off image #1); the rest are references. The extras are their own
+  list (`App.editExtraImages`, kept separate from `inputImage` so the video path
+  is untouched); the UI is a stack of wells under the primary plus an empty "add
+  another" well. `submit()` passes `input_images` (primary first);
+  `input_image` stays as `input_images[0]` for the single-image case.
 - A family with no `edit` block **refuses** an edit build. That refusal is what
   the mode button relies on.
 
