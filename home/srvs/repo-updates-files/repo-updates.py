@@ -295,7 +295,10 @@ def notify(summary, body, actions=(), replace_id=0, wait=False, urgency="normal"
         log(f"notify (dry): {summary} | {body}" + (f" | actions: {keys}" if keys else ""))
         return 0, None
     cmd = (override.split() if override else ["notify-send"])
-    cmd += ["-a", "nix", "-u", urgency, "-t", str(expire), "-p"]
+    # -i repo-updates: the Gaap seal (home/prog/app-icons/repo-updates.svg,
+    # installed into hicolor by repo-updates.nix). The panel's NotificationCard
+    # resolves the name and tints the currentColor sigil to the header colour.
+    cmd += ["-a", "nix", "-i", "repo-updates", "-u", urgency, "-t", str(expire), "-p"]
     if replace_id:
         cmd += ["-r", str(replace_id)]
     for key, label in actions:
