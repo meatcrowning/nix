@@ -16,6 +16,14 @@
   # Declare a seal next to the `home.file` that installs it. One left out draws
   # in the file's baked fallback colour (#cc4400, red) wherever Qt renders it
   # raw, on every wallpaper.
+  #
+  # REDRAWING an existing seal (same icon name, new artwork) does NOT show up in
+  # the panel from `sudo rebuild-top` alone: the rebuild swaps the hicolor
+  # symlink, but Quickshell watches the resolved store path and the panel keeps
+  # its old, already-rendered icon. Force its hot reload after the switch — the
+  # in-place `Theme.qml` bump (home/prog/quickshell-files/AGENTS.md, "Getting an
+  # edit live"). Until then the app bar shows the previous glyph; a hard restart
+  # (next login) also clears it.
   options.my.appSeals = lib.mkOption {
     type = lib.types.listOf lib.types.str;
     default = [ ];
