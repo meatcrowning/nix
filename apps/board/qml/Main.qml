@@ -161,6 +161,92 @@ Window {
         onActivated: win.undoSend()
     }
 
+    // ---- Ctrl+F: find over the two long lists (docs/DESIGN.md §11.2) --------
+    // The board is ONE scroll region (§9.2), but its two ever-growing lists —
+    // LANDED and the triangle's minister cards — are where finding a thing by
+    // eye stops working. Ctrl+F opens `findBar` below and FILTERS those two
+    // lists to the rows whose text contains the query; the rest of the page is
+    // left alone, and Escape (or the bar's `x`) restores the full lists.
+    //
+    // A FILTER, not a step-through mark: these rows are whole bullets and cards
+    // rather than runs inside a document, and `PixelText` draws plain text only
+    // (textFormat pinned, so there is no substring to paint) — the player album
+    // filter §11.2 already lists is the precedent for a find that filters.
+    // Window-scoped (a `Shortcut` child of the root Window), so it fires
+    // wherever the focus is, exactly as §11.2 requires.
+    property bool findOpen: false
+    property string findText: ""
+    readonly property string findQ: findText.trim().toLowerCase()
+
+    // A row is shown when find is closed, the query is empty, or the query is a
+    // substring of the row's text. Every filtered delegate calls this, so a
+    // closed find never changes a single thing the page draws.
+    function findHit(s) {
+        return !win.findOpen || win.findQ === ""
+               || String(s).toLowerCase().indexOf(win.findQ) !== -1;
+    }
+    // A minister card's searchable text: everything it says on screen, so a
+    // find matches whatever he can read on the card — its name and model, its
+    // two sentences, the title, and the waiting/worked lines.
+    function agentText(a) {
+        if (!a) return "";
+        return [a.name, a.model, a.title, a.saysLine, a.doingLine, a.saysDetail,
+                a.says, a.actually, a.observed, a.contextLine, a.workedLine,
+                a.detail]
+               .filter(function (x) { return x; }).join(" ");
+    }
+    function findHitAgent(a) { return win.findHit(win.agentText(a)); }
+    // A LANDED day is shown when any of its commit rows or prose lines match;
+    // an empty day would otherwise leave its date heading stranded (§5.2).
+    function landedDayHit(day) {
+        if (!win.findOpen || win.findQ === "") return true;
+        var rows = day && day.rows ? day.rows : [];
+        for (var i = 0; i < rows.length; i++)
+            if (win.findHit(rows[i].commit + " " + rows[i].what
+                            + " " + (rows[i].when || ""))) return true;
+        var prose = day && day.prose ? day.prose : [];
+        for (var j = 0; j < prose.length; j++)
+            if (win.findHit(prose[j].text)) return true;
+        return false;
+    }
+    // How many rows the query matches across both lists — the bar's readout,
+    // held in a fixed slot so it never reflows the bar (§5.4).
+    readonly property int findCount: {
+        if (!win.findOpen || win.findQ === "") return 0;
+        var n = 0;
+        var intro = win.intro && win.intro.landed ? win.intro.landed : [];
+        for (var i = 0; i < intro.length; i++)
+            if (win.findHit(intro[i].text)) n++;
+        var days = win.landed || [];
+        for (var d = 0; d < days.length; d++) {
+            var rows = days[d].rows || [];
+            for (var r = 0; r < rows.length; r++)
+                if (win.findHit(rows[r].commit + " " + rows[r].what
+                                + " " + (rows[r].when || ""))) n++;
+            var prose = days[d].prose || [];
+            for (var p = 0; p < prose.length; p++)
+                if (win.findHit(prose[p].text)) n++;
+        }
+        var cards = win.agentCards || [];
+        for (var c = 0; c < cards.length; c++)
+            if (win.findHitAgent(cards[c])) n++;
+        return n;
+    }
+
+    function openFind() {
+        win.findOpen = true;
+        findBar.focusField();     // a second Ctrl+F re-selects the query (§11.2)
+    }
+    function closeFind() {
+        win.findOpen = false;
+        win.findText = "";
+    }
+
+    Shortcut {
+        sequence: StandardKey.Find
+        onActivated: win.openFind()
+    }
+
     // A window sized for reading one column of prose beside the panel: the bar
     // reserves 376px on the right of a 1920px screen and Hyprland's `gaps_out`
     // takes 35 top and bottom of 1080, so 880x880 sits inside what is actually
@@ -645,6 +731,10 @@ Window {
         // drawers opening on every card say it. The tooltip names what the click
         // will DO, which is the half that is not on screen.
         "-",
+        // §11.2: the glyph is `fs`, the tooltip names the key. A lit cell IS
+        // the open state (§12.1), so the same click that Ctrl+F does closes it.
+        { id: "find", label: "fs", state: findOpen ? 1 : 0,
+          tip: "find (Ctrl+F)" },
         { id: "logs", label: "lg", state: allLogs ? 1 : 0,
           tip: allLogs ? "hide every card's log" : "show every card's log" },
         { id: "summoned", label: "sm", state: showSummoned ? 1 : 0,
@@ -704,6 +794,7 @@ Window {
                     win.status = "could not run reader";
                 break;
             case "logs":   win.toggleAllLogs(); break;
+            case "find":   if (win.findOpen) win.closeFind(); else win.openFind(); break;
             }
         }
     }
@@ -2191,6 +2282,10 @@ Component {
                                 required property int index
                                 readonly property var modelData:
                                     win.agentCards[agRow.index] || ({})
+                                // Ctrl+F filters the triangle: a card the query
+                                // does not match hides, and the Column skips it
+                                // (§11.2). Closed find shows every card.
+                                visible: win.findHitAgent(agRow.modelData)
                                 width: agentsCol.width
                                 agent: agRow.modelData
                                 cellW: win.cellW
@@ -2374,6 +2469,7 @@ Component {
                             model: win.intro.landed ? win.intro.landed : []
                             delegate: Para {
                                 required property var modelData
+                                visible: win.findHit(modelData.text)
                                 width: landedCol.width
                                 color: win.fgDim
                                 text: modelData.text
@@ -2390,6 +2486,9 @@ Component {
                             delegate: Column {
                                 id: group
                                 required property var modelData
+                                // A day with no matching row hides whole, header
+                                // and all, so Ctrl+F never strands a date (§5.2).
+                                visible: win.landedDayHit(group.modelData)
                                 width: landedCol.width
 
                                 // A DAY is a sub-section of `landed`, so it wears
@@ -2427,6 +2526,9 @@ Component {
                                         delegate: Item {
                                             id: lrow
                                             required property var modelData
+                                            visible: win.findHit(lrow.modelData.commit
+                                                     + " " + lrow.modelData.what + " "
+                                                     + (lrow.modelData.when || ""))
                                             width: landedCol.width
                                             implicitHeight: lwhat.implicitHeight
                                             height: implicitHeight
@@ -2490,6 +2592,7 @@ Component {
                                         delegate: Para {
                                             id: lprose
                                             required property var modelData
+                                            visible: win.findHit(lprose.modelData.text)
                                             width: landedCol.width
                                             topPadding: lprose.modelData.kind === "bullet" ? 0 : 6
                                             color: win.fgDim
@@ -2528,6 +2631,140 @@ Component {
         z: -1
         acceptedButtons: Qt.RightButton
         onClicked: (m) => win.rowMenu("", m.x, m.y)
+    }
+
+    // ---- the find bar (docs/DESIGN.md §11.2, §3) ---------------------------
+    // Docked at the TOP-RIGHT and sliding down out of the window edge — the same
+    // motion (and the same `Motion` source) surfer's FindBar and reader's find
+    // chip use, so find looks and moves the same in every program. It is the
+    // desktop's field idiom (§7.2): a `bgAlt` inset with a 1px accent border,
+    // the caret in a `bg` box that lights its border on focus, and a fixed slot
+    // for the match count so the bar never reflows keystroke to keystroke (§5.4).
+    Rectangle {
+        id: findBar
+        z: 2100
+
+        // The one entry point for the caret: opening, and a second Ctrl+F while
+        // it is already open, both land here — the field takes focus and selects
+        // its query so the next keystroke replaces it (§11.2's find-again).
+        function focusField() {
+            findInput.forceActiveFocus();
+            findInput.selectAll();
+        }
+
+        readonly property string countLabel:
+            win.findQ === "" ? ""
+          : win.findCount > 0 ? (win.findCount + (win.findCount === 1 ? " row" : " rows"))
+          : "no matches"
+
+        Motion { id: findMotion }
+        property real slide: win.findOpen ? 1 : 0
+        Behavior on slide {
+            NumberAnimation {
+                duration: findMotion.ms(findMotion.slideMs)
+                easing.type: findMotion.slideEasing
+            }
+        }
+
+        visible: slide > 0.001
+        width: findRow.implicitWidth + 12
+        height: 34
+        x: Math.max(0, parent.width - width - 8)
+        y: -height + slide * (height + 8)
+        color: Theme.bgAlt
+        radius: Theme.rounding
+        border.width: Theme.ctrlBorder
+        border.color: win.fgAccent
+
+        // The page below must not receive clicks aimed at the bar.
+        MouseArea { anchors.fill: parent }
+
+        Row {
+            id: findRow
+            x: 6
+            y: 6
+            height: 22
+            spacing: 6
+
+            Rectangle {
+                width: 220
+                height: parent.height
+                color: Theme.bg
+                radius: Theme.rounding
+                border.width: Theme.ctrlBorder
+                border.color: findInput.activeFocus ? win.fgAccent : Theme.border
+
+                TextInput {
+                    id: findInput
+                    anchors { fill: parent; margins: 4 }
+                    verticalAlignment: TextInput.AlignVCenter
+                    color: win.fgText
+                    // Whole QFont: an editable item draws a scalable pixel font
+                    // grey-fringed otherwise (docs/DESIGN.md §2.2).
+                    font: Theme.editorFont
+                    renderType: Text.NativeRendering
+                    clip: true
+                    selectByMouse: true
+                    selectionColor: win.fgAccent
+                    selectedTextColor: Theme.bg
+                    text: win.findText
+                    onTextChanged: win.findText = text
+
+                    // Escape closes and restores the full lists; it only has to
+                    // work while this field holds the keyboard, so no window
+                    // filter is needed for it. Enter keeps the filter as it is —
+                    // there is nothing to step to, the lists already show every
+                    // match at once.
+                    Keys.onPressed: (event) => {
+                        if (event.key === Qt.Key_Escape) {
+                            win.closeFind();
+                            event.accepted = true;
+                        }
+                    }
+                }
+
+                PixelText {
+                    anchors { left: parent.left; leftMargin: 5; verticalCenter: parent.verticalCenter }
+                    visible: findInput.text.length === 0
+                    text: "find"
+                    color: Theme.dim
+                }
+            }
+
+            // The count, in a reserved slot (§5.4): "no matches" is warn, not
+            // crit — a query with nothing behind it yet is not an error.
+            Item {
+                width: 74
+                height: parent.height
+                PixelText {
+                    anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                    width: parent.width
+                    horizontalAlignment: Text.AlignRight
+                    elide: Text.ElideRight
+                    text: findBar.countLabel
+                    color: win.findCount > 0 || win.findQ === "" ? Theme.textDim : Theme.warn
+                }
+            }
+
+            // `x` closes, mirroring the titlebar cell and the surfer bar's own.
+            Rectangle {
+                width: 22
+                height: parent.height
+                radius: Theme.rounding
+                color: closeMa.containsMouse ? Theme.highlight : "transparent"
+                PixelText {
+                    anchors.centerIn: parent
+                    text: "x"
+                    color: win.fgDim
+                }
+                MouseArea {
+                    id: closeMa
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onClicked: win.closeFind()
+                }
+            }
+        }
     }
 
     CtxMenu {
