@@ -14,10 +14,25 @@ patch-exposure window (Chrome / QtWebEngine parse hostile web content daily).
 RECURRING BY CONSTRUCTION, unlike board-reminder.py (which fires once ever and
 drops a `.done` stamp): this re-derives staleness every tick and only ensures
 the bullet exists while stale, keyed off a marker already in the board. So it
-writes at most one bullet, never a duplicate; if you dismiss it while still
-stale it comes back next tick; and once you upgrade and flake.lock refreshes,
-the age drops below the threshold and it stops re-appearing on its own. The
-board is the only state — there is no stamp file to clear.
+writes at most one bullet and never a duplicate, and once the lock refreshes the
+age drops below the threshold and it stops on its own.
+
+DISMISSING IT MEANS "NOT YET", AND THAT IS RECORDED. Until 2026-08-08 the board
+was the only state, so a dismissal could not be represented at all: he answered
+this bullet at 21:59 with "dont update yet, but give me a way to easily see what
+packages can be upgraded" — which cleared it and dispatched two workers — and
+the next tick wrote it straight back, because nixpkgs was still stale. The nudge
+could be overridden but never answered, and would have returned every quarter
+hour until he did the one thing he had just said not to do.
+
+So a dismissal now defers, KEYED ON THE LOCKED REVISION it was dismissed at
+(`STATE`). That keeps the property the stampless design existed to protect — a
+deferral cannot outlive the thing it was about, because the moment `flake.lock`
+moves the key no longer matches and the reminder re-arms itself — while letting
+"not yet" mean something. DEFER_DAYS is the backstop for the other direction: a
+lock that never moves re-arms on the horizon anyway, so a dismissal can delay
+this warning but can never silence it for good. Staleness dropping below the
+threshold clears the state outright.
 
 The bullet is INFORMATION (not a question/decision), so board-watch never spawns
 an agent on it.
@@ -25,12 +40,14 @@ an agent on it.
 BOTH MACHINES, EACH ITS OWN BOARD. This deploys via home/ to top and book; each
 writes only its own `docs/board.<hostname>.md` (resolved by
 `boardparse.ensure_board()`), and the host-appropriate upgrade command is
-injected by the nix module as PATCH_REMINDER_UPGRADE_CMD.
+injected by the nix module as PATCH_REMINDER_UPGRADE_CMD. The state file is
+machine-local (`~/.local/state`, not synced), which is correct: each host
+dismisses its own board's bullet.
 
 Overridable for tests (tools/patch-reminder-test.py):
 PATCH_REMINDER_FLAKE_LOCK, PATCH_REMINDER_BOARD, PATCH_REMINDER_BOARDCTL,
 PATCH_REMINDER_NOW (ISO-8601), PATCH_REMINDER_STALE_DAYS,
-PATCH_REMINDER_UPGRADE_CMD.
+PATCH_REMINDER_UPGRADE_CMD, PATCH_REMINDER_STATE, PATCH_REMINDER_DEFER_DAYS.
 """
 
 import datetime
@@ -47,6 +64,13 @@ FLAKE_LOCK = pathlib.Path(os.environ.get(
 BOARDCTL = pathlib.Path(os.environ.get(
     "PATCH_REMINDER_BOARDCTL", HOME / "nix/apps/board/tools/boardctl.py"))
 STALE_DAYS = int(os.environ.get("PATCH_REMINDER_STALE_DAYS", "21"))
+#: How long a dismissal holds while the lock sits still. Long enough that
+#: "not yet" is respected across a working week, short enough that a box left
+#: unpatched for a month is told again.
+DEFER_DAYS = int(os.environ.get("PATCH_REMINDER_DEFER_DAYS", "7"))
+STATE = pathlib.Path(os.environ.get(
+    "PATCH_REMINDER_STATE",
+    HOME / ".local/state/patch-reminder/state.json"))
 # `update` is the upgrade alias on BOTH hosts (home/prog/zsh.nix): on top it is
 # `sudo rebuild-top --upgrade`, on book `nix flake update && rebuild-air`. So the
 # single host-neutral token is the correct instruction on either machine, and
@@ -73,8 +97,13 @@ def now():
     return datetime.datetime.now(datetime.timezone.utc)
 
 
-def nixpkgs_last_modified():
-    """Unix timestamp of the locked nixpkgs input, or None if unreadable.
+def nixpkgs_locked():
+    """`(lastModified, key)` for the locked nixpkgs input, or `(None, None)`.
+
+    `key` identifies WHICH snapshot is locked, so a deferral can be pinned to it
+    and expire the instant the lock moves. The revision is the honest answer;
+    `lastModified` is the fallback for a lock node that carries no rev, and is
+    just as good a key here since any update changes it too.
 
     Prefer the node literally named `nixpkgs`; fall back to any node whose
     locked source is the NixOS/nixpkgs repo, so an aliased input still resolves.
@@ -83,7 +112,7 @@ def nixpkgs_last_modified():
         with FLAKE_LOCK.open() as fh:
             lock = json.load(fh)
     except (OSError, ValueError):
-        return None
+        return None, None
     nodes = lock.get("nodes") or {}
     node = nodes.get("nixpkgs")
     if not (isinstance(node, dict) and "locked" in node):
@@ -94,17 +123,55 @@ def nixpkgs_last_modified():
                 node = cand
                 break
     loc = node.get("locked") if isinstance(node, dict) else None
-    lm = loc.get("lastModified") if isinstance(loc, dict) else None
-    return lm if isinstance(lm, (int, float)) else None
+    if not isinstance(loc, dict):
+        return None, None
+    lm = loc.get("lastModified")
+    if not isinstance(lm, (int, float)):
+        return None, None
+    rev = loc.get("rev")
+    return lm, (rev if isinstance(rev, str) and rev else "lm:%d" % int(lm))
 
 
-def already_on_board():
-    """Has a patch-cadence bullet already been written onto this host's board?"""
+def board_text():
+    """This host's board, or None if it cannot be read.
+
+    None is NOT "the bullet is absent": a board we cannot read is one we must
+    neither write into nor draw conclusions from, and the two callers below both
+    need to tell those apart.
+    """
     try:
-        return MARKER in BOARD.read_text()
+        return BOARD.read_text()
     except OSError:
-        # No board to read is not "not written": refuse to write into the dark.
-        return True
+        return None
+
+
+def load_state():
+    try:
+        with STATE.open() as fh:
+            st = json.load(fh)
+        return st if isinstance(st, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(st):
+    try:
+        STATE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = STATE.with_suffix(".tmp")
+        with tmp.open("w") as fh:
+            json.dump(st, fh, indent=1, sort_keys=True)
+        os.replace(tmp, STATE)
+    except OSError as exc:
+        # Unwritable state degrades to the old always-renag behaviour rather
+        # than to silence: never suppress the warning on a write we did not make.
+        sys.stderr.write("patch-reminder: cannot write %s: %s\n" % (STATE, exc))
+
+
+def clear_state():
+    try:
+        STATE.unlink()
+    except OSError:
+        pass
 
 
 def write_bullet(lines):
@@ -119,16 +186,51 @@ def write_bullet(lines):
 
 
 def main():
-    lm = nixpkgs_last_modified()
+    lm, key = nixpkgs_locked()
     if lm is None:
         # Unreadable lock is a no-op that retries next tick, never a false alarm.
         return 0
     locked = datetime.datetime.fromtimestamp(lm, datetime.timezone.utc)
     age = (now() - locked).days
     if age < STALE_DAYS:
+        # Fresh again: forget any deferral, so the NEXT time it goes stale is
+        # judged on its own merits.
+        clear_state()
         return 0
-    if already_on_board():
+
+    text = board_text()
+    if text is None:
+        return 0                       # refuse to write, or reason, in the dark
+
+    st = load_state()
+    if MARKER in text:
+        # Standing on the board. Remember which snapshot it is about, so a later
+        # tick can tell "he dismissed it" from "it was never written".
+        if st.get("wroteFor") != key:
+            save_state({"wroteFor": key})
         return 0
+
+    # Not on the board. Either we have never written it for this snapshot, or he
+    # took it off — and only the state file can say which.
+    if st.get("deferredKey") == key:
+        deferred_at = st.get("deferredAt")
+        try:
+            since = (now() - datetime.datetime.fromisoformat(deferred_at)).days
+        except (TypeError, ValueError):
+            since = DEFER_DAYS         # unparseable stamp re-arms, never silences
+        if since < DEFER_DAYS:
+            return 0
+        sys.stderr.write("patch-reminder: deferral expired after %d days, "
+                         "re-arming\n" % since)
+    elif st.get("wroteFor") == key:
+        # We put it there, it is gone, and the lock has not moved: a dismissal.
+        save_state({"wroteFor": key, "deferredKey": key,
+                    "deferredAt": now().isoformat()})
+        sys.stderr.write("patch-reminder: dismissed at %s - deferring up to "
+                         "%d days or until the lock moves\n" % (key[:12],
+                                                                DEFER_DAYS))
+        return 0
+
     lines = [
         "INFORMATION: **Patch cadence** - nixpkgs snapshot is stale, "
         "upgrade when convenient",
@@ -137,10 +239,11 @@ def main():
         "Chrome and QtWebEngine only advance when you run an upgrade."
         % (age, locked.date().isoformat()),
         "  Run your upgrade alias `%s` when convenient (its own commit; bumps "
-        "flake inputs). This bullet stops on its own once the snapshot is fresh "
-        "again; it is only re-written if removed while still stale." % UPGRADE_CMD,
+        "flake inputs). Clear this bullet and it stays quiet until the lock "
+        "actually moves, or %d days pass." % (UPGRADE_CMD, DEFER_DAYS),
     ]
     if write_bullet(lines):
+        save_state({"wroteFor": key})
         sys.stderr.write("patch-reminder: wrote stale-packages bullet "
                          "(%d days)\n" % age)
     return 0
