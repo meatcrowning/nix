@@ -24,12 +24,19 @@ PanelWindow {
 
     // Which screen edge to hug: "left" (default), "top", or "bottom".
     property string edge: "left"
-    // Stripe thickness: a flat 2px on every edge (matching the window-border
-    // width). A 1px top/bottom line vanishes on a scale-1.0 1080p monitor — it's
-    // a single physical pixel pinned to the screen edge — whereas 2px stays
+    // Stripe thickness: follows the global border width, floored at the legible
+    // 2px. A 1px top/bottom line vanishes on a scale-1.0 1080p monitor — it's a
+    // single physical pixel pinned to the screen edge — whereas 2px stays
     // visible there and matches the left/right stripe.
-    // follows the global border width, floored at the legible 2px
-    property int thickness: Math.max(2, Theme.windowBorderWidth)
+    //
+    // Border width 0 is NOT that floor: it means "no window borders", and these
+    // stripes are the desktop's own border, so they go away with the rest
+    // (docs/DESIGN.md §10 — a control that says 0 and leaves a line on all four
+    // screen edges is lying). The surface is hidden rather than sized 0, since a
+    // zero-height layer surface is a protocol error.
+    property int thickness: Theme.windowBorderWidth <= 0
+                            ? 0 : Math.max(2, Theme.windowBorderWidth)
+    visible: thickness > 0
 
     // The horizontal stripes span the desktop the panel does NOT cover, so they
     // have to follow the panel edge exactly while it is dragged.
