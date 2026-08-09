@@ -1,20 +1,19 @@
 import QtQuick
 
 // Current conditions on one line, over a ten-day forecast graph sampled twice a
-// day. The LINE is the chance of rain, the BARS are the temperature.
+// day. The LINE is the temperature, the BARS are the chance of rain.
 //
 // The graph replaced a table of seven rows because a table spends a whole line
 // of height per day to say two numbers. Twenty points of the same height show
 // ten days AND the shape of the week — which day the warm spell breaks, whether
 // nights are dropping — none of which a column of hi/lo pairs conveys.
 //
-// Which series gets which mark is not arbitrary. Rain chance is the thing you
-// look at this widget to decide something about, so it is the INDICATOR — the
-// bright line, on a FIXED 0-100 axis (DESIGN.md §9.3: the battery's rule —
-// autoscaling a probability against its own peak reads 30% as certain rain).
-// Temperature is the context it rides over, so it is the dim FILL (§3.2), a
-// column per sample scaled to the window's own low and high, both of which are
-// printed on the axis because that scale moves with the week.
+// Which series gets which mark is not arbitrary. Temperature is a continuous
+// reading, so it is the TRACE — a line over the window's own low and high, both
+// printed on the axis because that scale moves with the week. Rain chance is a
+// per-sample odds, so it is the dim COLUMN (§3.2), on a FIXED 0-100 axis
+// (DESIGN.md §9.3: the battery's rule — autoscaling a probability against its
+// own peak reads 30% as certain rain).
 //
 // "Morning" and "night" are the 09:00 and 21:00 hourly samples (Weather.amHour
 // / pmHour), not the daily max and min: a daily max is not tied to a time of
@@ -141,7 +140,7 @@ Item {
 
     // ---- legend, or the hovered sample -----------------------------------
     // A line chart with no key is a squiggle: this says, in the widget itself,
-    // that the line is rain chance, the columns are temperature, and the two
+    // that the line is temperature, the columns are rain chance, and the two
     // marker shapes are the morning and night samples. Hovering replaces it
     // with the actual numbers for the sample under the pointer, which is the
     // other half of the same question.
@@ -175,11 +174,11 @@ Item {
             spacing: 10
             visible: legend.hov === null
 
-            // The swatch IS the key, so it moved with the series: rain took the
-            // line and temp took the column. The two marker shapes sit on the
+            // The swatch IS the key, so it moved with the series: temp took the
+            // line and rain took the column. The two marker shapes sit on the
             // line, so they are the line's colour.
             Key {
-                label: "rain %"
+                label: "temp"
                 Rectangle {
                     anchors.centerIn: parent
                     width: 8; height: 2
@@ -187,7 +186,7 @@ Item {
                 }
             }
             Key {
-                label: "temp"
+                label: "rain %"
                 Rectangle {
                     anchors.centerIn: parent
                     width: 6; height: 8
@@ -324,12 +323,12 @@ Item {
             // 12px at the top is room for the axis labels; the mini form does
             // not draw them, so it uses the full height instead.
             const top = mini ? 2 : 12, bot = height - (mini ? 2 : 4);
-            // ty: a temperature, for the COLUMNS. `y0` is the floor the columns
-            // stand on and it is printed on the axis, so the non-zero baseline
-            // is declared rather than implied — a 0°-based column of Fahrenheit
-            // would be nine tenths ink and say nothing about the week.
+            // ty: a temperature, for the LINE. `y0`/`y1` are the window's own
+            // low and high, both printed on the axis, so the trace fills the
+            // band rather than riding a 0°-based Fahrenheit scale that would be
+            // nine tenths ink and say nothing about the week.
             function ty(t) { return top + (bot - top) * (y0 - t) / (y0 - y1); }
-            // py: a probability, for the LINE. Fixed 0-100, never autoscaled.
+            // py: a probability, for the COLUMNS. Fixed 0-100, never autoscaled.
             function py(p) { return top + (bot - top) * (1 - Math.max(0, Math.min(100, p)) / 100); }
             function tx(i) { return width * (i + 0.5) / n; }
 
@@ -354,31 +353,30 @@ Item {
                 ctx.stroke();
             }
 
-            // temperature, as a column standing on the window's low. A sample
-            // AT the low would otherwise have no column at all, which reads as
-            // missing data rather than as the coldest reading of the week, so
-            // there is a 1px floor under it.
+            // rain chance, as a column rising from the 0% floor on the fixed
+            // axis. A dry sample (0%) draws no column at all rather than a stub —
+            // the absence reads as "no rain" honestly, not as missing data.
             ctx.fillStyle = Theme.accent;
             ctx.globalAlpha = 0.22;
             for (let i = 0; i < n; i++) {
-                const t = root.slots[i].temp;
-                if (t === undefined || t === null) continue;
-                const yTop = Math.min(ty(t), bot - 1);
+                const p = root.slots[i].prob;
+                if (!(p > 0)) continue;
+                const yTop = py(p);
                 ctx.fillRect(tx(i) - width / n * 0.3, yTop, width / n * 0.6, bot - yTop);
             }
             ctx.globalAlpha = 1;
 
-            // the rain-chance line. A sample whose probability is missing (-1,
-            // an older API answer) BREAKS the line rather than being drawn as a
-            // dry hour — hence the per-segment pen-up instead of one path.
+            // the temperature line. A sample whose temperature is missing
+            // BREAKS the line rather than being interpolated across — hence the
+            // per-segment pen-up instead of one path.
             ctx.strokeStyle = Theme.info;
             ctx.lineWidth = mini ? 1 : 1.5;
             ctx.beginPath();
             let pen = false;
             for (let i = 0; i < n; i++) {
-                const p = root.slots[i].prob;
-                if (!(p >= 0)) { pen = false; continue; }
-                const x = tx(i), y = py(p);
+                const t = root.slots[i].temp;
+                if (t === undefined || t === null) { pen = false; continue; }
+                const x = tx(i), y = ty(t);
                 if (!pen) ctx.moveTo(x, y); else ctx.lineTo(x, y);
                 pen = true;
             }
@@ -388,9 +386,9 @@ Item {
             // in the mini form — a 3px square every few pixels reads as noise on
             // the line rather than as two samples a day.
             for (let i = 0; !mini && i < n; i++) {
-                const p = root.slots[i].prob;
-                if (!(p >= 0)) continue;
-                const x = tx(i), y = py(p);
+                const t = root.slots[i].temp;
+                if (t === undefined || t === null) continue;
+                const x = tx(i), y = ty(t);
                 if (root.slots[i].part === "am") {
                     ctx.fillStyle = Theme.info;
                     ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
@@ -417,9 +415,9 @@ Item {
             }
 
             // The two scales, one per side, so neither series is read against
-            // the other's axis: the columns' high and low of the whole window on
+            // the other's axis: the line's high and low of the whole window on
             // the LEFT (it moves with the week, so it has to be printed), the
-            // line's fixed ceiling on the RIGHT. NOT in the mini form: two lines
+            // columns' fixed ceiling on the RIGHT. NOT in the mini form: two lines
             // of 16px text is most of a 24px canvas, and drawing them there is
             // exactly the overlap this widget was reported for.
             if (mini) return;
