@@ -146,6 +146,31 @@ PanelWindow {
         // must still settle the panel somewhere valid rather than leaving
         // `dragging` latched true forever.
         onCanceled: ViewMode.commitDrag(ViewMode.dragWidth)
+
+        // DOUBLE-CLICK THE NOTCH'S OUTER FACE to disable the shortcut notch —
+        // the same toggle the Settings control drives (SetPgAppearance.qml's
+        // `desktopIcons`, docs/DESIGN.md §12.2.2). The face is the notch's
+        // leading (left) edge, the vertical strip the mask exposes at
+        // `notchX`; double-clicking anywhere else on the handle does nothing,
+        // so the plain resize edge keeps its bare drag.
+        //
+        // The single click and the drag are UNTOUCHED: a MouseArea only emits
+        // doubleClicked for two quick presses with no travel, and the two
+        // no-op drags those presses fire commit the same width (a click on
+        // this edge is already a no-op — see commitDrag). Only when the notch
+        // is actually up (`notchPx > 0`, i.e. enabled and the drawer in) is
+        // there a face to hit; disabled or drawer-out, notchPx is 0 and this
+        // returns. Re-enabling is via Settings, there being no notch to click.
+        function onNotchFace(mx, my) {
+            return root.notchPx > 0
+                && mx >= root.notchX && mx < root.notchX + root.gripW
+                && my >= root.notchTop && my < root.notchBottom;
+        }
+        onDoubleClicked: (mouse) => {
+            if (!onNotchFace(mouse.x, mouse.y)) return;
+            SettingsStore.d.desktopIcons = !SettingsStore.d.desktopIcons;
+            SettingsStore.save();
+        }
     }
 
     // Affordance: the edge brightens under the cursor, so the handle is
