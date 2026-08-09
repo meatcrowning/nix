@@ -34,6 +34,12 @@ gate passes, and asserts:
      reload;
   4. SELF-GATE: a 4chan page WITHOUT html.oneechan is NOT themed — the baked
      ch4SS baseline survives untouched.
+  5. RENDERED light-palette collapse: on a light palette, every OneeChan inset
+     surface — post header, reply chain, catalog cells (`Show Background`),
+     inline-expanded quotes, text fields — computes to the plain page `bg`,
+     asserted by getComputedStyle after a real load (not a string match), so a
+     surface OneeChan paints near-black but surfer forgets to collapse cannot
+     pass unnoticed the way the catalog cells and `.inline` did.
 
     tools/oneechan-theme-test.py        # exits 0 on pass, 1 on failure
 """
@@ -73,6 +79,13 @@ PAL_A = {
 }
 # the live change: a different bg so the re-skin is visible on body background
 PAL_B = dict(PAL_A, bg="#010203", bgAlt="#0a0b0c")
+
+# A LIGHT palette with DARK bgAlt/highlight, so "collapsed to bg" is
+# distinguishable from "kept as the inset shade" in a real render. This is the
+# case f66285e was about and the one his live wallpaper produces: on it, every
+# OneeChan inset surface must read as the plain page `bg`, not a near-black
+# inset. rel_lum(#f4efe2) ~= 0.85 > 0.2, so the collapse branch fires.
+PAL_LIGHT = dict(PAL_A, bg="#f4efe2", bgAlt="#202020", highlight="#181818")
 
 
 def rgb(hexstr):
@@ -129,10 +142,56 @@ setTimeout(function(){
 """
 
 
+# A RENDERED light-palette page. The ch4SS baseline paints every inset surface
+# the way his live OneeChan theme does — from a full-opacity near-black
+# `mainColor`/`headerBGColor` — so "collapsed to bg" and "left as the dark
+# inset" are visibly different. It covers the surfaces f66285e's string-only
+# "20/20" never rendered: the post header, the catalog cells (`Show Background`
+# mode), inline-expanded quotes, and a text field. Selectors and classes are
+# verbatim from OneeChan's ch4SS so specificity ties exactly as in the browser.
+INDEX_LIGHT = """<!doctype html>
+<html class="oneechan header-gradient catalog-background">
+<head><title>t</title>
+<style id="ch4SS">
+html,body{color:#000 !important}
+body{background:#000 !important}
+.reply,body.is_catalog .panel,.dialog{background:rgba(0,0,0,1)!important}
+:root.header-gradient #header-bar{background:linear-gradient(rgb(15,15,15),rgba(0,0,0,0.9))!important}
+input:not(.jsColor),textarea,.captcha-root{background:#000 !important}
+.inline{background:rgba(0,0,0,.8)!important}
+:root.catalog-background #threads div.thread,:root.catalog-background .catalog-thread{background:rgba(0,0,0,1)!important}
+</style></head><body>
+<div id="header-bar" class="dialog">header</div>
+<div class="reply postContainer" id="r">reply</div>
+<input id="inp" type="text">
+<div id="threads"><div class="thread catalog-thread" id="ct">catalog cell</div></div>
+<div class="inline" id="il">inline expand</div>
+<script src="/applight.js"></script>
+</body></html>"""
+
+# probe for the light page: report the computed background of each inset. Both
+# the flat colour AND the image, since a gradient shows up only as image.
+APP_JS_LIGHT = b"""\
+setTimeout(function(){
+  function bg(sel){ try { var e=document.querySelector(sel);
+      var s=getComputedStyle(e);
+      return s.backgroundColor+'|'+s.backgroundImage; } catch(e){ return 'ERR'; } }
+  document.title = JSON.stringify({
+      header: bg('#header-bar'), reply: bg('#r'), input: bg('#inp'),
+      catalog: bg('#ct'), inline: bg('#il')
+  });
+}, 900);
+"""
+
+
 class Page(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/app.js":
             body, ctype = APP_JS, "application/javascript"
+        elif self.path == "/applight.js":
+            body, ctype = APP_JS_LIGHT, "application/javascript"
+        elif self.path.startswith("/light"):
+            body, ctype = INDEX_LIGHT.encode("utf-8"), "text/html"
         else:
             cls = "oneechan" if self.path.startswith("/gated") else "notonee"
             body = INDEX.format(cls=cls).encode("utf-8")
@@ -213,6 +272,7 @@ def main():
     port = srv.server_address[1]
     gated = "http://boards.4chan.org:%d/gated.html" % port
     bare = "http://boards.4chan.org:%d/bare.html" % port
+    lightgated = "http://boards.4chan.org:%d/light.html" % port
 
     # the live palette the OneeChan bridge reads (same parser/watcher as filer's)
     palette = surfer.Palette(str(theme), app)
@@ -372,7 +432,42 @@ def main():
               out.get("bodyBg") == "rgb(255, 255, 255)")
         check("self-gate: a page without html.oneechan keeps ch4SS reply bg",
               out.get("replyBg") == "rgb(238, 238, 238)")
-        print("probe:", json.dumps(out, sort_keys=True))
+        # phase 4: RENDERED light-palette collapse. Switch to a light palette
+        # (light bg, DARK bgAlt/highlight) and load a page whose ch4SS paints
+        # every inset near-black, exactly like his live OneeChan theme. Assert
+        # by RENDER (getComputedStyle after a real load), not by string match:
+        # header, reply, catalog cells, inline expands and the text field must
+        # all compute to the plain page bg — the gap that let a string-only
+        # "20/20" miss the catalog cells and `.inline`, which f66285e never
+        # collapsed.
+        write_theme(theme, PAL_LIGHT)
+        QTimer.singleShot(400, lambda: view.setProperty("url", QUrl(lightgated)))
+        QTimer.singleShot(2000, phase4)
+
+    def phase4():
+        if not read_title() or "catalog" not in out:
+            QTimer.singleShot(200, phase4)
+            return
+        want = rgb(PAL_LIGHT["bg"])
+
+        def bgcolor(v):
+            return (v or "").split("|")[0]
+
+        def bgimage(v):
+            return (v or "").split("|", 1)[1] if v and "|" in v else ""
+        check("light render: post header (#header-bar) collapses to bg",
+              bgcolor(out.get("header")) == want)
+        check("light render: #header-bar clears OneeChan's gradient image",
+              bgimage(out.get("header")) == "none")
+        check("light render: reply chain collapses to bg",
+              bgcolor(out.get("reply")) == want)
+        check("light render: text field collapses to bg",
+              bgcolor(out.get("input")) == want)
+        check("light render: catalog cell (Show Background) collapses to bg",
+              bgcolor(out.get("catalog")) == want)
+        check("light render: inline-expanded quote collapses to bg",
+              bgcolor(out.get("inline")) == want)
+        print("light probe:", json.dumps(out, sort_keys=True))
         n = total[0]
         print("%d/%d checks passed" % (n - len(fails), n))
         app.quit()

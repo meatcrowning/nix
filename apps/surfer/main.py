@@ -1847,8 +1847,18 @@ class OneeTheme(QObject):
             ".quotelink{color:%s%s}" % (ql, i),
             # --- backgrounds ---
             "body{background:%s%s}" % (bg, i),
+            # `.inline` and the catalog cells (`Show Background` mode) are
+            # reply-type insets OneeChan also paints from `mainColor`, but they
+            # were never mapped here — so on a dark palette they kept OneeChan's
+            # baked colour un-themed, and on a light one they rendered as the raw
+            # dark inset (near-black on his cream page). Fold them in so they
+            # follow `reply` too: `bgAlt` on dark, collapsed to `bg` on light.
+            # Selectors are verbatim (catalog's is `:root.catalog-background …`),
+            # since a bare `.catalog-thread` loses on specificity to OneeChan's.
             ".reply,body.is_catalog .panel,:root.catalog-mode .panel,.dialog,"
-            ".tab-label,#post-preview,#tegaki,.boxbar,"
+            ".tab-label,#post-preview,#tegaki,.boxbar,.inline,"
+            ":root.catalog-background #threads div.thread,"
+            ":root.catalog-background .catalog-thread,"
             ":root.op-background .postContainer.opContainer,"
             ".dd-menu ul{background:%s%s}" % (reply, i),
             ":root:not(.header-gradient) #header-bar,"
