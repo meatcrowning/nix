@@ -50,9 +50,17 @@ Window {
     readonly property color fgText:   winActive ? Theme.text    : Theme.inactive
     readonly property color fgDim:    winActive ? Theme.textDim : Theme.inactive
 
-    // The window title IS the address bar: the plugin renders it as the stacked
-    // outer-column text and seeds its editor from it. Keep it the live URL.
-    title: current ? current.url.toString() : "surfer"
+    // The window title IS the address bar, rendered by the plugin as the stacked
+    // outer-column text. It shows the PAGE TITLE at rest; the real URL is fed to
+    // the plugin on a separate channel (Titlebar.setEditSeed), so clicking the
+    // bar opens the editor on the URL and blur reverts to the title — a browser's
+    // address bar. A cold/titleless page falls back to the URL so the bar is
+    // never blank, and the URL also names the window in the taskbar/alt-tab when
+    // there is no title yet.
+    readonly property string curUrl: current ? current.url.toString() : ""
+    readonly property string curTitle: (current && current.title) ? current.title.toString().trim() : ""
+    title: current ? (curTitle.length > 0 ? curTitle : curUrl) : "surfer"
+    onCurUrlChanged: Titlebar.setEditSeed(curUrl)
 
     readonly property string homeUrl: "https://start.duckduckgo.com/"
 

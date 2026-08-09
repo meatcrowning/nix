@@ -3115,7 +3115,14 @@ void CVtbDeco::enterEdit() {
     const auto PWINDOW = m_pWindow.lock();
     if (!PWINDOW)
         return;
-    m_editBuf       = PWINDOW->m_title; // seed with the current address (surfer sets title = URL)
+    // Seed the editor. Normally the bar shows what you edit, so the buffer is
+    // the window title. But an app can send a separate EDITSEED — surfer draws
+    // the page TITLE in the bar yet must open the editor on the real URL — in
+    // which case seed from that. Read it from the deco's own snapshot (owned by
+    // mainThreadTick), never VtbIpc::get on this input path.
+    m_editBuf       = (m_bHasReg && !m_regSnap.editSeed.empty())
+                          ? m_regSnap.editSeed
+                          : PWINDOW->m_title;
     m_editCursor    = m_editBuf.size(); // whole field selected on open, like a browser:
     m_editSelAnchor = 0;                //   anchor 0 .. cursor end
     m_bEditDragging = false;
