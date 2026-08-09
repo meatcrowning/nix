@@ -44,6 +44,13 @@
   # home/srvs/wal-files/ly-theme.sh — carried forward, so a rebuild does not
   # revert the greeter to the seed colours. Failure is benign: ly falls back
   # to its defaults, login still works, and the next switch re-seeds the file.
+  #
+  # `sed` is spelled absolutely because an activation script's PATH does NOT
+  # include it: the colour-carrying loop below failed with `sed: command not
+  # found` on every single switch (12 times in the three days to 2026-08-09),
+  # silently — the `[ -n "$v" ]` guard turns the failure into a no-op, so the
+  # greeter quietly reverted to the seed colours each rebuild and nothing said
+  # why. Any command added here needs the same treatment unless it is coreutils.
   system.activationScripts.lyRuntimeConfig = lib.stringAfter [ "etc" ] ''
     [ -f /etc/ly/config.ini ] || exit 0
     mkdir -p /var/lib/ly
@@ -51,8 +58,8 @@
     cp -f /etc/ly/config.ini /var/lib/ly/config.ini.new
     if [ -f /var/lib/ly/config.ini ]; then
       for k in border_fg colormix_col1 colormix_col2 colormix_col3 error_fg fg; do
-        v="$(sed -n "s/^$k=//p" /var/lib/ly/config.ini | head -n1)"
-        [ -n "$v" ] && sed -i "s|^$k=.*|$k=$v|" /var/lib/ly/config.ini.new
+        v="$(${pkgs.gnused}/bin/sed -n "s/^$k=//p" /var/lib/ly/config.ini | head -n1)"
+        [ -n "$v" ] && ${pkgs.gnused}/bin/sed -i "s|^$k=.*|$k=$v|" /var/lib/ly/config.ini.new
       done
     fi
     chown lam:users /var/lib/ly/config.ini.new
