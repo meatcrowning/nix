@@ -370,6 +370,11 @@ class CVtbDeco : public IHyprWindowDecoration {
     // texture for a TOP/BOTTOM bar, whose run goes ALONG the bar (horizontal).
     // Surface is runLenPx wide × one bar-column tall.
     SP<Render::ITexture> renderHorizTex(const std::string& text, int runLenPx, float scale, const CHyprColor& color);
+    // The address editor's buffer laid ALONG a horizontal bar: one codepoint per
+    // fixed cell, the x-transpose of renderStackedTex (so the caret/selection/
+    // scroll math stays codepoint-counted for both orientations). outCols = cells
+    // drawn.
+    SP<Render::ITexture> renderEditLineTex(const std::string& text, int runLenPx, float scale, const CHyprColor& color, int* outCols = nullptr);
     // A button glyph texture. `quarter` turns it a quarter-turn for a horizontal
     // (top/bottom) bar: 0 upright (the default, every vertical-bar and letter
     // glyph), -1 counter-clockwise (roll on a TOP bar -> `>>` points UP),

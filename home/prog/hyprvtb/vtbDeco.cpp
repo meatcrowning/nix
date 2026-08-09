@@ -920,6 +920,80 @@ SP<Render::ITexture> CVtbDeco::renderHorizTex(const std::string& text, int runLe
     return tex;
 }
 
+// The address editor's text laid ALONG a horizontal (top/bottom) bar: one
+// codepoint per SIZE-wide cell, left to right, into a runLenPx-wide × colW-tall
+// surface. The transpose of renderStackedTex — same one-cell-per-codepoint grid
+// (so the caret/selection/scroll math stays codepoint-counted and identical for
+// both orientations, see the m_bEditing block in renderPass), just walked in x
+// instead of y. `outCols` reports how many cells were actually drawn (the caller
+// treats it like renderStackedTex's line count). Cairo clips at the surface's
+// right edge, so a long URL's overflow is dropped exactly as the vertical path's
+// overflow falls off the bottom.
+SP<Render::ITexture> CVtbDeco::renderEditLineTex(const std::string& text, int runLenPx, float scale, const CHyprColor& COLOR, int* outCols) {
+    const auto FONT = Cfg::font();
+    const int  SIZE = std::round(Cfg::fontSize() * scale);
+    const int  BARW = std::round(colW() * scale);
+
+    if (runLenPx < SIZE || text.empty())
+        return nullptr;
+
+    // one entry per codepoint
+    std::vector<std::string> cps;
+    for (size_t i = 0; i < text.size();) {
+        size_t len = 1;
+        while (i + len < text.size() && (text[i + len] & 0xC0) == 0x80)
+            len++;
+        cps.push_back(text.substr(i, len));
+        i += len;
+    }
+    const int maxCells = runLenPx / SIZE;
+    const int shown    = std::min((int)cps.size(), maxCells);
+    if (outCols)
+        *outCols = shown;
+    if (shown <= 0)
+        return nullptr;
+
+    auto SURF = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, runLenPx, BARW);
+    auto CR   = cairo_create(SURF);
+
+    // mono for pixel faces only — see renderStackedTex for the rule
+    cairo_font_options_t* fo = cairo_font_options_create();
+    if (!Vtb::Cfg::fontSmooth())
+        cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_NONE);
+
+    PangoLayout* layout = pango_cairo_create_layout(CR);
+    pango_cairo_context_set_font_options(pango_layout_get_context(layout), fo);
+
+    PangoFontDescription* fd = pango_font_description_new();
+    pango_font_description_set_family(fd, FONT.c_str());
+    pango_font_description_set_absolute_size(fd, SIZE * PANGO_SCALE);
+    pango_layout_set_font_description(layout, fd);
+
+    cairo_set_source_rgba(CR, COLOR.r, COLOR.g, COLOR.b, COLOR.a);
+
+    // centre each glyph in its own SIZE-wide, BARW-tall cell
+    for (int i = 0; i < shown; i++) {
+        pango_layout_set_text(layout, cps[i].c_str(), -1);
+        int gw = 0, gh = 0;
+        pango_layout_get_pixel_size(layout, &gw, &gh);
+        const double cx = (double)i * SIZE + std::max(0.0, (SIZE - gw) / 2.0);
+        const double cy = std::max(0.0, (BARW - gh) / 2.0);
+        cairo_move_to(CR, cx, cy);
+        pango_cairo_show_layout(CR, layout);
+    }
+
+    pango_font_description_free(fd);
+    g_object_unref(layout);
+    cairo_font_options_destroy(fo);
+    cairo_surface_flush(SURF);
+
+    auto tex = Hl::textureFromCairo(SURF);
+
+    cairo_destroy(CR);
+    cairo_surface_destroy(SURF);
+    return tex;
+}
+
 SP<Render::ITexture> CVtbDeco::glyphTex(const std::string& glyph, const CHyprColor& color, float scale, int quarter) {
     const auto key = glyph + "|" + std::format("{:08x}", color.getAsHex()) + (quarter > 0 ? "|cw" : quarter < 0 ? "|ccw" : "");
     auto       it  = m_glyphCache.find(key);
@@ -1683,36 +1757,52 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
         const size_t selHi  = std::max(m_editSelAnchor, m_editCursor);
         const bool   hasSel = selHi > selLo;
 
-        // byte offset of the first visible row (the m_editScrollCp'th codepoint)
+        // The editor is codepoint-counted in bar-local coords: a "row" is a
+        // stacked cell ALONG the bar — down a vertical right/left bar, across a
+        // horizontal top/bottom one. Everything below (scroll, selection, caret)
+        // indexes those cells identically; only the drawn texture and the
+        // caret/selection boxes transpose between the two axes. VERT picks which.
+        const bool VERT = barVertical();
+
+        // byte offset of the first visible cell (the m_editScrollCp'th codepoint)
         size_t visStart = 0;
         for (int i = 0; i < m_editScrollCp && visStart < m_editBuf.size(); i++)
             visStart = nextCp(m_editBuf, visStart);
 
-        // rows below are relative to the scroll offset; everything is clamped to
+        // cells below are relative to the scroll offset; everything is clamped to
         // the visible window so a long URL's selection/text never spills past the
-        // bar's bottom edge (which used to run off-window and flicker).
+        // bar's far edge (which used to run off-window and flicker).
         const int loCp = hasSel ? (countCp(m_editBuf, selLo) - m_editScrollCp) : 0;
         const int hiCp = hasSel ? (countCp(m_editBuf, selHi) - m_editScrollCp) : 0;
 
         if (!m_pEditTex) {
             int th = 0, lines = 0;
-            // render only from the scroll offset; pango clips to the RUNLEN-tall
-            // surface, so nothing is drawn below the bar
+            // render only from the scroll offset; the surface is RUNLEN long, so
+            // the overflow past the bar's far edge is clipped (dropped off the
+            // bottom for a vertical bar, off the right for a horizontal one)
             const std::string SHOWN = m_editBuf.empty() ? std::string(" ") : m_editBuf.substr(visStart);
-            m_pEditTex   = renderStackedTex(SHOWN, RUNLEN, SCALE, textColor, &th, &lines, /*ellipsis=*/false);
-            m_iEditLineH = lines > 0 ? th / lines : std::round(Cfg::fontSize() * SCALE);
+            if (VERT) {
+                m_pEditTex   = renderStackedTex(SHOWN, RUNLEN, SCALE, textColor, &th, &lines, /*ellipsis=*/false);
+                m_iEditLineH = lines > 0 ? th / lines : std::round(Cfg::fontSize() * SCALE);
+            } else {
+                m_pEditTex   = renderEditLineTex(SHOWN, RUNLEN, SCALE, textColor, &lines);
+                m_iEditLineH = std::round(Cfg::fontSize() * SCALE); // fixed cell pitch along the bar
+            }
             m_iEditLines = lines;
             // the selected substring (bg colour, drawn over the accent block so
-            // those rows invert), clamped to the visible window: it starts at
-            // max(selLo, visStart) and its own surface is only as tall as the
-            // space left below that row, so it can't spill either.
+            // those cells invert), clamped to the visible window: it starts at
+            // max(selLo, visStart) and its own surface is only as long as the
+            // space left past that cell, so it can't spill either.
             m_pEditSelTex = nullptr;
             if (hasSel && m_iEditLineH > 0) {
                 const size_t vSelLo    = std::max(selLo, visStart);
                 const int    selRow    = std::max(0, loCp);
                 const int    selRunLen = std::max(0, RUNLEN - selRow * m_iEditLineH);
-                if (selHi > vSelLo && selRunLen >= m_iEditLineH)
-                    m_pEditSelTex = renderStackedTex(m_editBuf.substr(vSelLo, selHi - vSelLo), selRunLen, SCALE, bgColor, nullptr, nullptr, /*ellipsis=*/false);
+                if (selHi > vSelLo && selRunLen >= m_iEditLineH) {
+                    const std::string SEL = m_editBuf.substr(vSelLo, selHi - vSelLo);
+                    m_pEditSelTex = VERT ? renderStackedTex(SEL, selRunLen, SCALE, bgColor, nullptr, nullptr, /*ellipsis=*/false)
+                                         : renderEditLineTex(SEL, selRunLen, SCALE, bgColor);
+                }
             }
         }
 
@@ -1723,7 +1813,9 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
                 const int blkLo = std::clamp(loCp, 0, maxRow);
                 const int blkHi = std::clamp(hiCp, 0, maxRow);
                 if (blkHi > blkLo) {
-                    CBox block = {TITLEX, TITLEY + blkLo * (double)m_iEditLineH, (double)TSZ.x, (blkHi - blkLo) * (double)m_iEditLineH};
+                    const double span = (blkHi - blkLo) * (double)m_iEditLineH;
+                    CBox block = VERT ? CBox{TITLEX, TITLEY + blkLo * (double)m_iEditLineH, (double)TSZ.x, span}
+                                      : CBox{TITLEX + blkLo * (double)m_iEditLineH, TITLEY, span, (double)TSZ.y};
                     Hl::rect(block.round(), accentColor, {});
                 }
             }
@@ -1733,18 +1825,24 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
         if (hasSel && m_pEditSelTex && m_pEditSelTex->m_texID != 0 && m_iEditLineH > 0) {
             const auto TSZ    = m_pEditSelTex->m_size;
             const int  selRow = std::max(0, loCp);
-            CBox       sbox   = {TITLEX, TITLEY + selRow * (double)m_iEditLineH, TSZ.x, TSZ.y};
+            CBox       sbox   = VERT ? CBox{TITLEX, TITLEY + selRow * (double)m_iEditLineH, (double)TSZ.x, (double)TSZ.y}
+                                     : CBox{TITLEX + selRow * (double)m_iEditLineH, TITLEY, (double)TSZ.x, (double)TSZ.y};
             Hl::texture(m_pEditSelTex, sbox.round(), {.a = a});
         }
-        // caret: a horizontal bar at the cursor's row (relative to scroll), drawn
-        // only when there's no selection and the row is within the visible window.
+        // caret: a thin bar at the cursor's cell (relative to scroll), drawn only
+        // when there's no selection and the cell is within the visible window. It
+        // sits at the cell's leading edge along the bar — a line across the column
+        // on a vertical bar, an upright line down the column on a horizontal one.
         if (!hasSel && m_iEditLineH > 0) {
             const long ms       = std::chrono::duration_cast<std::chrono::milliseconds>(Time::steadyNow() - m_editBlinkAt).count();
             const bool blinkOn  = (ms / 500) % 2 == 0;
             const int  caretRow = countCp(m_editBuf, m_editCursor) - m_editScrollCp;
             if (blinkOn && caretRow >= 0 && caretRow <= maxRow) {
-                const double cy = TITLEY + caretRow * (double)m_iEditLineH;
-                CBox caret = {TITLEX + 2 * SCALE, cy, (double)(cellSize() - 4) * SCALE, std::max(1.0, 2.0 * (double)SCALE)};
+                const double along = caretRow * (double)m_iEditLineH;
+                const double thick = std::max(1.0, 2.0 * (double)SCALE);
+                const double acr   = (double)(cellSize() - 4) * SCALE;
+                CBox caret = VERT ? CBox{TITLEX + 2 * SCALE, TITLEY + along, acr, thick}
+                                  : CBox{TITLEX + along, TITLEY + 2 * SCALE, thick, acr};
                 Hl::rect(caret.round(), accentColor, {});
             }
             damageEntire(); // keep the blink ticking on a still cursor
@@ -2986,13 +3084,13 @@ int CVtbDeco::appDropSlot(const Vector2D& c, const SVtbAppReg& reg) {
 // ---- title address editor -------------------------------------------------
 
 bool CVtbDeco::titleEditEnabled() {
-    // The address editor is a vertical-bar feature: its whole geometry (stacked
-    // rows, caret, selection) is bar-local-Y and does not transpose to a
-    // horizontal top/bottom bar. On a horizontal bar the title region is
-    // display-only. The apps that opt in (surfer's URL bar) keep the title
-    // visible; they just can't edit it in place on that edge.
-    if (!barVertical())
-        return false;
+    // The address editor works on every edge. Its geometry is codepoint-counted
+    // in bar-local coords (the caret/selection/scroll rows), and both the drawn
+    // texture and the caret/selection boxes transpose x<->along with the bar side
+    // (renderEditLineTex + the m_bEditing branch in renderPass), so a click on
+    // the title region opens an editable field on a vertical right/left bar and
+    // on a horizontal top/bottom one alike. The apps that opt in (surfer's URL
+    // bar) declare it with TITLEEDIT.
     SVtbAppReg reg;
     return appReg(reg) && reg.titleEdit;
 }
