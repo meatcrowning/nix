@@ -236,6 +236,14 @@ Column {
             }
         }
         SetRow {
+            label: "compact titlebar"
+            desc: "collapse the two-column bar into one, half the thickness; drops the footer and scrub track"
+            SetToggle {
+                checked: page.d.compact
+                onToggled: (v) => { page.d.compact = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
             label: "drop shadow"
             desc: "opacity of the shadow cast to a window's bottom-left; 0 = none"
             SetSlider {
