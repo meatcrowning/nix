@@ -19,12 +19,10 @@ Column {
     // theme — in solid mode ("display wallpaper" off) the palette changes and
     // the image simply stays hidden (WallpaperLayer.qml), same as the picker.
     SetSection {
-        title: "paper + theme"
         SetPaperGrid { }
     }
 
     SetSection {
-        title: "wallpaper"
         SetRow {
             // The ONE control for this feature: show the wallpaper image, or fill
             // the desktop with a solid block of the theme's background colour
@@ -76,7 +74,6 @@ Column {
     }
 
     SetSection {
-        title: "theme"
         SetRow {
             // The stored key is still themeMode ("auto"/"manual") — the toggle
             // is just its face: on = manual, the fixed accent below; off =
@@ -217,7 +214,6 @@ Column {
     }
 
     SetSection {
-        title: "window decorations"
         SetRow {
             label: "title orientation"
             SetSelect {
@@ -295,7 +291,6 @@ Column {
     }
 
     SetSection {
-        title: "motion"
         SetRow {
             label: "reduce motion"
             desc: "disable slide/fan animations"
