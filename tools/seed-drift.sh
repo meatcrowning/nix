@@ -62,6 +62,9 @@ normalize() {
                    -e 's/GoogleDot-[A-Za-z0-9]+/GoogleDot-<ACCENT>/g' \
                    -e 's/(\["shadow_alpha"\][[:space:]]*=[[:space:]]*)[0-9.]+/\1<WAL>/g' \
                    -e 's/(\["title_rotated"\][[:space:]]*=[[:space:]]*)(true|false)/\1<WAL>/g' \
+                   -e 's/(\["titlebar_edge"\][[:space:]]*=[[:space:]]*)"[^"]*"/\1<WAL>/g' \
+                   -e 's/(\["dim_unfocused"\][[:space:]]*=[[:space:]]*)(true|false)/\1<WAL>/g' \
+                   -e 's/^([[:space:]]*dim_inactive[[:space:]]*=[[:space:]]*)(true|false)/\1<WAL>/' \
                    -e 's/(\["font"\][[:space:]]*=[[:space:]]*)"[^"]*"/\1<WAL>/g' \
                    -e 's/(\["font_size"\][[:space:]]*=[[:space:]]*)[0-9]+/\1<WAL>/g' \
                    -e 's/(\["font_smooth"\][[:space:]]*=[[:space:]]*)(true|false)/\1<WAL>/g' \

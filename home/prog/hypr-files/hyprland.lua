@@ -334,6 +334,17 @@ hl.config({
             -- from settings.json's titleOrientation, the panel applies live
             -- changes, this line is the persisted floor across a reload.
             ["title_rotated"]     = false,
+            -- Titlebar anchor edge + unfocus dim — two more USER keys riding
+            -- this block for the shadow_alpha reason: the panel sets them live
+            -- over hl.config, but a `hyprctl reload` (fired by wal-set.sh on a
+            -- theme change, and by apply-pixel-font.sh on a font change) re-runs
+            -- this file and drops any runtime override, so the titlebar side
+            -- snapped back to the C++ default "right" and the dim toggle back to
+            -- default-true on every theme tweak. apply-window-frame.sh (and
+            -- wal-set.sh) rewrite these from settings.json so the pick survives.
+            -- Masked in seed-drift.sh so the runtime rewrite is not flagged.
+            ["titlebar_edge"]     = "right",
+            ["dim_unfocused"]     = true,
             -- The desktop font pick — persisted like shadow_alpha above
             -- because this file AUTO-RELOADS: wal-set.sh seds the palette in
             -- on every theme apply, the re-run lua reverted any key living
@@ -500,10 +511,12 @@ hl.config({
         -- terminal) never had the app fade, so its body stayed lit while its
         -- titlebar and border read unfocused. "The setting should affect the
         -- window itself, the border, EVERYTHING, not only the titlebar."
-        -- Floor is ON to match plugin dim_unfocused's default-true;
+        -- Seed is ON to match plugin dim_unfocused's default-true, but this
+        -- line is a persisted FLOOR that apply-window-frame.sh / wal-set.sh
+        -- rewrite from settings.json's dimUnfocused (masked in seed-drift.sh):
         -- SettingsApply.qml toggles it live over hl.config when the setting
-        -- flips (a reload reverts to this floor, exactly like dim_unfocused
-        -- itself). Retune dim_strength to taste — 0.5 is Hyprland's default.
+        -- flips, and the persist keeps the pick across a reload instead of
+        -- reverting to default-true. Retune dim_strength — 0.5 is the default.
         dim_inactive = true,
         dim_strength = 0.5,
 
