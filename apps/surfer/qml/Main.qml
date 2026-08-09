@@ -39,10 +39,14 @@ Window {
     // Only surfer's OWN chrome follows this. The page is Chromium's and keeps
     // its own colours — dimming a web page on focus loss is not what §3.1.1
     // asks for, and §16 already says the desktop imposes only the font there.
+    // "dim unfocused" off (Settings > Appearance) keeps the chrome on its
+    // focused tones (docs/DESIGN.md §3.1.1's off switch); native dim is off
+    // then too, so the chrome must not grey itself.
     readonly property bool winActive: win.active
-    readonly property color fgAccent: win.active ? Theme.accent  : Theme.inactive
-    readonly property color fgText:   win.active ? Theme.text    : Theme.inactive
-    readonly property color fgDim:    win.active ? Theme.textDim : Theme.inactive
+        || (typeof DeskStyle !== "undefined" && !DeskStyle.dimUnfocused)
+    readonly property color fgAccent: winActive ? Theme.accent  : Theme.inactive
+    readonly property color fgText:   winActive ? Theme.text    : Theme.inactive
+    readonly property color fgDim:    winActive ? Theme.textDim : Theme.inactive
 
     // The window title IS the address bar: the plugin renders it as the stacked
     // outer-column text and seeds its editor from it. Keep it the live URL.

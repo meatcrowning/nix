@@ -36,10 +36,14 @@ Window {
     // docs/DESIGN.md §3.1.1). Derived ONCE here and handed down: a leaf never
     // reads Window.active itself, so a focus change re-evaluates these four
     // bindings rather than one per drawn item.
+    // "dim unfocused" off (Settings > Appearance) keeps the window on its
+    // focused tones (docs/DESIGN.md §3.1.1's off switch); native dim is off
+    // then too, so the body — picture included — must not grey itself.
     readonly property bool act: win.active
-    readonly property color fgAccent: win.active ? Theme.accent  : Theme.inactive
-    readonly property color fgText:   win.active ? Theme.text    : Theme.inactive
-    readonly property color fgDim:    win.active ? Theme.textDim : Theme.inactive
+        || (typeof DeskStyle !== "undefined" && !DeskStyle.dimUnfocused)
+    readonly property color fgAccent: act ? Theme.accent  : Theme.inactive
+    readonly property color fgText:   act ? Theme.text    : Theme.inactive
+    readonly property color fgDim:    act ? Theme.textDim : Theme.inactive
 
     // ...and the PICTURE fades with them. [his, 2026-08-07] — the same answer he
     // gave for player's cover art: "dim it with everything else — the window
@@ -49,7 +53,7 @@ Window {
     // lighter than a dark photograph and would BRIGHTEN half of them. 0.55 is
     // player's measured number, reused rather than re-picked, because both
     // surfaces sit on the same near-black fill.
-    readonly property real fgArt: win.active ? 1.0 : 0.55
+    readonly property real fgArt: act ? 1.0 : 0.55
 
     Motion { id: motion }
 
@@ -595,7 +599,7 @@ Window {
                 ImageViewer {
                     id: iv
                     anchors.fill: parent
-                    winActive: win.active
+                    winActive: win.act
                     fgArt: win.fgArt
                     paneFocused: pane.focused
                     canPlay: win.revealed

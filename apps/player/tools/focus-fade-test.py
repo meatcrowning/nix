@@ -149,6 +149,15 @@ class FakeStyle(QObject):
     def reduceMotion(self): return True     # no animation to wait out
     @Property(float, notify=changed)
     def animSpeed(self): return 1.0
+    # ON, so the §3.1.1 app-side fade under test stays live. With it OFF the
+    # window keeps its focused tones and this whole fade is (correctly) absent.
+    @Property(bool, notify=changed)
+    def dimUnfocused(self): return DIM_UNFOCUSED
+
+
+# Flip with DIM_UNFOCUSED=0 to exercise the off switch: an unfocused window then
+# stays on its focused tones (native decoration:dim_inactive is off too).
+DIM_UNFOCUSED = os.environ.get("DIM_UNFOCUSED", "1") not in ("0", "false", "")
 
 
 # ------------------------------------------------------------------ the stubs

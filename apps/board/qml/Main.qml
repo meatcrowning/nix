@@ -27,10 +27,15 @@ Window {
 
     // Focus-aware foreground, in lock-step with the titlebar (§3.1.1, filer's
     // idiom). Leaves take the tone they are handed; none reads Window.active.
-    readonly property color fgAccent:  win.active ? Theme.accent  : Theme.inactive
-    readonly property color fgAccent2: win.active ? Theme.accent2 : Theme.inactive
-    readonly property color fgText:    win.active ? Theme.text    : Theme.inactive
-    readonly property color fgDim:     win.active ? Theme.textDim : Theme.inactive
+    // "dim unfocused" off (Settings > Appearance) keeps the window on its
+    // focused tones (docs/DESIGN.md §3.1.1's off switch); native dim is off
+    // then too, so the body must not grey itself.
+    readonly property bool renderActive: win.active
+        || (typeof DeskStyle !== "undefined" && !DeskStyle.dimUnfocused)
+    readonly property color fgAccent:  renderActive ? Theme.accent  : Theme.inactive
+    readonly property color fgAccent2: renderActive ? Theme.accent2 : Theme.inactive
+    readonly property color fgText:    renderActive ? Theme.text    : Theme.inactive
+    readonly property color fgDim:     renderActive ? Theme.textDim : Theme.inactive
 
     // ONE measurement gives every layout its column (the font is monospace),
     // measured against the real family rather than derived from §2.7's rounded

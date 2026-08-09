@@ -21,9 +21,16 @@ Window {
     // docs/DESIGN.md §3.1.1). Every foreground in this window goes through one
     // of these three; the document panes derive their own from `winActive` for
     // the same reason.
-    readonly property color fgAccent: win.active ? Theme.accent  : Theme.inactive
-    readonly property color fgText:   win.active ? Theme.text    : Theme.inactive
-    readonly property color fgDim:    win.active ? Theme.textDim : Theme.inactive
+    // "dim unfocused" off (Settings > Appearance) keeps the window on its
+    // focused tones regardless (docs/DESIGN.md §3.1.1's off switch). With it
+    // off, native decoration:dim_inactive is off too, so nothing greys the
+    // body; the app must not grey it either. Falls back to plain focus when
+    // DeskStyle is absent (a harness without it).
+    readonly property bool renderActive: win.active
+        || (typeof DeskStyle !== "undefined" && !DeskStyle.dimUnfocused)
+    readonly property color fgAccent: renderActive ? Theme.accent  : Theme.inactive
+    readonly property color fgText:   renderActive ? Theme.text    : Theme.inactive
+    readonly property color fgDim:    renderActive ? Theme.textDim : Theme.inactive
 
     // The pixel font is monospace, so ONE measurement gives every layout in the
     // app its column: the advance. Measured against the real font rather than
@@ -379,7 +386,7 @@ Window {
             visible: win.sideOpen
             mode: win.sideMode
             cellW: win.cellW
-            winActive: win.active
+            winActive: win.renderActive
             query: win.query
             files: win.fileIndex
             outline: win.pane ? win.pane.outline : []
@@ -432,7 +439,7 @@ Window {
                 width: win.splitOn && win.splitVertical ? win.paneLeadSize : docArea.width
                 height: win.splitOn && !win.splitVertical ? win.paneLeadSize : docArea.height
                 cellW: win.cellW
-                winActive: win.active
+                winActive: win.renderActive
                 focused: !win.splitOn || win.focusPane === 0
                 onFocusClaimed: win.focusPane = 0
                 onStatusChanged: (m) => win.status = m
@@ -453,7 +460,7 @@ Window {
                 sourceComponent: DocPane {
                     watchKey: "right"
                     cellW: win.cellW
-                    winActive: win.active
+                    winActive: win.renderActive
                     focused: win.focusPane === 1
                     onFocusClaimed: win.focusPane = 1
                     onStatusChanged: (m) => win.status = m
@@ -501,7 +508,7 @@ Window {
                 color: "transparent"
                 radius: Theme.rounding
                 border.width: Theme.ctrlBorder
-                border.color: win.active ? Theme.accent : Theme.dim
+                border.color: win.renderActive ? Theme.accent : Theme.dim
             }
 
             // ---- the search bar ----

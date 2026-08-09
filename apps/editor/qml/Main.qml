@@ -42,9 +42,14 @@ Window {
         ? tabs.get(current).dirty : false
 
     // §3.1.1 — an unfocused window fades its WHOLE foreground.
-    readonly property color fgAccent: win.active ? Theme.accent  : Theme.inactive
-    readonly property color fgText:   win.active ? Theme.text    : Theme.inactive
-    readonly property color fgDim:    win.active ? Theme.textDim : Theme.inactive
+    // "dim unfocused" off (Settings > Appearance) keeps the window on its
+    // focused tones (docs/DESIGN.md §3.1.1's off switch); native dim is off
+    // then too, so the body must not grey itself.
+    readonly property bool renderActive: win.active
+        || (typeof DeskStyle !== "undefined" && !DeskStyle.dimUnfocused)
+    readonly property color fgAccent: renderActive ? Theme.accent  : Theme.inactive
+    readonly property color fgText:   renderActive ? Theme.text    : Theme.inactive
+    readonly property color fgDim:    renderActive ? Theme.textDim : Theme.inactive
 
     // The pixel font is monospace, so ONE measurement gives every layout its
     // column (§2.7). Measured against the real font rather than derived from
@@ -494,7 +499,7 @@ Window {
                     useTabs: win.useTabs
                     indentWidth: win.indentWidth
                     showNumbers: win.showNumbers
-                    winActive: win.active
+                    winActive: win.renderActive
                     cellW: win.cellW
                     onStatusReported: (m) => win.status = m
                     onContextRequested: (x, y, pos) => win.showMenu(x, y, pos)
@@ -530,7 +535,7 @@ Window {
         FindBar {
             id: findBar
             parent: stage
-            winActive: win.active
+            winActive: win.renderActive
             onRequery: win.refreshFind()
             onStep: (backward) => win.doStep(backward)
             onReplaceCurrent: win.doReplaceCurrent()
@@ -541,7 +546,7 @@ Window {
         PathBar {
             id: pathBar
             parent: stage
-            winActive: win.active
+            winActive: win.renderActive
             onAccepted: (p) => {
                 if (pathBar.mode === "goto") {
                     var n = parseInt(p);
@@ -582,7 +587,7 @@ Window {
         Confirm {
             id: confirm
             anchors.fill: parent
-            winActive: win.active
+            winActive: win.renderActive
             showDiscard: discardLabel !== ""
 
             onAccepted: {

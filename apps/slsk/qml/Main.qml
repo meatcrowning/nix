@@ -13,9 +13,14 @@ Window {
 
     // Focus-aware foreground, in lock-step with the titlebar (filer's idiom,
     // docs/DESIGN.md 3.1.1).
-    readonly property color fgAccent: win.active ? Theme.accent  : Theme.inactive
-    readonly property color fgText:   win.active ? Theme.text    : Theme.inactive
-    readonly property color fgDim:    win.active ? Theme.textDim : Theme.inactive
+    // "dim unfocused" off (Settings > Appearance) keeps the window on its
+    // focused tones (docs/DESIGN.md §3.1.1's off switch); native dim is off
+    // then too, so the body must not grey itself.
+    readonly property bool renderActive: win.active
+        || (typeof DeskStyle !== "undefined" && !DeskStyle.dimUnfocused)
+    readonly property color fgAccent: renderActive ? Theme.accent  : Theme.inactive
+    readonly property color fgText:   renderActive ? Theme.text    : Theme.inactive
+    readonly property color fgDim:    renderActive ? Theme.textDim : Theme.inactive
 
     Motion { id: motion }
 
