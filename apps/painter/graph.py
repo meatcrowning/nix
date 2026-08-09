@@ -102,6 +102,24 @@ class Graph:
         node.setdefault("inputs", {})[key] = value
         return self
 
+    def add_node(self, class_type: str, inputs: dict, role: str,
+                 title: str | None = None) -> str:
+        """Add a fresh node with a unique id and register its role.
+
+        The same direct-insertion + reindex shape `insert_lora_chain` uses,
+        exposed for the edit branch's extra reference images: each additional
+        image is a LoadImage -> scale -> VAEEncode plus a ReferenceLatent
+        spliced onto both conditioning tails. Returns the new node id.
+        """
+        nid = self._next_id()
+        self.nodes[nid] = {
+            "inputs": dict(inputs),
+            "class_type": class_type,
+            "_meta": {"title": title or role, "painter_role": role},
+        }
+        self._reindex()
+        return nid
+
     def set_inputs(self, role: str, values: dict):
         for k, v in (values or {}).items():
             self.set_input(role, k, v)

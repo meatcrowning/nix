@@ -702,6 +702,7 @@ class Painter(QObject):
     optionsChanged = Signal()
     inputImageChanged = Signal()
     lastImageChanged = Signal()
+    editExtraChanged = Signal()
     modeChanged = Signal()
     previewChanged = Signal()
     toast = Signal(str, bool)          # message, isError
@@ -744,6 +745,9 @@ class Painter(QObject):
         self._last_image = ""             # the frame to end on, likewise
         self._uploaded = ("", "")         # (local path, the ref ComfyUI knows it by)
         self._uploaded_last = ("", "")    # the same, for the last frame
+        self._edit_extra = []             # edit mode's ADDITIONAL reference images,
+                                          # as local paths (the primary is _input_image)
+        self._edit_uploads = {}           # {local path: ref} for those extras
         self._mode = ""                   # anime / real / edit / video, or "" for the list
         self._want_mode = ""              # a remembered mode, until the rows land
         # Collages built for a dragged selection, keyed by the files that went
@@ -890,6 +894,8 @@ class Painter(QObject):
     inputImageUrl = Property(str, lambda self: (
         QUrl.fromLocalFile(self._input_image).toString() if self._input_image else ""),
         notify=inputImageChanged)
+    editExtraImages = Property("QStringList", lambda self: list(self._edit_extra),
+                               notify=editExtraChanged)
     lastImage = Property(str, lambda self: self._last_image, notify=lastImageChanged)
     lastImageUrl = Property(str, lambda self: (
         QUrl.fromLocalFile(self._last_image).toString() if self._last_image else ""),
@@ -1054,6 +1060,54 @@ class Painter(QObject):
             self._last_image = path
             self._uploaded_last = ("", "")
             self.lastImageChanged.emit()
+
+    # -- edit mode's additional reference images ---------------------------
+    # The primary image (the one that sizes the output) is _input_image, shared
+    # with the video first frame. These are the extra references Flux 2 Klein
+    # attaches alongside it — kept as a separate list so the video path and every
+    # existing single-image behaviour are untouched.
+    @Slot(str, result=bool)
+    def addEditImage(self, url):
+        path = self._dropped_path(url)
+        if not path:
+            return False
+        if path not in self._edit_extra:
+            self._edit_extra.append(path)
+            self.editExtraChanged.emit()
+        return True
+
+    @Slot(result=bool)
+    def pasteEditImage(self):
+        path = self._paste_target()
+        if not path:
+            return False
+        if path not in self._edit_extra:
+            self._edit_extra.append(path)
+            self.editExtraChanged.emit()
+        return True
+
+    @Slot(int)
+    def removeEditImage(self, idx):
+        if 0 <= idx < len(self._edit_extra):
+            del self._edit_extra[idx]
+            self.editExtraChanged.emit()
+
+    @Slot()
+    def clearEditImages(self):
+        if self._edit_extra:
+            self._edit_extra = []
+            self.editExtraChanged.emit()
+
+    @Slot("QStringList")
+    def restoreEditImages(self, paths):
+        kept = [p for p in paths if p and os.path.isfile(p)]
+        if kept:
+            self._edit_extra = kept
+            self.editExtraChanged.emit()
+
+    @Slot(str, result=str)
+    def fileUrl(self, path):
+        return QUrl.fromLocalFile(path).toString() if path else ""
 
     @Slot()
     def clearInputImage(self):
@@ -1458,9 +1512,8 @@ class Painter(QObject):
             if not self._input_image:
                 self.toast.emit("drop an image to edit first", True)
                 return
-            self._upload_then_start(
-                entry, params, count,
-                [("input_image", self._input_image, "_uploaded", "image")])
+            paths = [self._input_image] + [p for p in self._edit_extra if p]
+            self._upload_edit_then_start(entry, params, count, paths)
             return
 
         # A dropped frame lives on THIS machine and the graph names a file in
@@ -1480,6 +1533,48 @@ class Painter(QObject):
         if params.get("use_last_frame"):
             pending.append(("last_image", self._last_image, "_uploaded_last", "last frame"))
         self._upload_then_start(entry, params, count, pending)
+
+    def _upload_edit_then_start(self, entry, params, count, paths, refs=None):
+        """Upload an edit job's images — primary plus every reference — then go.
+
+        Same re-entrant walk as `_upload_then_start`, but over a LIST of edit
+        images rather than the two fixed frame slots. The primary (index 0)
+        reuses the shared single-image cache so a picture already sent for a
+        video first frame is not sent again; extras cache in `_edit_uploads`.
+        Passes both `input_image` (the primary ref) and `input_images` (all of
+        them, in order) so the graph can chain a ReferenceLatent per image.
+        """
+        refs = refs or []
+        i = len(refs)
+        if i == len(paths):
+            self._start_jobs(
+                entry,
+                dict(params, input_image=refs[0], input_images=list(refs)),
+                count)
+            return
+        path = paths[i]
+        if i == 0 and self._uploaded[0] == path and self._uploaded[1]:
+            cached = self._uploaded[1]
+        else:
+            cached = self._edit_uploads.get(path)
+        if cached:
+            self._upload_edit_then_start(entry, params, count, paths, refs + [cached])
+            return
+        label = "image" if len(paths) == 1 else f"image {i + 1} of {len(paths)}"
+        self._set_status(f"uploading the {label}...")
+
+        def uploaded(ref, error):
+            if not ref:
+                self._set_status("ready")
+                self.toast.emit(f"could not send the {label}: {error}", True)
+                return
+            if i == 0:
+                self._uploaded = (path, ref)
+            else:
+                self._edit_uploads[path] = ref
+            self._upload_edit_then_start(entry, params, count, paths, refs + [ref])
+
+        self.client.upload_image(path, uploaded)
 
     def _upload_then_start(self, entry, params, count, pending):
         """Send whatever dropped frames this job needs, one at a time, then go.

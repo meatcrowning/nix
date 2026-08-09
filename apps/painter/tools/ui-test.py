@@ -1364,6 +1364,38 @@ def test_modes(win, ctl, tmp):
           not any(k in sent for k in ("steps", "cfg", "width", "height",
                                       "batch_size", "negative", "toggles")),
           sorted(sent))
+    check("...a single image still submits input_images with one entry",
+          sent.get("input_images") == ["painter/to-edit.png"],
+          sent.get("input_images"))
+
+    # MULTIPLE reference images: Flux 2 Klein takes N, chained as reference
+    # latents. The extras are their own list; the primary still sizes the job,
+    # so input_images is [primary, extra1, extra2] in order.
+    for rel in ("ref-a.png", "ref-b.png"):
+        with open(os.path.join(tmp, rel), "wb") as fh:
+            fh.write(b"not really a png")
+    ctl._edit_extra = [os.path.join(tmp, "ref-a.png"), os.path.join(tmp, "ref-b.png")]
+    ctl._edit_uploads = {ctl._edit_extra[0]: "painter/ref-a.png",
+                         ctl._edit_extra[1]: "painter/ref-b.png"}
+    check("editExtraImages exposes the reference list to QML",
+          list(ctl.property("editExtraImages")) == ctl._edit_extra,
+          ctl.property("editExtraImages"))
+    sent.clear()
+    win.metaObject().invokeMethod(win, "submit")
+    spin(300)
+    check("an edit job carries every reference image, primary first",
+          sent.get("input_images") == ["painter/to-edit.png",
+                                       "painter/ref-a.png", "painter/ref-b.png"]
+          and sent.get("input_image") == "painter/to-edit.png",
+          {k: sent.get(k) for k in ("input_image", "input_images")})
+    ctl.removeEditImage(0)
+    check("removeEditImage drops one reference, keeping the rest",
+          list(ctl.property("editExtraImages")) == [os.path.join(tmp, "ref-b.png")],
+          ctl.property("editExtraImages"))
+    ctl.clearEditImages()
+    check("clearEditImages empties the reference list",
+          len(ctl.property("editExtraImages")) == 0,
+          ctl.property("editExtraImages"))
 
     ctl.reg.build, ctl.client.submit = orig_build, orig_submit
     ctl._object_info = None

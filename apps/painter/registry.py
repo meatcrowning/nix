@@ -537,9 +537,15 @@ class Registry:
         follows for its own missing controls).
         """
         spec = fam.get("edit") or {}
-        image = (p.get("input_image") or "").strip()
+        # The FIRST image is the primary: it alone sizes the output (GetImageSize
+        # feeds the latent and the scheduler). `input_images` is the full list;
+        # `input_image` is the legacy single field and equals its first element.
+        images = [str(s).strip() for s in (p.get("input_images") or []) if str(s).strip()]
+        image = (p.get("input_image") or (images[0] if images else "")).strip()
         if not image:
             raise G.GraphError("drop an image to edit first")
+        if not images:
+            images = [image]
 
         # --- LoRA chain (same shape as the image path; there IS a clip here) ---
         loras = p.get("loras") or []
@@ -551,10 +557,41 @@ class Registry:
         g.set_input("load_image", "image", image)
 
         mp = float(p.get("megapixels") or spec.get("megapixels", 1.5))
+        upscale = spec.get("upscale_method", "nearest-exact")
+        res_steps = int(spec.get("resolution_steps", 1))
         g.set_input("scale_image", "megapixels", mp)
-        g.set_input("scale_image", "resolution_steps", int(spec.get("resolution_steps", 1)))
-        g.set_input("scale_image", "upscale_method",
-                    spec.get("upscale_method", "nearest-exact"))
+        g.set_input("scale_image", "resolution_steps", res_steps)
+        g.set_input("scale_image", "upscale_method", upscale)
+
+        # --- ADDITIONAL reference images ------------------------------------
+        # Flux 2 attaches every reference latent as a CONDList (comfy's
+        # Flux.extra_conds sums them), so N images are N chained ReferenceLatent
+        # nodes -- each its own LoadImage -> scale -> VAEEncode -- appended onto
+        # BOTH conditioning tails. ReferenceLatent's own schema: "If the model
+        # supports it you can chain multiple to set multiple reference images."
+        # Only the primary (above) sizes the output; the rest are references.
+        pos_tail = [g.id_of("ref_pos"), 0]
+        neg_tail = [g.id_of("ref_neg"), 0]
+        for i, ref in enumerate(images[1:], start=2):
+            li = g.add_node("LoadImage", {"image": ref},
+                            f"load_image_{i}", f"Load Image {i}")
+            si = g.add_node("ImageScaleToTotalPixels",
+                            {"upscale_method": upscale, "megapixels": mp,
+                             "resolution_steps": res_steps, "image": [li, 0]},
+                            f"scale_image_{i}", f"Scale Image {i}")
+            ve = g.add_node("VAEEncode",
+                            {"pixels": [si, 0], "vae": [g.id_of("vae"), 0]},
+                            f"vae_encode_{i}", f"VAE Encode {i}")
+            rp = g.add_node("ReferenceLatent",
+                            {"conditioning": list(pos_tail), "latent": [ve, 0]},
+                            f"ref_pos_{i}", f"Set Reference Latent {i}")
+            rn = g.add_node("ReferenceLatent",
+                            {"conditioning": list(neg_tail), "latent": [ve, 0]},
+                            f"ref_neg_{i}", f"Set Reference Latent (negative) {i}")
+            pos_tail, neg_tail = [rp, 0], [rn, 0]
+        if len(images) > 1:
+            g.set_input("guider", "positive", pos_tail)
+            g.set_input("guider", "negative", neg_tail)
 
         g.set_input("model_sampling", "shift", float(p.get("shift", spec.get("shift", 6.0))))
         g.set_input("sampler_select", "sampler_name", p.get("sampler_name", "euler"))
@@ -571,7 +608,8 @@ class Registry:
             if problems:
                 raise G.ValidationError(problems)
         params = {**p, "positive": pos, "negative": "", "kind": "edit",
-                  "megapixels": mp, "input_image": image, "edit": True}
+                  "megapixels": mp, "input_image": image,
+                  "input_images": images, "edit": True}
         # What the recorded parameters must NOT claim: Flux2Scheduler takes a
         # step count and the image's size and nothing else, so the family's
         # image-path scheduler/denoise/add_noise would be three settings the PNG
