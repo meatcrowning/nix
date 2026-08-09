@@ -280,7 +280,7 @@ Column {
         }
         SetRow {
             label: "dim unfocused windows"
-            desc: "grey an unfocused window's titlebar; off keeps every bar lit"
+            desc: "grey an unfocused window whole — titlebar, border and body; off keeps it lit"
             SetToggle {
                 checked: page.d.dimUnfocused
                 onToggled: (v) => { page.d.dimUnfocused = v; SettingsStore.save(); }
