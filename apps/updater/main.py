@@ -269,9 +269,9 @@ class Runner(QObject):
     #: {name, old, new} rows from `nix store diff-closures`.
     packagesReady = Signal(str, "QVariantList")
 
-    #: A diff-closures line: "<pkg>: <old versions> -> <new versions>[, ±size]".
+    #: A diff-closures/drv-closure-diff line: "<pkg>: <old> -> <new>[, ±size]".
     _DIFF_RE = re.compile(r"^\s*(\S.*?):\s+(.+?)\s+->\s+(.+?)\s*$")
-    _DIFF_MARK = "== nix store diff-closures"
+    _DIFF_MARK = "== drv-closure diff"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -310,12 +310,13 @@ class Runner(QObject):
 
     @Slot(str)
     def previewInput(self, name):
-        """Per-input package delta: `nix-upgradable.sh --input <name>` builds the
-        one input's updated closure and diffs it, so the exact packages it moves
-        can be listed under its row. This BUILDS a real closure (a from-source
-        hyprland on book), so it is on-demand only, never on list load; the whole
-        run still streams to the log so the cost is visible. The parsed result is
-        emitted on packagesReady(name, rows)."""
+        """Per-input package delta: `nix-upgradable.sh --input <name>` diffs the
+        two toplevel drv CLOSURES by evaluation alone (docs/agents/
+        updater-per-input-diff.md) — forcing a drvPath writes .drv files but
+        builds nothing, so this costs ~15s and no download, and it still answers
+        when the new system does not build. Still on-demand only (never on list
+        load) so the run and its cost stay visible in the log. The parsed result
+        is emitted on packagesReady(name, rows)."""
         name = (name or "").strip()
         if not name:
             return
