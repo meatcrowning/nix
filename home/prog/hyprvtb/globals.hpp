@@ -182,6 +182,15 @@ struct SGlobalState {
         // gated by this.
         SP<Config::Values::CBoolValue>   dimUnfocused;
 
+        // ---- titlebar edge (see CVtbDeco::getPositioningInfo) ----
+        // Which window edge the titlebar anchors to. "right" (default, the
+        // shipped look) or "left" — a clean vertical mirror: same two-column
+        // bar, reflected to the other side, with the roll/shade sliding the
+        // other way. "top"/"bottom" are NOT yet implemented (they need the bar
+        // laid horizontal) and read as the right edge here, so an unknown value
+        // never breaks layout. Settings > appearance > titlebar side.
+        SP<Config::Values::CStringValue> titlebarEdge;
+
         // ---- kinetic scrolling (see vtbKinetic.hpp) ----
         // Flat underscore names, matching bar_width / font_size. The dotted
         // `col.*` group exists only because wal-set.sh writes those keys.
@@ -299,6 +308,12 @@ namespace Vtb::Cfg {
     // Title text: false = stacked upright letters, true = rotated 90° CW.
     inline auto titleRotated() {
         return g_pGlobalState->config.titleRotated->value();
+    }
+    // True when the titlebar sits on the window's LEFT edge instead of the
+    // default right. Anything unrecognised (incl. the not-yet-built top/bottom)
+    // reads as the right edge, so an unknown value never breaks layout.
+    inline bool barOnLeft() {
+        return g_pGlobalState->config.titlebarEdge->value() == "left";
     }
 
     // ---- kinetic scrolling ----

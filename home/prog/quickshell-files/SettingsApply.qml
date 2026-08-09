@@ -61,7 +61,8 @@ Item {
         const lua = "hl.config({plugin = { hyprvtb = { "
             + "shadow_alpha = " + d.shadowAlpha + ", "
             + "title_rotated = " + _b(d.titleOrientation === "horizontal") + ", "
-            + "dim_unfocused = " + _b(d.dimUnfocused)
+            + "dim_unfocused = " + _b(d.dimUnfocused) + ", "
+            + "titlebar_edge = \"" + d.titlebarEdge + "\""
             + " } }})"
             + (flush ? " hl.plugin.hyprvtb.refresh_fonts()" : "");
         Quickshell.execDetached(["hyprctl", "eval", lua]);
@@ -141,6 +142,7 @@ Item {
         function onShadowAlphaChanged() { root.applyVtb(false); }
         function onTitleOrientationChanged() { root.applyVtb(true); }
         function onDimUnfocusedChanged() { root.applyVtb(false); }
+        function onTitlebarEdgeChanged() { root.applyVtb(true); }
         function onWindowBorderWidthChanged() { root.applyFrame(); }
         function onWindowRoundingChanged() { root.applyFrame(); }
 

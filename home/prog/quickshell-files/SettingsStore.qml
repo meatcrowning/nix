@@ -304,6 +304,11 @@ Singleton {
             // lit. Live-applied over `hl.config` (plugin:hyprvtb:dim_unfocused)
             // by SettingsApply.qml, like titleOrientation.
             property bool   dimUnfocused: true
+            // Which window edge the hyprvtb titlebar anchors to: "right" (the
+            // shipped look) or "left" — a vertical mirror. Live-applied over
+            // `hl.config` (plugin:hyprvtb:titlebar_edge) by SettingsApply.qml,
+            // like titleOrientation. (top/bottom are not offered yet.)
+            property string titlebarEdge: "right"
             // Which scrollbar the seven Qt apps draw (docs/DESIGN.md 9.2).
             // win31 | beveled | flat. The panel itself draws no scrollbar at
             // all — its one page never scrolls — so this key exists here purely
@@ -553,7 +558,7 @@ Singleton {
         themeMode: "auto", accentOverride: "#5c9fcc", fontFamily: "More Perfect DOS VGA",
         fontSize: 15, fontSizeByFamily: ({}), paletteColorCount: 16, pureBlackBg: true, pureBlackBgDark: true, lightMode: false,
         paletteVariant: "pastel", windowBorderWidth: 2,
-        windowRounding: 0, trayTint: true, desktopIcons: true, shadowAlpha: 0.6, titleOrientation: "vertical", dimUnfocused: true, scrollbarStyle: "win31",
+        windowRounding: 0, trayTint: true, desktopIcons: true, shadowAlpha: 0.6, titleOrientation: "vertical", dimUnfocused: true, titlebarEdge: "right", scrollbarStyle: "win31",
         paletteDropped: ({}),
         rgbFollowTheme: true, reduceMotion: false, animSpeed: 1.0,
         wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",

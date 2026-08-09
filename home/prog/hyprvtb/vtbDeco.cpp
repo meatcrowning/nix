@@ -379,7 +379,7 @@ SDecorationPositioningInfo CVtbDeco::getPositioningInfo() {
 
     SDecorationPositioningInfo info;
     info.policy   = DECORATION_POSITION_STICKY;
-    info.edges    = DECORATION_EDGE_RIGHT;
+    info.edges    = Cfg::barOnLeft() ? DECORATION_EDGE_LEFT : DECORATION_EDGE_RIGHT;
     // Above the border decoration's priority, so the window border wraps
     // window + bar as a single frame (same trick as hyprbars'
     // bar_precedence_over_border).
@@ -402,8 +402,9 @@ CBox CVtbDeco::assignedBoxGlobal() {
         return {};
 
     const auto PWINDOW = m_pWindow.lock();
+    const auto EDGE    = Cfg::barOnLeft() ? DECORATION_EDGE_LEFT : DECORATION_EDGE_RIGHT;
     CBox       box     = m_bAssignedBox;
-    box.translate(g_pDecorationPositioner->getEdgeDefinedPoint(DECORATION_EDGE_RIGHT, PWINDOW));
+    box.translate(g_pDecorationPositioner->getEdgeDefinedPoint(EDGE, PWINDOW));
 
     // Fallback when the positioner hasn't handed us a box yet: right after a
     // roll-out lands the window un-hides and the deco positioner needs a frame
@@ -413,9 +414,10 @@ CBox CVtbDeco::assignedBoxGlobal() {
     // positioner caught up. Derive the box straight off the window geometry
     // (content's right edge, totalBarW wide, full height — mirrors frameBox()).
     if (box.w < 1 || box.h < 1) {
-        const auto POS = Hl::posValue(PWINDOW);
-        const auto SZ  = Hl::sizeValue(PWINDOW);
-        box            = {POS.x + SZ.x, POS.y, (double)totalBarW(), SZ.y};
+        const auto   POS = Hl::posValue(PWINDOW);
+        const auto   SZ  = Hl::sizeValue(PWINDOW);
+        const double BX  = Cfg::barOnLeft() ? (POS.x - totalBarW()) : (POS.x + SZ.x);
+        box              = {BX, POS.y, (double)totalBarW(), SZ.y};
     }
 
     const auto PWORKSPACE      = PWINDOW->m_workspace;
@@ -1207,15 +1209,17 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     const int RND = std::max(0, (int)std::round(Hl::windowRounding(PWINDOW) * SCALE));
 
     // background. Rounded to match the window clip: the bar sits on the
-    // window's RIGHT edge, so its window-adjacent LEFT corners must stay
-    // flush — the box is extended left by RND and the extension hides under
-    // the window (this deco renders on DECORATION_LAYER_UNDER), leaving only
-    // the outer corners visibly rounded. A rolled-up bar has no window over
-    // it, so it takes the plain box with all four corners rounded — a lone
-    // shaded bar reads as its own little window.
-    if (RND > 0 && !m_bRolledUp && m_rollAnim == ROLL_NONE)
-        Hl::rect(CBox{barBox.x - RND, barBox.y, barBox.w + RND, barBox.h}.round(), bgColor, {.round = RND});
-    else
+    // window's RIGHT edge (or LEFT — Cfg::barOnLeft), so its window-adjacent
+    // corners must stay flush — the box is extended by RND TOWARD the window
+    // and the extension hides under it (this deco renders on
+    // DECORATION_LAYER_UNDER), leaving only the outer corners visibly rounded.
+    // A rolled-up bar has no window over it, so it takes the plain box with
+    // all four corners rounded — a lone shaded bar reads as its own little
+    // window.
+    if (RND > 0 && !m_bRolledUp && m_rollAnim == ROLL_NONE) {
+        const double BGX = Cfg::barOnLeft() ? barBox.x : barBox.x - RND; // extend toward the window
+        Hl::rect(CBox{BGX, barBox.y, barBox.w + RND, barBox.h}.round(), bgColor, {.round = RND});
+    } else
         Hl::rect(barBox, bgColor, {.round = RND});
 
     // local -> monitor-space helper for interior boxes (logical px in)
@@ -2107,20 +2111,27 @@ void CVtbDeco::renderTooltip(PHLMONITOR pMonitor, const CBox& barBox, float SCAL
     const double W     = tex->m_size.x + PADPX * 2;
     const double H     = tex->m_size.y + PADPX * 2;
 
-    // rest position sits just left of the bar; at phase 0 the label is shoved a
-    // full width+gap to the RIGHT so it's entirely tucked behind the bar, then
-    // slides left out into place. hideDist = W + gap => right edge starts at the
-    // bar's left edge.
-    const double restX    = barBox.x - W - 6 * SCALE;
+    // rest position sits just OUTSIDE the bar (left of a right-edge bar, right
+    // of a left-edge one); at phase 0 the label is shoved a full width+gap back
+    // BEHIND the bar so it's entirely tucked, then slides out into place.
+    // hideDist = W + gap => its bar-adjacent edge starts at the bar's edge.
+    const bool   ONLEFT   = Cfg::barOnLeft();
+    const double barOutX  = ONLEFT ? (barBox.x + barBox.w) : barBox.x; // the bar's window-far edge
     const double hideDist = W + 6 * SCALE;
-    const double slideX   = restX + (1.f - E) * hideDist;
+    const double restX    = ONLEFT ? (barOutX + 6 * SCALE) : (barOutX - W - 6 * SCALE);
+    const double slideX   = ONLEFT ? (restX - (1.f - E) * hideDist) : (restX + (1.f - E) * hideDist);
 
-    // Clip everything to the LEFT of the bar so the not-yet-emerged part stays
-    // hidden behind it. renderRect/renderTexture reset the GL scissor to their
-    // own damage region internally, so a manual scissor would be ignored — pass
-    // a clipped damage region via the render-data structs instead.
-    CRegion clip = Hl::renderDamage();
-    clip.intersect(CBox{0.0, 0.0, barBox.x, (double)pMonitor->m_transformedSize.y});
+    // Clip everything to the OUTER side of the bar so the not-yet-emerged part
+    // stays hidden behind it. renderRect/renderTexture reset the GL scissor to
+    // their own damage region internally, so a manual scissor would be ignored —
+    // pass a clipped damage region via the render-data structs instead.
+    CRegion      clip = Hl::renderDamage();
+    const double MONW = (double)pMonitor->m_transformedSize.x;
+    const double MONH = (double)pMonitor->m_transformedSize.y;
+    if (ONLEFT)
+        clip.intersect(CBox{barOutX, 0.0, MONW - barOutX, MONH});
+    else
+        clip.intersect(CBox{0.0, 0.0, barOutX, MONH});
 
     CBox box = {slideX, barBox.y + CY * SCALE - H / 2.0, W, H};
     box.round();
@@ -2141,7 +2152,8 @@ void CVtbDeco::renderTooltip(PHLMONITOR pMonitor, const CBox& barBox, float SCAL
     const auto   DECOBOX = effectiveBoxGlobal();
     const double LW      = W / SCALE + 10;
     const double LH      = H / SCALE + 4;
-    m_tooltipBox         = {DECOBOX.x - LW, DECOBOX.y + CY - LH / 2.0, LW + 2, LH};
+    const double LX      = ONLEFT ? (DECOBOX.x + DECOBOX.w) : (DECOBOX.x - LW);
+    m_tooltipBox         = {LX, DECOBOX.y + CY - LH / 2.0, LW + 2, LH};
 
     // keep frames coming until the slide settles (a motionless cursor emits no
     // events of its own; this self-sustains the animation)
