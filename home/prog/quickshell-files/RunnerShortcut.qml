@@ -34,19 +34,37 @@ QtObject {
     //
     // The coalesce is for the other case: a press-type bind sends `pressed`
     // then `released`, and without it the runner would open and immediately
-    // close. Our bind produces exactly one event, so it never engages here.
-    property bool armed: true
-    function fire() {
-        if (!armed)
-            return;
-        armed = false;
-        rearm.restart();
+    // close. Our bind is `bindr` (release-only) and produces exactly one
+    // `released` event per tap, so the pair never arrives.
+    //
+    // COALESCE ON THE PRECEDING `pressed`, NOT ON A FLAT TIMEOUT — that is the
+    // fix for "Meta sometimes does nothing". The old form disarmed for 250ms
+    // after EVERY fire, a window sized to span one physical tap's press->release
+    // gap for a press-type bind. But this bind never sends `pressed`, so that
+    // window coalesced nothing and only ever swallowed a DELIBERATE second tap
+    // made within 250ms — a quick tap to dismiss or re-open the runner landed on
+    // dead time and did nothing. Keying the guard on a `pressed` we actually saw
+    // costs a release-only bind zero lockout (no `pressed` ever comes) while
+    // still collapsing a press-type bind's pressed+released into a single toggle.
+    property bool sawPress: false
+    function onPress() {
+        sawPress = true;
+        pressGuard.restart();
         root.triggered();
     }
-    property var rearmTimer: Timer {
-        id: rearm
-        interval: 250
-        onTriggered: root.armed = true
+    function onRelease() {
+        if (sawPress) {          // the `released` half of a press+release pair
+            sawPress = false;
+            pressGuard.stop();
+            return;
+        }
+        root.triggered();
+    }
+    // A `pressed` with no `released` behind it must not wedge the guard shut.
+    property var pressGuardTimer: Timer {
+        id: pressGuard
+        interval: 500
+        onTriggered: root.sawPress = false
     }
 
     // `appid:name` is what the bind names. Keep both halves in step with
@@ -55,7 +73,7 @@ QtObject {
         appid: "quickshell"
         name: "launcher"
         description: "Open the program runner"
-        onPressed: root.fire()
-        onReleased: root.fire()
+        onPressed: root.onPress()
+        onReleased: root.onRelease()
     }
 }
