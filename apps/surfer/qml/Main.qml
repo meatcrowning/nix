@@ -39,11 +39,13 @@ Window {
     // Only surfer's OWN chrome follows this. The page is Chromium's and keeps
     // its own colours — dimming a web page on focus loss is not what §3.1.1
     // asks for, and §16 already says the desktop imposes only the font there.
-    // "dim unfocused" off (Settings > Appearance) keeps the chrome on its
-    // focused tones (docs/DESIGN.md §3.1.1's off switch); native dim is off
-    // then too, so the chrome must not grey itself.
-    readonly property bool winActive: win.active
-        || (typeof DeskStyle !== "undefined" && !DeskStyle.dimUnfocused)
+    // §3.1.1's app-side fade is RETIRED — his board call, 2026-08-09: with
+    // "dim unfocused" on, the native decoration:dim_inactive scrim is the ONE
+    // dimming mechanism, and an app that also greys its own foreground reads
+    // darker than a plain window. The window always renders its focused tones;
+    // the compositor dims the whole surface. Re-arm by restoring `win.active`
+    // here — the plumbing is all still wired.
+    readonly property bool winActive: true
     readonly property color fgAccent: winActive ? Theme.accent  : Theme.inactive
     readonly property color fgText:   winActive ? Theme.text    : Theme.inactive
     readonly property color fgDim:    winActive ? Theme.textDim : Theme.inactive
@@ -515,7 +517,7 @@ Window {
     // setting changes.
     Connections {
         target: WalPalette
-        function onChanged() { win.reinjectScrollbar(); }
+        function onChanged() { win.reinjectScrollbar(); win.reinjectOnee(); }
     }
     Connections {
         target: (typeof DeskStyle !== "undefined") ? DeskStyle : null
@@ -554,6 +556,19 @@ Window {
     Connections {
         target: DarkMode
         function onChanged() { win.dmRev += 1; win.reinjectDark(); }
+    }
+
+    // OneeChan live-theme courier (OneeTheme bridge + surferonee://). The page
+    // style courier (reinjectDark) and OneeChan's re-skin are independent
+    // sheets, both adopted; this asks each open page's courier to re-fetch the
+    // current palette CSS so an open 4chan tab follows a wallpaper change with
+    // no reload. Driven off WalPalette.onChanged above.
+    function reinjectOnee() {
+        for (var i = 0; i < viewRep.count; i++) {
+            var v = viewRep.itemAt(i);
+            if (v) v.runJavaScript(
+                "window.__surferOneeThemeRefresh && window.__surferOneeThemeRefresh()");
+        }
     }
 
     // A page asked the browser to open a URL in a new foreground tab (currently
@@ -888,6 +903,7 @@ Window {
         // same collection.
         Component.onCompleted: userScripts.collection =
             CosmeticInject.scripts.concat(PageStyle.scripts)
+                                 .concat(OneeTheme.scripts)
         // Spell-checking (red squiggle + right-click suggestions in
         // showContextMenu) is enabled IMPERATIVELY in main.py's _wire_profile,
         // NOT declaratively here: setting spellCheckEnabled/spellCheckLanguages
