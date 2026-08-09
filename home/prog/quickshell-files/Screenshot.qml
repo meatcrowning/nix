@@ -67,12 +67,12 @@ PanelWindow {
     property var rawClients: []    // client rects straight from hyprctl (global)
 
     // How far the visible FRAME reaches past the client rect, read live from the
-    // compositor — never a pixel literal. hyprvtb's titlebar is VERTICAL on the
-    // window's RIGHT edge and is DOUBLE-wide: two columns of `bar_width`
-    // (vtbDeco.cpp totalBarW() = bar_width * 2), the inner one carrying the
-    // app's own buttons and the outer one the system controls. Hyprland's border
-    // then wraps window + bar as a single frame (the deco's priority is above
-    // the border's), so `border_size` is added on every side.
+    // compositor — never a pixel literal. hyprvtb's titlebar is a strip of
+    // totalBarW() = bar_width * 2 (two columns: the inner one carries the app's
+    // own buttons, the outer one the system controls) on ONE of the window's
+    // four edges (`plugin:hyprvtb:titlebar_edge`, default right). Hyprland's
+    // border then wraps window + bar as a single frame (the deco's priority is
+    // above the border's), so `border_size` is added on every side.
     //
     // This was `+ 32` — ONE column — so "window" mode cut the outer bar off the
     // shot, which is the whole reason these are read from `hyprctl getoption`
@@ -80,17 +80,28 @@ PanelWindow {
     property int vtbBarPx: 64  // fallbacks = the plugin's own defaults
     property int borderPx: 2
     property bool vtbEnabled: true
+    property string vtbSide: "right"  // the bar's edge; unknown reads as right
     readonly property int barPx: vtbEnabled ? vtbBarPx : 0
 
     // Visible window frames (global coords): the client rect grown by the border
-    // on all four sides and by the bar on the right, for the windows that have
-    // one. The bottom-left drop shadow is deliberately NOT included — it is cast
-    // ON the desktop rather than part of the window, so a shot containing it
-    // would carry a strip of whatever is behind.
-    readonly property var clients: rawClients.map(c => Qt.rect(
-        c.x - borderPx, c.y - borderPx,
-        c.width + 2 * borderPx + (c.bar ? barPx : 0),
-        c.height + 2 * borderPx))
+    // on all four sides and by the bar on ITS OWN side, for the windows that
+    // have one. The bottom-left drop shadow is deliberately NOT included — it is
+    // cast ON the desktop rather than part of the window, so a shot containing
+    // it would carry a strip of whatever is behind.
+    readonly property var clients: rawClients.map(c => {
+        const b = (c.bar ? barPx : 0);
+        if (vtbSide === "left")
+            return Qt.rect(c.x - borderPx - b, c.y - borderPx,
+                           c.width + 2 * borderPx + b, c.height + 2 * borderPx);
+        if (vtbSide === "top")
+            return Qt.rect(c.x - borderPx, c.y - borderPx - b,
+                           c.width + 2 * borderPx, c.height + 2 * borderPx + b);
+        if (vtbSide === "bottom")
+            return Qt.rect(c.x - borderPx, c.y - borderPx,
+                           c.width + 2 * borderPx, c.height + 2 * borderPx + b);
+        return Qt.rect(c.x - borderPx, c.y - borderPx,           // right (default)
+                       c.width + 2 * borderPx + b, c.height + 2 * borderPx);
+    })
 
     // Focused monitor's refresh rate + name, read from hyprctl on open — the
     // recording framerate (-r) and fullscreen output (-o) come from here.
@@ -205,7 +216,8 @@ PanelWindow {
         command: ["sh", "-c",
             "hyprctl getoption -j general:border_size; " +
             "hyprctl getoption -j plugin:hyprvtb:enabled; " +
-            "hyprctl getoption -j plugin:hyprvtb:bar_width"]
+            "hyprctl getoption -j plugin:hyprvtb:bar_width; " +
+            "hyprctl getoption -j plugin:hyprvtb:titlebar_edge"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const lines = this.text.trim().split("\n");
@@ -218,6 +230,8 @@ PanelWindow {
                         root.vtbBarPx = o.int * 2; // totalBarW(): inner + outer column
                     else if (o.option === "plugin:hyprvtb:enabled")
                         root.vtbEnabled = o.bool === true;
+                    else if (o.option === "plugin:hyprvtb:titlebar_edge" && o.str)
+                        root.vtbSide = o.str;
                 }
             }
         }
