@@ -158,6 +158,27 @@ in
       RestartSec = 3;
       # Model loading is slow; do not let systemd give up on startup.
       TimeoutStartSec = "infinity";
+
+      # A CEILING, because this unit froze `top` on 2026-08-08. ComfyUI's
+      # dynamic VRAM loading stages weights in SYSTEM RAM and streams them to
+      # the card, so the pressure lands here, not in the 12G of VRAM: a
+      # MiniMaxH3 video run staged 19995M + 14956M + 2677M against 30G of RAM
+      # while kitty, a nix eval and the panel were already swapping. Nothing
+      # crashed — the box livelocked, reclaiming just fast enough that the
+      # kernel OOM killer never fired, so the screen froze with no TTY to
+      # escape to and the only way out was the power button.
+      #
+      # `High` is the throttle and does the real work: past it the cgroup is
+      # put under reclaim pressure and slows down. `Max` is the backstop that
+      # kills. Most of what a big model run holds here is mmap'd weight file,
+      # i.e. reclaimable page cache that counts against the cgroup and is
+      # simply evicted at the limit — so these cap the blast radius without
+      # capping the model, and a run that genuinely needs more gets slower
+      # rather than taking the desktop with it. Raise them if a workload
+      # legitimately needs it; do not remove them.
+      MemoryAccounting = true;
+      MemoryHigh = "16G";
+      MemoryMax = "24G";
     };
     # No Install section: never auto-started at boot.
   };
