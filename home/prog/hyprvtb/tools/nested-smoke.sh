@@ -153,9 +153,17 @@ echo "plugin: $PLUGIN"
 # Lua, like the real session: the plugin only registers its Lua functions when
 # the config is not CONFIG_LEGACY, and hyprctl eval is how we drive them.
 
+# decoration:rounding is NOT left at Hyprland's default 0: the roll animation
+# has a whole second geometry at a non-zero radius (the sliding snapshot drawn
+# with custom UV so it can be clipped round, and the frame's rounded leading
+# corners), and at 0 none of that code runs — a smoke run at the default would
+# have declared the roll clean without touching it. 20/2 is what the live
+# session uses.
 cat > "$RUN/hyprland.lua" <<LUA
 hl.plugin.load("$PLUGIN")
 hl.set("animations:enabled", true)
+hl.set("decoration:rounding", 20)
+hl.set("general:border_size", 2)
 hl.set("misc:disable_hyprland_logo", true)
 hl.set("misc:disable_splash_rendering", true)
 LUA
