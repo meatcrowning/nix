@@ -499,13 +499,15 @@ The style it carries has three parts (all computed by `DarkMode`):
   from the faces' fontconfig pins, which Chromium honours (verified by
   canvas raster offscreen 2026-08-08: mono glyphs, ink and advance identical
   to the QML PixelText pipeline at 15px). The layer's size is **divided by
-  the shared page zoom** (`Zoom.levelChanged` chained onto
+  the shared page zoom AND the face's x-height size-adjust** (`Zoom.levelChanged` chained onto
   `darkmode.changed`, like `style.changed`), because zoom multiplies every
   CSS px on the way to the screen — at his live 0.83 the pixel font was
   rasterising at ~12.4 device px, which is what *"more perfect doesn't look
   like a pixel font anymore"* was. Same idiom as the scrollbar's
   zoom-compensated width. Site-styled text still zooms; only the inherited
-  default holds the desktop's device-pixel size.
+  default holds the desktop's device-pixel size. The ÷adjust is the second
+  half of the 2026-08-09 x-height settlement: the inherited text's computed
+  px shrinks so the 1.14x face still lands on the desktop's 15 device px.
 - **the dark filter** (global toggle, per-site exceptions), top frame only;
 - **the system-font force** — the desktop family imposed on page text so ALL
   of a page reads in the pick, not just the runs a site left unstyled.
@@ -514,7 +516,16 @@ The style it carries has three parts (all computed by `DarkMode`):
   *"fails to capture all the text in a given webpage"*). Family only +
   `font-synthesis:none`, never sizes — the full reskin was retracted,
   `ad868e4` / DESIGN.md §16 — and icon-font elements (`_ICON_CARVE`) are
-  excluded by class so pictogram fonts don't render as tofu.
+  excluded by class so pictogram fonts don't render as tofu. Since 2026-08-09
+  the family it imposes is a **size-adjusted `@font-face` alias** (the pick +
+  `" (web)"`, `src:local()`, `size-adjust:114%`, `font-weight:1 1000` +
+  an italic twin): the pixel face's x-height is only ~44% of its em against
+  the ~51% of the proportional fonts a site's sizes were designed around, so
+  the site's size numbers render at the proportional x-height the site
+  assumed — sizes still never imposed, apparent scale adjusted. Measured
+  offscreen 2026-08-09: an adopted-sheet `@font-face` with `size-adjust`
+  renders scaled exactly (document.fonts.check() lies about adopted sheets;
+  the canvas ink does not), bold/italic requests match the range'd rule.
 
 The plumbing:
 
@@ -549,10 +560,12 @@ a real offscreen profile carrying **both** couriers via the exact `concat` line
 Main.qml uses: the invert filter is present at the page's own parse-time inline
 script *and* in its first `requestAnimationFrame` (both before any paint), still
 present once settled, and a brightness change live-refreshes an open page while
-turning dark off strips it back to `none`; plus the font checks — unstyled text
-inherits the pick at the desktop size, a page's own font styling beats the
+off strips it back to `none`; plus the font checks — unstyled text inherits
+the pick at the desktop's apparent size (the size-adjusted alias renders the
+same ink as the raw 15px face), a page's own font styling beats the
 layer, a subframe gets the face but never the filter, and the per-site force
-imposes the family while the page's font-size survives. Run it after touching
+imposes the family while the page's font-size survives (and its ink renders
+~1.14x — the proportional x-height). Run it after touching
 `main.py`'s
 dark-mode block, `PAGE_STYLE_RUNTIME_JS`, `PageStyle`/`PageStyleHandler`, or the
 `Main.qml` profile/courier wiring.

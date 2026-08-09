@@ -2490,7 +2490,11 @@ class DarkMode(QObject):
         was tried and retracted, docs/DESIGN.md §16 — plus
         `font-synthesis:none`, §2.2's "no bold, ever": the shipped faces are
         Regular-only and Chromium's synthetic bold smears them. It combines
-        with dark mode rather than replacing it.
+        with dark mode rather than replacing it. Since 2026-08-09 the forced
+        face also carries a `@font-face` `size-adjust` (_face_css) so its
+        x-height — only ~44% of em against the ~51% of the proportional fonts
+        a site's sizes were designed around — reads at the size the site
+        intended, with the site's font-size numbers untouched.
 
     All state persists to the "dark" key of prefs.json. Application is NOT
     per-view at load-finished (that painted light first and flipped once images
@@ -2513,6 +2517,22 @@ class DarkMode(QObject):
     # that construct DarkMode without a DeskStyle (find/pagestyle tests).
     _SYSTEM_FONT = "More Perfect DOS VGA"
     _SYSTEM_SIZE = 15    # kitty's cell height — DESIGN.md §2.1's one number
+
+    # The forced face's x-height is only ~44% of its em (measured: the default
+    # pick's lowercase x is 6.56 px of a 15 px em) against the ~51% of the
+    # proportional fonts a site's font-size numbers were designed around — so
+    # site text in the pixel face reads ~14% small at the site's own sizes.
+    # §16's settlement keeps the site's font-size NUMBERS; this makes the
+    # face's apparent size match the intent instead, via a @font-face
+    # `size-adjust` — the one mechanism Chromium has to rescale a face without
+    # touching font-size (the `font-size-adjust` property is Firefox/Safari
+    # only). Measured offscreen: size-adjust 114% puts the default pick's
+    # x-height on the Arial/Segoe-class baseline (6.56 -> 7.48 px at 15 px),
+    # and the adjust scales glyphs AND metrics together, so a site's em-based
+    # line-height is untouched while the ink reads the size the site assumed.
+    # One constant, measured for the default pick; a different pick (Botis
+    # 4x6, Phenex) has its own x-height ratio and would need its own number.
+    _XHEIGHT_ADJUST = 1.14
 
     def _fam(self):
         return self._style.fontFamily if self._style is not None else DarkMode._SYSTEM_FONT
@@ -2726,6 +2746,39 @@ class DarkMode(QObject):
         v = [1.0 - x for x in v]                    # undo invert(100%)
         return "#" + "".join("%02x" % max(0, min(255, round(x * 255))) for x in v)
 
+    def _face_css(self):
+        # The @font-face that rescales the live pick to the proportional-font
+        # x-height baseline (see _XHEIGHT_ADJUST). Family is the pick plus a
+        # " (web)" suffix — a DISTINCT name, so only the text surfer forces
+        # gets the adjust; a site that names the pick itself keeps the plain
+        # face. `src:local()` resolves through the same fontconfig pins the
+        # plain family honours, so rasterisation parity is preserved. Two
+        # rules: the pixel faces are Regular-only, so a bold/italic REQUEST
+        # must still match (font-weight:1 1000 covers every weight; the
+        # italic rule covers font-style — `font-synthesis:none` on the page
+        # stops any synthetic emboldening/obliquing, as it already does for
+        # the plain family). Lives in the ADOPTED sheet, which Chromium
+        # honours for @font-face even though document.fonts.check() does not
+        # reflect it (measured offscreen 2026-08-09: an adopted-sheet face
+        # with size-adjust:150% rendered its 'x' ink exactly 1.5x wider).
+        # @font-face cannot live inside @layer, so it is emitted at top
+        # level, ahead of the inherit layer, in every body.
+        q = json.dumps(self._fam() + " (web)")
+        src = json.dumps(self._fam())
+        adj = "%d%%" % round(self._XHEIGHT_ADJUST * 100)
+        return ("@font-face{font-family:" + q + ";src:local(" + src + ");"
+                "size-adjust:" + adj + ";font-weight:1 1000;}"
+                "@font-face{font-family:" + q + ";src:local(" + src + ");"
+                "size-adjust:" + adj + ";font-weight:1 1000;font-style:italic;}")
+
+    def _adj_fam(self):
+        # The family chain the inherit layer and the force actually impose:
+        # the size-adjusted alias first, then the plain pick, so an
+        # @font-face registration failure degrades to today's rendering
+        # rather than to Chromium's Times.
+        return (json.dumps(self._fam() + " (web)")
+                + "," + json.dumps(self._fam()))
+
     def _inherit_css(self):
         # Webpages INHERIT the desktop font: family, apparent size and (via the
         # faces' fontconfig pins, which Chromium honours) rasterisation. This is
@@ -2748,14 +2801,20 @@ class DarkMode(QObject):
         # zoom; text a site sizes itself still zooms, as zoom means it to.
         # Zoom.levelChanged is chained onto `changed` in main(), so open pages
         # re-fetch this on every zoom step.
-        f = json.dumps(self._fam())
+        #
+        # The family is the size-ADJUSTED alias (above), so the desktop size
+        # is divided by the adjust as well: font-size 13.158 px in the 1.14x
+        # face renders exactly the desktop's 15 px — the same raster as before
+        # the adjust existed, at any zoom. Only SITE-styled (forced) text
+        # actually grows, which is the point of _XHEIGHT_ADJUST.
+        f = self._adj_fam()
         z = 1.0
         if self._zoom is not None:
             try:
                 z = float(self._zoom.level) or 1.0
             except (TypeError, ValueError):
                 z = 1.0
-        px = ("%.4f" % (self._px() / z)).rstrip("0").rstrip(".")
+        px = ("%.4f" % ((self._px() / self._XHEIGHT_ADJUST) / z)).rstrip("0").rstrip(".")
         return (
             "@layer __surfer_inherit__{"
             ":root{font-family:" + f + ",monospace;font-size:" + px + "px}"
@@ -2780,12 +2839,16 @@ class DarkMode(QObject):
     def _font_css(self):
         # Force the desktop pixel font on all page text (family only — sizes stay
         # the site's, so layout/heading hierarchy survives; forcing sizes too is
-        # the retracted reskin, DESIGN.md §16). Reads the LIVE pick from
-        # DeskStyle so a Settings > pixel font change shows here too, falling
-        # back to the default family only when no DeskStyle was supplied.
-        # font-synthesis with !important so the forced Regular-only face is
-        # never synthetically embossed, whatever the page declares.
-        f = json.dumps(self._fam())
+        # the retracted reskin, DESIGN.md §16). The family is the size-ADJUSTED
+        # alias (see _face_css), so the site's size numbers render with the
+        # proportional-font x-height the site assumed — the 2026-08-09
+        # settlement, which keeps those numbers unchanged while fixing their
+        # apparent size. Reads the LIVE pick from DeskStyle so a Settings >
+        # pixel font change shows here too, falling back to the default family
+        # only when no DeskStyle was supplied. font-synthesis with !important so
+        # the forced Regular-only face is never synthetically embossed, whatever
+        # the page declares.
+        f = self._adj_fam()
         el = "*:not(:is(" + DarkMode._ICON_CARVE + "))"
         return (el + "," + el + "::before," + el + "::after{"
                 "font-family:" + f + ",monospace!important;"
@@ -2793,14 +2856,15 @@ class DarkMode(QObject):
 
     @Slot(str, result=str)
     def css(self, url):
-        """The page-style CSS Python computes for this url right now (the font
-        inherit layer, plus dark mode and/or the system-font override where
-        they apply) — the body the `surferstyle://` courier adopts at
-        document-creation and re-fetches on a settings change."""
+        """The page-style CSS Python computes for this url right now (the
+        size-adjusted @font-face, the font inherit layer, plus dark mode and/or
+        the system-font override where they apply) — the body the
+        `surferstyle://` courier adopts at document-creation and re-fetches on
+        a settings change."""
         return self._css(url)
 
     def _css(self, url):
-        parts = [self._inherit_css()]
+        parts = [self._face_css(), self._inherit_css()]
         if self._enabled and self.isSiteEnabled(url):
             parts.append(self._dark_css())
         if self.isSystemFontSite(url):
@@ -2810,11 +2874,11 @@ class DarkMode(QObject):
     @Slot(str, result=str)
     def fontsCss(self, url):
         """The fonts-only page style — what a SUBFRAME adopts (`f` on the
-        `surferstyle://` scheme): the inherit layer, plus the per-site force
-        when the frame's own host is opted in. Never the dark filter — the top
-        frame's `html` filter already composites over its iframes and a copy
-        here would double-invert."""
-        parts = [self._inherit_css()]
+        `surferstyle://` scheme): the size-adjusted @font-face, the inherit
+        layer, plus the per-site force when the frame's own host is opted in.
+        Never the dark filter — the top frame's `html` filter already
+        composites over its iframes and a copy here would double-invert."""
+        parts = [self._face_css(), self._inherit_css()]
         if self.isSystemFontSite(url):
             parts.append(self._font_css())
         return "".join(parts)
