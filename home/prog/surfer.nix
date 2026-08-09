@@ -123,6 +123,35 @@ let
       "$out/en-US.bdic"
   '';
 
+  # Chromium force-enables the FreeType autohinter on any face whose fontconfig
+  # match says antialias=false — the hinting/autohint pins are ignored for the
+  # aliased case (measured offscreen 2026-08-08: with the desktop pins, Botis
+  # 4x6 came back grid-fitted with the exact FT_LOAD_FORCE_AUTOHINT bitmaps at
+  # every size, under every hinting pin and --font-render-hinting value; with
+  # antialias=true the same engine honoured hintnone verbatim). On a face
+  # authored as pixel squares that autohint slices blank rows through every
+  # glyph at any size off its exact grid — [his] "covered with many
+  # horizontally parallel lines". So FOR SURFER ONLY, layer one rule over the
+  # system config: Botis renders antialiased, which disarms the clamp and lets
+  # the hintnone pin through. At the desktop's 15px the AA raster is still
+  # pixel-exact (0 grey pixels — the grid is integral), and off-grid sizes go
+  # soft instead of striped. More Perfect DOS VGA is deliberately NOT included:
+  # its merged outlines survive the forced autohint with zero stripe artifacts
+  # at every probed size, and its mono+hinted render (uniform 8px advances) is
+  # the look the desktop wants. The pins themselves live in
+  # home/pkgs/desktop/font.nix; QtWebEngineProcess children inherit this env.
+  fcConf = pkgs.writeText "surfer-fontconfig.conf" ''
+    <?xml version="1.0"?>
+    <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+    <fontconfig>
+      <include>/etc/fonts/fonts.conf</include>
+      <match target="font">
+        <test name="family"><string>Botis 4x6</string></test>
+        <edit name="antialias" mode="assign"><bool>true</bool></edit>
+      </match>
+    </fontconfig>
+  '';
+
   # A wrapper is not a sourceable env file, and this one bites: line 3 is the
   # single-instance probe, so `source $(which surfer)` hands the RUNNING browser
   # an empty OPEN — a new home-page tab in the window the user is looking at —
@@ -201,6 +230,9 @@ let
             >> "$LOG" 2>&1 || echo "  (skipped: rc=$?)" >> "$LOG"
         }
         [ -n "''${SURFER_NO_SYNC:-}" ] || vtbsync pull
+        # Same Botis AA carve-out as top's wrapper — see fcConf above. Fedora's
+        # system config lives at /etc/fonts/fonts.conf there too.
+        export FONTCONFIG_FILE="''${FONTCONFIG_FILE:-${fcConf}}"
         # Launched from the runner, so the app's own stdio has nowhere to go and
         # Qt/Chromium diagnostics were being thrown away. Keep one session's
         # worth (truncated per launch) — this is how the mid-session GPU/raster
@@ -227,6 +259,7 @@ let
           makeWrapper ${pyEnv}/bin/python3 $out/bin/surfer \
             --add-flags /home/lam/nix/apps/surfer/main.py \
             --set-default QTWEBENGINE_DICTIONARIES_PATH ${spellDicts} \
+            --set-default FONTCONFIG_FILE ${fcConf} \
             --run ${lib.escapeShellArg sourceGuard} \
             --run 'if ${pyEnv}/bin/python3 /home/lam/nix/apps/surfer/singleton.py "$@"; then exit 0; fi' \
             --run 'exec > "$HOME/.cache/surfer.log" 2>&1' \
@@ -242,6 +275,7 @@ let
           # equivalent: there the interpreter IS /usr/bin/python3.
           makeWrapper ${qtenvBody} $out/bin/surfer-qtenv \
             --set-default QTWEBENGINE_DICTIONARIES_PATH ${spellDicts} \
+            --set-default FONTCONFIG_FILE ${fcConf} \
             --prefix PATH : ${pyEnv}/bin \
             "''${qtWrapperArgs[@]}"
           runHook postInstall
