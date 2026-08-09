@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls.Basic
 import "../../qmlcommon"
 
 // Backend controls and housekeeping.  Deliberately sparse: everything that
@@ -90,6 +91,39 @@ Item {
                 color: Theme.dim
                 width: parent.width
                 elide: Text.ElideRight
+            }
+
+            // Live comfy.py websocket activity (queued/started/running/finished/
+            // error) — App.logLines, newest last, kept scrolled to the bottom
+            // unless he has scrolled up to read something older.
+            Rectangle {
+                width: parent.width
+                height: 96
+                color: Theme.bg
+                border.color: Theme.border
+                border.width: Theme.ctrlBorder
+                clip: true
+
+                KineticListView {
+                    id: logView
+                    anchors.fill: parent
+                    anchors.margins: 4
+                    clip: true
+                    model: App.logLines
+                    spacing: 1
+                    ScrollBar.vertical: VScroll { id: logScroll }
+                    delegate: PixelText {
+                        width: logView.width - logScroll.barW
+                        text: modelData
+                        color: Theme.dim
+                        elide: Text.ElideRight
+                    }
+                    // Only auto-follow when already at (or near) the bottom, so
+                    // scrolling up to read an older line is not yanked away by
+                    // the next event.
+                    property bool atBottom: atYEnd
+                    onCountChanged: if (atBottom) positionViewAtEnd()
+                }
             }
 
             Row {
