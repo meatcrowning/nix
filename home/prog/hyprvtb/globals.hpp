@@ -186,9 +186,11 @@ struct SGlobalState {
         // Which window edge the titlebar anchors to. "right" (default, the
         // shipped look) or "left" — a clean vertical mirror: same two-column
         // bar, reflected to the other side, with the roll/shade sliding the
-        // other way. "top"/"bottom" are NOT yet implemented (they need the bar
-        // laid horizontal) and read as the right edge here, so an unknown value
-        // never breaks layout. Settings > appearance > titlebar side.
+        // other way. "top"/"bottom" lay the bar horizontal (the 90° transpose):
+        // title and footer read along the bar, the roll slides vertically, and
+        // the roll glyph turns to point along it. Anything unrecognised reads as
+        // the right edge, so an unknown value never breaks layout.
+        // Settings > appearance > titlebar side.
         SP<Config::Values::CStringValue> titlebarEdge;
 
         // ---- kinetic scrolling (see vtbKinetic.hpp) ----
