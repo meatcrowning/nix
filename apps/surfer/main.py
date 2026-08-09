@@ -1400,6 +1400,103 @@ PAGE_STYLE_RUNTIME_JS = r"""
 """
 
 
+# The OneeChan live-theme courier. OneeChan (a 4chan userscript) bakes hex
+# colours from its own theme into a single <style id=ch4SS> it appends to the
+# head; its `$SS` state is a private var in a top-level IIFE, so its theme
+# cannot be re-driven externally without a page reload (which would lose scroll
+# position and half-typed replies). So instead of poking OneeChan, this adopts
+# our OWN stylesheet built from the live wallpaper palette. An adopted
+# stylesheet cascades AFTER any document <style>, so with matching selectors +
+# !important it wins over ch4SS on ties — re-skinning OneeChan's colours to the
+# desktop palette with no reload. Same document-creation / synchronous-XHR /
+# adoptedStyleSheets shape as PAGE_STYLE_RUNTIME_JS.
+#
+# SELF-GATE: it adopts only once `document.documentElement` carries the
+# `oneechan` class (OneeChan adds `html.oneechan` when it initialises — so the
+# theme rides ONLY when OneeChan is actually active, never on bare 4chan).
+# Live: window.__surferOneeThemeRefresh() re-fetches + re-adopts on a palette
+# change, exactly like __surferPageStyleRefresh. Top frame only
+# (RunsOnSubFrames off): OneeChan themes the board page, not its iframes.
+ONEE_THEME_RUNTIME_JS = r"""
+(function(){
+  if (window.__surferOneeTheme) return;
+  window.__surferOneeTheme = true;
+
+  // Only 4chan hosts — OneeChan itself only @matches boards.4chan.org, and the
+  // self-gate below is the real guard, but scope the network chatter anyway.
+  var host = '';
+  try { host = location.hostname || ''; } catch(e) {}
+  if (!/(^|\.)4chan(nel)?\.org$/.test(host)) return;
+
+  var SCHEME = 'surferonee://';
+  var sheet = null;
+
+  function b64(o){
+    var s = JSON.stringify(o), t = '';
+    try {
+      var b = new TextEncoder().encode(s);
+      for (var i = 0; i < b.length; i++) t += String.fromCharCode(b[i]);
+    } catch(e) { t = unescape(encodeURIComponent(s)); }
+    return btoa(t).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  }
+  function addr(payload){ return SCHEME + 's/' + b64(payload); }
+
+  function fetchCss(){
+    var css = '';
+    try {
+      var x = new XMLHttpRequest();
+      x.open('GET', addr({ u: location.href }), false);
+      x.send();
+      css = (x.status === 200 || x.status === 0) ? (x.responseText || '') : '';
+    } catch(e){}
+    return css;
+  }
+
+  // One adopted sheet, owned here — concat so cosmetic/page-style sheets survive.
+  function apply(css){
+    try {
+      if (!css){
+        if (sheet){
+          var a = Array.prototype.slice.call(document.adoptedStyleSheets);
+          var i = a.indexOf(sheet);
+          if (i >= 0){ a.splice(i, 1); document.adoptedStyleSheets = a; }
+          sheet = null;
+        }
+        return;
+      }
+      if (!sheet){
+        sheet = new CSSStyleSheet();
+        document.adoptedStyleSheets = document.adoptedStyleSheets.concat([sheet]);
+      }
+      sheet.replaceSync(css);
+    } catch(e){}
+  }
+
+  function active(){
+    try {
+      return !!(document.documentElement &&
+                document.documentElement.classList.contains('oneechan'));
+    } catch(e){ return false; }
+  }
+
+  // Live refresh (palette change): re-fetch + re-adopt, but only while OneeChan
+  // is actually on. If it went away, strip our sheet.
+  function refresh(){ apply(active() ? fetchCss() : ''); }
+  window.__surferOneeThemeRefresh = refresh;
+
+  // documentElement is null at document-creation and OneeChan marks the page
+  // later; poll for html.oneechan, then adopt. ~60s cap so a non-OneeChan page
+  // stops watching.
+  var tries = 0;
+  var iv = setInterval(function(){
+    tries++;
+    if (active()){ apply(fetchCss()); clearInterval(iv); }
+    else if (tries > 600){ clearInterval(iv); }
+  }, 100);
+})();
+"""
+
+
 class CosmeticInjector(QWebEngineUrlSchemeHandler):
     """The other half of COSMETIC_RUNTIME_JS: the profile-level QWebEngineScript
     that carries it, and the ``surfercos://`` scheme that feeds it rules.
@@ -1616,6 +1713,149 @@ class PageStyle(QObject):
         s.setRunsOnSubFrames(True)
         s.setSourceCode(PAGE_STYLE_RUNTIME_JS)
         return [s]
+
+
+class OneeTheme(QObject):
+    """Builds the palette-derived override CSS that re-skins OneeChan's 4chan
+    theme to the live wallpaper palette, and carries ONEE_THEME_RUNTIME_JS as a
+    profile-level QWebEngineScript (the same route CosmeticInject/PageStyle
+    take, since PySide6 6.11 does not bind QQuickWebEngineScriptCollection).
+
+    Selectors mirror OneeChan's own `ch4SS` colour rules verbatim (userscript
+    `insertCSS`), so specificity matches and our adopted sheet wins purely on
+    cascade order (adopted sheets follow document <style>) — nothing here has
+    to out-specify OneeChan. Every rule is `!important`, because ch4SS's are.
+
+    The role->palette map (values from `docs/DESIGN.md` §3.1's twelve tokens;
+    §3.8's whole-palette spread): 4chan post bodies read as the primary label
+    (`text`), reply surfaces on the inset background (`bgAlt`), greentext and
+    names on the status greens (`ok`), links dim with an accent hover, subjects/
+    board titles/quotelinks on the accent."""
+
+    def __init__(self, palette, parent=None):
+        super().__init__(parent)
+        self._pal = palette
+        self._scripts = None
+
+    def _css(self):
+        p = self._pal.hex
+        bg = p("bg")
+        reply = p("bgAlt")           # OneeChan mainColor (reply/dialog bg)
+        header_bg = p("bgAlt")       # headerBGColor
+        border = p("border")         # brderColor + inputbColor
+        inp = p("highlight")         # inputColor (field bg)
+        header_text = p("text")      # headerColor
+        board = p("accent")          # boardColor
+        text = p("text")             # textColor (post message body)
+        link = p("dim")              # linkColor
+        link_h = p("accent")         # linkHColor
+        header_link = p("dim")       # headerLColor
+        ql = p("accent")             # qlColor (quotelinks)
+        blink = p("info")            # blinkColor (backlinks)
+        name = p("ok")               # nameColor
+        trip = p("warn")             # tripColor
+        title = p("accent")          # titleColor (subject)
+        quote = p("ok")              # quoteColor (greentext)
+        unread = p("warn")           # unreadColor
+        post_hl = p("highlight")     # postHLColor
+        replyslct = p("accent")      # replyslctColor
+        i = "!important"
+        return "".join([
+            # --- text colours ---
+            "html,body,div.boardBanner,#menu,input:not(.jsColor),textarea,"
+            "#qr-filename-container,#post-preview,.post-last,.pln,select,"
+            ".captcha-root,.tegaki-label,.dd-menu ul,.boxbar{color:%s%s}" % (text, i),
+            ".nameBlock:not(.capcodeMod)>.name,.com,.post-author{color:%s%s}" % (name, i),
+            ".nameBlock>.postertrip,.post-tripcode,.tag{color:%s%s}" % (trip, i),
+            "a,.typ,.atn,body.is_catalog .button,:root.catalog-mode .button,"
+            ".options-button,.tegaki-tb-btn{color:%s%s}" % (link, i),
+            "a:hover,body.is_catalog .button:hover,:root.catalog-mode .button:hover,"
+            ".lit,.tegaki-tb-btn:hover{color:%s%s}" % (link_h, i),
+            "#header-bar,a.current{color:%s%s}" % (header_text, i),
+            "#header-bar a:not(.current){color:%s%s}" % (header_link, i),
+            ".postMessage>.quote,s:hover .quote,.str,.atv,.new,"
+            ".catalog-thread>.comment>.quote{color:%s%s}" % (quote, i),
+            ".subject,.replytitle,.teaser b,.post-subject,"
+            ".option.header .option-title,.kwd{color:%s%s}" % (title, i),
+            ".boardTitle{color:%s%s}" % (board, i),
+            "#boardNavDesktop,#boardNavDesktopFoot{color:%s%s}" % (header_text, i),
+            ".backlink{color:%s%s}" % (blink, i),
+            ".quotelink{color:%s%s}" % (ql, i),
+            # --- backgrounds ---
+            "body{background:%s%s}" % (bg, i),
+            ".reply,body.is_catalog .panel,:root.catalog-mode .panel,.dialog,"
+            ".tab-label,#post-preview,#tegaki,.boxbar,"
+            ":root.op-background .postContainer.opContainer,"
+            ".dd-menu ul{background:%s%s}" % (reply, i),
+            ":root:not(.header-gradient) #header-bar,"
+            ":root.header-gradient #header-bar{background:%s%s}" % (header_bg, i),
+            "input:not(.jsColor),textarea,.riceCheck,#qr-filename-container,select,"
+            ".captcha-root{background:%s%s}" % (inp, i),
+            # --- borders ---
+            ".reply,:root.op-background .postContainer.opContainer,.dialog,.entry,"
+            ".inline,fieldset,#post-preview,select{border-color:%s%s}" % (border, i),
+            "input,textarea,.riceCheck,#qr-filename-container,#search-box,"
+            "#index-search,select,#post-preview,.captcha-root,"
+            ".dd-menu ul{border-color:%s%s}" % (border, i),
+            "input:focus,textarea:focus,#qr-filename-container:focus,select:focus,"
+            ".captcha-root:focus{border-color:%s%s}" % (link, i),
+            # --- highlights ---
+            ".highlight{outline-color:%s%s}" % (replyslct, i),
+            ":root.hl-border .post.reply,"
+            ":root.op-background.hl-border .postContainer.opContainer{"
+            "border-left-color:%s%s}" % (post_hl, i),
+            "#unread-line{background-image:linear-gradient(to left,"
+            "transparent,%s,transparent)%s}" % (unread, i),
+        ])
+
+    @Slot(str, result=str)
+    def css(self, url):
+        """The OneeChan override CSS for this url (the `surferonee://` courier's
+        `s` body). url is unused today — the theme is url-independent — but kept
+        for parity with DarkMode.css and in case a per-board exception is ever
+        wanted."""
+        return self._css()
+
+    @Property("QVariantList", constant=True)
+    def scripts(self):
+        if self._scripts is None:
+            s = QWebEngineScript()
+            s.setName("surfer-oneetheme")
+            s.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
+            s.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+            s.setRunsOnSubFrames(False)
+            s.setSourceCode(ONEE_THEME_RUNTIME_JS)
+            self._scripts = [s]
+        return self._scripts
+
+
+class OneeThemeHandler(QWebEngineUrlSchemeHandler):
+    """The `surferonee://` feed for ONEE_THEME_RUNTIME_JS: serves the current
+    OneeChan override CSS for a url, computed by the OneeTheme bridge. One host
+    (`s`), taking the same base64url `{"u": href}` path convention as
+    surferstyle/surfercos. The reply is `text/css`, adopted as a constructed
+    CSSStyleSheet (never hits `style-src`, needs no DOM parent)."""
+
+    def __init__(self, oneetheme, parent=None):
+        super().__init__(parent)
+        self._onee = oneetheme
+
+    def requestStarted(self, job):
+        body = b""
+        try:
+            spec = json.loads(
+                _b64url_decode(job.requestUrl().path().lstrip("/")).decode("utf-8"))
+            url = str(spec.get("u") or "")
+            body = self._onee.css(url).encode("utf-8")
+        except Exception:
+            body = b""
+        try:
+            buf = QBuffer(job)
+            buf.setData(body)
+            buf.open(QIODevice.OpenModeFlag.ReadOnly)
+            job.reply(b"text/css", buf)
+        except RuntimeError:
+            pass  # the page went away before we could reply
 
 
 class CmdHandler(QWebEngineUrlSchemeHandler):
@@ -4034,6 +4274,18 @@ def main():
                          | QWebEngineUrlScheme.Flag.ContentSecurityPolicyIgnored)
     QWebEngineUrlScheme.registerScheme(stylescheme)
 
+    # surferonee:// — how ONEE_THEME_RUNTIME_JS asks Python for the live
+    # palette-derived CSS that re-skins OneeChan's 4chan theme (OneeThemeHandler).
+    # Same flags/convention as surferstyle: the reply is adopted as a constructed
+    # CSSStyleSheet, so CSP never sees it. Registered before Chromium initializes.
+    oneescheme = QWebEngineUrlScheme(b"surferonee")
+    oneescheme.setSyntax(QWebEngineUrlScheme.Syntax.Host)
+    oneescheme.setFlags(QWebEngineUrlScheme.Flag.SecureScheme
+                        | QWebEngineUrlScheme.Flag.CorsEnabled
+                        | QWebEngineUrlScheme.Flag.FetchApiAllowed
+                        | QWebEngineUrlScheme.Flag.ContentSecurityPolicyIgnored)
+    QWebEngineUrlScheme.registerScheme(oneescheme)
+
     # Chromium must be initialized before the QGuiApplication exists.
     QtWebEngineQuick.initialize()
 
@@ -4110,6 +4362,13 @@ def main():
     pagestyle = PageStyle(app)
     ctx.setContextProperty("PageStyle", pagestyle)
     pshandler = PageStyleHandler(darkmode, app)
+    # OneeChan live-theme courier: ONEE_THEME_RUNTIME_JS on `surferonee://`.
+    # Main.qml concats `OneeTheme.scripts` onto the profile's userScripts
+    # collection and drives OneeTheme.reinjectOnee() off WalPalette.onChanged;
+    # _wire_profile installs oneehandler as the scheme handler.
+    oneetheme = OneeTheme(palette, app)
+    ctx.setContextProperty("OneeTheme", oneetheme)
+    oneehandler = OneeThemeHandler(oneetheme, app)
     pagecmd = CmdHandler(app)
     ctx.setContextProperty("PageCmd", pagecmd)
     ctx.setContextProperty("imageClickJs", IMAGE_CLICK_JS)
@@ -4162,6 +4421,7 @@ def main():
                     prof.installUrlSchemeHandler(b"surfercmd", pagecmd)
                     prof.installUrlSchemeHandler(b"surfercos", cosinject)
                     prof.installUrlSchemeHandler(b"surferstyle", pshandler)
+                    prof.installUrlSchemeHandler(b"surferonee", oneehandler)
                 except RuntimeError:
                     pass
                 # give gmxhr the SAME UA the views send, so userscript fetches
