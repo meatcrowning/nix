@@ -13,9 +13,14 @@ import "../../qmlcommon"
 Window {
     id: win
 
-    readonly property color fgAccent: win.active ? Theme.accent  : Theme.inactive
-    readonly property color fgText:   win.active ? Theme.text    : Theme.inactive
-    readonly property color fgDim:    win.active ? Theme.textDim : Theme.inactive
+    // "dim unfocused" off (Settings > Appearance) keeps the window on its
+    // focused tones (docs/DESIGN.md §3.1.1's off switch); native dim is off
+    // then too, so the body must not grey itself.
+    readonly property bool renderActive: win.active
+        || (typeof DeskStyle !== "undefined" && !DeskStyle.dimUnfocused)
+    readonly property color fgAccent: renderActive ? Theme.accent  : Theme.inactive
+    readonly property color fgText:   renderActive ? Theme.text    : Theme.inactive
+    readonly property color fgDim:    renderActive ? Theme.textDim : Theme.inactive
 
     TextMetrics {
         id: metrics
@@ -186,7 +191,7 @@ Window {
             height: parent.height
             color: Theme.bg
             border.width: Theme.ctrlBorder
-            border.color: win.active ? Theme.border : Theme.inactive
+            border.color: win.renderActive ? Theme.border : Theme.inactive
 
             Column {
                 anchors.fill: parent
@@ -329,7 +334,7 @@ Window {
             height: parent.height
             color: Theme.bg
             border.width: Theme.ctrlBorder
-            border.color: win.active ? Theme.border : Theme.inactive
+            border.color: win.renderActive ? Theme.border : Theme.inactive
 
             KineticFlickable {
                 id: logFlick

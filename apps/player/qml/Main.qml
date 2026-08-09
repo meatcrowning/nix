@@ -64,9 +64,15 @@ Window {
     // and filer's PreviewTile keeps its error tone lit unfocused for the same
     // reason. Backgrounds, `Theme.border` hairlines, `Theme.bgAlt` inset fills
     // and the `Theme.highlight` row fill do not move at all.
-    readonly property color fgText:   win.active ? Theme.text    : Theme.inactive
-    readonly property color fgDim:    win.active ? Theme.textDim : Theme.inactive
-    readonly property color fgAccent: win.active ? Theme.accent  : Theme.inactive
+    // "dim unfocused" off (Settings > Appearance) keeps the window on its
+    // focused tones (docs/DESIGN.md §3.1.1's off switch); native
+    // decoration:dim_inactive is off then too, so the body — art included —
+    // must not grey itself.
+    readonly property bool renderActive: win.active
+        || (typeof DeskStyle !== "undefined" && !DeskStyle.dimUnfocused)
+    readonly property color fgText:   renderActive ? Theme.text    : Theme.inactive
+    readonly property color fgDim:    renderActive ? Theme.textDim : Theme.inactive
+    readonly property color fgAccent: renderActive ? Theme.accent  : Theme.inactive
 
     // ...and the ARTWORK fades with them — HIS call (2026-07-28): "dim it with
     // everything else, the window reads as one unfocused surface". This reverses
@@ -90,7 +96,7 @@ Window {
     // the cover is a large field, where a tonal step reads far stronger than it
     // does in glyph-sized text, and matching the 47 would take the average
     // sleeve to near-black — "broken", not "quiet".
-    readonly property real fgArt: win.active ? 1.0 : 0.55
+    readonly property real fgArt: renderActive ? 1.0 : 0.55
 
     // The OUTER titlebar shows the window title — put the playing track there
     // ("artist — title") instead of a static app name. The inner column's

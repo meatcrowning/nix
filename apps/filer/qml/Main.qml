@@ -22,8 +22,13 @@ Window {
     // Focus-aware foreground: while the window is unfocused, controls and text
     // grey to the SAME tone the hyprvtb titlebar fades to (Theme.inactive), so
     // filer reads as "inactive" in lock-step with its titlebar.
-    readonly property color fgAccent: win.active ? Theme.accent : Theme.inactive
-    readonly property color fgText:   win.active ? Theme.text  : Theme.inactive
+    // "dim unfocused" off (Settings > Appearance) keeps the window on its
+    // focused tones (docs/DESIGN.md §3.1.1's off switch); native dim is off
+    // then too, so the body must not grey itself.
+    readonly property bool renderActive: win.active
+        || (typeof DeskStyle !== "undefined" && !DeskStyle.dimUnfocused)
+    readonly property color fgAccent: renderActive ? Theme.accent : Theme.inactive
+    readonly property color fgText:   renderActive ? Theme.text  : Theme.inactive
 
     // In picker mode the window IS the file dialog (`filer --pick`, see
     // ../pick.py): same tree, same navigation, plus the bar along the bottom.
@@ -404,7 +409,7 @@ Window {
         width: win.paneLeadW
         height: win.paneLeadH
         startPath: win.startPath
-        winActive: win.active
+        winActive: win.renderActive
         picking: win.picking
         primary: true
         watchKey: "left"
@@ -425,7 +430,7 @@ Window {
             width: paneRLoader.width
             height: paneRLoader.height
             startPath: win.splitStartPath
-            winActive: win.active
+            winActive: win.renderActive
             picking: false          // a picker is never split (see toggleSplit)
             primary: false
             watchKey: "right"

@@ -58,8 +58,12 @@ Window {
     // own titlebar instead of staying brighter than the bar beside it — the
     // idiom filer uses (docs/DESIGN.md §3.1). Body text and values keep their own
     // colours; only the accented chrome follows.
+    // "dim unfocused" off (Settings > Appearance) keeps the chrome on its
+    // focused tones (docs/DESIGN.md §3.1.1's off switch); native dim is off
+    // then too, so the chrome must not grey itself.
     readonly property bool winActive: root.active
-    readonly property color fgAccent: root.active ? Theme.accent : Theme.inactive
+        || (typeof DeskStyle !== "undefined" && !DeskStyle.dimUnfocused)
+    readonly property color fgAccent: winActive ? Theme.accent : Theme.inactive
 
     // Live generation settings, seeded from the selected model's family.
     property var gen: ({
