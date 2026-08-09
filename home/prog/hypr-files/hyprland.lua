@@ -481,6 +481,15 @@ hl.config({
         col = {
 	    active_border = "rgba(5c9fccee)",
             -- active_border   = { colors = {"rgba(33ccffee)", "rgba(00ff99ee)"}, angle = 45 },
+            -- The unfocused-window border is the THIRD surface the "dim
+            -- unfocused" pick moves (titlebar + body + border, all as one —
+            -- docs/DESIGN.md §3.1.1): dim ON gives this static grey, dim OFF
+            -- rewrites it to the active accent so nothing distinguishes an
+            -- unfocused window. wal-set.sh (on a theme change) and
+            -- apply-window-frame.sh (on the toggle) rewrite this floor from
+            -- settings.json's dimUnfocused; the rgba mask in seed-drift.sh
+            -- already covers the runtime value. Seed is the dim-ON grey to
+            -- match dimUnfocused's default-ON.
             inactive_border = "rgba(595959aa)",
         },
 
