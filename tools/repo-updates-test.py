@@ -218,6 +218,32 @@ def main():
               if (sb9.state / "state.json").exists() else None, None)
         check("the next pass offers it again", "offered" in sb9.offer(), True)
 
+        case("the real notify-send accepts a body that starts with a dash")
+        # Every case above stubs the notifier, which is how the toast shipped
+        # broken: notify-send parses argv with GOption, so a body whose first
+        # line is a commit-subject bullet ("- curate: ...") was read as a flag
+        # — "Unknown option", exit 1, no id — and the daemon could only report
+        # it as "no notification server answered". `--` is the fix; this runs
+        # the REAL binary to prove the argv still parses. The bus address names
+        # a socket that does not exist and every fallback route is unset, so it
+        # cannot reach his session: the parse happens long before any connect.
+        nsend = shutil.which("notify-send")
+        if not nsend:
+            print("  skip  notify-send is not on PATH")
+        else:
+            env = {k: v for k, v in os.environ.items()
+                   if k not in ("DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR")}
+            env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/nonexistent/repo-updates-test"
+            p = subprocess.run(
+                [nsend, "-a", "nix", "-i", "repo-updates", "-u", "normal",
+                 "-t", "0", "-p", "--action=apply=Pull & apply",
+                 "--action=dismiss=Dismiss", "--",
+                 "2 commits waiting in ~/nix",
+                 "- curate: verify dupes union-finds\nplugin rebuild"],
+                capture_output=True, text=True, env=env, timeout=30)
+            check("argv parses", "Unknown option" not in p.stderr, True)
+            check("it got as far as the bus", "connect" in p.stderr.lower(), True)
+
         # ---- applying -------------------------------------------------------
         case("apply, the happy path")
         sb6 = Sandbox(root / "f")

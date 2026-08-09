@@ -305,7 +305,14 @@ def notify(summary, body, actions=(), replace_id=0, wait=False, urgency="normal"
         cmd += [f"--action={key}={label}"]
     if wait:
         cmd += ["-w"]
-    cmd += [summary, body]
+    # `--` OR NOTHING IS EVER SHOWN. The body's first line is a commit subject
+    # bullet, "- curate: ...", and notify-send parses its argv with GOption:
+    # a positional that starts with a dash is read as a flag, so it died with
+    # "Unknown option - curate: ..." and exit 1, printing no id. That is
+    # indistinguishable here from a boot racing the panel, so every pass since
+    # this shipped logged "no notification server answered" and retried forever
+    # against a server that was up and listening.
+    cmd += ["--", summary, body]
 
     try:
         if not wait:
