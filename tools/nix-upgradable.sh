@@ -25,6 +25,9 @@
 #
 #   tools/nix-upgradable.sh               # full preview (builds the new closure)
 #   tools/nix-upgradable.sh --no-build    # inputs summary + update preview only
+#   tools/nix-upgradable.sh --input NAME  # preview only ONE input's move (and,
+#                                         # without --no-build, the exact packages
+#                                         # it changes — that is the per-input diff)
 #
 # Exit: 0 = diff shown (or --no-build completed); 1 = update/build failed (the
 # repo and the running system are untouched either way); 2 = bad usage.
@@ -32,19 +35,23 @@
 set -uo pipefail
 
 usage() {
-    sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     echo "  --attr <flake-attr>   build this attr instead of the host default"
+    echo "  --input <name>        update only this one input in the copy"
     echo "  --no-build            skip the toplevel builds and the diff"
     exit "${1:-0}"
 }
 
 NO_BUILD=0
 ATTR=""
+INPUT=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --no-build) NO_BUILD=1; shift ;;
         --attr)     [ "$#" -ge 2 ] || { echo "--attr needs a value" >&2; usage 2; }
                     ATTR="$2"; shift 2 ;;
+        --input)    [ "$#" -ge 2 ] || { echo "--input needs a value" >&2; usage 2; }
+                    INPUT="$2"; shift 2 ;;
         -h|--help)  usage 0 ;;
         *) echo "unknown option: $1" >&2; usage 2 ;;
     esac
@@ -116,8 +123,14 @@ verify_lock() {
 }
 
 echo ""
-echo "== nix flake update (on the throwaway copy $TMP — repo untouched) =="
-if ! (cd "$TMP" && nix flake update); then
+if [ -n "$INPUT" ]; then
+    echo "== nix flake update $INPUT (on the throwaway copy $TMP — repo untouched) =="
+    upd=(nix flake update "$INPUT")
+else
+    echo "== nix flake update (on the throwaway copy $TMP — repo untouched) =="
+    upd=(nix flake update)
+fi
+if ! (cd "$TMP" && "${upd[@]}"); then
     echo "FAIL: nix flake update in the copy failed; nothing was changed." >&2
     exit 1
 fi

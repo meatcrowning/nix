@@ -265,6 +265,13 @@ class Runner(QObject):
     started = Signal(str)         # job label
     finished = Signal(str, bool)  # job label, ok
     busyChanged = Signal()
+    #: parsed per-input package delta ready: input name, list of
+    #: {name, old, new} rows from `nix store diff-closures`.
+    packagesReady = Signal(str, "QVariantList")
+
+    #: A diff-closures line: "<pkg>: <old versions> -> <new versions>[, ±size]".
+    _DIFF_RE = re.compile(r"^\s*(\S.*?):\s+(.+?)\s+->\s+(.+?)\s*$")
+    _DIFF_MARK = "== nix store diff-closures"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -272,6 +279,8 @@ class Runner(QObject):
         self._steps = []
         self._label = ""
         self._ok = True
+        self._capture_name = ""   # input name when this job is a per-row preview
+        self._capture_buf = ""
 
     @Property(bool, notify=busyChanged)
     def busy(self):
@@ -299,6 +308,20 @@ class Runner(QObject):
                              else "%d inputs" % len(names))
         self._run(label, [upd, rebuild_cmd()])
 
+    @Slot(str)
+    def previewInput(self, name):
+        """Per-input package delta: `nix-upgradable.sh --input <name>` builds the
+        one input's updated closure and diffs it, so the exact packages it moves
+        can be listed under its row. This BUILDS a real closure (a from-source
+        hyprland on book), so it is on-demand only, never on list load; the whole
+        run still streams to the log so the cost is visible. The parsed result is
+        emitted on packagesReady(name, rows)."""
+        name = (name or "").strip()
+        if not name:
+            return
+        args = [str(REPO / "tools" / "nix-upgradable.sh"), "--input", name]
+        self._run("diff " + name, [args], capture_name=name)
+
     @Slot()
     def stop(self):
         if self._proc is not None:
@@ -308,12 +331,14 @@ class Runner(QObject):
 
     # ---- the machinery ----
 
-    def _run(self, label, steps):
+    def _run(self, label, steps, capture_name=""):
         if self._proc is not None:
             return
         self._label = label
         self._steps = list(steps)
         self._ok = True
+        self._capture_name = capture_name
+        self._capture_buf = ""
         self.output.emit("\n===== %s =====\n$ cd %s\n" % (label, REPO))
         self.started.emit(label)
         self._next()
@@ -339,7 +364,29 @@ class Runner(QObject):
             return
         data = bytes(self._proc.readAllStandardOutput()).decode("utf-8", "replace")
         if data:
+            if self._capture_name:
+                self._capture_buf += data
             self.output.emit(data)
+
+    def _parse_diff(self, text):
+        """Pull the `pkg: old -> new` rows out of the diff-closures section."""
+        rows = []
+        seen = False
+        for line in text.splitlines():
+            if self._DIFF_MARK in line:
+                seen = True
+                continue
+            if not seen:
+                continue
+            if line.startswith("=====") or line.startswith("read-only"):
+                break
+            m = self._DIFF_RE.match(line)
+            if not m:
+                continue
+            new = m.group(3).split(",")[0].strip()  # drop the ", ±size" suffix
+            rows.append({"name": m.group(1).strip(),
+                         "old": m.group(2).strip(), "new": new})
+        return rows
 
     def _error(self, _):
         # start failed (binary missing etc.) — finished may not fire.
@@ -362,6 +409,11 @@ class Runner(QObject):
 
     def _done(self, ok):
         self._ok = ok
+        if self._capture_name:
+            rows = self._parse_diff(self._capture_buf) if ok else []
+            self.packagesReady.emit(self._capture_name, rows)
+            self._capture_name = ""
+            self._capture_buf = ""
         self.output.emit("\n===== %s: %s =====\n"
                          % (self._label, "done" if ok else "failed"))
         self.finished.emit(self._label, ok)

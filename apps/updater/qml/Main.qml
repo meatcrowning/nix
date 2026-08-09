@@ -90,6 +90,26 @@ Window {
         }
     }
 
+    // Per-input package deltas, cached by input name: the parsed
+    // `pkg: old -> new` rows a `diff` run produced, plus which rows are open and
+    // which one is building right now. Reassign whole (QML does not react to
+    // deep mutation of a var map).
+    property var pkgsByInput: ({})
+    property var expanded: ({})
+    property string previewing: ""
+
+    function toggleRow(name) {
+        var e = expanded;
+        e[name] = !e[name];
+        expanded = e;
+        // Building the closure is a real download/build (docs/DESIGN.md §10), so
+        // it only runs when he opens a row we have not diffed yet, never on load.
+        if (expanded[name] && pkgsByInput[name] === undefined && !Runner.busy) {
+            previewing = name;
+            Runner.previewInput(name);
+        }
+    }
+
     Connections {
         target: Runner
         function onOutput(chunk) {
@@ -101,6 +121,17 @@ Window {
         function onStarted(label) { win.status = label; }
         function onFinished(label, ok) {
             win.status = label + (ok ? ": done" : ": FAILED");
+            if (win.previewing !== "" && !ok) {
+                // build failed/stopped: forget it so a later click retries.
+                var m = win.pkgsByInput; delete m[win.previewing];
+                win.pkgsByInput = m;
+                win.previewing = "";
+            }
+        }
+        function onPackagesReady(name, rows) {
+            var m = win.pkgsByInput; m[name] = rows; win.pkgsByInput = m;
+            var e = win.expanded; e[name] = true; win.expanded = e;
+            if (win.previewing === name) win.previewing = "";
         }
     }
 
@@ -177,8 +208,12 @@ Window {
                     ScrollBar.vertical: VScroll { id: listScroll }
 
                     delegate: Rectangle {
+                        id: row
+                        readonly property bool isOpen: win.expanded[modelData.name] === true
+                        readonly property bool building: win.previewing === modelData.name
+                        readonly property var pkgs: win.pkgsByInput[modelData.name]
                         width: list.width - listScroll.barW
-                        height: rowCol.implicitHeight + Theme.gap
+                        height: rowBody.implicitHeight + Theme.gap
                         color: rma.containsMouse ? Theme.bgAlt : "transparent"
                         radius: Theme.rounding
 
@@ -188,49 +223,99 @@ Window {
                             hoverEnabled: true
                         }
 
-                        Row {
-                            anchors.fill: parent
+                        Column {
+                            id: rowBody
+                            anchors.left: parent.left
+                            anchors.right: parent.right
                             anchors.leftMargin: Theme.gap
                             anchors.rightMargin: Theme.gap
+                            anchors.verticalCenter: parent.verticalCenter
                             spacing: Theme.gap
 
-                            Column {
-                                id: rowCol
-                                width: parent.width - upBtn.width - parent.spacing
-                                anchors.verticalCenter: parent.verticalCenter
-                                Row {
-                                    spacing: cellW
-                                    PixelText {
-                                        text: modelData.name
-                                        color: win.fgText
+                            Row {
+                                width: parent.width
+                                spacing: Theme.gap
+
+                                Column {
+                                    id: rowCol
+                                    width: parent.width - diffBtn.width - upBtn.width
+                                           - 2 * parent.spacing
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    Row {
+                                        spacing: cellW
+                                        PixelText {
+                                            text: (row.isOpen ? "- " : "+ ") + modelData.name
+                                            color: win.fgText
+                                        }
+                                        PixelText {
+                                            visible: modelData.pinned
+                                            text: "[pinned]"
+                                            color: Theme.warn
+                                        }
+                                        PixelText {
+                                            visible: modelData.follows !== ""
+                                            text: "follows " + modelData.follows
+                                            color: Theme.textDim
+                                        }
                                     }
                                     PixelText {
-                                        visible: modelData.pinned
-                                        text: "[pinned]"
-                                        color: Theme.warn
-                                    }
-                                    PixelText {
-                                        visible: modelData.follows !== ""
-                                        text: "follows " + modelData.follows
-                                        color: Theme.textDim
+                                        visible: modelData.rev !== ""
+                                        text: modelData.rev + "  " + modelData.date
+                                              + (modelData.age >= 0 ? "  " + modelData.age + "d old" : "")
+                                        color: win.fgDim
                                     }
                                 }
-                                PixelText {
-                                    visible: modelData.rev !== ""
-                                    text: modelData.rev + "  " + modelData.date
-                                          + (modelData.age >= 0 ? "  " + modelData.age + "d old" : "")
-                                    color: win.fgDim
+
+                                Btn {
+                                    id: diffBtn
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    visible: modelData.updatable
+                                    label: row.building ? "…" : "diff"
+                                    enabled: !Runner.busy || row.isOpen
+                                    onActivated: win.toggleRow(modelData.name)
+                                }
+
+                                Btn {
+                                    id: upBtn
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    visible: modelData.updatable
+                                    label: "update"
+                                    danger: modelData.pinned
+                                    enabled: !Runner.busy
+                                    onActivated: win.askUpdate([modelData.name])
                                 }
                             }
 
-                            Btn {
-                                id: upBtn
-                                anchors.verticalCenter: parent.verticalCenter
-                                visible: modelData.updatable
-                                label: "update"
-                                danger: modelData.pinned
-                                enabled: !Runner.busy
-                                onActivated: win.askUpdate([modelData.name])
+                            // Expanded per-package delta (docs/DESIGN.md §10: the
+                            // build cost is stated, and it only runs on demand).
+                            Column {
+                                visible: row.isOpen
+                                width: parent.width
+                                spacing: 2
+                                leftPadding: 3 * cellW
+
+                                PixelText {
+                                    visible: row.building
+                                    text: "building the updated closure to diff — slow"
+                                    color: Theme.warn
+                                }
+                                PixelText {
+                                    visible: !row.building && row.pkgs !== undefined
+                                             && row.pkgs.length === 0
+                                    text: "no package version changes"
+                                    color: win.fgDim
+                                }
+                                Repeater {
+                                    model: (!row.building && row.pkgs !== undefined)
+                                           ? row.pkgs : []
+                                    delegate: PixelText {
+                                        width: row.width - 4 * cellW - listScroll.barW
+                                        wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                                        text: modelData.name + ": " + modelData.old
+                                              + " -> " + modelData.new
+                                        color: win.fgText
+                                    }
+                                }
                             }
                         }
                     }
