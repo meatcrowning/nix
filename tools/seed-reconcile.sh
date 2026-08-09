@@ -103,6 +103,16 @@ case "$KIND" in
     carry '[[:space:]]*\["font_smooth"\][[:space:]]*=[[:space:]]*' 'true|false'
     carry '[[:space:]]*border_size[[:space:]]*=[[:space:]]*' '[0-9]+'
     carry '[[:space:]]*rounding[[:space:]]+=[[:space:]]*' '[0-9]+'
+    # apply-window-frame.sh: titlebar anchor edge, the unfocus dim (both the
+    # plugin titlebar scrim and Hyprland's native content dim) and the compact
+    # bar layout. seed-drift.sh already masks these four as runtime-owned; this
+    # carry is what makes that true instead of just claimed — without it, a
+    # rebuild silently reset all four to the nix-source seed on every switch,
+    # discarding whatever Settings > Appearance had persisted.
+    carry '[[:space:]]*\["titlebar_edge"\][[:space:]]*=[[:space:]]*"' '[^"]*'
+    carry '[[:space:]]*\["dim_unfocused"\][[:space:]]*=[[:space:]]*' 'true|false'
+    carry '[[:space:]]*\["compact"\][[:space:]]*=[[:space:]]*' 'true|false'
+    carry '[[:space:]]*dim_inactive[[:space:]]*=[[:space:]]*' 'true|false'
     # cursor-recolor.sh: the generated GoogleDot-<accent><outline> theme name.
     carry 'hl\.env\("XCURSOR_THEME", "'    'GoogleDot-[^"]*'
     carry 'hl\.env\("HYPRCURSOR_THEME", "' 'GoogleDot-[^"]*'
