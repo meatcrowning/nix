@@ -4,8 +4,8 @@
 Runs surfer offscreen in a scratch HOME with a scratch XDG_RUNTIME_DIR, and
 plays the part of the hyprvtb button server: we read its REGISTER lines (the
 whole button set, with per-tab tooltips that name each pane) and send CLICK
-lines back. No screen, no network, no second panel — tabs are about:blank and
-nothing touches the user's own session.
+(and RCLICK — the tab right-click menu) lines back. No screen, no network, no
+second panel — tabs are about:blank and nothing touches the user's own session.
 
 The tooltips are the assertion surface: they say which pane a tab is in (by
 orientation — left/right when vertical, top/bottom when stacked) and whether
@@ -288,6 +288,22 @@ try:
           bstate(bs, "vsplit") == 0 and bstate(bs, "hsplit") == 0 and
           sum(1 for b in t if b["state"] == 1) == 1,
           str([(b["state"], b["tip"][:22]) for b in t]))
+
+    # --- tab right-click: RCLICK opens the tab menu (the plugin owns tab
+    #     input — there is no QML MouseArea for it). Offscreen there is no way
+    #     to click a menu row, so assert the wire path: the app survives, no
+    #     tab was closed by accident, and the log gained no QML error.
+    tid = [b["id"] for b in tabs(buttons()[0])]
+    conn.sendall(("RCLICK %s 320 210\n" % tid[0]).encode())
+    time.sleep(0.8)
+    t2 = tabs(buttons()[0])
+    check("RCLICK on a tab leaves the app alive and the tabs untouched",
+          proc.poll() is None and [b["id"] for b in t2] == tid,
+          str([b["id"] for b in t2]))
+    logtail = (root / "surfer.log").read_text(errors="replace")[-3000:]
+    check("tab menu opens without a QML error",
+          "TypeError" not in logtail and "ReferenceError" not in logtail,
+          logtail[-300:])
 
     # (the session/prefs round trip is checked separately — saveSession only
     #  runs from Window.onClosing, which a SIGTERM never reaches)

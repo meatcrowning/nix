@@ -320,6 +320,25 @@ Window {
         if (splTid >= 0) splitTab = tabIndexByTid(splTid);
         tabRev += 1;
     }
+    // right-click tab menu: close every tab except `keep`. Each removal
+    // re-resolves by tid, so earlier closes can never shift the wrong row out
+    // from under us, and goes through closeTab, so the panes re-derive
+    // currentTab/splitTab exactly as they do for a single close.
+    function closeTabsExcept(keep) {
+        var tids = [];
+        for (var i = 0; i < tabs.count; i++)
+            if (i !== keep) tids.push(tabs.get(i).tid);
+        for (var j = 0; j < tids.length; j++) {
+            var k = tabIndexByTid(tids[j]);
+            if (k >= 0 && tabs.count > 1) closeTab(k);
+        }
+    }
+    // right-click tab menu: close everything right of `idx`, right-to-left so
+    // the indices before it stay valid.
+    function closeTabsToRight(idx) {
+        for (var i = tabs.count - 1; i > idx; i--)
+            closeTab(i);
+    }
 
     // ---- memory saver: discard background tabs after idle ----
     // QtWebEngine keeps a full renderer process (V8 heap + GPU/canvas buffers
@@ -650,6 +669,40 @@ Window {
         ctxMenu.open(c.pos.x, c.pos.y, items);
     }
 
+    // Right-click a titlebar TAB button. The tabs live in the hyprvtb
+    // titlebar, not in this window, so the plugin owns the input and reports
+    // the right-click (RCLICK id + window-local point — see vtbclient.py);
+    // there is no QML MouseArea that could catch it. Pop the tab menu at the
+    // click. Triggers re-resolve the tab by tid, so a list that shifted
+    // between the right-click and the menu click still acts on the same tab.
+    function showTabMenu(tid, idx, x, y) {
+        function at() { return win.tabIndexByTid(tid); }
+        var items = [
+            { label: "Close",
+              trigger: function(){ var i = at(); if (i >= 0) win.closeTab(i); } },
+            { label: "Close others", enabled: tabs.count > 1,
+              trigger: function(){ var i = at(); if (i >= 0) win.closeTabsExcept(i); } },
+            { label: "Close to right", enabled: idx < tabs.count - 1,
+              trigger: function(){ var i = at(); if (i >= 0) win.closeTabsToRight(i); } },
+            { label: "Reload",
+              trigger: function(){
+                  var i = at(); if (i < 0) return;
+                  var v = viewRep.count > i ? viewRep.itemAt(i) : null;
+                  if (!v) return;
+                  if (tabs.get(i).cold) { win.warmTab(i); return; }
+                  v.reload();
+              } },
+            { label: "Duplicate",
+              trigger: function(){
+                  var i = at(); if (i < 0) return;
+                  var v = viewRep.count > i ? viewRep.itemAt(i) : null;
+                  var u = (v && ("" + v.url) !== "") ? ("" + v.url) : (tabs.get(i).seed || win.homeUrl);
+                  win.newTab(u);
+              } },
+        ];
+        ctxMenu.open(x, y, items);
+    }
+
     // Address text -> url: explicit schemes pass through, host-ish strings get
     // https://, anything else becomes a DuckDuckGo search.
     function normalize(t) {
@@ -806,6 +859,16 @@ Window {
         }
         // un-hidden: force the live view to repaint out of its black state
         function onWake() { win.nudgeCurrent(); }
+        // right-click a titlebar tab button: the plugin owns tab input, so it
+        // reports RCLICK id + window-local coords (see vtbclient.py); pop the
+        // tab menu at the click point.
+        function onRClicked(id, x, y) {
+            if (id.indexOf("tab:") !== 0) return;
+            var tid = parseInt(id.substring(4));
+            var idx = win.tabIndexByTid(tid);
+            if (idx < 0) return;
+            win.showTabMenu(tid, idx, x, y);
+        }
     }
 
     // A later `surfer <url>` launch (a link clicked in another app — surfer is

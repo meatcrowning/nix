@@ -63,17 +63,17 @@ class MockPlugin:
             pass
 
     def _loop(self):
-        clients = {}
+        self.clients = {}
         while not self._stop.is_set():
-            rl, _, _ = select.select([self._srv] + [c[0] for c in clients.values()],
+            rl, _, _ = select.select([self._srv] + [c[0] for c in self.clients.values()],
                                      [], [], 0.02)
             for s in rl:
                 if s is self._srv:
                     c, _ = self._srv.accept()
                     c.setblocking(False)
-                    clients[c.fileno()] = [c, b""]
+                    self.clients[c.fileno()] = [c, b""]
                     continue
-                st, dead = clients[s.fileno()], False
+                st, dead = self.clients[s.fileno()], False
                 while True:
                     try:
                         d = s.recv(4096)
@@ -91,9 +91,18 @@ class MockPlugin:
                     self.wakeups.append(batch)
                 if dead:
                     s.close()
-                    del clients[s.fileno()]
-        for st in clients.values():
+                    del self.clients[s.fileno()]
+        for st in self.clients.values():
             st[0].close()
+
+    def broadcast(self, line):
+        """Server -> client, like VtbIpc::sendLineLocked: one line to every
+        connected client (the mock has one)."""
+        for st in self.clients.values():
+            try:
+                st[0].sendall((line + "\n").encode())
+            except OSError:
+                pass
 
     def wait_for(self, verb, timeout=5.0):
         end = time.monotonic() + timeout
@@ -256,6 +265,27 @@ def case_backoff_ceiling():
     del c
 
 
+def case_rclick(rundir):
+    """The RCLICK verb (surfer's tab right-click menu): server -> client with
+    the button id plus window-local x/y. The reader must split the id from the
+    coords and hand floats to the callback, exactly as the plugin sends them."""
+    got = []
+    srv = MockPlugin(rundir).start()
+    c = VtbClient(on_rclick=lambda i, x, y: got.append((i, x, y)), buttons=BUTTONS)
+    try:
+        srv.wait_for("REGISTER")
+        srv.broadcast("RCLICK tab:3 512.50 400.00")
+        srv.broadcast("RCLICK tab:4 10 20")
+        end = time.monotonic() + 5.0
+        while len(got) < 2 and time.monotonic() < end:
+            time.sleep(0.01)
+        check("rclick parses id + float coords",
+              got == [("tab:3", 512.5, 400.0), ("tab:4", 10.0, 20.0)], repr(got))
+    finally:
+        c.close()
+        srv.stop()
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="vtbtest-") as rundir:
         os.environ["XDG_RUNTIME_DIR"] = rundir
@@ -267,6 +297,8 @@ def main():
         print("reconnect")
         case_reconnect(rundir)
         case_backoff_ceiling()
+        print("server -> client")
+        case_rclick(rundir)
     print()
     if FAILS:
         print("FAILED: " + ", ".join(FAILS))

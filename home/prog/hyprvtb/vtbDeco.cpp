@@ -3718,6 +3718,42 @@ void CVtbDeco::onMouseButton(Event::SCallbackInfo& info, IPointer::SButtonEvent 
     if (tryStartEdgeResize(info, e))
         return;
 
+    // Right-click on an app-registered button (surfer's tab buttons): report it
+    // to the client on the PRESS — context menus open on press, and CLICK is
+    // release-fired so it cannot carry one. The client gets the button id plus
+    // the WINDOW-LOCAL point (this window's box origin subtracted, logical px)
+    // to pop its menu at. Consumed exactly like any other bar press: the page
+    // must not also see a right-click, and no press state is armed — a
+    // right-press must never arm a drag. Super+right is the interior resize
+    // (tryStartEdgeResize above) and is left alone; a right-click anywhere
+    // else on the bar falls through to handleDownEvent, i.e. behaves as it
+    // always did.
+    if (e.button == VTB_BTN_RIGHT && !superHeld()) {
+        const auto COORDS = cursorRelativeToBar();
+        const auto BOX    = assignedBoxGlobal();
+        // Bar-local rect: across (0..totalBarW) × along (0..barLen), the same
+        // test handleDownEvent applies before it acts.
+        const double ACROSS = barVertical() ? BOX.w : BOX.h;
+        const double ALONG  = barLenOf(BOX);
+        if (VECINRECT(COORDS, 0, 0, ACROSS, ALONG - 1)) {
+            SVtbAppReg reg;
+            if (appReg(reg)) {
+                const int AI = appCellAt(COORDS, reg);
+                if (AI >= 0 && reg.buttons[AI].state != 2) { // disabled: inert, like CLICK
+                    const auto GLOBAL = Hl::mouse();
+                    VtbIpc::sendRClick(appPid(), reg.buttons[AI].id,
+                                       GLOBAL.x - BOX.x, GLOBAL.y - BOX.y);
+                    // Swallow the press (and its release) so the right-click
+                    // reaches neither the page nor the drag/down handlers.
+                    info.cancelled   = true;
+                    m_bCancelledDown = true;
+                    hideTooltip();
+                    return;
+                }
+            }
+        }
+    }
+
     handleDownEvent(info);
 }
 
