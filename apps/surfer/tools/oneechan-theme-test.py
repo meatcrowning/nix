@@ -59,7 +59,7 @@ os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
     + ' --host-resolver-rules="MAP boards.4chan.org 127.0.0.1"')
 
 from PySide6.QtCore import QObject, QTimer, QUrl, Slot                # noqa: E402
-from PySide6.QtGui import QGuiApplication                             # noqa: E402
+from PySide6.QtGui import QColor, QGuiApplication                     # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine                       # noqa: E402
 from PySide6.QtWebEngineCore import QWebEngineUrlScheme               # noqa: E402
 from PySide6.QtWebEngineQuick import QtWebEngineQuick                 # noqa: E402
@@ -249,11 +249,30 @@ def main():
 
     out = {}
     fails = []
+    total = [0]
 
     def check(label, ok):
+        total[0] += 1
         print(("  ok   " if ok else "  FAIL ") + label)
         if not ok:
             fails.append(label)
+
+    # --- pure-python: the dark-mode link legibility lift (helper itself) ---
+    # PAL_A's bg is dark and its dim link sits close to it; the helper lifts the
+    # link until it clears the contrast floor, capped under the hover accent. A
+    # light palette must leave OneeChan's dim link untouched.
+    dark_bg, dim, acc = QColor(PAL_A["bg"]), QColor(PAL_A["dim"]), QColor(PAL_A["accent"])
+    lifted = QColor(surfer._legible_link(PAL_A["dim"], PAL_A["bg"], PAL_A["accent"]))
+    check("dark palette lifts the dim link's contrast against bg",
+          surfer._contrast(lifted, dark_bg) > surfer._contrast(dim, dark_bg))
+    check("lifted link clears the legibility floor (or hits the accent cap)",
+          surfer._contrast(lifted, dark_bg) >= 4.0 - 1e-6
+          or surfer._rel_lum(lifted) >= surfer._rel_lum(acc) - 1e-9)
+    check("lifted link stays no brighter than the hover accent",
+          surfer._rel_lum(lifted) <= surfer._rel_lum(acc) + 1e-9)
+    light = dict(PAL_A, bg="#f4f4f4")
+    check("a light palette leaves OneeChan's dim link untouched",
+          surfer._legible_link(light["dim"], light["bg"], light["accent"]) == light["dim"])
 
     def read_title():
         t = view.property("title")
@@ -279,8 +298,9 @@ def main():
               out.get("bodyColor") == rgb(PAL_A["text"]))
         check("reply background takes the palette bgAlt (beats ch4SS #eeeeee)",
               out.get("replyBg") == rgb(PAL_A["bgAlt"]))
-        check("plain link takes the palette dim (beats ch4SS #0000ee)",
-              out.get("aColor") == rgb(PAL_A["dim"]))
+        check("plain link takes the legibility-lifted palette dim (beats ch4SS #0000ee)",
+              out.get("aColor")
+              == rgb(surfer._legible_link(PAL_A["dim"], PAL_A["bg"], PAL_A["accent"])))
         check("quotelink takes the palette accent (beats ch4SS #dd0000)",
               out.get("qlColor") == rgb(PAL_A["accent"]))
         check("live refresh hook installed", out.get("hasRefresh") is True)
@@ -315,7 +335,7 @@ def main():
         check("self-gate: a page without html.oneechan keeps ch4SS reply bg",
               out.get("replyBg") == "rgb(238, 238, 238)")
         print("probe:", json.dumps(out, sort_keys=True))
-        n = 10
+        n = total[0]
         print("%d/%d checks passed" % (n - len(fails), n))
         app.quit()
 

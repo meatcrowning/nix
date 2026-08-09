@@ -1715,6 +1715,50 @@ class PageStyle(QObject):
         return [s]
 
 
+def _rel_lum(qc):
+    """WCAG relative luminance of a QColor (0..1)."""
+    def lin(c):
+        c = c / 255.0
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    return 0.2126 * lin(qc.red()) + 0.7152 * lin(qc.green()) + 0.0722 * lin(qc.blue())
+
+
+def _contrast(a, b):
+    """WCAG contrast ratio between two QColors (1..21)."""
+    la, lb = _rel_lum(a), _rel_lum(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
+def _legible_link(link_hex, bg_hex, cap_hex, target=4.0):
+    """The non-hovered link colour, lifted for legibility on a DARK palette.
+
+    OneeChan's link slot is `dim`, which on a dark wallpaper sits too close to
+    the page background to read comfortably (DESIGN.md §3.2 'contrast is
+    measured, not judged'). On a dark palette, raise the link's HSL lightness —
+    hue and saturation kept, so it stays palette-derived — until it clears a
+    contrast floor against the background, capped just under the hover accent's
+    luminance so the hover state still reads as brighter. A light palette (and
+    the hover colour, which is `accent`) is left untouched."""
+    bg = QColor(bg_hex)
+    if _rel_lum(bg) > 0.2:              # light-ish background: dark mode only
+        return link_hex
+    link = QColor(link_hex)
+    if _contrast(link, bg) >= target:  # already legible: leave it alone
+        return link_hex
+    cap = _rel_lum(QColor(cap_hex))
+    for _ in range(40):
+        if _contrast(link, bg) >= target or _rel_lum(link) >= cap:
+            break
+        h, s, l, a = link.getHslF()
+        if h < 0:                      # achromatic: HSL hue is undefined
+            h = 0.0
+        nl = min(1.0, l + 0.03)
+        if nl <= l:
+            break
+        link = QColor.fromHslF(h, s, nl, a)
+    return link.name()
+
+
 class OneeTheme(QObject):
     """Builds the palette-derived override CSS that re-skins OneeChan's 4chan
     theme to the live wallpaper palette, and carries ONEE_THEME_RUNTIME_JS as a
@@ -1747,9 +1791,11 @@ class OneeTheme(QObject):
         header_text = p("text")      # headerColor
         board = p("accent")          # boardColor
         text = p("text")             # textColor (post message body)
-        link = p("dim")              # linkColor
+        # linkColor: OneeChan's `dim`, lifted for legibility on a dark palette
+        # (DESIGN.md §3.2). Hover stays `accent`; a light palette is untouched.
+        link = _legible_link(p("dim"), bg, p("accent"))          # linkColor
         link_h = p("accent")         # linkHColor
-        header_link = p("dim")       # headerLColor
+        header_link = _legible_link(p("dim"), header_bg, p("accent"))  # headerLColor
         ql = p("accent")             # qlColor (quotelinks)
         blink = p("info")            # blinkColor (backlinks)
         name = p("ok")               # nameColor
