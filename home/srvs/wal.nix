@@ -60,6 +60,14 @@ in
       source = cursorRecolor;
       executable = true;
     };
+    "scripts/ly-theme.sh" = {
+      # The ly login greeter's colours (top only: /var/lib/ly/config.ini is
+      # seeded by sys/dsk/plasma.nix's activation; on book the file does not
+      # exist and the script no-ops). wal-set.sh calls it on every palette
+      # change so the greeter follows the wallpaper at next login.
+      source = ./wal-files/ly-theme.sh;
+      executable = true;
+    };
     "scripts/rgb-set.py" = {
       source = rgbSet;
       executable = true;
