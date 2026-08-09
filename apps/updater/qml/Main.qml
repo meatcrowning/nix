@@ -107,8 +107,9 @@ Window {
         var e = expanded;
         e[name] = !e[name];
         expanded = e;
-        // Building the closure is a real download/build (docs/DESIGN.md §10), so
-        // it only runs when he opens a row we have not diffed yet, never on load.
+        // Eval-only (docs/agents/updater-per-input-diff.md), but still a real
+        // subprocess run (docs/DESIGN.md §10), so it only runs when he opens a
+        // row we have not diffed yet, never on load.
         if (expanded[name] && pkgsByInput[name] === undefined && !Runner.busy) {
             previewing = name;
             Runner.previewInput(name);
@@ -292,7 +293,8 @@ Window {
                             }
 
                             // Expanded per-package delta (docs/DESIGN.md §10: the
-                            // build cost is stated, and it only runs on demand).
+                            // cost is stated, and it only runs on demand) — an
+                            // eval-only drv-closure diff, no build.
                             Column {
                                 visible: row.isOpen
                                 width: parent.width
@@ -301,7 +303,7 @@ Window {
 
                                 PixelText {
                                     visible: row.building
-                                    text: "building the updated closure to diff — slow"
+                                    text: "evaluating the closure diff — no build, a few seconds"
                                     color: Theme.warn
                                 }
                                 PixelText {

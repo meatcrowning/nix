@@ -41,7 +41,7 @@ bump is on his ask-first list** (root `AGENTS.md` → Boundaries).
 | `c+` | `tools/nix-upgradable.sh` (full) | same, but builds the closures and diffs them (slow) |
 | `up` | `nix flake update <non-pinned…>` then the rebuild wrapper | the actual apply |
 | a row's `update` | `nix flake update <one>` then the rebuild wrapper | a single input, pins behind the second confirm |
-| a row's `diff` | `tools/nix-upgradable.sh --input <one>` | the per-input package delta: exactly which packages that one input moves, `pkg: old -> new` |
+| a row's `diff` | `tools/nix-upgradable.sh --input <one>` | the per-input package delta: exactly which packages that one input moves, `pkg: old -> new` — eval-only, no build |
 | `x` | terminates the running job | — |
 
 - **Checking is `tools/nix-upgradable.sh`, streamed verbatim** into the log
@@ -49,20 +49,27 @@ bump is on his ask-first list** (root `AGENTS.md` → Boundaries).
   app calls it and reinvents none of it. (It cleans its own temp dir, so a
   per-row "update available" marker would need its own small lock-diff — left
   out for now precisely to avoid a second copy of what that tool does.)
-- **A row's `diff` is the per-input package delta, reusing the same tool.**
-  `nix-upgradable.sh` grew a `--input <name>` flag that runs `nix flake update
-  <name>` in its throwaway copy instead of the bare all-inputs update;
-  everything else (build CUR from the repo, build NEW from the copy, `nix store
-  diff-closures`) is unchanged, so the exact `pkg: old -> new` lines it already
-  prints ARE the per-input delta. `Runner.previewInput(name)` runs it through
-  the one job queue, captures stdout, `_parse_diff()` pulls the rows out of the
-  `== nix store diff-closures` section (dropping the `, ±size` suffix) and
-  `packagesReady(name, rows)` fills an expandable list under that row. It is
-  **on-demand only** — expanding a row that has not been diffed BUILDS the
-  updated closure (a real download/build, a from-source hyprland on book), so it
-  never runs on list load and the whole run streams to the log so the cost is
-  visible (docs/DESIGN.md §10). A failed/stopped build is forgotten so a later
-  click retries.
+- **A row's `diff` is the per-input package delta, computed from EVALUATION
+  alone — no build.** `nix-upgradable.sh --input <name>` runs `nix flake
+  update <name>` in its throwaway copy as before, but the diff itself is a
+  **drv-closure diff**: `nix eval --raw <attr>.drvPath` for the repo and for
+  the copy (forcing a drvPath only writes `.drv` files, it builds nothing),
+  then `tools/nix-eval-diff.py` diffs the two closures
+  (`nix-store -qR`) by name/version and prints the same `pkg: old -> new`
+  shape a realized `nix store diff-closures` would. Research verdict
+  (`docs/agents/updater-per-input-diff.md`, Sallos 2026-08-08): building each
+  input's closure just to preview it costs roughly what the update itself
+  costs and fails whenever the new system does not build; the eval-only
+  drv-closure diff gives the identical list in ~15s and still answers when
+  the build would fail. `Runner.previewInput(name)` runs it through the one
+  job queue, captures stdout, `_parse_diff()` pulls the rows out of the `==
+  drv-closure diff` section and `packagesReady(name, rows)` fills an
+  expandable list under that row. Still **on-demand only** (never on list
+  load) so the run and its cost stay visible in the log (docs/DESIGN.md §10).
+  A failed/stopped run is forgotten so a later click retries. The **full
+  check** (`c+`) is unchanged — building the whole toplevel and diffing the
+  realized closure is inherent to a confirmation that the new system actually
+  builds, and stays out of scope for a per-row preview.
 - **Applying is `nix flake update` then this host's wrapper** — `sudo
   rebuild-top` on top, `rebuild-air` on book (`rebuild_cmd()` picks by
   `platform.machine()`). Both wrappers own preflight and the shared rebuild

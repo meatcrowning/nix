@@ -25,9 +25,13 @@
 #
 #   tools/nix-upgradable.sh               # full preview (builds the new closure)
 #   tools/nix-upgradable.sh --no-build    # inputs summary + update preview only
-#   tools/nix-upgradable.sh --input NAME  # preview only ONE input's move (and,
-#                                         # without --no-build, the exact packages
-#                                         # it changes — that is the per-input diff)
+#   tools/nix-upgradable.sh --input NAME  # preview only ONE input's move, and
+#                                         # (without --no-build) the exact packages
+#                                         # it changes via an EVAL-ONLY drv-closure
+#                                         # diff (tools/nix-eval-diff.py) — no
+#                                         # build, so it still answers when the
+#                                         # new system does not build. See
+#                                         # docs/agents/updater-per-input-diff.md.
 #
 # Exit: 0 = diff shown (or --no-build completed); 1 = update/build failed (the
 # repo and the running system are untouched either way); 2 = bad usage.
@@ -140,6 +144,27 @@ if [ "$NO_BUILD" -eq 1 ]; then
     echo ""
     echo "inputs updated in the copy; the repo's flake.lock was not touched."
     echo "run without --no-build to build both toplevels and diff the closures."
+    exit 0
+fi
+
+if [ -n "$INPUT" ]; then
+    # Per-input row diff: EVAL only, no build (docs/agents/updater-per-input-diff.md).
+    # Forcing drvPath writes .drv files but builds nothing; nix-eval-diff.py
+    # diffs the two drv closures by name/version, which is the same
+    # `pkg: old -> new` list a realized diff-closures gives, at ~15s instead of
+    # a full rebuild — and it still answers when the new system does not build.
+    echo ""
+    echo "== drv-closure diff (eval only, no build): current -> updated $INPUT =="
+    OLD_DRV=$(nix eval --raw "$REPO#$ATTR.drvPath") \
+        || { echo "FAIL: could not evaluate $ATTR from the current inputs" >&2; exit 1; }
+    NEW_DRV=$(nix eval --raw "$TMP#$ATTR.drvPath") \
+        || { echo "FAIL: could not evaluate $ATTR from the updated inputs" >&2; exit 1; }
+    python3 "$(dirname "${BASH_SOURCE[0]}")/nix-eval-diff.py" "$OLD_DRV" "$NEW_DRV" \
+        || { echo "FAIL: drv-closure diff failed" >&2; exit 1; }
+
+    verify_lock
+    echo ""
+    echo "read-only confirmed: $REPO/flake.lock unchanged (sha256 $LOCK_SHA)"
     exit 0
 fi
 
