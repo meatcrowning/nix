@@ -594,7 +594,13 @@ Exactly the dark-mode courier's shape, on a parallel scheme:
 The role→palette map (`OneeTheme._css`, selectors mirroring `ch4SS` verbatim so
 specificity ties and cascade order decides): body bg=`bg`, reply/dialog
 bg=`bgAlt`, borders=`border`, field bg=`highlight`, post text=`text`,
-links=`dim` (hover `accent`), greentext + names=`ok`, tripcodes=`warn`,
+links=`dim` (hover `accent`) — but the non-hovered link is run through
+`_legible_link` first: on a **dark** palette `dim` sits too close to the page
+background to read (DESIGN.md §3.2 "contrast is measured"), so its HSL lightness
+is lifted (hue/saturation kept, so it stays palette-derived) until it clears a
+~4:1 contrast floor against the background, capped just under the hover accent so
+hover still reads brighter; a light palette and the hover colour are untouched —
+greentext + names=`ok`, tripcodes=`warn`,
 subjects/board titles/quotelinks=`accent`, backlinks=`info`, post
 highlight=`highlight`. Every rule is `!important`, because `ch4SS`'s are.
 
