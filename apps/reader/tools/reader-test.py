@@ -443,18 +443,18 @@ def test_chrome(engine, cellw):
     item.deleteLater()
 
 
-def test_focus_fade(win, pane, theme):
-    """An unfocused window fades its WHOLE foreground (docs/DESIGN.md §3.1.1).
+def test_focus_steady(win, pane, theme):
+    """An unfocused reader stays on its focused tones (docs/DESIGN.md §3.1.1,
+    app-side fade retired 2026-08-09).
 
-    reader wired `winActive` all the way to `DocPane` and then hardcoded
-    `fg: Theme.text` on the block delegate, so the titlebar greyed and the
-    document — the only thing the user was actually reading — stayed lit.
-
-    The assertion is on the colour a real Block delegate ENDED UP WITH, not on
-    the pane's own property, because the bug lived in the propagation. Note the
-    ternary must stay at the pane: reader draws one Text per word, so a per-leaf
-    binding would re-evaluate thousands of times on a focus change."""
-    inactive = theme.property("inactive")
+    The window pins `renderActive` to `true`, so the native
+    decoration:dim_inactive scrim is the one dimming mechanism and the pane is
+    never handed an inactive state. Reader used to wire `winActive` all the way
+    to `DocPane` and then hardcode `fg: Theme.text` on the block delegate — the
+    titlebar greyed and the document, the only thing he was actually reading,
+    stayed lit; under the retirement, a document that stays on `Theme.text` is
+    the designed behaviour, so the assertion is that the window really does pin
+    it and the document really does stay lit."""
     text = theme.property("text")
 
     def block_fg():
@@ -464,22 +464,14 @@ def test_focus_fade(win, pane, theme):
                 return fg
         return None
 
-    pane.setProperty("winActive", True)
-    spin(80)
-    check("a focused pane draws its body text in Theme.text",
+    check("the window pins the pane on its focused tones (renderActive is true)",
+          pane.property("winActive") is True, pane.property("winActive"))
+    check("the document draws its body text in Theme.text, focused or not",
           block_fg() == text, (block_fg(), text))
-    pane.setProperty("winActive", False)
-    spin(80)
-    check("an UNFOCUSED pane fades the document to Theme.inactive (S3.1.1)",
-          pane.property("fg") == inactive and block_fg() == inactive,
-          (pane.property("fg"), block_fg(), inactive))
-    check("...its secondary tone and its accent rules go with it",
-          pane.property("fgDim") == inactive and pane.property("fgAccent") == inactive,
+    check("its secondary tone and its accent rules stay on the focused tones",
+          pane.property("fgDim") == theme.property("textDim")
+          and pane.property("fgAccent") == theme.property("accent"),
           (pane.property("fgDim"), pane.property("fgAccent")))
-    # The assignments above BROKE the binding to `win.active`; leave the pane
-    # lit so the checks after this one see ordinary colours.
-    pane.setProperty("winActive", True)
-    spin(80)
 
 
 def find_bands(img, theme, x0, x1):
@@ -622,7 +614,7 @@ def test_window(app, tmp):
     check("a monospace advance was MEASURED, not assumed",
           2 < win.property("cellW") < 40, win.property("cellW"))
     test_wrap(engine, win.property("cellW"))
-    test_focus_fade(win, pane, _keep[-1])
+    test_focus_steady(win, pane, _keep[-1])
     test_find_marks(win, pane, _keep[-1])
 
     # the files index feeds the browse pane

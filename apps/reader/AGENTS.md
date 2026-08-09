@@ -189,10 +189,13 @@ rounded 8), so it stays right if the desktop font family is ever changed.
 - **No block reads a foreground colour off `Theme`.** `DocPane` derives
   `fg`/`fgDim`/`fgAccent` once from `winActive` and hands them down; `Block`
   passes them into `RichText`, which already gives each word a single
-  `color: root.color` binding. §3.1.1 — an unfocused window fades its whole
-  foreground, and the delegate is drawn per *word*, so the ternary lives at the
-  pane and not at the leaf. `Block.qml` hardcoding `Theme.text` here is what
-  left the document lit under a greyed titlebar.
+  `color: root.color` binding. §3.1.1 — the app-side fade is RETIRED
+  (2026-08-09): the window pins `renderActive` true and the native scrim is the
+  one dimmer, but the single-derivation structure survives so the fade can be
+  re-armed with a one-line change — and if it is, the delegate is drawn per
+  *word*, so the ternary must live at the pane and not at the leaf.
+  `Block.qml` hardcoding `Theme.text` was what left the document lit under a
+  greyed titlebar.
 - **Inline code takes `Theme.bgAlt`**, the inset background every other inset
   surface on this desktop takes. A fenced block is that fill inside the 1px
   `Theme.border` hairline. No radius, no new colour (§4, §3.1).
@@ -371,9 +374,9 @@ to `QRawFont.glyphIndexesForString` — the only audit that does not lie), and t
 real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen` — wrapping, the outline,
 both searches, real `QMouseEvent`s for buttons 275/276 walking document history,
 the split's toggle/re-orient semantics, the zero-size guard, the reload keeping
-its place, and the body text fading to `Theme.inactive` with the window
-(§3.1.1 — asserted on a real Block delegate, since the bug was in the
-propagation and not in the pane's own property). It redirects `XDG_STATE_HOME` into a scratch dir, which any
+its place, and the focus steadiness — the window pins `renderActive` true
+(§3.1.1's app-side fade is retired) and the document stays on `Theme.text`,
+asserted on a real Block delegate. It redirects `XDG_STATE_HOME` into a scratch dir, which any
 harness here **must** do or it rewrites where the user's own reader reopens, and
 it stubs the Titlebar, because the real one registers buttons against the
 harness's pid in the live compositor.

@@ -58,11 +58,13 @@ Window {
     // own titlebar instead of staying brighter than the bar beside it — the
     // idiom filer uses (docs/DESIGN.md §3.1). Body text and values keep their own
     // colours; only the accented chrome follows.
-    // "dim unfocused" off (Settings > Appearance) keeps the chrome on its
-    // focused tones (docs/DESIGN.md §3.1.1's off switch); native dim is off
-    // then too, so the chrome must not grey itself.
-    readonly property bool winActive: root.active
-        || (typeof DeskStyle !== "undefined" && !DeskStyle.dimUnfocused)
+    // §3.1.1's app-side fade is RETIRED — his board call, 2026-08-09: with
+    // "dim unfocused" on, the native decoration:dim_inactive scrim is the ONE
+    // dimming mechanism, and an app that also greys its own foreground reads
+    // darker than a plain window. The window always renders its focused tones;
+    // the compositor dims the whole surface. Re-arm by restoring `root.active`
+    // here — the plumbing is all still wired.
+    readonly property bool winActive: true
     readonly property color fgAccent: winActive ? Theme.accent : Theme.inactive
 
     // Live generation settings, seeded from the selected model's family.

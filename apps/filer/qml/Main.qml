@@ -22,11 +22,13 @@ Window {
     // Focus-aware foreground: while the window is unfocused, controls and text
     // grey to the SAME tone the hyprvtb titlebar fades to (Theme.inactive), so
     // filer reads as "inactive" in lock-step with its titlebar.
-    // "dim unfocused" off (Settings > Appearance) keeps the window on its
-    // focused tones (docs/DESIGN.md §3.1.1's off switch); native dim is off
-    // then too, so the body must not grey itself.
-    readonly property bool renderActive: win.active
-        || (typeof DeskStyle !== "undefined" && !DeskStyle.dimUnfocused)
+    // §3.1.1's app-side fade is RETIRED — his board call, 2026-08-09: with
+    // "dim unfocused" on, the native decoration:dim_inactive scrim is the ONE
+    // dimming mechanism, and an app that also greys its own foreground reads
+    // darker than a plain window. The window always renders its focused tones;
+    // the compositor dims the whole surface. Re-arm by restoring `win.active`
+    // here — the plumbing is all still wired.
+    readonly property bool renderActive: true
     readonly property color fgAccent: renderActive ? Theme.accent : Theme.inactive
     readonly property color fgText:   renderActive ? Theme.text  : Theme.inactive
 

@@ -21,8 +21,10 @@ records each one and what it became. What that leaves you with, mechanically:
 
 - **`TextButton.qml` is the only clickable label.** Every action in this app
   goes through it — hover tint, `PointingHandCursor`, `enabled` (0.4 opacity,
-  click refused), `lit`, `winActive` greying to `Theme.inactive`, and `flipY`
-  for a mirrored paired glyph. Do not drop a bare `MouseArea` on a `PixelText`.
+  click refused), `lit`, `winActive` greying to `Theme.inactive` (the §3.1.1
+  fade — RETIRED 2026-08-09, so the window pins `winActive` true and the grey
+  never fires; the property survives for a re-arm), and `flipY` for a mirrored
+  paired glyph. Do not drop a bare `MouseArea` on a `PixelText`.
 - **No `radius:` anywhere, and no `QtQuick.Controls` `ToolTip`.** `ToolTipArea`
   is ours now: it reparents its chip into the window `contentItem`, because the
   left column is `clip: true` panels inside a Flickable.

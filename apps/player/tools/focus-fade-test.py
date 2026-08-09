@@ -2,37 +2,34 @@
 """player's focus-fade harness — docs/DESIGN.md §3.1.1, offscreen, no window on
 anyone's screen and no contact with the live player.
 
-The rule: when the window loses focus, EVERY foreground in it goes to
-`Theme.inactive` — the exact grey hyprvtb fades the titlebar's text and glyphs
-to — while backgrounds, `Theme.border` hairlines, `Theme.bgAlt` inset fills and
-the `Theme.highlight` row fill do not move at all. player was the third app to
-get this wrong (painter, then reader), which is why it is tested rather than
-merely read.
+The rule, since his board call of 2026-08-09: **the app-side §3.1.1 fade is
+RETIRED.** An unfocused window used to grey every foreground to
+`Theme.inactive` (the exact grey hyprvtb fades the titlebar's text and glyphs
+to) while the native `decoration:dim_inactive` scrim dimmed the whole surface
+— the double-dim — and he chose the single mechanism: **the native scrim is the
+ONE dimmer, and the app always renders its focused tones.** So this harness's
+job inverted: instead of asserting that focus loss greys everything, it asserts
+that focus changes NOTHING — an unfocused player must be pixel-identical to its
+focused self, because any app-drawn inactive state would double-dim it again.
 
-Three layers:
+Two layers:
 
-  1. THE DERIVATION. `Main.qml`'s `fgText`/`fgDim`/`fgAccent` flip with the real
-     `Window.active`, driven by really activating and deactivating the window —
-     the offscreen platform honours `requestActivate()` and deactivates a window
-     when another one is activated, so this does NOT have to fake the signal the
-     way a `winActive` assignment would.
-  2. THE PROPAGATION. Every visible item in the tree is walked and asked what
-     colour it ended up with. While the window is inactive, NOTHING may still be
-     painted in `Theme.text`, `Theme.textDim` or `Theme.accent`. That is the
-     layer both previous occurrences of this bug lived in — the window derived
-     the tones correctly and a delegate three levels down went on reading
-     `Theme.text` for itself.
-  3. THE PIXELS. The window is rendered at 480x826 (the size player actually
-     runs at, not the 1080 default) in each view, focused and unfocused, and the
-     two frames are histogrammed. Every theme slot is given a UNIQUE primary
-     colour by the harness's fake palette, so a pixel count is an unambiguous
-     answer to "is this slot still on screen": the three foreground slots must
-     fall to ZERO, and bg / bgAlt / border / highlight must be IDENTICAL between
-     the two frames. The cover art is counted too — and since 2026-07-28 it must
-     MOVE: he reversed the earlier "an image is content, so it stays lit"
-     reading with *"dim it with everything else — the window reads as one
-     unfocused surface"*, so every flat-colour art pixel is composited toward
-     `bgAlt` by `Main.fgArt` and none of them survive at the exact art RGB.
+  1. THE DERIVATION. `Main.qml`'s `fgText`/`fgDim`/`fgAccent` and `fgArt` must
+     not move with the real `Window.active`, driven by really activating and
+     deactivating the window — the offscreen platform honours
+     `requestActivate()` and deactivates a window when another one is
+     activated, so this does NOT have to fake the signal the way a `winActive`
+     assignment would.
+  2. THE PIXELS. The window is rendered at 480x826 (the size player actually
+     runs at, not the 1080 default) in each view, focused and unfocused, and
+     the two frames are histogrammed. Every theme slot is given a UNIQUE
+     primary colour by the harness's fake palette, so a pixel count is an
+     unambiguous answer to "is this slot still on screen" — and the assertion
+     is that the two frames are IDENTICAL slot for slot, cover art included.
+     If the app ever draws an inactive state of its own again, the frames
+     differ and the test fails. (The old propagation walk is gone with the
+     fade: a leaf hardcoding `Theme.text` was the §3.1.1 bug; under the
+     retirement that is the designed behaviour.)
 
 Run it with player's own Qt env, not the bare system python — and never through
 the packaged `player` binary, which takes no arguments and would open a real
@@ -149,15 +146,6 @@ class FakeStyle(QObject):
     def reduceMotion(self): return True     # no animation to wait out
     @Property(float, notify=changed)
     def animSpeed(self): return 1.0
-    # ON, so the §3.1.1 app-side fade under test stays live. With it OFF the
-    # window keeps its focused tones and this whole fade is (correctly) absent.
-    @Property(bool, notify=changed)
-    def dimUnfocused(self): return DIM_UNFOCUSED
-
-
-# Flip with DIM_UNFOCUSED=0 to exercise the off switch: an unfocused window then
-# stays on its focused tones (native decoration:dim_inactive is off too).
-DIM_UNFOCUSED = os.environ.get("DIM_UNFOCUSED", "1") not in ("0", "false", "")
 
 
 # ------------------------------------------------------------------ the stubs
@@ -396,68 +384,6 @@ def spin(app, ms=200):
         app.processEvents()
 
 
-def descendants(item):
-    out = []
-    stack = list(item.childItems()) if hasattr(item, "childItems") else []
-    while stack:
-        it = stack.pop()
-        out.append(it)
-        stack.extend(it.childItems())
-    return out
-
-
-def visible_chain(it, root):
-    """An item is only on screen if it AND every ancestor up to the root is
-    visible and has a non-zero size — a check on the leaf alone would flag the
-    hidden branch of every responsive layout in this app."""
-    cur = it
-    while cur is not None and cur is not root:
-        if not cur.isVisible() or cur.width() <= 0 or cur.height() <= 0:
-            return False
-        cur = cur.parentItem()
-    return True
-
-
-def item_colours(it):
-    """Every colour this item paints with: `color` (Text and Rectangle) and
-    `border.color` (Rectangle) — the accent gutters and frames live in the
-    second one, which is exactly where AlbumGrid's open-cover frame sits."""
-    out = []
-    c = it.property("color")
-    if isinstance(c, QColor):
-        out.append(("color", c))
-    # `border` is a QQuickPen, which PySide cannot convert out of
-    # QObject::property() at all — read through the grouped-property names Qt
-    # registers for it instead.
-    bc = it.property("border.color")
-    if isinstance(bc, QColor) and (it.property("border.width") or 0) > 0:
-        out.append(("border.color", bc))
-    return out
-
-
-def ancestry(it, root):
-    """The chain of QML component types up to the root — a leak is useless
-    without knowing which pane it is in."""
-    out, cur = [], it.parentItem()
-    while cur is not None and cur is not root:
-        n = cur.metaObject().className().split("_QMLTYPE")[0]
-        if n not in out[-1:]:
-            out.append(n)
-        cur = cur.parentItem()
-    return "/".join(reversed(out))
-
-
-def in_menu(it, root):
-    """CtxMenu / TrackMenu are deliberately out of scope — see the report."""
-    cur = it
-    while cur is not None and cur is not root:
-        n = cur.objectName()
-        if n in ("trackMenu", "headerMenu", "coverMenu"):
-            return True
-        cur = cur.parentItem()
-    return False
-
-
 def histogram(img, names):
     """Exact-RGB pixel counts for the named slots (plus the art colour)."""
     counts = {n: 0 for n in names}
@@ -469,27 +395,6 @@ def histogram(img, names):
             if n:
                 counts[n] += 1
     return counts
-
-
-def blend(fg, bg, a):
-    """`fg` drawn at opacity `a` over an opaque `bg` — what Qt's renderer does
-    to a cover when the window loses focus."""
-    return QColor(*[round(getattr(fg, c)() * a + getattr(bg, c)() * (1 - a))
-                    for c in ("red", "green", "blue")])
-
-
-def near_count(img, want, tol=2):
-    """Pixels within `tol` per channel of `want` — the composite is computed in
-    the renderer, so an exact match is one rounding rule away from a false
-    failure."""
-    n = 0
-    for y in range(img.height()):
-        for x in range(img.width()):
-            p = QColor(img.pixel(x, y))
-            if (abs(p.red() - want.red()) <= tol and abs(p.green() - want.green()) <= tol
-                    and abs(p.blue() - want.blue()) <= tol):
-                n += 1
-    return n
 
 
 def main():
@@ -561,7 +466,6 @@ def main():
     win.setHeight(826)
     spin(app, 400)
 
-    inactive = theme.property("inactive")
     lit = {"Theme.text": theme.property("text"),
            "Theme.textDim": theme.property("textDim"),
            "Theme.accent": theme.property("accent")}
@@ -593,18 +497,25 @@ def main():
     focus(False)
     check("the window reports itself INACTIVE once another window takes focus",
           win.property("active") is False)
-    check("an UNFOCUSED window fades all three foreground tones to Theme.inactive (S3.1.1)",
-          win.property("fgText") == inactive and win.property("fgDim") == inactive
-          and win.property("fgAccent") == inactive,
+    # §3.1.1's app-side fade is RETIRED (his board call, 2026-08-09): the
+    # native decoration:dim_inactive scrim is the ONE dimming mechanism, so an
+    # unfocused window must stay on its focused tones — artwork included, which
+    # the scrim dims as part of the surface.
+    check("an UNFOCUSED window KEEPS all three foreground tones (the app-side fade is retired)",
+          win.property("fgText") == lit["Theme.text"]
+          and win.property("fgDim") == lit["Theme.textDim"]
+          and win.property("fgAccent") == lit["Theme.accent"],
           (win.property("fgText"), win.property("fgDim"), win.property("fgAccent")))
-    # HIS call, 2026-07-28: the cover art dims with the rest of the foreground.
-    # An image has no `Theme.inactive` version, so the fade is an opacity onto
-    # the `Theme.bgAlt` fill behind every cover — a multiplier, not a tone.
-    fga = win.property("fgArt")
-    check("an UNFOCUSED window also fades the ARTWORK (0 < fgArt < 1)",
-          isinstance(fga, float) and 0.0 < fga < 1.0, fga)
+    check("an UNFOCUSED window keeps the ARTWORK at full opacity",
+          win.property("fgArt") == 1.0, win.property("fgArt"))
 
-    # ------------------------------------------------ 2. the propagation
+    # ------------------------------------------------ 2. the pixels
+    # Focus must change NOTHING on screen: the app draws no inactive state of
+    # its own (the §3.1.1 fade is retired), so an unfocused frame has to be
+    # identical to its focused self, slot for slot, cover art included. The
+    # grab covers the whole visible window, which is why the old per-item
+    # propagation walk is gone with the fade — a leaf that hardcodes
+    # `Theme.text` is now the designed behaviour, not a bug.
     # PySide hands a QML `Window` root back as a bare QWindow: no
     # `contentItem()`, no `grabWindow()`, and re-wrapping the pointer does not
     # help (the wrapper is cached per pointer). Reach the scene graph through
@@ -628,40 +539,7 @@ def main():
         return res.image()
     views = [("albums", {}), ("now", {}), ("playlists", {}),
              ("albums", {"settingsOpen": True}), ("albums", {"searching": True})]
-    for view, extra in views:
-        win.setProperty("view", view)
-        for k, v in extra.items():
-            win.setProperty(k, v)
-        focus(False)
-        leaks = []
-        for it in descendants(root):
-            if not visible_chain(it, root) or in_menu(it, root):
-                continue
-            for which, col in item_colours(it):
-                for name, want in lit.items():
-                    if col == want:
-                        leaks.append("%s.%s=%s <- %s" % (
-                            it.metaObject().className(), which, name, ancestry(it, root)))
-        label = view + ("+" + "+".join(extra) if extra else "")
-        check("nothing in the %s view is still lit while unfocused" % label,
-              not leaks, sorted(set(leaks))[:8])
-        # Every cover on screen must have taken `fgArt`. This is the layer an
-        # unwired pane fails in — AlbumPanel gets its value relayed through
-        # AlbumGrid, so a missing line there dims the gallery and leaves the
-        # open album section lit at full brightness.
-        arts = [it for it in descendants(root)
-                if it.metaObject().className().startswith("QQuickImage")
-                and visible_chain(it, root)]
-        unfaded = ["%s <- %s" % (it.metaObject().className(), ancestry(it, root))
-                   for it in arts if abs(it.opacity() - fga) > 1e-6]
-        if arts:
-            check("every cover drawn in the %s view is faded to fgArt" % label,
-                  not unfaded, sorted(set(unfaded))[:8])
-        for k in extra:
-            win.setProperty(k, False)
-
-    # ------------------------------------------------ 3. the pixels
-    slots = ["bg", "bgAlt", "border", "highlight", "accent", "text", "textDim", "art"]
+    slots = list(SLOTS) + ["art"]
     for view, extra in views:
         win.setProperty("view", view)
         for k, v in extra.items():
@@ -685,35 +563,11 @@ def main():
 
         h_on = histogram(on, slots)
         h_off = histogram(off, slots)
-        check("%s: the two grabs are not blank (foreground pixels exist focused)" % label,
+        check("%s: the focused frame is not blank (foreground pixels exist)" % label,
               h_on["text"] + h_on["textDim"] + h_on["accent"] > 200, h_on)
-        check("%s: every lit foreground is GONE when unfocused" % label,
-              h_off["text"] == 0 and h_off["textDim"] == 0 and h_off["accent"] == 0,
-              {k: h_off[k] for k in ("text", "textDim", "accent")})
-        same = {k: (h_on[k], h_off[k]) for k in ("bg", "bgAlt", "border", "highlight")
-                if h_on[k] != h_off[k]}
-        check("%s: background, bgAlt, border and highlight pixels are IDENTICAL" % label,
-              not same, same)
-        # The artwork DOES dim (his call, 2026-07-28). The fake art is one flat
-        # colour, so every pixel of it is composited toward `bgAlt` by the same
-        # factor and the exact art RGB must vanish entirely — a partial count
-        # would mean some cover was left lit. The playlists page draws no
-        # artwork at all, so there the claim is only that nothing appeared; the
-        # albums and now-playing pages carry the real evidence (thumbnails and a
-        # full-bleed cover).
-        if h_on["art"]:
-            check("%s: the cover art DIMS with the foreground (S3.1.1, his call)" % label,
-                  h_off["art"] == 0, (h_on["art"], h_off["art"]))
-            # ...and is DIMMED, not erased: the same pixel count comes back at
-            # the tone `fgArt` over `bgAlt` predicts. A cover that had gone
-            # blank, or been hidden, would pass the check above just as well.
-            faded = near_count(off, blend(QColor(ART_RGB), QColor(SLOTS["bgAlt"]), fga))
-            check("%s: those pixels are still THERE, at the predicted faded tone" % label,
-                  abs(faded - h_on["art"]) <= max(4, h_on["art"] // 50),
-                  (h_on["art"], faded))
-        else:
-            check("%s: no artwork appeared out of nowhere when unfocused" % label,
-                  h_off["art"] == 0, (h_on["art"], h_off["art"]))
+        diff = {k: (h_on[k], h_off[k]) for k in slots if h_on[k] != h_off[k]}
+        check("%s: the unfocused frame is IDENTICAL — the app draws no inactive state" % label,
+              not diff, str(diff) if diff else "")
         for k in extra:
             win.setProperty(k, False)
 

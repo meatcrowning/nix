@@ -85,47 +85,40 @@ reuse for any further change here.
 
 **Track list, album grid and both lyrics panes are `Kinetic*` views from `../qmlcommon/`** — player's scrolling policy is the scrollbar and the wheel only, never drag-flicking, so the compositor's momentum is the only momentum. `WheelScroll.qml` used to live in `player/qml/`; it is shared now and player is no longer its owner. `TrackList` passes `wheelEnabled: root.scrollable` so a table sized to hold every row (AlbumPanel) hands the wheel out to the gallery behind it. See [`../AGENTS.md`](../AGENTS.md).
 
-## Focus: three tones, derived once, handed down (`docs/DESIGN.md` §3.1.1)
+## Focus: three tones, derived once, handed down — the fade is RETIRED (`docs/DESIGN.md` §3.1.1)
 
 **No file under `qml/` may read `Theme.text`, `Theme.textDim` or `Theme.accent`
 for a thing it draws, and none may read `Window.active`.** `Main.qml` derives
 
 ```qml
-readonly property color fgText:   win.active ? Theme.text    : Theme.inactive
-readonly property color fgDim:    win.active ? Theme.textDim : Theme.inactive
-readonly property color fgAccent: win.active ? Theme.accent  : Theme.inactive
+readonly property bool renderActive: true   // §3.1.1's fade, pinned off
+readonly property color fgText:   renderActive ? Theme.text    : Theme.inactive
+readonly property color fgDim:    renderActive ? Theme.textDim : Theme.inactive
+readonly property color fgAccent: renderActive ? Theme.accent  : Theme.inactive
 ```
 
 and every pane, list, drawer and leaf takes those three as plain `color`
 properties (defaulting to the lit tones, so a harness can build one alone).
-`Theme.inactive` is the exact grey hyprvtb fades the titlebar to; player was the
-**third** app to grey its chrome and leave its content lit, after painter and
-reader, which is why §3.1.1 exists and why this is tested.
+**The app-side §3.1.1 fade is RETIRED — his board call, 2026-08-09**: with "dim
+unfocused" on, the native `decoration:dim_inactive` scrim is the ONE dimming
+mechanism, and an app that also greys its own foreground reads darker than a
+plain window. `renderActive` is pinned to `true`; the plumbing is retained so a
+one-line change at the window re-arms the whole fade. `Theme.inactive` is still
+the exact grey hyprvtb fades the titlebar to; player was the **third** app to
+grey its chrome and leave its content lit, after painter and reader — the
+history is in `docs/DESIGN.md` §3.1.1, and the wiring exists so the fade can
+come back whole if he ever asks.
 
-**The artwork fades with them**, through a fourth derived value on the same
-chain — `readonly property real fgArt: win.active ? 1.0 : 0.55`, wired
+**The artwork rode the same fade**, through a fourth derived value on the same
+chain — `readonly property real fgArt: renderActive ? 1.0 : 0.55`, wired
 `Main` → `AlbumGrid` → `AlbumPanel` and `Main` → `NowPlaying`. **All three
 covers**: the gallery thumbnails, the album section's art and the now-playing
-full-bleed cover. This REVERSES the first implementation, which left the art lit
-by analogy with filer's `PreviewTile`; **his call, 2026-07-28** — *"dim it with
-everything else — the window reads as one unfocused surface"*. Do not restore
-the old reading, in code or in `docs/DESIGN.md` §3.1.1.
+full-bleed cover. The 2026-07-28 call — *"dim it with everything else — the
+window reads as one unfocused surface"* — survives; the mechanism died with the
+retirement: `fgArt` is pinned to 1.0 and the native scrim dims the covers as
+part of the surface. Do not resurrect either half on its own.
 
-The mechanism is plain `opacity` on the existing `Image`, i.e. compositing the
-cover toward the `Theme.bgAlt` fill every artBox already draws behind it — no
-shader, no `Qt5Compat` effect and no extra item in a gallery of tiles (verified:
-the item count of the whole window is unchanged at 406, and load+first-frame CPU
-time is indistinguishable). A grey scrim in `Theme.inactive` was the obvious
-alternative and is wrong for the same reason `Theme.dim` is exempt below: the
-grey is lighter than a dark sleeve, so it would BRIGHTEN half the library.
-**0.55 is measured**: over 200 real thumbnails from `~/.cache/player/art`
-composited on the live palette's `bgAlt` it moves the mean cover 18.5 L\* (median
-18.3), against `fgDim`'s 22.5 L\* and `fgText`/`fgAccent`'s 47.3 L\* — just under
-the weaker text move, because a cover is a large field where a step reads
-stronger than in glyph-sized text, and matching 47 would take the average sleeve
-to near-black and read as broken rather than quiet.
-
-Deliberately NOT faded, and each for a reason:
+Deliberately never faded, and each for a reason (unchanged by the retirement):
 
 - **`Theme.dim`** — the tertiary tone (the `♫` art placeholder, an unrated star,
   a play count, the search placeholder). It sits *below* the inactive grey, so
@@ -149,22 +142,18 @@ Deliberately NOT faded, and each for a reason:
 tools/focus-fade-test.py [--png DIR]   # offscreen, never touches the live player
 ```
 
-Three layers: the derivation (real `Window.active`, driven by activating a
-second offscreen window — no faked flag); the propagation (every visible item in
-every view is asked what colour it *ended up* with, which is the layer both
-earlier occurrences of the bug lived in); and the pixels (480x826 — the size
-player actually runs at — histogrammed focused vs unfocused, with a fake palette
-that gives every theme slot a unique hue so a count is unambiguous). The
-propagation layer also asks every visible `Image` whether it took `fgArt` (an
-`AlbumPanel` whose relay through `AlbumGrid` is missing dims the gallery and
-leaves the open album section lit), and the pixel layer asserts the art
-**differs** between the frames — gone at the lit RGB, and back at the exact tone
-`fgArt` over `bgAlt` predicts, in the same pixel count, so a cover that had been
-blanked fails as loudly as one left lit. 39/39, 2026-07-28. Two traps
-that harness paid for: `highlight` must not be a grey, because `Theme.inactive`
-over `bg` composites to exactly `#404040`; and Qt caches a directory's file
-listing on first load, so a scratch `.qml` written afterwards fails with "File
-name case mismatch".
+Its job inverted with the rule: instead of asserting that focus loss greys
+everything, it asserts that focus changes NOTHING. Two layers: the derivation
+(real `Window.active`, driven by activating a second offscreen window — no faked
+flag — asserting `fgText`/`fgDim`/`fgAccent`/`fgArt` do not move), and the
+pixels (480x826 — the size player actually runs at — histogrammed focused vs
+unfocused, with a fake palette that gives every theme slot a unique hue so a
+count is unambiguous: the two frames must be IDENTICAL slot for slot, cover art
+included). Any app-drawn inactive state makes the frames differ and the test
+fails. Two traps that harness paid for: `highlight` must not be a grey, because
+`Theme.inactive` over `bg` composites to exactly `#404040`; and Qt caches a
+directory's file listing on first load, so a scratch `.qml` written afterwards
+fails with "File name case mismatch".
 
 ## Smart playlists are RULES the user owns (2026-08-07)
 

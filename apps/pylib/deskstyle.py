@@ -93,15 +93,6 @@ DEFAULT_ANIM_SPEED = 1.0
 SCROLLBAR_STYLES = ("win31", "beveled", "flat")
 DEFAULT_SCROLLBAR_STYLE = "win31"
 
-# The desktop's "dim unfocused" toggle (Settings > Appearance, settings.json
-# dimUnfocused), default ON to match SettingsStore.qml. It drives Hyprland's
-# native decoration:dim_inactive (the whole-window scrim) and the hyprvtb
-# titlebar tint; the apps read it here so their own §3.1.1 foreground fade
-# (docs/DESIGN.md §3.1.1) honours the same switch instead of greying the body
-# regardless. OFF keeps a window on its focused tones (his complaint: the body
-# greyed even with the setting disabled).
-DEFAULT_DIM_UNFOCUSED = True
-
 
 def settings_path():
     return Path(os.environ.get("DESK_SETTINGS") or SETTINGS_PATH)
@@ -128,7 +119,6 @@ class DeskStyle(QObject):
         self._reduce = DEFAULT_REDUCE_MOTION
         self._speed = DEFAULT_ANIM_SPEED
         self._scrollbar = DEFAULT_SCROLLBAR_STYLE
-        self._dim_unfocused = DEFAULT_DIM_UNFOCUSED
         self._border = 2
         self._rounding = 0
         self._watcher = QFileSystemWatcher(self)
@@ -175,9 +165,6 @@ class DeskStyle(QObject):
         bar = data.get("scrollbarStyle")
         if bar not in SCROLLBAR_STYLES:
             bar = DEFAULT_SCROLLBAR_STYLE
-        dim = data.get("dimUnfocused")
-        if not isinstance(dim, bool):
-            dim = DEFAULT_DIM_UNFOCUSED
         border = data.get("windowBorderWidth")
         if isinstance(border, bool) or not isinstance(border, (int, float)):
             border = 2
@@ -186,13 +173,11 @@ class DeskStyle(QObject):
         if isinstance(rounding, bool) or not isinstance(rounding, (int, float)):
             rounding = 0
         rounding = max(0, min(20, int(rounding)))
-        now = (family, size, reduce_motion, speed, bar, dim, border, rounding)
+        now = (family, size, reduce_motion, speed, bar, border, rounding)
         if now != (self._family, self._size, self._reduce, self._speed,
-                   self._scrollbar, self._dim_unfocused, self._border,
-                   self._rounding):
+                   self._scrollbar, self._border, self._rounding):
             (self._family, self._size, self._reduce, self._speed,
-             self._scrollbar, self._dim_unfocused, self._border,
-             self._rounding) = now
+             self._scrollbar, self._border, self._rounding) = now
             self.changed.emit()
 
     @Property(str, notify=changed)
@@ -295,12 +280,3 @@ class DeskStyle(QObject):
     @Property(str, notify=changed)
     def scrollbarStyle(self):
         return self._scrollbar
-
-    @Property(bool, notify=changed)
-    def dimUnfocused(self):
-        """The desktop's "dim unfocused" toggle (settings.json dimUnfocused).
-        ON (default) lets a window fade to its inactive tones when it loses
-        focus; OFF keeps it on its focused tones. An app's §3.1.1 foreground
-        fade reads this so the switch reaches the body, not just the titlebar
-        and the native window scrim."""
-        return self._dim_unfocused
