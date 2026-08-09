@@ -9,14 +9,20 @@ import Quickshell.Wayland
 // window (windows highlight under the cursor), or fullscreen; a leftmost
 // toggle flips the whole overlay between "shot" and "rec".
 //
-//   shot: region drag / window click / fullscreen click captures immediately.
+//   shot: region drag / window click / fullscreen only SELECT a target; the
+//         selection then stays on screen adjustable (drag its interior to move,
+//         the eight handles to resize, or drag a fresh box outside it). A
+//         "capture" button (right of exit) or Enter/Return then takes the shot.
 //         Saved to the configured screenshot dir, and (optionally) copied to
 //         the clipboard.
 //   rec:  region / window / fullscreen only SELECT a target; a "record"
-//         button (right of exit) then starts wf-recorder on it. Audio,
-//         framerate and the output dir come from settings; the file goes
+//         button (right of exit) or Enter/Return then starts wf-recorder on it.
+//         Audio, framerate and the output dir come from settings; the file goes
 //         to the configured recording dir. A separate top-right toast
 //         (RecordingToast.qml, driven by root.recording) is clicked to stop.
+//
+// Both actions share one select-then-confirm flow: the capture/record button
+// and Enter both call confirm(), which fires whichever action is armed.
 //
 // The overlay itself must not appear in the shot, so capture/record closes
 // the overlay first and runs grim / wf-recorder after a short settle in a
@@ -117,6 +123,16 @@ PanelWindow {
     readonly property rect sel: Qt.rect(Math.min(selX1, selX2), Math.min(selY1, selY2),
                                         Math.abs(selX2 - selX1), Math.abs(selY2 - selY1))
     readonly property bool hasSel: sel.width > 4 && sel.height > 4
+
+    // Set the region from normalized edges, clamped to the overlay. The editable
+    // move/resize handles (see selEditor) drive this; selX1/selY1 hold the
+    // top-left corner and selX2/selY2 the bottom-right.
+    function setSelRect(l, t, r, b) {
+        root.selX1 = Math.max(0, Math.min(l, root.width));
+        root.selY1 = Math.max(0, Math.min(t, root.height));
+        root.selX2 = Math.max(0, Math.min(r, root.width));
+        root.selY2 = Math.max(0, Math.min(b, root.height));
+    }
 
     // window-mode hover (local coords; width 0 = none)
     property rect hoverRect: Qt.rect(0, 0, 0, 0)
@@ -359,6 +375,34 @@ PanelWindow {
         capture(screenX + r.x, screenY + r.y, r.width, r.height);
     }
 
+    function notifyShot(msg) {
+        Quickshell.execDetached(["notify-send", "-a", "screenshot", "Screenshot", msg]);
+    }
+
+    // Is a target selected for the current mode? Drives the confirm affordance.
+    readonly property bool hasTarget: mode === "fullscreen"
+                                    || (mode === "region" && hasSel)
+                                    || (mode === "window" && hasPick)
+
+    // The one confirm path for BOTH actions and every mode: the capture/record
+    // button and the Enter/Return key both land here. Screenshot and record now
+    // share the same select-then-confirm flow, so nothing fires until this runs.
+    function confirm() {
+        if (root.action === "record") {
+            root.startRecording();
+            return;
+        }
+        if (root.mode === "fullscreen") {
+            root.capture(root.screenX, root.screenY, root.width, root.height);
+        } else if (root.mode === "region") {
+            if (!root.hasSel) { root.notifyShot("drag a region first"); return; }
+            root.captureLocalRect(root.sel);
+        } else { // window
+            if (!root.hasPick) { root.notifyShot("click a window first"); return; }
+            root.captureLocalRect(root.pickedRect);
+        }
+    }
+
     // Smallest visible window under a local point (smallest = the one on
     // top in the common overlap case of a dialog over its parent).
     //
@@ -401,6 +445,9 @@ PanelWindow {
         focus: true
 
         Keys.onEscapePressed: root.open = false
+        // Enter/Return confirms the current selection for either action.
+        Keys.onReturnPressed: root.confirm()
+        Keys.onEnterPressed: root.confirm()
 
         onPressed: mouse => {
             if (root.mode !== "region")
@@ -425,17 +472,14 @@ PanelWindow {
                 root.selX1 = root.selY1 = root.selX2 = root.selY2 = 0;
                 return;
             }
-            // screenshot: capture now. record: keep the box as the target.
-            if (root.action === "screenshot")
-                root.captureLocalRect(root.sel);
+            // Both actions now only SELECT: the box stays on screen adjustable
+            // until confirm() fires (Enter or the capture/record button).
         }
         onClicked: {
             if (root.mode !== "window" || !root.hasHover)
                 return;
-            if (root.action === "screenshot")
-                root.captureLocalRect(root.hoverRect);
-            else
-                root.pickedRect = root.hoverRect; // lock the record target
+            // Both actions lock the target; confirm() then acts on it.
+            root.pickedRect = root.hoverRect;
         }
     }
 
@@ -465,15 +509,116 @@ PanelWindow {
         }
     }
 
+    // ---- editable region: move + resize handles ----------------------------
+    // Once a region is dragged out it stays on screen adjustable until confirm()
+    // fires — mirroring record's select-then-act, now shared by both actions.
+    // The interior drags the whole box; eight handles resize it. A press OUTSIDE
+    // the box falls through to `grab` below and starts a fresh selection.
+    //
+    // All deltas are measured in SCENE coords (mapToItem(null, …)), which are
+    // stable even as a handle's own item moves under the pointer mid-drag — so
+    // the arithmetic never chases a moving reference frame.
+    Item {
+        id: selEditor
+        anchors.fill: parent
+        visible: root.mode === "region" && root.hasSel && !root.selecting
+
+        property real dsx: 0   // scene-coord press point
+        property real dsy: 0
+        property real l0: 0    // edge snapshot at press
+        property real t0: 0
+        property real r0: 0
+        property real b0: 0
+
+        function grabStart(ma, mouse) {
+            const p = ma.mapToItem(null, mouse.x, mouse.y);
+            dsx = p.x; dsy = p.y;
+            l0 = root.sel.x; t0 = root.sel.y;
+            r0 = root.sel.x + root.sel.width; b0 = root.sel.y + root.sel.height;
+        }
+        function scenePt(ma, mouse) { return ma.mapToItem(null, mouse.x, mouse.y); }
+
+        // move the whole box (interior)
+        MouseArea {
+            id: moveMa
+            x: root.hole.x; y: root.hole.y
+            width: root.hole.width; height: root.hole.height
+            cursorShape: Qt.SizeAllCursor
+            onPressed: mouse => selEditor.grabStart(moveMa, mouse)
+            onPositionChanged: mouse => {
+                const p = selEditor.scenePt(moveMa, mouse);
+                const w = selEditor.r0 - selEditor.l0, h = selEditor.b0 - selEditor.t0;
+                const l = Math.max(0, Math.min(selEditor.l0 + (p.x - selEditor.dsx), root.width - w));
+                const t = Math.max(0, Math.min(selEditor.t0 + (p.y - selEditor.dsy), root.height - h));
+                root.setSelRect(l, t, l + w, t + h);
+            }
+        }
+
+        // eight resize handles: gx/gy in {-1,0,1} pick which edge(s) they move.
+        component Handle: Rectangle {
+            id: hnd
+            property int gx: 0
+            property int gy: 0
+            width: 12; height: 12
+            color: Theme.accent
+            border.color: Theme.bg
+            border.width: 1
+            x: root.hole.x + (gx < 0 ? 0 : gx > 0 ? root.hole.width : root.hole.width / 2) - width / 2
+            y: root.hole.y + (gy < 0 ? 0 : gy > 0 ? root.hole.height : root.hole.height / 2) - height / 2
+            MouseArea {
+                id: hMa
+                anchors.fill: parent
+                anchors.margins: -6   // a forgiving hit target around the 12px square
+                cursorShape: (hnd.gx !== 0 && hnd.gy !== 0)
+                             ? (hnd.gx * hnd.gy > 0 ? Qt.SizeFDiagCursor : Qt.SizeBDiagCursor)
+                             : hnd.gx !== 0 ? Qt.SizeHorCursor : Qt.SizeVerCursor
+                onPressed: mouse => selEditor.grabStart(hMa, mouse)
+                onPositionChanged: mouse => {
+                    const p = selEditor.scenePt(hMa, mouse);
+                    const dx = p.x - selEditor.dsx, dy = p.y - selEditor.dsy;
+                    let l = selEditor.l0, t = selEditor.t0, r = selEditor.r0, b = selEditor.b0;
+                    if (hnd.gx < 0) l += dx; else if (hnd.gx > 0) r += dx;
+                    if (hnd.gy < 0) t += dy; else if (hnd.gy > 0) b += dy;
+                    root.setSelRect(Math.min(l, r), Math.min(t, b), Math.max(l, r), Math.max(t, b));
+                }
+            }
+        }
+        Handle { gx: -1; gy: -1 }
+        Handle { gx:  0; gy: -1 }
+        Handle { gx:  1; gy: -1 }
+        Handle { gx: -1; gy:  0 }
+        Handle { gx:  1; gy:  0 }
+        Handle { gx: -1; gy:  1 }
+        Handle { gx:  0; gy:  1 }
+        Handle { gx:  1; gy:  1 }
+    }
+
+    // The confirm verb for the current action — the label on the primary button
+    // and the word both hints use, so "capture"/"record" is stated once.
+    readonly property string confirmWord: root.action === "record" ? "record" : "capture"
+
     // hint when nothing is selected yet
     PixelText {
         visible: root.hole.width === 0
         anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: 40 }
-        readonly property string verb: root.action === "record" ? " to record" : ""
-        text: root.mode === "fullscreen" ? (root.action === "record" ? "fullscreen - press record" : "fullscreen")
-            : root.mode === "region"     ? "drag to select a region" + verb
-                                         : "click a window" + verb
+        text: root.mode === "fullscreen" ? "fullscreen - press " + root.confirmWord
+            : root.mode === "region"     ? "drag to select a region"
+                                         : "click a window"
         color: Theme.text
+        style: Text.Outline
+        styleColor: Theme.bg
+    }
+
+    // hint once a target exists: how to fire it. Sits under the top edge of the
+    // selection, or top-centre for a whole-output fullscreen pick.
+    PixelText {
+        visible: root.hasTarget && !root.selecting
+        readonly property bool fs: root.mode === "fullscreen"
+        anchors.horizontalCenter: fs ? parent.horizontalCenter : undefined
+        x: fs ? 0 : root.hole.x
+        y: fs ? 40 : Math.max(0, root.hole.y - implicitHeight - 6)
+        text: "Enter to " + root.confirmWord
+        color: Theme.accent
         style: Text.Outline
         styleColor: Theme.bg
     }
@@ -544,18 +689,14 @@ PanelWindow {
             MenuButton {
                 label: "fullscreen"
                 active: root.mode === "fullscreen"
-                // screenshot: capture the whole output now. record: just select
-                // it as the target for the record button.
+                // Both actions only SELECT the whole output here; confirm()
+                // (Enter or the capture/record button) then acts on it.
                 onClicked: {
-                    if (root.action === "screenshot") {
-                        root.capture(root.screenX, root.screenY, root.width, root.height);
-                    } else {
-                        root.mode = "fullscreen";
-                        root.selecting = false;
-                        root.selX1 = root.selY1 = root.selX2 = root.selY2 = 0;
-                        root.hoverRect = Qt.rect(0, 0, 0, 0);
-                        root.pickedRect = Qt.rect(0, 0, 0, 0);
-                    }
+                    root.mode = "fullscreen";
+                    root.selecting = false;
+                    root.selX1 = root.selY1 = root.selX2 = root.selY2 = 0;
+                    root.hoverRect = Qt.rect(0, 0, 0, 0);
+                    root.pickedRect = Qt.rect(0, 0, 0, 0);
                 }
             }
             MenuButton {
@@ -568,12 +709,13 @@ PanelWindow {
                 label: "exit"
                 onClicked: root.open = false
             }
-            // Right of exit, record mode only: start wf-recorder on the target.
+            // Right of exit: confirm the selection. Same slot, same primary
+            // styling for both actions — "capture" for a shot, "record" for a
+            // recording — so the two flows read identically. Enter does the same.
             MenuButton {
-                visible: root.action === "record"
-                label: "record"
+                label: root.action === "record" ? "record" : "capture"
                 active: true
-                onClicked: root.startRecording()
+                onClicked: root.confirm()
             }
         }
     }
