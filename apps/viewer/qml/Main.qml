@@ -36,23 +36,22 @@ Window {
     // docs/DESIGN.md §3.1.1). Derived ONCE here and handed down: a leaf never
     // reads Window.active itself, so a focus change re-evaluates these four
     // bindings rather than one per drawn item.
-    // "dim unfocused" off (Settings > Appearance) keeps the window on its
-    // focused tones (docs/DESIGN.md §3.1.1's off switch); native dim is off
-    // then too, so the body — picture included — must not grey itself.
-    readonly property bool act: win.active
-        || (typeof DeskStyle !== "undefined" && !DeskStyle.dimUnfocused)
+    // §3.1.1's app-side fade is RETIRED — his board call, 2026-08-09: with
+    // "dim unfocused" on, the native decoration:dim_inactive scrim is the ONE
+    // dimming mechanism, and an app that also greys its own foreground reads
+    // darker than a plain window. The window always renders its focused tones;
+    // the compositor dims the whole surface. Re-arm by restoring `win.active`
+    // here — the plumbing is all still wired.
+    readonly property bool act: true
     readonly property color fgAccent: act ? Theme.accent  : Theme.inactive
     readonly property color fgText:   act ? Theme.text    : Theme.inactive
     readonly property color fgDim:    act ? Theme.textDim : Theme.inactive
 
-    // ...and the PICTURE fades with them. [his, 2026-08-07] — the same answer he
-    // gave for player's cover art: "dim it with everything else — the window
-    // reads as one unfocused surface". An image has no `Theme.inactive` version,
-    // so it composites toward the bgAlt it is drawn on at plain item opacity —
-    // no shader, no extra scene-graph item. A grey SCRIM would be wrong: it is
-    // lighter than a dark photograph and would BRIGHTEN half of them. 0.55 is
-    // player's measured number, reused rather than re-picked, because both
-    // surfaces sit on the same near-black fill.
+    // ...and the PICTURE rode the same fade — [his, 2026-08-07], the same
+    // answer he gave for player's cover art: "dim it with everything else — the
+    // window reads as one unfocused surface". That call survives; the mechanism
+    // died with the retirement above: `fgArt` is pinned to 1.0 and the native
+    // scrim dims the whole surface, picture included, like any other window.
     readonly property real fgArt: act ? 1.0 : 0.55
 
     Motion { id: motion }

@@ -21,13 +21,13 @@ Window {
     // docs/DESIGN.md §3.1.1). Every foreground in this window goes through one
     // of these three; the document panes derive their own from `winActive` for
     // the same reason.
-    // "dim unfocused" off (Settings > Appearance) keeps the window on its
-    // focused tones regardless (docs/DESIGN.md §3.1.1's off switch). With it
-    // off, native decoration:dim_inactive is off too, so nothing greys the
-    // body; the app must not grey it either. Falls back to plain focus when
-    // DeskStyle is absent (a harness without it).
-    readonly property bool renderActive: win.active
-        || (typeof DeskStyle !== "undefined" && !DeskStyle.dimUnfocused)
+    // §3.1.1's app-side fade is RETIRED — his board call, 2026-08-09: with
+    // "dim unfocused" on, the native decoration:dim_inactive scrim is the ONE
+    // dimming mechanism, and an app that also greys its own foreground reads
+    // darker than a plain window. The window always renders its focused tones;
+    // the compositor dims the whole surface. Re-arm by restoring `win.active`
+    // here — the plumbing is all still wired.
+    readonly property bool renderActive: true
     readonly property color fgAccent: renderActive ? Theme.accent  : Theme.inactive
     readonly property color fgText:   renderActive ? Theme.text    : Theme.inactive
     readonly property color fgDim:    renderActive ? Theme.textDim : Theme.inactive
