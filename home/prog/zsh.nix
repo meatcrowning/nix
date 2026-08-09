@@ -42,6 +42,11 @@
         # the ones that are clean AND fully landed on origin/main; see the
         # script header. `wtprune --dry-run` to look first.
         wtprune = "/home/lam/nix/tools/prune-worktrees.sh";
+        # Read-only preview of what `nix flake update` would bring (inputs
+        # summary, then a closure diff of the current toplevel vs one built
+        # from updated inputs). Never touches flake.lock — it works on a
+        # throwaway copy; see tools/nix-upgradable.sh.
+        upgradable = "/home/lam/nix/tools/nix-upgradable.sh";
       };
     initContent = ''
       # Set your default prompt
