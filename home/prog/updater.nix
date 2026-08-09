@@ -52,10 +52,10 @@ in
 {
   home.packages = [ updater ];
 
-  # App icon: a redrawn refresh glyph in currentColor SVG, installed into the
-  # hicolor icon theme so both the desktop entry's Icon= and the titlebar
-  # program-icon slot find it. Declared a SEAL so the panel paints its
-  # currentColor strokes in the focus colour (app-icons/seals.nix).
+  # App icon: the seal of Zagan (the transmuter — old into new) in currentColor
+  # SVG, installed into the hicolor icon theme so both the desktop entry's Icon=
+  # and the titlebar program-icon slot find it. Declared a SEAL so the panel
+  # paints its currentColor strokes in the focus colour (app-icons/seals.nix).
   home.file.".local/share/icons/hicolor/scalable/apps/updater.svg".source = ./app-icons/updater.svg;
   my.appSeals = [ "updater" ];
 

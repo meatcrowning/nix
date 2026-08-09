@@ -110,8 +110,9 @@ is host-specific by construction and the rest are his own live tools.
 - **No `MimeType=`** — like painter and goetia, it has no honest file to open
   (it is a GUI over the flake), so it declares no association and is absent from
   `mime-defaults.nix` (`../AGENTS.md`).
-- The icon is `home/prog/app-icons/updater.svg`, declared in `my.appSeals` so
-  the panel paints its currentColor strokes in the focus colour.
+- The icon is `home/prog/app-icons/updater.svg` — the seal of Zagan (the
+  Ars Goetia's transmuter, old into new), declared in `my.appSeals` so the
+  panel paints its currentColor strokes in the focus colour.
 
 ## Gotchas (paid for once already)
 
