@@ -203,7 +203,16 @@ in
   # Botis 4x6 ships Regular-only too (a single outline face), so it gets the
   # same guard: pin any request for it to upright regular and kill synthetic
   # emboldening, so the pixel squares are never faux-bolded/obliqued into a
-  # smear. Same rasterisation pins as the VGA face above, same reason.
+  # smear. Same antialias/rgba pins as the VGA face above — but UNHINTED,
+  # unlike it. Botis's glyphs are disconnected per-pixel square contours, and
+  # the autohinter snaps each square's horizontal edges independently: at any
+  # size off the exact 2x2 grid (15px), adjacent rows round apart and every
+  # glyph is sliced by blank horizontal lines (measured 2026-08-08: 'H' at
+  # 11-20px carries 2-4 full white rows under autohint+hintfull; unhinted is
+  # contiguous at every size, and at 15px the two are pixel-identical). The
+  # VGA face keeps hintfull because kitty's 8x15 cell needs the grid-fitted
+  # 8px advance; nothing pins Botis to a size, so it must survive arbitrary
+  # ones instead.
   xdg.configFile."fontconfig/conf.d/50-botis-4x6-regular.conf".text = ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
@@ -218,9 +227,9 @@ in
         <test name="family"><string>Botis 4x6</string></test>
         <edit name="embolden"  mode="assign"><bool>false</bool></edit>
         <edit name="antialias" mode="assign"><bool>false</bool></edit>
-        <edit name="autohint"  mode="assign"><bool>true</bool></edit>
-        <edit name="hinting"   mode="assign"><bool>true</bool></edit>
-        <edit name="hintstyle" mode="assign"><const>hintfull</const></edit>
+        <edit name="autohint"  mode="assign"><bool>false</bool></edit>
+        <edit name="hinting"   mode="assign"><bool>false</bool></edit>
+        <edit name="hintstyle" mode="assign"><const>hintnone</const></edit>
         <edit name="rgba"      mode="assign"><const>none</const></edit>
       </match>
     </fontconfig>
