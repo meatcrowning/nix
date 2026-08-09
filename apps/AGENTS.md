@@ -1,10 +1,10 @@
 # `apps/` — the vendored desktop apps
 
-Nine standalone Qt/QML apps that ship with this config, plus the shared Python
+Eleven standalone Qt/QML apps that ship with this config, plus the shared Python
 helpers they all import. Each has its own `AGENTS.md` with the detail:
 
 **Read `~/nix/docs/DESIGN.md` before you draw anything in here.** These apps are not
-nine programs that happen to share a repo — they are one desktop, alongside the
+eleven programs that happen to share a repo — they are one desktop, alongside the
 panel and the compositor plugin, and the user's standing requirement is that a
 new app or a new feature *looks like the rest without him having to say so*.
 Type, palette, spacing, corners, motion timing, titlebar button glyphs, menus,
@@ -24,6 +24,7 @@ each other. This guide owns the *mechanics*; that one owns the *look*.
 | [`board/`](board/AGENTS.md) | **goetia** — decision board over `docs/board.<hostname>.md` | `home/prog/board.nix` |
 | [`editor/`](editor/AGENTS.md) | text editor with Kate's core editing | `home/prog/editor.nix` |
 | [`slsk/`](slsk/AGENTS.md) | Soulseek search + downloads over the local slskd daemon | `home/prog/slsk.nix` |
+| [`updater/`](updater/AGENTS.md) | GUI for this flake's package (input) updates | `home/prog/updater.nix` |
 | `pylib/` | shared helpers — see below | (imported, not packaged) |
 | `qmlcommon/` | shared QML components — see below | (imported, not packaged) |
 
@@ -45,10 +46,10 @@ from `mime-defaults.nix`: `text/markdown` already belongs to reader and
 double-clicking does without him asking. One line in that file (or one
 `xdg-mime default`) is the whole change if he wants it.
 
-**painter and goetia are the deliberate none.** painter has no open-a-file path
-at all and goetia is a GUI over one fixed file, so neither declares a
-`MimeType=` and neither appears in `mime-defaults.nix`. An app with no honest
-file type gets no association.
+**painter, goetia and updater are the deliberate none.** painter has no
+open-a-file path at all, goetia is a GUI over one fixed file, and updater is a
+GUI over the flake — so none declares a `MimeType=` and none appears in
+`mime-defaults.nix`. An app with no honest file type gets no association.
 
 **player covers ALL of its `AUDIO_EXTS`** since 2026-07-29 — every
 shared-mime-info type that globs one of its fourteen extensions, aliases and
@@ -84,7 +85,7 @@ travels with the repo so a `git pull` carries the apps to every machine.
 (This is why they sat at the repo *root* historically; the constraint was only
 ever "outside `home/`/`sys/`", so `apps/` satisfies it just as well.)
 
-## The live-source pattern — all nine work this way
+## The live-source pattern — all eleven work this way
 
 `home/prog/<app>.nix` builds a wrapper that runs the **live** source at the
 absolute path `/home/lam/nix/apps/<app>/main.py` — valid on both `top` and
