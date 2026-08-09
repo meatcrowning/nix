@@ -39,6 +39,94 @@ static CHyprColor configColor(Config::INTEGER color) {
     return CHyprColor{static_cast<uint64_t>(color)};
 }
 
+// ---- titlebar side ---------------------------------------------------------
+// The whole layout below is written in BAR-LOCAL coordinates: x = across the
+// bar (0..totalBarW, 0 at the window-adjacent edge), y = along the bar
+// (0..barLen, where barLen = window height for left/right, window width for
+// top/bottom). The four side-aware helpers at the bottom of this block are
+// the ONLY places that know which global axis is which; everything else draws
+// in bar-local and works for all four edges unchanged.
+enum class eBarSide { RIGHT, LEFT, TOP, BOTTOM };
+
+// totalBarW() is defined below with the other interior metrics; the side-aware
+// helpers above it need it, so declare it here.
+static int totalBarW();
+
+static eBarSide barSide() {
+    const std::string S = Cfg::barSideRaw();
+    if (S == "left")
+        return eBarSide::LEFT;
+    if (S == "top")
+        return eBarSide::TOP;
+    if (S == "bottom")
+        return eBarSide::BOTTOM;
+    return eBarSide::RIGHT;
+}
+
+// A left/right bar runs along the window's height; a top/bottom bar along its
+// width. This is the one predicate everything else derives from.
+static bool barVertical() {
+    const eBarSide S = barSide();
+    return S == eBarSide::LEFT || S == eBarSide::RIGHT;
+}
+
+// The bar's own global box for a window box. RIGHT/LEFT: a vertical strip
+// totalBarW wide on the window's right/left edge. TOP/BOTTOM: a horizontal
+// strip totalBarW tall on the window's top/bottom edge.
+static CBox barBoxFor(const CBox& winBox) {
+    switch (barSide()) {
+        case eBarSide::RIGHT: return {winBox.x + winBox.w, winBox.y, (double)totalBarW(), winBox.h};
+        case eBarSide::LEFT:  return {winBox.x - totalBarW(), winBox.y, (double)totalBarW(), winBox.h};
+        case eBarSide::TOP:   return {winBox.x, winBox.y - totalBarW(), winBox.w, (double)totalBarW()};
+        case eBarSide::BOTTOM:return {winBox.x, winBox.y + winBox.h, winBox.w, (double)totalBarW()};
+    }
+    return {};
+}
+
+// Bar-local logical (x across, y along) -> global logical, for a window box.
+static Vector2D barLocalToGlobal(const CBox& winBox, double x, double y) {
+    switch (barSide()) {
+        case eBarSide::RIGHT: return {winBox.x + winBox.w + x, winBox.y + y};
+        case eBarSide::LEFT:  return {winBox.x - x, winBox.y + y};
+        case eBarSide::TOP:   return {winBox.x + y, winBox.y - x};
+        case eBarSide::BOTTOM:return {winBox.x + y, winBox.y + winBox.h + x};
+    }
+    return {};
+}
+
+// Global logical -> bar-local logical (the inverse of barLocalToGlobal).
+static Vector2D globalToBarLocal(const CBox& winBox, const Vector2D& g) {
+    switch (barSide()) {
+        case eBarSide::RIGHT: return {g.x - winBox.x - winBox.w, g.y - winBox.y};
+        case eBarSide::LEFT:  return {winBox.x - g.x, g.y - winBox.y};
+        case eBarSide::TOP:   return {winBox.y - g.y, g.x - winBox.x};
+        case eBarSide::BOTTOM:return {g.y - winBox.y - winBox.h, g.x - winBox.x};
+    }
+    return {};
+}
+
+// Bar-local logical box -> monitor-device box, given the bar's own device box.
+// This is renderBar's localBox transform: for a vertical bar x stays the
+// device x axis and y the device y axis (mirrored for LEFT, so the OUTER
+// column — system cells — sits on the far side); for a horizontal bar the
+// axes swap (x across the bar becomes device y) so the whole interior layout
+// rotates with the bar.
+static CBox barLocalToDevice(const CBox& barBox, double x, double y, double w, double h, double S) {
+    switch (barSide()) {
+        case eBarSide::RIGHT: return CBox{barBox.x + x * S, barBox.y + y * S, w * S, h * S}.round();
+        case eBarSide::LEFT:  return CBox{barBox.x + (totalBarW() - x - w) * S, barBox.y + y * S, w * S, h * S}.round();
+        case eBarSide::TOP:   return CBox{barBox.x + y * S, barBox.y + (totalBarW() - x - w) * S, h * S, w * S}.round();
+        case eBarSide::BOTTOM:return CBox{barBox.x + y * S, barBox.y + x * S, h * S, w * S}.round();
+    }
+    return {};
+}
+
+// The bar's along-bar extent (logical) for a bar box: height for left/right,
+// width for top/bottom.
+static double barLenOf(const CBox& barBox) {
+    return barVertical() ? barBox.h : barBox.w;
+}
+
 // Fixed interior metrics (logical px). The bar is DOUBLE-WIDE for every
 // window: two columns of bar_width each. The INNER column (adjacent to the
 // window content) holds app-registered buttons (vtbIpc) — empty for apps that
@@ -375,17 +463,30 @@ void CVtbDeco::cancelPendingDoLater() {
 }
 
 SDecorationPositioningInfo CVtbDeco::getPositioningInfo() {
-    const auto                 ENABLED = Cfg::enabled();
+    const auto ENABLED = Cfg::enabled();
 
     SDecorationPositioningInfo info;
-    info.policy   = DECORATION_POSITION_STICKY;
-    info.edges    = Cfg::barOnLeft() ? DECORATION_EDGE_LEFT : DECORATION_EDGE_RIGHT;
+    info.policy = DECORATION_POSITION_STICKY;
+    switch (barSide()) {
+        case eBarSide::RIGHT: info.edges = DECORATION_EDGE_RIGHT; break;
+        case eBarSide::LEFT:  info.edges = DECORATION_EDGE_LEFT; break;
+        case eBarSide::TOP:   info.edges = DECORATION_EDGE_TOP; break;
+        case eBarSide::BOTTOM:info.edges = DECORATION_EDGE_BOTTOM; break;
+    }
     // Above the border decoration's priority, so the window border wraps
     // window + bar as a single frame (same trick as hyprbars'
     // bar_precedence_over_border).
     info.priority       = 10005;
     info.reserved       = true;
-    info.desiredExtents = {{0.0, 0.0}, {ENABLED ? (double)totalBarW() : 0.0, 0.0}};
+    // Reserve the strip on the bar's own side: width for left/right, height
+    // for top/bottom.
+    const double BW = ENABLED ? (double)totalBarW() : 0.0;
+    switch (barSide()) {
+        case eBarSide::RIGHT: info.desiredExtents = {{0.0, 0.0}, {BW, 0.0}}; break;
+        case eBarSide::LEFT:  info.desiredExtents = {{BW, 0.0}, {0.0, 0.0}}; break;
+        case eBarSide::TOP:   info.desiredExtents = {{0.0, BW}, {0.0, 0.0}}; break;
+        case eBarSide::BOTTOM:info.desiredExtents = {{0.0, 0.0}, {0.0, BW}}; break;
+    }
     return info;
 }
 
@@ -402,9 +503,12 @@ CBox CVtbDeco::assignedBoxGlobal() {
         return {};
 
     const auto PWINDOW = m_pWindow.lock();
-    const auto EDGE    = Cfg::barOnLeft() ? DECORATION_EDGE_LEFT : DECORATION_EDGE_RIGHT;
     CBox       box     = m_bAssignedBox;
-    box.translate(g_pDecorationPositioner->getEdgeDefinedPoint(EDGE, PWINDOW));
+    box.translate(g_pDecorationPositioner->getEdgeDefinedPoint(barSide() == eBarSide::LEFT   ? DECORATION_EDGE_LEFT
+                                                               : barSide() == eBarSide::TOP    ? DECORATION_EDGE_TOP
+                                                               : barSide() == eBarSide::BOTTOM ? DECORATION_EDGE_BOTTOM
+                                                                                              : DECORATION_EDGE_RIGHT,
+                                                               PWINDOW));
 
     // Fallback when the positioner hasn't handed us a box yet: right after a
     // roll-out lands the window un-hides and the deco positioner needs a frame
@@ -412,12 +516,11 @@ CBox CVtbDeco::assignedBoxGlobal() {
     // renderPass early-returns (barBox.w < 1), which blinked the titlebar out
     // for a frame the instant the animation finished, then back once the
     // positioner caught up. Derive the box straight off the window geometry
-    // (content's right edge, totalBarW wide, full height — mirrors frameBox()).
+    // (mirrors barBoxFor()).
     if (box.w < 1 || box.h < 1) {
-        const auto   POS = Hl::posValue(PWINDOW);
-        const auto   SZ  = Hl::sizeValue(PWINDOW);
-        const double BX  = Cfg::barOnLeft() ? (POS.x - totalBarW()) : (POS.x + SZ.x);
-        box              = {BX, POS.y, (double)totalBarW(), SZ.y};
+        const auto POS = Hl::posValue(PWINDOW);
+        const auto SZ  = Hl::sizeValue(PWINDOW);
+        box            = barBoxFor(CBox{POS, SZ});
     }
 
     const auto PWORKSPACE      = PWINDOW->m_workspace;
@@ -709,11 +812,68 @@ SP<Render::ITexture> CVtbDeco::renderRotatedTex(const std::string& text, int run
 }
 
 void CVtbDeco::renderTitleTex(int runLenPx, float scale, const CHyprColor& color) {
-    if (Cfg::titleRotated()) {
+    if (!barVertical()) {
+        // A horizontal (top/bottom) bar's title reads along the bar, i.e. as
+        // plain horizontal text — the stacked column and the 90°-rotated line
+        // are vertical-bar looks and do not transpose (this is the "title
+        // texture" half of the top/bottom rewrite).
+        m_pTitleTex    = renderHorizTex(m_szLastTitle, runLenPx, scale, color);
+        m_iTitleTopInk = 0;
+    } else if (Cfg::titleRotated()) {
         m_pTitleTex    = renderRotatedTex(m_szLastTitle, runLenPx, scale, color);
         m_iTitleTopInk = 0; // the §12.2 ink lift is a stacked-column concern
     } else
         m_pTitleTex = renderStackedTex(m_szLastTitle, runLenPx, scale, color, nullptr, nullptr, /*ellipsis=*/true, /*flatColon=*/false, &m_iTitleTopInk);
+}
+
+// One horizontal pango line, ellipsized to the run length — the title texture
+// for a top/bottom bar (the run goes ALONG the bar, which is horizontal).
+// Surface is runLenPx wide × one bar-column tall; the line is centred across
+// the bar's thickness.
+SP<Render::ITexture> CVtbDeco::renderHorizTex(const std::string& text, int runLenPx, float scale, const CHyprColor& COLOR) {
+    const auto FONT = Cfg::font();
+    const int  SIZE = std::round(Cfg::fontSize() * scale);
+    const int  BARW = std::round(colW() * scale);
+
+    if (runLenPx < SIZE || text.empty())
+        return nullptr;
+
+    auto SURF = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, runLenPx, BARW);
+    auto CR   = cairo_create(SURF);
+
+    cairo_font_options_t* fo = cairo_font_options_create();
+    if (!Vtb::Cfg::fontSmooth())
+        cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_NONE);
+
+    PangoLayout* layout = pango_cairo_create_layout(CR);
+    pango_cairo_context_set_font_options(pango_layout_get_context(layout), fo);
+
+    PangoFontDescription* fd = pango_font_description_new();
+    pango_font_description_set_family(fd, FONT.c_str());
+    pango_font_description_set_absolute_size(fd, SIZE * PANGO_SCALE);
+    pango_layout_set_font_description(layout, fd);
+    pango_layout_set_width(layout, runLenPx * PANGO_SCALE);
+    pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
+    pango_layout_set_single_paragraph_mode(layout, true);
+    pango_layout_set_text(layout, text.c_str(), -1);
+
+    // centre the line vertically across the bar's thickness
+    int lh = 0;
+    pango_layout_get_pixel_size(layout, nullptr, &lh);
+    cairo_set_source_rgba(CR, COLOR.r, COLOR.g, COLOR.b, COLOR.a);
+    cairo_move_to(CR, 0, std::max(0.0, (BARW - lh) / 2.0));
+    pango_cairo_show_layout(CR, layout);
+
+    pango_font_description_free(fd);
+    g_object_unref(layout);
+    cairo_font_options_destroy(fo);
+    cairo_surface_flush(SURF);
+
+    auto tex = Hl::textureFromCairo(SURF);
+
+    cairo_destroy(CR);
+    cairo_surface_destroy(SURF);
+    return tex;
 }
 
 SP<Render::ITexture> CVtbDeco::glyphTex(const std::string& glyph, const CHyprColor& color, float scale) {
@@ -1209,7 +1369,7 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     const int RND = std::max(0, (int)std::round(Hl::windowRounding(PWINDOW) * SCALE));
 
     // background. Rounded to match the window clip: the bar sits on the
-    // window's RIGHT edge (or LEFT — Cfg::barOnLeft), so its window-adjacent
+    // window's edge (which one depends on barSide), so its window-adjacent
     // corners must stay flush — the box is extended by RND TOWARD the window
     // and the extension hides under it (this deco renders on
     // DECORATION_LAYER_UNDER), leaving only the outer corners visibly rounded.
@@ -1217,14 +1377,23 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     // all four corners rounded — a lone shaded bar reads as its own little
     // window.
     if (RND > 0 && !m_bRolledUp && m_rollAnim == ROLL_NONE) {
-        const double BGX = Cfg::barOnLeft() ? barBox.x : barBox.x - RND; // extend toward the window
-        Hl::rect(CBox{BGX, barBox.y, barBox.w + RND, barBox.h}.round(), bgColor, {.round = RND});
+        CBox bg = barBox;
+        switch (barSide()) {
+            case eBarSide::RIGHT: bg.x -= RND; bg.w += RND; break; // extend left, toward the window
+            case eBarSide::LEFT:  bg.w += RND; break;              // extend right, toward the window
+            case eBarSide::TOP:   bg.h += RND; break;              // extend down, toward the window (bar sits ABOVE it)
+            case eBarSide::BOTTOM:bg.y -= RND; bg.h += RND; break; // extend up, toward the window (bar sits BELOW it)
+        }
+        Hl::rect(bg.round(), bgColor, {.round = RND});
     } else
         Hl::rect(barBox, bgColor, {.round = RND});
 
-    // local -> monitor-space helper for interior boxes (logical px in)
+    // local -> monitor-space helper for interior boxes (logical px in). The
+    // whole layout below is bar-local (x across the bar, y along it) and this
+    // is the ONLY mapping to the screen — so the same code draws a vertical
+    // right/left bar and a horizontal top/bottom bar.
     auto localBox = [&](double x, double y, double w, double h) {
-        return CBox{barBox.x + x * SCALE, barBox.y + y * SCALE, w * SCALE, h * SCALE}.round();
+        return barLocalToDevice(barBox, x, y, w, h, SCALE);
     };
 
     const int CELL = cellSize();
@@ -1269,8 +1438,11 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
         auto tex = glyphTex(glyph, color, SCALE);
         if (!tex || tex->m_texID == 0)
             return;
-        const auto TSZ  = tex->m_size;
-        CBox       gbox = {barBox.x + (x + CELL / 2.0) * SCALE - TSZ.x / 2.0, barBox.y + (y + CELL / 2.0) * SCALE - TSZ.y / 2.0, TSZ.x, TSZ.y};
+        const auto TSZ = tex->m_size;
+        // centre the glyph in the cell — the cell box comes from localBox so
+        // the centring works identically on a vertical and a horizontal bar.
+        const CBox cellBox = localBox(x, y, CELL, CELL);
+        CBox       gbox    = {cellBox.x + cellBox.w / 2.0 - TSZ.x / 2.0, cellBox.y + cellBox.h / 2.0 - TSZ.y / 2.0, TSZ.x, TSZ.y};
         Hl::texture(tex, gbox.round(), {.a = a});
     };
 
@@ -1354,14 +1526,21 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     }
 
     // ---- title (outer column, under the cells): a column of upright letters,
-    // or one sideways line when title_rotated is on ----
+    // or one sideways line when title_rotated is on. On a top/bottom bar the
+    // run goes ALONG the bar (which is horizontal), so the texture is a
+    // horizontal line there — see renderTitleTex. ----
     // In edit mode the same region becomes the address editor: it shows the
     // live edit buffer, a caret (or an inverted block when the whole field is
-    // selected), instead of the window title.
+    // selected), instead of the window title. The editor is a vertical-bar
+    // feature — on a horizontal bar the title region is display-only (the
+    // editor's stacked geometry does not transpose).
     const int    TITLETOP = titleTopEff();
-    const int    RUNLEN = std::round((DECOBOX.h - TITLETOP - VTB_PAD) * SCALE);
-    const double TITLEX = barBox.x + titleTexX() * SCALE;
-    const double TITLEY = barBox.y + TITLETOP * SCALE;
+    const int    RUNLEN = std::round((barLenOf(DECOBOX) - TITLETOP - VTB_PAD) * SCALE);
+    // The title's device box, from bar-local coords (titleTexX across,
+    // TITLETOP along) so it lands in the OUTER band whatever the edge.
+    const CBox   TITLEBOX = localBox(titleTexX(), TITLETOP, colW(), std::max(0.0, barLenOf(DECOBOX) - TITLETOP - VTB_PAD));
+    const double TITLEX = TITLEBOX.x;
+    const double TITLEY = TITLEBOX.y;
 
     if (m_bEditing) {
         // auto-scroll to keep the caret on-screen whenever it MOVED (typing /
@@ -1491,7 +1670,7 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     // the bar. docs/hyprvtb-titlebar-flash.md.
     SVtbAppReg reg;
     if (appReg(reg)) {
-        const double CONTENTH  = DECOBOX.h;
+        const double CONTENTH  = barLenOf(DECOBOX); // along-bar length (h for left/right, w for top/bottom)
         double       appBottom = VTB_PAD; // bottom of the TOP group (footer stays below it)
 
         walkAppLayout(reg.buttons, CONTENTH, [&](size_t i, double y) {
@@ -1539,7 +1718,9 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
         // readout / viewer's position+name). Normally bottom-anchored, ABOVE any
         // bottom-anchored buttons. When a media scrub bar is shown it instead
         // TOP-anchors just under the top button group so the vertical track has
-        // room below it (bounded run length reserves that track space).
+        // room below it (bounded run length reserves that track space). On a
+        // horizontal bar the stacked column would read sideways, so the footer
+        // is one horizontal line there (same anchor logic, transposed).
         const double BH      = bottomGroupH(reg.buttons);
         const double lowerTop = appBottom + VTB_PAD;              // top of the lower area (logical)
         const double lowerBot = CONTENTH - BH - VTB_PAD;          // bottom (above the bottom group)
@@ -1549,10 +1730,16 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
             m_szLastFooter   = reg.footer;
             m_iLastFooterRun = FRUNLEN;
             m_iFooterTextH   = 0;
-            // flatColon: the footer is where clock-style readouts live
-            // ("3:45/5:12"), and a laid-flat colon both reads as a separator
-            // and gives the scrub track back the cells it was eating.
-            m_pFooterTex     = renderStackedTex(reg.footer, FRUNLEN, SCALE, textColor, &m_iFooterTextH, nullptr, /*ellipsis=*/true, /*flatColon=*/true);
+            if (barVertical()) {
+                // flatColon: the footer is where clock-style readouts live
+                // ("3:45/5:12"), and a laid-flat colon both reads as a separator
+                // and gives the scrub track back the cells it was eating.
+                m_pFooterTex = renderStackedTex(reg.footer, FRUNLEN, SCALE, textColor, &m_iFooterTextH, nullptr, /*ellipsis=*/true, /*flatColon=*/true);
+            } else {
+                m_pFooterTex = renderHorizTex(reg.footer, FRUNLEN, SCALE, textColor);
+                // horizontal line: report its height as the bar-thickness cell
+                m_iFooterTextH = std::round(colW() * SCALE);
+            }
         }
         if (m_pFooterTex && m_pFooterTex->m_texID != 0) {
             // the texture's glyphs start at its top; bottom-anchor using the real
@@ -1561,11 +1748,19 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
             // footerBottom flips the pair: the track takes the top of the lower
             // area and the readout bottom-anchors under it (player), instead of
             // the readout on top and the track below (viewer).
-            const auto   TSZ  = m_pFooterTex->m_size;
-            const bool   FTOP = reg.playbar && !reg.footerBottom;
-            const double fy   = FTOP ? (barBox.y + lowerTop * SCALE)
-                                     : (barBox.y + barBox.h - (VTB_PAD + BH) * SCALE - m_iFooterTextH);
-            CBox         fbox = {barBox.x + footerTexX() * SCALE, fy, TSZ.x, TSZ.y};
+            const auto TSZ  = m_pFooterTex->m_size;
+            const bool FTOP = reg.playbar && !reg.footerBottom;
+            // Anchor offset along the bar (logical): top-anchor at lowerTop,
+            // bottom-anchor at CONTENTH - (PAD+BH) minus the text height.
+            const double along = FTOP ? lowerTop : (CONTENTH - (VTB_PAD + BH) - m_iFooterTextH / SCALE);
+            // The footer sits in the INNER column, colW wide across the bar,
+            // running `along` from the start of the bar. localBox transposes it
+            // for horizontal bars.
+            CBox fbox = localBox(footerTexX(), along, colW(), m_iFooterTextH / SCALE);
+            // localBox gives the full colW-wide slot; the texture is only as
+            // wide/tall as its content, so pin it to the slot's start edge.
+            fbox.w = TSZ.x;
+            fbox.h = TSZ.y;
             Hl::texture(m_pFooterTex, fbox.round(), {.a = a});
         }
 
@@ -1610,7 +1805,7 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
                 Hl::rect(localBox(innerColX(), tgtY - VTB_CELL_GAP / 2.0 - 1, CELL, 2), ac, {});
             }
             // lifted cell at the cursor's Y (clamped into the column)
-            const auto   MOUSELOCAL = Hl::mouse() - assignedBoxGlobal().pos();
+            const auto   MOUSELOCAL = cursorRelativeToBar();
             const double liftY      = std::clamp(MOUSELOCAL.y - CELL / 2.0, (double)VTB_PAD, CONTENTH - VTB_PAD - CELL);
             if (m_iAppPressIdx >= 0 && m_iAppPressIdx < (int)reg.buttons.size()) {
                 drawCellXY(innerColX(), liftY, TINT_FOCUSED ? accentColor : inactiveColor, true, false);
@@ -1716,8 +1911,16 @@ static CRegion vtbWindowFrames(PHLMONITOR pMonitor) {
         if (L.w < 1 || L.h < 1)
             continue;
 
-        const bool DECORATED = w->m_ruleApplicator->decorate().valueOrDefault();
-        frames.add(CBox{L.x, L.y, L.w + (DECORATED && vtbHasBar(w) ? BARW : 0.0), L.h}.round());
+        const bool   DECORATED = w->m_ruleApplicator->decorate().valueOrDefault();
+        const double ADDW      = (DECORATED && vtbHasBar(w)) ? BARW : 0.0;
+        // The frame grows on the bar's own side: width for left/right, height for
+        // top/bottom (and upward for a top bar).
+        switch (barSide()) {
+            case eBarSide::RIGHT: frames.add(CBox{L.x, L.y, L.w + ADDW, L.h}.round()); break;
+            case eBarSide::LEFT:  frames.add(CBox{L.x - ADDW, L.y, L.w + ADDW, L.h}.round()); break;
+            case eBarSide::TOP:   frames.add(CBox{L.x, L.y - ADDW, L.w, L.h + ADDW}.round()); break;
+            case eBarSide::BOTTOM:frames.add(CBox{L.x, L.y, L.w, L.h + ADDW}.round()); break;
+        }
     }
 
     return frames;
@@ -1786,12 +1989,30 @@ bool CVtbDeco::rollShadowBoxDev(PHLMONITOR pMonitor, CBox& out) {
     if (barBox.w < 1 || barBox.h < 1)
         return false;
 
-    const double clientW  = m_rollWinBox.w * SCALE;
-    const double barRight = barBox.x + barBox.w;
-    // left edge of the still-visible content as it tucks right into the bar
-    const double visLeft = barBox.x - clientW * (1.f - slideT);
-
-    out = CBox{visLeft - shadowOff, barBox.y + shadowOff, barRight - visLeft, barBox.h}.round();
+    const double clientW = m_rollWinBox.w * SCALE;
+    const double emerged = clientW * (1.f - slideT);
+    // The composite is content + bar; the shadow spans both. The span runs
+    // ACROSS the bar's axis (left/right of a vertical bar, above/below a
+    // horizontal one), mirrored for LEFT/TOP so the content side stays on the
+    // window side.
+    const eBarSide SIDE = barSide();
+    double         spanA, spanB;
+    switch (SIDE) {
+        case eBarSide::RIGHT: spanA = barBox.x - emerged; spanB = barBox.x + barBox.w; break;
+        case eBarSide::LEFT:  spanA = barBox.x; spanB = barBox.x + barBox.w + emerged; break;
+        case eBarSide::TOP:   spanA = barBox.y; spanB = barBox.y + barBox.h + emerged; break;
+        case eBarSide::BOTTOM:spanA = barBox.y - emerged; spanB = barBox.y + barBox.h; break;
+    }
+    // The shadow offset is always down+left (DESIGN §4), so which edge of the
+    // span box carries it depends on orientation.
+    CBox shadowBox;
+    switch (SIDE) {
+        case eBarSide::RIGHT: shadowBox = {spanA - shadowOff, barBox.y + shadowOff, spanB - spanA, barBox.h}; break;
+        case eBarSide::LEFT:  shadowBox = {spanA - shadowOff, barBox.y + shadowOff, spanB - spanA, barBox.h}; break;
+        case eBarSide::TOP:   shadowBox = {barBox.x - shadowOff, spanA + shadowOff, barBox.w, spanB - spanA}; break;
+        case eBarSide::BOTTOM:shadowBox = {barBox.x - shadowOff, spanA + shadowOff, barBox.w, spanB - spanA}; break;
+    }
+    out = shadowBox.round();
     return out.w >= 1 && out.h >= 1; // never hand renderRect a degenerate box
 }
 
@@ -1825,17 +2046,27 @@ bool CVtbDeco::rollBarBoxDev(PHLMONITOR pMonitor, CBox& out) {
     return out.w >= 1 && out.h >= 1;
 }
 
-// The window snapshot sliding right into the bar (or back out), clipped at the
-// bar's left edge so it disappears behind the bar like a closing drawer. Drawn
-// after the bar; the clip keeps it from painting over the bar column.
+// The window snapshot sliding into the bar (or back out), clipped at the bar's
+// window-adjacent edge so it disappears behind the bar like a closing drawer.
+// Drawn after the bar; the clip keeps it from painting over the bar column.
+// The strip and its slide direction are bar-local: a vertical bar's content
+// slides in along x, a horizontal (top/bottom) bar's along y.
 void CVtbDeco::drawRollSnapshot(const CBox& barBoxDev, float scale, float slideT, float a) {
     if (!m_rollSnapTex || m_rollSnapTex->m_texID == 0 || slideT >= 0.999f)
         return;
-    const double clientW    = m_rollWinBox.w * scale;
-    const double contentLft = barBoxDev.x - clientW * (1.f - slideT);
-    if (clientW < 1.0)
+    // The client extent along the slide axis: width for left/right, height for top/bottom.
+    const double clientC = barVertical() ? m_rollWinBox.w : m_rollWinBox.h;
+    const double emerged = clientC * scale * (1.f - slideT);
+    if (emerged < 1.0)
         return;
-    drawRollSnapshotClipped(barBoxDev, scale, slideT, a, CBox{contentLft, barBoxDev.y, barBoxDev.x - contentLft, barBoxDev.h}.round());
+    CBox strip;
+    switch (barSide()) {
+        case eBarSide::RIGHT: strip = {barBoxDev.x - emerged, barBoxDev.y, emerged, barBoxDev.h}; break;
+        case eBarSide::LEFT:  strip = {barBoxDev.x + barBoxDev.w, barBoxDev.y, emerged, barBoxDev.h}; break;
+        case eBarSide::TOP:   strip = {barBoxDev.x, barBoxDev.y + barBoxDev.h, barBoxDev.w, emerged}; break;
+        case eBarSide::BOTTOM:strip = {barBoxDev.x, barBoxDev.y - emerged, barBoxDev.w, emerged}; break;
+    }
+    drawRollSnapshotClipped(barBoxDev, scale, slideT, a, strip.round());
 }
 
 // The radius the sliding content carries: the window's own rounding, clamped to
@@ -1845,23 +2076,28 @@ void CVtbDeco::drawRollSnapshot(const CBox& barBoxDev, float scale, float slideT
 // Hyprland does to a window narrower than its own rounding.
 int CVtbDeco::rollSnapRounding(const CBox& barBoxDev, float scale, float slideT) {
     const int    WANT    = std::max(0, (int)std::round(Hl::windowRounding(m_pWindow.lock()) * scale));
-    const double clientW = m_rollWinBox.w * scale;
-    const double drawW   = clientW * (1.f - slideT) + WANT;
-    return std::min(WANT, (int)std::floor(std::min(drawW, barBoxDev.h) / 2.0));
+    // Client extent along the slide axis; the limit is the bar's extent across
+    // it (the strip's short dimension) — h for a vertical bar, w for a horizontal.
+    const double clientC = barVertical() ? m_rollWinBox.w : m_rollWinBox.h;
+    const double drawC   = clientC * scale * (1.f - slideT) + WANT;
+    const double limitC  = barVertical() ? barBoxDev.h : barBoxDev.w;
+    return std::min(WANT, (int)std::floor(std::min(drawC, limitC) / 2.0));
 }
 
 void CVtbDeco::drawRollSnapshotClipped(const CBox& barBoxDev, float scale, float slideT, float a, const CRegion& clip) {
     if (!m_rollSnapTex || m_rollSnapTex->m_texID == 0 || slideT >= 0.999f)
         return;
-    const double clientW = m_rollWinBox.w * scale;
-    if (clientW < 1.0)
+    // Client extent along the slide axis: width for left/right, height for top/bottom.
+    const double clientC = barVertical() ? m_rollWinBox.w : m_rollWinBox.h;
+    const double clientCDev = clientC * scale;
+    if (clientCDev < 1.0)
         return;
 
     // The snapshot is a MONITOR-sized texture with the window at m_rollSnapOrigin,
     // so we can't just stretch the whole thing into the content box (that shrinks
     // the entire screen into the bar). Draw only the window's sub-rect — mapped by
     // custom UV, so the visible part still lands 1:1 — into the content box, and
-    // clip to the still-visible strip (its sliding left edge to the bar's left
+    // clip to the still-visible strip (its sliding edge to the bar's window-adjacent
     // edge) so no neighbouring desktop leaks in and the drawer-into-bar occlusion
     // is preserved.
     //
@@ -1873,39 +2109,85 @@ void CVtbDeco::drawRollSnapshotClipped(const CBox& barBoxDev, float scale, float
     // them, so the square corners carried a frozen scrap of wallpaper across the
     // screen. Rounding needs a box that IS the content.
     //
-    // Only the LEADING (left) corners may round: the trailing edge abuts the bar,
-    // and the two are one frame. Same trick as the bar background — overshoot the
-    // seam by the radius so the trailing rounding falls outside the clip — and the
-    // UV rect is widened to match so the visible pixels stay 1:1 rather than
-    // stretching by RND.
-    const int    RND         = rollSnapRounding(barBoxDev, scale, slideT);
-    const double contentLeft = barBoxDev.x - clientW * (1.f - slideT);
-    const double drawW       = barBoxDev.x - contentLeft + RND; // to the seam, plus the overshoot
-    if (drawW < 1.0)
+    // Only the LEADING (away-from-bar) corners may round: the trailing edge abuts
+    // the bar, and the two are one frame. Same trick as the bar background —
+    // overshoot the seam by the radius so the trailing rounding falls outside the
+    // clip — and the UV rect is widened to match so the visible pixels stay 1:1
+    // rather than stretching by RND. The seam is the bar's window-adjacent edge:
+    // LEFT for a right bar, RIGHT for a left, BOTTOM for a top, TOP for a bottom.
+    const int      RND      = rollSnapRounding(barBoxDev, scale, slideT);
+    const double   emerged  = clientCDev * (1.f - slideT);
+    const eBarSide SIDE     = barSide();
+    // Seam position and the box's start along the slide axis (the far edge, or
+    // under the bar for the overshoot side). VERT: slide axis is x; HORIZ: y.
+    double seam = 0.0, boxStart = 0.0, drawExtent = 0.0;
+    switch (SIDE) {
+        case eBarSide::RIGHT: seam = barBoxDev.x; boxStart = seam - emerged; drawExtent = emerged + RND; break;
+        case eBarSide::LEFT:  seam = barBoxDev.x + barBoxDev.w; boxStart = seam - RND; drawExtent = emerged + RND; break;
+        case eBarSide::TOP:   seam = barBoxDev.y + barBoxDev.h; boxStart = seam - RND; drawExtent = emerged + RND; break;
+        case eBarSide::BOTTOM:seam = barBoxDev.y; boxStart = seam - emerged; drawExtent = emerged + RND; break;
+    }
+    if (drawExtent < 1.0)
         return;
 
     const Vector2D TS = m_rollSnapTex->m_size;
     if (TS.x < 1 || TS.y < 1)
         return;
 
-    // Source rect in the snapshot, device px: the window's top-left plus however
-    // much of it is currently out. Clamped into the texture (the overshoot can run
-    // past the monitor's right edge on a window flush to it); WRAP_CLAMP_TO_EDGE
-    // makes the last column repeat there, and it is inside the discarded overshoot
-    // in any case.
-    const double u0 = m_rollSnapOrigin.x / TS.x;
-    const double v0 = m_rollSnapOrigin.y / TS.y;
-    const double u1 = std::min(1.0, (m_rollSnapOrigin.x + drawW) / TS.x);
-    const double v1 = std::min(1.0, (m_rollSnapOrigin.y + barBoxDev.h) / TS.y);
+    // Source rect in the snapshot, device px. The visible sub-rect is the window's
+    // FAR-from-bar portion — its left for a right bar, right for a left, bottom for
+    // a top, top for a bottom — because the near portion tucks under the bar first.
+    // WRAP_CLAMP_TO_EDGE repeats the last row/column where the overshoot runs past
+    // the monitor edge.
+    double u0, u1, v0, v1;
+    switch (SIDE) {
+        case eBarSide::RIGHT:
+            u0 = m_rollSnapOrigin.x / TS.x;
+            u1 = std::min(1.0, (m_rollSnapOrigin.x + drawExtent) / TS.x);
+            v0 = m_rollSnapOrigin.y / TS.y;
+            v1 = std::min(1.0, (m_rollSnapOrigin.y + barBoxDev.h) / TS.y);
+            break;
+        case eBarSide::LEFT:
+            u1 = std::min(1.0, (m_rollSnapOrigin.x + clientCDev) / TS.x);
+            u0 = u1 - drawExtent / TS.x;
+            v0 = m_rollSnapOrigin.y / TS.y;
+            v1 = std::min(1.0, (m_rollSnapOrigin.y + barBoxDev.h) / TS.y);
+            break;
+        case eBarSide::TOP:
+            u0 = m_rollSnapOrigin.x / TS.x;
+            u1 = std::min(1.0, (m_rollSnapOrigin.x + barBoxDev.w) / TS.x);
+            v1 = std::min(1.0, (m_rollSnapOrigin.y + clientCDev) / TS.y);
+            v0 = v1 - drawExtent / TS.y;
+            break;
+        case eBarSide::BOTTOM:
+            u0 = m_rollSnapOrigin.x / TS.x;
+            u1 = std::min(1.0, (m_rollSnapOrigin.x + barBoxDev.w) / TS.x);
+            v0 = m_rollSnapOrigin.y / TS.y;
+            v1 = std::min(1.0, (m_rollSnapOrigin.y + drawExtent) / TS.y);
+            break;
+    }
 
     // The strip is the hard limit whatever the caller asked for: the box overshoots
     // the seam by RND (so the trailing rounding falls outside), and only this clip
     // keeps that overshoot — and the tucked part of the window — off the bar column.
-    CRegion visible = CRegion{CBox{contentLeft, barBoxDev.y, barBoxDev.x - contentLeft, barBoxDev.h}.round()}.intersect(clip);
+    CBox strip;
+    switch (SIDE) {
+        case eBarSide::RIGHT: strip = {boxStart, barBoxDev.y, emerged, barBoxDev.h}; break;
+        case eBarSide::LEFT:  strip = {seam, barBoxDev.y, emerged, barBoxDev.h}; break;
+        case eBarSide::TOP:   strip = {barBoxDev.x, seam, barBoxDev.w, emerged}; break;
+        case eBarSide::BOTTOM:strip = {barBoxDev.x, boxStart, barBoxDev.w, emerged}; break;
+    }
+    CRegion visible = CRegion{strip.round()}.intersect(clip);
     if (visible.empty())
         return;
 
-    CBox                                box = CBox{contentLeft, barBoxDev.y, drawW, barBoxDev.h}.round();
+    CBox box;
+    switch (SIDE) {
+        case eBarSide::RIGHT: box = {boxStart, barBoxDev.y, drawExtent, barBoxDev.h}; break;
+        case eBarSide::LEFT:  box = {boxStart, barBoxDev.y, drawExtent, barBoxDev.h}; break;
+        case eBarSide::TOP:   box = {barBoxDev.x, boxStart, barBoxDev.w, drawExtent}; break;
+        case eBarSide::BOTTOM:box = {barBoxDev.x, boxStart, barBoxDev.w, drawExtent}; break;
+    }
     CHyprOpenGLImpl::STextureRenderData data;
     data.a                           = a;
     data.round                       = RND;
@@ -1913,7 +2195,7 @@ void CVtbDeco::drawRollSnapshotClipped(const CBox& barBoxDev, float scale, float
     data.allowCustomUV               = true;
     data.primarySurfaceUVTopLeft     = {u0, v0};
     data.primarySurfaceUVBottomRight = {u1, v1};
-    Hl::texture(m_rollSnapTex, box, data);
+    Hl::texture(m_rollSnapTex, box.round(), data);
 }
 
 // The emerging window's border during a roll animation, framing the WHOLE
@@ -1931,14 +2213,25 @@ void CVtbDeco::drawRollBorder(const CBox& barBoxDev, float scale, float slideT, 
     if (bs < 1.0)
         return;
 
-    const double clientW = m_rollWinBox.w * scale;
-    if (clientW < 1.0)
+    const double clientC = barVertical() ? m_rollWinBox.w : m_rollWinBox.h;
+    const double clientCDev = clientC * scale;
+    if (clientCDev < 1.0)
         return;
-    const double cl = barBoxDev.x - clientW * (1.f - slideT); // frame left (content), sliding
-    const double cr = barBoxDev.x + barBoxDev.w;              // frame right (titlebar's right edge)
-    const double ct = barBoxDev.y;                            // frame top
-    const double ch = barBoxDev.h;                            // frame height (== window height)
-    const double fw = cr - cl;                                // visible frame width (content + bar)
+    // Frame = content + bar. For a vertical bar the content slides in on one side
+    // (LEFT for a right bar, RIGHT for a left) and the bar's square trailing edge
+    // is on the other; a horizontal (top/bottom) bar transposes both axes, so the
+    // content (leading, rounded) edge is the bottom for a top bar and the top for
+    // a bottom one.
+    const eBarSide SIDE    = barSide();
+    const double   emerged = clientCDev * (1.f - slideT);
+    double         cl, cr, ct, ch;
+    switch (SIDE) {
+        case eBarSide::RIGHT: cl = barBoxDev.x - emerged; cr = barBoxDev.x + barBoxDev.w; ct = barBoxDev.y; ch = barBoxDev.h; break;
+        case eBarSide::LEFT:  cl = barBoxDev.x; cr = barBoxDev.x + barBoxDev.w + emerged; ct = barBoxDev.y; ch = barBoxDev.h; break;
+        case eBarSide::TOP:   cl = barBoxDev.x; cr = barBoxDev.x + barBoxDev.w; ct = barBoxDev.y; ch = barBoxDev.h + emerged; break;
+        case eBarSide::BOTTOM:cl = barBoxDev.x; cr = barBoxDev.x + barBoxDev.w; ct = barBoxDev.y - emerged; ch = barBoxDev.h + emerged; break;
+    }
+    const double fw = cr - cl; // visible frame width (content + bar)
 
     const float  revealT = 1.f - slideT; // 0 tucked .. 1 out
     CHyprColor   bc      = {unfocused.r + (focused.r - unfocused.r) * revealT, unfocused.g + (focused.g - unfocused.g) * revealT,
@@ -1958,8 +2251,27 @@ void CVtbDeco::drawRollBorder(const CBox& barBoxDev, float scale, float slideT, 
     if (RND > 0) {
         const double CS    = RND + bs; // corner square: the outer arc's bounding box
         const int    OUTRND = std::min((int)std::round(CS), (int)std::floor(std::min(fw + 2 * bs, ch + 2 * bs) / 2.0));
-        CRegion      corners{CBox{cl - bs, ct - bs, CS, CS}.round()};
-        corners.add(CBox{cl - bs, ct + ch + bs - CS, CS, CS}.round());
+        // the leading (content) corners: left of the frame for a right bar, right
+        // of it for a left, bottom for a top, top for a bottom
+        CRegion      corners;
+        switch (SIDE) {
+            case eBarSide::RIGHT:
+                corners.add(CBox{cl - bs, ct - bs, CS, CS}.round());
+                corners.add(CBox{cl - bs, ct + ch + bs - CS, CS, CS}.round());
+                break;
+            case eBarSide::LEFT:
+                corners.add(CBox{cr + bs - CS, ct - bs, CS, CS}.round());
+                corners.add(CBox{cr + bs - CS, ct + ch + bs - CS, CS, CS}.round());
+                break;
+            case eBarSide::TOP:
+                corners.add(CBox{cl - bs, ct + ch + bs - CS, CS, CS}.round());
+                corners.add(CBox{cr + bs - CS, ct + ch + bs - CS, CS, CS}.round());
+                break;
+            case eBarSide::BOTTOM:
+                corners.add(CBox{cl - bs, ct - bs, CS, CS}.round());
+                corners.add(CBox{cr + bs - CS, ct - bs, CS, CS}.round());
+                break;
+        }
         // clipRegion is not a field on SRectRenderData; renderRect clips to the
         // damage it is handed, so intersect the corner squares into that instead.
         CRegion clipped = Hl::renderDamage().intersect(corners);
@@ -1986,11 +2298,35 @@ void CVtbDeco::drawRollBorder(const CBox& barBoxDev, float scale, float slideT, 
     }
 
     // The straight runs, held clear of the corner squares so they cannot re-square
-    // what the ring just rounded (no-op at RND 0, where they meet as before).
-    Hl::rect(CBox{cl - bs + RND, ct - bs, fw + 2 * bs - RND, bs}.round(), bc, {});      // top
-    Hl::rect(CBox{cl - bs + RND, ct + ch, fw + 2 * bs - RND, bs}.round(), bc, {});      // bottom
-    Hl::rect(CBox{cl - bs, ct - bs + RND, bs, ch + 2 * bs - 2 * RND}.round(), bc, {});  // left
-    Hl::rect(CBox{cr, ct - bs, bs, ch + 2 * bs}.round(), bc, {});                       // right (bar's outer edge)
+    // what the ring just rounded (no-op at RND 0, where they meet as before). The
+    // leading (content) side carries the RND insets; the trailing (bar) side is a
+    // full square edge — sides swap per edge.
+    switch (SIDE) {
+        case eBarSide::RIGHT:
+            Hl::rect(CBox{cl - bs + RND, ct - bs, fw + 2 * bs - RND, bs}.round(), bc, {});            // top
+            Hl::rect(CBox{cl - bs + RND, ct + ch, fw + 2 * bs - RND, bs}.round(), bc, {});            // bottom
+            Hl::rect(CBox{cl - bs, ct - bs + RND, bs, ch + 2 * bs - 2 * RND}.round(), bc, {});        // content edge
+            Hl::rect(CBox{cr, ct - bs, bs, ch + 2 * bs}.round(), bc, {});                             // bar's outer edge
+            break;
+        case eBarSide::LEFT:
+            Hl::rect(CBox{cl - bs, ct - bs, fw + 2 * bs - RND, bs}.round(), bc, {});                 // top
+            Hl::rect(CBox{cl - bs, ct + ch, fw + 2 * bs - RND, bs}.round(), bc, {});                 // bottom
+            Hl::rect(CBox{cr, ct - bs + RND, bs, ch + 2 * bs - 2 * RND}.round(), bc, {});            // content edge
+            Hl::rect(CBox{cl - bs, ct - bs, bs, ch + 2 * bs}.round(), bc, {});                       // bar's outer edge
+            break;
+        case eBarSide::TOP:
+            Hl::rect(CBox{cl - bs, ct - bs, fw + 2 * bs, bs}.round(), bc, {});                       // bar's outer edge
+            Hl::rect(CBox{cl - bs + RND, ct + ch, fw + 2 * bs - 2 * RND, bs}.round(), bc, {});       // content edge
+            Hl::rect(CBox{cl - bs, ct - bs, bs, ch + 2 * bs - RND}.round(), bc, {});                 // left (held clear at the leading bottom corner)
+            Hl::rect(CBox{cr, ct - bs, bs, ch + 2 * bs - RND}.round(), bc, {});                      // right
+            break;
+        case eBarSide::BOTTOM:
+            Hl::rect(CBox{cl - bs, ct + ch, fw + 2 * bs, bs}.round(), bc, {});                       // bar's outer edge
+            Hl::rect(CBox{cl - bs + RND, ct - bs, fw + 2 * bs - 2 * RND, bs}.round(), bc, {});       // content edge
+            Hl::rect(CBox{cl - bs, ct - bs + RND, bs, ch + 2 * bs - RND}.round(), bc, {});           // left
+            Hl::rect(CBox{cr, ct - bs + RND, bs, ch + 2 * bs - RND}.round(), bc, {});                // right
+            break;
+    }
 }
 
 // Hover text for a cell: fixed strings for the five system cells, the
@@ -2024,7 +2360,7 @@ double CVtbDeco::cellCenterY(int cell) {
         if (appReg(reg)) {
             const size_t want = cell - VTB_APPCELL;
             double       cy   = -1;
-            walkAppLayout(reg.buttons, effectiveBoxGlobal().h, [&](size_t i, double y) {
+            walkAppLayout(reg.buttons, barLenOf(effectiveBoxGlobal()), [&](size_t i, double y) {
                 if (i == want && !reg.buttons[i].isSep())
                     cy = y + CELL / 2.0;
             });
@@ -2111,15 +2447,34 @@ void CVtbDeco::renderTooltip(PHLMONITOR pMonitor, const CBox& barBox, float SCAL
     const double W     = tex->m_size.x + PADPX * 2;
     const double H     = tex->m_size.y + PADPX * 2;
 
-    // rest position sits just OUTSIDE the bar (left of a right-edge bar, right
-    // of a left-edge one); at phase 0 the label is shoved a full width+gap back
-    // BEHIND the bar so it's entirely tucked, then slides out into place.
-    // hideDist = W + gap => its bar-adjacent edge starts at the bar's edge.
-    const bool   ONLEFT   = Cfg::barOnLeft();
-    const double barOutX  = ONLEFT ? (barBox.x + barBox.w) : barBox.x; // the bar's window-far edge
-    const double hideDist = W + 6 * SCALE;
-    const double restX    = ONLEFT ? (barOutX + 6 * SCALE) : (barOutX - W - 6 * SCALE);
-    const double slideX   = ONLEFT ? (restX - (1.f - E) * hideDist) : (restX + (1.f - E) * hideDist);
+    // Rest position sits just OUTSIDE the bar on its window-far side: left of a
+    // right-edge bar, right of a left-edge one, above a top bar, below a bottom
+    // one. At phase 0 the label is shoved a full width+gap back BEHIND the bar so
+    // it's entirely tucked, then slides out into place. hideDist = W + gap (or
+    // H + gap for a horizontal bar) => its bar-adjacent edge starts at the bar's
+    // edge. The along-bar centring (CY) is the tooltip's position along the bar —
+    // y for a vertical bar, x for a horizontal one.
+    const eBarSide SIDE    = barSide();
+    const bool     VERT    = barVertical();
+    const double   hideDist = (VERT ? W : H) + 6 * SCALE;
+    double         slideAlong = 0.0, slideOut = 0.0; // out = the axis the tooltip slides on
+    switch (SIDE) {
+        case eBarSide::RIGHT:
+            slideOut = barBox.x - W - 6 * SCALE + (1.f - E) * hideDist; // rest left, tucks right
+            break;
+        case eBarSide::LEFT:
+            slideOut = barBox.x + barBox.w + 6 * SCALE - (1.f - E) * hideDist; // rest right, tucks left
+            break;
+        case eBarSide::TOP:
+            slideOut = barBox.y - H - 6 * SCALE + (1.f - E) * hideDist; // rest above, tucks down
+            break;
+        case eBarSide::BOTTOM:
+            slideOut = barBox.y + barBox.h + 6 * SCALE - (1.f - E) * hideDist; // rest below, tucks up
+            break;
+    }
+    slideAlong = VERT ? (barBox.y + CY * SCALE) : (barBox.x + CY * SCALE);
+    CBox box = VERT ? CBox{slideOut, slideAlong - H / 2.0, W, H} : CBox{slideAlong - W / 2.0, slideOut, W, H};
+    box.round();
 
     // Clip everything to the OUTER side of the bar so the not-yet-emerged part
     // stays hidden behind it. renderRect/renderTexture reset the GL scissor to
@@ -2128,13 +2483,12 @@ void CVtbDeco::renderTooltip(PHLMONITOR pMonitor, const CBox& barBox, float SCAL
     CRegion      clip = Hl::renderDamage();
     const double MONW = (double)pMonitor->m_transformedSize.x;
     const double MONH = (double)pMonitor->m_transformedSize.y;
-    if (ONLEFT)
-        clip.intersect(CBox{barOutX, 0.0, MONW - barOutX, MONH});
-    else
-        clip.intersect(CBox{0.0, 0.0, barOutX, MONH});
-
-    CBox box = {slideX, barBox.y + CY * SCALE - H / 2.0, W, H};
-    box.round();
+    switch (SIDE) {
+        case eBarSide::RIGHT: clip.intersect(CBox{0.0, 0.0, barBox.x, MONH}); break;
+        case eBarSide::LEFT:  clip.intersect(CBox{barBox.x + barBox.w, 0.0, MONW - (barBox.x + barBox.w), MONH}); break;
+        case eBarSide::TOP:   clip.intersect(CBox{0.0, 0.0, MONW, barBox.y}); break;
+        case eBarSide::BOTTOM:clip.intersect(CBox{0.0, barBox.y + barBox.h, MONW, MONH - (barBox.y + barBox.h)}); break;
+    }
 
     // Rounded like the panel's tooltips: the global rounding, never below the
     // shipped 3 (DESIGN §7/§8 exception), clamped to the flyout's half-height.
@@ -2152,8 +2506,13 @@ void CVtbDeco::renderTooltip(PHLMONITOR pMonitor, const CBox& barBox, float SCAL
     const auto   DECOBOX = effectiveBoxGlobal();
     const double LW      = W / SCALE + 10;
     const double LH      = H / SCALE + 4;
-    const double LX      = ONLEFT ? (DECOBOX.x + DECOBOX.w) : (DECOBOX.x - LW);
-    m_tooltipBox         = {LX, DECOBOX.y + CY - LH / 2.0, LW + 2, LH};
+    if (VERT) {
+        const double LX = (SIDE == eBarSide::LEFT) ? (DECOBOX.x + DECOBOX.w) : (DECOBOX.x - LW);
+        m_tooltipBox     = {LX, DECOBOX.y + CY - LH / 2.0, LW + 2, LH};
+    } else {
+        const double LY = (SIDE == eBarSide::BOTTOM) ? (DECOBOX.y + DECOBOX.h) : (DECOBOX.y - LH);
+        m_tooltipBox     = {DECOBOX.x + CY - LW / 2.0, LY, LW + 2, LH};
+    }
 
     // keep frames coming until the slide settles (a motionless cursor emits no
     // events of its own; this self-sustains the animation)
@@ -2320,7 +2679,7 @@ int CVtbDeco::appCellAt(const Vector2D& c, const SVtbAppReg& reg) {
     if (c.x < innerColX() || c.x > innerColX() + cellSize())
         return -1;
     int hit = -1;
-    walkAppLayout(reg.buttons, effectiveBoxGlobal().h, [&](size_t i, double y) {
+    walkAppLayout(reg.buttons, barLenOf(effectiveBoxGlobal()), [&](size_t i, double y) {
         if (!reg.buttons[i].isSep() && c.y >= y && c.y <= y + cellSize())
             hit = (int)i;
     });
@@ -2474,7 +2833,7 @@ int CVtbDeco::appDropSlot(const Vector2D& c, const SVtbAppReg& reg) {
     int    best     = -1;
     double bestDist = 1e9;
     const int CELL  = cellSize();
-    walkAppLayout(reg.buttons, effectiveBoxGlobal().h, [&](size_t i, double y) {
+    walkAppLayout(reg.buttons, barLenOf(effectiveBoxGlobal()), [&](size_t i, double y) {
         if (!reg.buttons[i].draggable)
             return;
         const double d = std::abs(c.y - (y + CELL / 2.0));
@@ -2489,6 +2848,13 @@ int CVtbDeco::appDropSlot(const Vector2D& c, const SVtbAppReg& reg) {
 // ---- title address editor -------------------------------------------------
 
 bool CVtbDeco::titleEditEnabled() {
+    // The address editor is a vertical-bar feature: its whole geometry (stacked
+    // rows, caret, selection) is bar-local-Y and does not transpose to a
+    // horizontal top/bottom bar. On a horizontal bar the title region is
+    // display-only. The apps that opt in (surfer's URL bar) keep the title
+    // visible; they just can't edit it in place on that edge.
+    if (!barVertical())
+        return false;
     SVtbAppReg reg;
     return appReg(reg) && reg.titleEdit;
 }
@@ -2671,7 +3037,7 @@ size_t CVtbDeco::editByteAtLocalY(double localY) {
 // px / line height), matching renderPass's RUNLEN / m_iEditLineH.
 int CVtbDeco::editVisibleRows() {
     const double scale = m_fLastScale > 0 ? m_fLastScale : 1.0;
-    const double avail = (effectiveBoxGlobal().h - titleTopEff() - VTB_PAD) * scale;
+    const double avail = (barLenOf(effectiveBoxGlobal()) - titleTopEff() - VTB_PAD) * scale;
     const double lineH = m_iEditLineH > 0 ? (double)m_iEditLineH
                                           : (Cfg::fontSize() * scale);
     return std::max(1, (int)std::floor(avail / std::max(1.0, lineH)));
@@ -2729,7 +3095,7 @@ bool CVtbDeco::consumesAxisAt(const Vector2D& mouse) {
         const auto   MON = PW->m_monitor.lock();
         const double scl = MON ? MON->m_scale : 1.0;
         CBox         track;
-        if (!playbarTrackLocal(reg, assignedBoxGlobal().h, scl, track) || !track.containsPoint(mouse - assignedBoxGlobal().pos()))
+        if (!playbarTrackLocal(reg, barLenOf(assignedBoxGlobal()), scl, track) || !track.containsPoint(cursorRelativeToBar()))
             return false;
         // ...and only when the track is the topmost thing at the cursor: a
         // shaded bar draws under every window, and an unshaded bar can have
@@ -3027,8 +3393,26 @@ bool CVtbDeco::shadeOccludedAt(const Vector2D& mouse) {
     return false;
 }
 
+// Global logical -> bar-local logical, given the BAR's OWN box (not the window
+// box). x=0 at the window-adjacent edge, x=totalBarW at the outer edge; y=0 at
+// the bar's start (top for left/right, left for top/bottom). This is the
+// inverse of the barBoxFor layout and works for a rolled-up bar too, whose box
+// (m_rollBox / effectiveBoxGlobal) is all the hit-test has.
+static Vector2D globalToBarLocalFromBarBox(const CBox& barBox, const Vector2D& g) {
+    switch (barSide()) {
+        case eBarSide::RIGHT: return {g.x - barBox.x, g.y - barBox.y};
+        case eBarSide::LEFT:  return {barBox.x + barBox.w - g.x, g.y - barBox.y};
+        case eBarSide::TOP:   return {barBox.y + barBox.h - g.y, g.x - barBox.x};
+        case eBarSide::BOTTOM:return {g.y - barBox.y, g.x - barBox.x};
+    }
+    return {};
+}
+
 Vector2D CVtbDeco::cursorRelativeToBar() {
-    return Hl::mouse() - assignedBoxGlobal().pos();
+    // Bar-local via the bar's own box — same result as globalToBarLocal off
+    // the window box, but also correct for a rolled-up bar (whose window is
+    // hidden and whose drawn box is m_rollBox).
+    return globalToBarLocalFromBarBox(assignedBoxGlobal(), Hl::mouse());
 }
 
 int CVtbDeco::cellAt(const Vector2D& c) {
@@ -3055,10 +3439,18 @@ int CVtbDeco::cellAt(const Vector2D& c) {
 // bar-less windows (scratchpad) fall through to the native behavior.
 
 // The visual frame: window + our (double-wide) bar, wrapped by one border.
+// The bar sits on its own side: right/left grow the width, top/bottom the
+// height (upward for a top bar).
 static CBox frameBox(PHLWINDOW w) {
     CBox box = Hl::boxValue(w);
-    if (Cfg::enabled())
-        box.w += totalBarW();
+    if (Cfg::enabled()) {
+        switch (barSide()) {
+            case eBarSide::RIGHT: box.w += totalBarW(); break;
+            case eBarSide::LEFT:  box.x -= totalBarW(); box.w += totalBarW(); break;
+            case eBarSide::TOP:   box.y -= totalBarW(); box.h += totalBarW(); break;
+            case eBarSide::BOTTOM:box.h += totalBarW(); break;
+        }
+    }
     return box;
 }
 
@@ -3111,13 +3503,36 @@ uint32_t CVtbDeco::borderResizeZone(const Vector2D& M) {
         return edges;
     }
 
-    // inside the frame: only the bar's outermost strip acts as the right
+    // inside the frame: only the bar's outermost strip acts as the outer-edge
     // handle (button cells take priority — the caller checks them first via
-    // the normal bar path, but be defensive here too)
+    // the normal bar path, but be defensive here too). The outermost strip is
+    // the far side from the window, driving that window edge: the RIGHT strip
+    // for a right bar, the LEFT for a left, the TOP for a top, the BOTTOM for
+    // a bottom. In bar-local terms (x across the bar, 0 at the window edge)
+    // it is always the far x strip; the edge it drives and the corner hint
+    // axis rotate with the side.
     const auto BARBOX = assignedBoxGlobal();
     const auto LOCAL  = M - BARBOX.pos();
-    if (VECINRECT(LOCAL, 0, 0, BARBOX.w, BARBOX.h) && cellAt(LOCAL) == -1 && LOCAL.x > BARBOX.w - VTB_RESIZE_STRIP)
-        return RS_EDGE_R | hintV;
+    if (VECINRECT(LOCAL, 0, 0, BARBOX.w, BARBOX.h) && cellAt(LOCAL) == -1) {
+        switch (barSide()) {
+            case eBarSide::RIGHT:
+                if (LOCAL.x > BARBOX.w - VTB_RESIZE_STRIP)
+                    return RS_EDGE_R | hintV;
+                break;
+            case eBarSide::LEFT:
+                if (LOCAL.x < VTB_RESIZE_STRIP)
+                    return RS_EDGE_L | hintV;
+                break;
+            case eBarSide::TOP:
+                if (LOCAL.x > BARBOX.w - VTB_RESIZE_STRIP)
+                    return RS_EDGE_T | hintH;
+                break;
+            case eBarSide::BOTTOM:
+                if (LOCAL.x > BARBOX.w - VTB_RESIZE_STRIP)
+                    return RS_EDGE_B | hintH;
+                break;
+        }
+    }
 
     return 0;
 }
@@ -3319,8 +3734,8 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
         const double scl     = MON ? MON->m_scale : 1.0;
         SVtbAppReg   reg;
         CBox         track;
-        const auto   LOCAL = Hl::mouse() - assignedBoxGlobal().pos();
-        if (PWINDOW && appReg(reg) && playbarTrackLocal(reg, assignedBoxGlobal().h, scl, track)) {
+        const auto   LOCAL = cursorRelativeToBar();
+        if (PWINDOW && appReg(reg) && playbarTrackLocal(reg, barLenOf(assignedBoxGlobal()), scl, track)) {
             const double f = std::clamp((LOCAL.y - track.y) / track.h, 0.0, 1.0);
             if (f != m_playbarDragFrac) {
                 m_playbarDragFrac = f;
@@ -3334,8 +3749,7 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
     // selecting in the address editor: drag the cursor end to the row under the
     // pointer (anchor stays at the press point), extending the highlight.
     if (m_bEditDragging) {
-        const auto   BOX   = assignedBoxGlobal();
-        const auto   LOCAL = Hl::mouse() - BOX.pos();
+        const auto   LOCAL = cursorRelativeToBar();
         const size_t at    = editByteAtLocalY(LOCAL.y);
         if (at != m_editCursor) {
             m_editCursor = at;
@@ -3398,10 +3812,17 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
         const auto     PW  = m_pWindow.lock();
         const Vector2D OFF = PW ? PW->m_floatingOffset : Vector2D();
         const auto     MOUSE = Hl::mouse();
-        const auto     LOCAL = MOUSE - (HIT.pos() + OFF);
+        // Bar-local, like every other hit-test: x across the bar from the
+        // window-adjacent edge, y along it — the drawn box is HIT (with its own
+        // floating offset), which for a rolled bar differs from assignedBoxGlobal.
+        const auto     LOCAL = globalToBarLocalFromBarBox(HIT, MOUSE - OFF);
         // no hover feedback through whatever's drawn over the bar (matches the
         // press path's occlusion test — the visible thing on top owns the point)
-        const int      cell  = VECINRECT(LOCAL, 0, 0, HIT.w, HIT.h) && !shadeOccludedAt(MOUSE) ? cellAt(LOCAL) : -1;
+        // Bar-local rect: across (0..totalBarW) × along (0..barLen) — for a
+        // horizontal bar those are the box's h and w respectively.
+        const double ACROSS = barVertical() ? HIT.w : HIT.h;
+        const double ALONG  = barLenOf(HIT);
+        const int    cell   = VECINRECT(LOCAL, 0, 0, ACROSS, ALONG) && !shadeOccludedAt(MOUSE) ? cellAt(LOCAL) : -1;
         if (cell != m_iHoverCell) {
             m_iHoverCell = cell;
             m_hoverSince = Time::steadyNow(); // the main-thread tick pops the tooltip after the dwell
@@ -3426,7 +3847,7 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
         if (m_bAppDragging) {
             SVtbAppReg reg;
             if (appReg(reg)) {
-                const auto LOCAL = Hl::mouse() - assignedBoxGlobal().pos();
+                const auto LOCAL = cursorRelativeToBar();
                 const int  tgt   = appDropSlot(LOCAL, reg);
                 if (tgt != m_iAppDragTarget)
                     m_iAppDragTarget = tgt;
@@ -3440,9 +3861,12 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
     // hover feedback on the button cells (system column + app column)
     if (validMapped(m_pWindow) && !m_bMinimized) {
         const auto BOX    = assignedBoxGlobal();
-        const auto LOCAL  = Hl::mouse() - BOX.pos();
-        int        cell   = VECINRECT(LOCAL, 0, 0, BOX.w, BOX.h) ? cellAt(LOCAL) : -1;
-        if (cell == -1 && VECINRECT(LOCAL, 0, 0, BOX.w, BOX.h)) {
+        const auto LOCAL  = cursorRelativeToBar();
+        // Bar-local rect: across (0..totalBarW) × along (0..barLen).
+        const double ACROSS = barVertical() ? BOX.w : BOX.h;
+        const double ALONG  = barLenOf(BOX);
+        int        cell   = VECINRECT(LOCAL, 0, 0, ACROSS, ALONG) ? cellAt(LOCAL) : -1;
+        if (cell == -1 && VECINRECT(LOCAL, 0, 0, ACROSS, ALONG)) {
             SVtbAppReg reg;
             if (appReg(reg)) {
                 const int AI = appCellAt(LOCAL, reg);
@@ -3476,6 +3900,18 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
                 const char* shape = (Z & RS_EDGE_T) ? "top_right_corner" : (Z & RS_EDGE_B) ? "bottom_right_corner" : "right_side";
                 Hl::setCursorOverride(shape);
                 m_bCursorOverridden = true;
+            } else if (Z & RS_EDGE_L) {
+                const char* shape = (Z & RS_EDGE_T) ? "top_left_corner" : (Z & RS_EDGE_B) ? "bottom_left_corner" : "left_side";
+                Hl::setCursorOverride(shape);
+                m_bCursorOverridden = true;
+            } else if (Z & RS_EDGE_T) {
+                const char* shape = (Z & RS_EDGE_L) ? "top_left_corner" : (Z & RS_EDGE_R) ? "top_right_corner" : "top_side";
+                Hl::setCursorOverride(shape);
+                m_bCursorOverridden = true;
+            } else if (Z & RS_EDGE_B) {
+                const char* shape = (Z & RS_EDGE_L) ? "bottom_left_corner" : (Z & RS_EDGE_R) ? "bottom_right_corner" : "bottom_side";
+                Hl::setCursorOverride(shape);
+                m_bCursorOverridden = true;
             } else if (m_bCursorOverridden) {
                 Hl::clearCursorOverride();
                 m_bCursorOverridden = false;
@@ -3495,8 +3931,11 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
     const auto PWINDOW = m_pWindow.lock();
     const auto COORDS  = cursorRelativeToBar();
     const auto BOX     = assignedBoxGlobal();
+    // Bar-local rect: across (0..totalBarW) × along (0..barLen).
+    const double ACROSS = barVertical() ? BOX.w : BOX.h;
+    const double ALONG  = barLenOf(BOX);
 
-    if (!VECINRECT(COORDS, 0, 0, BOX.w, BOX.h - 1)) {
+    if (!VECINRECT(COORDS, 0, 0, ACROSS, ALONG - 1)) {
         if (m_bDraggingThis)
             Config::Actions::mouse("0movewindow"); // end the move-drag (was the dispatcher map)
 
@@ -3582,7 +4021,7 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
         CBox         track;
         const auto   MON = PWINDOW->m_monitor.lock();
         const double scl = MON ? MON->m_scale : 1.0;
-        if (appReg(reg) && playbarTrackLocal(reg, BOX.h, scl, track) && track.containsPoint(COORDS)) {
+        if (appReg(reg) && playbarTrackLocal(reg, barLenOf(BOX), scl, track) && track.containsPoint(COORDS)) {
             m_bPlaybarDragging = true;
             m_playbarScrollAcc = 0.0; // a grab supersedes any carried scroll remainder
             m_playbarDragFrac  = std::clamp((COORDS.y - track.y) / track.h, 0.0, 1.0);
@@ -3713,11 +4152,15 @@ void CVtbDeco::handleRolledDown(Event::SCallbackInfo& info) {
     // hit-test the bar where it's actually drawn: dropped by the set-down
     // (effectiveBoxGlobal) AND shifted by the window's floating offset, exactly
     // as renderPass positions it — otherwise a restored window's non-zero
-    // floating offset slid the buttons out from under the click.
+    // floating offset slid the buttons out from under the click. Bar-local via
+    // the bar's own box so the x-across / y-along mapping follows the side.
     const auto BAR   = effectiveBoxGlobal();
     const auto MOUSE = Hl::mouse();
-    const auto LOCAL = MOUSE - (BAR.pos() + PWINDOW->m_floatingOffset);
-    if (!VECINRECT(LOCAL, 0, 0, BAR.w, BAR.h))
+    const auto LOCAL = globalToBarLocalFromBarBox(BAR, MOUSE - PWINDOW->m_floatingOffset);
+    // Bar-local rect: across (0..totalBarW) × along (0..barLen).
+    const double ACROSS = barVertical() ? BAR.w : BAR.h;
+    const double ALONG  = barLenOf(BAR);
+    if (!VECINRECT(LOCAL, 0, 0, ACROSS, ALONG))
         return; // not on the bar — let the click pass through to what's behind
 
     // On the bar's box, but the bar itself draws UNDER every visible window —
@@ -3829,9 +4272,9 @@ void CVtbDeco::startOpenReveal() {
     m_rollWinBox = g;
 
     // The decoration positioner hasn't run yet at window.open, so assignedBoxGlobal()
-    // is still 0x0 here — build the bar box directly: it sits on the content's right
-    // edge, totalBarW() wide and the window's full height (mirrors frameBox()).
-    m_rollBox = {m_rollWinBox.x + m_rollWinBox.w, m_rollWinBox.y, (double)totalBarW(), m_rollWinBox.h};
+    // is still 0x0 here — build the bar box directly off the window box (mirrors
+    // barBoxFor, which is exactly what this is).
+    m_rollBox = barBoxFor(m_rollWinBox);
 
     const auto SNAPFB = Hl::snapshotFB(PWINDOW);
     if (SNAPFB && SNAPFB->isAllocated())
@@ -3863,11 +4306,18 @@ CBox CVtbDeco::maximizeTarget() {
     const auto GAP    = Cfg::maximizeGap();
     const auto BARW   = totalBarW();
     // Inset by the border width so the window frame stays visible against
-    // the screen edges / panel when maximized.
+    // the screen edges / panel when maximized. The bar reserves its strip on
+    // its own side, so the BARW comes off that side: width for right/left,
+    // height for top/bottom (and off the top edge for a top bar).
     const auto BS     = PWINDOW->getRealBorderSize() + GAP;
     const CBox usable = PMONITOR->m_reservedArea.apply(CBox{PMONITOR->m_position, PMONITOR->m_size});
-
-    return {usable.x + BS, usable.y + BS, usable.w - BS * 2 - BARW, usable.h - BS * 2};
+    switch (barSide()) {
+        case eBarSide::RIGHT: return {usable.x + BS, usable.y + BS, usable.w - BS * 2 - BARW, usable.h - BS * 2};
+        case eBarSide::LEFT:  return {usable.x + BS + BARW, usable.y + BS, usable.w - BS * 2 - BARW, usable.h - BS * 2};
+        case eBarSide::TOP:   return {usable.x + BS, usable.y + BS + BARW, usable.w - BS * 2, usable.h - BS * 2 - BARW};
+        case eBarSide::BOTTOM:return {usable.x + BS, usable.y + BS, usable.w - BS * 2, usable.h - BS * 2 - BARW};
+    }
+    return {};
 }
 
 void CVtbDeco::toggleMaximize() {
@@ -4393,10 +4843,14 @@ void CVtbDeco::renderShadeIfRolled(PHLMONITOR pMonitor) {
     // flashed and, on the final frame, sat as a stale outline until the next move.
     if (m_rollAnim != ROLL_NONE) {
         const double M = VTB_SHADOW_SIZE + PWINDOW->getRealBorderSize() + 2;
+        // Damage the whole reach of the slide + shadow + drawRollBorder overhang.
+        // Every edge is the min/max over the window box and the bar box: for a
+        // right/left bar the two share y and differ in x, for a top/bottom bar
+        // they share x and differ in y.
         const double L = std::min(m_rollWinBox.x, m_rollBox.x) - M;
-        const double R = m_rollBox.x + m_rollBox.w + M;
-        const double T = m_rollBox.y - M;
-        const double B = m_rollBox.y + std::max(m_rollBox.h, m_rollWinBox.h) + M;
+        const double R = std::max(m_rollWinBox.x + m_rollWinBox.w, m_rollBox.x + m_rollBox.w) + M;
+        const double T = std::min(m_rollWinBox.y, m_rollBox.y) - M;
+        const double B = std::max(m_rollWinBox.y + m_rollWinBox.h, m_rollBox.y + m_rollBox.h) + M;
         Hl::damage(CBox{L, T, R - L, B - T});
     }
 
@@ -4737,13 +5191,20 @@ void vtbRenderShadowLayer(PHLMONITOR pMonitor, bool overBars) {
 
         // Frame-sized rect offset down and left; only the sharp L-overhang ends
         // up visible once the frames are subtracted. The size animvar is the client
-        // surface only — the titlebar is a reserved deco on the RIGHT edge, so
-        // the visible frame is that much wider; widen the shadow to match or the
-        // whole bar column casts nothing. A bar-less window (scratchpad,
-        // privilege prompt) spans only its own frame.
-        const CBox SB = CBox{L.x - N, L.y + N, L.w + (vtbHasBar(w) ? BARW : 0.0), L.h}.round();
-        shadow.add(SB);
-        shadowBoxes.emplace_back(SB, std::max(0, (int)std::round(Hl::windowRounding(w) * SCALE)));
+        // surface only — the titlebar is a reserved deco on the window's edge, so
+        // the visible frame is that much larger; widen the shadow on the bar's own
+        // side to match or the whole bar column casts nothing. A bar-less window
+        // (scratchpad, privilege prompt) spans only its own frame.
+        const double EXT = vtbHasBar(w) ? BARW : 0.0;
+        CBox         SB;
+        switch (barSide()) {
+            case eBarSide::RIGHT: SB = {L.x - N, L.y + N, L.w + EXT, L.h}; break;
+            case eBarSide::LEFT:  SB = {L.x - EXT - N, L.y + N, L.w + EXT, L.h}; break;
+            case eBarSide::TOP:   SB = {L.x - N, L.y - EXT + N, L.w, L.h + EXT}; break;
+            case eBarSide::BOTTOM:SB = {L.x - N, L.y + N, L.w, L.h + EXT}; break;
+        }
+        shadow.add(SB.round());
+        shadowBoxes.emplace_back(SB.round(), std::max(0, (int)std::round(Hl::windowRounding(w) * SCALE)));
     }
 
     // In-flight roll composite's own collapsing shadow. A window at REST rolled
