@@ -274,6 +274,44 @@ def main():
     check("a light palette leaves OneeChan's dim link untouched",
           surfer._legible_link(light["dim"], light["bg"], light["accent"]) == light["dim"])
 
+    # --- pure-python: the LIGHT-palette background collapse ---
+    # On a light palette, OneeChan's inset surfaces (open reply chains, post
+    # backgrounds, post headers, catalog panels and text fields) must read as
+    # the plain PAGE background, not the dark-tuned bgAlt/highlight shades. A
+    # dark palette keeps the inset treatment untouched. Assert on the built CSS
+    # via stable selector-tail fragments (each background rule ends on a
+    # selector unique to that rule).
+    class _StubPal:
+        def __init__(self, d):
+            self._d = d
+
+        def hex(self, k):
+            return self._d[k]
+
+    def onee_css(pal):
+        return surfer.OneeTheme(_StubPal(pal), app)._css()
+
+    # distinct bgAlt/highlight so we can tell "collapsed to bg" from "kept"
+    light_pal = dict(PAL_A, bg="#f0f0f0", bgAlt="#c8c8c8", highlight="#d0d0d0")
+    dark_pal = dict(PAL_A)  # bg=#102030 (dark), bgAlt=#203040, highlight=#123456
+    lcss, dcss = onee_css(light_pal), onee_css(dark_pal)
+
+    def bg_rule(css, tail, color):
+        return ("%s{background:%s!important}" % (tail, color)) in css
+
+    check("light palette: reply/post-chain/catalog background collapses to bg",
+          bg_rule(lcss, ".dd-menu ul", "#f0f0f0"))
+    check("light palette: post header (#header-bar) background collapses to bg",
+          bg_rule(lcss, "#header-bar", "#f0f0f0"))
+    check("light palette: text input background collapses to bg",
+          bg_rule(lcss, ".captcha-root", "#f0f0f0"))
+    check("dark palette: reply/post background keeps bgAlt (inset untouched)",
+          bg_rule(dcss, ".dd-menu ul", "#203040"))
+    check("dark palette: post header background keeps bgAlt (inset untouched)",
+          bg_rule(dcss, "#header-bar", "#203040"))
+    check("dark palette: text input background keeps highlight (inset untouched)",
+          bg_rule(dcss, ".captcha-root", "#123456"))
+
     def read_title():
         t = view.property("title")
         if isinstance(t, str) and t:
