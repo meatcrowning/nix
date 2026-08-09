@@ -93,6 +93,27 @@ Item {
             + "decoration = { rounding = " + Math.round(d.windowRounding) + " }"
             + "})";
         Quickshell.execDetached(["hyprctl", "eval", lua]);
+        framePersist.restart();
+    }
+
+    // ...and persist both into hyprland.lua, because the call above is only a
+    // RUNTIME OVERRIDE: Hyprland drops it on any config reload, and reloads
+    // happen for reasons unrelated to the frame — apply-pixel-font.sh seds the
+    // font keys into hyprland.lua, which Hyprland AUTO-RELOADS, so picking a
+    // different pixel font threw the corner radius and the border width back to
+    // whatever that file still said (until 2026-08-08). Nudging the rounding
+    // slider off its value and back was the workaround, i.e. re-running the
+    // override above.
+    //
+    // DEBOUNCED, and only from the script: writing hyprland.lua fires that same
+    // autoreload, so a slider dragged across twenty values must not reload the
+    // whole config twenty times (the script's seds are also guarded, so an
+    // already-correct line is not rewritten at all).
+    Timer {
+        id: framePersist
+        interval: 500
+        onTriggered: Quickshell.execDetached(["sh", "-c",
+            'exec "$HOME/.config/scripts/apply-window-frame.sh"'])
     }
 
     // loadNow() first: this handler branches on persisted values (the palette
