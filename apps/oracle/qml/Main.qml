@@ -22,10 +22,6 @@ Window {
 
     property string model: ""
     property string status: ""
-    // When on, every send offers ollama a `web_search` tool it may call
-    // mid-turn (Tavily-backed); off by default, so a model with no tool support
-    // is never handed tools it would reject (docs/DESIGN.md §10 — opt-in, honest).
-    property bool webSearch: false
     // The conversation is a persistent LOG, not one turn swapped out under the
     // last: every send appends a `you` row and an assistant row to `chatLog`,
     // prior turns stay in place and scrolled back, readable (docs/DESIGN.md §14 —
@@ -185,7 +181,7 @@ Window {
                          streaming: true, isError: false });
         win.activeIndex = chatLog.count - 1;
         Ollama.rememberModel(win.model);   // the model he last used is next launch's default
-        Ollama.send(win.model, p, win.webSearch);
+        Ollama.send(win.model, p);
         input.clear();
     }
 
@@ -209,7 +205,7 @@ Window {
         Rectangle {
             id: picker
             anchors { left: modelLabel.right; leftMargin: 10
-                      right: webToggle.left; rightMargin: 10
+                      right: parent.right
                       verticalCenter: parent.verticalCenter }
             height: 24
             color: pickerMouse.containsMouse ? Theme.highlight : Theme.bgAlt
@@ -243,33 +239,6 @@ Window {
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: picker.open = !picker.open
-            }
-        }
-
-        // The web-search toggle: a chip that, when lit, offers the model the
-        // `web_search` tool (docs/DESIGN.md §7.2, §10 — a real on/off state, not
-        // a claim). Accent-filled when on, dim outline when off.
-        Rectangle {
-            id: webToggle
-            anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-            width: 52
-            height: 24
-            radius: Theme.rounding
-            border.width: Theme.ctrlBorder
-            border.color: win.webSearch ? Theme.accent : Theme.border
-            color: win.webSearch ? Theme.highlight
-                                  : (webMouse.containsMouse ? Theme.highlight : Theme.bgAlt)
-            PixelText {
-                anchors.centerIn: parent
-                text: "web"
-                color: win.webSearch ? Theme.accent : Theme.textDim
-            }
-            MouseArea {
-                id: webMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: win.webSearch = !win.webSearch
             }
         }
     }
