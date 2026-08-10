@@ -179,12 +179,12 @@ Seven tags, `boardparse.TODO_TAGS`, and the set is short on purpose:
 | `ENACTED:` | done, and on his machine | a worker's or decision agent's `note` |
 | `PARTIAL:` | some landed, some did not — a pending rebuild counts | the same |
 | `FAILED:` | attempted, nothing landed | every failure path in `board-watch.py`, and `reconcile`'s dead-agent bullet |
-| `SUMMONED` | a minister was started for a piece of work | the orchestrator's note |
+| `SUMMONED` | a spirit was started for a piece of work | the orchestrator's note |
 | `COMMANDED` | ...and the same, for one that was already running | the same |
 
 **The last two carry NO COLON and NOTHING in front of them**, and they are the
 only two written that way (`boardparse.BARE_TAGS`). [his, 2026-07-30] *"the
-message posted to the board when a minister is summoned should read `SUMMONED
+message posted to the board when a spirit is summoned should read `SUMMONED
 [agent] [for/to] [task]` instead of what it is now ... it should NOT say
 INFORMATION: at the beginning"*. So the line is
 `SUMMONED Marbas (`wd690a4`) to add commit times` — the `for`/`to` is whichever
@@ -200,7 +200,7 @@ it files under are allowed to differ), and the heading text is
 `summoned - who is on what right now` so the bare word would not read as one
 more tag in a column of tags; he has since asked for the heading to be just
 `summoned`. It is LAST in `TODO_ORDER`: not a report at all but the state
-of the triangle, and every line in it is retired by its own minister's result.
+of the triangle, and every line in it is retired by its own spirit's result.
 Reading is unchanged: the store
 is full of the old `INFORMATION: **subject** - SUMMONED: Marbas (...)` shape and
 every one of them still parses, still groups under `information` (its tag is
@@ -416,8 +416,8 @@ same reserved column). Three things are specific to it:
 - **`agent_id` is NOT authorship and must never be read as it.** It names the
   agent a result is FROM, which is what retires that agent's summon note
   (`drop_summon`). Reading it as the author stamped every `board-watch` failure
-  note with the DEAD minister's name — a bullet whose own text says that
-  minister recorded nothing, attributed to it (fixed 2026-07-30; the stamp comes
+  note with the DEAD spirit's name — a bullet whose own text says that
+  spirit recorded nothing, attributed to it (fixed 2026-07-30; the stamp comes
   from `whoami()` with no argument, and `board-watch` names itself through
   `by=`).
 - **Nobody resolving means NO stamp.** `by_now()` returns `""` for an empty or

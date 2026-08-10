@@ -1,7 +1,7 @@
 import QtQuick
 
 // The spend section — what this board's automation costs, across every provider
-// it dispatches to (the deepseek/hermes ministers AND every Claude tier). The
+// it dispatches to (the deepseek/hermes spirits AND every Claude tier). The
 // numbers, and every decision about where they come from, are `boardspend.py`'s;
 // this file only draws, through the `Spend` context property (main.py).
 //

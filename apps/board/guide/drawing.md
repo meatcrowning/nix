@@ -241,7 +241,7 @@ an empty title, so the bar would read `board` — the one word the rename exists
 keep off screen — and the taskbar and alt-tab would lose the window's name too.
 
 **...and the footer only says what nothing else on screen can.** [his,
-2026-07-30] *"when i change the number of ministers in goetia itll flash text
+2026-07-30] *"when i change the number of spirits in goetia itll flash text
 indicating that on the inner bar"* — the third report of that bar flashing, and
 the first with a repro. It was not a render fault at all (the plugin's IPC-serial
 stamp was already fixed in hyprvtb 2.97, and `tools/vtb-flash-test.sh` measured

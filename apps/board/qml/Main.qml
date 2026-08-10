@@ -92,7 +92,7 @@ Window {
     readonly property var summonerCards: Agents.summoner
     readonly property var agentCards: Agents.workers
     readonly property var queuedNotes: Agents.queued
-    // The triangle's LIVE SHELLS — a little tail per bound minister ([his ask,
+    // The triangle's LIVE SHELLS — a little tail per bound spirit ([his ask,
     // 2026-08-01]). `main.py` builds them off the same `workers` list, so this
     // can never disagree with the cards above it about who is bound.
     readonly property var agentShells: Agents.shells
@@ -118,7 +118,7 @@ Window {
 
     // CTRL+Z TAKES THE LAST ORDER BACK, and hands his words back to him.
     //
-    // [his, 2026-07-29] *"before solomon summons a minister, allow the user to
+    // [his, 2026-07-29] *"before solomon summons a spirit, allow the user to
     // crtl+z to stop solomon from doing that ... and then insert the prompt back
     // into the prompt box for the user to edit. if the last prompt had to be
     // placed in the pending [orders] section, then ctrl+z should remove it from
@@ -163,7 +163,7 @@ Window {
 
     // ---- Ctrl+F: find over the two long lists (docs/DESIGN.md §11.2) --------
     // The board is ONE scroll region (§9.2), but its two ever-growing lists —
-    // LANDED and the triangle's minister cards — are where finding a thing by
+    // LANDED and the triangle's spirit cards — are where finding a thing by
     // eye stops working. Ctrl+F opens `findBar` below and FILTERS those two
     // lists to the rows whose text contains the query; the rest of the page is
     // left alone, and Escape (or the bar's `x`) restores the full lists.
@@ -185,7 +185,7 @@ Window {
         return !win.findOpen || win.findQ === ""
                || String(s).toLowerCase().indexOf(win.findQ) !== -1;
     }
-    // A minister card's searchable text: everything it says on screen, so a
+    // A spirit card's searchable text: everything it says on screen, so a
     // find matches whatever he can read on the card — its name and model, its
     // two sentences, the title, and the waiting/worked lines.
     function agentText(a) {
@@ -319,8 +319,8 @@ Window {
     }
 
     // ---- ...and which cards have their output drawer open ----
-    // [his, 2026-07-30] clicking a minister card slides a drawer out from under
-    // it with what that minister is actually saying. Held HERE and keyed by the
+    // [his, 2026-07-30] clicking a spirit card slides a drawer out from under
+    // it with what that spirit is actually saying. Held HERE and keyed by the
     // AGENT'S ID, for the reason the caret below is: a card is destroyed and
     // rebuilt whenever the key list changes — one agent finishing is enough —
     // so a drawer remembered in the delegate, or by list index, would shut
@@ -852,7 +852,7 @@ Window {
             // selector box not the prompt box as they are now."* So:
             //
             //   * `summonerPick` sits at y 0 and the rest of the column — the
-            //     summoner model, the cap, the minister model, then the meters —
+            //     summoner model, the cap, the spirit model, then the meters —
             //     hangs off it, and nothing in it looks at the box.
             //   * `askBox.minHeight` is that column's span, so the box is as
             //     tall as chooser + gap + meters and both edges line up. It is
@@ -876,7 +876,7 @@ Window {
 
                 // Top of the chooser to the bottom of the last meter. The 4s are
                 // the lead-ins below, stated once here and once at each of them.
-                readonly property real pickCol: ministerPick.y + ministerPick.height
+                readonly property real pickCol: spiritPick.y + spiritPick.height
                     + (usageCol.visible ? 4 + usageCol.height : 0)
 
                 // ONE edge for the whole column, and it is the widest control in
@@ -887,7 +887,7 @@ Window {
                 // number, so a longer model name still widens all of it (§2.7).
                 readonly property real colW:
                     Math.max(summonerPick.implicitWidth, modelPick.implicitWidth,
-                             capPick.implicitWidth, ministerPick.implicitWidth)
+                             capPick.implicitWidth, spiritPick.implicitWidth)
 
                 // ...and ONE arrow column, for the same reason. Every label is
                 // padded out to the longest of the four so the `v` on each lands
@@ -895,7 +895,7 @@ Window {
                 // monospace and the controls are centred (§2.7).
                 readonly property int pickCells:
                     Math.max(Agents.summonerLabel.length, Agents.modelLabel.length,
-                             Agents.capLabel.length, Agents.ministerLabel.length)
+                             Agents.capLabel.length, Agents.spiritLabel.length)
 
                 InputBox {
                     id: askBox
@@ -905,7 +905,7 @@ Window {
                     fgText: win.fgText
                     fgDim: win.fgDim
                     draft: win.draftOf("msg:queue")
-                    placeholder: "type anything and press enter to command Solomon and his ministers"
+                    placeholder: "type anything and press enter to command Solomon and his spirits"
                     hintText: "enter sends - shift+enter is a new line - esc keeps a draft"
                     // This box is never a delegate and is never rebuilt, so it
                     // takes no `openCaret` — it reports only, which is what
@@ -917,8 +917,8 @@ Window {
                 }
 
                 // FOUR of these, and the ORDER IS HIS. [his, 2026-07-29] *"1.
-                // number of summoners 2. summoner model 3. number of ministers
-                // 4. minister model"* — so the column reads count, model, count,
+                // number of summoners 2. summoner model 3. number of spirits
+                // 4. spirit model"* — so the column reads count, model, count,
                 // model, and each count names the role of the model under it.
                 // That pairing is what lets the labels stay as short as they are:
                 // `fable 5` on its own is ambiguous between the two models, and
@@ -991,17 +991,17 @@ Window {
                     anchors.right: modelPick.right
                     width: parent.colW
                     label: Agents.capLabel
-                    hint: "the most ministers allowed to work at once - the next tick honours it"
+                    hint: "the most spirits allowed to work at once - the next tick honours it"
                     items: () => win.capItems()
                     popup: menu
                     fgDim: win.fgDim
                     fgAccent: win.fgAccent
                 }
 
-                // ...and under THAT, what those ministers run on. [his,
-                // 2026-07-29] *"do not allow ministers to be anything higher than
+                // ...and under THAT, what those spirits run on. [his,
+                // 2026-07-29] *"do not allow spirits to be anything higher than
                 // opus 5 medium thinking."* So this control offers
-                // `boardwork.MINISTER_MODELS` and nothing else, ceiling first —
+                // `boardwork.SPIRIT_MODELS` and nothing else, ceiling first —
                 // and the ceiling is enforced AGAIN at the spawn
                 // (`boardwork.role_flags`), because a control is not a guard
                 // against a file he or an agent edited by hand.
@@ -1011,15 +1011,15 @@ Window {
                 // only half of what it set would be the §10 failure with a
                 // shorter string.
                 PickBox {
-                    id: ministerPick
+                    id: spiritPick
                     padTo: parent.pickCells
                     anchors.top: capPick.bottom
                     anchors.topMargin: 4
                     anchors.right: capPick.right
                     width: parent.colW
-                    label: Agents.ministerLabel
-                    hint: "what ministers run on, up to opus 5 medium - the next one dispatched gets it"
-                    items: () => win.ministerItems()
+                    label: Agents.spiritLabel
+                    hint: "what spirits run on, up to opus 5 medium - the next one dispatched gets it"
+                    items: () => win.spiritItems()
                     popup: menu
                     fgDim: win.fgDim
                     fgAccent: win.fgAccent
@@ -1037,7 +1037,7 @@ Window {
                 // spending that model costs him. [his, 2026-07-29] *"each usage
                 // indicator should be exactly as wide as the model selection box
                 // above it … stacked vertically"*. The width is bound to the
-                // dropdown column (`ministerPick`, its foot), not to a number,
+                // dropdown column (`spiritPick`, its foot), not to a number,
                 // so the box and the bars stay flush when a longer model name
                 // widens it.
                 //
@@ -1064,10 +1064,10 @@ Window {
                     // and the same 4 this block leaves under itself, so the card
                     // keeps one gap and not three. The 5h/7d rows still butt
                     // together; only the lead-in moved.
-                    anchors.top: ministerPick.bottom
+                    anchors.top: spiritPick.bottom
                     anchors.topMargin: 4
-                    anchors.right: ministerPick.right
-                    width: ministerPick.width
+                    anchors.right: spiritPick.right
+                    width: spiritPick.width
                     visible: (Usage.rows.length + Usage.hrows.length) > 0
                     // Zero: each meter already carries its own line box (§4.1),
                     // and stacked readouts butt together like every other tiled
@@ -1098,8 +1098,8 @@ Window {
                         }
                     }
 
-                    // ===================== hermes minister usage =====================
-                    // [his, 2026-07-31] when a minister runs on the hermes
+                    // ===================== hermes spirit usage =====================
+                    // [his, 2026-07-31] when a spirit runs on the hermes
                     // (deepseek) backend, keep his Anthropic bars as they are and
                     // show the real hermes usage here. These are FIGURES — tokens
                     // and cost Hermes recorded for `source='tool'` sessions
@@ -1110,7 +1110,7 @@ Window {
                     // hard left, figures hard right.
                     Item { width: 1; height: 4 }
                     PixelText {
-                        text: "hermes ministers"
+                        text: "hermes spirits"
                         color: Theme.textDim
                     }
                     // The one hermes "how much I have left" figure [his,
@@ -2088,7 +2088,7 @@ Component {
 
                         // PENDING ORDERS — what he typed that is waiting for the
                         // next summoner, either because nothing was running when he
-                        // sent it or because a minister went away without reading
+                        // sent it or because a spirit went away without reading
                         // it. Drawn because an order he cannot see is one he has to
                         // assume was lost.
                         // ...and one he has changed his mind about can be rewritten,
@@ -2107,7 +2107,7 @@ Component {
                         // should be shown at the bottom of the summoner section NOT
                         // at the bottom of the triangle"*. An order is addressed to
                         // the summoner and is waiting on HIM to pick it up; the
-                        // triangle is the ministers already bound, which is a
+                        // triangle is the spirits already bound, which is a
                         // different question.
                         PixelText {
                             width: summonerCol.width
@@ -2167,9 +2167,9 @@ Component {
         // height and the Column below the Loader lay out by it (2026-08-01).
         height: implicitHeight
 
-                // ---- THE TRIANGLE: where the ministers reside ----
+                // ---- THE TRIANGLE: where the spirits reside ----
                 // [his, 2026-07-29] *"what triangle should refer to is the area the
-                // ministers reside"*. Solomon etches the CIRCLE on his own card in
+                // spirits reside"*. Solomon etches the CIRCLE on his own card in
                 // the summoner section above; the spirits are bound in the triangle,
                 // which is this list. The section `id` stays `agents` — it keys the
                 // collapse state, `jump()` and the `ag` titlebar cell — so this is
@@ -2178,21 +2178,21 @@ Component {
                     width: page.width
                     // "the triangle", with the article, matching "the circle" on
                     // Solomon's own card - [his, 2026-07-29]. Since 2026-07-31 the
-                    // band also says how many ministers the triangle is BINDING
+                    // band also says how many spirits the triangle is BINDING
                     // right now, in the same voice as the rest of the card — his
-                    // call, *"the triangle binds three ministers"*. The count is
-                    // `Agents.boundMinisters`, which counts the running minister
+                    // call, *"the triangle binds three spirits"*. The count is
+                    // `Agents.boundSpirits`, which counts the running spirit
                     // cards drawn HERE — sessions he started are already filtered
                     // out of the drawn set, so an anonymous terminal of his is
                     // never counted. With none bound the band keeps the plain name
-                    // and lets the dim `binds ministers.` line below say the empty
+                    // and lets the dim `binds spirits.` line below say the empty
                     // state, so the two never contradict.
-                    label: Agents.boundMinisters === 0 ? "the triangle"
+                    label: Agents.boundSpirits === 0 ? "the triangle"
                          : "the triangle binds " + ({
                                 1: "one", 2: "two", 3: "three", 4: "four",
                                 5: "five", 6: "six"
-                            }[Agents.boundMinisters] || Agents.boundMinisters)
-                           + " minister" + (Agents.boundMinisters === 1 ? "" : "s")
+                            }[Agents.boundSpirits] || Agents.boundSpirits)
+                           + " spirit" + (Agents.boundSpirits === 1 ? "" : "s")
                     collapsed: win.isCollapsed("agents")
                     fgAccent: win.fgAccent
                     fgAccent2: win.fgAccent2
@@ -2216,7 +2216,7 @@ Component {
                         // Nothing running is the NORMAL state, and it must read as
                         // finished rather than as broken — one dim sentence, no
                         // empty frame, no "0 agents". [his, 2026-07-29] that
-                        // sentence is now *"binds ministers."*: what the triangle
+                        // sentence is now *"binds spirits."*: what the triangle
                         // IS, rather than a report that it is currently holding
                         // none. Gated on the WORKERS and not on the list's length,
                         // as before.
@@ -2225,7 +2225,7 @@ Component {
                             visible: win.nothingRunning
                             height: visible ? implicitHeight : 0
                             color: Theme.dim
-                            text: "binds ministers."
+                            text: "binds spirits."
                         }
 
                         // ...and the ONE thing that can make that sentence a lie:
@@ -2247,10 +2247,10 @@ Component {
                         }
 
                         // NO description of this section. [his, 2026-07-30] the
-                        // triangle explains itself with cards: bound ministers ->
+                        // triangle explains itself with cards: bound spirits ->
                         // the cards and nothing else, none bound -> the one line
                         // above. The paragraph that used to stand here ("each
-                        // minister says what it is doing...") is gone; the two
+                        // spirit says what it is doing...") is gone; the two
                         // sentences on a card are legible without a preface, and
                         // §5.2 already refuses a disclaimer where a sentence
                         // belongs.
@@ -2324,11 +2324,11 @@ Component {
 
                         // The watcher's own systemd sentence used to sit here, under
                         // the cards. It does not any more: [his, 2026-07-30] with
-                        // ministers bound the section draws the cards and the shells
+                        // spirits bound the section draws the cards and the shells
                         // and NOTHING else. It is still read (`Agents.watcher`/
                         // `armed`) and it is still SAID in the one case where
                         // silence would make the empty line a lie — a watcher that
-                        // will never fire, up beside "binds ministers." (§10).
+                        // will never fire, up beside "binds spirits." (§10).
                     }
                 }
 
@@ -2339,13 +2339,13 @@ Component {
 Component {
     id: shellsSection
     //: a top-level section [his re-ask, 2026-08-02]: the live workings
-    //  of the bound ministers, placeable anywhere among the other bands.
+    //  of the bound spirits, placeable anywhere among the other bands.
     Column {
         width: page.width
         height: implicitHeight
 
                         // ---- their LIVE SHELLS ----
-                        // [his ask, 2026-08-01] a small live tail per bound minister,
+                        // [his ask, 2026-08-01] a small live tail per bound spirit,
                         // under the cards: the last couple of lines each one is
                         // actually producing, so a running spirit reads as a live
                         // process rather than two sentences and a name. It is the
@@ -2356,7 +2356,7 @@ Component {
                         //
                         // It shows only when there is something to show (§5.2 — an
                         // empty shell slot is a hole he has to fill): no bound
-                        // ministers, or none with anything to say, draws no
+                        // spirits, or none with anything to say, draws no
                         // band and no rows. Each row's foreGROUND tail is the
                         // transcript; [his, 2026-08-01] the backgrounded
                         // long-runners it left running ride under it, read from
@@ -2369,7 +2369,7 @@ Component {
                     visible: win.agentShells.length > 0
                     height: visible ? implicitHeight : 0
                     // [ask 1, 2026-08-02] renamed from "shells": the band is the
-                    // live tail of each bound minister's tool calls AND their
+                    // live tail of each bound spirit's tool calls AND their
                     // output ([his, 2026-08-03] — the actual result of the
                     // command/script, not just the command line), not a
                     // terminal — *"the other section labeled 'shells'"* read as
@@ -2778,7 +2778,7 @@ Component {
     // The cap dropdown's entries. Same shape as `modelItems`.
     //
     // A SUCCESSFUL PICK SAYS NOTHING. [his, 2026-07-30] *"when i change the
-    // number of ministers in goetia itll flash text indicating that on the
+    // number of spirits in goetia itll flash text indicating that on the
     // inner bar"* — reported as the inner titlebar flashing text, and it is
     // this: `footerStr` IS `status`, so a four-second confirmation is the only
     // thing that slot ever holds, appearing and going again with nothing on
@@ -2823,16 +2823,16 @@ Component {
         }));
     }
 
-    // What the ministers run on. The list is `boardwork.MINISTER_MODELS`, which
+    // What the spirits run on. The list is `boardwork.SPIRIT_MODELS`, which
     // stops at opus 5 medium by his rule, so there is nothing here to disable
     // and nothing greyed out: a chooser that draws what it will not do is the
     // §10 failure (see `boardwork.role_flags`, which enforces the same ceiling
-    // where a minister is actually spawned).
-    function ministerItems() {
-        return Agents.ministers.map((m) => ({
+    // where a spirit is actually spawned).
+    function spiritItems() {
+        return Agents.spirits.map((m) => ({
             label: (m.current ? "* " : "  ") + m.label,
             trigger: () => {
-                if (!Agents.chooseMinister(m.name))
+                if (!Agents.chooseSpirit(m.name))
                     win.status = "could not save that choice";
             }
         }));
@@ -2910,12 +2910,12 @@ Component {
         if (text !== "")
             items.push({ label: "copy line", trigger: () => Board.copy(text) });
         items = items.concat(fileItems()).concat(undoItems());
-        // Force-stopping a bound minister — §10.3's destructive act, so it is a
+        // Force-stopping a bound spirit — §10.3's destructive act, so it is a
         // menu entry (never a click on a list that re-sorts under the cursor)
         // at the FOOT of the menu behind its own separator, where the pointer
         // does not land by accident. Offered ONLY for a RUNNING worker or
-        // decision minister: Solomon is not force-stopped from here and a
-        // subminister has no unit of its own (`boardwork.force_stop` refuses
+        // decision spirit: Solomon is not force-stopped from here and a
+        // subspirit has no unit of its own (`boardwork.force_stop` refuses
         // both, so nothing here can silently no-op). `forceStop` SIGKILLs the
         // unit and re-reads liveness before the footer speaks, so this is never
         // the inert control §10 rules out.
@@ -2924,7 +2924,7 @@ Component {
                 && (k === "worker" || k === "decision")) {
             items.push({ separator: true });
             items.push({ label: "force-stop "
-                                + (ar.name !== "" ? ar.name : "this minister"),
+                                + (ar.name !== "" ? ar.name : "this spirit"),
                          trigger: () =>
                              { win.status = Agents.forceStop(String(ar.agent.id)); } });
         }

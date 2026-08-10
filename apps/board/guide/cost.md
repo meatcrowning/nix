@@ -2,14 +2,14 @@
 
 *The three levers on what one of his asks costs to work: waiting out a burst so
 it is planned once, tiering each dispatched piece to a model that fits it, and
-bounding how long one minister runs. Spawning, the cap and the handoff are in
+bounding how long one spirit runs. Spawning, the cap and the handoff are in
 [`orchestrator.md`](orchestrator.md); read that first — this file assumes it.*
 
 Part of goetia's guide — the map and the shared rules are in
 [`../AGENTS.md`](../AGENTS.md).
 
 **Why there is a file for this at all.** Measured on `top` for the week to
-2026-08-01 (`docs/claude-usage-2026-08-01.md`): the ministers were $4,426 of the
+2026-08-01 (`docs/claude-usage-2026-08-01.md`): the spirits were $4,426 of the
 spend against the summoners' $911, **84% of every dollar was context re-read
 rather than output**, and per-turn cost climbed with session length (42k
 cache-read/turn at 22 turns, 151k at 163). The summoner dropdown had tiered the
@@ -55,7 +55,7 @@ coordination this section is about.
 - **For scale, what the hold is measured AGAINST**: over ~190 runs in
   `~/.cache/board-watch.log` the summoner itself is a median ~50 s, p90 ~2 min,
   tail 3-6 min, and nothing is dispatched until it finishes. That, and not this
-  window, is where the wait between his sentence and a minister card lives.
+  window, is where the wait between his sentence and a spirit card lives.
 - **It SLEEPS inside the run, holding the flock — it does not return.**
   `board-inbox.path` is `PathExistsGlob` and level-triggered, so returning with
   the queue still full is a respawn every few hundred milliseconds for the
@@ -66,7 +66,7 @@ coordination this section is about.
   window out — the queue is re-read after every sleep. That is the whole point:
   the batch then reaches ONE summoner, which can group it by file set instead
   of two summoners dispatching two
-  ministers into the same files.
+  spirits into the same files.
 - **Nothing is dropped and nothing is promised.** The queue is left exactly as
   it was until it is drained, and the box's footer already says only *"in the
   inbox - ctrl+z takes it back until a summoner acts"* — so nothing drawn
@@ -77,18 +77,18 @@ coordination this section is about.
   there sets `BOARD_COALESCE_QUIET=0` by default, or each would take 75 seconds
   longer.
 
-### WHICH TIER a minister runs on, per piece of work
+### WHICH TIER a spirit runs on, per piece of work
 
 **`dispatch --model` names the tier, and it is stored on the task record.** The
-summoner dropdown tiers the PLANNER (~9% of the spend); every minister — the
+summoner dropdown tiers the PLANNER (~9% of the spend); every spirit — the
 43% — read one global dial, so a doc edit and a compositor C++ change spawned on
-the same model. `boardwork.minister_tier()` resolves what the planner asked for
-(`resolve_minister`'s forgiveness), `dispatch()` stores `(model, effort)` on the
+the same model. `boardwork.spirit_tier()` resolves what the planner asked for
+(`resolve_spirit`'s forgiveness), `dispatch()` stores `(model, effort)` on the
 record, and `_spawn_worker` picks the BACKEND from that record's model —
-so a deepseek-tiered minister reaches hermes rather than Claude carrying a
+so a deepseek-tiered spirit reaches hermes rather than Claude carrying a
 deepseek flag.
 
-- **His dial (`minister-model`) is the DEFAULT a dispatch tiers UP from**, not a
+- **His dial (`spirit-model`) is the DEFAULT a dispatch tiers UP from**, not a
   ceiling. [his, 2026-08-02] it defaults to `deepseek v4`, so a dispatch naming
   no tier runs cheap and off the weekly Claude window; Solomon names a higher
   `--model` only for work that needs one. (The hard `role_flags` clamp — opus 5
@@ -98,7 +98,7 @@ deepseek flag.
   `promote()` finds it a slot.
 - **An unreadable tier is his dial, never a cheap guess**, and `boardctl` SAYS
   so rather than falling back silently. The `role_flags` clamp still runs last
-  and independently, so no route here can spawn a minister above the ceiling.
+  and independently, so no route here can spawn a spirit above the ceiling.
 - **The prompt's rubric makes deepseek-flash the DEFAULT** (inventories,
   surveys, doc edits, mechanical renames, anything within what deepseek can
   usually handle) **and Solomon tiers UP from it, by difficulty, only for work
@@ -110,23 +110,23 @@ deepseek flag.
   is plainly more than mechanical, and before reaching for opus consider
   splitting the piece into simpler models working together on disjoint files —
   each cheap, running in parallel. Higher than opus 4.8 medium he is ASKED
-  first. A minister on too small a model does not fail where he can see it: it
+  first. A spirit on too small a model does not fail where he can see it: it
   half-lands the work and reports `ENACTED` — so tier UP when the work
   genuinely exceeds the cheap model, never because the difficulty is
   uncertain.
 - Harness: `tools/board-test.py` → `test_tier`.
 
-### The RELAY: a minister hands the rest on rather than running long
+### The RELAY: a spirit hands the rest on rather than running long
 
 **`RELAY_TURNS` (60) is a turn budget, and reaching it is a HANDOVER, not a
 kill.** A session's cost is quadratic in its turns — everything already said is
-re-read on every turn after it — and the measured average minister was 118 turns
+re-read on every turn after it — and the measured average spirit was 118 turns
 with cache-read per turn climbing 42k → 151k across that range.
 `WORKER_TIMEOUT_S` bounded the wall-clock and nothing bounded the turns.
 
-- **`boardctl.py turns`** reads the count from the minister's own transcript
+- **`boardctl.py turns`** reads the count from the spirit's own transcript
   (the file `boardphase` already tails) and says whether to hop. An unreadable
-  count — a hermes minister, a transcript not written yet — is the honest
+  count — a hermes spirit, a transcript not written yet — is the honest
   unknown and NEVER advises a hop.
 - **`boardctl.py relay '<brief>'`** writes the successor into `work/pending/`
   carrying the brief, the same tier, the same `--where` and `relay: n+1`, and
@@ -135,11 +135,11 @@ with cache-read per turn climbing 42k → 151k across that range.
   indistinguishable from a crash to `reap()` — filed `failed`, with a `FAILED:`
   bullet for work that was going fine. Here the ending is voluntary: the
   successor exists before the exit and **the hop stamps `mark_reported()`**, so
-  the finished minister reaps as `done`. The `relay` call IS its report.
+  the finished spirit reaps as `done`. The `relay` call IS its report.
 - **`RELAY_MAX` (4) is the depth cap**; the last hop is refused and told to
   report the remainder as `PARTIAL:`. A relay is not a `retried` — the two marks
   stay distinct because the causes do (a budget reached vs a platform death).
-- **A minister that cannot hop is not told the mechanism exists.**
+- **A spirit that cannot hop is not told the mechanism exists.**
   `relay_block()` renders rule 14 only when there is a hop left, because every
   line in that prompt is re-read on every turn of the session it is telling to
   be short.

@@ -13,7 +13,7 @@ property. Renamed 2026-07-29, his call; the prose here goes on calling the FILE
 Vendored source of the decision board: `main.py`, `boardparse.py`, `boardmove.py`,
 `boardagents.py`, `boardwork.py`, `boardphase.py`, `boardhermes.py`,
 `boardusage.py`, `boardundo.py` and `qml/`. (`boardhermes.py` is the second
-runtime's half of `boardphase`: a minister spawned on hermes has no transcript
+runtime's half of `boardphase`: a spirit spawned on hermes has no transcript
 file, so its card and its drawer are read out of hermes's own session store —
 see `guide/cards.md`.)
 Built and installed by `home/prog/board.nix`, which mirrors `reader.nix` exactly
@@ -27,13 +27,13 @@ goetia                      # ~/nix/docs/board.<hostname>.md, this host's own
 goetia /path/to/other.md    # any file with the same shape
 ```
 
-## The word he reads for an agent is MINISTER
+## The word he reads for an agent is SPIRIT
 
 [his, 2026-07-29] *"ANYTHING that could refer to an agent where the user can see
-should use minister instead"*. So every string he can read — goetia's own labels,
-placeholders and framing prose, the cap dropdown (`4 ministers`), everything
+should use spirit instead"*. So every string he can read — goetia's own labels,
+placeholders and framing prose, the cap dropdown (`4 spirits`), everything
 `boardctl.py` prints back at him, and every template that writes a line into
-the board, `board-watch.py`'s included — says **minister** / **ministers**,
+the board, `board-watch.py`'s included — says **spirit** / **spirits**,
 never *agent* or *worker*.
 
 **Identifiers do not move.** `kind="worker"`, `board-worker-*.service`,
@@ -47,7 +47,7 @@ Solomon's own **summoner** section: the magician stands in the circle and the
 spirits are bound in the triangle.
 
 **A length is not free.** These templates are wrapped when they are written, and
-*minister* is three characters longer than *agent* — `board-watch.py`'s
+*spirit* is three characters longer than *agent* — `board-watch.py`'s
 `FAIL_TEMPLATE` had to give three characters back elsewhere in the sentence or
 the write re-wrapped lines around it (`tools/board-watch-test.py` catches that).
 
@@ -93,7 +93,7 @@ swallow whole for one change.
     - What the orchestrator and its workers are told, beyond the board
     - What each spawn STARTS WITH, before it reads a line
     - The one thing that could hold the whole system up, and does not
-    - The deepseek subminister: a Claude minister OR the orchestrator delegates a chunk
+    - The deepseek subspirit: a Claude spirit OR the orchestrator delegates a chunk
     - A DISPATCH IS A START, NOT A RESULT
     - ...and the summon note GOES when the result arrives
 
@@ -102,10 +102,10 @@ swallow whole for one change.
 106 lines. Its sections:
 
   - A BURST IS ONE PLANNING PROBLEM: the coalescing window
-  - WHICH TIER a minister runs on, per piece of work
-  - The RELAY: a minister hands the rest on rather than running long
+  - WHICH TIER a spirit runs on, per piece of work
+  - The RELAY: a spirit hands the rest on rather than running long
 
-### [`guide/cards.md`](guide/cards.md) — the TRIANGLE — what a minister's card says
+### [`guide/cards.md`](guide/cards.md) — the TRIANGLE — what a spirit's card says
 
 559 lines. Its sections:
 
@@ -126,7 +126,7 @@ swallow whole for one change.
     - 1. How many summoners plan at once
     - 2. The dropdown beside the box: which model, and how hard, summons
     - 3. ...and under THAT, how many agents may run at once
-    - 4. ...and under that, what the MINISTERS run on — CAPPED
+    - 4. ...and under that, what the SPIRITS run on — CAPPED
     - ...and under that, how much of his usage is gone
     - Second thoughts about something still queued
     - Ctrl+Z takes the last order back — and it is a real cancellation
@@ -274,7 +274,7 @@ Both harnesses redirect `XDG_STATE_HOME` and always did; what leaked was
 one-off probe scripts an agent wrote against a `/tmp` board and ran with nothing
 set, inheriting his real `~/.local/state/board`. Measured on `top` 2026-08-02:
 830 stale `edit-*.lock` files from 830 throwaway board paths, and a fixture
-stash left in `inflight/` that drew a phantom minister card on his board — a
+stash left in `inflight/` that drew a phantom spirit card on his board — a
 decision agent with no process behind it, which nothing would ever reap because
 a stash with a null pid cannot be observed to die. `boardparse.scratch_state_dir`
 is the backstop: a board that is not `board_path()` gets a per-board root under
