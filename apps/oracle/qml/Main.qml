@@ -57,12 +57,17 @@ Window {
 
     Component.onCompleted: Titlebar.setFooter(ollamaHost.replace(/^https?:\/\//, ""))
 
-    // Keep a model selected: default to the first the daemon reports, and never
-    // point at a model that has gone away.
+    // Keep a model selected, and never point at a model that has gone away.
+    // On a fresh launch (or when the current pick vanishes) default to the model
+    // he last used if the daemon still has it, else the first it reports.
     Connections {
         target: Ollama
         function onModelsChanged() {
-            if (win.model === "" || Ollama.models.indexOf(win.model) < 0)
+            if (win.model !== "" && Ollama.models.indexOf(win.model) >= 0)
+                return;                       // a still-valid selection stands
+            if (Ollama.lastModel !== "" && Ollama.models.indexOf(Ollama.lastModel) >= 0)
+                win.model = Ollama.lastModel;
+            else
                 win.model = Ollama.models.length > 0 ? Ollama.models[0] : "";
         }
         // The turns are appended by send() before the stream opens; these deltas
@@ -156,6 +161,7 @@ Window {
                          sources: "", searchCount: 0, searching: false,
                          streaming: true, isError: false });
         win.activeIndex = chatLog.count - 1;
+        Ollama.rememberModel(win.model);   // the model he last used is next launch's default
         Ollama.send(win.model, p, win.webSearch);
         input.clear();
     }
@@ -380,6 +386,15 @@ Window {
                 width: modelList.width
                 height: 22
                 color: rowMouse.containsMouse ? Theme.highlight : "transparent"
+                // A 1px rule where the agent-suggested group ends and the rest
+                // begins (docs/DESIGN.md §7.2 — the menu separator). Drawn at the
+                // top of the first non-suggested row.
+                Rectangle {
+                    visible: Ollama.suggestedCount > 0 && index === Ollama.suggestedCount
+                    anchors { top: parent.top; left: parent.left; right: parent.right }
+                    height: Theme.ctrlBorder
+                    color: Theme.border
+                }
                 PixelText {
                     anchors { left: parent.left; leftMargin: 6
                               right: parent.right; rightMargin: 6
@@ -393,7 +408,8 @@ Window {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: { win.model = modelData; picker.open = false; }
+                    onClicked: { win.model = modelData; Ollama.rememberModel(modelData);
+                                 picker.open = false; }
                 }
             }
             ScrollBar.vertical: VScroll {}
@@ -665,10 +681,17 @@ Window {
                 }
             }
 
-            // Follow the newest turn to the bottom while it streams; when idle,
-            // leave the scroll where he put it so he can read back up the log.
-            onContentHeightChanged: if (Ollama.busy)
+            // Follow the newest text to the bottom ONLY while he is already at
+            // the bottom (docs/DESIGN.md §6.1 — never yank his position). The
+            // moment he scrolls up, `followBottom` clears and streaming stops
+            // forcing the position; scrolling back down to the bottom re-arms it.
+            // Computed inline, not off a binding, so the height handler sees the
+            // just-grown contentHeight rather than a stale max.
+            property bool followBottom: true
+            onContentHeightChanged: if (followBottom)
                 contentY = Math.max(0, contentHeight - height)
+            onContentYChanged: followBottom =
+                contentY >= Math.max(0, contentHeight - height) - 2
 
             ScrollBar.vertical: VScroll { id: replyScroll }
         }
