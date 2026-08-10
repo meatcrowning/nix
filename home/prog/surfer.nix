@@ -140,6 +140,22 @@ let
   # at every probed size, and its mono+hinted render (uniform 8px advances) is
   # the look the desktop wants. The pins themselves live in
   # home/pkgs/desktop/font.nix; QtWebEngineProcess children inherit this env.
+  #
+  # The web twin ("More Perfect DOS VGA (web)") gets its antialias=false pin
+  # RE-ASSERTED here, not just in font.nix's conf.d, because on book a stale
+  # unmanaged ~/.config/fontconfig/fonts.conf (a regular file, not a
+  # home-manager symlink) carries a GLOBAL antialias=true plus per-family
+  # antialias=false overrides for the plain pixel faces only — and Fedora loads
+  # that user fonts.conf AFTER conf.d, so its global true clobbers the twin's
+  # conf.d pin (the plain face survives because it has its own override there,
+  # the twin has none). Result measured offscreen on book 2026-08-09: the twin,
+  # which is the family surfer forces on ALL page text (_adj_fam in main.py),
+  # came back grayF~0.59 — grayscale-antialiased, soft, not matching goetia's
+  # crisp pixel text — while the plain face stayed 0 grey. surfer's fcConf
+  # includes /etc/fonts/fonts.conf and then runs its own match target="font"
+  # LAST, so pinning the twin here wins over that stale file on both hosts (a
+  # no-op on top, where the twin already renders 0 grey). Verified: twin 0 grey,
+  # pixel-identical to the plain face, via a real WebEngineView grab.
   fcConf = pkgs.writeText "surfer-fontconfig.conf" ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
@@ -148,6 +164,10 @@ let
       <match target="font">
         <test name="family"><string>Botis 4x6</string></test>
         <edit name="antialias" mode="assign"><bool>true</bool></edit>
+      </match>
+      <match target="font">
+        <test name="family"><string>More Perfect DOS VGA (web)</string></test>
+        <edit name="antialias" mode="assign"><bool>false</bool></edit>
       </match>
     </fontconfig>
   '';
