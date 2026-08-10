@@ -177,7 +177,7 @@ Column {
             // (docs/DESIGN.md 3.1.2 — the full palette is always on now).
             label: "variant"
             SetSelect {
-                options: ["vivid", "muted", "pastel"]
+                options: ["vivid", "normal", "muted", "pastel"]
                 value: page.d.paletteVariant
                 onChanged: (v) => { page.d.paletteVariant = v; SettingsStore.save(); }
             }

@@ -3,7 +3,7 @@
 from it. Prints KEY=rrggbb lines for shell eval.
 
     wal-extract.py IMAGE [--colors N] [--accent RRGGBB|--auto] [--bg pure|tone]
-                         [--variant vivid|muted|pastel] [--light|--dark]
+                         [--variant vivid|normal|muted|pastel] [--light|--dark]
 
 Six of the Settings program's Appearance keys land here, and this is the ONLY
 place they can: the whole desktop's palette is derived in this file, so a
@@ -29,7 +29,7 @@ value all taken from the image, the hue clamped to a legible band so each slot
 still reads as its state — so the desktop reads as several wallpaper colours,
 not shades of one. The manual accent replaces where the accent hue comes FROM,
 never the derivation; `--bg tone` puts BG on a rung below BGALT rather than
-inventing a colour. The `paletteVariant` picker (vivid | muted | pastel) is a
+inventing a colour. The `paletteVariant` picker (vivid | normal | muted | pastel) is a
 global chroma/value transform over that generated palette. See
 ~/nix/docs/DESIGN.md §3.1.2."""
 import sys, os, json, colorsys, warnings
@@ -70,6 +70,11 @@ VARIANTS = {
     "pastel":  {"light_cap": 0.34, "accent_v": 0.92, "struct_mul": 1.00, "status_s": 0.42, "light_ink": 0.40, "light_ink_v": 0.42},
     "muted":   {"light_cap": 0.20, "accent_v": 0.78, "struct_mul": 0.55, "status_s": 0.30, "light_ink": 0.10, "light_ink_v": 0.40},
     "vivid":   {"light_cap": 0.85, "accent_v": 1.00, "struct_mul": 1.45, "status_s": 0.90, "light_ink": 0.85, "light_ink_v": 0.55},
+    # `normal` is the plain, un-stylised baseline — every knob sits about
+    # halfway between pastel and vivid, so it neither softens the palette the
+    # way pastel does nor pushes the chroma the way vivid does. A
+    # middle-of-the-road, straightforward rendition of the wallpaper palette.
+    "normal":  {"light_cap": 0.55, "accent_v": 0.96, "struct_mul": 1.20, "status_s": 0.65, "light_ink": 0.60, "light_ink_v": 0.48},
 }
 
 
@@ -171,7 +176,7 @@ def full_palette(h, s, v, clusters, pure_bg, variant, light=False):
     """The desktop palette: the accent stays the primary hue, but the
     structural tones take the wallpaper's secondary hue and the status ramp
     takes real colour-coded hues nudged toward the wallpaper. Twelve tokens.
-    `variant` (vivid|muted|pastel) is a global transform — see VARIANTS.
+    `variant` (vivid|normal|muted|pastel) is a global transform — see VARIANTS.
     `light` inverts the value ladder onto a white background (dark ink accent,
     light grey structural tints) while keeping the secondary-hue frames and the
     sampled status ramp. docs/DESIGN.md §3.1.2."""
@@ -339,7 +344,7 @@ def main():
         if path is None:
             sys.stderr.write("usage: wal-extract.py IMAGE [--colors N] "
                              "[--accent RRGGBB] [--bg pure|tone] "
-                             "[--variant vivid|muted|pastel] "
+                             "[--variant vivid|normal|muted|pastel] "
                              "[--light|--dark]\n")
             return 2
         try:
