@@ -901,6 +901,39 @@ qs ipc call live all     # mode + which data singletons are actually polling
 That is the check for it. A `true` for something not on screen is the bug; two
 copies of a widget both live is the bug this whole split exists to prevent.
 
+### Watching `top` from `book`: `TopStats` + `TopProcDrawer` (book-only)
+
+The cpu popup on **book** has a disclosure under the local cpu chart — `top v` —
+that rolls out a COPY of the same graph sourced from the other machine, `top`,
+so the laptop can keep an eye on the desktop. It is gated on `Host.name === "air"`
+everywhere and does nothing on top itself. Same two-halves split as above, plus
+a transport:
+
+- **`TopStats.qml` is the data singleton**, shaped exactly like `SysInfo`
+  (`cpuHist`/`tempHist`/`memHist` ring buffers, `intervalSec`, a `watch(obj, on)`
+  set, a `stateJson`/`restoreState` pair carried by `shell.qml`'s `persist`
+  block). It fills those buffers by **ssh to the MagicDNS name `top`**, running
+  the SAME `scripts/sysinfo.sh` and parsing the same positional pipe line — so a
+  new field added to `sysinfo.sh` must keep `TopStats.parse`'s indices in step
+  just like `SysInfo`'s (see "sysinfo.sh's fields are POSITIONAL"). The transport
+  is **`/usr/bin/ssh`, not a nix ssh** (nix binaries can't resolve MagicDNS on
+  book), through `sh -c` for `$XDG_RUNTIME_DIR` expansion, with
+  `BatchMode`+`ControlMaster`+`ControlPersist` so 2s polls reuse one connection
+  and a missing key fails fast. **No new listener** — an outbound tailnet ssh,
+  the same loopback/tailnet-only rule as the comfy tunnel.
+- **`TopProcDrawer.qml` is the view + disclosure**, animated like the media queue
+  drawer (`SettingsStore.d.topStatsOpen`, a clip whose height glides over
+  `ViewMode.slideMs`, `Behavior` gated on `!ViewMode.settling` so a reload with
+  the drawer open lands in place). `CpuPanel.qml` stacks it under `CpuContent`
+  on air only and grows its `implicitHeight` so the popup follows the glide.
+- **It polls ONLY while the drawer is both on screen AND expanded** — `wantData`
+  drives `TopStats.watch`, so a closed disclosure spawns no ssh and top is never
+  touched when nobody is looking.
+- **`reachable` fails VISIBLY** (docs/DESIGN.md §10.2): an overlay says
+  "connecting to top…" (never reached) or "top unreachable" (was, isn't) instead
+  of a blank chart. Live data needs book joined to the tailnet with key-based ssh
+  to top; until then the drawer honestly reads unreachable and nothing is broken.
+
 ### Tooltips are driven by `show`, not `visible`
 
 `Tooltip.qml` owns its own visibility: it waits `delayMs` (350) before appearing
