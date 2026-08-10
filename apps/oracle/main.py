@@ -621,7 +621,7 @@ class Ollama(QObject):
                 self._run_fs_tool(name, args, i, remaining, calls)
             else:
                 self._tool_results[i] = {
-                    "role": "tool",
+                    "role": "tool", "tool_name": name,
                     "content": json.dumps({"error": "unknown tool: " + name})}
                 self._tool_done(remaining, calls)
 
@@ -630,7 +630,7 @@ class Ollama(QObject):
         if not key:
             self.webSearchError.emit(query, "no Tavily API key configured")
             self._tool_results[idx] = {
-                "role": "tool",
+                "role": "tool", "tool_name": "web_search",
                 "content": json.dumps({"error": "web search unavailable: no "
                                        "Tavily API key configured"})}
             self._tool_done(remaining, calls)
@@ -666,14 +666,15 @@ class Ollama(QObject):
                     pass
                 self.webSearchError.emit(query, msg)
                 self._tool_results[idx] = {
-                    "role": "tool",
+                    "role": "tool", "tool_name": "web_search",
                     "content": json.dumps({"error": "web search failed: " + msg})}
                 return
             obj = json.loads(data or b"{}")
             answer = obj.get("answer") or ""
             results = obj.get("results") or []
             # Fed back to the model to summarize and cite.
-            self._tool_results[idx] = {"role": "tool", "content": json.dumps({
+            self._tool_results[idx] = {"role": "tool", "tool_name": "web_search",
+                                       "content": json.dumps({
                 "query": query, "answer": answer,
                 "results": [{"title": r.get("title", ""), "url": r.get("url", ""),
                              "content": r.get("content", "")} for r in results]})}
@@ -683,7 +684,7 @@ class Ollama(QObject):
         except (ValueError, TypeError) as e:
             self.webSearchError.emit(query, str(e))
             self._tool_results[idx] = {
-                "role": "tool",
+                "role": "tool", "tool_name": "web_search",
                 "content": json.dumps({"error": str(e)})}
         finally:
             reply.deleteLater()
@@ -756,7 +757,7 @@ class Ollama(QObject):
                 return
             proc.deleteLater()
             result = self._fs_result(out, err, rc)
-            self._tool_results[idx] = {"role": "tool",
+            self._tool_results[idx] = {"role": "tool", "tool_name": name,
                                        "content": json.dumps(result)}
             self.fileToolDone.emit(self._fs_outcome(name, args, result),
                                    "error" not in result)
