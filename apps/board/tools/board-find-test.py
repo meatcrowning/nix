@@ -2,7 +2,7 @@
 """goetia's Ctrl+F find harness — offscreen, no window on anyone's screen.
 
 The board is ONE scroll region (docs/DESIGN.md §9.2), but its two ever-growing
-lists — LANDED and the triangle's minister cards — had no way to find anything
+lists — LANDED and the triangle's spirit cards — had no way to find anything
 by eye. §11.2 makes Ctrl+F the key for that; this asserts the real `qml/Main.qml`
 under QT_QPA_PLATFORM=offscreen:
 

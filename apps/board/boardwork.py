@@ -158,7 +158,7 @@ DEFAULT_CAP = 4
 #: Measured on book 2026-08-02 (7.3 GB): five workers plus the orchestrator,
 #: goetia, Hyprland and the panel OOM-killed the user slice — every worker
 #: SIGKILLed mid-task, and the panel's whole cgroup with them before
-#: `OOMPolicy=continue`. A Claude minister peaks near 2.8 GB, a deepseek
+#: `OOMPolicy=continue`. A Claude spirit peaks near 2.8 GB, a deepseek
 #: (hermes) one near 350 MB, and neither knows which it is until it grows — so
 #: the floor leaves room for the desktop plus one more worker rather than
 #: trying to price the spawn. Under it the task stays QUEUED, the same "a slot
@@ -280,7 +280,7 @@ def set_cap(n):
 
 # ------------------------------------------------------- how many summoners
 #: [his, 2026-07-29] four dropdowns at the top of the window, in his order:
-#: *"1. number of summoners 2. summoner model 3. number of ministers 4. minister
+#: *"1. number of summoners 2. summoner model 3. number of spirits 4. spirit
 #: model"*. This is the first of them, and it is the only one of the four that
 #: had no store at all before.
 #:
@@ -351,7 +351,7 @@ def split_for_summoners(items, n=None):
 #: allows the user to select which model they wish the orchestrator to be."* —
 #: and, its thinking budget too, added when he asked to choose *"the reasoning
 #: effort of the summoner agents"*. So this carries EFFORT now, exactly as the
-#: minister chooser below does, rather than the model alone: model and effort are
+#: spirit chooser below does, rather than the model alone: model and effort are
 #: one pick here, one control, one label.
 #:
 #: `(flag, effort, label)`. The flag is what `--model` gets, the effort what
@@ -361,11 +361,11 @@ def split_for_summoners(items, n=None):
 #: would silently re-point his choice the day a new one ships, which is exactly
 #: the thing a chooser exists to stop.
 #:
-#: Unlike the minister list this is NOT a ceiling: the summoner's judgement is
+#: Unlike the spirit list this is NOT a ceiling: the summoner's judgement is
 #: the whole of its job and he asked to be able to buy as much of it as he likes,
 #: so the higher efforts (`xhigh`, `max`) are offered on the reasoning models and
 #: there is no clamp at the spawn. It is a curated spread rather than the full
-#: model×effort cross product, for the reason `MINISTER_MODELS` is: a dropdown is
+#: model×effort cross product, for the reason `SPIRIT_MODELS` is: a dropdown is
 #: a short list of sensible pairs, and `boardctl.py model` takes any of them.
 ORCH_MODELS = [
     ("claude-fable-5", "high", "fable 5 high"),
@@ -471,23 +471,23 @@ def set_orch_model(name):
     return (flag, effort)
 
 
-# --------------------------------------------- what the MINISTERS run on
+# --------------------------------------------- what the SPIRITS run on
 #: The fourth dropdown, and the one with a hard ceiling on it. [his, 2026-07-29]
-#: *"do not allow ministers to be anything higher than opus 5 medium
-#: thinking."* So this list is the WHOLE of what a minister may ever be, and it
+#: *"do not allow spirits to be anything higher than opus 5 medium
+#: thinking."* So this list is the WHOLE of what a spirit may ever be, and it
 #: is an ALLOWLIST rather than an ordering: "higher" needs no definition if the
 #: only reachable values are the ones written here.
 #:
 #: `(flag, effort, label)`, ceiling FIRST because the ceiling is the hard cap
 #: this list exists to state — but the ceiling is no longer the default. [his,
-#: 2026-08-02] the minister DEFAULT is `deepseek v4 flash`, the LAST row and
-#: `MINISTER_DEFAULT` below: an unnamed dispatch runs cheap and Solomon tiers UP
+#: 2026-08-02] the spirit DEFAULT is `deepseek v4 flash`, the LAST row and
+#: `SPIRIT_DEFAULT` below: an unnamed dispatch runs cheap and Solomon tiers UP
 #: from there only for work that needs it (rubric in `ORCHESTRATOR_PROMPT`).
 #: Between the two: the same models thinking less, then the smaller families.
 #: Effort never exceeds `medium` for ANY of them, because his sentence caps the
 #: thinking budget as well as the family and a bigger budget on a smaller model
 #: is still a tier he did not offer.
-MINISTER_MODELS = [
+SPIRIT_MODELS = [
     ("claude-opus-5", "medium", "opus 5 medium"),
     ("claude-opus-5", "low", "opus 5 low"),
     ("claude-opus-4-8", "medium", "opus 4.8 medium"),
@@ -504,19 +504,19 @@ MINISTER_MODELS = [
 
 #: The ceiling, named once — the hard cap [his, 2026-07-29], the first row of the
 #: list above and the value a stale or out-of-range file clamps DOWN to.
-MINISTER_CEILING = (MINISTER_MODELS[0][0], MINISTER_MODELS[0][1])
+SPIRIT_CEILING = (SPIRIT_MODELS[0][0], SPIRIT_MODELS[0][1])
 
-#: The default, named once — [his, 2026-08-02] the minister DEFAULT is deepseek
+#: The default, named once — [his, 2026-08-02] the spirit DEFAULT is deepseek
 #: v4, the LAST row above and what an unnamed dispatch (and a never-chosen dial)
 #: gets. Solomon tiers UP from here per piece of work; the ceiling is where that
 #: tiering stops without asking him first (rubric in `ORCHESTRATOR_PROMPT`).
-MINISTER_DEFAULT = (MINISTER_MODELS[-1][0], MINISTER_MODELS[-1][1])
+SPIRIT_DEFAULT = (SPIRIT_MODELS[-1][0], SPIRIT_MODELS[-1][1])
 
 
 def tier_label(flag, effort=""):
     """The human tier label for a spawn's `(flag, effort)` — *"sonnet 5 medium"*,
     *"deepseek v4 flash"* — from the chooser tables the rest of this file reads,
-    MINISTER first then ORCH (the summoner-only tiers `fable`/`xhigh`/`max` live
+    SPIRIT first then ORCH (the summoner-only tiers `fable`/`xhigh`/`max` live
     only there). `""` for a spawn that named no model. An unofferable pair (an
     old record, a hermes id) falls back to the wire values with the deepseek
     path prefix stripped — never the raw `deepseek/...-0731` flag, which is a
@@ -526,68 +526,68 @@ def tier_label(flag, effort=""):
     if not flag:
         return ""
     effort = (effort or "").strip()
-    for f, e, lab in MINISTER_MODELS + ORCH_MODELS:
+    for f, e, lab in SPIRIT_MODELS + ORCH_MODELS:
         if f == flag and (not effort or e == effort):
             return lab
     return ("%s %s" % (flag.split("/")[-1], effort)).strip()
 
 
-def minister_choices():
-    return {(f, e) for f, e, _ in MINISTER_MODELS}
+def spirit_choices():
+    return {(f, e) for f, e, _ in SPIRIT_MODELS}
 
 
-def minister_file():
-    return os.path.join(_root(), "minister-model")
+def spirit_file():
+    return os.path.join(_root(), "spirit-model")
 
 
-def minister_label(pair=None):
+def spirit_label(pair=None):
     """The prose for a `(flag, effort)` pair — what the closed control reads and
     what the footer reports. Never the wire values (docs/DESIGN.md §2)."""
-    flag, effort = pair or minister_model()
-    for f, e, lab in MINISTER_MODELS:
+    flag, effort = pair or spirit_model()
+    for f, e, lab in SPIRIT_MODELS:
         if (f, e) == (flag, effort):
             return lab
     return "%s %s" % (flag, effort)
 
 
-def minister_model():
-    """`(flag, effort)` the NEXT minister spawns with, never above the ceiling.
+def spirit_model():
+    """`(flag, effort)` the NEXT spirit spawns with, never above the ceiling.
 
     Read at spawn time and cached nowhere, so his choice reaches the next
-    dispatch and no running minister is re-pointed — the same mechanism
+    dispatch and no running spirit is re-pointed — the same mechanism
     `orch_model()` is, and for the same reason.
 
-    A never-chosen dial is `MINISTER_DEFAULT` — [his, 2026-08-02] the minister
+    A never-chosen dial is `SPIRIT_DEFAULT` — [his, 2026-08-02] the spirit
     DEFAULT is deepseek v4, so an unnamed dispatch runs cheap and Solomon tiers
-    UP from there. A value the file DOES hold that is not one of `MINISTER_MODELS`
+    UP from there. A value the file DOES hold that is not one of `SPIRIT_MODELS`
     — stale, hand edited, or written by a version that offered more — clamps to
     the CEILING, not the file's value and not a spawn that dies on a CLI usage
     error: a chosen-but-unofferable value is the one place the hard cap, not the
     cheap default, is the safe fallback.
     """
     try:
-        with open(minister_file()) as f:
+        with open(spirit_file()) as f:
             parts = f.read().split()
     except OSError:
-        return MINISTER_DEFAULT
+        return SPIRIT_DEFAULT
     pair = (parts[0], parts[1]) if len(parts) >= 2 else None
-    return pair if pair in minister_choices() else MINISTER_CEILING
+    return pair if pair in spirit_choices() else SPIRIT_CEILING
 
 
-def resolve_minister(name):
+def resolve_spirit(name):
     """A `(flag, effort)` from what somebody typed. Exact label, exact
     `<flag> <effort>`, or one unambiguous case-insensitive substring of either —
     `resolve_model`'s forgiveness, and its refusal: ambiguity is an error.
 
-    A model this board offers a SUMMONER but not a minister (`fable 5`) is
+    A model this board offers a SUMMONER but not a spirit (`fable 5`) is
     refused here with the reason, rather than silently becoming the ceiling: a
     typed selector that quietly does something else is worse than one that says
     no.
     """
     want = " ".join((name or "").split()).lower()
     if not want:
-        raise ValueError("no minister model named")
-    rows = [("%s %s" % (f, e), lab, (f, e)) for f, e, lab in MINISTER_MODELS]
+        raise ValueError("no spirit model named")
+    rows = [("%s %s" % (f, e), lab, (f, e)) for f, e, lab in SPIRIT_MODELS]
     for wire, lab, pair in rows:
         if want in (wire.lower(), lab.lower()):
             return pair
@@ -598,18 +598,18 @@ def resolve_minister(name):
     if hits:
         raise ValueError("%r matches %s - be more specific"
                          % (name, ", ".join(lab for lab, _ in hits)))
-    raise ValueError("not a minister this board may run: %r - the ceiling is %s "
+    raise ValueError("not a spirit this board may run: %r - the ceiling is %s "
                      "and the choices are: %s"
-                     % (name, minister_label(MINISTER_CEILING),
-                        ", ".join(lab for _, _, lab in MINISTER_MODELS)))
+                     % (name, spirit_label(SPIRIT_CEILING),
+                        ", ".join(lab for _, _, lab in SPIRIT_MODELS)))
 
 
-def minister_tier(name=None):
+def spirit_tier(name=None):
     """The `(flag, effort)` ONE dispatch really runs on — his dial when it names
     nothing, and never anything the dial itself could not be set to.
 
     This is the per-task half of tiering the spend: the summoner dropdown tiers
-    the PLANNER (~9% of the spend) and until now every minister — the
+    the PLANNER (~9% of the spend) and until now every spirit — the
     43% — read one global dial, so a doc edit and a compositor C++ change
     spawned on the same model. `dispatch(model=…)` names a tier per piece of
     work, because the planner has just written the task sentence and the
@@ -621,40 +621,40 @@ def minister_tier(name=None):
     opus 4.8 medium the rubric stops at without asking him first.
 
     **An unresolvable tier falls back to his dial, never to an invented one.**
-    `resolve_minister` refuses what it cannot name unambiguously and this
-    swallows that refusal upward to `minister_model()` — his configured default
+    `resolve_spirit` refuses what it cannot name unambiguously and this
+    swallows that refusal upward to `spirit_model()` — his configured default
     (deepseek v4 unless he has raised the dial), not a tier nobody chose. The
     clamp in `role_flags` still runs last and independently, so no route here can
-    spawn a minister above the ceiling either.
+    spawn a spirit above the ceiling either.
     """
     if not (name or "").strip():
-        return minister_model()
+        return spirit_model()
     try:
-        return resolve_minister(name)
+        return resolve_spirit(name)
     except ValueError:
-        return minister_model()
+        return spirit_model()
 
 
-def set_minister_model(name):
+def set_spirit_model(name):
     """Choose it. Same atomic write as `set_cap`, because a dispatch may fire at
     any moment and a half-written file must be impossible."""
-    flag, effort = resolve_minister(name)
+    flag, effort = resolve_spirit(name)
     os.makedirs(_root(), exist_ok=True)
-    tmp = minister_file() + ".tmp"
+    tmp = spirit_file() + ".tmp"
     with open(tmp, "w") as f:
         f.write("%s %s\n" % (flag, effort))
         f.flush()
         os.fsync(f.fileno())
-    os.replace(tmp, minister_file())
+    os.replace(tmp, spirit_file())
     return (flag, effort)
 
 
 # -------------------------------------------------------------- the RELAY
-#: How many turns one minister takes before it hands the rest to a fresh one.
+#: How many turns one spirit takes before it hands the rest to a fresh one.
 #:
 #: **A session's cost is quadratic in its turns** — everything already said is
 #: re-read on every turn after it — and measured on `top` (2026-08-01, over the
-#: week) a minister averaged 118 turns while cache-read per turn climbed from
+#: week) a spirit averaged 118 turns while cache-read per turn climbed from
 #: 42k at 22 turns to 151k at 163. `WORKER_TIMEOUT_S` bounds the wall-clock and
 #: nothing bounded the turns; "dispatch smaller" was doctrine in `RULES` and
 #: unenforced. Three 100-turn hops cost about a third of one 300-turn session.
@@ -669,12 +669,12 @@ RELAY_MAX = int(os.environ.get("BOARD_WORK_RELAY_MAX", "4"))
 
 
 def turns_used(session=None):
-    """How many turns this minister has taken, or None if it cannot be known.
+    """How many turns this spirit has taken, or None if it cannot be known.
 
     Counted from the agent's OWN transcript — the file `boardphase` already
     tails to draw the observed line on its card — so nothing new is written and
     no runtime is asked to account for itself. None is the honest answer for a
-    hermes minister (its run lives in hermes's store, not a `.jsonl` here) and
+    hermes spirit (its run lives in hermes's store, not a `.jsonl` here) and
     for a transcript that has not appeared yet; `boardctl turns` says so rather
     than inventing a number, and a budget that cannot be read is not enforced.
     """
@@ -694,7 +694,7 @@ def turns_used(session=None):
 
 
 def relay_state(session=None):
-    """`(used, budget, depth, may_relay)` for the running minister.
+    """`(used, budget, depth, may_relay)` for the running spirit.
 
     `used` is None when the transcript cannot be read (see `turns_used`), and
     then `may_relay` is False: an unknown count never triggers a hop, because
@@ -709,7 +709,7 @@ def relay_state(session=None):
 
 
 def relay(brief, agent_id=None, where=None, model=None):
-    """Hand what is LEFT of this task to a fresh minister. Returns the new
+    """Hand what is LEFT of this task to a fresh spirit. Returns the new
     record, or None with a reason on `ValueError`.
 
     **A relay is not a kill, and that is the whole design.** `--max-turns`
@@ -717,13 +717,13 @@ def relay(brief, agent_id=None, where=None, model=None):
     `reap()` it would look exactly like a crash — filed `failed`, with a
     `FAILED:` bullet on his board for work that was going fine. Here the
     ENDING IS VOLUNTARY AND ACCOUNTED FOR: the successor is written to
-    `pending/` before the minister exits, the hop is stamped `mark_reported`
+    `pending/` before the spirit exits, the hop is stamped `mark_reported`
     so `reap()` files the finished one under `done/`, and `promote()` starts
     the successor on the next tick exactly as it starts anything else that was
     over the cap.
 
     The successor inherits the tier, the `--where` and the depth+1. It does NOT
-    inherit the original task text alone: `brief` is what the minister knows
+    inherit the original task text alone: `brief` is what the spirit knows
     now and the next one would otherwise rediscover, and it is the reason one
     hop costs a brief rather than a re-run.
     """
@@ -737,7 +737,7 @@ def relay(brief, agent_id=None, where=None, model=None):
         raise ValueError("this task has already relayed %d times (the limit) - "
                          "report what is left as PARTIAL: instead" % depth)
     task = os.environ.get("BOARD_WORK_TASK") or ""
-    rec = {"task": " ".join(("%s\n\nPICKING UP WHERE THE LAST MINISTER LEFT "
+    rec = {"task": " ".join(("%s\n\nPICKING UP WHERE THE LAST SPIRIT LEFT "
                              "OFF: %s" % (task, brief)).split()),
            "phase": "", "where": (where if where is not None
                                   else os.environ.get("BOARD_WORK_WHERE") or ""),
@@ -746,7 +746,7 @@ def relay(brief, agent_id=None, where=None, model=None):
            "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "sent": time.time(),
            "host": os.uname().nodename,
            "order": os.environ.get("BOARD_ORDER") or ""}
-    flag, effort = minister_tier(model or " ".join(
+    flag, effort = spirit_tier(model or " ".join(
         x for x in (os.environ.get("BOARD_WORK_MODEL") or "",
                     os.environ.get("BOARD_WORK_EFFORT") or "") if x))
     rec["model"], rec["effort"] = flag, effort
@@ -754,11 +754,11 @@ def relay(brief, agent_id=None, where=None, model=None):
     ba._write_json(path, rec)
     rec["file"] = path
     rec["state"] = "queued"
-    # The hop IS this minister's report. Without it `reap()` finds a worker
+    # The hop IS this spirit's report. Without it `reap()` finds a worker
     # that recorded nothing, files it `failed` and writes a `FAILED:` bullet
     # for work that is in hand and queued — the exact confident lie the rest of
     # this module is built to refuse.
-    mark_reported(aid, "relayed to a fresh minister: %s" % brief[:120])
+    mark_reported(aid, "relayed to a fresh spirit: %s" % brief[:120])
     return rec
 
 
@@ -766,7 +766,7 @@ def relay_block(budget, depth):
     """Rule 14 as the worker sees it, or nothing at all.
 
     A budget of zero (or a task already at `RELAY_MAX`) prints NOTHING rather
-    than a rule saying "you may not relay": a minister that cannot hop does not
+    than a rule saying "you may not relay": a spirit that cannot hop does not
     need to know the mechanism exists, and every line in that prompt is re-read
     on every turn of the session it is telling to be short.
     """
@@ -810,7 +810,7 @@ def host_line():
 #: spawner appends them VERBATIM to the system prompt (`--append-system-prompt`)
 #: via `AgentBackend.system_blocks`, rather than paraphrasing — a constant block
 #: appended to the identical cached system prompt, so RULES is a cache read (see
-#: `docs/agents/minister-context.md`). This block is never interpolated into a
+#: `docs/agents/spirit-context.md`). This block is never interpolated into a
 #: prompt body; the prompts point at it.
 #:
 #: Rule 1 was the reverse of this until 2026-07-29 — no rebuild, ever, work left
@@ -929,7 +929,7 @@ systemd unit, your log and your inbox are keyed on, and it is what the tools \
 below want when one asks for an agent id.
 
 An orchestrator, Solomon, split up something he asked for and bound you to one
-piece of it. This is your whole job; another minister has the rest, and may be
+piece of it. This is your whole job; another spirit has the rest, and may be
 editing other files in this same checkout right now.
 
 When it is done you record it, and you are then at liberty to depart.
@@ -1043,7 +1043,7 @@ nothing under it: `ENACTED: done, no errors. pushed.` Detail (an indented
 line, a second clause) earns its place only for what would otherwise surprise
 him — something that did not work, a choice you made on his behalf, a rebuild
 left pending, work deliberately left out. Never dress a plain success up.
-Leaving another minister's work alone is implied, not news — a note never
+Leaving another spirit's work alone is implied, not news — a note never
 says it.
 
    The board (`docs/board.<hostname>.md`, this host's own — the two machines \
@@ -1079,12 +1079,12 @@ orchestrator**, handing you a further item because you are already in those \
 files: that is part of your job now, and your final note says what you did with \
 it. Take them either way — an unread note is handed to somebody else later.
 
-13. **If you are a CLAUDE minister (or Solomon, the orchestrator), you may hand
-a chunk of wide, mechanical work to a cheaper deepseek subminister.** Run a
+13. **If you are a CLAUDE spirit (or Solomon, the orchestrator), you may hand
+a chunk of wide, mechanical work to a cheaper deepseek subspirit.** Run a
 bounded chunk in your shell and get back a COMPACT result, instead of burning
 your own expensive context on it:
 
-       python3 apps/board/tools/boardctl.py subminister \\
+       python3 apps/board/tools/boardctl.py subspirit \\
            'read apps/pylib/**/*.py and list every public function with file:line'
 
    Reach for it only when BOTH hold: **(a)** the work is wide or mechanical —
@@ -1098,20 +1098,20 @@ your own expensive context on it:
    for creative, discretionary or judgement work you would have to re-read the
    whole output of to trust — if you would ingest ALL of it to verify or redo it,
    doing the work yourself is still cheaper. And a caller ALREADY on deepseek —
-   a minister or the orchestrator on a hermes model — never uses it (the tool
+   a spirit or the orchestrator on a hermes model — never uses it (the tool
    refuses): it is not cheaper for one of those.
 {relay}
 There is nobody to ask. Finish, or write down why you did not.
 """
 
-#: Rule 14, and it is only shown to a minister that can actually act on it
+#: Rule 14, and it is only shown to a spirit that can actually act on it
 #: (`relay_block`). Written as a HANDOVER rather than a stop: the reason a long
 #: session is expensive is not the work it does, it is that every turn re-reads
 #: everything said before it, so what has to end is the SESSION and not the
 #: task.
 RELAY_RULE = """
 14. **You have a turn budget of about {budget}, and when you reach it you hand \
-the REST of this task to a fresh minister instead of pushing on.** Check it \
+the REST of this task to a fresh spirit instead of pushing on.** Check it \
 between steps, in the same breath as your inbox:
 
        python3 apps/board/tools/boardctl.py turns
@@ -1124,7 +1124,7 @@ push, and `land`/`note` what actually landed, exactly as rule 10 says.
    2. Then hand the rest on, in one call, and STOP:
 
        python3 apps/board/tools/boardctl.py relay '<what landed, what is still \\
-left, and what you learned that the next minister would otherwise have to \\
+left, and what you learned that the next spirit would otherwise have to \\
 rediscover>'
 
    The successor is queued the instant you call it and the next tick starts it, \
@@ -1134,7 +1134,7 @@ your report, so you do not need a second one.
 
    **Why, in a number.** A session's cost grows with the SQUARE of its turns — \
 everything already said is re-read on every turn after it — so three 100-turn \
-ministers cost about a THIRD of one 300-turn minister for the same work. The \
+spirits cost about a THIRD of one 300-turn spirit for the same work. The \
 brief you write is the whole price of the hop; write it well and it is cheap.
 
    This is hop {hop} of at most {most}. On the last one there is no relay left: \
@@ -1174,7 +1174,7 @@ for|to <a few words>'
 
     python3 apps/board/tools/boardctl.py agents       # who is running, and on what
 
-    python3 apps/board/tools/boardctl.py subminister '<a bounded chunk of \\
+    python3 apps/board/tools/boardctl.py subspirit '<a bounded chunk of \\
 wide, mechanical reading you would otherwise do YOURSELF>'
 
     python3 apps/board/tools/boardctl.py phase reading --doing '<one short \\
@@ -1220,9 +1220,9 @@ Every worker's own rules already send it to those, and reading them here buys \
 nothing but delay. Name the one it should read if it is not obvious.
   * **When you genuinely must read WIDE, mechanical material to name a \
 `--where` or see how many jobs an ask holds — many files at once, a bulk \
-inventory — hand THAT to a deepseek `subminister` rather than reading it in \
+inventory — hand THAT to a deepseek `subspirit` rather than reading it in \
 your own waited-on session**, and fold the compact result back in. Same tool \
-and same two rules a minister uses (rule 13): the chunk is wide/mechanical and \
+and same two rules a spirit uses (rule 13): the chunk is wide/mechanical and \
 what comes back is smaller than the work. It refuses if you are yourself on a \
 deepseek/hermes model — then it is no cheaper and you read it yourself. Do not \
 reach for it for the quick grep you would finish in one call, or to plan the \
@@ -1259,7 +1259,7 @@ the other end.
 apart, and they are ONE planning problem.** They are given to you together on \
 purpose: how he broke his thinking into box-fulls is not how the work divides. \
 So group across the whole input by FILE SET before you dispatch anything — two \
-messages that both land in `apps/player/` are one minister, not two racing to \
+messages that both land in `apps/player/` are one spirit, not two racing to \
 edit the same file — and treat a later message that corrects or extends an \
 earlier one as the same item, not a second one.
 
@@ -1305,7 +1305,7 @@ better. [his, 2026-08-02] the DEFAULT is now `deepseek v4` — leave `--model` \
 off and the piece runs there, off his weekly Claude window entirely. You tier \
 UP from that default with `--model`, and only for a piece that is MORE than \
 mechanical or beyond what deepseek can usually handle, graded by how hard it \
-is. The ministers are most of what this system spends, so the cheap default is \
+is. The spirits are most of what this system spends, so the cheap default is \
 the point: name a Claude tier because the work needs it, not by habit.
 
   * `deepseek v4 flash` (the DEFAULT, leave `--model` off) — an inventory, a \
@@ -1327,7 +1327,7 @@ needs more than deepseek? Prefer the default unless the piece is plainly more \
 than mechanical; uncertainty is not a reason to spend. Before you reach for \
 opus, consider SPLITTING the piece into simpler models working together on \
 disjoint files — each cheap, running in parallel (the split rules above). Tier \
-UP only when the work genuinely exceeds the cheap model: a minister on too \
+UP only when the work genuinely exceeds the cheap model: a spirit on too \
 small a model does not fail where he can see it — it half-lands the work and \
 reports that it is done, which is the one thing nothing here may do. That guard \
 is the reason to tier up to what the work NEEDS, not a licence to default to \
@@ -1358,7 +1358,7 @@ next agent instead — which is why the words have to stand on their own. Neithe
 outcome loses it; neither is immediate.
   * **A collision is never grounds for LEAVING THE ITEM ALONE.** His rule, \
 2026-07-29: *"in the future instead of leaving it alone you should pass it to \
-the minister holding the files"*. Noting that you left work undone to avoid a \
+the spirit holding the files"*. Noting that you left work undone to avoid a \
 collision is not an outcome — hand it over. An agent had found the cause of \
 goetia's flashing titlebar text, saw `apps/pylib/vtbclient.py` was held by \
 another worker, and dropped the fix "rather than collide", losing it to save \
@@ -1502,7 +1502,7 @@ DENY = ["Bash(hyprctl plugin:*)", "Bash(loginctl:*)",
 #: a spawn here is ~43k tokens, and it is re-read on EVERY turn of the session.
 #: Across one day (215 sessions, 11,987 assistant turns) that floor alone
 #: accounted for ~600M of the 1,510M input tokens processed — 40%. So a token cut
-#: from the floor is paid back once per turn, and the long ministers run 150-350
+#: from the floor is paid back once per turn, and the long spirits run 150-350
 #: turns each. Restricting the tool set is the single biggest lever: 43,442 ->
 #: 32,865 tokens, -24%, because it drops the deferred-tool block, `Workflow`
 #: (~6k of description on its own), `Artifact`, `ScheduleWakeup`, `ToolSearch`,
@@ -1510,33 +1510,33 @@ DENY = ["Bash(hyprctl plugin:*)", "Bash(loginctl:*)",
 #: fire every few turns.
 #:
 #: WHAT IS DELIBERATELY STILL HERE. `Task` is the subagent tool (the CLI answers
-#: to that name and the session then reports it as `Agent`) — ministers use it,
-#: 26 times across the last 40 sessions, and a minister that cannot fan out does
+#: to that name and the session then reports it as `Agent`) — spirits use it,
+#: 26 times across the last 40 sessions, and a spirit that cannot fan out does
 #: the reading serially in its own context, which is the expensive shape. The web
-#: pair costs ~1k and has zero recorded uses, and is kept anyway: a minister sent
+#: pair costs ~1k and has zero recorded uses, and is kept anyway: a spirit sent
 #: at an upstream API it cannot look up flounders for far more than 1k. `Skill`
-#: and `TodoWrite` are NOT here — nothing in a minister's prompt reaches for
+#: and `TodoWrite` are NOT here — nothing in a spirit's prompt reaches for
 #: either, and every skill this machine has is unreachable from a headless run.
 TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "Task",
          "WebFetch", "WebSearch"]
 
-#: Turn the superpowers plugin OFF for a MINISTER, and only for a minister.
-#: [his, 2026-07-29] *"def disable superpowers for ministers but solomon should
+#: Turn the superpowers plugin OFF for a SPIRIT, and only for a spirit.
+#: [his, 2026-07-29] *"def disable superpowers for spirits but solomon should
 #: still have it enabled"*. `--settings` merges over `~/.claude/settings.json`
 #: rather than replacing it, which is what this needs: the SessionStart host-id
 #: hook and the PostToolUse inbox hook both still fire (verified — an inbox note
 #: reaching a worker mid-flight is load-bearing for rule 11).
 #:
-#: It is worth doing for a minister and not for Solomon because of the shape of
+#: It is worth doing for a spirit and not for Solomon because of the shape of
 #: the two runs, not because the skill is worse advice. The injection is ~2k
 #: tokens and arrives TWICE (the hook's own stdout and the additionalContext it
 #: asks for), plus ~2.2k of skill listing. Solomon runs 6-12 turns, so it costs
-#: it ~50k a run; a minister runs 150-350, so it costs one of those ~1.2M. And
+#: it ~50k a run; a spirit runs 150-350, so it costs one of those ~1.2M. And
 #: its first instruction — invoke a skill before answering, brainstorm before
-#: building — is advice for somebody with a human to check with. A minister has
+#: building — is advice for somebody with a human to check with. A spirit has
 #: no human, has its whole task in one prompt, and has RULES that already say
 #: what to read.
-MINISTER_SETTINGS = json.dumps(
+SPIRIT_SETTINGS = json.dumps(
     {"enabledPlugins": {"superpowers@claude-plugins-official": False}})
 
 
@@ -1548,7 +1548,7 @@ MINISTER_SETTINGS = json.dumps(
 #: live transcript lives, and the per-backend tool names. A second backend is
 #: additive: subclass `AgentBackend`, register it, select it at spawn with the
 #: `BOARD_BACKEND` env (a runtime knob like `cap`, no rebuild). See
-#: `docs/agents/minister-context.md` for the invariants a backend must keep.
+#: `docs/agents/spirit-context.md` for the invariants a backend must keep.
 #
 #: `context_flags` and `role_flags` below stay public module functions because
 #: the prompt-argv tests call them by name; the backend COMPOSES them rather
@@ -1597,7 +1597,7 @@ class ClaudeBackend(AgentBackend):
     """The Claude Code CLI. `--append-system-prompt` merges RULES into the
     default system prompt that `--exclude-dynamic-system-prompt-sections` has
     already made identical across spawns, so the whole constant prefix is one
-    cache entry (see the Phase 1 note in `docs/agents/minister-context.md`)."""
+    cache entry (see the Phase 1 note in `docs/agents/spirit-context.md`)."""
     name = "claude"
 
     def system_blocks(self, role):
@@ -1636,7 +1636,7 @@ class ClaudeBackend(AgentBackend):
 #: The models that live on the Hermes runtime rather than Claude Code, and the
 #: provider they run under on this machine. A model in `HERMES_MODELS` routes a
 #: spawn to `HermesBackend`; everything else stays on Claude. [his, 2026-07-31]
-#: the summoner and minister dropdowns should offer `deepseek-v4-flash-0731`
+#: the summoner and spirit dropdowns should offer `deepseek-v4-flash-0731`
 #: via hermes.
 #:
 #: `deepseek-v4-pro` rides it too — a stronger, still-far-cheaper-than-Claude
@@ -1647,7 +1647,7 @@ class ClaudeBackend(AgentBackend):
 #:
 #: [docs/agents/hermes-paid-models.md, 2026-08-03] three more rungs fill gaps in
 #: the ladder: `minimax-m3` (a mid step between the deepseek default and
-#: kimi/haiku) and `deepseek-v4-pro` as MINISTER rungs, and `z-ai/glm-5.2` — the
+#: kimi/haiku) and `deepseek-v4-pro` as SPIRIT rungs, and `z-ai/glm-5.2` — the
 #: portal's own silent default, a strong planner below the fable summoner — as a
 #: summoner option. All route through the same nous provider.
 HERMES_MODELS = {"deepseek/deepseek-v4-flash-0731",
@@ -1656,8 +1656,8 @@ HERMES_MODELS = {"deepseek/deepseek-v4-flash-0731",
                  "z-ai/glm-5.2",
                  "moonshotai/kimi-k3"}
 HERMES_PROVIDER = os.environ.get("BOARD_HERMES_PROVIDER", "nous")
-#: The Hermes toolsets a minister may reach. Mirrors the Claude `TOOLS` idea:
-#: a minister gets the shell, the file tools and the web pair — nothing bigger.
+#: The Hermes toolsets a spirit may reach. Mirrors the Claude `TOOLS` idea:
+#: a spirit gets the shell, the file tools and the web pair — nothing bigger.
 HERMES_TOOLSETS = os.environ.get("BOARD_HERMES_TOOLSETS",
                                  "file,terminal,web,search")
 #: Cap on tool-calling iterations, the Hermes analog of the 45-minute unit cap.
@@ -1744,8 +1744,8 @@ def _role_model(role, model=None):
     backend."""
     if model:
         return model.strip()
-    if role in MINISTER_ROLES:
-        return minister_model()[0]
+    if role in SPIRIT_ROLES:
+        return spirit_model()[0]
     if role == "orchestrator":
         # Honour the same `BOARD_ORCH_MODEL` override `role_flags` reads, so the
         # BACKEND a run rides (hermes vs claude) never disagrees with the
@@ -1766,34 +1766,34 @@ def get_backend_for_role(role, model=None):
     return get_backend_for_model(_role_model(role, model))
 
 
-# --------------------------------------------------- the deepseek subminister
-#: A Claude minister may hand a chunk of wide, mechanical work to a cheaper
-#: deepseek "subminister" instead of doing it in its own expensive context —
-#: the whole point of the feature. THE MODEL IS PINNED: whatever the minister's
-#: own dropdown says, a subminister ALWAYS runs on the deepseek flash model,
+# --------------------------------------------------- the deepseek subspirit
+#: A Claude spirit may hand a chunk of wide, mechanical work to a cheaper
+#: deepseek "subspirit" instead of doing it in its own expensive context —
+#: the whole point of the feature. THE MODEL IS PINNED: whatever the spirit's
+#: own dropdown says, a subspirit ALWAYS runs on the deepseek flash model,
 #: and it rides the hermes backend because that model is in `HERMES_MODELS`.
-DEEPSEEK_SUBMINISTER_MODEL = "deepseek/deepseek-v4-flash-0731"
-DEEPSEEK_SUBMINISTER_TURNS = int(
-    os.environ.get("BOARD_SUBMINISTER_MAX_TURNS", str(HERMES_MAX_TURNS)))
-#: Backstop only. A bounded subminister chunk should finish in minutes; this
-#: stops a wedged hermes run from hanging the calling minister's shell forever
+DEEPSEEK_SUBSPIRIT_MODEL = "deepseek/deepseek-v4-flash-0731"
+DEEPSEEK_SUBSPIRIT_TURNS = int(
+    os.environ.get("BOARD_SUBSPIRIT_MAX_TURNS", str(HERMES_MAX_TURNS)))
+#: Backstop only. A bounded subspirit chunk should finish in minutes; this
+#: stops a wedged hermes run from hanging the calling spirit's shell forever
 #: (the calling tool's own timeout usually bites first, which is why the guide
-#: tells a minister to keep a delegated chunk bounded).
-SUBMINISTER_TIMEOUT_S = int(os.environ.get("BOARD_SUBMINISTER_TIMEOUT", "2700"))
+#: tells a spirit to keep a delegated chunk bounded).
+SUBSPIRIT_TIMEOUT_S = int(os.environ.get("BOARD_SUBSPIRIT_TIMEOUT", "2700"))
 
 
 def calling_backend():
     """Which agent runtime the CALLING process is running under, if any.
 
-    The gate for `subminister`, and it treats a Claude MINISTER and Solomon the
+    The gate for `subspirit`, and it treats a Claude SPIRIT and Solomon the
     ORCHESTRATOR identically — both are `claude` processes, both may delegate,
     and the refusal is on the RUNTIME (already on deepseek), never on the role.
     Walks this process's ancestors and takes the NEAREST one that is an agent
     runtime — `hermes` or claude — because the nearest is the one we are actually
-    running under: a deepseek subminister spawned by a Claude caller has FIRST a
+    running under: a deepseek subspirit spawned by a Claude caller has FIRST a
     `hermes` ancestor and then a claude one beyond it, and it is hermes. Env is
     deliberately NOT consulted (except as a fallback when no agent ancestor is
-    found): `BOARD_WORKER_BACKEND` would be inherited by a subminister from its
+    found): `BOARD_WORKER_BACKEND` would be inherited by a subspirit from its
     claude parent and lie.
 
     Returns `'claude'` | `'hermes'` | `'shell'` (no agent runtime in the chain).
@@ -1813,25 +1813,25 @@ def calling_backend():
     return env if env in ("claude", "hermes") else "shell"
 
 
-def subminister(prompt, max_turns=None):
-    """Run `prompt` to completion on the deepseek flash subminister, synchronously.
+def subspirit(prompt, max_turns=None):
+    """Run `prompt` to completion on the deepseek flash subspirit, synchronously.
 
-    Returns its stdout text. The calling Claude minister (or Solomon, the
+    Returns its stdout text. The calling Claude spirit (or Solomon, the
     orchestrator) runs this in its shell and the result is captured as a tool
-    result and folded into its own context — so the subminister is told, in the
+    result and folded into its own context — so the subspirit is told, in the
     framing below, to return something COMPACT relative to the work it did. That
     compactness is what makes the hop a saving rather than a large bill.
 
-    Refuses unless the CALLER genuinely runs on a Claude model — a minister or
+    Refuses unless the CALLER genuinely runs on a Claude model — a spirit or
     the orchestrator already on the deepseek/hermes runtime spending another
     hermes run to spawn one is pure waste (see `calling_backend`; the gate is on
     the runtime, not the role).
 
-    **It DOES get a card.** [his follow-up, 2026-08-01] a subminister is given
+    **It DOES get a card.** [his follow-up, 2026-08-01] a subspirit is given
     its own demon name from the Lesser Key and a registration record keyed on a
     minted `sub…` id, so the board can draw an inset card under its parent while
     it runs (`Murmur` renders it in `main.py`/`qml` off the fields this writes:
-    `kind="subminister"`, `name`, `parent`, `parentName`). It is NOT a board
+    `kind="subspirit"`, `name`, `parent`, `parentName`). It is NOT a board
     worker: it takes no unit, writes no bullet, counts against no cap
     (`live_workers` filters on `kind=="worker"`), is never reaped
     (`reap` reads task files it never creates) and is not in the flat `cards()`
@@ -1840,23 +1840,23 @@ def subminister(prompt, max_turns=None):
     """
     want = " ".join((prompt or "").split())
     if not want:
-        raise ValueError("no prompt for the subminister")
+        raise ValueError("no prompt for the subspirit")
     if calling_backend() == "hermes":
         raise ValueError(
             "you are ALREADY on the deepseek/hermes runtime, so a deepseek "
-            "subminister is just another cheap run - do this chunk yourself; "
-            "the tool refuses a caller (minister or orchestrator) already on "
+            "subspirit is just another cheap run - do this chunk yourself; "
+            "the tool refuses a caller (spirit or orchestrator) already on "
             "deepseek spawning another")
-    q = SUBMINISTER_FRAME.format(prompt=want)
+    q = SUBSPIRIT_FRAME.format(prompt=want)
     cmd = ["hermes", "chat", "-q", q, "-Q",
            "--source", "tool",
-           "-m", DEEPSEEK_SUBMINISTER_MODEL,
+           "-m", DEEPSEEK_SUBSPIRIT_MODEL,
            "--provider", HERMES_PROVIDER,
            "-t", HERMES_TOOLSETS,
-           "--max-turns", str(int(max_turns or DEEPSEEK_SUBMINISTER_TURNS)),
+           "--max-turns", str(int(max_turns or DEEPSEEK_SUBSPIRIT_TURNS)),
            "--yolo"]
     # The id/name/record exist only for the duration of the run, purely so the
-    # UI can draw the inset card. `parent` is the CALLER's inbox id — a minister's
+    # UI can draw the inset card. `parent` is the CALLER's inbox id — a spirit's
     # `BOARD_AGENT_ID`, or the orchestrator's — so `Murmur` can place the card
     # directly under the row that spawned it (`boardagents.self_id`).
     aid = "sub%s" % os.urandom(3).hex()
@@ -1866,48 +1866,48 @@ def subminister(prompt, max_turns=None):
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                              text=True, cwd=REPO)
     except (OSError, ValueError) as e:
-        raise ValueError("the deepseek subminister could not run: %s" % e)
-    ba.register(aid, want[:70], p.pid, kind="subminister", where="",
+        raise ValueError("the deepseek subspirit could not run: %s" % e)
+    ba.register(aid, want[:70], p.pid, kind="subspirit", where="",
                 session="", name=name, parent=parent,
                 # It always runs on deepseek flash; name that tier on its card
                 # like every other agent's, from the offerable flag (not the raw
                 # hermes id) so `tier_label` reads *"deepseek v4 flash"*.
-                model=MINISTER_DEFAULT[0], effort=MINISTER_DEFAULT[1])
+                model=SPIRIT_DEFAULT[0], effort=SPIRIT_DEFAULT[1])
     try:
-        out, err = p.communicate(timeout=SUBMINISTER_TIMEOUT_S)
+        out, err = p.communicate(timeout=SUBSPIRIT_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         p.kill()
         out, err = p.communicate()
-        raise ValueError("the deepseek subminister timed out after %ss"
-                         % SUBMINISTER_TIMEOUT_S)
+        raise ValueError("the deepseek subspirit timed out after %ss"
+                         % SUBSPIRIT_TIMEOUT_S)
     except (OSError, subprocess.SubprocessError) as e:
-        raise ValueError("the deepseek subminister could not run: %s" % e)
+        raise ValueError("the deepseek subspirit could not run: %s" % e)
     finally:
         ba.unregister(aid)
     if p.returncode != 0:
-        raise ValueError("the deepseek subminister failed (exit %s): %s"
+        raise ValueError("the deepseek subspirit failed (exit %s): %s"
                          % (p.returncode, (err or out or "").strip()[:600]))
     return out
 
 
-#: The framing a subminister starts with. It is the subminister's WHOLE
+#: The framing a subspirit starts with. It is the subspirit's WHOLE
 #: instruction set — deliberately a self-contained block, NOT the board-worker
 #: `RULES` (which speaks of committing, rebuilding and writing to the board, all
 #: things a bounded mechanical subagent must NOT do). Its job is to return a
-#: COMPACT result and get out of the way; the calling Claude minister quotes
+#: COMPACT result and get out of the way; the calling Claude spirit quotes
 #: what comes back, so the leaner it is the more the hop saves.
-SUBMINISTER_FRAME = (
-    "You are a deepseek subminister working FOR a Claude minister (or the "
+SUBSPIRIT_FRAME = (
+    "You are a deepseek subspirit working FOR a Claude spirit (or the "
     "orchestrator) on this machine. You get one bounded chunk of wide, "
     "mechanical work (bulk reading, "
     "wide greps, a normalising/mechanical transform). DO it in your own cheap "
-    "context, and return a COMPACT result the calling minister can fold straight "
+    "context, and return a COMPACT result the calling spirit can fold straight "
     "into its own context: a summary, an inventory, a list, or the transformed "
     "output it asked for. Do NOT write to any board, do NOT commit, do NOT use "
     "boardctl note/land/ask, and do NOT spawn any further agent. Do the work "
     "entirely on files in the repo: never touch the user's display, focus, "
     "audio, running apps or a rebuild, and never run a GUI. Keep your final "
-    "answer lean - the calling minister will quote it wholesale.\n\n"
+    "answer lean - the calling spirit will quote it wholesale.\n\n"
     "--- the chunk ---\n{prompt}\n--- end ---")
 
 
@@ -1940,10 +1940,10 @@ def context_flags(role):
     with its own tool list.
     """
     argv = ["--exclude-dynamic-system-prompt-sections"]
-    if role in MINISTER_ROLES:
+    if role in SPIRIT_ROLES:
         argv += ["--tools", *TOOLS,
                  "--disable-slash-commands",
-                 "--settings", MINISTER_SETTINGS]
+                 "--settings", SPIRIT_SETTINGS]
     return argv
 
 
@@ -1980,26 +1980,26 @@ def context_flags(role):
 #: to choose *"the reasoning effort of the summoner agents"* on top of the model,
 #: so the effort is no longer pinned; `DEFAULT_ORCH` (`high`) is what a summoner
 #: runs at until he picks otherwise, which is the value it was pinned to before.
-#: Unlike a minister the summoner has NO ceiling — its judgement is the whole of
+#: Unlike a spirit the summoner has NO ceiling — its judgement is the whole of
 #: its job and he asked to be able to buy as much of it as he likes.
 #:
-#: A MINISTER's pair is his too — the fourth dropdown, read out of
-#: `minister_model()` at spawn (which `role_flags` overwrites the pair below
+#: A SPIRIT's pair is his too — the fourth dropdown, read out of
+#: `spirit_model()` at spawn (which `role_flags` overwrites the pair below
 #: with), so like the orchestrator's the value here is a dead fallback shape. It
-#: is `MINISTER_DEFAULT` — [his, 2026-08-02] the minister default is deepseek v4
-#: — named through the constant so it cannot drift from what `minister_model()`
+#: is `SPIRIT_DEFAULT` — [his, 2026-08-02] the spirit default is deepseek v4
+#: — named through the constant so it cannot drift from what `spirit_model()`
 #: returns when he has never chosen.
 #:
-#: The two MINISTER roles. Both are drawn on his board as ministers and both are
+#: The two SPIRIT roles. Both are drawn on his board as spirits and both are
 #: bound by the same ceiling, so the dropdown writes one store and this names who
 #: reads it — a decision agent that could be re-pointed while a worker could not
 #: would be the same control disagreeing with itself.
-MINISTER_ROLES = ("worker", "decision")
+SPIRIT_ROLES = ("worker", "decision")
 
 ROLES = {
     "orchestrator": ("", "high"),
-    "worker": MINISTER_DEFAULT,
-    "decision": MINISTER_DEFAULT,
+    "worker": SPIRIT_DEFAULT,
+    "decision": SPIRIT_DEFAULT,
 }
 
 
@@ -2010,19 +2010,19 @@ def role_tier(role, model=None, effort=None):
     the launched model and the card's label are resolved by one function and
     cannot disagree (a decision card was blank because its stash carried no
     tier — this is what board-watch stamps it from). Same precedence and the
-    same minister clamp as `role_flags` documents below."""
+    same spirit clamp as `role_flags` documents below."""
     m, e = ROLES.get(role, ("", ""))
     if role == "orchestrator":
         m, e = orch_model()  # his choice of model AND effort, re-read
-    elif role in MINISTER_ROLES:
-        m, e = minister_model()   # his choice, capped, re-read likewise
+    elif role in SPIRIT_ROLES:
+        m, e = spirit_model()   # his choice, capped, re-read likewise
     prefix = "BOARD_" + ("ORCH" if role == "orchestrator" else role.upper())
     # explicit arg > BOARD_* env > the role default, resolved independently for
     # model and effort so a caller can pin one and leave the other.
     model = (os.environ.get(prefix + "_MODEL", m) if model is None else model).strip()
     effort = (os.environ.get(prefix + "_EFFORT", e) if effort is None else effort).strip()
-    if role in MINISTER_ROLES and (model, effort) not in minister_choices():
-        model, effort = MINISTER_CEILING
+    if role in SPIRIT_ROLES and (model, effort) not in spirit_choices():
+        model, effort = SPIRIT_CEILING
     return model, effort
 
 
@@ -2041,13 +2041,13 @@ def role_flags(role, model=None, effort=None):
     `BOARD_WORKER_EFFORT`, `BOARD_DECISION_MODEL` / `BOARD_DECISION_EFFORT`.
     Set one to the empty string to drop the flag and inherit the default.
 
-    **A MINISTER role is clamped after all of that**, environment included. [his,
-    2026-07-29] *"do not allow ministers to be anything higher than opus 5 medium
-    thinking"* — so the pair either is one of `MINISTER_MODELS` or becomes
-    `MINISTER_CEILING`, and there is no reachable route (stale file, hand-edited
+    **A SPIRIT role is clamped after all of that**, environment included. [his,
+    2026-07-29] *"do not allow spirits to be anything higher than opus 5 medium
+    thinking"* — so the pair either is one of `SPIRIT_MODELS` or becomes
+    `SPIRIT_CEILING`, and there is no reachable route (stale file, hand-edited
     file, exported variable, dropped flag inheriting whatever
-    `~/.claude/settings.json` says) by which a minister spawns above it. The
-    variables can still LOWER a minister, which is all a harness ever wanted.
+    `~/.claude/settings.json` says) by which a spirit spawns above it. The
+    variables can still LOWER a spirit, which is all a harness ever wanted.
     """
     model, effort = role_tier(role, model=model, effort=effort)
     argv = []
@@ -2143,7 +2143,7 @@ def log_header(aid, name, task, session):
     chose; a hermes worker's is a row in `~/.hermes/state.db` whose id nobody
     knows yet, so the header says how to reach it and `boardphase._bind_hermes`
     appends the exact id the moment the session is bound. [2026-07-31: the
-    header pointed every hermes minister at a `~/.claude/projects/*.jsonl` that
+    header pointed every hermes spirit at a `~/.claude/projects/*.jsonl` that
     was never written.]
     """
     _log_line(aid, "worker %s (%s) starting: %s" % (aid, name or "?",
@@ -2307,8 +2307,8 @@ def dispatch(task, phase="", where="", context="", cap_=None, model=""):
     is never its own hit. WARN ONLY: it changes nothing about what was
     dispatched; `boardctl dispatch` prints it and the caller decides.
 
-    `model` names the TIER this piece runs on (`minister_tier`) — a label, a
-    wire pair, or anything `resolve_minister` can name; empty is his dial. It
+    `model` names the TIER this piece runs on (`spirit_tier`) — a label, a
+    wire pair, or anything `resolve_spirit` can name; empty is his dial. It
     is resolved HERE and stored on the record, not read at spawn time, so a
     task that queues behind the cap runs on the tier it was planned with rather
     than on whatever the dial says whenever a slot happens to free.
@@ -2317,7 +2317,7 @@ def dispatch(task, phase="", where="", context="", cap_=None, model=""):
     task = " ".join((task or "").split())
     if not task:
         return None
-    flag, effort = minister_tier(model)
+    flag, effort = spirit_tier(model)
     rec = {"task": task, "phase": (phase or "").strip().lower(),
            "where": (where or "").strip(), "context": (context or "").strip(),
            "model": flag, "effort": effort, "turns": RELAY_TURNS, "relay": 0,
@@ -2480,10 +2480,10 @@ def _spawn_worker(rec):
     session = str(uuid.uuid4())
     # THE TIER THIS ONE RUNS ON, resolved once here so the backend, the flags
     # and the record can never disagree: `dispatch` stored what the planner
-    # asked for and `minister_tier` clamps it to something the dial itself
+    # asked for and `spirit_tier` clamps it to something the dial itself
     # could hold. An older record (dispatched before tiering existed, or
     # requeued from `pending/`) names nothing and gets his dial, unchanged.
-    flag, effort = minister_tier(" ".join(
+    flag, effort = spirit_tier(" ".join(
         x for x in (rec.get("model") or "", rec.get("effort") or "") if x))
     budget = int(rec.get("turns") or RELAY_TURNS)
     prompt = WORKER_PROMPT.format(
@@ -2500,7 +2500,7 @@ def _spawn_worker(rec):
         # tools, the allowed/denied sets, and the appended RULES system-prompt
         # block — live in the backend. Which backend this task runs on follows
         # THIS TASK'S tier rather than the dial (`get_backend_for_model` on the
-        # pair resolved above); a deepseek-tiered minister must reach the hermes
+        # pair resolved above); a deepseek-tiered spirit must reach the hermes
         # backend, not claude carrying a deepseek flag.
         backend = get_backend_for_model(flag)
         cmd = backend.args(
@@ -2521,7 +2521,7 @@ def _spawn_worker(rec):
                BOARD_ORDER=rec.get("order") or "",
                # The relay's own state, on the environment for the reason
                # everything else here is: `boardctl turns` and `boardctl relay`
-               # are run by the minister itself, in a shell that inherits this,
+               # are run by the spirit itself, in a shell that inherits this,
                # so neither has to be told which task it is a hop of.
                BOARD_WORK_TURNS=str(budget),
                BOARD_WORK_RELAY=str(int(rec.get("relay") or 0)),
@@ -2702,12 +2702,12 @@ def unit_capped(unit, since=None):
 
 
 
-# ------------------------------------- force-stopping ONE bound minister
+# ------------------------------------- force-stopping ONE bound spirit
 def _stop_unit(unit):
     """SIGKILL one transient unit's whole cgroup, synchronously. (ok, detail).
 
     `systemctl --user kill --signal=KILL` signals every process in the unit's
-    control group at once and returns at once, so a minister that would ignore
+    control group at once and returns at once, so a spirit that would ignore
     SIGTERM dies anyway, and `--collect` (set at `systemd-run` time) reaps the
     unit afterwards. `ok` is None when systemctl could not be RUN at all — no
     user manager — which the caller must NOT read as "stopped": it falls back to
@@ -2726,7 +2726,7 @@ def _stop_unit(unit):
 
 
 def _kill_pid(pid):
-    """Last-resort SIGKILL for a minister with no unit — the detached fallback
+    """Last-resort SIGKILL for a spirit with no unit — the detached fallback
     on a box with no user manager. The process group first (a detached worker
     leads its own session, `start_new_session=True`), then the pid itself in
     case it is not a leader. Best effort: `force_stop` verifies liveness after,
@@ -2742,23 +2742,23 @@ def _kill_pid(pid):
 
 
 def force_stop(agent_id):
-    """Force-stop ONE bound minister, and report what is ACTUALLY true after.
+    """Force-stop ONE bound spirit, and report what is ACTUALLY true after.
 
     docs/DESIGN.md §10 forbids OFFERING an action that can silently fail, and
     §10.3 makes a SIGKILL a menu entry rather than a click for the reason that
     it cannot be undone. So this never reports success off a command's own exit
-    code: it stops the minister's own transient systemd unit (or, with no user
+    code: it stops the spirit's own transient systemd unit (or, with no user
     manager, SIGKILLs its process group), then RE-READS the one liveness rule
     (`boardagents.agents()` -> `boardmove._alive`) and answers from that.
     Returns {"ok": bool, "msg": <one line for him, addressed as "you">}.
 
-    Only a worker or a decision minister is force-stoppable (`MINISTER_ROLES`):
+    Only a worker or a decision spirit is force-stoppable (`SPIRIT_ROLES`):
     each runs as its own unit, so the kill is a real, reportable act. Solomon is
     refused — the orchestrator is a brief planning burst that holds the
     board-watch tick and then delegates, its resting card has no process at all
     to stop, and killing it mid-plan would abandon a dispatch you asked for. A
-    deepseek subminister has no unit of its own: it lives inside its parent
-    minister's cgroup, so force-stopping that parent takes it down with it.
+    deepseek subspirit has no unit of its own: it lives inside its parent
+    spirit's cgroup, so force-stopping that parent takes it down with it.
     """
     aid = ba.clean_id(agent_id)
 
@@ -2768,14 +2768,14 @@ def force_stop(agent_id):
     rec = find()
     if rec is None:
         return {"ok": False,
-                "msg": "no such minister - it may have already gone"}
+                "msg": "no such spirit - it may have already gone"}
     name = rec.get("name") or aid
     kind = rec.get("kind") or ""
     if kind == ba.ORCHESTRATOR_KIND:
         return {"ok": False, "msg": "Solomon is not force-stopped from here"}
-    if kind not in MINISTER_ROLES:
+    if kind not in SPIRIT_ROLES:
         return {"ok": False,
-                "msg": "%s runs inside its minister - stop that one" % name}
+                "msg": "%s runs inside its spirit - stop that one" % name}
     if rec.get("state") != "running":
         return {"ok": True, "msg": "%s had already stopped" % name}
 
@@ -2908,12 +2908,12 @@ def _queued_row(t):
         "waiting": [],
         # A task with no process has nothing to observe and says so, rather
         # than borrowing the sentence a running card would use.
-        "actually": "not started - a minister starts when a slot frees",
+        "actually": "not started - a spirit starts when a slot frees",
         # No working duration either: nothing has been spawned, so nothing is
         # working. The sentence above says so in words, which is truer than a
         # counter at zero would be.
         "doingLine": "", "workedLine": "",
-        "detail": "not started - a minister starts when a slot frees"}
+        "detail": "not started - a spirit starts when a slot frees"}
 
 
 def _idle_orchestrator_row():
@@ -2950,10 +2950,10 @@ def _idle_orchestrator_row():
         # [his, 2026-07-29] `hands` is gone from his card: an item goes to a NEW
         # agent as `summoned` and to one already running as `commanded`, the same
         # pair his notes carry. This line used to say "hands out what you type".
-        # Then, verbatim and with the full stop, *"summons a minister to do your
+        # Then, verbatim and with the full stop, *"summons a spirit to do your
         # bidding."* — the whole card is now TWO lines, and the clause about who
         # does the work went with the third one.
-        "title": "summons a minister to do your bidding.",
+        "title": "summons a spirit to do your bidding.",
         "where": "", "state": "idle", "running": False,
         # NO observation, deliberately — this row is not a process and there is
         # nothing to observe. The top line is the ONE sentence that is true of
@@ -2983,7 +2983,7 @@ def _is_orchestrator(a):
 def _drawable(rows):
     """The rows that may be DRAWN, i.e. everything whose summon has completed.
 
-    [his, 2026-07-30] A minister's card was appearing while Solomon was still
+    [his, 2026-07-30] A spirit's card was appearing while Solomon was still
     summoning it, because the registration is written the instant the spawn
     call returns and that is an `execve`, not a running agent. So the filter
     lives HERE, at the one point that draws — `boardagents.agents()` goes on
@@ -2991,8 +2991,8 @@ def _drawable(rows):
     `sweep()` and the inbox seeing a worker that is starting up.
     `boardagents.CONFIRM_GRACE_S` carries the rest of the argument.
 
-    **...and a minister that FINISHED leaves at once, rather than when he next
-    touches the board.** [his, 2026-07-30] *"are ministers sometimes staying in
+    **...and a spirit that FINISHED leaves at once, rather than when he next
+    touches the board.** [his, 2026-07-30] *"are spirits sometimes staying in
     the triangle unfocused colored until the user clears their completion
     message?"* — they were, and the "sometimes" was a race. A card is only
     deleted from disk by `boardagents.sweep()`, which runs on a board-watch
@@ -3049,19 +3049,19 @@ def cards(agents=None, pend=None):
     # rows that `boardagents.agents()` walks out of /proc — bare interactive
     # Claude Code sessions with no name and no `--where`, e.g. "s831183 an
     # interactive Claude Code session" — are HIS terminals, not summoned
-    # ministers, so they are dropped here at the one surface that draws the
+    # spirits, so they are dropped here at the one surface that draws the
     # triangle. Deliberately NOT in `_drawable()`: `groups()` (which is what
     # `boardctl.py agents` lists) keeps showing them, because that is an
     # agent-facing collision check where a live session of his still matters.
     # Board-dispatched workers (named rows) and Solomon are unaffected —
     # neither is ever a `session`.
     rows = [a for a in rows if a.get("kind") != "session"]
-    # A SUBMINISTER IS NOT A TOP-LEVEL CARD. It is a transient deepseek run a
-    # minister (or Solomon) delegated a chunk to; the board draws it INSET under
+    # A SUBSPIRIT IS NOT A TOP-LEVEL CARD. It is a transient deepseek run a
+    # spirit (or Solomon) delegated a chunk to; the board draws it INSET under
     # its parent's row, not as one more card in the flat list. `main.py`/`qml`
     # (Murmur) reads it off the `boardagents.agents()` walk by `kind`/`parent`
     # and interleaves it — so it is dropped here, exactly like a `session`.
-    rows = [a for a in rows if a.get("kind") != "subminister"]
+    rows = [a for a in rows if a.get("kind") != "subspirit"]
     pend = pending() if pend is None else pend
     out = sorted(rows, key=lambda a: (float(a.get("born") or 0.0), a["id"]))
     orch = [a for a in out if _is_orchestrator(a)]

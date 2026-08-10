@@ -25,18 +25,18 @@ The orchestrator's verbs — how one sentence he typed becomes several agents
     boardctl.py dispatch 'wire FOCUS through vtbclient' --where 'apps/pylib/**'
     boardctl.py ask 'How far should the fade reach?' --option 'apps only' \\
         --option 'apps and panel' --if-unanswered 'the apps get it, nothing else'
-    boardctl.py cap 6                              # ministers allowed at once
+    boardctl.py cap 6                              # spirits allowed at once
     boardctl.py summoners 2                        # summoners planning at once
     boardctl.py model opus                         # which model summons
-    boardctl.py minister 'sonnet 5 low'            # what a minister runs on
+    boardctl.py spirit 'sonnet 5 low'            # what a spirit runs on
     boardctl.py phase coding --doing 'the vtbclient parser'
 
-**`subminister` runs one bounded chunk on a cheap deepseek subminister** — the
-way a Claude minister OR Solomon the orchestrator hands bulk, mechanical work
+**`subspirit` runs one bounded chunk on a cheap deepseek subspirit** — the
+way a Claude spirit OR Solomon the orchestrator hands bulk, mechanical work
 (wide reading/greps, a transform) to the small model and gets a COMPACT result
 back, instead of burning its own expensive context. Any caller genuinely on a
 Claude model may use it; one already on deepseek is refused — the gate is on the
-runtime, not the role (`boardwork.subminister`). While it runs it draws its own
+runtime, not the role (`boardwork.subspirit`). While it runs it draws its own
 inset card, named from the Lesser Key, under the parent that spawned it.
 
 **`phase` records what you SAY you are doing and does not set the phase your
@@ -276,7 +276,7 @@ def _warn_overlaps(rec):
     for w in rec.get("overlaps") or []:
         who = w.get("name") or w["id"]
         print("warning: %s (%s) is already working in `%s` - if this is the "
-              "same files, `inbox send --to %s` beats a second minister"
+              "same files, `inbox send --to %s` beats a second spirit"
               % (who, w["id"], w.get("where") or "?", who))
 
 
@@ -288,12 +288,12 @@ def cmd_dispatch(a):
         return 1
     # WHAT IT WILL ACTUALLY RUN ON, said out loud whenever the caller asked for
     # something — a tier this board cannot name falls back to his dial rather
-    # than raising (`boardwork.minister_tier`), and a silent fallback that the
+    # than raising (`boardwork.spirit_tier`), and a silent fallback that the
     # planner reads as honoured is exactly the confident lie this tree refuses.
     if a.model:
-        got = bw.minister_label((rec.get("model"), rec.get("effort")))
+        got = bw.spirit_label((rec.get("model"), rec.get("effort")))
         try:
-            bw.resolve_minister(a.model)
+            bw.resolve_spirit(a.model)
             print("tier: " + got)
         except ValueError as e:
             print("tier: %s - using %s (the setting, which is also the "
@@ -305,7 +305,7 @@ def cmd_dispatch(a):
         _warn_overlaps(rec)
         return 0
     if rec["state"] == "failed":
-        print("boardctl: could not start a minister - " + rec.get("why", "?"),
+        print("boardctl: could not start a spirit - " + rec.get("why", "?"),
               file=sys.stderr)
         return 1
     # STARTED, and that is all this can honestly say. The worker records its own
@@ -322,10 +322,10 @@ def cmd_dispatch(a):
 
 
 def cmd_turns(a):
-    """How much of its turn budget this minister has spent, and whether to hop.
+    """How much of its turn budget this spirit has spent, and whether to hop.
 
     Read from its own transcript, so it costs nothing to ask and there is
-    nothing to keep in step. An unreadable count (a hermes minister, a
+    nothing to keep in step. An unreadable count (a hermes spirit, a
     transcript not written yet) says so and does NOT advise a relay: handing on
     work that has barely started spends a whole startup context to save
     nothing."""
@@ -351,7 +351,7 @@ def cmd_turns(a):
 
 
 def cmd_relay(a):
-    """Hand the rest of this task to a fresh minister. See `boardwork.relay`."""
+    """Hand the rest of this task to a fresh spirit. See `boardwork.relay`."""
     try:
         rec = bw.relay(" ".join(a.brief))
     except ValueError as e:
@@ -397,7 +397,7 @@ def cmd_cap(a):
     if a.n is None:
         print(bw.cap())
         return 0
-    print("at most %d ministers bound in the triangle at once" % bw.set_cap(a.n))
+    print("at most %d spirits bound in the triangle at once" % bw.set_cap(a.n))
     return 0
 
 
@@ -409,22 +409,22 @@ def cmd_summoners(a):
     return 0
 
 
-def cmd_minister(a):
-    """What the ministers run on. Capped at opus 5 medium by his rule, so this
+def cmd_spirit(a):
+    """What the spirits run on. Capped at opus 5 medium by his rule, so this
     prints the whole of what is reachable and refuses anything else — the
-    dropdown's list and this one are `boardwork.MINISTER_MODELS`."""
+    dropdown's list and this one are `boardwork.SPIRIT_MODELS`."""
     if a.name is None:
-        cur = bw.minister_model()
-        for flag, effort, label in bw.MINISTER_MODELS:
+        cur = bw.spirit_model()
+        for flag, effort, label in bw.SPIRIT_MODELS:
             print("%s %-28s %-7s %s"
                   % ("*" if (flag, effort) == cur else " ", flag, effort, label))
         return 0
     try:
-        flag, effort = bw.set_minister_model(a.name)
+        flag, effort = bw.set_spirit_model(a.name)
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2
-    print("the next minister answers on %s at %s effort" % (flag, effort))
+    print("the next spirit answers on %s at %s effort" % (flag, effort))
     return 0
 
 
@@ -432,7 +432,7 @@ def cmd_model(a):
     """Which model summons, and how hard it thinks. The dropdown beside his box
     writes the same file; this is the scriptable half, and what a harness
     drives. The summoner carries an effort now, so this sets a `(model, effort)`
-    pair the way `minister` does, from `boardwork.ORCH_MODELS`."""
+    pair the way `spirit` does, from `boardwork.ORCH_MODELS`."""
     if a.name is None:
         cur = bw.orch_model()
         for flag, effort, label in bw.ORCH_MODELS:
@@ -449,7 +449,7 @@ def cmd_model(a):
 
 
 def cmd_budget(a):
-    """His dollar budget for the hermes minister window: the settable fallback
+    """His dollar budget for the hermes spirit window: the settable fallback
     allowance `boardusage.hermes_proximity` counts against when the real nous
     account publishes no monthly cap (pay-as-you-go) or no balance has been
     read. `clear` (or `off`) unsets it and the readout is honest-unknown again.
@@ -467,7 +467,7 @@ def cmd_budget(a):
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2
-    print("hermes minister budget set to $%.2f for the window" % v)
+    print("hermes spirit budget set to $%.2f for the window" % v)
     return 0
 
 
@@ -522,17 +522,17 @@ def cmd_inbox(a):
 #: is deliberately the DEFAULT: a verb added later is refused after a ctrl+z
 #: without anybody having to remember this list. `phase` stays open on purpose —
 #: a cancelled Solomon saying what he is doing is not an act on the board.
-#: (`subminister` changes nothing on the board either — it is a compute run.)
-UNGATED = {"list", "agents", "phase", "subminister"}
+#: (`subspirit` changes nothing on the board either — it is a compute run.)
+UNGATED = {"list", "agents", "phase", "subspirit"}
 
 
-def cmd_subminister(a):
-    """Run a bounded chunk to completion on the deepseek subminister and print
+def cmd_subspirit(a):
+    """Run a bounded chunk to completion on the deepseek subspirit and print
     its result, so the calling caller's shell captures it. Open to a Claude
-    minister AND Solomon the orchestrator; refuses a caller already on the
+    spirit AND Solomon the orchestrator; refuses a caller already on the
     deepseek/hermes runtime, which gains nothing."""
     try:
-        out = bw.subminister(" ".join(a.text), max_turns=a.max_turns)
+        out = bw.subspirit(" ".join(a.text), max_turns=a.max_turns)
     except ValueError as e:
         print("boardctl: " + str(e), file=sys.stderr)
         return 2
@@ -613,11 +613,11 @@ def main(argv=None):
     s = sub.add_parser("agents", help="who is running right now, by phase")
     s.set_defaults(fn=cmd_agents)
 
-    s = sub.add_parser("dispatch", help="summon a minister to one piece of work")
+    s = sub.add_parser("dispatch", help="summon a spirit to one piece of work")
     s.add_argument("task", nargs="+")
     s.add_argument("--where", default="", help="the files it will touch")
     s.add_argument("--context", default="",
-                   help="what you know that the minister does not")
+                   help="what you know that the spirit does not")
     s.add_argument("--model", default="",
                    help="the tier this piece runs on (a label like 'sonnet 5 "
                         "medium'); left off, it runs on the setting, which is "
@@ -629,7 +629,7 @@ def main(argv=None):
     s.set_defaults(fn=cmd_turns)
 
     s = sub.add_parser("relay", help="hand the rest of your task to a fresh "
-                                     "minister (it is your report too)")
+                                     "spirit (it is your report too)")
     s.add_argument("brief", nargs="+",
                    help="what landed, what is left, what you learned")
     s.set_defaults(fn=cmd_relay)
@@ -660,7 +660,7 @@ def main(argv=None):
                    help="what you were working on when it came up")
     s.set_defaults(fn=cmd_ask)
 
-    s = sub.add_parser("cap", help="how many ministers may be bound at once")
+    s = sub.add_parser("cap", help="how many spirits may be bound at once")
     s.add_argument("n", nargs="?", type=int, default=None)
     s.set_defaults(fn=cmd_cap)
 
@@ -673,10 +673,10 @@ def main(argv=None):
     s.add_argument("name", nargs="?", default=None)
     s.set_defaults(fn=cmd_model)
 
-    s = sub.add_parser("minister", help="what the ministers run on (at most "
+    s = sub.add_parser("spirit", help="what the spirits run on (at most "
                                         "opus 5 medium)")
     s.add_argument("name", nargs="?", default=None)
-    s.set_defaults(fn=cmd_minister)
+    s.set_defaults(fn=cmd_spirit)
 
     s = sub.add_parser("inbox", help="his mid-flight notes to a running agent")
     s.add_argument("what", nargs="?", default="list",
@@ -691,16 +691,16 @@ def main(argv=None):
     s.add_argument("--quiet", action="store_true", help="take: print nothing if empty")
     s.set_defaults(fn=cmd_inbox)
 
-    s = sub.add_parser("subminister",
-                       help="a CLAUDE minister or the orchestrator runs one "
-                            "bounded chunk on the deepseek subminister: spawns "
+    s = sub.add_parser("subspirit",
+                       help="a CLAUDE spirit or the orchestrator runs one "
+                            "bounded chunk on the deepseek subspirit: spawns "
                             "it, waits, prints its COMPACT result. Refuses a "
                             "caller already on deepseek.")
     s.add_argument("text", nargs="+", help="the chunk of wide/mechanical work")
     s.add_argument("--max-turns", dest="max_turns", type=int, default=None)
-    s.set_defaults(fn=cmd_subminister)
+    s.set_defaults(fn=cmd_subspirit)
 
-    s = sub.add_parser("budget", help="his dollar budget for the hermes minister "
+    s = sub.add_parser("budget", help="his dollar budget for the hermes spirit "
                        "window (the settable fallback allowance)")
     s.add_argument("amount", nargs="?", default=None,
                    help="dollars, or 'clear' to unset; empty shows it")

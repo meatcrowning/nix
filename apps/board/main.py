@@ -735,7 +735,7 @@ class Agents(QObject):
     #: unread note — and anything hung off that would be a 2.5s poll of
     #: whatever it drives. See `Usage.follow()`, its one consumer.
     lives = Signal()
-    #: THE LIVE SHELLS of the ministers bound in the triangle. A per-minister
+    #: THE LIVE SHELLS of the spirits bound in the triangle. A per-spirit
     #: little tail of the agent's own literal output, rebuilt on the ordinary
     #: poll — `shells` is the list, this is when it changed. Deliberately a
     #: SEPARATE signal from `changed`: a running agent's output moves every poll,
@@ -881,21 +881,21 @@ class Agents(QObject):
             "detail": boardagents.describe(a),
             "waiting": [m["text"] for m in boardagents.for_agent(a["id"])]
                        if a["id"] else [],
-            # A DEEPSEEK SUBMINISTER's card, drawn INSET under its parent
-            # minister's card (§9.1's subordinate block — `AgentRow.subminister`).
+            # A DEEPSEEK SUBSPIRIT's card, drawn INSET under its parent
+            # spirit's card (§9.1's subordinate block — `AgentRow.subspirit`).
             # `kind`, `parent` and `parentName` are `boardagents`' (Botis' seam:
             # `register(parent=...)` + the dict `agents()` appends); the card is
             # otherwise an ordinary agent card. `boardwork.cards()` leaves a
-            # subminister OUT of the flat list, so `workers` below is the one
+            # subspirit OUT of the flat list, so `workers` below is the one
             # place it is interleaved back under its parent.
-            "subminister": a.get("kind") == "subminister",
+            "subspirit": a.get("kind") == "subspirit",
             "parentId": a.get("parent", ""),
             "parentName": a.get("parentName", ""),
         }
 
     # ---- WHAT IT IS ACTUALLY SAYING: the tail of the worker's own log ----
     # [his, 2026-07-30] a card opens a drawer showing *"the last couple of
-    # lines"* of that minister's output. The card's three lines are this app's
+    # lines"* of that spirit's output. The card's three lines are this app's
     # account of the agent; this is the agent's own voice, unedited.
     #
     # THE LIVE SOURCE IS THE TRANSCRIPT, NOT THE `.log`. [his, 2026-07-30]
@@ -959,7 +959,7 @@ class Agents(QObject):
 
     #: How many of its own lines one row of the triangle's SHELLS tail shows.
     #: [his ask, 2026-08-01] *\"the last couple of lines\"* — two, read for the
-    #: same reason the drawer is cut at three: several ministers side by side
+    #: same reason the drawer is cut at three: several spirits side by side
     #: must not become the transcript §5.2 rules out.
     SHELL_LINES = 2
 
@@ -1088,12 +1088,12 @@ class Agents(QObject):
                     # too: *"the tools section SHOULD NOT just be `ls | grep`... it
                     # should be a trailing log of the ACTUAL OUTPUT"*. So it is
                     # kept for BOTH readers, ahead of the `tools_only` skip below;
-                    # what that skip still drops is the minister's prose and
+                    # what that skip still drops is the spirit's prose and
                     # reasoning, never a command's result.
                     out.extend(Agents._result_lines(part))
                 elif tools_only:
                     # The workings band is the calls and their OUTPUT — but not
-                    # the minister's own prose or reasoning.
+                    # the spirit's own prose or reasoning.
                     continue
                 elif role != "assistant":
                     continue
@@ -1109,7 +1109,7 @@ class Agents(QObject):
         if not (agent_id or "").strip():
             return []
         rec = boardagents.record(agent_id) or {}
-        # A minister on the hermes runtime has no transcript FILE; its history is
+        # A spirit on the hermes runtime has no transcript FILE; its history is
         # rows in `~/.hermes/state.db`, bound to this agent by the query it was
         # spawned with. Same drawer, same three lines, same rule about whose
         # words belong in it — only the reader differs (`boardhermes.lines`).
@@ -1188,7 +1188,7 @@ class Agents(QObject):
             was, self._lives = self._lives, lives
             if was is not None:      # the first read is not a transition
                 self.lives.emit()
-        # ---- the live shells of the bound ministers ----
+        # ---- the live shells of the bound spirits ----
         # Rebuilt off `cards` — the SAME drawn list the triangle shows — and
         # only for running, non-orchestrator rows, so the shells section can
         # never disagree with the triangle about who is bound. Each is the
@@ -1230,16 +1230,16 @@ class Agents(QObject):
         # the orchestrator, who has his own section (`summoner`).
         cards = [c for c in self._cards
                  if c.get("kind") != boardagents.ORCHESTRATOR_KIND]
-        # ...with each deepseek subminister slotted back in DIRECTLY UNDER its
-        # parent minister, drawn inset (`AgentRow.subminister`, §9.1). A
-        # subminister is a real registered agent, so it is in the `agents()`
+        # ...with each deepseek subspirit slotted back in DIRECTLY UNDER its
+        # parent spirit, drawn inset (`AgentRow.subspirit`, §9.1). A
+        # subspirit is a real registered agent, so it is in the `agents()`
         # walk (`self._rows`) — but `boardwork.cards()` deliberately keeps it
         # out of the flat list, so this is where the hierarchy is rebuilt for
         # the one surface that draws it. Ordered under its parent by id, which
         # is stable across polls so a card never jumps.
         subs = {}
         for r in self._rows:
-            if r.get("subminister"):
+            if r.get("subspirit"):
                 subs.setdefault(r.get("parentId") or "", []).append(r)
         for lst in subs.values():
             lst.sort(key=lambda r: r.get("id") or "")
@@ -1248,17 +1248,17 @@ class Agents(QObject):
             out.append(c)
             for s in subs.pop(c["id"], []):
                 out.append(dict(s, orphan=False))
-        # A subminister whose parent card is gone still draws — but with no
+        # A subspirit whose parent card is gone still draws — but with no
         # card above it to be subordinate to, it drops the inset and reads as an
-        # ordinary top-level card (`orphan`, killing `AgentRow.subminister`).
+        # ordinary top-level card (`orphan`, killing `AgentRow.subspirit`).
         for lst in subs.values():
             for s in lst:
                 out.append(dict(s, orphan=True))
         return out
 
     @Property(int, notify=changed)
-    def boundMinisters(self):
-        """How many ministers the triangle is BINDING right now — the running,
+    def boundSpirits(self):
+        """How many spirits the triangle is BINDING right now — the running,
         non-orchestrator cards it draws. [his, 2026-07-31] the triangle header
         says it in words; this is the number behind the sentence.
 
@@ -1272,9 +1272,9 @@ class Agents(QObject):
                    if c.get("kind") != boardagents.ORCHESTRATOR_KIND
                    and c.get("state") == "running")
 
-    # ---- the SHELLS: a live tail per bound minister -------------------------
+    # ---- the SHELLS: a live tail per bound spirit -------------------------
     # [his ask, 2026-08-01] under the triangle, a small live tail per running
-    # minister — theirs, not this app's account of them. It is the SAME source
+    # spirit — theirs, not this app's account of them. It is the SAME source
     # the card drawer tails (`output`, i.e. the transcript — a running worker's
     # `~/.cache/board-work/<id>.log` is buffered and empty until it exits), and
     # it reads the running set the way the app already knows it: off `cards`,
@@ -1285,12 +1285,12 @@ class Agents(QObject):
     #
     # THE CLARIFIED ASK, 2026-08-01: *"leave triangle how it is, do the
     # background processes in the other section labeled 'shells'"*. The
-    # transcript tail shows the FOREGROUND activity — what each minister is
+    # transcript tail shows the FOREGROUND activity — what each spirit is
     # doing right now, which is what the triangle already says. The backgrounded
     # long-runners it started and left running are a separate fact, visible for
     # free from each worker's own systemd unit cgroup, so they get their own
     # lines under the foreground tail — same band, same row, nothing in the
-    # triangle changes. A minister with foreground lines and no runners shows
+    # triangle changes. A spirit with foreground lines and no runners shows
     # just the tail; one that is silent but left a runner going shows the runner
     # (the row exists on the strength of the running process, not the words).
     # Only a worker — a card with a `board-worker-<id>` unit — can have
@@ -1355,7 +1355,7 @@ class Agents(QObject):
     def _bg_processes(self, agent_id):
         """The long-runners a bound worker started and left running, read from
         its own systemd unit cgroup: every process still in the unit besides
-        the minister itself. Empty for anything with no worker unit. Pure /proc
+        the spirit itself. Empty for anything with no worker unit. Pure /proc
         reads — never a fork, so it is safe on the poll clock like the rest of
         the section."""
         rec = boardagents.record(agent_id) or {}
@@ -1397,7 +1397,7 @@ class Agents(QObject):
 
     @Property("QVariantList", notify=shellsChanged)
     def shells(self):
-        """`[{id, name, lines, bg}]` for each bound minister with something to
+        """`[{id, name, lines, bg}]` for each bound spirit with something to
         show — `lines` the foreground tail, `bg` the backgrounded long-runners
         it left running (empty when it has none). Top-to-bottom the same order
         the triangle draws its cards in, so a shell never appears above or
@@ -1431,7 +1431,7 @@ class Agents(QObject):
 
     @staticmethod
     def _capLabel(n):
-        return "%d minister%s" % (n, "" if n == 1 else "s")
+        return "%d spirit%s" % (n, "" if n == 1 else "s")
 
     @Property(str, notify=capChanged)
     def capLabel(self):
@@ -1455,7 +1455,7 @@ class Agents(QObject):
 
     # ---- how many SUMMONERS may plan at once ---------------------------------
     # The top dropdown of his four. [his, 2026-07-29] *"1. number of summoners 2.
-    # summoner model 3. number of ministers 4. minister model"*. Thin for the
+    # summoner model 3. number of spirits 4. spirit model"*. Thin for the
     # reason the other three are: `boardwork.summoners()`/`set_summoners()` are
     # the ONE store — the file `boardctl.py summoners` writes and
     # `board-watch.work_the_queue` reads at the top of every tick — and
@@ -1527,39 +1527,39 @@ class Agents(QObject):
         self.modelChanged.emit()
         return True
 
-    # ---- ...and what the MINISTERS run on ------------------------------------
+    # ---- ...and what the SPIRITS run on ------------------------------------
     # The fourth dropdown, under the cap. [his, 2026-07-29] *"do not allow
-    # ministers to be anything higher than opus 5 medium thinking."* This half
-    # cannot OFFER more than that, because the list is `boardwork.MINISTER_MODELS`
+    # spirits to be anything higher than opus 5 medium thinking."* This half
+    # cannot OFFER more than that, because the list is `boardwork.SPIRIT_MODELS`
     # and there is no other list; `role_flags()` cannot SPAWN more than that,
     # whatever the file ends up saying. Two independent halves of one rule, on
     # purpose — a control that is the only guard is a guard a hand-edited file
     # walks past.
-    ministerChanged = Signal()
+    spiritChanged = Signal()
 
-    @Property("QVariantList", notify=ministerChanged)
-    def ministers(self):
+    @Property("QVariantList", notify=spiritChanged)
+    def spirits(self):
         """`[{name, label, current}]`, in the order the menu draws them, ceiling
-        first. `name` is the `<flag> <effort>` pair `resolve_minister` takes."""
-        cur = boardwork.minister_model()
+        first. `name` is the `<flag> <effort>` pair `resolve_spirit` takes."""
+        cur = boardwork.spirit_model()
         return [{"name": "%s %s" % (f, e), "label": lab, "current": (f, e) == cur}
-                for f, e, lab in boardwork.MINISTER_MODELS]
+                for f, e, lab in boardwork.SPIRIT_MODELS]
 
-    @Property(str, notify=ministerChanged)
-    def ministerLabel(self):
+    @Property(str, notify=spiritChanged)
+    def spiritLabel(self):
         """What the closed control reads. Prose, never the wire pair (§2)."""
-        return boardwork.minister_label()
+        return boardwork.spirit_label()
 
     @Slot(str, result=bool)
-    def chooseMinister(self, name):
-        """Write his choice. It reaches the next minister dispatched and no
+    def chooseSpirit(self, name):
+        """Write his choice. It reaches the next spirit dispatched and no
         other — a worker already running keeps what it started with, the same
         mechanism the summoner's chooser has."""
         try:
-            boardwork.set_minister_model(name)
+            boardwork.set_spirit_model(name)
         except (ValueError, OSError):
             return False
-        self.ministerChanged.emit()
+        self.spiritChanged.emit()
         return True
 
     @Property("QVariantList", notify=changed)
@@ -1596,7 +1596,7 @@ class Agents(QObject):
         if msg is None:
             return ""
         # WHAT CTRL+Z WOULD TAKE BACK. Only an order from the top box — a note
-        # addressed to a running minister is a different act, with its own row
+        # addressed to a running spirit is a different act, with its own row
         # and its own menu, and there is no summon of it to cancel.
         boardundo.remember(msg)
         self.refresh()
@@ -1632,10 +1632,10 @@ class Agents(QObject):
                 boardwork.HOST, self._watcher)
         return "in the inbox - ctrl+z takes it back until a summoner acts"
 
-    # ---- force-stopping ONE bound minister from its card's menu ----
+    # ---- force-stopping ONE bound spirit from its card's menu ----
     # Same shape as `send`: the returned string IS what the footer says, and it
     # is the VERIFIED outcome, never the intent (§10, §10.3). `force_stop`
-    # SIGKILLs the minister's own transient unit and then re-reads liveness
+    # SIGKILLs the spirit's own transient unit and then re-reads liveness
     # before it answers, so the footer can never claim a kill that did not
     # happen — and the poll below redraws the card off the same read.
     @Slot(str, result=str)
@@ -1732,7 +1732,7 @@ class Agents(QObject):
             said = ("a summoner has it with %d other order(s) - nothing "
                     "cancelled" % others)
         elif state == "summoned":
-            said = "too late - a minister has already been summoned for it"
+            said = "too late - a spirit has already been summoned for it"
         else:
             said = "that order has already gone - nothing cancelled"
         return {"said": said, "text": out.get("text") or ""}
@@ -1925,7 +1925,7 @@ class Usage(QObject):
         # supposed to say so — so a re-read is skipped only while the rows come
         # out identical, never merely because the mtimes held still.
         rows = boardusage.readings()
-        # The hermes minister readout rides the same clocks (not a fetch — it is
+        # The hermes spirit readout rides the same clocks (not a fetch — it is
         # a read of Hermes' own ledger, so there is nothing to fetch).
         hrows = boardusage.hermes_readings()
         # ...and so does the REAL-balance proximity — the one hermes "left"
@@ -1963,7 +1963,7 @@ class Usage(QObject):
     def rows(self):
         return self._rows
 
-    #: The hermes minister readout (one row per `boardusage.HERMES_WINDOWS`),
+    #: The hermes spirit readout (one row per `boardusage.HERMES_WINDOWS`),
     #: real token/cost figures — see `boardusage.hermes_readings`.
     hchanged = Signal()
 

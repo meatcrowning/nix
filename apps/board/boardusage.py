@@ -659,14 +659,14 @@ def _level_for(fraction):
     return None
 
 
-# ------------------------------------------------- hermes minister usage
+# ------------------------------------------------- hermes spirit usage
 #: Hermes' session store. Read-only from here, never written: it is Hermes'
 #: own ledger (`hermes insights` reads the same file).
 HERMES_DB = os.path.join(os.path.expanduser("~"), ".hermes", "state.db")
 
-#: Minister spawns run hermes with `--source tool` (`HermesBackend.args`), so a
+#: Spirit spawns run hermes with `--source tool` (`HermesBackend.args`), so a
 #: query filtered on this source is exactly the hermes usage this board's
-#: ministers produced — never his interactive sessions or his other agents.
+#: spirits produced — never his interactive sessions or his other agents.
 HERMES_SOURCE = "tool"
 
 #: The two recency windows the hermes readout mirrors the settings with, in the
@@ -675,8 +675,8 @@ HERMES_SOURCE = "tool"
 #: of, so these are FIGURES (tokens + cost), never a percentage — see the
 #: module docstring for that rule (docs/DESIGN.md §10).
 HERMES_WINDOWS = (
-    ("h5", "5h", "hermes minister usage in the last 5 hours - tokens and cost"),
-    ("d7", "7d", "hermes minister usage in the last 7 days - tokens and cost"),
+    ("h5", "5h", "hermes spirit usage in the last 5 hours - tokens and cost"),
+    ("d7", "7d", "hermes spirit usage in the last 7 days - tokens and cost"),
 )
 
 
@@ -701,7 +701,7 @@ def _hermes_db_path():
 
 
 def _hermes_query(seconds, now):
-    """`(tokens, cost_usd)` for ministers in the last `seconds`, or `(None, 0)`
+    """`(tokens, cost_usd)` for spirits in the last `seconds`, or `(None, 0)`
     if the ledger is unreachable. Public for the harness; the board draws via
     `hermes_readings()`."""
     try:
@@ -732,7 +732,7 @@ def _hermes_query(seconds, now):
 
 
 def hermes_readings(now=None):
-    """The hermes minister usage rows the window draws, in `HERMES_WINDOWS`
+    """The hermes spirit usage rows the window draws, in `HERMES_WINDOWS`
     order. Each is `{key, label, known, text, note, detail}` where `known` is
     false when the ledger is unreachable (nothing drawn), and `text` is real
     figures — `<tokens> · $<cost>` — never a percentage. Honest by the same
@@ -747,7 +747,7 @@ def hermes_readings(now=None):
                 "key": key, "label": label, "known": False,
                 "text": "unknown", "note": "",
                 "detail": ("no hermes ledger on this host yet - it needs one "
-                           "hermes minister run to have written state.db"),
+                           "hermes spirit run to have written state.db"),
             })
             continue
         rows.append({
@@ -759,7 +759,7 @@ def hermes_readings(now=None):
 
 
 # ------------------------------------------------- hermes proximity signal
-#: The coarse level the display draws for the hermes minister spend, and the
+#: The coarse level the display draws for the hermes spirit spend, and the
 #: two FRACTION bounds each level means (level, low, high). CHOSEN AND STATED
 #: HERE, IN ONE PLACE, so the QML binds the `level` string and never does
 #: arithmetic. `fraction` is the USED share of the real monthly cap the portal
@@ -783,7 +783,7 @@ PROXIMITY_WORD = {
 
 
 # ----------------------------------------------------------- his own budget
-#: The allowance HE can set for the hermes minister window — ONE number, a
+#: The allowance HE can set for the hermes spirit window — ONE number, a
 #: dollar budget, stored where the board keeps its other settings
 #: (`~/.local/state/board/`, the same dir `boardwork` uses for `cap` and
 #: `summoners`). It is the fallback denominator for `hermes_proximity` when the
@@ -796,7 +796,7 @@ def _hermes_budget_file():
 
 
 def hermes_budget():
-    """His dollar budget for the minister window, or None when unset."""
+    """His dollar budget for the spirit window, or None when unset."""
     try:
         with open(_hermes_budget_file(), "r", encoding="utf-8") as f:
             v = float(f.read().strip())
@@ -830,11 +830,11 @@ def clear_hermes_budget():
 
 
 def _hermes_span(now):
-    """`(tokens, cost_usd, span_days)` for ministers in the LAST 7 DAYS.
+    """`(tokens, cost_usd, span_days)` for spirits in the LAST 7 DAYS.
 
     `span_days` is how much real history that window contains (clamped to at
     least an hour, at most 7) — the honest denominator for a per-day burn
-    rate, so a machine that only started running ministers yesterday is not
+    rate, so a machine that only started running spirits yesterday is not
     assumed to have spent across a full week. `(None, 0.0, 0.0)` when the
     ledger is unreachable.
     """
@@ -923,7 +923,7 @@ def hermes_proximity(now=None):
     The one case the real account cannot answer is his settable budget
     (`hermes_budget`): when the plan publishes no monthly denominator, or no
     balance has been read at all, a budget he set becomes the allowance and the
-    signal counts his minister spend against it — `used`, `left`, `fraction`
+    signal counts his spirit spend against it — `used`, `left`, `fraction`
     and the level are then real arithmetic on his own number, never invented.
     With no budget set and no real figure, the honesty above stands.
     """
@@ -947,8 +947,8 @@ def hermes_proximity(now=None):
                 burn = (" · ~$%.2f/day" % per_day) if per_day else ""
                 text = "$%.2f used of $%.2f budget - $%.2f left%s" % (
                     cost, budget, left, burn)
-                detail = ("his $%.2f budget for the minister window; hermes "
-                          "ministers spent $%.2f in 7d, $%.2f left%s" % (
+                detail = ("his $%.2f budget for the spirit window; hermes "
+                          "spirits spent $%.2f in 7d, $%.2f left%s" % (
                               budget, cost, left, burn))
                 if bal is not None:
                     detail += ("; the nous account itself shows $%.2f usable"
@@ -997,12 +997,12 @@ def hermes_proximity(now=None):
             "known": False, "fraction": None, "remaining": None,
             "level": "unknown", "text": "unknown",
             "detail": ("no hermes ledger on this host yet - it needs one hermes "
-                       "minister run to have written state.db"),
+                       "spirit run to have written state.db"),
             "reset": _prox_reset(None, now),
         }
     per_day = cost / span_days if span_days else 0.0
     text = "~$%.2f in 7d · ~$%.2f/day" % (cost, per_day)
-    detail = ("hermes ministers spent ~$%.2f in 7d (~$%.2f/day); the real nous "
+    detail = ("hermes spirits spent ~$%.2f in 7d (~$%.2f/day); the real nous "
               "account balance has not been read on this host yet, so the margin "
               "is unknown") % (cost, per_day)
     return {

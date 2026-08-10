@@ -291,7 +291,7 @@ def start(sel, where="agent", notes=None, pid=None, path=bp.BOARD_PATH,
     # sitting in NEEDS YOU would be reclaimed into a duplicate of itself.
     # ...and it is written for THIS board: a stash for a board that is not this
     # host's own goes to that board's scratch root, never into his `inflight/`
-    # where it would draw a minister card nothing can ever reap.
+    # where it would draw a spirit card nothing can ever reap.
     with open(stash_file(rec["key"], path), "w") as f:
         json.dump(rec, f, indent=1, sort_keys=True)
     return rec
@@ -745,9 +745,9 @@ def note(text, path=bp.BOARD_PATH, agent_id=None, by=None):
     # agent a result is FROM (which is what retires its summon note above),
     # while the stamp says who put the line on the board. They are the same
     # process for a worker writing its own result, and they are NOT for
-    # `board-watch`, which writes the failure note for a minister that died —
+    # `board-watch`, which writes the failure note for a spirit that died —
     # reading `agent_id` there stamped every one of those with the dead
-    # minister's name, i.e. an entry attributed to the one process that
+    # spirit's name, i.e. an entry attributed to the one process that
     # certainly did not write it, on a bullet whose own text says it recorded
     # nothing. `by` is the fallback for a caller with no agent identity at all,
     # which is the program's own name. Neither resolving means NO stamp:
@@ -843,9 +843,9 @@ def _abandoned(rec):
 #: `{title}` stays on the indented line, exactly as it does in the FAILED
 #: bullets: its length is not this file's to choose.
 DECISION_CAP_TEMPLATE = (
-    "- INFORMATION: **the {cap}-minute cap cut the minister off; it resumes "
+    "- INFORMATION: **the {cap}-minute cap cut the spirit off; it resumes "
     "automatically**\n"
-    "    It was working on {title}; a fresh minister picks it up from its own "
+    "    It was working on {title}; a fresh spirit picks it up from its own "
     "history, so nothing was lost and nothing for you to do.\n")
 
 
@@ -868,9 +868,9 @@ def reconcile(path=bp.BOARD_PATH, capped=None):
     `capped` is an optional callable `(rec) -> bool` saying whether the owner's
     death was the RuntimeMaxSec cap (board-watch reads it off the unit's
     journal — `boardwork.unit_capped`). When it says yes the hand-back bullet
-    says the work is handed on rather than that the minister died, because the
+    says the work is handed on rather than that the spirit died, because the
     cap is a SCHEDULED cut: the answer comes back with its host stamp and the
-    same tick re-fires it, so `FAILED: the minister ... is gone` would be the
+    same tick re-fires it, so `FAILED: the spirit ... is gone` would be the
     confident lie this module refuses everywhere else — in the other direction.
     The app and the harnesses leave it `None` and get the death bullet as
     before; it is only ever consulted for a stash that HAD an owner.
@@ -891,7 +891,7 @@ def reconcile(path=bp.BOARD_PATH, capped=None):
                 why = DECISION_CAP_TEMPLATE.format(
                     title=title, cap=_cap_minutes())
             else:
-                why = ("- FAILED: **the minister working %s is gone** - it "
+                why = ("- FAILED: **the spirit working %s is gone** - it "
                        "exited without finishing.\n"
                        "    It never said so; the decision is back above with your "
                        "answer intact. Nothing was committed on its behalf. "

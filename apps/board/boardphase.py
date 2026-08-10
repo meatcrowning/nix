@@ -244,9 +244,9 @@ def describe_call(name, inp):
         # tool's own `description`, which the agent writes and could word any way
         # it liked — this is the observed line, so the machine picks the words.
         if "boardctl.py dispatch" in cmd0:
-            return "summoning a minister"
+            return "summoning a spirit"
         if "boardctl.py inbox send" in cmd0:
-            return "commanding a minister already in those files"
+            return "commanding a spirit already in those files"
         d = " ".join(str(inp.get("description") or "").split())
         if d:
             if d[:1].isupper():
@@ -383,9 +383,9 @@ def read_sidecar(agent_id):
         return {}
 
 
-# ------------------------------------------- a minister on the OTHER runtime
+# ------------------------------------------- a spirit on the OTHER runtime
 # Everything above is written around a transcript whose path the spawner CHOSE.
-# A hermes minister has no such file and no choosable id (`boardhermes`'s
+# A hermes spirit has no such file and no choosable id (`boardhermes`'s
 # docstring has the measurements), so a spawn on that runtime ARMS the sidecar
 # with a fingerprint of the query instead, and the session is discovered from
 # hermes's own store on the next poll. Two keys, and the rest of this module
@@ -655,7 +655,7 @@ def arises_line(who=""):
 
     THIS REPLACED A GATE, and that is the point of it. A card used to be
     WITHHELD until its top line was a real sentence, which read fine for the two
-    seconds a healthy spawn takes and hid a wedged minister completely: one that
+    seconds a healthy spawn takes and hid a wedged spirit completely: one that
     never reached its first API call was registered, linked and had genuinely
     done nothing, so it was undrawable, and it burned a core for 45 minutes
     behind an empty triangle before he noticed [top, 2026-07-31]. A placeholder
@@ -720,7 +720,7 @@ def says_line(rec, who=""):
 # \"solomon etches the triangle...\" it should read \"solomon etches the
 # circle...\""*. In the Lesser Key the magician stands in the circle and the
 # spirit is bound in the triangle, so this line said the wrong shape. The word
-# is not retired: `triangle` now names the AREA THE MINISTERS RESIDE IN — the
+# is not retired: `triangle` now names the AREA THE SPIRITS RESIDE IN — the
 # agents section of the board, below Solomon's own summoner section.
 #
 # **Two of them are the STARTUP pair, and the order is the point.** `starting`

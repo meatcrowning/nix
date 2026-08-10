@@ -430,7 +430,7 @@ def test_scratch_state(tmp):
     `~/.local/state/board` was ad-hoc probe scripts that set nothing and ran
     against a `/tmp` board. Measured on `top` 2026-08-02: 830 stale
     `edit-*.lock` files, and a fixture stash in `inflight/` drawing a phantom
-    minister card with no process behind it, which nothing would ever reap.
+    spirit card with no process behind it, which nothing would ever reap.
 
     So the assertion is made against his LIVE directory by listing it before and
     after: if the guard regresses, this test says so instead of quietly adding
@@ -1326,19 +1326,19 @@ def test_by(tmp):
     # ---- ...and a bullet written ON BEHALF of an agent is NOT that agent's ----
     # `agent_id` says which agent a result is FROM, so its summon note goes with
     # it. It is NOT authorship, and reading it as authorship stamped every
-    # board-watch failure note with the dead minister's name — a bullet whose own
-    # text says that minister recorded nothing, attributed to it. The author is
+    # board-watch failure note with the dead spirit's name — a bullet whose own
+    # text says that spirit recorded nothing, attributed to it. The author is
     # resolved from the environment (the writing process) and nothing else; a
     # caller that is nobody falls back to `by=`, which is how board-watch says
     # `board-watch`.
     B.write(path, FIXTURE)
-    bm.note("FAILED: a minister stopped without finishing", path=path,
+    bm.note("FAILED: a spirit stopped without finishing", path=path,
             agent_id="w2502ad")
     onbehalf = B.parse(B.read(path))["todo"][-1]
     check("a bullet written on behalf of an agent is not attributed to it",
           onbehalf["by"] == "", onbehalf["by"])
     B.write(path, FIXTURE)
-    bm.note("FAILED: a minister stopped without finishing", path=path,
+    bm.note("FAILED: a spirit stopped without finishing", path=path,
             agent_id="w2502ad", by="board-watch")
     onbehalf = B.parse(B.read(path))["todo"][-1]
     check("...it is attributed to the program that wrote it, when it says so",
@@ -1996,7 +1996,7 @@ def test_summon_cleared(tmp):
           B.summon_of("INFORMATION: **x** - commanded Marbas (`wd690a4`), yes."))
 
     # ---- THE SHAPE HE ASKED FOR, 2026-07-30 ----
-    # *"the message posted to the board when a minister is summoned should read
+    # *"the message posted to the board when a spirit is summoned should read
     # `SUMMONED [agent] [for/to] [task]` ... it should NOT say INFORMATION: at
     # the beginning"*. So `SUMMONED` is a tag of its own, with nothing in front
     # of it — and, [his, 2026-07-30, later the same day] *"SUMMONED messages
@@ -2027,7 +2027,7 @@ def test_summon_cleared(tmp):
             agent_id="wd690a4")
     check("...and the new shape is retired by its worker's result too",
           not [t for t in texts() if t.startswith("SUMMONED")], texts())
-    check("...leaving the other minister's line alone",
+    check("...leaving the other spirit's line alone",
           any(t.startswith("COMMANDED Zepar") for t in texts()), texts())
 
     # An OLD line keeps rendering: the store is full of them and it is his file.
@@ -2423,12 +2423,12 @@ def test_agents(tmp):
 
     # ---- a decision agent has a name too ---- [his, 2026-08-01] two cards (an
     # answered decision each) sat in the triangle with no name on them while the
-    # minister on the job worked on, and he came back to have it fixed. There IS
+    # spirit on the job worked on, and he came back to have it fixed. There IS
     # somebody on a decision agent - a stashed process - so the "a name is a
     # claim that somebody is on it" rule gives it one: derived off the stable
     # stash key (`name_for`), so it is the same in every process, never changes
     # between two polls, and needs nothing persisted.
-    check("a decision agent is named, like any minister actually on the job",
+    check("a decision agent is named, like any spirit actually on the job",
           all(seen.get(k, {}).get("name") in ba.NAMES
               for k in ("live-one", "dead-one", "hand-one"))
           and all(ba.name_for(seen[k]["id"]) == seen[k]["name"]
@@ -2447,7 +2447,7 @@ def test_agents(tmp):
           tseen.get("tiered-one", {}).get("model") == "sonnet 5 medium",
           tseen.get("tiered-one", {}).get("model"))
     # A stash written before the stamp existed still shows a tier, off the SAME
-    # decision resolver its spawn used - never blank for a running minister...
+    # decision resolver its spawn used - never blank for a running spirit...
     check("...and an unstamped LIVE decision falls back to the decision tier, "
           "not a blank",
           tseen.get("live-one", {}).get("model") == bw.tier_label(
@@ -2776,7 +2776,7 @@ def test_phase(tmp):
     # that wedges before its first API call is linked, has a transcript, and
     # writes nothing into it ever; `none` is what holds a card in its bare
     # *"<name> awakens..."* form (`boardagents.arising`), so an unbounded `none`
-    # would leave a stuck minister claiming forever that it is on its way —
+    # would leave a stuck spirit claiming forever that it is on its way —
     # and under the older `speaks` gate it was UNDRAWABLE outright, measured on
     # top 2026-07-31 at 45 minutes invisible on 100% of one core. Past the
     # grace it is `silent`, which says so.
@@ -3357,7 +3357,7 @@ def test_work(tmp):
           (bph.orch_doing_line("starting"), bph.orch_doing_line("none"))
           == ("%s wields the ring..." % ba.ORCHESTRATOR_NAME,
               # the CIRCLE is Solomon's — [his, 2026-07-29] the magician stands
-              # in it; `triangle` now names the agents area the ministers sit in
+              # in it; `triangle` now names the agents area the spirits sit in
               "%s etches the circle..." % ba.ORCHESTRATOR_NAME),
           (bph.orch_doing_line("starting"), bph.orch_doing_line("none")))
     check("...while a worker keeps the honest bare placeholder",
@@ -3403,7 +3403,7 @@ def test_work(tmp):
     # window draws `describe()` and not the row's own `detail`, so both are
     # checked — a third line coming back through either one is the regression.
     check("...the second line being his sentence, verbatim and with the stop",
-          idle.get("title") == "summons a minister to do your bidding.",
+          idle.get("title") == "summons a spirit to do your bidding.",
           idle.get("title"))
     check("...and NO third line, from either of the two things that feed one",
           ba.describe(idle) == "" and idle.get("detail") == "",
@@ -3549,8 +3549,8 @@ def test_work(tmp):
     check("a stale or hand-edited choice falls back, never reaching --model",
           bw.orch_model() == bw.DEFAULT_ORCH, bw.orch_model())
     os.unlink(bw.orch_model_file())
-    # [his, 2026-08-02] the minister DEFAULT is deepseek v4; the orchestrator's
-    # model is his own pick and never leaks into a minister's default.
+    # [his, 2026-08-02] the spirit DEFAULT is deepseek v4; the orchestrator's
+    # model is his own pick and never leaks into a spirit's default.
     for role in ("worker", "decision"):
         check("a %s defaults to deepseek v4, whatever he picked for the "
               "orchestrator" % role,
@@ -3568,45 +3568,45 @@ def test_work(tmp):
               + (["--effort", e] if e else []),
               (bw.role_tier(role), bw.role_flags(role)))
 
-    # ---- what the MINISTERS run on, and the ceiling on it ----
-    # [his, 2026-07-29] "do not allow ministers to be anything higher than opus 5
+    # ---- what the SPIRITS run on, and the ceiling on it ----
+    # [his, 2026-07-29] "do not allow spirits to be anything higher than opus 5
     # medium thinking." Two independent halves: a list that cannot offer more, and
     # a spawn that cannot pass more. The second is what a hand-edited file meets.
-    check("with nothing chosen, a minister is the DEFAULT (deepseek v4)",
-          not os.path.exists(bw.minister_file())
-          and bw.minister_model() == bw.MINISTER_DEFAULT
-          and bw.MINISTER_DEFAULT == ("deepseek/deepseek-v4-flash-0731", "medium")
-          and bw.MINISTER_CEILING == ("claude-opus-5", "medium"),
-          bw.minister_model())
+    check("with nothing chosen, a spirit is the DEFAULT (deepseek v4)",
+          not os.path.exists(bw.spirit_file())
+          and bw.spirit_model() == bw.SPIRIT_DEFAULT
+          and bw.SPIRIT_DEFAULT == ("deepseek/deepseek-v4-flash-0731", "medium")
+          and bw.SPIRIT_CEILING == ("claude-opus-5", "medium"),
+          bw.spirit_model())
     check("nothing above the ceiling is even offered",
-          all(e in ("low", "medium") for _, e, _ in bw.MINISTER_MODELS)
-          and not any(f == "claude-fable-5" for f, _, _ in bw.MINISTER_MODELS),
-          [(f, e) for f, e, _ in bw.MINISTER_MODELS])
+          all(e in ("low", "medium") for _, e, _ in bw.SPIRIT_MODELS)
+          and not any(f == "claude-fable-5" for f, _, _ in bw.SPIRIT_MODELS),
+          [(f, e) for f, e, _ in bw.SPIRIT_MODELS])
     check("choosing one writes it, and it is what the next spawn reads",
-          bw.set_minister_model("sonnet 5 low") == ("claude-sonnet-5", "low")
+          bw.set_spirit_model("sonnet 5 low") == ("claude-sonnet-5", "low")
           and bw.role_flags("worker") == ["--model", "claude-sonnet-5",
                                           "--effort", "low"],
           bw.role_flags("worker"))
     for bad in ("opus 5 high", "claude-opus-5 max", "fable 5", "opus", ""):
         try:
-            bw.resolve_minister(bad)
+            bw.resolve_spirit(bad)
             check("...%r is refused rather than raised or guessed" % bad, False)
         except ValueError:
             check("...%r is refused rather than raised or guessed" % bad, True)
-    with open(bw.minister_file(), "w") as fh:
+    with open(bw.spirit_file(), "w") as fh:
         fh.write("claude-opus-5 max\n")
     check("a hand-edited file ABOVE the ceiling spawns at the ceiling",
-          bw.minister_model() == bw.MINISTER_CEILING
+          bw.spirit_model() == bw.SPIRIT_CEILING
           and bw.role_flags("worker") == ["--model", "claude-opus-5",
                                           "--effort", "medium"],
           bw.role_flags("worker"))
-    with open(bw.minister_file(), "w") as fh:
+    with open(bw.spirit_file(), "w") as fh:
         fh.write("a-model-that-was-retired medium\n")
     check("...and a stale one falls back too, never reaching --model",
-          bw.minister_model() == bw.MINISTER_CEILING, bw.minister_model())
-    os.unlink(bw.minister_file())
+          bw.spirit_model() == bw.SPIRIT_CEILING, bw.spirit_model())
+    os.unlink(bw.spirit_file())
     os.environ["BOARD_WORKER_EFFORT"] = "xhigh"
-    check("...and the environment can lower a minister, never raise one",
+    check("...and the environment can lower a spirit, never raise one",
           bw.role_flags("worker") == ["--model", "claude-opus-5",
                                       "--effort", "medium"],
           bw.role_flags("worker"))
@@ -3774,9 +3774,9 @@ def test_summon_confirmed(tmp):
 
 
 def test_finished_leaves(tmp):
-    """A MINISTER THAT FINISHED LEAVES THE TRIANGLE AT ONCE. [his, 2026-07-30]
+    """A SPIRIT THAT FINISHED LEAVES THE TRIANGLE AT ONCE. [his, 2026-07-30]
 
-    *"are ministers sometimes staying in the triangle unfocused colored until
+    *"are spirits sometimes staying in the triangle unfocused colored until
     the user clears their completion message?"* — they were: the card is only
     deleted from disk by `boardagents.sweep()`, on a board-watch tick, and the
     next thing to trigger a tick after a worker's final `note` was usually his
@@ -3798,7 +3798,7 @@ def test_finished_leaves(tmp):
 
     ok = bw.dispatch("finish and go", where="apps/zzz/**")
     bad = bw.dispatch("stop mid-sentence", where="apps/yyy/**")
-    check("(setup) both ministers are drawn while they run",
+    check("(setup) both spirits are drawn while they run",
           ok["id"] in drawn() and bad["id"] in drawn(), drawn())
 
     bw.mark_reported(ok["id"], "recorded its result")
@@ -3808,7 +3808,7 @@ def test_finished_leaves(tmp):
     os.kill(ok["pid"], 9)
     os.kill(bad["pid"], 9)
     time.sleep(0.4)
-    check("the finished minister is gone the moment it exits - no tick needed",
+    check("the finished spirit is gone the moment it exits - no tick needed",
           ok["id"] not in drawn(), drawn())
     check("...while the one that stopped without reporting stays",
           bad["id"] in drawn(), drawn())
@@ -3831,12 +3831,12 @@ def test_finished_leaves(tmp):
 
 
 def test_force_stop(tmp):
-    """FORCE-STOPPING one bound minister is HONEST: it reports what is really
+    """FORCE-STOPPING one bound spirit is HONEST: it reports what is really
     true after, never off the kill command's own exit (docs/DESIGN.md §10,
-    §10.3). `boardwork.force_stop` SIGKILLs the minister's own transient unit
+    §10.3). `boardwork.force_stop` SIGKILLs the spirit's own transient unit
     and RE-READS liveness before it answers.
 
-    The refusals matter as much as the kill: Solomon and a deepseek subminister
+    The refusals matter as much as the kill: Solomon and a deepseek subspirit
     have no force-stoppable unit of their own, so `force_stop` declines both
     (the card menu never offers it for them either) rather than silently no-op.
     """
@@ -3851,20 +3851,20 @@ def test_force_stop(tmp):
                            for a in ba.agents())
 
     w = bw.dispatch("run until stopped", where="apps/fsx/**")
-    check("(setup) the minister is running", live(w["id"]))
+    check("(setup) the spirit is running", live(w["id"]))
 
     res = bw.force_stop(w["id"])
-    check("force-stop reports the minister stopped, by name",
+    check("force-stop reports the spirit stopped, by name",
           res["ok"] and "force-stopped" in res["msg"], res)
     check("...and it is REALLY gone, not just signalled", not live(w["id"]),
           [a for a in ba.agents() if a["id"] == w["id"]])
 
     again = bw.force_stop(w["id"])
-    check("stopping an already-stopped minister says so honestly",
+    check("stopping an already-stopped spirit says so honestly",
           again["ok"] and "already" in again["msg"], again)
 
     miss = bw.force_stop("nosuch1")
-    check("a minister that is gone entirely is refused, not faked",
+    check("a spirit that is gone entirely is refused, not faked",
           not miss["ok"] and "no such" in miss["msg"], miss)
 
     ba.register("fs-orch", "planning", os.getpid(), kind="orchestrator")
@@ -3873,11 +3873,11 @@ def test_force_stop(tmp):
           not so["ok"] and "Solomon" in so["msg"], so)
     ba.unregister("fs-orch")
 
-    ba.register("fs-sub", "a chunk", os.getpid(), kind="subminister",
+    ba.register("fs-sub", "a chunk", os.getpid(), kind="subspirit",
                 parent="fs-orch")
     sub = bw.force_stop("fs-sub")
-    check("a subminister has no unit of its own and is refused",
-          not sub["ok"] and "inside its minister" in sub["msg"], sub)
+    check("a subspirit has no unit of its own and is refused",
+          not sub["ok"] and "inside its spirit" in sub["msg"], sub)
     ba.unregister("fs-sub")
 
 
@@ -3957,7 +3957,7 @@ def test_overlap(tmp):
 
 
 def test_tier(tmp):
-    """A dispatch names the TIER its minister runs on, and the ceiling still
+    """A dispatch names the TIER its spirit runs on, and the ceiling still
     holds above it. The planner picks per piece of work (`--model`); his dial
     is what a dispatch naming nothing gets, and is also the ceiling."""
     import subprocess
@@ -3966,7 +3966,7 @@ def test_tier(tmp):
 
     os.environ["BOARD_WORK_SPAWN"] = "sleep 30"
     os.environ["BOARD_MAX_WORKERS"] = "4"
-    bw.set_minister_model("opus 5 medium")
+    bw.set_spirit_model("opus 5 medium")
 
     rec = bw.dispatch("a doc sweep", where="docs/**", model="sonnet 5 medium")
     check("the tier the planner asked for is stored ON THE RECORD...",
@@ -3977,12 +3977,12 @@ def test_tier(tmp):
            for k in ("model", "effort")] == ["claude-opus-5", "medium"])
 
     check("a label this board cannot name is his dial, never a cheap guess",
-          bw.minister_tier("gpt-9 ultra") == ("claude-opus-5", "medium"))
+          bw.spirit_tier("gpt-9 ultra") == ("claude-opus-5", "medium"))
     check("...and neither is a tier ABOVE the ceiling",
-          bw.minister_tier("opus 5 high") == ("claude-opus-5", "medium"))
+          bw.spirit_tier("opus 5 high") == ("claude-opus-5", "medium"))
     check("a deepseek tier resolves, and rides the hermes backend",
-          bw.minister_tier("deepseek v4 flash")[0] in bw.HERMES_MODELS
-          and bw.get_backend_for_model(bw.minister_tier("deepseek v4 flash")[0])
+          bw.spirit_tier("deepseek v4 flash")[0] in bw.HERMES_MODELS
+          and bw.get_backend_for_model(bw.spirit_tier("deepseek v4 flash")[0])
           .name == "hermes")
 
     # THE FLAGS THE SPAWN REALLY CARRIES, not what the record says it wanted:
@@ -4000,7 +4000,7 @@ def test_tier(tmp):
     q = bw.dispatch("queued work", where="apps/x/**", model="haiku 4.5 low",
                     cap_=0)
     check("(setup) it queued above the cap", q["state"] == "queued", q["state"])
-    bw.set_minister_model("opus 5 medium")
+    bw.set_spirit_model("opus 5 medium")
     on_disk = ba._read_json(q["file"])
     check("a queued task carries its own tier on disk, so `promote()` starts "
           "it on the tier it was PLANNED with",
@@ -4072,7 +4072,7 @@ def test_memory_floor(tmp):
 
 
 def test_relay(tmp):
-    """A minister at its turn budget hands the REST on instead of pushing
+    """A spirit at its turn budget hands the REST on instead of pushing
     through: one successor in `pending/`, the hop stamped as reported so
     `reap()` files it done, the tier and `--where` inherited, and a hard depth
     cap that turns into a `PARTIAL:` instead of a fifth hop."""
@@ -4095,7 +4095,7 @@ def test_relay(tmp):
         check("...carrying the brief AND the original task",
               "PICKING UP WHERE" in rec["task"] and task in rec["task"]
               and "PlaybarRow.qml" in rec["task"], rec["task"][:120])
-        check("...at depth 1, from the minister that wrote it",
+        check("...at depth 1, from the spirit that wrote it",
               (rec["relay"], rec["relayFrom"]) == (1, "wrelay1"), rec)
         check("...inheriting the tier and the files, not re-reading the dial",
               (rec["model"], rec["effort"], rec["where"])
@@ -4106,7 +4106,7 @@ def test_relay(tmp):
         # THE HOP IS THE REPORT. Without this `reap()` finds a worker that
         # recorded nothing, files it FAILED and puts a `FAILED:` bullet on his
         # board for work that is in hand and queued.
-        check("the hop stamps the minister as having reported",
+        check("the hop stamps the spirit as having reported",
               os.path.exists(bw.reported_file("wrelay1")))
 
         os.environ["BOARD_WORK_RELAY"] = str(bw.RELAY_MAX)
@@ -4147,7 +4147,7 @@ def test_relay(tmp):
         os.environ["BOARD_WORK_TURNS"] = "600"
         check("...but not before", bw.relay_state()[3] is False)
 
-        check("rule 14 reaches a minister that can hop...",
+        check("rule 14 reaches a spirit that can hop...",
               "boardctl.py relay" in bw.relay_block(60, 0)
               and "hop 1 of at most %d" % bw.RELAY_MAX in bw.relay_block(60, 0))
         check("...and NOTHING reaches one that cannot",
@@ -4726,7 +4726,7 @@ def test_window(app, tmp):
         check("picking a cap writes the one store boardctl writes",
               agents_obj.chooseCap(7)
               and open(bwm.cap_file()).read().strip() == "7"
-              and agents_obj.capLabel == "7 ministers",
+              and agents_obj.capLabel == "7 spirits",
               (bwm.cap_file(), agents_obj.capLabel))
         agents_obj.chooseCap(9)
         check("...and a cap of his that is off the range is drawn, and ticked",
@@ -4735,8 +4735,8 @@ def test_window(app, tmp):
               [(c["n"], c["current"]) for c in agents_obj.caps])
         check("...and 1 is the floor, since 0 agents is not a cap",
               agents_obj.chooseCap(0) and bwm.cap() == 1, bwm.cap())
-        check("...and one minister is singular, because he reads it",
-              agents_obj.capLabel == "1 minister", agents_obj.capLabel)
+        check("...and one spirit is singular, because he reads it",
+              agents_obj.capLabel == "1 spirit", agents_obj.capLabel)
     finally:
         with open(bwm.cap_file(), "w") as f:
             f.write(was or "%d\n" % bwm.DEFAULT_CAP)
@@ -4746,7 +4746,7 @@ def test_window(app, tmp):
 
     # ---- FOUR dropdowns, and the ORDER IS HIS ----
     # [his, 2026-07-29] *"1. number of summoners 2. summoner model 3. number of
-    # ministers 4. minister model"*. Found by their labels, top to bottom, because
+    # spirits 4. spirit model"*. Found by their labels, top to bottom, because
     # the label is the only thing about any of them he can see and a column in the
     # wrong order is the whole failure worth catching here.
     order = sorted((round(it.parentItem()
@@ -4754,43 +4754,43 @@ def test_window(app, tmp):
                     it.property("text").split("  v")[0].strip())
                    for it in drops)
     want = [agents_obj.summonerLabel, agents_obj.modelLabel,
-            agents_obj.capLabel, agents_obj.ministerLabel]
+            agents_obj.capLabel, agents_obj.spiritLabel]
     check("all four dropdowns are drawn, in his order, top to bottom",
           [lab for _, lab in order] == want, (order, want))
     check("...and every one of them is padded to one arrow column",
           len({len(it.property("text")) for it in drops}) == 1,
           [it.property("text") for it in drops])
-    # The minister chooser: what it offers is the ceiling and below, and picking
+    # The spirit chooser: what it offers is the ceiling and below, and picking
     # one writes the store `role_flags` reads at the spawn.
-    listed = agents_obj.ministers
-    check("the minister chooser offers the capped list, one marked current",
+    listed = agents_obj.spirits
+    check("the spirit chooser offers the capped list, one marked current",
           [m["label"] for m in listed]
-          == [lab for _, _, lab in bwm.MINISTER_MODELS]
+          == [lab for _, _, lab in bwm.SPIRIT_MODELS]
           and sum(1 for m in listed if m["current"]) == 1,
           [(m["label"], m["current"]) for m in listed])
     check("...and stops at opus 5 medium - nothing higher is drawn at all",
-          not any(e not in ("low", "medium") for _, e, _ in bwm.MINISTER_MODELS)
-          and agents_obj.ministerLabel == "opus 5 medium",
-          agents_obj.ministerLabel)
-    was_min = open(bwm.minister_file()).read() \
-        if os.path.exists(bwm.minister_file()) else ""
+          not any(e not in ("low", "medium") for _, e, _ in bwm.SPIRIT_MODELS)
+          and agents_obj.spiritLabel == "opus 5 medium",
+          agents_obj.spiritLabel)
+    was_min = open(bwm.spirit_file()).read() \
+        if os.path.exists(bwm.spirit_file()) else ""
     try:
         check("picking one writes the store the spawn reads",
-              agents_obj.chooseMinister("claude-sonnet-5 low")
-              and bwm.minister_model() == ("claude-sonnet-5", "low")
-              and agents_obj.ministerLabel == "sonnet 5 low",
-              agents_obj.ministerLabel)
+              agents_obj.chooseSpirit("claude-sonnet-5 low")
+              and bwm.spirit_model() == ("claude-sonnet-5", "low")
+              and agents_obj.spiritLabel == "sonnet 5 low",
+              agents_obj.spiritLabel)
         check("...and one above the ceiling is refused rather than written",
-              not agents_obj.chooseMinister("claude-opus-5 max")
-              and bwm.minister_model() == ("claude-sonnet-5", "low"),
-              bwm.minister_model())
+              not agents_obj.chooseSpirit("claude-opus-5 max")
+              and bwm.spirit_model() == ("claude-sonnet-5", "low"),
+              bwm.spirit_model())
     finally:
         if was_min:
-            with open(bwm.minister_file(), "w") as f:
+            with open(bwm.spirit_file(), "w") as f:
                 f.write(was_min)
-        elif os.path.exists(bwm.minister_file()):
-            os.unlink(bwm.minister_file())
-        agents_obj.ministerChanged.emit()
+        elif os.path.exists(bwm.spirit_file()):
+            os.unlink(bwm.spirit_file())
+        agents_obj.spiritChanged.emit()
     # ...and the summoner count, the one control that had no store before.
     env_sum = os.environ.pop("BOARD_MAX_SUMMONERS", None)
     was_sum = open(bwm.summoners_file()).read() \
@@ -4880,7 +4880,7 @@ def test_window(app, tmp):
         bp = box.mapToItem(win.contentItem(), QPointF(0, 0))
         # Bottom of the WHOLE usage column, not just the % meters: the box is
         # derived to fill it end to end, and since 2026-07-31 the column also
-        # carries the hermes minister readout below the meters (plain Items with
+        # carries the hermes spirit readout below the meters (plain Items with
         # no `hovering`, so `bars` alone would stop at the second meter).
         col = bars[0].parentItem()
         cb = col.mapToItem(win.contentItem(), QPointF(0, 0))
@@ -5155,20 +5155,20 @@ def test_window(app, tmp):
           rows.get("drawn-dead"))
 
     # ---- the triangle header says how many it BINDS, in words ----
-    # [his, 2026-07-31] *"the triangle binds three ministers"*. The band's
-    # count (`Agents.boundMinisters`) must equal the RUNNING, non-orchestrator
+    # [his, 2026-07-31] *"the triangle binds three spirits"*. The band's
+    # count (`Agents.boundSpirits`) must equal the RUNNING, non-orchestrator
     # cards actually drawn (`win.agentCards` is `Agents.workers`, the set the
     # triangle renders — sessions the user started are already filtered out by
     # `cards()`, so a live anonymous session here can never be one of them).
     # Drawn-live is running; drawn-dead is not.
-    _n = prop(agents, "boundMinisters")
+    _n = prop(agents, "boundSpirits")
     _running = [a for a in prop(win, "agentCards")
                 if a.get("state") == "running"]
-    check("the header count is exactly the running ministers drawn",
+    check("the header count is exactly the running spirits drawn",
           _n == len(_running) and _n >= 1, (_n, [a["id"] for a in _running]))
     _words = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five"}
     _want = ("the triangle binds " + _words.get(_n, str(_n))
-             + (" minister" if _n == 1 else " ministers"))
+             + (" spirit" if _n == 1 else " spirits"))
     _band = [str(it.property("label") or "") for it in descendants(win.contentItem())
              if it.property("interactive") is not None
              and str(it.property("label") or "").startswith("the triangle")]
@@ -5634,9 +5634,9 @@ def test_window(app, tmp):
           .get("Fold VScroll into qmlcommon") == keep[-1].property("textDim"),
           [(s, t.property("color").name()) for _, s, t in muteLines])
 
-    # ---- the DRAWER: what the minister is actually saying ----
-    # [his, 2026-07-30] *"a minister card should expand to show what that
-    # minister is actually saying"* — clicking anywhere on the card slides a
+    # ---- the DRAWER: what the spirit is actually saying ----
+    # [his, 2026-07-30] *"a spirit card should expand to show what that
+    # spirit is actually saying"* — clicking anywhere on the card slides a
     # drawer down out from under it with the last couple of lines that agent
     # logged, indented, with a rule down its left edge; clicking again closes it.
     #
@@ -5800,7 +5800,7 @@ def test_window(app, tmp):
     cells = ["-" if isinstance(b, str) else str(b["label"])
              for b in prop(win, "tbButtons")]
     check("the titlebar carries a `lg` cell in its own section under `md`",
-          cells[-4:] == ["md", "-", "lg", "sm"], cells)
+          cells[-5:] == ["md", "-", "fs", "lg", "sm"], cells)
 
     type(keep[2]).sent[:] = []
     keep[2].clicked.emit("logs")
@@ -6044,7 +6044,7 @@ def test_window(app, tmp):
         spin(250)
         check("with nothing running the agents section is empty, not broken",
               prop(win2, "agents") == [], prop(win2, "agents"))
-        # [his, 2026-07-29] *"binds ministers."* — what the triangle IS, and
+        # [his, 2026-07-29] *"binds spirits."* — what the triangle IS, and
         # with board-watch armed it is the ONLY text down there: no systemd
         # sentence, no second line. The window's `armed` comes from the real
         # `Agents`, so the armed case is forced here rather than waited for.
@@ -6053,7 +6053,7 @@ def test_window(app, tmp):
         spin(200)
         shown2 = _visible_texts()
         check("the empty triangle says what it is, in his words",
-              "binds ministers." in shown2, shown2[:12])
+              "binds spirits." in shown2, shown2[:12])
         check("...and armed, that sentence is the only text the section draws",
               not any("board-watch" in s for s in shown2),
               [s for s in shown2 if "board-watch" in s])
@@ -6062,7 +6062,7 @@ def test_window(app, tmp):
         spin(200)
         shown3 = _visible_texts()
         check("...while a watcher that will never fire is said so, once",
-              "binds ministers." in shown3
+              "binds spirits." in shown3
               and shown3.count("board-watch is not armed") == 1,
               [s for s in shown3 if "board-watch" in s])
         # Unknown is neither: §10 does not let "could not ask systemctl" become
@@ -6984,7 +6984,7 @@ def test_usage_follows_agents(app):
 
 def test_undo(tmp):
     """CTRL+Z, the mechanism. [his, 2026-07-29] *"before solomon summons a
-    minister, allow the user to crtl+z to stop solomon from doing that ... and
+    spirit, allow the user to crtl+z to stop solomon from doing that ... and
     then insert the prompt back into the prompt box"*.
 
     The three answers that are NOT a cancellation are the point of most of these
@@ -7058,7 +7058,7 @@ def test_undo(tmp):
     # ---- everybody else is untouched by the gate ----
     was = os.environ.get("BOARD_AGENT_ID")
     os.environ["BOARD_AGENT_ID"] = "w1a2b3c"
-    check("a minister is never gated by any of this", bun.claim() is True)
+    check("a spirit is never gated by any of this", bun.claim() is True)
     if was is None:
         del os.environ["BOARD_AGENT_ID"]
     else:
@@ -7336,7 +7336,7 @@ def test_card_output(tmp):
     # with an animated elipsies ... nothing else until the agent card actually
     # starts producing stuff"* — the word is AWAKENS, not arises: [his,
     # 2026-08-01] settled it. This replaced `speaks`, whose withheld state was
-    # exactly the one a wedged minister sat in, invisibly, for 45 minutes.
+    # exactly the one a wedged spirit sat in, invisibly, for 45 minutes.
     ba.register("w-hush", "T", os.getpid(), kind="worker", where="apps/x/**",
                 session="ses-never")          # linked, transcript never appears
     by_id = {a["id"]: a for a in ba.agents()}
@@ -7362,7 +7362,7 @@ def test_card_output(tmp):
     # AND IT DOES NOT RISE FOREVER. Past `START_GRACE_S` with an empty
     # transcript the observation is `silent`, and the card stops claiming it is
     # on its way and says plainly that it never started — the whole point of the
-    # change being that a wedged minister is VISIBLE, not that it looks tidy.
+    # change being that a wedged spirit is VISIBLE, not that it looks tidy.
     # An EMPTY transcript that exists is the wedged shape: a file was opened and
     # not one entry was ever written to it. (A session id with no file at all is
     # the other failure, `unlinked`, and has its own sentence.)
@@ -7373,7 +7373,7 @@ def test_card_output(tmp):
     try:
         bph.START_GRACE_S = -1                # everything is instantly past it
         by_id = {a["id"]: a for a in ba.agents()}
-        check("a minister wedged past the grace stops rising and says so",
+        check("a spirit wedged past the grace stops rising and says so",
               by_id["w-wedged"]["arising"] is False
               and "not started" in by_id["w-wedged"]["doingLine"],
               (by_id["w-wedged"]["arising"], by_id["w-wedged"]["doingLine"]))
@@ -7416,16 +7416,16 @@ def test_card_output(tmp):
 
 
 def test_shells(tmp):
-    """The triangle's live workings band: a per-minister tail of the TOOL CALLS
+    """The triangle's live workings band: a per-spirit tail of the TOOL CALLS
     the running agent runs AND THEIR OUTPUT — [his, 2026-08-01] not its prose or
     reasoning, [his, 2026-08-03] but the actual result of each command/script, a
     trailing log of what it printed, not just the command line. Off the same
-    `cards` list the triangle draws, and only for running ministers — the FILE
+    `cards` list the triangle draws, and only for running spirits — the FILE
     under `~/.cache/board-work/<id>.log` is buffered and empty until exit anyway,
     so the transcript is the source."""
     import main as brd
     import boardagents as ba
-    print("\n=== the triangle shows each bound minister's tool-call shell ===")
+    print("\n=== the triangle shows each bound spirit's tool-call shell ===")
     os.environ["BOARD_TRANSCRIPTS"] = os.path.join(tmp, "transcripts")
     agents = brd.Agents.__new__(brd.Agents)      # no Qt, no polling
     ba.register("w-a", "T", 1, kind="worker", session="ses-a", where="apps/x/**")
@@ -7465,7 +7465,7 @@ def test_shells(tmp):
                   "input": {"file_path": "/a/b.py"}})
     # prose ONLY, no call at all: nothing to show, so no shell row
     say("ses-prose", {"type": "text", "text": "just talking, no tools"})
-    # an empty transcript, the shape of a running minister that has not spoken
+    # an empty transcript, the shape of a running spirit that has not spoken
     open(os.path.join(d, "ses-quiet.jsonl"), "w").close()
     # A command whose output is LONG and holds a pathologically wide line: the
     # band shows a bounded TAIL, and no single line arrives wider than
@@ -7493,7 +7493,7 @@ def test_shells(tmp):
     trace_a = brd.Agents._transcript_lines("ses-a", tools_only=True)
     check("the workings trace is the calls AND their output, in file order",
           trace_a == ["$ grep foo x", "3 matches", "$ git push"], trace_a)
-    check("...the minister's prose and reasoning are NOT in it",
+    check("...the spirit's prose and reasoning are NOT in it",
           "let me think" not in trace_a and "I will grep for it" not in trace_a
           and "now push" not in trace_a, trace_a)
     # The band itself is the trailing couple of lines of that trace — so a
@@ -7502,9 +7502,9 @@ def test_shells(tmp):
           by["w-a"]["lines"] == ["3 matches", "$ git push"], by)
     check("...and a single call with no output yet shows as itself",
           by["w-b"]["lines"] == ["Read /a/b.py"], by)
-    check("...a minister that has only talked (no tools) draws no shell row",
+    check("...a spirit that has only talked (no tools) draws no shell row",
           "w-prose" not in by, list(by))
-    check("...a minister still bound but silent draws no shell row at all",
+    check("...a spirit still bound but silent draws no shell row at all",
           "w-quiet" not in by, list(by))
     check("...an exited worker is never shelled",
           "w-stop" not in by, list(by))
@@ -7527,17 +7527,17 @@ def test_shells(tmp):
 
 
 def test_shell_bg(tmp):
-    """The backgrounded long-runners a bound minister left running, read from
+    """The backgrounded long-runners a bound spirit left running, read from
     its own worker-unit cgroup (`board-worker-<id>.service`), ride under the
     foreground tail in the shells band — the triangle itself is untouched
     ([his, 2026-08-01] *\"leave triangle how it is, do the background\n
     processes in the other section labeled 'shells'\"*). Proves the row is kept
-    on the strength of a running process even when the minister has said
+    on the strength of a running process even when the spirit has said
     nothing, that only a worker unit reads background processes at all, and
-    that the minister's own main pid is the one process never shown."""
+    that the spirit's own main pid is the one process never shown."""
     import main as brd
     import boardagents as ba
-    print("\n=== the shells band reads a bound minister's backgrounded runners ===")
+    print("\n=== the shells band reads a bound spirit's backgrounded runners ===")
     os.environ["BOARD_TRANSCRIPTS"] = os.path.join(tmp, "transcripts")
     agents = brd.Agents.__new__(brd.Agents)      # no Qt, no polling
     ba.register("w-run", "T", 4242, kind="worker", session="ses-run",
@@ -7547,7 +7547,7 @@ def test_shell_bg(tmp):
 
     cg = os.path.join(tmp, "cgroup")
     os.makedirs(cg)
-    # a worker unit cgroup holding the minister itself and two long-runners
+    # a worker unit cgroup holding the spirit itself and two long-runners
     with open(os.path.join(cg, "cgroup.procs"), "w") as f:
         f.write("4242\n5150\n5250\n")
 
@@ -7574,7 +7574,7 @@ def test_shell_bg(tmp):
           == {"qml -p /tmp/qs-test/shell.qml", "node media/scan.mjs"}, by)
     check("...its own main pid is never one of them",
           "4242" not in " ".join(by.get("w-run", {}).get("bg", [])), by)
-    check("...a minister with a worker unit draws background even if silent",
+    check("...a spirit with a worker unit draws background even if silent",
           "w-run" in by and by["w-run"]["bg"], by)
     check("...a session (no worker unit) reads no background processes at all",
           set(by.get("w-nounit", {}).get("bg", [])) == set(), by)
@@ -7630,10 +7630,10 @@ def _hcall(con, sid, name, args, at=0.0):
 
 
 def test_hermes(tmp):
-    """A MINISTER ON THE OTHER RUNTIME IS WATCHED THE SAME WAY.
+    """A SPIRIT ON THE OTHER RUNTIME IS WATCHED THE SAME WAY.
 
     Hermes has no `--session-id` and no transcript file, so until 2026-07-31 a
-    hermes minister's card was claim-only and its log pointed at a
+    hermes spirit's card was claim-only and its log pointed at a
     `~/.claude/projects/*.jsonl` that was never written. The run is bound by a
     hash of the query hermes stores verbatim instead; everything downstream —
     the observed phase, the drawer, the confirmation of the summon — has to
@@ -7644,7 +7644,7 @@ def test_hermes(tmp):
     import boardagents as ba
     import boardwork as bw
     import main as brd
-    print("\n=== a hermes minister is observed out of hermes's own store ===")
+    print("\n=== a hermes spirit is observed out of hermes's own store ===")
     db = os.path.join(tmp, "state.db")
     os.environ["BOARD_HERMES_DB"] = db
     con = _hermes_db(db)
@@ -7675,7 +7675,7 @@ def test_hermes(tmp):
     check("the run is found by ITS OWN query, not by whatever started nearby",
           bph.read_sidecar("h-one").get("hsession") == "20260731_2_bbb",
           bph.read_sidecar("h-one").get("hsession"))
-    check("...and a bound-but-idle minister says nothing yet, like any other",
+    check("...and a bound-but-idle spirit says nothing yet, like any other",
           r["observed"] == "none", r["observed"])
     check("...and that binding is the proof its summon completed",
           ba._confirmed({"id": "h-one", "confirmed": False}, False) is True)
@@ -7726,7 +7726,7 @@ def test_hermes(tmp):
     con.execute("INSERT INTO messages (session_id, role, content, timestamp)"
                 " VALUES (?, 'user', 'HIS PROMPT', ?)", ("20260731_2_bbb", now))
     con.commit()
-    check("...and his own prompt read back is NOT the minister's output",
+    check("...and his own prompt read back is NOT the spirit's output",
           "HIS PROMPT" not in agents.output("h-one"), agents.output("h-one"))
     _hcall(con, "20260731_2_bbb", "terminal", {"command": "hyprctl layers"}, now)
     check("...and a terminal call is the command, the same as a Bash one",
@@ -7870,12 +7870,12 @@ def test_hermes_topup(tmp):
 def test_hermes_spend_export(tmp):
     """THE HERMES SPEND IS SUMMED ACROSS HOSTS VIA THE SYNCED PER-HOST EXPORT.
 
-    [his answer, 2026-08-03] on combining the hermes minister rows across top
+    [his answer, 2026-08-03] on combining the hermes spirit rows across top
     and book: *build the hermes per-host export and sum both*. The Claude side
     already combines (transcripts sync through claude-state), but
     `~/.hermes/state.db` does not, so each host mints `spend.<host>.json` into
     docs/ (quarter-hourly unit) and the docs sync carries it over. What must
-    hold: the readout shows BOTH hosts' hermes ministers, the local host's own
+    hold: the readout shows BOTH hosts' hermes spirits, the local host's own
     export is NOT double-counted beside its live ledger, the daily chart merges
     too, windows apply to the remote rows, and a missing or malformed remote
     export degrades to the local side instead of crashing the section.
@@ -8010,24 +8010,24 @@ def test_hermes_spend_export(tmp):
     del os.environ["BOARD_SPEND_EXPORT_DIR"]
 
 
-def test_subminister(tmp):
-    """A CLAUDE MINISTER *OR THE ORCHESTRATOR* DELEGATES A CHUNK TO A DEEPSEEK
-    SUBMINISTER.
+def test_subspirit(tmp):
+    """A CLAUDE SPIRIT *OR THE ORCHESTRATOR* DELEGATES A CHUNK TO A DEEPSEEK
+    SUBSPIRIT.
 
-    The gate: only a caller genuinely running on a Claude model — a minister OR
-    Solomon the orchestrator — may spawn the deepseek subminister; one already
+    The gate: only a caller genuinely running on a Claude model — a spirit OR
+    Solomon the orchestrator — may spawn the deepseek subspirit; one already
     on the deepseek/hermes runtime gains nothing and is refused (the gate is on
-    the runtime, not the role). The subminister's model is PINNED to
+    the runtime, not the role). The subspirit's model is PINNED to
     `deepseek/deepseek-v4-flash-0731` whatever the caller's own dropdown says,
     and its chunk is carried in the query. Its whole result is the returned
-    stdout the calling minister quotes — but while it runs it DOES get a card: a
-    demon name and a registration record carrying `kind="subminister"` and the
+    stdout the calling spirit quotes — but while it runs it DOES get a card: a
+    demon name and a registration record carrying `kind="subspirit"` and the
     `parent`/`parentName` of the caller, so the UI can inset it under that row.
     The record is dropped when the run ends and it counts against no cap.
     """
     import boardwork as bw
     import types
-    print("\n=== a Claude minister delegates bulk work to a deepseek subminister ===")
+    print("\n=== a Claude spirit delegates bulk work to a deepseek subspirit ===")
 
     # The gate reads the NEAREST agent-runtime ancestor out of /proc.
     P = os.getpid()
@@ -8046,16 +8046,16 @@ def test_subminister(tmp):
         check("a deepseek/hermes worker's nearest runtime is 'hermes' (refused)",
               _with({10: (1, "sh", ["sh"]),
                      20: (1, "hermes", ["hermes"])}, [10, 20]) == "hermes")
-        # The recursion case the gate exists for: a deepseek SUBminister spawned
-        # by a Claude minister inherits its parent's claude env, so the walk must
+        # The recursion case the gate exists for: a deepseek SUBspirit spawned
+        # by a Claude spirit inherits its parent's claude env, so the walk must
         # take the NEAREST runtime (hermes), not the env it was handed.
-        check("a deepseek subminister of a Claude minister is still 'hermes'",
+        check("a deepseek subspirit of a Claude spirit is still 'hermes'",
               _with({10: (1, "sh", ["sh"]), 20: (1, "hermes", ["hermes"]),
                      30: (1, ".claude-wrapped", [".claude-wrapped"])},
                     [10, 20, 30]) == "hermes")
 
         # The ORCHESTRATOR is a `claude` process too, so its nearest runtime is
-        # `claude` and it is allowed exactly as a minister is — the gate never
+        # `claude` and it is allowed exactly as a spirit is — the gate never
         # reads the role. [his follow-up, 2026-08-01: Solomon may delegate too.]
         check("Solomon the orchestrator (a claude process) is allowed",
               _with({10: (1, "sh", ["sh"]),
@@ -8066,12 +8066,12 @@ def test_subminister(tmp):
         bw.ba._ancestors = lambda pid, pr: [10, 20]
         refused = False
         try:
-            bw.subminister("any chunk")
+            bw.subspirit("any chunk")
         except ValueError as e:
             refused = "ALREADY on the deepseek/hermes runtime" in str(e)
         check("a deepseek caller is refused, not delegated", refused)
 
-        # A Claude caller (here standing in for BOTH a minister and Solomon):
+        # A Claude caller (here standing in for BOTH a spirit and Solomon):
         # the argv is pinned to deepseek flash and carries the chunk + the
         # compact-result framing, AND while it runs a card is registered under
         # the caller's id. We fake `Popen` so nothing real is spawned; its
@@ -8084,13 +8084,13 @@ def test_subminister(tmp):
         captured = {}
 
         # A deterministic id, so the name it WOULD take is known — and a LIVE
-        # minister already sitting on that name, so we can prove the subminister
+        # spirit already sitting on that name, so we can prove the subspirit
         # is moved off it rather than colliding with a running agent.
         real_urandom = bw.os.urandom
         bw.os.urandom = lambda n: b"\xab\xcd\xef"[:n]
         sub_aid = "sub" + b"\xab\xcd\xef".hex()
         collide = bw.ba.name_for(sub_aid)
-        bw.ba.register("wmin001", "a live minister", os.getpid(),
+        bw.ba.register("wmin001", "a live spirit", os.getpid(),
                        kind="worker", name=collide)
 
         class FakePopen:
@@ -8115,10 +8115,10 @@ def test_subminister(tmp):
         real_popen = bw.subprocess.Popen
         bw.subprocess.Popen = FakePopen
         try:
-            out = bw.subminister("read all python and list public funcs")
+            out = bw.subspirit("read all python and list public funcs")
             cmd = captured["cmd"]
             q = cmd[cmd.index("-q") + 1]
-            check("the subminister's model is PINNED to deepseek flash",
+            check("the subspirit's model is PINNED to deepseek flash",
                   cmd[cmd.index("-m") + 1] == "deepseek/deepseek-v4-flash-0731", cmd)
             check("it rides the hermes backend and the nous provider",
                   cmd[0] == "hermes"
@@ -8128,7 +8128,7 @@ def test_subminister(tmp):
                   "list public funcs" in q, q)
             check("the framing tells it to return something COMPACT",
                   "return a COMPACT result" in q)
-            check("...and not to act as a board minister",
+            check("...and not to act as a board spirit",
                   "write to any board" in q and "boardctl note/land/ask" in q)
             check("its frame is self-contained — it does NOT inherit the board "
                   "worker RULES (which would have it commit and rebuild)",
@@ -8136,21 +8136,21 @@ def test_subminister(tmp):
                   and "RULES are in force" not in q, q)
             check("...but still carries the user-safe guardrail",
                   "never touch the user's display" in q)
-            check("its stdout is the calling minister's result",
+            check("its stdout is the calling spirit's result",
                   out == "LEAN RESULT\n", repr(out))
             check("it runs in the repo, where the bulk files live",
                   captured["kw"].get("cwd") == bw.REPO, captured["kw"])
 
-            # THE CARD, mid-flight. Exactly one subminister registration, named
+            # THE CARD, mid-flight. Exactly one subspirit registration, named
             # from the Lesser Key and stamped with the caller as its parent.
             subs = [r for r in captured["regs"]
-                    if r.get("kind") == "subminister"]
-            check("a subminister registers exactly one card while it runs",
+                    if r.get("kind") == "subspirit"]
+            check("a subspirit registers exactly one card while it runs",
                   len(subs) == 1, subs)
             rec = subs[0] if subs else {}
             check("its name is drawn from the Lesser Key demon pool",
                   rec.get("name") in bw.ba.NAMES, rec.get("name"))
-            check("it does NOT collide with the live minister's name",
+            check("it does NOT collide with the live spirit's name",
                   rec.get("name") != collide, rec.get("name"))
             check("the parent field carries the caller's id",
                   rec.get("parent") == parent, rec.get("parent"))
@@ -8160,21 +8160,21 @@ def test_subminister(tmp):
                   rec.get("parentName"))
             # The fields reach the UI walk with the same keys Murmur reads.
             arow = [a for a in captured["agents"]
-                    if a.get("kind") == "subminister"]
-            check("agents() surfaces parent/parentName on the subminister row",
+                    if a.get("kind") == "subspirit"]
+            check("agents() surfaces parent/parentName on the subspirit row",
                   len(arow) == 1 and arow[0]["parent"] == parent
                   and arow[0]["parentName"] == rec.get("parentName"), arow)
             # It is NOT a top-level card and NOT a capped worker.
             check("it is excluded from the flat cards() list (drawn inset)",
-                  not any(c.get("kind") == "subminister"
+                  not any(c.get("kind") == "subspirit"
                           for c in captured["cards"]))
             check("it counts against no worker cap",
-                  not any(w.get("kind") == "subminister"
+                  not any(w.get("kind") == "subspirit"
                           for w in captured["workers"]))
             # ...and it is gone once the run returns: a transient compute card.
             after = [r for r in bw.ba._registrations()
-                     if r.get("kind") == "subminister"]
-            check("the subminister card is dropped when the run ends",
+                     if r.get("kind") == "subspirit"]
+            check("the subspirit card is dropped when the run ends",
                   after == [], after)
         finally:
             bw.subprocess.Popen = real_popen
@@ -8273,7 +8273,7 @@ def main():
         test_hermes_proximity(os.path.join(tmp, "herm"))
         test_hermes_topup(os.path.join(tmp, "herm"))
         test_hermes_spend_export(os.path.join(tmp, "herm"))
-        test_subminister(os.path.join(tmp, "herm"))
+        test_subspirit(os.path.join(tmp, "herm"))
         app = QGuiApplication(sys.argv)
         test_usage_follows_agents(app)
         test_real_store()

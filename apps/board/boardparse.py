@@ -720,7 +720,7 @@ def parse(src):
 #   INFORMATION  a fact; nothing is asked of him at all.
 #   SUMMONED     who is working on what right now. Last: it is not a report at
 #                all but the state of the triangle, and every line in it is
-#                retired by its own minister's result without him touching it.
+#                retired by its own spirit's result without him touching it.
 #
 # An untagged bullet — the store is full of ones written before the tag rule —
 # comes FIRST, under no heading at all, so nothing claims it as something it is
@@ -761,7 +761,7 @@ def tag_of(text):
 def section_of(tag):
     """The subsection a tag is DRAWN under — itself, unless `TAG_SECTION` says
     otherwise. Only `COMMANDED`, which is drawn beside `SUMMONED`: the two are
-    the same announcement, one for a new minister and one for a running one."""
+    the same announcement, one for a new spirit and one for a running one."""
     return TAG_SECTION.get(tag, tag)
 
 
@@ -1442,8 +1442,8 @@ TODO_TAGS = (
     #: emits this one, and it is the reason the set is not just his three: the
     #: system must never let a failure read as information.
     "FAILED",
-    #: a minister was started for a piece of work. [his, 2026-07-30] *"the
-    #: message posted to the board when a minister is summoned should read
+    #: a spirit was started for a piece of work. [his, 2026-07-30] *"the
+    #: message posted to the board when a spirit is summoned should read
     #: `SUMMONED [agent] [for/to] [task]` instead of what it is now. it should
     #: NOT say INFORMATION: at the beginning"*. So it is a tag of its own
     #: rather than a sentence sitting behind `INFORMATION:` — and, since later
@@ -1929,7 +1929,7 @@ def drop_summon(lines, doc, agent_id="", name=""):
 # agent writing a one-off probe against a `/tmp` board inherits his real state dir
 # and writes into it. Measured on `top` 2026-08-02: 830 stale `edit-*.lock` files
 # from 830 throwaway board paths, and one fixture stash left in `inflight/` that
-# drew a phantom minister card on his board — a decision agent with no process
+# drew a phantom spirit card on his board — a decision agent with no process
 # behind it, which nothing would ever reap because a stash with a null pid cannot
 # be observed to die.
 #

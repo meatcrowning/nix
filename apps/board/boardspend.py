@@ -2,13 +2,13 @@
 
 [his ask, 2026-08-02] a usage/spend section in goetia — its own band beside the
 others — showing, across ALL the providers this board automation reaches (the
-deepseek/hermes ministers AND every Claude tier haiku/sonnet/opus/fable): how
+deepseek/hermes spirits AND every Claude tier haiku/sonnet/opus/fable): how
 many agents were dispatched per model, what each model cost, and the total
 tokens split input vs output.
 
 **This is the board system's OWN footprint, not his interactive coding.** A
 Claude session counts here only when its first prompt marks it as something the
-board spawned — a summoner tick (Solomon), a dispatched minister/worker, or a
+board spawned — a summoner tick (Solomon), a dispatched spirit/worker, or a
 decision agent (`_role_of`, the same markers `tools/claude-usage-report.py` and
 `boardphase` read). His own `claude` sessions at this desk are his, not the
 board's, and are left out — the section is about what the automation costs.
@@ -26,9 +26,9 @@ board's, and are left out — the section is about what the automation costs.
   the public per-token API rates (`RATES`) — a **compute-weight, not a bill**,
   because he is on a plan measured in % of limit and there is no invoice to read.
   That is stated in the readout, never implied away.
-- **deepseek/hermes ministers** DO keep a real ledger — Hermes' own
+- **deepseek/hermes spirits** DO keep a real ledger — Hermes' own
   `~/.hermes/state.db` — with `estimated_cost_usd` the provider itself computed
-  and true input/output token columns. Board ministers run `--source tool`
+  and true input/output token columns. Board spirits run `--source tool`
   (`boardusage.HERMES_SOURCE`), so that filter is exactly this board's hermes
   spend. Here the cost is the provider's own estimate, not ours.
 - **The hermes rows are BOTH hosts', not just this one's.** `~/.hermes/state.db`
@@ -309,7 +309,7 @@ def _hermes_export_files():
     live source for this host and its own export is a stale copy of it, so
     reading both would double count. A missing dir or an empty glob is simply
     no rows from the other host: a machine that has not deployed the writer
-    yet, or one that has no hermes ministers at all, contributes nothing."""
+    yet, or one that has no hermes spirits at all, contributes nothing."""
     d = _hermes_export_dir()
     try:
         names = sorted(glob.glob(os.path.join(d, "spend.*.json")))
@@ -394,7 +394,7 @@ def _hermes_fold(out, sessions, cutoff):
 
 
 def _hermes_rows(now, window):
-    """`{label: {...}}` for board (source=tool) hermes ministers on BOTH hosts,
+    """`{label: {...}}` for board (source=tool) hermes spirits on BOTH hosts,
     grouped by the session's model, or an empty dict when neither source is
     readable. Cost is the provider's own `estimated_cost_usd`; tokens are the
     real columns, folded exactly as `_hermes_fold` documents. The local ledger
@@ -423,7 +423,7 @@ def _hermes_label(model):
 
 def _hermes_daily(now):
     """`{day: {"tokens": {label: tokens}, "cost": {label: cost}, "agents": int}}`
-    for board (source=tool) hermes ministers on BOTH hosts over the trailing
+    for board (source=tool) hermes spirits on BOTH hosts over the trailing
     `DAILY_DAYS`, bucketed by `started_at`'s local day, or an empty dict when
     neither source is readable. `tokens` folds every column the aggregate's
     `in`/`out` do, so a day's chart bar equals the sum of its per-model figures;
