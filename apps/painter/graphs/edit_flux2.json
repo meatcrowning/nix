@@ -68,13 +68,18 @@
     "class_type": "ConditioningZeroOut",
     "_meta": { "title": "Conditioning Zero Out", "painter_role": "zero_out" }
   },
+  "14": {
+    "inputs": { "samples": ["13", 0], "multiplier": 0.7 },
+    "class_type": "LatentMultiply",
+    "_meta": { "title": "Reference Strength", "painter_role": "ref_scale" }
+  },
   "22": {
-    "inputs": { "conditioning": ["20", 0], "latent": ["13", 0] },
+    "inputs": { "conditioning": ["20", 0], "latent": ["14", 0] },
     "class_type": "ReferenceLatent",
     "_meta": { "title": "Set Reference Latent", "painter_role": "ref_pos" }
   },
   "23": {
-    "inputs": { "conditioning": ["21", 0], "latent": ["13", 0] },
+    "inputs": { "conditioning": ["21", 0], "latent": ["14", 0] },
     "class_type": "ReferenceLatent",
     "_meta": { "title": "Set Reference Latent (negative)", "painter_role": "ref_neg" }
   },
