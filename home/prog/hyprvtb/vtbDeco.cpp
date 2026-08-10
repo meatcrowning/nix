@@ -5321,6 +5321,33 @@ uint64_t CVtbDeco::getDecorationFlags() {
 
 // ---- CVtbShadowDeco: bottom-left hard drop shadow -------------------------
 
+// Per-edge reach of the hard drop shadow beyond the CLIENT box, logical px.
+// The shadow is always offset down+left by VTB_SHADOW_SIZE (DESIGN §4), so it
+// ALWAYS overhangs the decorated box by N on the left and bottom. On top of
+// that it spans the reserved titlebar strip, and on a LEFT or BOTTOM bar the
+// down-left offset carries that strip's shadow a full bar-width PAST the bar —
+// so the reach on that side has to clear bar+N, not just N. This is the same
+// reach that vtbRenderShadowLayer's SB actually paints; every damage box for
+// the shadow (the deco's declared extents, the self-damage on move, and
+// damageEntire) is computed from it. Getting it from barSide() rather than
+// hardcoding the RIGHT-bar case is what stops the shadow freezing on the bar
+// side when titlebar_edge is left/top/bottom (the L/B overhang there fell
+// outside both the declared extents and the move damage, so it went stale and
+// flickered instead of tracking the window).
+struct SVtbShadowReach { double left, top, right, bottom; };
+static SVtbShadowReach vtbShadowReach(PHLWINDOW w) {
+    const double N   = VTB_SHADOW_SIZE;
+    const double EXT = (g_pGlobalState && Cfg::enabled() && vtbHasBar(w)) ? (double)totalBarW() : 0.0;
+    SVtbShadowReach r{N, 0.0, 0.0, N};
+    switch (barSide()) {
+        case eBarSide::RIGHT:  r.right   = EXT; break; // bar reserves the right; down-left offset points into it
+        case eBarSide::LEFT:   r.left   += EXT; break; // overhang lands a bar-width left of the left bar
+        case eBarSide::TOP:    r.top     = EXT; break;
+        case eBarSide::BOTTOM: r.bottom += EXT; break; // overhang lands a bar-width below the bottom bar
+    }
+    return r;
+}
+
 CVtbShadowDeco::CVtbShadowDeco(PHLWINDOW pWindow) : IHyprWindowDecoration(pWindow), m_pWindow(pWindow) {
     ;
 }
@@ -5335,11 +5362,12 @@ SDecorationPositioningInfo CVtbShadowDeco::getPositioningInfo() {
     info.edges    = DECORATION_EDGE_LEFT | DECORATION_EDGE_BOTTOM;
     info.priority = 5;      // below the titlebar; order among non-solid decos is irrelevant
     info.reserved = false;  // must NOT inset the window — this is just a shadow
-    // Declare the shadow's reach so a moving window's damage box includes it:
-    // left + bottom for the L-overhang, and right for the titlebar strip the
-    // shadow now spans (so its under-bar bottom edge doesn't trail on moves).
-    const double BARW = g_pGlobalState && Cfg::enabled() && vtbHasBar(m_pWindow.lock()) ? (double)totalBarW() : 0.0;
-    info.desiredExtents = {{(double)VTB_SHADOW_SIZE, 0.0}, {BARW, (double)VTB_SHADOW_SIZE}};
+    // Declare the shadow's reach so a moving window's damage box includes it —
+    // side-aware (vtbShadowReach): the L-overhang plus, on the bar's own edge,
+    // the titlebar strip the shadow spans. Hardcoding the RIGHT-bar case left
+    // the overhang past a left/bottom bar out of the damage box, so it froze.
+    const SVtbShadowReach R = vtbShadowReach(m_pWindow.lock());
+    info.desiredExtents = {{R.left, R.top}, {R.right, R.bottom}};
     return info;
 }
 
@@ -5370,9 +5398,9 @@ void CVtbShadowDeco::draw(PHLMONITOR, const float&) {
     // moving window trailed the hard shadow's left edge. Whenever the footprint
     // moves, damage its old ∪ new (global-logical, incl. the drag's
     // floatingOffset) so the trailing edge repaints. Stable when the window is.
-    const auto&  FO     = PWINDOW->m_floatingOffset;
-    const double BARW   = vtbHasBar(PWINDOW) ? (double)totalBarW() : 0.0;
-    CBox         coverG = {g.x + FO.x - VTB_SHADOW_SIZE, g.y + FO.y, g.w + VTB_SHADOW_SIZE + BARW, g.h + VTB_SHADOW_SIZE};
+    const auto&           FO = PWINDOW->m_floatingOffset;
+    const SVtbShadowReach R  = vtbShadowReach(PWINDOW);
+    CBox coverG = {g.x + FO.x - R.left, g.y + FO.y - R.top, g.w + R.left + R.right, g.h + R.top + R.bottom};
     if (coverG.x != m_lastCoverBox.x || coverG.y != m_lastCoverBox.y || coverG.w != m_lastCoverBox.w || coverG.h != m_lastCoverBox.h) {
         if (m_lastCoverBox.w > 0)
             Hl::damage(CBox{m_lastCoverBox}.expand(2));
@@ -5565,11 +5593,10 @@ void CVtbShadowDeco::damageEntire() {
         return;
     const auto PWINDOW = m_pWindow.lock();
     CBox       g = Hl::boxValue(PWINDOW);
-    const double N    = VTB_SHADOW_SIZE;
-    const double BARW = g_pGlobalState && Cfg::enabled() && vtbHasBar(PWINDOW) ? (double)totalBarW() : 0.0;
-    // window box grown by the shadow's left + bottom overhang, plus the titlebar
-    // strip on the right (the shadow now spans it too)
-    Hl::damage(CBox{g.x - N, g.y, g.w + N + BARW, g.h + N});
+    // window box grown by the shadow's full side-aware reach (vtbShadowReach):
+    // the L-overhang plus the titlebar strip on the bar's own edge.
+    const SVtbShadowReach R = vtbShadowReach(PWINDOW);
+    Hl::damage(CBox{g.x - R.left, g.y - R.top, g.w + R.left + R.right, g.h + R.top + R.bottom});
 }
 
 eDecorationType CVtbShadowDeco::getDecorationType() {
