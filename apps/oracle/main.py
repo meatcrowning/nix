@@ -43,6 +43,57 @@ from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font set
 #: a local backend here — never a new listener (root AGENTS.md → the tailnet).
 OLLAMA = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 
+#: Tavily's REST search endpoint. Reached only when the model calls the
+#: `web_search` tool AND a key is configured — oracle opens no listener, and
+#: without a key the tool reports itself unavailable rather than reaching out.
+TAVILY_URL = "https://api.tavily.com/search"
+
+#: The web-search tool offered to ollama when the "web" toggle is on. ollama's
+#: function-calling: the model may emit a `tool_calls` entry naming this and we
+#: run it, feed the result back as a `role: tool` message, and let the model
+#: summarize and cite (the loop lives in `Ollama` below).
+WEB_SEARCH_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "web_search",
+        "description": (
+            "Search the public web for current or factual information you may "
+            "not know. Returns a short answer plus source pages (title, URL, "
+            "snippet). Use it for recent events, specific facts, or anything "
+            "you are unsure of, then cite the sources in your reply."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string",
+                          "description": "The search query."},
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+#: How many tool rounds one turn may take before we stop looping and let the
+#: model answer with what it has — a guard against a model that keeps searching.
+MAX_TOOL_ROUNDS = 4
+
+
+def tavily_key():
+    """The Tavily API key, never hardcoded (see apps/oracle/AGENTS.md).
+
+    Same shape as `OLLAMA` reads its endpoint: an env var first
+    (`TAVILY_API_KEY`), then a convenience fallback file so the key can be set
+    without a rebuild — `~/.config/oracle/tavily.key`, one line, the key. Empty
+    string when neither is present; the tool then reports itself unavailable."""
+    key = os.environ.get("TAVILY_API_KEY", "").strip()
+    if key:
+        return key
+    try:
+        return (Path.home() / ".config" / "oracle" / "tavily.key"
+                ).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
 
 # ---- the wallpaper palette (mirrors reader/viewer/filer — see reader/main.py) --
 PANEL_THEME = Path.home() / ".config" / "quickshell" / "Theme.qml"
@@ -162,6 +213,14 @@ class Ollama(QObject):
     replyDone = Signal()
     replyError = Signal(str)
 
+    # The web_search tool-call loop, surfaced so QML can draw a subordinated
+    # "sources" disclosure per turn (docs/DESIGN.md §9.1): the model asked to
+    # search, the search returned N sources (as themed-link markdown), or it
+    # failed with a reason.
+    webSearchStarted = Signal(str)          # query
+    webSearchDone = Signal(str, str, int)   # query, sources markdown, result count
+    webSearchError = Signal(str, str)       # query, reason
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._nam = QNetworkAccessManager(self)
@@ -170,6 +229,13 @@ class Ollama(QObject):
         self._reply = None       # the in-flight chat QNetworkReply, if any
         self._buf = b""          # partial NDJSON line carried between reads
         self._think_tokens = 0   # reasoning tokens seen this turn (one per delta)
+        self._model = ""         # the model for the current turn
+        self._web = False        # offer the web_search tool this turn?
+        self._messages = []      # the growing message list across a tool loop
+        self._acc_content = ""   # assistant content accumulated in this sub-turn
+        self._tool_calls = []    # tool calls accumulated in this sub-turn
+        self._tool_results = []  # results being gathered for the current round
+        self._rounds = 0         # tool rounds taken this turn (MAX_TOOL_ROUNDS cap)
 
     # ---- model list ----
 
@@ -211,23 +277,37 @@ class Ollama(QObject):
 
     # ---- one streamed chat turn ----
 
-    @Slot(str, str)
-    def send(self, model, prompt):
+    @Slot(str, str, bool)
+    def send(self, model, prompt, web=False):
         if not model or not prompt.strip():
             return
         self.cancel()          # one turn at a time
-        body = json.dumps({
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
+        self._model = model
+        self._web = bool(web)
+        self._messages = [{"role": "user", "content": prompt}]
+        self._think_tokens = 0
+        self._rounds = 0
+        self._set_busy(True)
+        self.replyStarted.emit()
+        self._post_chat()
+
+    def _post_chat(self):
+        """POST the current message list, streaming, offering the web_search
+        tool when the turn asked for it. Re-entered after each tool round."""
+        payload = {
+            "model": self._model,
+            "messages": self._messages,
             "stream": True,
-        }).encode("utf-8")
+        }
+        if self._web:
+            payload["tools"] = [WEB_SEARCH_TOOL]
+        body = json.dumps(payload).encode("utf-8")
         req = QNetworkRequest(QUrl(OLLAMA + "/api/chat"))
         req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
                       "application/json")
         self._buf = b""
-        self._think_tokens = 0
-        self._set_busy(True)
-        self.replyStarted.emit()
+        self._acc_content = ""
+        self._tool_calls = []
         reply = self._nam.post(req, body)
         self._reply = reply
         reply.readyRead.connect(lambda: self._on_stream(reply))
@@ -235,13 +315,15 @@ class Ollama(QObject):
 
     @Slot()
     def cancel(self):
+        # Drops the whole turn: a pending tool fetch checks `busy` and bails, so
+        # a search still in flight never re-posts to a cancelled turn.
+        self._set_busy(False)
         if self._reply is not None:
             r, self._reply = self._reply, None
             r.readyRead.disconnect()
             r.finished.disconnect()
             r.abort()
             r.deleteLater()
-            self._set_busy(False)
 
     def _on_stream(self, reply):
         if reply is not self._reply:
@@ -274,21 +356,152 @@ class Ollama(QObject):
                 self.replyThinkTokens.emit(self._think_tokens)
             piece = msg.get("content", "")
             if piece:
+                self._acc_content += piece
                 self.replyChunk.emit(piece)
+            # Tool calls arrive assembled by ollama (not partial deltas); a turn
+            # may carry several. Accumulate them for the round.
+            calls = msg.get("tool_calls")
+            if calls:
+                self._tool_calls.extend(calls)
 
     def _on_finished(self, reply):
         if reply is not self._reply:
             reply.deleteLater()
             return
         self._reply = None
-        self._set_busy(False)
         err = reply.error()
-        if err not in (QNetworkReply.NetworkError.NoError,
-                       QNetworkReply.NetworkError.OperationCanceledError):
-            self.replyError.emit(reply.errorString())
-        else:
-            self.replyDone.emit()
+        err_str = reply.errorString()
         reply.deleteLater()
+        if err == QNetworkReply.NetworkError.OperationCanceledError:
+            return                      # cancel() already cleared busy
+        if err != QNetworkReply.NetworkError.NoError:
+            self._set_busy(False)
+            self.replyError.emit(err_str)
+            return
+        # A tool round: run the calls, feed the results back, and let the model
+        # continue. Past the cap, stop looping and take the answer as-is.
+        if self._tool_calls and self._rounds < MAX_TOOL_ROUNDS:
+            self._rounds += 1
+            self._messages.append({"role": "assistant",
+                                   "content": self._acc_content,
+                                   "tool_calls": self._tool_calls})
+            self._run_tool_calls(self._tool_calls)
+            return
+        self._set_busy(False)
+        self.replyDone.emit()
+
+    # ---- the web_search tool loop ----
+
+    def _run_tool_calls(self, calls):
+        """Dispatch each tool call; when the last result is in, re-post the
+        chat with the tool messages appended. Calls run concurrently."""
+        self._tool_results = [None] * len(calls)
+        remaining = {"n": len(calls)}
+        for i, call in enumerate(calls):
+            fn = call.get("function") or {}
+            name = fn.get("name", "")
+            args = fn.get("arguments") or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except ValueError:
+                    args = {}
+            if name == "web_search":
+                self._tavily_search(str(args.get("query", "")).strip(),
+                                    i, remaining, calls)
+            else:
+                self._tool_results[i] = {
+                    "role": "tool",
+                    "content": json.dumps({"error": "unknown tool: " + name})}
+                self._tool_done(remaining, calls)
+
+    def _tavily_search(self, query, idx, remaining, calls):
+        key = tavily_key()
+        if not key:
+            self.webSearchError.emit(query, "no Tavily API key configured")
+            self._tool_results[idx] = {
+                "role": "tool",
+                "content": json.dumps({"error": "web search unavailable: no "
+                                       "Tavily API key configured"})}
+            self._tool_done(remaining, calls)
+            return
+        self.webSearchStarted.emit(query)
+        body = json.dumps({
+            "api_key": key,
+            "query": query,
+            "search_depth": "basic",
+            "include_answer": True,
+            "max_results": 5,
+        }).encode("utf-8")
+        req = QNetworkRequest(QUrl(TAVILY_URL))
+        req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
+                      "application/json")
+        reply = self._nam.post(req, body)
+        reply.finished.connect(
+            lambda: self._on_tavily(reply, query, idx, remaining, calls))
+
+    def _on_tavily(self, reply, query, idx, remaining, calls):
+        if not self._busy:            # turn was cancelled mid-search
+            reply.deleteLater()
+            return
+        try:
+            data = bytes(reply.readAll().data())
+            if reply.error() != QNetworkReply.NetworkError.NoError:
+                msg = reply.errorString()
+                try:                  # Tavily returns a JSON error body
+                    o = json.loads(data or b"{}")
+                    if isinstance(o, dict) and (o.get("error") or o.get("detail")):
+                        msg = str(o.get("error") or o.get("detail"))
+                except ValueError:
+                    pass
+                self.webSearchError.emit(query, msg)
+                self._tool_results[idx] = {
+                    "role": "tool",
+                    "content": json.dumps({"error": "web search failed: " + msg})}
+                return
+            obj = json.loads(data or b"{}")
+            answer = obj.get("answer") or ""
+            results = obj.get("results") or []
+            # Fed back to the model to summarize and cite.
+            self._tool_results[idx] = {"role": "tool", "content": json.dumps({
+                "query": query, "answer": answer,
+                "results": [{"title": r.get("title", ""), "url": r.get("url", ""),
+                             "content": r.get("content", "")} for r in results]})}
+            self.webSearchDone.emit(query,
+                                    self._sources_markdown(answer, results),
+                                    len(results))
+        except (ValueError, TypeError) as e:
+            self.webSearchError.emit(query, str(e))
+            self._tool_results[idx] = {
+                "role": "tool",
+                "content": json.dumps({"error": str(e)})}
+        finally:
+            reply.deleteLater()
+            self._tool_done(remaining, calls)
+
+    def _tool_done(self, remaining, calls):
+        remaining["n"] -= 1
+        if remaining["n"] > 0 or not self._busy:
+            return
+        for tr in self._tool_results:
+            if tr is not None:
+                self._messages.append(tr)
+        self._post_chat()
+
+    @staticmethod
+    def _sources_markdown(answer, results):
+        """The sources disclosure body: Tavily's own answer, then a themed-link
+        list of the hits (docs/DESIGN.md §2 — drawn through MarkdownText)."""
+        lines = []
+        if answer:
+            lines.append(answer.strip())
+            lines.append("")
+        for r in results:
+            title = (r.get("title") or r.get("url") or "untitled").strip()
+            url = (r.get("url") or "").strip()
+            lines.append("- [" + title + "](" + url + ")" if url
+                         else "- " + title)
+        return "\n".join(lines)
 
 
 class Backend(QObject):

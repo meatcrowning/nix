@@ -22,6 +22,10 @@ Window {
 
     property string model: ""
     property string status: ""
+    // When on, every send offers ollama a `web_search` tool it may call
+    // mid-turn (Tavily-backed); off by default, so a model with no tool support
+    // is never handed tools it would reject (docs/DESIGN.md §10 — opt-in, honest).
+    property bool webSearch: false
     // The conversation is a persistent LOG, not one turn swapped out under the
     // last: every send appends a `you` row and an assistant row to `chatLog`,
     // prior turns stay in place and scrolled back, readable (docs/DESIGN.md §14 —
@@ -84,10 +88,34 @@ Window {
             if (win.activeIndex < 0) return;
             chatLog.setProperty(win.activeIndex, "thinkTokens", n);
         }
+        // The web_search tool loop, drawn as a subordinated per-turn disclosure
+        // (docs/DESIGN.md §9.1): the model asked to search, sources came back,
+        // or the search failed. Several searches in one turn accumulate.
+        function onWebSearchStarted(query) {
+            if (win.activeIndex < 0) return;
+            chatLog.setProperty(win.activeIndex, "searching", true);
+        }
+        function onWebSearchDone(query, md, count) {
+            if (win.activeIndex < 0) return;
+            var cur = chatLog.get(win.activeIndex);
+            var prefix = cur.sources !== "" ? cur.sources + "\n\n" : "";
+            chatLog.setProperty(win.activeIndex, "sources", prefix + md);
+            chatLog.setProperty(win.activeIndex, "searchCount", cur.searchCount + count);
+            chatLog.setProperty(win.activeIndex, "searching", false);
+        }
+        function onWebSearchError(query, reason) {
+            if (win.activeIndex < 0) return;
+            var cur = chatLog.get(win.activeIndex);
+            var prefix = cur.sources !== "" ? cur.sources + "\n\n" : "";
+            chatLog.setProperty(win.activeIndex, "sources",
+                                prefix + "search failed: " + reason);
+            chatLog.setProperty(win.activeIndex, "searching", false);
+        }
         function onReplyDone() {
             if (win.activeIndex < 0) return;
             chatLog.setProperty(win.activeIndex, "streaming", false);
             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
+            chatLog.setProperty(win.activeIndex, "searching", false);
         }
         function onReplyError(reason) {
             if (win.activeIndex < 0) return;
@@ -95,6 +123,7 @@ Window {
             chatLog.setProperty(win.activeIndex, "isError", true);
             chatLog.setProperty(win.activeIndex, "streaming", false);
             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
+            chatLog.setProperty(win.activeIndex, "searching", false);
         }
         function onModelsError(reason) { win.status = "no models: " + reason; }
     }
@@ -119,13 +148,15 @@ Window {
         // Append the pair now, then stream into the assistant row. Prior turns
         // are left untouched — the log grows downward (docs/DESIGN.md §14).
         chatLog.append({ isUser: true, who: "you", body: p,
-                         thinking: "", thinkingActive: false,
+                         thinking: "", thinkingActive: false, thinkTokens: 0,
+                         sources: "", searchCount: 0, searching: false,
                          streaming: false, isError: false });
         chatLog.append({ isUser: false, who: win.model, body: "",
                          thinking: "", thinkingActive: false, thinkTokens: 0,
+                         sources: "", searchCount: 0, searching: false,
                          streaming: true, isError: false });
         win.activeIndex = chatLog.count - 1;
-        Ollama.send(win.model, p);
+        Ollama.send(win.model, p, win.webSearch);
         input.clear();
     }
 
@@ -149,7 +180,7 @@ Window {
         Rectangle {
             id: picker
             anchors { left: modelLabel.right; leftMargin: 10
-                      right: parent.right
+                      right: webToggle.left; rightMargin: 10
                       verticalCenter: parent.verticalCenter }
             height: 24
             color: pickerMouse.containsMouse ? Theme.highlight : Theme.bgAlt
@@ -183,6 +214,33 @@ Window {
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: picker.open = !picker.open
+            }
+        }
+
+        // The web-search toggle: a chip that, when lit, offers the model the
+        // `web_search` tool (docs/DESIGN.md §7.2, §10 — a real on/off state, not
+        // a claim). Accent-filled when on, dim outline when off.
+        Rectangle {
+            id: webToggle
+            anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+            width: 52
+            height: 24
+            radius: Theme.rounding
+            border.width: Theme.ctrlBorder
+            border.color: win.webSearch ? Theme.accent : Theme.border
+            color: win.webSearch ? Theme.highlight
+                                  : (webMouse.containsMouse ? Theme.highlight : Theme.bgAlt)
+            PixelText {
+                anchors.centerIn: parent
+                text: "web"
+                color: win.webSearch ? Theme.accent : Theme.textDim
+            }
+            MouseArea {
+                id: webMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: win.webSearch = !win.webSearch
             }
         }
     }
@@ -398,6 +456,9 @@ Window {
                         // it (docs/DESIGN.md §9.1 — subordinated, never in his way).
                         property bool userSet: false
                         property bool userOpen: false
+                        // Same, for the web-search sources disclosure below.
+                        property bool srcUserSet: false
+                        property bool srcUserOpen: false
 
                         Column {
                             id: turnCol
@@ -452,14 +513,18 @@ Window {
                                             text: "thinking"
                                             color: thinkingActive ? Theme.text : Theme.textDim
                                         }
-                                        // Live token count + animated ellipsis while
-                                        // active; both gone once the answer starts
-                                        // (§9.1 subordinated — one step dim, never
-                                        // accent, so it does not compete).
+                                        // The reasoning-token count, and — while
+                                        // active — an animated ellipsis. The count
+                                        // PERSISTS once counted, so a COLLAPSED block
+                                        // still reports its size after the answer
+                                        // starts (the header is all he sees when it
+                                        // is folded); the ellipsis is the only part
+                                        // that ends with the thinking (§9.1
+                                        // subordinated — one step dim, never accent).
                                         PixelText {
-                                            visible: thinkingActive
-                                            text: (thinkTokens > 0 ? "· " + thinkTokens + " " : "")
-                                                  + thinkToggle.dots
+                                            visible: thinkTokens > 0 || thinkingActive
+                                            text: (thinkTokens > 0 ? "· " + thinkTokens : "")
+                                                  + (thinkingActive ? " " + thinkToggle.dots : "")
                                             color: Theme.textDim
                                         }
                                     }
@@ -492,6 +557,82 @@ Window {
                                         wrapMode: Text.Wrap
                                         text: thinking
                                         color: Theme.textDim
+                                    }
+                                }
+                            }
+
+                            // The web-search sources: the same subordinated,
+                            // folded-by-default disclosure as the reasoning
+                            // (docs/DESIGN.md §9.1), showing which sources the
+                            // model searched. Heading reads "searching the web…"
+                            // (one step brighter) while a search is live and
+                            // settles to "web · N sources" once results land; the
+                            // body is Tavily's answer plus themed links, drawn
+                            // through MarkdownText.
+                            Item {
+                                id: src
+                                width: parent.width
+                                visible: !isUser && (sources !== "" || searching)
+                                height: visible ? srcToggle.height + srcReveal.height : 0
+
+                                readonly property bool expanded: turn.srcUserSet ? turn.srcUserOpen
+                                                                                 : false
+
+                                Item {
+                                    id: srcToggle
+                                    width: parent.width
+                                    height: Theme.lineHeight
+                                    property int dotPhase: 0
+                                    readonly property string dots:
+                                        motion.reduceMotion ? "…" : "...".substring(0, dotPhase)
+                                    Timer {
+                                        interval: motion.ms(motion.slideMs)
+                                        running: searching && !motion.reduceMotion
+                                        repeat: true
+                                        onTriggered: srcToggle.dotPhase = (srcToggle.dotPhase + 1) % 4
+                                    }
+                                    Row {
+                                        anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                                        spacing: 6
+                                        PixelText { text: src.expanded ? "-" : "+"; color: Theme.textDim }
+                                        PixelText {
+                                            text: searching ? "searching the web"
+                                                            : "web · " + searchCount + (searchCount === 1 ? " source" : " sources")
+                                            color: searching ? Theme.text : Theme.textDim
+                                        }
+                                        PixelText {
+                                            visible: searching
+                                            text: srcToggle.dots
+                                            color: Theme.textDim
+                                        }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: { turn.srcUserOpen = !src.expanded; turn.srcUserSet = true; }
+                                    }
+                                }
+
+                                Item {
+                                    id: srcReveal
+                                    anchors { top: srcToggle.bottom; left: parent.left; right: parent.right }
+                                    clip: true
+                                    height: src.expanded ? srcBody.height : 0
+                                    Behavior on height {
+                                        NumberAnimation { duration: motion.ms(motion.slideMs)
+                                                          easing.type: motion.slideEasing }
+                                    }
+                                    Rectangle {
+                                        anchors { left: parent.left; leftMargin: 3
+                                                  top: parent.top; bottom: parent.bottom }
+                                        width: Theme.ctrlBorder
+                                        color: Theme.border
+                                    }
+                                    MarkdownText {
+                                        id: srcBody
+                                        anchors { top: parent.top; left: parent.left; right: parent.right
+                                                  leftMargin: 12 }
+                                        text: sources
                                     }
                                 }
                             }
@@ -625,6 +766,7 @@ Window {
                         if (win.activeIndex >= 0) {
                             chatLog.setProperty(win.activeIndex, "streaming", false);
                             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
+                            chatLog.setProperty(win.activeIndex, "searching", false);
                         }
                     } else win.send();
                 }
