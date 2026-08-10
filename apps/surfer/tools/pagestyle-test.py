@@ -22,17 +22,22 @@ courier, points it at a local http server, and asserts:
      already-painted page with no reload;
   4. STRIP: turning dark mode off and refreshing strips the dark filter
      (filter back to 'none');
-  5. FONT INHERIT: unstyled page text takes the desktop face at the desktop's
-     APPARENT size (the face is a size-adjusted @font-face alias, so the
-     computed px is divided by the adjust and the ink still matches the raw
-     15px face), a page's own font styling beats the layer, and a subframe
-     gets the fonts-only body — the face, never the dark filter
-     (no double-invert);
+  5. FONT INHERIT: unstyled page text takes the desktop face (the PLAIN
+     family, no @font-face alias — see below) at the desktop size, its ink
+     matching the raw 15px face and CRISP (0 antialiased grey pixels), a
+     page's own font styling beats the layer, and a subframe gets the
+     fonts-only body — the face, never the dark filter (no double-invert);
   6. FORCE: the system-font force (GLOBAL by default, per-site exceptions)
      imposes the family over the page's own styling while its font-size
-     survives (family only), the forced face is the size-adjusted alias (its
-     ink ~1.14x the raw face at the same size — the proportional x-height),
-     and icon-font elements are carved out.
+     survives (family only), the forced text renders at the site's own size
+     (ink = the raw face at that size) and CRISP (0 grey), and icon-font
+     elements are carved out.
+
+The pick is imposed by its PLAIN family name, never a `src:local()`
+@font-face alias: Chromium grayscale-antialiases any @font-face-resolved
+face and ignores the fontconfig `antialias=false` pin, which softened every
+web glyph (970147b's size-adjust alias). That alias was dropped 2026-08-09
+(310cdc3); the crispness checks below are the regression guard.
 
 Deliberately only the page-style courier is installed here — cosmetic
 ad-blocking has its own harness (cosmetic-test.py) and must not interfere.
@@ -98,10 +103,10 @@ setTimeout(function(){
   function cs(id, d){ try { d = d || document; var e = d.getElementById(id);
       var c = d.defaultView.getComputedStyle(e);
       return c.fontFamily + '|' + c.fontSize; } catch(e){ return 'ERR'; } }
-  // ink width of 'x' at (family, size) - the pixel-level check. The
-  // size-adjusted face must render SITE text ~1.14x wider at the same
-  // font-size (the whole point) while INHERITED text renders exactly the
-  // desktop's size despite its smaller computed px.
+  // ink width of 'x' at (family, size) - the pixel-level check. Inherited
+  // text renders at the desktop size (ink = the raw 15px face); forced site
+  // text renders at the SITE's size (ink = the raw face at that size) - the
+  // plain family carries no size-adjust, so neither is scaled.
   function ink(fam, size){
     var c = document.createElement('canvas'); c.width=200; c.height=80;
     var g = c.getContext('2d');
@@ -114,8 +119,25 @@ setTimeout(function(){
     }
     return maxX<0 ? 0 : maxX-minX+1;
   }
+  // CRISPNESS: count antialiased edge pixels (alpha strictly between 0 and
+  // 255) when rasterising text at (family, size). A pixel-exact aliased face
+  // honouring the fontconfig antialias=false pin renders ONLY fully-opaque or
+  // fully-transparent pixels - 0 grey. An @font-face alias forced grayscale-AA
+  // and came back ~60-80% grey; this is the regression guard for that.
+  function grey(fam, size){
+    var c = document.createElement('canvas'); c.width=200; c.height=80;
+    var g = c.getContext('2d');
+    g.fillStyle='#000'; g.font = size + 'px ' + fam; g.textBaseline='alphabetic';
+    g.fillText('surf', 10, 60);
+    var d = g.getImageData(0,0,200,80).data, n=0;
+    for (var i=0;i<d.length;i+=4){ var a=d[i+3]; if (a>0 && a<255) n++; }
+    return n;
+  }
+  // The force is EXCEPTED for this host during phase1 (un-excepted in phase4),
+  // so the #s element still reads its own serif here - its forced-face ink and
+  // crispness are measured in phase4, after the force applies. This probe only
+  // measures the always-on inherit layer (#u).
   var cu = cs('u').split('|');
-  var cs_ = cs('s').split('|');
   var fdoc = null, ffilter = 'ERR';
   try { fdoc = document.getElementById('fr').contentDocument;
         ffilter = fdoc.defaultView.getComputedStyle(fdoc.documentElement).filter || 'none'; }
@@ -131,8 +153,7 @@ setTimeout(function(){
       hasRefresh: typeof window.__surferPageStyleRefresh === 'function',
       uInk: ink(cu[0], parseFloat(cu[1])),
       raw15Ink: ink('"More Perfect DOS VGA"', 15),
-      sInk: ink(cs_[0], parseFloat(cs_[1])),
-      raw20Ink: ink('"More Perfect DOS VGA"', 20)
+      uGrey: grey(cu[0], parseFloat(cu[1]))
   });
 }, 700);
 """
@@ -280,19 +301,18 @@ def main():
         # loses to any unlayered rule); the subframe inherits the face too but
         # never the dark filter.
         #
-        # The face is now the size-ADJUSTED alias (size-adjust:114%, DESIGN.md
-        # 16 / 2026-08-09): the computed font-size of inherited text is
-        # divided by the adjust (13.158 px, so the 1.14x face renders the
-        # desktop's 15 px), while a SITE-styled run keeps the site's numbers
-        # and renders ~1.14x wider ink - the whole point of the adjust. The
-        # canvas ink checks below are the honest assertions: inherited text's
-        # ink equals the raw 15px face, site text's ink exceeds the raw 20px
-        # face.
-        check("unstyled text inherits the adjusted desktop face",
-              "(web)" in (out.get("u") or "")
-              and "More Perfect DOS VGA" in (out.get("u") or ""))
-        check("inherited text renders the desktop's apparent size (ink = raw 15px)",
+        # The face is the PLAIN pick, by its real name - NO @font-face alias
+        # (dropped 310cdc3): the alias forced grayscale-AA and blurred every
+        # web glyph. Inherited text renders at the raw desktop size (ink = the
+        # raw 15px face) and pixel-crisp (0 grey). A SITE-styled run keeps its
+        # own numbers and its own face.
+        check("unstyled text inherits the plain desktop family (no @font-face alias)",
+              "More Perfect DOS VGA" in (out.get("u") or "")
+              and "(web)" not in (out.get("u") or ""))
+        check("inherited text renders the desktop size (ink = raw 15px)",
               abs((out.get("uInk") or 0) - (out.get("raw15Ink") or 0)) <= 1)
+        check("inherited text is pixel-crisp (0 antialiased grey pixels)",
+              (out.get("uGrey") if out.get("uGrey") is not None else 999) == 0)
         check("a page's own font styling beats the inherit layer",
               "serif" in (out.get("s") or "").split("|")[0]
               and "More Perfect DOS VGA" not in (out.get("s") or "")
@@ -343,11 +363,30 @@ def main():
         QTimer.singleShot(400, phase4)
 
     def phase4():
+        # Read the FORCED element AFTER the force applies, and canvas-measure its
+        # ink + crispness at its computed (family,size) - the app.js probe ran
+        # at phase1 while this host was still excepted, so it only ever saw the
+        # page's own serif. This is where the forced pixel face is measured.
         view.runJavaScript(
             "document.title=JSON.stringify((function(){"
             "function cs(id){var c=getComputedStyle(document.getElementById(id));"
             "return c.fontFamily+'|'+c.fontSize;}"
-            "return {s:cs('s'),ic:cs('ic')};})());",
+            "function ink(fam,size){var c=document.createElement('canvas');"
+            "c.width=200;c.height=80;var g=c.getContext('2d');g.fillStyle='#000';"
+            "g.font=size+'px '+fam;g.textBaseline='alphabetic';g.fillText('x',10,60);"
+            "var d=g.getImageData(0,0,200,80).data,mn=200,mx=-1;"
+            "for(var y=0;y<80;y++)for(var xx=0;xx<200;xx++){"
+            "if(d[(y*200+xx)*4+3]>40){if(xx<mn)mn=xx;if(xx>mx)mx=xx;}}"
+            "return mx<0?0:mx-mn+1;}"
+            "function grey(fam,size){var c=document.createElement('canvas');"
+            "c.width=200;c.height=80;var g=c.getContext('2d');g.fillStyle='#000';"
+            "g.font=size+'px '+fam;g.textBaseline='alphabetic';g.fillText('surf',10,60);"
+            "var d=g.getImageData(0,0,200,80).data,n=0;"
+            "for(var i=0;i<d.length;i+=4){var a=d[i+3];if(a>0&&a<255)n++;}return n;}"
+            "var f=cs('s').split('|');var sz=parseFloat(f[1]);"
+            "return {s:cs('s'),ic:cs('ic'),"
+            "sInk:ink(f[0],sz),raw20Ink:ink('\"More Perfect DOS VGA\"',20),"
+            "sGrey:grey(f[0],sz)};})());",
             lambda r: None)
         QTimer.singleShot(400, phase4b)
 
@@ -356,32 +395,33 @@ def main():
         check("the force is GLOBAL by default (an un-excepted host is on)",
               dm.isSystemFontSite("http://somewhere-never-toggled.example/"))
         # zoom compensation: the inherit layer divides its size by the shared
-        # page zoom, so inherited text holds the desktop's DEVICE pixel size.
-        # 0.826446... = 1/1.21 (two Ctrl+- steps); the desktop 15px divided by
-        # the 1.14x x-height adjust = 13.1579, and 13.1579 / it = 15.9211 CSS
-        # px, which the 1.14x face renders as 18.15 device px = 15 / 0.8264.
+        # page zoom (only - no x-height adjust any more), so inherited text
+        # holds the desktop's DEVICE pixel size. 0.826446... = 1/1.21 (two
+        # Ctrl+- steps); the desktop 15px / 0.826446 = 18.15 CSS px, which
+        # renders as 15 device px. At zoom 1 the size is the raw 15px.
         class FakeZoom:
             level = 1.0 / 1.21
         dmz = surfer.DarkMode(prefs, dm, zoom=FakeZoom())
         check("inherit layer zoom-compensates (15 device px at 0.826 zoom)",
-              "font-size:15.9211px" in dmz._inherit_css())
-        check("inherit layer divides the desktop size by the x-height adjust",
-              "font-size:13.1579px" in dm._inherit_css())
-        check("the forced face is a size-adjusted @font-face alias (114%)",
-              "size-adjust:114%" in dm._face_css()
-              and "@font-face" in dm.css(base)
-              and "@font-face" in dm.fontsCss(base))
-        check("force imposes the family but keeps the page's size",
-              "(web)" in (out.get("s") or "")
+              "font-size:18.15px" in dmz._inherit_css())
+        check("inherit layer holds the raw desktop size at zoom 1 (15px, no adjust)",
+              "font-size:15px" in dm._inherit_css())
+        check("no @font-face alias in the page or subframe body (crisp plain family)",
+              "@font-face" not in dm.css(base)
+              and "@font-face" not in dm.fontsCss(base))
+        check("force imposes the plain family but keeps the page's size",
+              "(web)" not in (out.get("s") or "")
               and "More Perfect DOS VGA" in (out.get("s") or "")
               and "20px" in (out.get("s") or ""))
-        check("site text renders at the proportional x-height (~1.14x ink)",
-              (out.get("sInk") or 0) > (out.get("raw20Ink") or 0))
+        check("forced site text renders at the site's own size (ink = raw 20px)",
+              abs((out.get("sInk") or 0) - (out.get("raw20Ink") or 0)) <= 1)
+        check("forced site text is pixel-crisp (0 antialiased grey pixels)",
+              (out.get("sGrey") if out.get("sGrey") is not None else 999) == 0)
         check("icon-font elements are carved out of the force",
               "More Perfect DOS VGA" not in (out.get("ic") or "ERR")
               and "Material Icons" in (out.get("ic") or ""))
         print("probe:", json.dumps(out, sort_keys=True))
-        n = 18
+        n = 20
         print("%d/%d checks passed" % (n - len(fails), n))
         app.quit()
 
