@@ -1,5 +1,6 @@
 {
   pkgs,
+  lib,
   ...
 }: {
   # Local LLM serving (RTX 5070). Previously a hand-rolled overlay building
@@ -20,5 +21,18 @@
   services.ollama = {
     enable = true;
     package = pkgs.ollama-cuda;
+    # The module's default (DynamicUser, /var/lib/ollama/models) left the
+    # service reading a near-empty models dir while every pulled model
+    # (qwen3.5 variants, gemma4, etc, ~105G) actually lives under
+    # ~lam/.ollama/models from years of `ollama pull` run interactively as
+    # lam. Point the service at the real data instead of moving 105G;
+    # DynamicUser still needs "other" rwx on that tree (chmod, not this file).
+    modelsDir = "/home/lam/.ollama/models";
   };
+
+  # ProtectHome=true (module default) hides /home entirely, so the service
+  # can't even traverse to /home/lam/.ollama/models despite ReadWritePaths
+  # naming it. "read-only" keeps /home visible (real inodes, so the path
+  # exists) while ReadWritePaths still punches a write hole for modelsDir.
+  systemd.services.ollama.serviceConfig.ProtectHome = lib.mkForce "read-only";
 }
