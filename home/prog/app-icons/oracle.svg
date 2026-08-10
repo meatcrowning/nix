@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" color="#ffffff">
+  <!-- oracle app icon - the seal of Gusion, eleventh spirit of the Ars Goetia (a
+       duke), rendered as clean geometry in the plate's idiom: the outer circle
+       and, at its heart, the oracular eye. Gusion's office is to discern all
+       things past, present, and to come, and to show the meaning and resolution
+       of all questions asked of him - the seal of a divination window that
+       answers what you put to it.
+
+       ONE transparent, theme-tracking variant. No filled tile: the sigil sits
+       on transparency so it reads on any surface (DESIGN.md S3.1). The strokes
+       are `currentColor` so the sigil IS the live theme's foreground (body text
+       = the accent) - the titlebar tints it via a user stylesheet
+       (home/prog/hyprvtb/vtbDeco.cpp), the panel tints it per cell state
+       (TaskCell.qml), and the desktop entry / launcher resolve currentColor to
+       the root `color` fallback above. THAT FALLBACK IS WHITE ON PURPOSE: the
+       panel tints through MultiEffect, whose colorization scales the tint by the
+       SOURCE's own luminance, so only a white sigil comes out the exact theme
+       colour (measured - a #cc4400 fallback landed at 36% of it). Uniform
+       44-unit stroke = the 2px edge weight scaled to icon size (DESIGN.md S4). -->
+  <g fill="none" stroke="currentColor" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="256" cy="256" r="218"/>
+    <path d="M148 256 Q256 172 364 256"/>
+    <path d="M148 256 Q256 340 364 256"/>
+    <circle cx="256" cy="256" r="34"/>
+  </g>
+</svg>
