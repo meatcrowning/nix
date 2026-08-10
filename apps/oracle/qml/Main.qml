@@ -55,6 +55,18 @@ Window {
         function onModelsError(reason) { win.status = "no models: " + reason; }
     }
 
+    // The backend controls (server up/down, loaded model, start/stop, unload)
+    // report through the same status line the model list uses, and refill the
+    // model list the moment the daemon comes back up.
+    Connections {
+        target: Backend
+        function onNote(msg) { win.status = msg; }
+        function onStatusChanged() {
+            if (Backend.serverUp && Ollama.models.length === 0)
+                Ollama.refreshModels();
+        }
+    }
+
     function send() {
         var p = input.text.trim();
         if (p === "" || win.model === "" || Ollama.busy)
@@ -121,12 +133,107 @@ Window {
         }
     }
 
-    // The dropdown floats over the reply area, anchored under the picker.
+    // -------------------------------------------------- server / backend row
+    // Observed state on the left (up/down + the loaded model, polled from
+    // /api/ps, docs/DESIGN.md §10.6 — never claimed from a click), the two
+    // controls on the right: unload the loaded model, and start/stop the daemon.
+    Item {
+        id: serverRow
+        anchors { top: top.bottom; topMargin: 8
+                  left: parent.left; right: parent.right; margins: 10 }
+        height: 22
+
+        PixelText {
+            id: serverLabel
+            anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+            text: "server"
+            color: Theme.textDim
+        }
+        PixelText {
+            anchors { left: serverLabel.right; leftMargin: 10
+                      right: unloadBtn.left; rightMargin: 10
+                      verticalCenter: parent.verticalCenter }
+            elide: Text.ElideRight
+            text: Backend.serverUp
+                  ? (Backend.loadedModels.length > 0
+                     ? "up · " + Backend.loadedModels.join(", ")
+                     : "up · idle")
+                  : "down"
+            color: Backend.serverUp
+                   ? (Backend.loadedModels.length > 0 ? Theme.ok : Theme.textDim)
+                   : Theme.crit
+        }
+
+        // Unload — enabled only when a model is actually loaded (§10.2: a
+        // control with no reading is dimmed and refuses, not silently inert).
+        Rectangle {
+            id: unloadBtn
+            anchors { right: powerBtn.left; rightMargin: 8
+                      verticalCenter: parent.verticalCenter }
+            width: 64
+            height: 22
+            radius: Theme.rounding
+            border.width: Theme.ctrlBorder
+            border.color: Theme.border
+            readonly property bool armed: Backend.loadedModels.length > 0
+            color: unloadMouse.containsMouse && armed ? Theme.highlight : Theme.bg
+            PixelText {
+                anchors.centerIn: parent
+                text: "unload"
+                color: unloadBtn.armed ? Theme.accent : Theme.dim
+            }
+            MouseArea {
+                id: unloadMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: unloadBtn.armed ? Qt.PointingHandCursor : Qt.ArrowCursor
+                onClicked: if (unloadBtn.armed) Backend.unloadModels()
+            }
+        }
+
+        // Start / stop — reflects the OBSERVED server state; disabled while a
+        // start/stop is in flight (the askpass dialog may be up).
+        Rectangle {
+            id: powerBtn
+            anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+            width: 84
+            height: 22
+            radius: Theme.rounding
+            border.width: Theme.ctrlBorder
+            border.color: Theme.border
+            color: powerMouse.containsMouse && !Backend.busy ? Theme.highlight : Theme.bg
+            PixelText {
+                anchors.centerIn: parent
+                text: Backend.busy ? "…"
+                      : (Backend.serverUp ? "stop server" : "start server")
+                color: Backend.busy ? Theme.textDim
+                       : (Backend.serverUp ? Theme.warn : Theme.accent)
+            }
+            MouseArea {
+                id: powerMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Backend.busy ? Qt.ArrowCursor : Qt.PointingHandCursor
+                onClicked: {
+                    if (Backend.busy) return;
+                    if (Backend.serverUp) Backend.stopServer();
+                    else Backend.startServer();
+                }
+            }
+        }
+    }
+
+    // The dropdown floats over the reply area, overlaying the picker exactly.
+    // It anchors to `top` (a sibling) and takes the picker's width rather than
+    // anchoring to `picker` itself — the picker is `top`'s child, a nephew of
+    // this dropdown, and QML silently drops an anchor to a non-sibling (the
+    // dropdown then had width 0 and never showed). picker.right == top.right, so
+    // right:top.right + width:picker.width lands it on the same span.
     Rectangle {
         id: dropdown
         visible: picker.open && Ollama.models.length > 0
-        anchors { top: top.bottom; topMargin: -6
-                  left: picker.left; right: picker.right }
+        anchors { top: top.bottom; topMargin: -6; right: top.right }
+        width: picker.width
         height: Math.min(Ollama.models.length * 22 + 2, 240)
         z: 50
         color: Theme.bgAlt
@@ -174,7 +281,7 @@ Window {
     // --------------------------------------------------------- the reply area
     Rectangle {
         id: replyBox
-        anchors { top: top.bottom; topMargin: 10
+        anchors { top: serverRow.bottom; topMargin: 10
                   left: parent.left; right: parent.right
                   bottom: promptBox.top
                   leftMargin: 10; rightMargin: 10; bottomMargin: 10 }

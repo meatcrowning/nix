@@ -24,7 +24,9 @@ import re
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Slot, Signal, Property, QUrl, QFileSystemWatcher
+from PySide6.QtCore import (QObject, Slot, Signal, Property, QUrl,
+                            QFileSystemWatcher, QProcess, QProcessEnvironment,
+                            QTimer)
 from PySide6.QtGui import QGuiApplication, QColor
 from PySide6.QtNetwork import (QNetworkAccessManager, QNetworkRequest,
                                QNetworkReply)
@@ -281,6 +283,161 @@ class Ollama(QObject):
         reply.deleteLater()
 
 
+class Backend(QObject):
+    """The ollama server's lifecycle, drawn beside the model selector — the same
+    backend controls painter gives ComfyUI (`apps/painter`: the systemd start/stop
+    and comfy's `/free`), for a daemon oracle otherwise only talks to.
+
+    Two things it exposes: UNLOAD the loaded model (ollama's analog of comfy's
+    `/free` — a zero `keep_alive` on `/api/generate`, freeing the VRAM without
+    stopping the daemon) and START/STOP the server. Ollama here is the SYSTEM
+    `ollama.service` (`sys/ai/ollama.nix`), not a `--user` unit like
+    comfy-painter, so start/stop go through `sudo -A systemctl`: the askpass
+    dialog (`home/prog/askpass.nix`) shows the reason, and a non-zero exit is
+    reported as itself rather than as success (docs/DESIGN.md §10 — never report
+    a change that did not happen).
+
+    Everything the controls light from is OBSERVED, not claimed (§10.6): `up`/
+    `down` and the loaded model are polled from the daemon's own `/api/ps`,
+    refreshed on a 3s timer and after every action, so the buttons follow what
+    the server IS doing, not what the last click intended."""
+
+    UNIT = "ollama.service"
+
+    statusChanged = Signal()      # serverUp and/or the loaded-model list changed
+    busyChanged = Signal()        # a start/stop is in flight
+    note = Signal(str)            # a one-line result of an action, drawn as status
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._nam = QNetworkAccessManager(self)
+        self._up = False
+        self._loaded = []
+        self._busy = False
+        self._procs = []          # live QProcesses, so none is GC'd mid-run
+        self._poll = QTimer(self)
+        self._poll.setInterval(3000)
+        self._poll.timeout.connect(self.pollStatus)
+        self._poll.start()
+
+    @Property(bool, notify=statusChanged)
+    def serverUp(self):
+        return self._up
+
+    @Property("QStringList", notify=statusChanged)
+    def loadedModels(self):
+        return self._loaded
+
+    @Property(bool, notify=busyChanged)
+    def busy(self):
+        return self._busy
+
+    def _set_busy(self, v):
+        if v != self._busy:
+            self._busy = v
+            self.busyChanged.emit()
+
+    # ---- observed status: /api/ps tells us both reachability and what is loaded ----
+
+    @Slot()
+    def pollStatus(self):
+        req = QNetworkRequest(QUrl(OLLAMA + "/api/ps"))
+        reply = self._nam.get(req)
+        reply.finished.connect(lambda: self._on_ps(reply))
+
+    def _on_ps(self, reply):
+        try:
+            up = reply.error() == QNetworkReply.NetworkError.NoError
+            loaded = []
+            if up:
+                try:
+                    obj = json.loads(bytes(reply.readAll().data()) or b"{}")
+                    loaded = sorted((m.get("name", "") for m in obj.get("models", [])
+                                     if m.get("name")), key=str.lower)
+                except (ValueError, TypeError):
+                    up = False
+            if up != self._up or loaded != self._loaded:
+                self._up, self._loaded = up, loaded
+                self.statusChanged.emit()
+        finally:
+            reply.deleteLater()
+
+    # ---- unload the loaded model(s): comfy's /free, in ollama's dialect ----
+
+    @Slot()
+    def unloadModels(self):
+        if not self._loaded:
+            self.note.emit("no model is loaded")
+            return
+        pending = list(self._loaded)
+        for name in pending:
+            body = json.dumps({"model": name, "keep_alive": 0}).encode("utf-8")
+            req = QNetworkRequest(QUrl(OLLAMA + "/api/generate"))
+            req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
+                          "application/json")
+            reply = self._nam.post(req, body)
+            reply.finished.connect(lambda r=reply, n=name: self._on_unload(r, n))
+        self.note.emit("unloading " + ", ".join(pending))
+
+    def _on_unload(self, reply, name):
+        try:
+            if reply.error() != QNetworkReply.NetworkError.NoError:
+                self.note.emit("unload failed: " + reply.errorString())
+            else:
+                self.note.emit("unloaded " + name)
+        finally:
+            reply.deleteLater()
+            self.pollStatus()
+
+    # ---- start / stop the SYSTEM unit, through the askpass dialog ----
+
+    def _systemctl(self, verb):
+        return ["sudo", "-A", "systemctl", verb, self.UNIT]
+
+    @Slot()
+    def startServer(self):
+        self._run(self._systemctl("start"), "starting the ollama server",
+                  "server started", "start failed")
+
+    @Slot()
+    def stopServer(self):
+        self._run(self._systemctl("stop"), "stopping the ollama server",
+                  "server stopped", "stop failed")
+
+    def _run(self, argv, reason, ok_msg, fail_label):
+        self._set_busy(True)
+        self.note.emit(reason + "…")
+        proc = QProcess(self)
+        self._procs.append(proc)
+        env = QProcessEnvironment.systemEnvironment()
+        env.insert("SUDO_ASKPASS_REASON", reason)  # the dialog shows WHY (root AGENTS.md)
+        proc.setProcessEnvironment(env)
+
+        def finished(*_):
+            if proc not in self._procs:
+                return
+            self._procs.remove(proc)
+            try:
+                out = (bytes(proc.readAllStandardOutput()).decode(errors="replace")
+                       + bytes(proc.readAllStandardError()).decode(errors="replace"))
+                rc = proc.exitCode()
+            except RuntimeError:
+                return
+            self._set_busy(False)
+            # Report what happened, not what was asked (docs/DESIGN.md §10).
+            if rc != 0:
+                tail = out.strip().splitlines()
+                self.note.emit(fail_label + ": " + (tail[-1] if tail else f"exit {rc}"))
+            else:
+                self.note.emit(ok_msg)
+            self.pollStatus()
+            proc.deleteLater()
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(lambda *_: None)   # reported through finished
+        proc.start(argv[0], argv[1:])
+
+
 def main():
     app = QGuiApplication(sys.argv)
     app.setApplicationName("oracle")
@@ -293,11 +450,13 @@ def main():
     style = DeskStyle()
     titlebar = Titlebar()
     ollama = Ollama()
+    backend = Backend()
 
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("DeskStyle", style)
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Ollama", ollama)
+    ctx.setContextProperty("Backend", backend)
     ctx.setContextProperty("ollamaHost", OLLAMA)
 
     theme_comp = QQmlComponent(engine, QUrl.fromLocalFile(str(QML / "theme" / "Theme.qml")))
@@ -313,6 +472,7 @@ def main():
         sys.exit(1)
 
     ollama.refreshModels()
+    backend.pollStatus()
     sys.exit(app.exec())
 
 
