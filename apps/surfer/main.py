@@ -2529,15 +2529,18 @@ class DarkMode(QObject):
         was tried and retracted, docs/DESIGN.md §16 — plus
         `font-synthesis:none`, §2.2's "no bold, ever": the shipped faces are
         Regular-only and Chromium's synthetic bold smears them. It combines
-        with dark mode rather than replacing it. The pick is imposed by its
-        PLAIN family name, never a `src:local()` `@font-face` alias: Chromium
-        grayscale-antialiases any `@font-face`-resolved face and ignores the
-        family's fontconfig `antialias=false` pin, which SOFTENED every web
-        glyph — so the alias (and the 114% x-height parity it bought) was
-        dropped 2026-08-09 for crisp, pixel-exact text (see `_adj_fam`). The
-        cost is that pixel-font site text reads ~14% small at the site's own
-        sizes; size-adjust is an `@font-face`-only descriptor, so it cannot be
-        had without the blur.
+        with dark mode rather than replacing it. The pick is imposed by a
+        REAL installed face, never a `src:local()` `@font-face` alias:
+        Chromium grayscale-antialiases any `@font-face`-resolved face and
+        ignores the family's fontconfig `antialias=false` pin — the 970147b
+        alias route, dropped 2026-08-09 for pixel-crisp text. The 114%
+        x-height parity the alias bought is back via a font-file TWIN: the
+        default pick also ships an installed " (web)" family whose outlines,
+        advances and vertical metrics are pre-scaled 1.14x
+        (home/pkgs/desktop/font-files/scale-vga.py) — a real face, so the
+        antialias pin reaches it and it rasterises pixel-crisp while site
+        text at the site's own sizes reads at the proportional x-height (see
+        `_adj_fam`).
 
     All state persists to the "dark" key of prefs.json. Application is NOT
     per-view at load-finished (that painted light first and flipped once images
@@ -2560,6 +2563,24 @@ class DarkMode(QObject):
     # that construct DarkMode without a DeskStyle (find/pagestyle tests).
     _SYSTEM_FONT = "More Perfect DOS VGA"
     _SYSTEM_SIZE = 15    # kitty's cell height — DESIGN.md §2.1's one number
+
+    # The forced face's x-height is only ~44% of its em (measured: the default
+    # pick's lowercase x is 6.56 px of a 15 px em) against the ~51% of the
+    # proportional fonts a site's font-size numbers were designed around — so
+    # site text in the pixel face read ~14% small at the site's own sizes.
+    # §16's settlement keeps the site's font-size NUMBERS; this constant makes
+    # the face's apparent size match the intent instead. It is NOT applied via
+    # a CSS `size-adjust` @font-face (an alias forces Chromium grayscale-AA —
+    # the 970147b blur) but baked into a font-file TWIN of the default pick,
+    # "More Perfect DOS VGA (web)", installed by home/pkgs/desktop/font.nix
+    # via font-files/scale-vga.py with outlines/advances/metrics all at 1.14x.
+    # A real installed face goes through fontconfig, so the antialias=false
+    # pin reaches it and it rasterises pixel-crisp at the site's own sizes
+    # (measured offscreen 2026-08-09). One constant, measured for the default
+    # pick; a different pick (Botis 4x6, Phenex) has its own x-height ratio
+    # and would need its own measured factor + twin before it can join — until
+    # then those picks impose the plain face, unadjusted.
+    _XHEIGHT_ADJUST = 1.14
 
     def _fam(self):
         return self._style.fontFamily if self._style is not None else DarkMode._SYSTEM_FONT
@@ -2774,20 +2795,28 @@ class DarkMode(QObject):
         return "#" + "".join("%02x" % max(0, min(255, round(x * 255))) for x in v)
 
     def _adj_fam(self):
-        # The family the inherit layer and the force impose: the PLAIN pick, by
-        # its real name. NOT a `src:local()` @font-face alias — Chromium renders
-        # any @font-face-resolved face with grayscale antialiasing and ignores
-        # the family's fontconfig `antialias=false` pin, even for a local()
-        # source, so routing the pixel font through an alias SOFTENED every web
-        # glyph (measured offscreen 2026-08-09: the plain family came back with
-        # 0 grey pixels at every size — pixel-exact aliased, matching goetia and
-        # the rest of the desktop — while the identical face via a local()
-        # @font-face came back ~60-80% grey). Naming the family directly is the
-        # only way the antialias pin reaches it, and crisp is the whole point.
-        # The cost is the x-height parity the alias bought (site text in the
-        # pixel face reads ~14% small at the site's own sizes): size-adjust is
-        # an @font-face-only descriptor, so it cannot be had without the blur.
-        return json.dumps(self._fam())
+        # The family chain the inherit layer and the force impose: the pick's
+        # size-adjusted WEB TWIN first, then the plain pick. The twin is a
+        # REAL installed face — the pick's outlines/advances/metrics pre-scaled
+        # 1.14x by home/pkgs/desktop/font-files/scale-vga.py and installed by
+        # font.nix as " (web)" — NOT a `src:local()` @font-face alias, which
+        # Chromium renders with grayscale antialiasing, ignoring the family's
+        # fontconfig `antialias=false` pin even for a local() source (measured
+        # offscreen 2026-08-09: the plain family came back with 0 grey pixels
+        # at every size — pixel-exact aliased, matching goetia and the rest of
+        # the desktop — while the identical face via a local() @font-face came
+        # back ~60-80% grey). Naming a real family is the only way the
+        # antialias pin reaches it, and the twin keeps the x-height parity: a
+        # site's 16px in the 1.14x face renders the ink of the plain face at
+        # 18.24px — the proportional-font baseline, crisp (measured offscreen:
+        # the twin came back 0 grey, pixel-identical to the plain face at the
+        # scaled size). Only the DEFAULT pick has a twin today (the factor is
+        # baked into the file); any other pick falls back to the plain face,
+        # unadjusted — the current crisp state.
+        fam = self._fam()
+        if fam == DarkMode._SYSTEM_FONT:
+            return (json.dumps(fam + " (web)") + "," + json.dumps(fam))
+        return json.dumps(fam)
 
     def _inherit_css(self):
         # Webpages INHERIT the desktop font: family, apparent size and (via the
@@ -2812,9 +2841,13 @@ class DarkMode(QObject):
         # Zoom.levelChanged is chained onto `changed` in main(), so open pages
         # re-fetch this on every zoom step.
         #
-        # The family is the PLAIN pick (see _adj_fam) — no @font-face alias, no
-        # size-adjust — so inherited text renders at the raw desktop size,
-        # pixel-crisp, only the zoom compensation applied.
+        # The family is the pick's web TWIN (see _adj_fam) when it has one, so
+        # the desktop size is divided by the twin's factor as well: font-size
+        # 13.158 px in the 1.14x face renders exactly the desktop's 15 px — the
+        # same raster as the plain face at 15px, at any zoom. Only SITE-styled
+        # (forced) text actually grows, which is the point of _XHEIGHT_ADJUST.
+        # A pick without a twin divides by 1 and imposes the plain face at the
+        # raw desktop size.
         f = self._adj_fam()
         z = 1.0
         if self._zoom is not None:
@@ -2822,7 +2855,8 @@ class DarkMode(QObject):
                 z = float(self._zoom.level) or 1.0
             except (TypeError, ValueError):
                 z = 1.0
-        px = ("%.4f" % (self._px() / z)).rstrip("0").rstrip(".")
+        adj = DarkMode._XHEIGHT_ADJUST if self._fam() == DarkMode._SYSTEM_FONT else 1.0
+        px = ("%.4f" % ((self._px() / adj) / z)).rstrip("0").rstrip(".")
         return (
             "@layer __surfer_inherit__{"
             ":root{font-family:" + f + ",monospace;font-size:" + px + "px}"
@@ -2847,14 +2881,15 @@ class DarkMode(QObject):
     def _font_css(self):
         # Force the desktop pixel font on all page text (family only — sizes stay
         # the site's, so layout/heading hierarchy survives; forcing sizes too is
-        # the retracted reskin, DESIGN.md §16). The family is the PLAIN pick
-        # (see _adj_fam), not a size-adjusted @font-face alias: the alias
-        # blurred every web glyph, so it was dropped for crispness at the cost
-        # of the ~14% x-height parity. Reads the LIVE pick from DeskStyle so a Settings >
-        # pixel font change shows here too, falling back to the default family
-        # only when no DeskStyle was supplied. font-synthesis with !important so
-        # the forced Regular-only face is never synthetically embossed, whatever
-        # the page declares.
+        # the retracted reskin, DESIGN.md §16). The family is the pick's
+        # size-adjusted web TWIN (see _adj_fam) — a real installed face, not a
+        # @font-face alias, so the fontconfig antialias=false pin reaches it
+        # and the forced text renders pixel-crisp AT the site's own sizes,
+        # reading the proportional x-height instead of ~14% small. Reads the
+        # LIVE pick from DeskStyle so a Settings > pixel font change shows here
+        # too, falling back to the default family only when no DeskStyle was
+        # supplied. font-synthesis with !important so the forced Regular-only
+        # face is never synthetically embossed, whatever the page declares.
         f = self._adj_fam()
         el = "*:not(:is(" + DarkMode._ICON_CARVE + "))"
         return (el + "," + el + "::before," + el + "::after{"
@@ -2871,8 +2906,9 @@ class DarkMode(QObject):
 
     def _css(self, url):
         # No @font-face alias any more (see _adj_fam): it blurred every web
-        # glyph. The pick is imposed by its plain family name so Chromium honours
-        # its fontconfig antialias=false pin and renders it pixel-crisp.
+        # glyph. The pick is imposed by a REAL family — its size-adjusted web
+        # twin where one exists — so Chromium honours its fontconfig
+        # antialias=false pin and renders it pixel-crisp at the site's sizes.
         parts = [self._inherit_css()]
         if self._enabled and self.isSiteEnabled(url):
             parts.append(self._dark_css())

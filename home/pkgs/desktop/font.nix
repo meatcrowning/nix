@@ -19,6 +19,25 @@ let
       "More Perfect DOS VGA"
   '';
 
+  # The size-adjusted WEB twin of the merged face: same outlines/advances/
+  # vertical metrics at 1.14x, installed as its own family (" (web)"). This is
+  # the font-file replacement for the @font-face size-adjust alias surfer used
+  # to carry — the alias forced Chromium grayscale-AA on every web glyph, the
+  # real face goes through fontconfig and honours the antialias=false pin, so
+  # site text at the site's own sizes reads the proportional x-height AND
+  # pixel-crisp (measured offscreen 2026-08-09; the whole story and the
+  # numbers are in scale-vga.py's docstring and apps/surfer/main.py's
+  # _XHEIGHT_ADJUST). Factor is the default pick's x-height adjust; another
+  # pick has its own ratio and would need its own measured factor.
+  morePerfectDOSVGAWeb = pkgs.runCommand "more-perfect-dos-vga-web" {
+    nativeBuildInputs = [ (pkgs.python3.withPackages (ps: [ ps.fonttools ])) ];
+  } ''
+    python3 ${./font-files/scale-vga.py} \
+      ${morePerfectDOSVGA}/share/fonts/truetype/MorePerfectDOSVGA.ttf \
+      $out/share/fonts/truetype/MorePerfectDOSVGA-web.ttf \
+      1.14 " (web)"
+  '';
+
   # Botis 4x6 — a hand-authored 4-wide blocky pixel face. There is NO 4x4 pixel
   # font on this system to merge or import from (the repo ships only the 8x16
   # DOS VGA pair, and fontconfig has only loose 8px IBM CGA faces), and the
@@ -119,6 +138,12 @@ in
   home.file.".local/share/fonts/MorePerfectDOSVGA.ttf".source =
     "${morePerfectDOSVGA}/share/fonts/truetype/MorePerfectDOSVGA.ttf";
 
+  # The size-adjusted web twin (see the derivation comment): installed
+  # alongside the base face so fontconfig can match it by family name. Only
+  # surfer's CSS ever asks for it; the desktop itself keeps the plain face.
+  home.file.".local/share/fonts/MorePerfectDOSVGA-web.ttf".source =
+    "${morePerfectDOSVGAWeb}/share/fonts/truetype/MorePerfectDOSVGA-web.ttf";
+
   # The second, hand-authored pixel face — a 4-wide blocky pixel face shipped as
   # a SCALABLE outline TTF (see the derivation comment: a bitmap here was
   # silently substituted by Pango and the GL scenegraph). Not the live desktop
@@ -190,6 +215,35 @@ in
       </match>
       <match target="font">
         <test name="family"><string>More Perfect DOS VGA</string></test>
+        <edit name="embolden"  mode="assign"><bool>false</bool></edit>
+        <edit name="antialias" mode="assign"><bool>false</bool></edit>
+        <edit name="autohint"  mode="assign"><bool>true</bool></edit>
+        <edit name="hinting"   mode="assign"><bool>true</bool></edit>
+        <edit name="hintstyle" mode="assign"><const>hintfull</const></edit>
+        <edit name="rgba"      mode="assign"><const>none</const></edit>
+      </match>
+    </fontconfig>
+  '';
+
+  # The same pins for the size-adjusted web twin (family name "More Perfect
+  # DOS VGA (web)"). This is the half that makes the twin work: without a
+  # font-level antialias=false on the NEW family name, fontconfig falls back
+  # to Chromium's default grayscale AA for it and the twin blurs exactly like
+  # the @font-face alias it replaces (the pin on the plain name does not
+  # reach it — the twin's family is its own name). Mirror the base rule so
+  # the scaled face rasterises pixel-crisp everywhere the plain one does.
+  xdg.configFile."fontconfig/conf.d/50-more-perfect-dos-vga-web-regular.conf".text = ''
+    <?xml version="1.0"?>
+    <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+    <fontconfig>
+      <match target="pattern">
+        <test name="family"><string>More Perfect DOS VGA (web)</string></test>
+        <edit name="weight"   mode="assign"><const>regular</const></edit>
+        <edit name="slant"    mode="assign"><const>roman</const></edit>
+        <edit name="embolden" mode="assign"><bool>false</bool></edit>
+      </match>
+      <match target="font">
+        <test name="family"><string>More Perfect DOS VGA (web)</string></test>
         <edit name="embolden"  mode="assign"><bool>false</bool></edit>
         <edit name="antialias" mode="assign"><bool>false</bool></edit>
         <edit name="autohint"  mode="assign"><bool>true</bool></edit>

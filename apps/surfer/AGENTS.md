@@ -517,14 +517,16 @@ The style it carries has three parts (all computed by `DarkMode`):
   rasterising at ~12.4 device px, which is what *"more perfect doesn't look
   like a pixel font anymore"* was. Same idiom as the scrollbar's
   zoom-compensated width. Site-styled text still zooms; only the inherited
-  default holds the desktop's device-pixel size. The family is the **PLAIN
-  pick** (`_adj_fam`), never a `src:local()` `@font-face` alias: Chromium
-  grayscale-antialiases any `@font-face`-resolved face and ignores the
-  fontconfig `antialias=false` pin, so the alias SOFTENED every web glyph
-  (measured offscreen 2026-08-09: plain family 0 grey pixels at every size,
-  the identical face via `local()` @font-face ~60-80% grey). Naming the
-  family directly is the only way the antialias pin reaches it — crisp,
-  pixel-exact, matching goetia and the rest of the desktop.
+  default holds the desktop's device-pixel size — and it is divided by the
+  web twin's factor too (see `_adj_fam`), so the inherited raster is exactly
+  the desktop's. The family is the pick's **size-adjusted WEB TWIN**
+  (`_adj_fam`), a real installed face, never a `src:local()` `@font-face`
+  alias: Chromium grayscale-antialiases any `@font-face`-resolved face and
+  ignores the fontconfig `antialias=false` pin, so the alias SOFTENED every
+  web glyph (measured offscreen 2026-08-09: plain family 0 grey pixels at
+  every size, the identical face via `local()` @font-face ~60-80% grey).
+  Naming a real family directly is the only way the antialias pin reaches
+  it — crisp, pixel-exact, matching goetia and the rest of the desktop.
 - **the dark filter** (global toggle, per-site exceptions), top frame only;
 - **the system-font force** — the desktop family imposed on page text so ALL
   of a page reads in the pick, not just the runs a site left unstyled.
@@ -534,16 +536,25 @@ The style it carries has three parts (all computed by `DarkMode`):
   `font-synthesis:none`, never sizes — the full reskin was retracted,
   `ad868e4` / DESIGN.md §16 — and icon-font elements (`_ICON_CARVE`) are
   excluded by class so pictogram fonts don't render as tofu. The family it
-  imposes is the **PLAIN pick** (`_adj_fam`), same as the inherit layer, for
-  the same reason: a `src:local()` `@font-face` alias forced grayscale-AA and
-  blurred the forced text (`970147b`'s `size-adjust:114%` alias was that
-  route). It was dropped 2026-08-09 (`310cdc3`) for crisp, pixel-exact text —
-  verified by `pagestyle-test.py`, which canvas-measures the forced face at
-  the site's own size and asserts 0 grey pixels. The cost: pixel-font site
-  text reads ~14% small at the site's own sizes (the pixel face's x-height is
-  only ~44% of its em against the ~51% the proportional fonts assumed);
-  `size-adjust` is an `@font-face`-only descriptor, so that parity cannot be
-  had without the blur.
+  imposes is the pick's **size-adjusted WEB TWIN** (`_adj_fam`), same as the
+  inherit layer, for the same reason: a `src:local()` `@font-face` alias
+  forced grayscale-AA and blurred the forced text (`970147b`'s
+  `size-adjust:114%` alias was that route; dropped 2026-08-09, `310cdc3`,
+  for crisp, pixel-exact text — verified by `pagestyle-test.py`, which
+  canvas-measures the forced face at the site's own size and asserts 0 grey
+  pixels). The parity the alias bought is back via a **font-file twin**: the
+  default pick ships a second installed family, " (web)", whose outlines,
+  advances and vertical metrics are pre-scaled 1.14x by
+  `home/pkgs/desktop/font-files/scale-vga.py` (installed by `font.nix`,
+  with its own fontconfig pins). It is a REAL face, so the antialias=false
+  pin reaches it — site text at the site's own sizes reads the proportional
+  x-height (~51% of em, against the pixel face's ~44%) AND pixel-crisp
+  (measured offscreen 2026-08-09: the twin came back 0 grey, pixel-identical
+  to the plain face at the scaled size). The inherit layer divides its px by
+  the same factor, so inherited text still lands on the desktop's device
+  pixels. Only the default pick has a twin; a different pick (Botis 4x6,
+  Phenex) imposes the plain face, unadjusted — its ratio would need its own
+  measured factor + twin.
 
 The plumbing:
 
@@ -579,11 +590,12 @@ Main.qml uses: the invert filter is present at the page's own parse-time inline
 script *and* in its first `requestAnimationFrame` (both before any paint), still
 present once settled, and a brightness change live-refreshes an open page while
 off strips it back to `none`; plus the font checks — unstyled text inherits
-the pick at the desktop's apparent size (the size-adjusted alias renders the
-same ink as the raw 15px face), a page's own font styling beats the
+the pick at the desktop's apparent size (the web twin's ink = the raw 15px
+face), a page's own font styling beats the
 layer, a subframe gets the face but never the filter, and the per-site force
 imposes the family while the page's font-size survives (and its ink renders
-~1.14x — the proportional x-height). Run it after touching
+at the proportional x-height — twin@N ink = the raw face at N x 1.14 — all
+of it 0 grey, the crispness regression guard). Run it after touching
 `main.py`'s
 dark-mode block, `PAGE_STYLE_RUNTIME_JS`, `PageStyle`/`PageStyleHandler`, or the
 `Main.qml` profile/courier wiring.
