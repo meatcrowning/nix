@@ -903,11 +903,11 @@ copies of a widget both live is the bug this whole split exists to prevent.
 
 ### Watching `top` from `book`: `TopStats` + `TopProcDrawer` (book-only)
 
-The cpu popup on **book** has a disclosure under the local cpu chart — `top v` —
-that rolls out a COPY of the same graph sourced from the other machine, `top`,
-so the laptop can keep an eye on the desktop. It is gated on `Host.name === "air"`
-everywhere and does nothing on top itself. Same two-halves split as above, plus
-a transport:
+The dock's system-info tile on **book** has a disclosure under the process list —
+`top v` — that rolls out a COPY of the local cpu graph sourced from the other
+machine, `top`, so the laptop can keep an eye on the desktop. It is gated on
+`Host.name === "air"` everywhere and does nothing on top itself. Same two-halves
+split as above, plus a transport:
 
 - **`TopStats.qml` is the data singleton**, shaped exactly like `SysInfo`
   (`cpuHist`/`tempHist`/`memHist` ring buffers, `intervalSec`, a `watch(obj, on)`
@@ -924,11 +924,16 @@ a transport:
 - **`TopProcDrawer.qml` is the view + disclosure**, animated like the media queue
   drawer (`SettingsStore.d.topStatsOpen`, a clip whose height glides over
   `ViewMode.slideMs`, `Behavior` gated on `!ViewMode.settling` so a reload with
-  the drawer open lands in place). `CpuPanel.qml` stacks it under `CpuContent`
-  on air only and grows its `implicitHeight` so the popup follows the glide.
+  the drawer open lands in place). `TaskManagerContent.qml` places it under the
+  process list on air only, height 0 off book; the process table anchors its
+  bottom to the drawer, so the reveal shrinks the LIST (the tile's grid height
+  is fixed). The list's slack covers the chart at this panel's size, so "then
+  weather" — growing the tile into the forecast — is not wired. It lived under
+  `CpuContent` in the cpu corner popup until 2026-08-09.
 - **It polls ONLY while the drawer is both on screen AND expanded** — `wantData`
-  drives `TopStats.watch`, so a closed disclosure spawns no ssh and top is never
-  touched when nobody is looking.
+  drives `TopStats.watch` (`active` is now the dock tile's visibility, not the
+  popup's `open`), so a closed disclosure spawns no ssh and top is never touched
+  when nobody is looking.
 - **`reachable` fails VISIBLY** (docs/DESIGN.md §10.2): an overlay says
   "connecting to top…" (never reached) or "top unreachable" (was, isn't) instead
   of a blank chart. Live data needs book joined to the tailnet with key-based ssh

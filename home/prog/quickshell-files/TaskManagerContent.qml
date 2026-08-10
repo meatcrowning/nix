@@ -602,7 +602,10 @@ Item {
         id: list
         anchors {
             top: header.bottom; topMargin: 3
-            bottom: parent.bottom; bottomMargin: root.pad
+            // On book the process table gives up its bottom to the top-mirror
+            // disclosure below it; on top there is no drawer and the list runs
+            // to the tile's bottom edge as before (topDrawer height 0 there).
+            bottom: topDrawer.top; bottomMargin: root.mirror ? 4 : root.pad
             horizontalCenter: parent.horizontalCenter
         }
         width: root.inner
@@ -738,6 +741,32 @@ Item {
             visible: Procs.rows.length === 0
             text: "reading..."
             color: Theme.textDim
+        }
+    }
+
+    // ---- book-only: watching top from book -------------------------------
+    // The top-mirror disclosure — an 18px "top v" button under the process
+    // list that rolls out a copy of top's cpu graph (TopStats/TopProcDrawer).
+    // It moved here from the cpu corner popup: the reveal shrinks the process
+    // list above it (the tile's grid height is fixed, so the chart's room comes
+    // off the list first — "then weather" would need the tile to grow into the
+    // forecast, which the list's slack makes unnecessary at this panel's size).
+    // On top there is no drawer: `mirror` is false, height collapses to 0 and
+    // the list runs to the tile bottom unchanged.
+    readonly property bool mirror: Host.name === "air"
+    TopProcDrawer {
+        id: topDrawer
+        visible: root.mirror
+        active: root.active
+        // Explicit height so the non-book tile does not lose the button's 18px:
+        // an invisible Item still occupies its implicitHeight for the anchor
+        // above, so collapse it to 0 off book. On book it follows its own
+        // gliding implicitHeight (disc + clipped chart), so the list reflows.
+        height: root.mirror ? implicitHeight : 0
+        width: root.inner
+        anchors {
+            bottom: parent.bottom; bottomMargin: root.mirror ? root.pad : 0
+            horizontalCenter: parent.horizontalCenter
         }
     }
 
