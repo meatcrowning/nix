@@ -3,7 +3,7 @@
 from it. Prints KEY=rrggbb lines for shell eval.
 
     wal-extract.py IMAGE [--colors N] [--accent RRGGBB|--auto] [--bg pure|tone]
-                         [--variant vivid|normal|muted|pastel] [--light|--dark]
+                         [--variant vivid|normal|fidelity|muted|pastel] [--light|--dark]
 
 Six of the Settings program's Appearance keys land here, and this is the ONLY
 place they can: the whole desktop's palette is derived in this file, so a
@@ -29,7 +29,7 @@ value all taken from the image, the hue clamped to a legible band so each slot
 still reads as its state — so the desktop reads as several wallpaper colours,
 not shades of one. The manual accent replaces where the accent hue comes FROM,
 never the derivation; `--bg tone` puts BG on a rung below BGALT rather than
-inventing a colour. The `paletteVariant` picker (vivid | normal | muted | pastel) is a
+inventing a colour. The `paletteVariant` picker (vivid | normal | fidelity | muted | pastel) is a
 global chroma/value transform over that generated palette. See
 ~/nix/docs/DESIGN.md §3.1.2."""
 import sys, os, json, colorsys, warnings
@@ -70,22 +70,34 @@ VARIANTS = {
     "pastel":  {"light_cap": 0.34, "accent_v": 0.92, "struct_mul": 1.00, "status_s": 0.42, "light_ink": 0.40, "light_ink_v": 0.42},
     "muted":   {"light_cap": 0.20, "accent_v": 0.78, "struct_mul": 0.55, "status_s": 0.30, "light_ink": 0.10, "light_ink_v": 0.40},
     "vivid":   {"light_cap": 0.85, "accent_v": 1.00, "struct_mul": 1.45, "status_s": 0.90, "light_ink": 0.85, "light_ink_v": 0.55},
-    # `normal` is the plain, un-stylised baseline — the structural tones and the
-    # status ramp still sit about halfway between pastel and vivid. But its MAIN
-    # colour and its BACKGROUND are not transformed at all: in DARK mode they are
-    # lifted VERBATIM off the wallpaper, so the desktop reads as the picture's own
-    # two colours rather than a dressed-up version of them (§3.1.2, his 2026-08-09
+    # `normal` is the BALANCED, contrast-safe default — the everyday choice a user
+    # expects behind the word "normal" (his 2026-08-09 call: the verbatim look
+    # moved to `fidelity` below). Its knobs sit about halfway between pastel and
+    # vivid, so it neither softens nor pushes the chroma; on top of that it is the
+    # one variant that GUARANTEES contrast (`contrast_safe`): every foreground on
+    # the background — `text`/`accent` to the 4.5:1 body floor, `textDim` and the
+    # status ramp to 3.0 — is rescued toward legibility (hue preserved, tone
+    # moved the smallest distance), and `text` is held no dimmer than `textDim`
+    # so the reading hierarchy can never invert. It does NOT lift anything
+    # verbatim and does NOT override `pureBlackBg`.
+    "normal":  {"light_cap": 0.55, "accent_v": 0.70, "struct_mul": 1.20, "status_s": 0.65, "light_ink": 0.60, "light_ink_v": 0.48, "contrast_safe": True},
+    # `fidelity` is the picture-faithful look: the structural tones and status
+    # ramp derive normally, but the MAIN colour and BACKGROUND are lifted VERBATIM
+    # off the wallpaper in DARK mode, so the desktop reads as the picture's own
+    # two colours rather than a dressed-up version (§3.1.2, his 2026-08-09
     # refinement — the re-saturated approximation was rejected):
     #   * `main_exact` — the accent/text colour is the EXACT pixel of the
     #     wallpaper's DOMINANT (most-prevalent real) cluster, straight through:
     #     no hue rebuild, no saturation floor, no value floor. A mostly-#1e4733
-    #     wallpaper gives #1e4733, not a brightened #50b283 of it.
+    #     wallpaper gives #1e4733, not a brightened #50b283 of it. It is nudged
+    #     only the smallest distance that clears the 3.0 legibility floor
+    #     (`legible_over`), never the 4.5 comfort floor — faithful over readable.
     #   * `bg_darkest` — the background is the DARKEST real cluster actually
     #     present in the image (the picture's own shadow), not a synthesised
     #     black. It overrides `pureBlackBg` for this variant, dark mode only.
     # The `light_cap`/`accent_v`/`struct_mul`/… knobs still shape the structural
     # tones, TEXTDIM and the status ramp, and the whole LIGHT branch is unchanged.
-    "normal":  {"light_cap": 0.55, "accent_v": 0.70, "struct_mul": 1.20, "status_s": 0.65, "light_ink": 0.60, "light_ink_v": 0.48, "main_dominant": True, "main_exact": True, "bg_darkest": True},
+    "fidelity": {"light_cap": 0.55, "accent_v": 0.70, "struct_mul": 1.20, "status_s": 0.65, "light_ink": 0.60, "light_ink_v": 0.48, "main_dominant": True, "main_exact": True, "bg_darkest": True},
 }
 
 
@@ -198,7 +210,7 @@ def contrast_ratio(a, b):
     return (hi + 0.05) / (lo + 0.05)
 
 
-# The `normal` variant lifts its main colour VERBATIM off the wallpaper — but a
+# The `fidelity` variant lifts its main colour VERBATIM off the wallpaper — but a
 # colour that cannot be read on the background it sits on is not a palette, it
 # is an invisible desktop. Measured 2026-08-09 across all 69 wallpapers in
 # ~/Pictures/wall: on `1658782593057758.jpg` the dominant real cluster and the
@@ -212,11 +224,21 @@ def contrast_ratio(a, b):
 # #2525ff tops out at 2.12 against its own dark background however bright it
 # goes. Blending keeps the hue recognisable while actually reaching the floor.
 MIN_CONTRAST = 3.0
+# Primary body text carries a stricter floor than the 3.0 large-text/UI one:
+# WCAG AA normal-text is 4.5:1. The balanced `normal` variant holds its
+# `accent`/`text` to this so the thing you read most is never the hardest to
+# read (§3.1.2). `fidelity` keeps the looser 3.0 — reading AS the picture is its
+# whole point, so it rescues only as far as legibility, not comfort.
+BODY_CONTRAST = 4.5
 
 
-def legible_over(rgb, bg_hex):
-    bg = tuple(int(bg_hex[i:i + 2], 16) for i in (0, 2, 4))
-    if contrast_ratio(rgb, bg) >= MIN_CONTRAST:
+def _hex_rgb(hx):
+    return tuple(int(hx[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def legible_over(rgb, bg_hex, floor=MIN_CONTRAST):
+    bg = _hex_rgb(bg_hex)
+    if contrast_ratio(rgb, bg) >= floor:
         return "%02x%02x%02x" % rgb
     # Toward whichever pole the background is NOT: on a near-black bg that is
     # white, on a pale one (a light wallpaper's own darkest cluster can still be
@@ -228,7 +250,7 @@ def legible_over(rgb, bg_hex):
     for i in range(1, 51):
         t = i / 50.0
         cand = tuple(round(rgb[j] + (pole[j] - rgb[j]) * t) for j in range(3))
-        if contrast_ratio(cand, bg) >= MIN_CONTRAST:
+        if contrast_ratio(cand, bg) >= floor:
             break
     return "%02x%02x%02x" % cand
 
@@ -238,7 +260,7 @@ def full_palette(h, s, v, clusters, pure_bg, variant, light=False,
     """The desktop palette: the accent stays the primary hue, but the
     structural tones take the wallpaper's secondary hue and the status ramp
     takes real colour-coded hues nudged toward the wallpaper. Twelve tokens.
-    `variant` (vivid|normal|muted|pastel) is a global transform — see VARIANTS.
+    `variant` (vivid|normal|fidelity|muted|pastel) is a global transform — see VARIANTS.
     `light` inverts the value ladder onto a white background (dark ink accent,
     light grey structural tints) while keeping the secondary-hue frames and the
     sampled status ramp. docs/DESIGN.md §3.1.2."""
@@ -326,7 +348,7 @@ def full_palette(h, s, v, clusters, pure_bg, variant, light=False,
         "INFO":      status_color(0.57, 0.07, clusters, min(ss, 0.55),  0.74, 0.20, 0.60),
     }
 
-    # The `normal` variant's two verbatim lifts (§3.1.2): the MAIN colour
+    # The `fidelity` variant's two verbatim lifts (§3.1.2): the MAIN colour
     # (accent = text) is the exact dominant wallpaper pixel and the BACKGROUND is
     # the darkest real cluster, both straight off the image with no transform, so
     # the desktop shows the picture's own colours rather than a re-saturated
@@ -348,6 +370,22 @@ def full_palette(h, s, v, clusters, pure_bg, variant, light=False,
             out["BG"] = "%02x%02x%02x" % dark_rgb
         if vp.get("main_exact") and dom_rgb is not None:
             out["ACCENT"] = out["TEXT"] = legible_over(dom_rgb, out["BG"])
+
+    # The balanced `normal` variant GUARANTEES every foreground reads on the
+    # background, so the thing you read most is never the hardest to read and the
+    # blue `info` slot never sinks below the floor a green `ok` clears easily
+    # (§3.1.2). Every rescue preserves hue and moves tone the smallest distance —
+    # the same `legible_over` machinery, applied to the whole foreground set
+    # rather than the accent alone. Ladder guard: `text` is held no dimmer than
+    # `textDim` (on either polarity, higher contrast on the shared bg == the
+    # correct end of the ramp), so the reading hierarchy can never invert.
+    if vp.get("contrast_safe"):
+        bg = out["BG"]
+        bg_rgb = _hex_rgb(bg)
+        for k in ("TEXTDIM", "OK", "WARN", "CRIT", "INFO"):
+            out[k] = legible_over(_hex_rgb(out[k]), bg, MIN_CONTRAST)
+        floor = max(BODY_CONTRAST, contrast_ratio(_hex_rgb(out["TEXTDIM"]), bg_rgb))
+        out["ACCENT"] = out["TEXT"] = legible_over(_hex_rgb(out["ACCENT"]), bg, floor)
     return out
 
 
@@ -433,7 +471,7 @@ def main():
         if path is None:
             sys.stderr.write("usage: wal-extract.py IMAGE [--colors N] "
                              "[--accent RRGGBB] [--bg pure|tone] "
-                             "[--variant vivid|normal|muted|pastel] "
+                             "[--variant vivid|normal|fidelity|muted|pastel] "
                              "[--light|--dark]\n")
             return 2
         try:
@@ -475,12 +513,12 @@ def main():
                 if score > best_score:
                     best_score, best = score, (h, s, v)
                 # Most-prevalent cluster that is a real COLOUR (not the near-black
-                # background, not a near-grey) — the `normal` variant's main hue,
+                # background, not a near-grey) — the `fidelity` variant's main hue,
                 # and the EXACT pixel it lifts as its accent. kept is
                 # dominant-first, so the first qualifier by count wins.
                 if s >= 0.15 and v >= 0.12 and cnt > dom_cnt:
                     dom_cnt, dom, dom_rgb = cnt, (h, s, v), (r, g, b)
-                # Darkest real cluster present — the `normal` variant's exact
+                # Darkest real cluster present — the `fidelity` variant's exact
                 # background (the picture's own shadow, never a synthesised dark).
                 if v < dark_v:
                     dark_v, dark_rgb = v, (r, g, b)
@@ -505,7 +543,7 @@ def main():
     else:
         h, s, v, avg_sat = img_hsv
 
-    # The `normal` variant takes its main colour from the wallpaper's DOMINANT
+    # The `fidelity` variant takes its main colour from the wallpaper's DOMINANT
     # colour (most-prevalent real cluster) rather than the vibrancy-scored
     # winner the other variants use — so the accent reads as the wallpaper's
     # own colour, and its low `accent_v` floor (VARIANTS) then lifts a deep
@@ -516,7 +554,7 @@ def main():
             and dom_hsv is not None):
         h, s, v = dom_hsv
 
-    # In DARK mode the `normal` variant lifts its main colour and background
+    # In DARK mode the `fidelity` variant lifts its main colour and background
     # verbatim off the image (full_palette applies `main_exact`/`bg_darkest`), so
     # it must NOT be re-saturated first — that is exactly the approximation he
     # rejected. TEXTDIM and the structural tones then track the real dominant
