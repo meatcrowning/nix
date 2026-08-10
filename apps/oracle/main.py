@@ -21,6 +21,7 @@ way it comes off the model.
 import json
 import os
 import re
+import socket
 import sys
 from pathlib import Path
 
@@ -76,6 +77,13 @@ WEB_SEARCH_TOOL = {
 #: How many tool rounds one turn may take before we stop looping and let the
 #: model answer with what it has — a guard against a model that keeps searching.
 MAX_TOOL_ROUNDS = 4
+
+#: Which machine we run on, by OS hostname (`top` / `book`) — NOT the flake
+#: attribute. On `book` there is no local `ollama.service`; the daemon lives on
+#: `top` and oracle reaches both its HTTP API (over the tunnel that forwards
+#: 11434, tools/ollama-tunnel.sh) and — for start/stop — its systemd unit over
+#: the same ssh. See Backend below.
+ON_BOOK = socket.gethostname() == "book"
 
 #: oracle's own config dir (shared with tavily.key). Two optional, no-rebuild
 #: files drive the model selector — drop them in and relaunch, same as the key:
@@ -596,10 +604,18 @@ class Backend(QObject):
     `/free` — a zero `keep_alive` on `/api/generate`, freeing the VRAM without
     stopping the daemon) and START/STOP the server. Ollama here is the SYSTEM
     `ollama.service` (`sys/ai/ollama.nix`), not a `--user` unit like
-    comfy-painter, so start/stop go through `sudo -A systemctl`: the askpass
-    dialog (`home/prog/askpass.nix`) shows the reason, and a non-zero exit is
+    comfy-painter, so start/stop go through `systemctl`, and a non-zero exit is
     reported as itself rather than as success (docs/DESIGN.md §10 — never report
     a change that did not happen).
+
+    WHERE the systemctl runs is host-branched. On `top` the unit is local, so it
+    is `sudo -A systemctl` (the NOPASSWD rule in `sys/ai/ollama.nix` means no
+    prompt; the askpass dialog is only a fallback). On `book` there is no local
+    `ollama.service` at all — the daemon runs on `top`, reached over the same ssh
+    that `tools/ollama-tunnel.sh` forwards 11434 through — so start/stop is
+    `ssh top sudo -n systemctl …`, non-interactive because top askpass cannot
+    prompt over an ssh with no tty. That is why the NOPASSWD rule exists and why
+    it is scoped to exactly `systemctl {start,stop} ollama.service`.
 
     Everything the controls light from is OBSERVED, not claimed (§10.6): `up`/
     `down` and the loaded model are polled from the daemon's own `/api/ps`,
@@ -696,6 +712,20 @@ class Backend(QObject):
     # ---- start / stop the SYSTEM unit, through the askpass dialog ----
 
     def _systemctl(self, verb):
+        if ON_BOOK:
+            # No local unit here; drive top's over the same ssh the tunnel uses.
+            # `sudo -n` (no tty over ssh) relies on top's NOPASSWD rule for
+            # exactly this command; ollama-tunnel.sh exports the resolved host
+            # and the ssh control path so this reuses the tunnel's master.
+            host = os.environ.get("OLLAMA_SSH_HOST", "top")
+            ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+            argv = [ssh, "-o", "BatchMode=yes"]
+            ctl = os.environ.get("OLLAMA_SSH_CTL")
+            if ctl:
+                argv += ["-o", "ControlMaster=auto", "-o", "ControlPersist=30",
+                         "-o", "ControlPath=" + ctl]
+            argv += [host, "sudo", "-n", "systemctl", verb, self.UNIT]
+            return argv
         return ["sudo", "-A", "systemctl", verb, self.UNIT]
 
     @Slot()
