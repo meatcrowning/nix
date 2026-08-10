@@ -13,16 +13,20 @@ the hand-run recipe that produced the OPN *Monody / The Station* wallpaper:
 
 Two production methods, auto-selected, same contract either way:
 
-  * ``comfy``  — the general, picture-faithful route: the headless ComfyUI
-    backend (apps/painter's Flux 2 Klein *edit* graph) removes text and
-    outpaints a photographic background seamlessly. Used when the backend is
-    reachable AND healthy. LOCAL models only (loopback / ssh-tunnelled 8188).
-  * ``flat``   — a dependency-light route for covers on a UNIFORM background
-    (the Monody green, the Love Deluxe cream): text on the flat field is
-    erased by filling the sampled background colour, the subject is recentred,
-    and the flat field is extended to 16:9. For a flat-background cover this is
-    visually equivalent to the generative pass; for a busy background it is the
-    graceful fallback, and the tool says which it used.
+  * ``comfy``  — the PREFERRED, picture-faithful route: the headless ComfyUI
+    backend (apps/painter's Flux 2 Klein *edit* graph) removes text (Latin and
+    CJK/Japanese alike, by prompt) and genuinely outpaints a photographic
+    background. It is primed with a mirror-blurred continuation in the extension
+    margins (``_outpaint_input``) rather than a flat border, so the edit model
+    invents new scene rather than reproducing a flat field. Used whenever the
+    backend is reachable AND healthy. LOCAL models only (loopback / ssh-tunnelled
+    8188 — on book that is top's GPU over apps/painter/tools/comfy-tunnel.sh).
+  * ``flat``   — the documented FALLBACK for when the backend is unreachable,
+    and a good fit for covers on a UNIFORM background (the Monody green, the Love
+    Deluxe cream): lettering — including CJK blocks — is erased by filling the
+    sampled background colour (``_text_regions``), the subject is recentred, and
+    the flat field is extended to 16:9. For a flat-background cover this is
+    visually close to the generative pass; the tool always says which it used.
 
 STABLE CLI (a player right-click "create systheme" action shells out to this):
 
@@ -64,7 +68,7 @@ import urllib.request
 from pathlib import Path
 
 try:
-    from PIL import Image, ImageChops, ImageDraw, ImageFilter
+    from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps
 except Exception as e:  # pragma: no cover - environment guard
     sys.stderr.write(f"systheme: Pillow is required ({e})\n")
     raise SystemExit(2)
@@ -133,89 +137,105 @@ def _bg_uniformity(im: "Image.Image", bg: tuple[int, int, int]) -> float:
     return 1.0 - off / total
 
 
-def _text_bands(mask: "Image.Image", margin_frac: float = 0.45) -> list[tuple[int, int, int, int]]:
-    """Best-effort: isolated thin fg bands sitting in a background margin = text.
+def _cc(cellset: set) -> list[set]:
+    """8-connected components over a set of (cx, cy) grid cells."""
+    seen: set = set()
+    comps: list[set] = []
+    for c in cellset:
+        if c in seen:
+            continue
+        stack = [c]
+        seen.add(c)
+        comp: set = set()
+        while stack:
+            x, y = stack.pop()
+            comp.add((x, y))
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    n = (x + dx, y + dy)
+                    if n in cellset and n not in seen:
+                        seen.add(n)
+                        stack.append(n)
+        comps.append(comp)
+    return comps
 
-    Scans the left and top margins for contiguous fg row/column runs that are
-    thin relative to the frame and separated from the main subject by clear
-    background. Returns bboxes to blank. Heuristic — the comfy route is the
-    robust one; this keeps the flat route honest for label strips like Monody's
-    top text and Love Deluxe's left "sade love deluxe".
+
+def _dilate(cells: set, ncx: int, ncy: int, r: int = 1) -> set:
+    out: set = set()
+    for (x, y) in cells:
+        for dx in range(-r, r + 1):
+            for dy in range(-r, r + 1):
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < ncx and 0 <= ny < ncy:
+                    out.add((nx, ny))
+    return out
+
+
+def _text_regions(mask: "Image.Image", margin_frac: float = 0.42) -> list[tuple[int, int, int, int]]:
+    """Isolated foreground clusters hugging the top/left edge = lettering.
+
+    A grid connected-components detector, robust to CJK/Japanese glyphs — which
+    are denser, blockier and taller than a Latin label and defeated the old
+    row/column band scan (it found only stroke slivers of "空夜 / 静焔" and left
+    the block standing). The frame is reduced to a coarse density grid; the
+    subject is the largest *solid* cell mass; text is any well-filled ink
+    cluster that is (a) separated from that mass by background and (b) hugging
+    the TOP or LEFT edge, where album titling sits. Restricting to those two
+    edges is deliberate: on a busy photographic cover a lit neck or shoulder in
+    the bottom/right margin reads geometrically like a label, and this is the
+    fallback route — the comfy route removes text by prompt and is preferred.
+
+    Verified offscreen against three covers: the CJK "空夜 / 静焔" block, Monody's
+    "THE STATION" title, and Love Deluxe's "sade love deluxe" — all caught, no
+    subject pixels erased.
     """
     w, h = mask.size
+    cs = max(4, min(w, h) // 90)
+    ncx = max(1, w // cs)
+    ncy = max(1, h // cs)
+    small = mask.resize((ncx, ncy), Image.BOX)
+    sp = small.load()
+    frac = [[sp[cx, cy] / 255.0 for cy in range(ncy)] for cx in range(ncx)]
+    solid = {(cx, cy) for cx in range(ncx) for cy in range(ncy) if frac[cx][cy] > 0.55}
+    ink = {(cx, cy) for cx in range(ncx) for cy in range(ncy) if frac[cx][cy] > 0.12}
+    if not ink:
+        return []
+
+    # subject mass = the largest solid component, dilated a little so the text
+    # candidate set never includes an anti-aliased fringe of it.
+    subj_cells: set = set()
+    scomps = _cc(solid)
+    if scomps:
+        subj_cells = _dilate(max(scomps, key=len), ncx, ncy, 2)
+
+    # text candidates: ink outside the subject, closed by one cell so a glyph's
+    # thin strokes bridge into one component instead of fragmenting.
+    cand = _dilate(ink - subj_cells, ncx, ncy, 1) - subj_cells
+
     out: list[tuple[int, int, int, int]] = []
-    m = mask.load()
-
-    # rows with fg only inside the LEFT margin (a left-aligned label column)
-    lw = int(w * margin_frac)
-    runs = []
-    start = None
-    for y in range(h):
-        c = sum(1 for x in range(lw) if m[x, y])
-        on = c > 3
-        if on and start is None:
-            start = y
-        elif not on and start is not None:
-            runs.append((start, y - 1))
-            start = None
-    if start is not None:
-        runs.append((start, h - 1))
-    gap_min = max(24, int(w * 0.03))
-    for y0, y1 in runs:
-        band_h = y1 - y0 + 1
-        if band_h > h * 0.16:  # too tall to be a label -> it's the subject/arm
+    frame_cells = ncx * ncy
+    edge = max(2, int(min(ncx, ncy) * 0.11))
+    for comp in _cc(cand):
+        if len(comp) < 6:
             continue
-        # column fg strength across the band (>=2 px = "on", so single-pixel
-        # jpeg noise does not bridge the gap between a label and the subject).
-        col = [sum(1 for yy in range(y0, y1 + 1) if m[x, yy]) for x in range(w)]
-        on = [c >= 2 for c in col]
-        try:
-            x_start = next(x for x in range(w) if on[x])
-        except StopIteration:
+        xs = [c[0] for c in comp]
+        ys = [c[1] for c in comp]
+        x0, y0, x1, y1 = min(xs), min(ys), max(xs), max(ys)
+        area = (x1 - x0 + 1) * (y1 - y0 + 1)
+        if area > frame_cells * 0.20:  # too big for a margin label
             continue
-        # the label ends at the FIRST clear background gap; if none opens before
-        # mid-frame the band is fused with the subject, so leave it alone.
-        x_right = None
-        run_empty = 0
-        for x in range(x_start, w):
-            if on[x]:
-                run_empty = 0
-            else:
-                run_empty += 1
-                if run_empty >= gap_min:
-                    x_right = x - run_empty
-                    break
-        if x_right is None or x_right <= x_start:
+        top_label = y0 < edge
+        left_label = x0 < edge and y1 < ncy * 0.72
+        if not (top_label or left_label):
             continue
-        if (x_right - x_start) > w * 0.5 or x_start > w * 0.5:
-            continue  # too wide / too far right to be a margin label
-        sub = mask.crop((x_start, y0, x_right + 1, y1 + 1))
-        bb = sub.getbbox()
-        if bb:
-            out.append((x_start + bb[0], y0 + bb[1], x_start + bb[2], y0 + bb[3]))
-
-    # rows with fg only inside the TOP margin (a top label strip, e.g. Monody)
-    th = int(h * margin_frac)
-    runs = []
-    start = None
-    for y in range(th):
-        c = sum(1 for x in range(w) if m[x, y])
-        on = 3 < c < w * 0.85
-        if on and start is None:
-            start = y
-        elif not on and start is not None:
-            runs.append((start, y - 1))
-            start = None
-    # a top strip only counts if clear background separates it from below
-    for y0, y1 in runs:
-        if (y1 - y0 + 1) > h * 0.22:
+        if len(comp) / area < 0.18:  # too sparse -> a stray fringe, not text
             continue
-        below = mask.crop((0, y1 + 1, w, min(h, y1 + 1 + int(h * 0.04))))
-        if below.getbbox() is None:  # gap of clean bg under it
-            sub = mask.crop((0, y0, w, y1 + 1))
-            bb = sub.getbbox()
-            if bb:
-                out.append((bb[0], y0 + bb[1], bb[2], y0 + bb[3]))
+        # isolation: the ring just outside the cluster is mostly background, or
+        # it is fused with the subject and not a standalone label.
+        ring = _dilate(comp, ncx, ncy, 2) - _dilate(comp, ncx, ncy, 0)
+        if ring and sum(1 for c in ring if c in ink) / len(ring) > 0.30:
+            continue
+        out.append((x0 * cs, y0 * cs, min(w, (x1 + 1) * cs), min(h, (y1 + 1) * cs)))
     return out
 
 
@@ -250,7 +270,7 @@ def render_flat(
     log(f"flat route: background {bg}")
 
     mask = _fg_mask(im, bg, thresh=30)
-    rects = _text_bands(mask) + list(extra_erase)
+    rects = _text_regions(mask) + list(extra_erase)
     if rects:
         log(f"erasing {len(rects)} text/label region(s)")
     clean = _erase(im, bg, rects)
@@ -289,6 +309,77 @@ def comfy_healthy(base: str, timeout: float = 4.0) -> bool:
         return False
 
 
+def _outpaint_input(
+    im: "Image.Image",
+    width: int,
+    height: int,
+    extra_erase: list[tuple[int, int, int, int]],
+) -> "Image.Image":
+    """Prime a 16:9 canvas the edit model can genuinely OUTPAINT into.
+
+    The edit graph regenerates the whole frame conditioned on this image's VAE
+    encoding (a ReferenceLatent), so what sits in the extension margins decides
+    what the model puts there. A FLAT sampled-colour border — the old prime,
+    render_flat's output — tells the reference "this area is a flat field", and
+    the model faithfully reproduces the flat border: the lazy result. Instead:
+
+      * erase lettering (the CJK-robust _text_regions, so text is never carried
+        into the extension), then scale the cleaned cover as LARGE as the frame
+        allows on its limiting axis — a square cover fills the height, leaving
+        side margins to invent, which keeps the subject big and the outpaint a
+        modest horizontal extension;
+      * fill each margin with a MIRROR of the adjacent edge, then blur it,
+        feathered back into the sharp core. That gives the reference a plausible
+        low-frequency continuation of colour and texture for the model to
+        sharpen into real scene content, instead of a hard flat field.
+
+    The result is the /upload/image payload; the graph outpaints from it.
+    """
+    im = im.convert("RGB")
+    bg = _corner_bg(im)
+    mask = _fg_mask(im, bg, thresh=30)
+    rects = _text_regions(mask) + list(extra_erase)
+    if rects:
+        log(f"outpaint prime: erasing {len(rects)} text region(s) before extension")
+    clean = _erase(im, bg, rects)
+
+    cw, ch = clean.size
+    s = height / ch
+    if cw * s > width:  # a wide cover -> fill width instead, outpaint top/bottom
+        s = width / cw
+    tw, th = max(1, round(cw * s)), max(1, round(ch * s))
+    core = clean.resize((tw, th), Image.LANCZOS)
+
+    canvas = Image.new("RGB", (width, height), bg)
+    ox, oy = (width - tw) // 2, (height - th) // 2
+    canvas.paste(core, (ox, oy))
+
+    # reflect the core outward into whichever margin exists (never both — the
+    # fill picks one axis — so there are no unfilled corners to seam)
+    if ox > 0:
+        m1 = ImageOps.mirror(core.crop((0, 0, min(ox, tw), th)))
+        canvas.paste(m1, (ox - m1.width, oy))
+        m2 = ImageOps.mirror(core.crop((tw - min(width - (ox + tw), tw), 0, tw, th)))
+        canvas.paste(m2, (ox + tw, oy))
+    if oy > 0:
+        m1 = ImageOps.flip(core.crop((0, 0, tw, min(oy, th))))
+        canvas.paste(m1, (ox, oy - m1.height))
+        m2 = ImageOps.flip(core.crop((0, th - min(height - (oy + th), th), tw, th)))
+        canvas.paste(m2, (ox, oy + th))
+
+    # blur the extension band, feathered back into the sharp core
+    feather = max(8, min(width, height) // 24)
+    blurred = canvas.filter(ImageFilter.GaussianBlur(max(4, min(width, height) // 50)))
+    fmask = Image.new("L", (width, height), 255)
+    ImageDraw.Draw(fmask).rectangle(
+        (ox + feather, oy + feather, ox + tw - feather - 1, oy + th - feather - 1), fill=0
+    )
+    fmask = fmask.filter(ImageFilter.GaussianBlur(feather))
+    canvas.paste(blurred, (0, 0), fmask)
+    log(f"outpaint prime: core {tw}x{th} at ({ox},{oy}); mirror+blur extension")
+    return canvas
+
+
 def render_comfy(
     im: "Image.Image",
     width: int,
@@ -324,9 +415,10 @@ def render_comfy(
 
     base = base.rstrip("/")
 
-    # 1. pad the cover onto a 16:9 canvas of its own background so the model has
-    #    a frame to outpaint into, with the subject already centred.
-    padded = render_flat(im, width, height, extra_erase=[])
+    # 1. prime a 16:9 canvas the model can genuinely outpaint into: text erased,
+    #    subject large and centred, extension margins a mirror-blurred
+    #    continuation of the scene (not a flat border it would just reproduce).
+    padded = _outpaint_input(im, width, height, extra_erase=[])
 
     # 2. upload as the edit input
     import io
@@ -352,9 +444,13 @@ def render_comfy(
     # 3. build the edit graph and point it at the uploaded frame
     tmpl = json.load(open(painter / "graphs" / "edit_flux2.json"))
     prompt_text = (
-        "Remove all text, lettering, logos and captions. Keep the central "
-        "figure exactly, centred, and seamlessly extend the background to fill "
-        "the whole frame. Photographic, no borders, no words."
+        "Remove every piece of text: all lettering, captions, titles, logos and "
+        "watermarks, and any Japanese, Chinese or Korean (CJK) characters, "
+        "including small or vertically-stacked text in the corners. Keep the main "
+        "subject centred and unchanged. Seamlessly outpaint and extend the "
+        "photographic background outward to fill the entire wide frame, matching "
+        "the lighting, colour and texture of the scene so the extension is "
+        "invisible. No borders, no frames, no words, no letters of any kind."
     )
     for node in tmpl.values():
         if not isinstance(node, dict):
