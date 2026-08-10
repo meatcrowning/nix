@@ -77,6 +77,29 @@ Singleton {
     }
     function toggleLightMode() { setLightMode(!d.lightMode); }
 
+    // Hide/unhide a paper from BOTH surfaces that draw the tiles — the settings
+    // paper grid (SetPaperGrid) and the Meta+W picker (WallpaperPicker). ONE
+    // stored set, wallpaperHidden (source paths, = list-wallpapers.sh field 0 =
+    // the model's own path), so the two renderers can never diverge on what is
+    // hidden. Reassign the array whole: a JsonAdapter var key only fires its
+    // change signal on assignment, not on an in-place push. The reveal path is
+    // wallpaperShowHidden (the Appearance "show hidden papers" toggle), so this
+    // is not a one-way trap (docs/DESIGN.md §10.2).
+    function hideWallpaper(p) {
+        if (!p) return;
+        const s = (d.wallpaperHidden || []).slice();
+        if (s.indexOf(p) === -1) { s.push(p); d.wallpaperHidden = s; save(); }
+    }
+    function unhideWallpaper(p) {
+        if (!p) return;
+        const s = (d.wallpaperHidden || []).filter(x => x !== p);
+        d.wallpaperHidden = s;
+        save();
+    }
+    function isWallpaperHidden(p) {
+        return (d.wallpaperHidden || []).indexOf(p) !== -1;
+    }
+
     // Switch the desktop font, remembering the size PER FACE. Same shape as
     // the pureBlackBgDark round trip above: the outgoing family's size is
     // captured at the transition (single writer, so pre-existing state
@@ -328,6 +351,19 @@ Singleton {
             // current paper's entry from the palette derivation; switching
             // papers restores each one's own selection.
             property var    paletteDropped: ({})
+            // Papers hidden from the tile surfaces (SetPaperGrid + the Meta+W
+            // WallpaperPicker): an array of source paths (list-wallpapers.sh
+            // field 0, = each surface's model path). Both renderers drop these
+            // from their model unless wallpaperShowHidden is on. Written via
+            // SettingsStore.hideWallpaper/unhideWallpaper from either surface's
+            // right-click menu (PaperCtxMenu). One key, so grid and picker read
+            // the exact same set.
+            property var    wallpaperHidden: []
+            // Reveal the hidden papers in BOTH surfaces (dimmed, right-clickable
+            // to unhide), so hiding is never a one-way trap (docs/DESIGN.md
+            // §10.2). Drawn as the "show hidden papers" toggle on the Appearance
+            // page; off by default.
+            property bool   wallpaperShowHidden: false
             // RGB hardware (DRAM sticks + motherboard headers) follows the
             // accent on every theme change. Read by rgb-set.py itself, which
             // wal-set.sh step 6c fires detached — so turning this off leaves
@@ -565,6 +601,7 @@ Singleton {
         paletteVariant: "pastel", windowBorderWidth: 2,
         windowRounding: 0, trayTint: true, desktopIcons: true, shadowAlpha: 0.6, titleOrientation: "vertical", dimUnfocused: true, titlebarEdge: "right", compact: false, scrollbarStyle: "win31",
         paletteDropped: ({}),
+        wallpaperHidden: [], wallpaperShowHidden: false,
         rgbFollowTheme: true, reduceMotion: false, animSpeed: 1.0,
         wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",
         wallpaperSolid: false,

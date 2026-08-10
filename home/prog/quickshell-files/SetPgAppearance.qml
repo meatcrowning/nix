@@ -21,6 +21,17 @@ Column {
     SetSection {
         title: "paper + theme"
         SetPaperGrid { }
+        SetRow {
+            // Right-click any tile above (or in the Meta+W picker) to hide a
+            // paper from both surfaces; this brings the hidden ones back —
+            // dimmed and right-clickable to unhide — so hiding is never a
+            // one-way trap (docs/DESIGN.md §10.2).
+            label: "show hidden papers"
+            SetToggle {
+                checked: page.d.wallpaperShowHidden
+                onToggled: (v) => { page.d.wallpaperShowHidden = v; SettingsStore.save(); }
+            }
+        }
     }
 
     SetSection {

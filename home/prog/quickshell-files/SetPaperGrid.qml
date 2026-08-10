@@ -37,10 +37,43 @@ Item {
     readonly property int vpW: cellW * cols
 
     // ---- the model: same three parallel arrays as the picker -------------
-    property var images: []          // absolute source paths
-    property var thumbs: []          // cached thumbnail per image
-    property var palettes: []        // ["#hex", …] per image
+    // raw* are the full listing straight off list-wallpapers.sh; images/thumbs/
+    // palettes are the VISIBLE view of it, with hidden papers dropped unless
+    // "show hidden" is on (applyFilter). Keeping the raw arrays lets the visible
+    // view recompute the instant the hidden set or the toggle changes, without
+    // re-running the process.
+    property var rawImages: []
+    property var rawThumbs: []
+    property var rawPalettes: []
+    property var images: []          // absolute source paths (visible subset)
+    property var thumbs: []          // cached thumbnail per visible image
+    property var palettes: []        // ["#hex", …] per visible image
     property string currentPath: ""  // what ~/.cache/wal/current names
+
+    // Recompute the visible arrays from raw* + the hidden set + the show-hidden
+    // toggle. Only reassign `images` when its contents actually change — it is
+    // the Repeaters' model and a wholesale reassign rebuilds every tile (the
+    // GridView-reset lesson). thumbs/palettes stay aligned to it.
+    function applyFilter() {
+        const hidden = SettingsStore.d.wallpaperHidden || [];
+        const showH = SettingsStore.d.wallpaperShowHidden;
+        const imgs = [], ths = [], pals = [];
+        for (let i = 0; i < rawImages.length; i++) {
+            if (hidden.indexOf(rawImages[i]) !== -1 && !showH) continue;
+            imgs.push(rawImages[i]);
+            ths.push(rawThumbs[i]);
+            pals.push(rawPalettes[i]);
+        }
+        if (imgs.length !== images.length || imgs.some((v, i) => v !== images[i]))
+            images = imgs;
+        thumbs = ths;
+        palettes = pals;
+    }
+    Connections {
+        target: SettingsStore.d
+        function onWallpaperHiddenChanged() { root.applyFilter(); }
+        function onWallpaperShowHiddenChanged() { root.applyFilter(); }
+    }
 
     property int pageIdx: 0
     readonly property int perPage: cols * rows
@@ -103,15 +136,13 @@ Item {
                     const raw = (f.length > 2 && f[2]) ? f[2] : "";
                     nextPalettes.push(raw ? raw.split(",").filter(s => s.length > 0).map(h => "#" + h) : []);
                 }
-                // Only reassign `images` when the set changed — it is the
-                // Repeaters' model, and a wholesale reassign rebuilds every
-                // tile (the picker's GridView-reset lesson). thumbs/palettes
-                // refresh unconditionally so late-generated ones swap in live.
-                if (nextImages.length !== root.images.length
-                        || nextImages.some((v, i) => v !== root.images[i]))
-                    root.images = nextImages;
-                root.thumbs = nextThumbs;
-                root.palettes = nextPalettes;
+                // Feed the raw arrays; applyFilter derives the visible subset
+                // (dropping hidden papers unless "show hidden" is on) and does
+                // the change-guarded reassign of `images` there.
+                root.rawImages = nextImages;
+                root.rawThumbs = nextThumbs;
+                root.rawPalettes = nextPalettes;
+                root.applyFilter();
                 root._gotList = true;
                 root.tryLand();
                 root.tryReveal();
@@ -321,6 +352,11 @@ Item {
                                 readonly property string path: root.images[gIdx] || ""
                                 readonly property string thumb: (root.thumbs && root.thumbs[gIdx]) || path
                                 readonly property bool isCurrent: path !== "" && path === root.currentPath
+                                // Only ever true while "show hidden" reveals it —
+                                // otherwise a hidden paper is not in the model at
+                                // all. Drawn dimmed (§10.1) and right-clickable to
+                                // unhide.
+                                readonly property bool hidden: path !== "" && (SettingsStore.d.wallpaperHidden || []).indexOf(path) !== -1
                                 width: root.cellW
                                 height: root.cellH
 
@@ -328,6 +364,7 @@ Item {
                                     id: tile
                                     anchors.fill: parent
                                     anchors.margins: 4   // gutter between tiles
+                                    opacity: cell.hidden ? 0.4 : 1.0
                                     color: Theme.bgAlt
                                     radius: Theme.windowRounding
                                     border.width: cell.isCurrent ? Theme.ctrlBorder + 1 : Theme.ctrlBorder
@@ -392,11 +429,18 @@ Item {
 
                                     MouseArea {
                                         anchors.fill: parent
+                                        acceptedButtons: Qt.LeftButton | Qt.RightButton
                                         cursorShape: Qt.PointingHandCursor
-                                        // Click = pick it; hover deliberately
+                                        // Left click = pick it; hover deliberately
                                         // never selects (the picker's lesson —
-                                        // mousing past must not re-theme).
-                                        onClicked: root.applyPath(cell.path)
+                                        // mousing past must not re-theme). Right
+                                        // click = the hide/unhide menu (§7.1).
+                                        onClicked: (mouse) => {
+                                            if (mouse.button === Qt.RightButton)
+                                                paperMenu.openFor(tile, cell.path, cell.hidden, mouse.x, mouse.y);
+                                            else
+                                                root.applyPath(cell.path);
+                                        }
                                     }
                                 }
                             }
@@ -436,5 +480,13 @@ Item {
         color: "transparent"
         border.width: 2
         border.color: Theme.accent
+    }
+
+    // The shared right-click hide/unhide menu (§7.2, written once). Zero-size;
+    // its overlay is parented to the window's contentItem on open.
+    PaperCtxMenu {
+        id: paperMenu
+        onHide: (p) => SettingsStore.hideWallpaper(p)
+        onUnhide: (p) => SettingsStore.unhideWallpaper(p)
     }
 }
