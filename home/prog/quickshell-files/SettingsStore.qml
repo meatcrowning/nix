@@ -412,6 +412,10 @@ Singleton {
             // because the dock GRID reads it too — the drawer's rows come off
             // the forecast tile (see DockGrid).
             property bool   mediaQueueOpen: false
+            // Book-only: whether the cpu popup's "top" disclosure is rolled out
+            // (TopProcDrawer). Machine-local like every settings.json key, so it
+            // never crosses to top, where the drawer does not exist.
+            property bool   topStatsOpen: false
             // Draw the FIXED-DUTY fans in the fan card anyway. Off by default:
             // this machine's pump sits at 255/255 for ever, is not adjustable in
             // the BIOS and is inaudible, so [his] "i dont need to see it at
@@ -607,7 +611,7 @@ Singleton {
         wallpaperSolid: false,
         viewMode: "classic", dockWidthFrac: 0.15,
         barWidth: 48, barEdge: "right", barGap: 8, barCell: 40, taskbarClickMinimizes: true,
-        procSort: "cpu", mediaLocalLoop: 0, mediaQueueOpen: false,
+        procSort: "cpu", mediaLocalLoop: 0, mediaQueueOpen: false, topStatsOpen: false,
         fanShowFixed: false,
         fanStepMs: 300, defaultWidgets: ["clock", "weather", "disk", "media", "cpu", "gpu"],
         monPollSec: 2, cpuWarn: 75, cpuCrit: 90, tempWarn: 65, tempCrit: 80, diskWarn: 75,
