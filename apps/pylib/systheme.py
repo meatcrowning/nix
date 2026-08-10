@@ -398,20 +398,19 @@ def render_comfy(
     is unhealthy the caller falls back to render_flat, which is why this raises
     rather than degrading silently.
     """
-    import importlib.util
+    import io
     import time
     import uuid
 
+    # painter owns the model registry and the graph builder; reuse them so this
+    # stays a caller of the SAME pipeline painter's "edit" mode drives, not a
+    # second hand-rolled copy of it. graph.py imports registry/pngmeta relative
+    # to painter/, so painter/ must be importable.
     painter = Path(__file__).resolve().parent.parent / "painter"
-    spec = importlib.util.spec_from_file_location("painter_graph", painter / "graph.py")
-    if spec is None or spec.loader is None:  # pragma: no cover
-        raise RuntimeError("cannot locate painter/graph.py")
-    # graph.py imports registry/pngmeta relative to painter/ — run from there
-    sys.path.insert(0, str(painter))
-    try:
-        import registry  # type: ignore  # noqa: F401
-    finally:
-        pass
+    if str(painter) not in sys.path:
+        sys.path.insert(0, str(painter))
+    import registry as R  # type: ignore
+    import graph as G  # type: ignore
 
     base = base.rstrip("/")
 
@@ -421,8 +420,6 @@ def render_comfy(
     padded = _outpaint_input(im, width, height, extra_erase=[])
 
     # 2. upload as the edit input
-    import io
-
     buf = io.BytesIO()
     padded.save(buf, format="PNG")
     data = buf.getvalue()
@@ -441,8 +438,25 @@ def render_comfy(
         up = json.load(r)
     fname = up["name"]
 
-    # 3. build the edit graph and point it at the uploaded frame
-    tmpl = json.load(open(painter / "graphs" / "edit_flux2.json"))
+    # 3. build the Flux 2 Klein EDIT graph through painter's registry. The bare
+    #    graphs/edit_flux2.json is a TEMPLATE: its unet/clip/vae loaders are
+    #    empty and its prompt node is untouched, so submitting it as-is fails on
+    #    the backend (no model, no prompt). Registry.build() fingerprints the
+    #    installed models to fill the loaders, pairs the encoder + VAE, injects
+    #    the prompt into encode_pos, points load_image at the upload, and
+    #    validates the whole thing against the live object_info — the same path
+    #    the painter app uses for its "edit" mode.
+    reg = R.Registry()
+    entry = reg.mode_model("edit")
+    if entry is None:
+        raise RuntimeError(
+            "no Flux 2 edit model available to ComfyUI "
+            "(registry root %s) — cannot outpaint" % R.MODEL_ROOT
+        )
+    try:
+        object_info = G.fetch_object_info(base)
+    except Exception:  # validate against nothing rather than refuse to run
+        object_info = None
     prompt_text = (
         "Remove every piece of text: all lettering, captions, titles, logos and "
         "watermarks, and any Japanese, Chinese or Korean (CJK) characters, "
@@ -452,18 +466,20 @@ def render_comfy(
         "the lighting, colour and texture of the scene so the extension is "
         "invisible. No borders, no frames, no words, no letters of any kind."
     )
-    for node in tmpl.values():
-        if not isinstance(node, dict):
-            continue
-        meta = node.get("_meta", {})
-        role = meta.get("painter_role")
-        ins = node.get("inputs", {})
-        if role == "image" or node.get("class_type") == "LoadImage":
-            ins["image"] = fname
-        if role in ("positive", "prompt") and "text" in ins:
-            ins["text"] = prompt_text
-        if node.get("class_type") == "RandomNoise" and "noise_seed" in ins:
-            ins["noise_seed"] = int.from_bytes(os.urandom(4), "big")
+    built = reg.build(
+        entry,
+        {
+            "edit": True,
+            "positive": prompt_text,
+            "input_image": fname,
+            "input_images": [fname],
+            "seed": int.from_bytes(os.urandom(6), "big"),
+            "filename_prefix": "systheme-edit",
+        },
+        object_info=object_info,
+    )
+    tmpl = built["prompt"]
+    log(f"comfy edit graph built on {entry.name}")
 
     # 4. submit and wait
     cid = uuid.uuid4().hex
