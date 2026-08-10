@@ -3,8 +3,10 @@
 The smallest of the vendored apps, and deliberately so. Two things and nothing
 more: a **model selector** filled from the local ollama daemon's `/api/tags`,
 and a **prompt box** that sends one chat turn to `/api/chat` and shows the reply
-as it streams. No history persistence, no settings, no system prompt — his
-scope was *"right now i think thats all i need"*.
+as it streams. No conversation-history persistence and no system prompt — his
+scope was *"right now i think thats all i need"*. The one thing it does remember
+is the **model selector**: the model last used and an agent-suggested ranking
+(see *The model selector* below).
 
 ## Shape
 
@@ -36,8 +38,9 @@ scope was *"right now i think thats all i need"*.
   **`qml/MarkdownText.qml`** (`Text.MarkdownText`, pixel idiom, themed links) —
   the replies come back in Markdown; user prompts and error lines stay verbatim
   on `PixelText` (pinned `PlainText`, the shared guard), so only trusted-shape
-  strings are ever interpreted. It follows the newest turn to the bottom only
-  while a stream is live — idle, the scroll stays where he put it. A model's
+  strings are ever interpreted. It auto-follows the newest text to the bottom
+  only while he is already at the bottom (see *The model selector* §streaming) —
+  scroll up mid-stream and it stops yanking. A model's
   reasoning is a **collapsible disclosure, folded by default** (§9.1
   subordinated), whose heading reports progress: while the reasoning streams it
   reads `thinking` (one brightness step up) with a **live token count** and an
@@ -47,7 +50,8 @@ scope was *"right now i think thats all i need"*.
   reduceMotion). The token count PERSISTS in the heading once counted (the
   ellipsis is the only part that ends with the thinking), so a folded block
   still reports its size after the answer starts — the heading is all that shows
-  when it is collapsed. No history persists across launches.
+  when it is collapsed. No conversation history persists across launches (the
+  selected model does — see *The model selector*).
   - **The sources disclosure** is the same subordinated, folded-by-default
     block for a turn's web searches: `searching the web…` (one step brighter,
     animated ellipsis) while a search is live, settling to `web · N sources`
@@ -56,6 +60,33 @@ scope was *"right now i think thats all i need"*.
     accumulate into it.
 - **`qml/theme/Theme.qml`, `qml/PixelText.qml`** — verbatim copies of reader's
   (the theme-as-context-property idiom, see `apps/AGENTS.md`).
+
+## The model selector
+
+Two persisted inputs shape the dropdown, both optional and no-rebuild — drop the
+file in and relaunch, same as `tavily.key`, and both live in `~/.config/oracle/`:
+
+- **`last-model`** — one line, the model to pre-select. `Ollama.rememberModel`
+  writes it on every pick and every send, so the model he last used is the
+  default the next time he opens the window. On launch the selector defaults to
+  `Ollama.lastModel` when the daemon still lists it, else the daemon's first
+  model; a selection that is still valid is never overridden. He no longer
+  reselects his model every launch.
+- **`suggested.json`** — a JSON array of model name strings that AGENTS write to
+  recommend a model (e.g. after benchmarking tool-calling support). Those that
+  the daemon actually has are ranked **above** the rest of the dropdown, in the
+  file's order; everything else follows alphabetically. `Ollama._order` does the
+  ranking and publishes `suggestedCount` (the size of the leading group) so the
+  dropdown rules a 1px `Theme.border` line off the suggested models from the
+  rest (docs/DESIGN.md §7.2). Malformed or absent → no ranking, plain alpha
+  order. Re-read on every `/api/tags` poll, so a mid-session write lands with no
+  relaunch.
+
+**Streaming no longer hijacks his scroll.** The reply view auto-follows the
+newest text to the bottom only while he is already AT the bottom
+(`replyFlick.followBottom`); the moment he scrolls up mid-stream it stops forcing
+the position, and it re-arms when he scrolls back down to the bottom
+(docs/DESIGN.md §6.1 — never yank his position).
 
 ## Talking to ollama
 

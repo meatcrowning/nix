@@ -77,6 +77,18 @@ WEB_SEARCH_TOOL = {
 #: model answer with what it has — a guard against a model that keeps searching.
 MAX_TOOL_ROUNDS = 4
 
+#: oracle's own config dir (shared with tavily.key). Two optional, no-rebuild
+#: files drive the model selector — drop them in and relaunch, same as the key:
+#:   `last-model`     one line, the model to pre-select next launch. oracle
+#:                    writes it on every pick/send, so the last model he used is
+#:                    the default the next time he opens the window.
+#:   `suggested.json` a JSON array of model names AGENTS write to recommend a
+#:                    model. Those present in /api/tags are ranked ABOVE the rest
+#:                    of the dropdown, in the file's order (see apps/oracle/AGENTS.md).
+CONFIG_DIR = Path.home() / ".config" / "oracle"
+LAST_MODEL_PATH = CONFIG_DIR / "last-model"
+SUGGESTED_PATH = CONFIG_DIR / "suggested.json"
+
 
 def tavily_key():
     """The Tavily API key, never hardcoded (see apps/oracle/AGENTS.md).
@@ -203,6 +215,7 @@ class Ollama(QObject):
     time: a new `send` aborts any reply still streaming."""
 
     modelsChanged = Signal()
+    lastModelChanged = Signal()
     busyChanged = Signal()
     modelsError = Signal(str)
 
@@ -225,6 +238,9 @@ class Ollama(QObject):
         super().__init__(parent)
         self._nam = QNetworkAccessManager(self)
         self._models = []
+        self._last_model = self._load_last_model()  # pre-select this next launch
+        self._suggested = self._load_suggested()    # agent-recommended, ranked first
+        self._suggested_count = 0                   # how many of _models are suggested
         self._busy = False
         self._reply = None       # the in-flight chat QNetworkReply, if any
         self._buf = b""          # partial NDJSON line carried between reads
@@ -243,6 +259,16 @@ class Ollama(QObject):
     def models(self):
         return self._models
 
+    @Property(str, notify=lastModelChanged)
+    def lastModel(self):
+        return self._last_model
+
+    @Property(int, notify=modelsChanged)
+    def suggestedCount(self):
+        """How many leading entries of `models` are agent-suggested — so the
+        dropdown can rule off the suggested group from the rest (§7.2)."""
+        return self._suggested_count
+
     @Property(bool, notify=busyChanged)
     def busy(self):
         return self._busy
@@ -251,6 +277,59 @@ class Ollama(QObject):
         if v != self._busy:
             self._busy = v
             self.busyChanged.emit()
+
+    # ---- the last-picked model, and the agent-suggested ranking ----
+
+    @staticmethod
+    def _load_last_model():
+        try:
+            return LAST_MODEL_PATH.read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+
+    @staticmethod
+    def _load_suggested():
+        """The agent-suggested model names, de-duped, order preserved. Missing
+        or malformed file (or anything but a JSON list of strings) → none."""
+        try:
+            data = json.loads(SUGGESTED_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        if not isinstance(data, list):
+            return []
+        out, seen = [], set()
+        for x in data:
+            if isinstance(x, str) and x and x not in seen:
+                seen.add(x)
+                out.append(x)
+        return out
+
+    def _order(self, names):
+        """Agent-suggested models the daemon actually has come first, in the
+        order they were suggested; everything else follows alphabetically. Sets
+        `_suggested_count` as a side effect (the size of that leading group)."""
+        present = set(names)
+        top = [m for m in self._suggested if m in present]
+        seen = set(top)
+        rest = sorted((n for n in names if n not in seen), key=str.lower)
+        self._suggested_count = len(top)
+        return top + rest
+
+    @Slot(str)
+    def rememberModel(self, name):
+        """Persist `name` as the model to pre-select next launch (a pick or a
+        send). No-op when unchanged; a write failure is swallowed — the setting
+        is a convenience, not load-bearing."""
+        name = (name or "").strip()
+        if not name or name == self._last_model:
+            return
+        self._last_model = name
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            LAST_MODEL_PATH.write_text(name + "\n", encoding="utf-8")
+        except OSError:
+            pass
+        self.lastModelChanged.emit()
 
     @Slot()
     def refreshModels(self):
@@ -265,8 +344,12 @@ class Ollama(QObject):
                 return
             data = bytes(reply.readAll().data())
             obj = json.loads(data or b"{}")
-            names = sorted((m.get("name", "") for m in obj.get("models", [])
-                            if m.get("name")), key=str.lower)
+            # Re-read the suggestions here (not just at startup) so an agent that
+            # writes suggested.json while oracle runs is honoured on the next
+            # daemon poll, with no relaunch.
+            self._suggested = self._load_suggested()
+            names = self._order([m.get("name", "") for m in obj.get("models", [])
+                                 if m.get("name")])
             if names != self._models:
                 self._models = names
                 self.modelsChanged.emit()
