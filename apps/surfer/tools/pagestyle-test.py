@@ -22,22 +22,26 @@ courier, points it at a local http server, and asserts:
      already-painted page with no reload;
   4. STRIP: turning dark mode off and refreshing strips the dark filter
      (filter back to 'none');
-  5. FONT INHERIT: unstyled page text takes the desktop face (the PLAIN
-     family, no @font-face alias — see below) at the desktop size, its ink
-     matching the raw 15px face and CRISP (0 antialiased grey pixels), a
-     page's own font styling beats the layer, and a subframe gets the
-     fonts-only body — the face, never the dark filter (no double-invert);
+  5. FONT INHERIT: unstyled page text takes the desktop face — the pick's
+     size-adjusted web TWIN, a real installed family (see below) — at the
+     desktop's apparent size: the layer divides by the twin's 1.14x factor,
+     so its ink matches the raw 15px face, and CRISP (0 antialiased grey
+     pixels); a page's own font styling beats the layer, and a subframe gets
+     the fonts-only body — the face, never the dark filter (no double-invert);
   6. FORCE: the system-font force (GLOBAL by default, per-site exceptions)
      imposes the family over the page's own styling while its font-size
      survives (family only), the forced text renders at the site's own size
-     (ink = the raw face at that size) and CRISP (0 grey), and icon-font
-     elements are carved out.
+     with the proportional x-height (twin@N ink = the raw face at N x 1.14)
+     and CRISP (0 grey), and icon-font elements are carved out.
 
-The pick is imposed by its PLAIN family name, never a `src:local()`
+The pick is imposed by a REAL installed face — its size-adjusted web twin
+" (web)", outlines/advances/metrics pre-scaled 1.14x
+(home/pkgs/desktop/font-files/scale-vga.py) — never a `src:local()`
 @font-face alias: Chromium grayscale-antialiases any @font-face-resolved
 face and ignores the fontconfig `antialias=false` pin, which softened every
-web glyph (970147b's size-adjust alias). That alias was dropped 2026-08-09
-(310cdc3); the crispness checks below are the regression guard.
+web glyph (970147b's size-adjust alias, dropped 2026-08-09 in 310cdc3). The
+crispness checks below are the regression guard for that; the ink checks
+guard the parity the twin restores.
 
 Deliberately only the page-style courier is installed here — cosmetic
 ad-blocking has its own harness (cosmetic-test.py) and must not interfere.
@@ -104,9 +108,10 @@ setTimeout(function(){
       var c = d.defaultView.getComputedStyle(e);
       return c.fontFamily + '|' + c.fontSize; } catch(e){ return 'ERR'; } }
   // ink width of 'x' at (family, size) - the pixel-level check. Inherited
-  // text renders at the desktop size (ink = the raw 15px face); forced site
-  // text renders at the SITE's size (ink = the raw face at that size) - the
-  // plain family carries no size-adjust, so neither is scaled.
+  // text renders at the desktop's APPARENT size (the web twin's ink = the
+  // raw 15px face); forced site text renders at the SITE's size with the
+  // proportional x-height (twin@N ink = the raw face at N x 1.14) - the
+  // twin is a real face, no size-adjust, so neither is scaled by CSS.
   function ink(fam, size){
     var c = document.createElement('canvas'); c.width=200; c.height=80;
     var g = c.getContext('2d');
@@ -301,15 +306,16 @@ def main():
         # loses to any unlayered rule); the subframe inherits the face too but
         # never the dark filter.
         #
-        # The face is the PLAIN pick, by its real name - NO @font-face alias
-        # (dropped 310cdc3): the alias forced grayscale-AA and blurred every
-        # web glyph. Inherited text renders at the raw desktop size (ink = the
-        # raw 15px face) and pixel-crisp (0 grey). A SITE-styled run keeps its
-        # own numbers and its own face.
-        check("unstyled text inherits the plain desktop family (no @font-face alias)",
-              "More Perfect DOS VGA" in (out.get("u") or "")
-              and "(web)" not in (out.get("u") or ""))
-        check("inherited text renders the desktop size (ink = raw 15px)",
+        # The face is the pick's web TWIN (a real installed family) - NO
+        # @font-face alias (dropped 310cdc3): the alias forced grayscale-AA
+        # and blurred every web glyph. Inherited text renders at the desktop's
+        # apparent size (twin@13.158px ink = the raw 15px face) and
+        # pixel-crisp (0 grey). A SITE-styled run keeps its own numbers and
+        # its own face.
+        check("unstyled text inherits the pick's web twin (real family, no @font-face)",
+              "(web)" in (out.get("u") or "")
+              and "More Perfect DOS VGA" in (out.get("u") or ""))
+        check("inherited text renders the desktop's apparent size (twin ink = raw 15px)",
               abs((out.get("uInk") or 0) - (out.get("raw15Ink") or 0)) <= 1)
         check("inherited text is pixel-crisp (0 antialiased grey pixels)",
               (out.get("uGrey") if out.get("uGrey") is not None else 999) == 0)
@@ -385,7 +391,7 @@ def main():
             "for(var i=0;i<d.length;i+=4){var a=d[i+3];if(a>0&&a<255)n++;}return n;}"
             "var f=cs('s').split('|');var sz=parseFloat(f[1]);"
             "return {s:cs('s'),ic:cs('ic'),"
-            "sInk:ink(f[0],sz),raw20Ink:ink('\"More Perfect DOS VGA\"',20),"
+            "sInk:ink(f[0],sz),raw22_8Ink:ink('\"More Perfect DOS VGA\"',22.8),"
             "sGrey:grey(f[0],sz)};})());",
             lambda r: None)
         QTimer.singleShot(400, phase4b)
@@ -395,26 +401,27 @@ def main():
         check("the force is GLOBAL by default (an un-excepted host is on)",
               dm.isSystemFontSite("http://somewhere-never-toggled.example/"))
         # zoom compensation: the inherit layer divides its size by the shared
-        # page zoom (only - no x-height adjust any more), so inherited text
+        # page zoom AND by the web twin's 1.14x factor, so inherited text
         # holds the desktop's DEVICE pixel size. 0.826446... = 1/1.21 (two
-        # Ctrl+- steps); the desktop 15px / 0.826446 = 18.15 CSS px, which
-        # renders as 15 device px. At zoom 1 the size is the raw 15px.
+        # Ctrl+- steps); at zoom 1 the size is 15/1.14 = 13.1579 CSS px, and
+        # at 0.826 zoom 13.1579/0.826446 = 15.9211 CSS px — which in the
+        # 1.14x face renders the desktop's 15 device px.
         class FakeZoom:
             level = 1.0 / 1.21
         dmz = surfer.DarkMode(prefs, dm, zoom=FakeZoom())
         check("inherit layer zoom-compensates (15 device px at 0.826 zoom)",
-              "font-size:18.15px" in dmz._inherit_css())
-        check("inherit layer holds the raw desktop size at zoom 1 (15px, no adjust)",
-              "font-size:15px" in dm._inherit_css())
-        check("no @font-face alias in the page or subframe body (crisp plain family)",
+              "font-size:15.9211px" in dmz._inherit_css())
+        check("inherit layer divides by the twin's factor at zoom 1 (13.1579px)",
+              "font-size:13.1579px" in dm._inherit_css())
+        check("no @font-face alias in the page or subframe body (crisp real family)",
               "@font-face" not in dm.css(base)
               and "@font-face" not in dm.fontsCss(base))
-        check("force imposes the plain family but keeps the page's size",
-              "(web)" not in (out.get("s") or "")
+        check("force imposes the web twin but keeps the page's size",
+              "(web)" in (out.get("s") or "")
               and "More Perfect DOS VGA" in (out.get("s") or "")
               and "20px" in (out.get("s") or ""))
-        check("forced site text renders at the site's own size (ink = raw 20px)",
-              abs((out.get("sInk") or 0) - (out.get("raw20Ink") or 0)) <= 1)
+        check("forced site text reads the proportional x-height (twin@20 ink = raw 22.8px)",
+              abs((out.get("sInk") or 0) - (out.get("raw22_8Ink") or 0)) <= 1)
         check("forced site text is pixel-crisp (0 antialiased grey pixels)",
               (out.get("sGrey") if out.get("sGrey") is not None else 999) == 0)
         check("icon-font elements are carved out of the force",
