@@ -216,6 +216,30 @@ FILE_OP = {"list_dir": "list", "read_file": "read", "write_file": "write",
            "show_tree": "tree"}
 FILE_TOOL_NAMES = set(FILE_OP)
 
+#: The SESSION-READ tools (list_sessions / read_session), offered beside the
+#: file and web tools so the model can reach past conversations he has had with
+#: it — not just this one. Read-only from the model's side: no save/delete
+#: tool is offered, so a model call can never touch what saveCurrent() writes.
+#: Backed by the same tools/sessions-store.py the session picker uses (list/load
+#: ops), which already validates the id as a bare filename — no new jail needed.
+SESSION_TOOLS = [
+    {"type": "function", "function": {
+        "name": "list_sessions",
+        "description": ("List his previous conversation sessions with you (not "
+                        "this one): id, title, when each was last updated, and "
+                        "how many turns it has. Use read_session with an id from "
+                        "this list to read one."),
+        "parameters": {"type": "object", "properties": {}, "required": []}}},
+    {"type": "function", "function": {
+        "name": "read_session",
+        "description": ("Read the full transcript of one previous conversation "
+                        "session by id (see list_sessions)."),
+        "parameters": {"type": "object", "properties": {
+            "id": {"type": "string", "description": "Session id, from list_sessions."}},
+            "required": ["id"]}}},
+]
+SESSION_TOOL_NAMES = {"list_sessions", "read_session"}
+
 #: How many tool rounds one turn may take before we stop looping and let the
 #: model answer with what it has — a guard against a model that keeps searching.
 MAX_TOOL_ROUNDS = 4
@@ -543,19 +567,45 @@ class Ollama(QObject):
 
     # ---- one streamed chat turn ----
 
-    @Slot(str, str)
-    def send(self, model, prompt):
+    @Slot(str, str, str)
+    def send(self, model, prompt, history_json):
+        """`history_json` is the CURRENT chat's prior turns (QML's chatLog,
+        user+assistant, before this one), so the model sees the whole
+        conversation so far rather than just the latest prompt — the tool-call
+        loop below still only accumulates within THIS turn on top of it."""
         if not model or not prompt.strip():
             return
         self.cancel()          # one turn at a time
         self._model = model
-        self._messages = [{"role": "system", "content": self._system_prompt()},
-                          {"role": "user", "content": prompt}]
+        self._messages = ([{"role": "system", "content": self._system_prompt()}]
+                          + self._parse_history(history_json)
+                          + [{"role": "user", "content": prompt}])
         self._think_tokens = 0
         self._rounds = 0
         self._set_busy(True)
         self.replyStarted.emit()
         self._post_chat()
+
+    @staticmethod
+    def _parse_history(history_json):
+        """Validate the prior-turns array QML sends: only user/assistant roles
+        with non-empty string content survive (QML already drops error rows and
+        empty streams before building it; this is the defensive re-check on the
+        Python side of a QML->Python string boundary)."""
+        try:
+            arr = json.loads(history_json or "[]")
+        except ValueError:
+            return []
+        if not isinstance(arr, list):
+            return []
+        out = []
+        for t in arr:
+            if not isinstance(t, dict):
+                continue
+            role, content = t.get("role"), t.get("content")
+            if role in ("user", "assistant") and isinstance(content, str) and content.strip():
+                out.append({"role": role, "content": content})
+        return out
 
     @staticmethod
     def _system_prompt():
@@ -607,7 +657,7 @@ class Ollama(QObject):
         # reject a request carrying tools — the tradeoff of always-on tools,
         # spelled out in apps/oracle/AGENTS.md; point oracle at a tool-capable
         # model.
-        payload["tools"] = list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL]
+        payload["tools"] = list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL] + list(SESSION_TOOLS)
         body = json.dumps(payload).encode("utf-8")
         req = QNetworkRequest(QUrl(OLLAMA + "/api/chat"))
         req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
@@ -720,6 +770,8 @@ class Ollama(QObject):
                 self._time_now(str(args.get("timezone", "")), i, remaining, calls)
             elif name in FILE_TOOL_NAMES:
                 self._run_fs_tool(name, args, i, remaining, calls)
+            elif name in SESSION_TOOL_NAMES:
+                self._run_session_tool(name, args, i, remaining, calls)
             else:
                 self._tool_results[i] = {
                     "role": "tool", "tool_name": name,
@@ -941,6 +993,79 @@ class Ollama(QObject):
             return "tree of %s · %d entries" % (result.get("path", "."),
                                                 result.get("count", 0))
         return name + " ok"
+
+    # ---- the session-read tools (past conversations, not the file jail) ----
+
+    @staticmethod
+    def _sessions_argv():
+        """The command that runs one session-store op through
+        tools/sessions-store.py, identical branch to Sessions._store_argv
+        (duplicated rather than shared: Ollama and Sessions are independent
+        QObjects with no reference to each other) — local on `top`, over the
+        tunnel's ssh master from `book`."""
+        if ON_BOOK:
+            host = os.environ.get("OLLAMA_SSH_HOST", "top")
+            ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+            argv = [ssh, "-o", "BatchMode=yes"]
+            ctl = os.environ.get("OLLAMA_SSH_CTL")
+            if ctl:
+                argv += ["-o", "ControlMaster=auto", "-o", "ControlPersist=30",
+                         "-o", "ControlPath=" + ctl]
+            argv += [host, "python3", shlex.quote(SESSIONS_SCRIPT),
+                     shlex.quote(SESSIONS_ROOT)]
+            return argv
+        return [sys.executable, SESSIONS_SCRIPT, SESSIONS_ROOT]
+
+    def _run_session_tool(self, name, args, idx, remaining, calls):
+        """list_sessions / read_session: the model reaching past THIS chat into
+        his other oracle conversations, through the same store the session
+        picker drives. Read-only from here — only `list`/`load` ops are ever
+        sent, so a model call can never save or delete a session."""
+        a = args if isinstance(args, dict) else {}
+        if name == "list_sessions":
+            req = {"op": "list"}
+            heading = "listing sessions"
+        else:
+            sid = str(a.get("id", ""))
+            req = {"op": "load", "id": sid}
+            heading = "reading session " + sid
+        self.fileToolStarted.emit(heading)
+        proc = QProcess(self)
+        self._procs.append(proc)
+
+        def finished(*_):
+            if proc not in self._procs:
+                return
+            self._procs.remove(proc)
+            try:
+                out = bytes(proc.readAllStandardOutput())
+                err = bytes(proc.readAllStandardError())
+                rc = proc.exitCode()
+            except RuntimeError:
+                return
+            proc.deleteLater()
+            result = self._fs_result(out, err, rc)
+            self._tool_results[idx] = {"role": "tool", "tool_name": name,
+                                       "content": json.dumps(result)}
+            self.fileToolDone.emit(self._session_outcome(name, a, result),
+                                   "error" not in result)
+            self._tool_done(remaining, calls)
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(lambda *_: None)  # surfaced through finished
+        argv = self._sessions_argv()
+        proc.start(argv[0], argv[1:])
+        proc.write(json.dumps(req).encode("utf-8"))
+        proc.closeWriteChannel()
+
+    @staticmethod
+    def _session_outcome(name, args, result):
+        if "error" in result:
+            return (name + ": " + str(result["error"]))[:200]
+        if name == "list_sessions":
+            n = len(result.get("sessions", []))
+            return "listed %d session%s" % (n, "" if n == 1 else "s")
+        return "read session " + str(result.get("id", args.get("id", "")))
 
 
 class Backend(QObject):

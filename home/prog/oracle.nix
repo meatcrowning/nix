@@ -71,7 +71,7 @@ in
   home.file.".local/share/applications/oracle.desktop".text = ''
     [Desktop Entry]
     Type=Application
-    Name=oracle
+    Name=chatter
     GenericName=Ollama Chat
     Comment=Chat with the local ollama daemon
     Exec=${oracle}/bin/oracle
