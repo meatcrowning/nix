@@ -22,6 +22,13 @@ Window {
 
     property string model: ""
     property string status: ""
+    // The current conversation SESSION: its store id (empty until the first
+    // turn is saved — oracle mints a stable one client-side then) and its title
+    // (empty until named, which happens automatically from the first prompt).
+    // The whole conversation is always a session and is persisted to the shared
+    // store; "+ new session" starts a fresh one, the picker switches between them.
+    property string sessionId: ""
+    property string sessionTitle: ""
     // The conversation is a persistent LOG, not one turn swapped out under the
     // last: every send appends a `you` row and an assistant row to `chatLog`,
     // prior turns stay in place and scrolled back, readable (docs/DESIGN.md §14 —
@@ -137,6 +144,7 @@ Window {
             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
             chatLog.setProperty(win.activeIndex, "searching", false);
             chatLog.setProperty(win.activeIndex, "filesActive", false);
+            win.saveCurrent();          // the finished turn persists to the session
         }
         function onReplyError(reason) {
             if (win.activeIndex < 0) return;
@@ -146,6 +154,7 @@ Window {
             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
             chatLog.setProperty(win.activeIndex, "searching", false);
             chatLog.setProperty(win.activeIndex, "filesActive", false);
+            win.saveCurrent();
         }
         function onModelsError(reason) { win.status = "no models: " + reason; }
     }
@@ -160,6 +169,93 @@ Window {
             if (Backend.serverUp && Ollama.models.length === 0)
                 Ollama.refreshModels();
         }
+    }
+
+    // ------------------------------------------------------------- sessions
+    // A stable id, minted once client-side (so the store never has to mint one
+    // and there is no round-trip before the first save).
+    function ensureSessionId() {
+        if (win.sessionId === "")
+            win.sessionId = "sess-" + Date.now() + "-"
+                            + Math.floor(1000 + Math.random() * 9000);
+        return win.sessionId;
+    }
+
+    // Persist the whole current transcript to its session. Titles itself from
+    // the first user prompt the first time (a meaningful name with no modal).
+    // Only the display fields are stored; the transient stream flags are not.
+    function saveCurrent() {
+        if (chatLog.count === 0)
+            return;
+        var id = ensureSessionId();
+        var title = win.sessionTitle;
+        if (title === "") {
+            for (var i = 0; i < chatLog.count; i++) {
+                var r = chatLog.get(i);
+                if (r.isUser && r.body.trim() !== "") {
+                    title = r.body.trim().substring(0, 48);
+                    break;
+                }
+            }
+            if (title === "") title = "session";
+            win.sessionTitle = title;
+        }
+        var turns = [];
+        for (var j = 0; j < chatLog.count; j++) {
+            var t = chatLog.get(j);
+            turns.push({ isUser: t.isUser, who: t.who, body: t.body,
+                         thinking: t.thinking, thinkTokens: t.thinkTokens,
+                         sources: t.sources, searchCount: t.searchCount,
+                         files: t.files, fileCount: t.fileCount,
+                         isError: t.isError });
+        }
+        Sessions.save(id, title, JSON.stringify(turns));
+    }
+
+    // Start a fresh, empty session. The old one is already saved; this just
+    // clears the view and forgets the id/title so the next turn opens a new one.
+    function newSession() {
+        Ollama.cancel();
+        chatLog.clear();
+        win.activeIndex = -1;
+        win.sessionId = "";
+        win.sessionTitle = "";
+        win.status = "";
+        sessionPicker.open = false;
+    }
+
+    // Rebuild the log from a loaded transcript (transient flags reset).
+    function loadTurns(id, title, turnsJson) {
+        var arr;
+        try { arr = JSON.parse(turnsJson); } catch (e) { arr = []; }
+        Ollama.cancel();
+        chatLog.clear();
+        for (var i = 0; i < arr.length; i++) {
+            var t = arr[i];
+            chatLog.append({ isUser: !!t.isUser, who: t.who || "", body: t.body || "",
+                             thinking: t.thinking || "", thinkingActive: false,
+                             thinkTokens: t.thinkTokens || 0,
+                             sources: t.sources || "", searchCount: t.searchCount || 0,
+                             searching: false,
+                             files: t.files || "", fileCount: t.fileCount || 0,
+                             filesActive: false, filesPending: 0,
+                             streaming: false, isError: !!t.isError });
+        }
+        win.sessionId = id;
+        win.sessionTitle = title;
+        win.activeIndex = -1;
+        win.status = "";
+        sessionPicker.open = false;
+    }
+
+    Connections {
+        target: Sessions
+        function onLoaded(id, title, turnsJson) { win.loadTurns(id, title, turnsJson); }
+        function onSaved(id, title) {
+            win.sessionId = id;
+            if (win.sessionTitle === "") win.sessionTitle = title;
+        }
+        function onError(reason) { win.status = "session store: " + reason; }
     }
 
     function send() {
@@ -243,13 +339,95 @@ Window {
         }
     }
 
+    // ---------------------------------------------------------- session row
+    // The named-conversation control: a picker showing the current session,
+    // opening a list of every saved session under it (docs/DESIGN.md §7.2 — the
+    // same boxed selector as the model picker, no combo boxes), and a "+ new"
+    // that starts a fresh conversation. The whole conversation is always a
+    // session and persists; switching loads that transcript back into the log.
+    Item {
+        id: sessionRow
+        anchors { top: top.bottom; topMargin: 8
+                  left: parent.left; right: parent.right; margins: 10 }
+        height: 24
+
+        PixelText {
+            id: sessionLabel
+            anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+            text: "session"
+            color: Theme.textDim
+        }
+
+        // "+ new" — starts a fresh session (the current one is already saved).
+        Rectangle {
+            id: newBtn
+            anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+            width: 52
+            height: 24
+            radius: Theme.rounding
+            border.width: Theme.ctrlBorder
+            border.color: Theme.border
+            color: newMouse.containsMouse ? Theme.highlight : Theme.bg
+            PixelText {
+                anchors.centerIn: parent
+                text: "+ new"
+                color: Theme.accent
+            }
+            MouseArea {
+                id: newMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: win.newSession()
+            }
+        }
+
+        Rectangle {
+            id: sessionPicker
+            anchors { left: sessionLabel.right; leftMargin: 10
+                      right: newBtn.left; rightMargin: 10
+                      verticalCenter: parent.verticalCenter }
+            height: 24
+            color: sessionMouse.containsMouse ? Theme.highlight : Theme.bgAlt
+            radius: Theme.rounding
+            border.width: Theme.ctrlBorder
+            border.color: Theme.border
+
+            property bool open: false
+
+            PixelText {
+                anchors { left: parent.left; leftMargin: 6
+                          right: sessionCaret.left; rightMargin: 6
+                          verticalCenter: parent.verticalCenter }
+                elide: Text.ElideRight
+                text: win.sessionTitle !== "" ? win.sessionTitle : "new session"
+                color: win.sessionTitle !== "" ? Theme.text : Theme.textDim
+            }
+            PixelText {
+                id: sessionCaret
+                anchors { right: parent.right; rightMargin: 6
+                          verticalCenter: parent.verticalCenter }
+                text: sessionPicker.open ? "^" : "v"
+                color: Theme.textDim
+            }
+            MouseArea {
+                id: sessionMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: { if (!sessionPicker.open) Sessions.refresh();
+                             sessionPicker.open = !sessionPicker.open; }
+            }
+        }
+    }
+
     // -------------------------------------------------- server / backend row
     // Observed state on the left (up/down + the loaded model, polled from
     // /api/ps, docs/DESIGN.md §10.6 — never claimed from a click), the two
     // controls on the right: unload the loaded model, and start/stop the daemon.
     Item {
         id: serverRow
-        anchors { top: top.bottom; topMargin: 8
+        anchors { top: sessionRow.bottom; topMargin: 8
                   left: parent.left; right: parent.right; margins: 10 }
         height: 22
 
@@ -408,12 +586,74 @@ Window {
         }
     }
 
-    // A click anywhere else closes the dropdown.
+    // The session dropdown floats over the reply area under the session picker.
+    // The session picker is a grandchild of `win` (it lives inside sessionRow),
+    // so — like the model dropdown's note — an anchor to it would be dropped;
+    // position it by arithmetic on the two items' live positions instead.
+    Rectangle {
+        id: sessionDropdown
+        visible: sessionPicker.open
+        x: sessionRow.x + sessionPicker.x
+        y: sessionRow.y + sessionRow.height - 6
+        width: sessionPicker.width
+        height: Math.min(Math.max(Sessions.sessions.length, 1) * 22 + 2, 240)
+        z: 50
+        color: Theme.bgAlt
+        radius: Theme.rounding
+        border.width: Theme.ctrlBorder
+        border.color: Theme.border
+
+        // The empty-state line, when no session has been saved yet.
+        PixelText {
+            anchors { centerIn: parent }
+            visible: Sessions.sessions.length === 0
+            text: "no saved sessions"
+            color: Theme.textDim
+        }
+
+        KineticListView {
+            id: sessionList
+            anchors { fill: parent; margins: 1 }
+            clip: true
+            visible: Sessions.sessions.length > 0
+            model: Sessions.sessions
+            delegate: Rectangle {
+                width: sessionList.width
+                height: 22
+                color: sessRowMouse.containsMouse ? Theme.highlight : "transparent"
+                PixelText {
+                    anchors { left: parent.left; leftMargin: 6
+                              right: sessCount.left; rightMargin: 6
+                              verticalCenter: parent.verticalCenter }
+                    elide: Text.ElideRight
+                    text: modelData.title
+                    color: modelData.id === win.sessionId ? Theme.accent : Theme.text
+                }
+                PixelText {
+                    id: sessCount
+                    anchors { right: parent.right; rightMargin: 6
+                              verticalCenter: parent.verticalCenter }
+                    text: modelData.turns
+                    color: Theme.textDim
+                }
+                MouseArea {
+                    id: sessRowMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: { Sessions.open(modelData.id); sessionPicker.open = false; }
+                }
+            }
+            ScrollBar.vertical: VScroll {}
+        }
+    }
+
+    // A click anywhere else closes an open dropdown.
     MouseArea {
         anchors.fill: parent
         z: 40
-        visible: picker.open
-        onClicked: picker.open = false
+        visible: picker.open || sessionPicker.open
+        onClicked: { picker.open = false; sessionPicker.open = false; }
     }
 
     // --------------------------------------------------------- the reply area
@@ -870,6 +1110,7 @@ Window {
                             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
                             chatLog.setProperty(win.activeIndex, "searching", false);
                             chatLog.setProperty(win.activeIndex, "filesActive", false);
+                            win.saveCurrent();   // keep the partial turn in the session
                         }
                     } else win.send();
                 }
