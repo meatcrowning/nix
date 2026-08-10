@@ -903,16 +903,20 @@ copies of a widget both live is the bug this whole split exists to prevent.
 
 ### Watching `top` from `book`: `TopStats` + `TopProcDrawer` (book-only)
 
-The dock's system-info tile on **book** has a disclosure under the process list —
-`top v` — that rolls out a COPY of the local cpu graph sourced from the other
-machine, `top`, so the laptop can keep an eye on the desktop. It is gated on
-`Host.name === "air"` everywhere and does nothing on top itself. Same two-halves
-split as above, plus a transport:
+The dock's system-info tile on **book** has a disclosure directly UNDER the local
+graphs — `top v` — that rolls out a COPY of top's OWN square-card grid (cpu, gpu,
+mem, net, load, vram, swap, fan) sourced from the other machine, `top`, so the
+laptop can keep an eye on the desktop. It is gated on `Host.name === "air"`
+everywhere and does nothing on top itself. Same two-halves split as above, plus a
+transport:
 
-- **`TopStats.qml` is the data singleton**, shaped exactly like `SysInfo`
-  (`cpuHist`/`tempHist`/`memHist` ring buffers, `intervalSec`, a `watch(obj, on)`
-  set, a `stateJson`/`restoreState` pair carried by `shell.qml`'s `persist`
-  block). It fills those buffers by **ssh to the MagicDNS name `top`**, running
+- **`TopStats.qml` is the data singleton**, shaped exactly like `SysInfo` and
+  exposing the SAME property/method surface `MetricCardGrid` reads (the full set
+  of ring buffers — cpu/gpu/mem/swap/net/load/vram + per-fan `fanPctHist`, plus
+  `fmtSize`/`fmtSpeed`, plus inert `psi*`/`dsk*`/`battery*` for the hidden
+  substitute cards; `intervalSec`, a `watch(obj, on)` set, a
+  `stateJson`/`restoreState` pair carried by `shell.qml`'s `persist` block). It
+  fills those buffers by **ssh to the MagicDNS name `top`**, running
   the SAME `scripts/sysinfo.sh` and parsing the same positional pipe line — so a
   new field added to `sysinfo.sh` must keep `TopStats.parse`'s indices in step
   just like `SysInfo`'s (see "sysinfo.sh's fields are POSITIONAL"). The transport
@@ -921,15 +925,29 @@ split as above, plus a transport:
   `BatchMode`+`ControlMaster`+`ControlPersist` so 2s polls reuse one connection
   and a missing key fails fast. **No new listener** — an outbound tailnet ssh,
   the same loopback/tailnet-only rule as the comfy tunnel.
+- **`MetricCardGrid.qml` is the shared card block** — the 4x2 square-card grid,
+  extracted from `TaskManagerContent` so book's own tile and this mirror of top's
+  cannot drift apart. It takes `src` (a SysInfo-shaped object — `SysInfo` for the
+  local tile, `TopStats` for the mirror), `noGpu` (the card set: false = the
+  gpu/vram/fan set top has, true = book's psi/io/batt substitutes) and
+  `wheelTarget` (the fan card's brightness scroll — **null** on the mirror, so
+  scrolling top's fan card never moves book's backlight, and top's `SysInfo` would
+  be the wrong target anyway).
 - **`TopProcDrawer.qml` is the view + disclosure**, animated like the media queue
   drawer (`SettingsStore.d.topStatsOpen`, a clip whose height glides over
   `ViewMode.slideMs`, `Behavior` gated on `!ViewMode.settling` so a reload with
-  the drawer open lands in place). `TaskManagerContent.qml` places it under the
-  process list on air only, height 0 off book; the process table anchors its
-  bottom to the drawer, so the reveal shrinks the LIST (the tile's grid height
-  is fixed). The list's slack covers the chart at this panel's size, so "then
-  weather" — growing the tile into the forecast — is not wired. It lived under
-  `CpuContent` in the cpu corner popup until 2026-08-09.
+  the drawer open lands in place). `TaskManagerContent.qml` places it directly
+  under the local graphs on air only (`top: cards.bottom`), height 0 off book;
+  the process table below runs to the tile bottom, so opening the drawer reflows
+  the LIST down rather than eating its bottom. It rolls out the same
+  `MetricCardGrid` sourced from `TopStats`, so it presents at exactly the size
+  top's tile draws the block at. It lived under `CpuContent` in the cpu corner
+  popup until 2026-08-09, then under the process list until it moved beneath the
+  graphs and grew from one cpu chart to top's full grid.
+- **The open-state caret is a MIRRORED `v`, never `^`** — More Perfect DOS VGA
+  has no triangle glyph and its `^` sits against the ascender and clips a strip
+  this short (the same finding as MediaContent's queue chevron), so the button
+  draws `top` + a `v` flipped about its own centre with a `Scale`.
 - **It polls ONLY while the drawer is both on screen AND expanded** — `wantData`
   drives `TopStats.watch` (`active` is now the dock tile's visibility, not the
   popup's `open`), so a closed disclosure spawns no ssh and top is never touched

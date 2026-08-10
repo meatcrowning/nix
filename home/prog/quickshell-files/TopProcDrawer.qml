@@ -1,20 +1,22 @@
 import QtQuick
 
-// Book-only disclosure that sits UNDER the process list in the dock's
+// Book-only disclosure that sits UNDER the local graphs in the dock's
 // system-info tile (TaskManagerContent gates it on Host.name === "air"). A thin
-// "top v / top ^" button; a click rolls out a copy of the CPU graph sourced from
-// `top` (TopStats), animated exactly like the media queue drawer — a CLIP whose
-// height glides over ViewMode.slideMs on ViewMode.slideEasing, with this Item's
-// implicitHeight following it so the process list above reflows up rather than
-// the chart snapping in. (It lived under CpuContent in the cpu corner popup
-// until 2026-08-09; moved to the dock so the reveal squishes the process list.)
+// "top v / top ^" button; a click rolls out a MIRROR of top's OWN square-card
+// grid (MetricCardGrid sourced from TopStats — cpu, gpu, mem, net, load, vram,
+// swap and fan, exactly what top shows), animated like the media queue drawer:
+// a CLIP whose height glides over ViewMode.slideMs on ViewMode.slideEasing, with
+// this Item's implicitHeight following it so the process list BELOW reflows down
+// rather than the grid snapping in. (It dropped down under the graphs — not the
+// process list — as of 2026-08-09, and mirrors top's full grid rather than just
+// its cpu chart.)
 //
 // TopStats polls top only while this drawer is BOTH on screen and expanded, so a
 // closed disclosure costs nothing (see TopStats.watch).
 Item {
     id: root
 
-    // The popup is open (hovered or pinned) — passed down by CpuPanel.
+    // The tile is active (dock visible / popup open) — passed down.
     property bool active: false
     property int pad: 10
 
@@ -32,12 +34,15 @@ Item {
     Component.onDestruction: TopStats.watch(root, false)
 
     readonly property int discH: 18
-    // The revealed chart's height. A MetricChart stretches to whatever it is
-    // given; 150 leaves the chart body ~88px between title and legend.
-    readonly property int drawerContentH: 150
+    // The revealed grid's height — the mirror's own implicit height plus a pad,
+    // so it presents at exactly the size top's tile draws the same block at.
+    readonly property int drawerContentH: mirror.implicitHeight + pad
 
     implicitWidth: 220
     implicitHeight: discH + clip.height
+
+    readonly property color discColor:
+        (discMa.containsMouse || root.expanded) ? Theme.accent : Theme.textDim
 
     // ---- the disclosure button -------------------------------------------
     Item {
@@ -45,7 +50,7 @@ Item {
         anchors { top: parent.top; left: parent.left; right: parent.right }
         height: root.discH
 
-        // hairline separating the disclosure from the local chart above it
+        // hairline separating the disclosure from the local graphs above it
         Rectangle {
             anchors {
                 left: parent.left; right: parent.right; top: parent.top
@@ -54,12 +59,36 @@ Item {
             height: 1
             color: Theme.border
         }
-        // ASCII carets only — More Perfect DOS VGA has no triangle glyphs, and a
-        // PixelText that falls back for one loses ~5px of ascent and clips.
-        PixelText {
+        // "top" plus a caret. More Perfect DOS VGA has no triangle glyphs, and
+        // "^" is NOT "v" upside down in this font — it sits hard against the
+        // ascender and clips a strip this short (measured, same finding as
+        // MediaContent's queue chevron). So the open state is the SAME "v",
+        // mirrored about its own centre: identical shape, identical band.
+        Item {
+            id: label
             anchors.centerIn: parent
-            text: "top " + (root.expanded ? "^" : "v")
-            color: (discMa.containsMouse || root.expanded) ? Theme.accent : Theme.textDim
+            width: topT.implicitWidth + 4 + caret.implicitWidth
+            height: parent.height
+            PixelText {
+                id: topT
+                anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                text: "top"
+                color: root.discColor
+            }
+            PixelText {
+                id: caret
+                text: "v"
+                color: root.discColor
+                x: topT.x + topT.implicitWidth + 4
+                // Rounded origin keeps NativeRendering crisp across the flip
+                // (see MediaContent's chevron): an integer y maps pixel centres
+                // onto pixel centres so the mirrored glyph has no AA edge.
+                y: Math.round((label.height - implicitHeight) / 2)
+                transform: Scale {
+                    yScale: root.expanded ? -1 : 1
+                    origin.y: caret.implicitHeight / 2
+                }
+            }
         }
         MouseArea {
             id: discMa
@@ -86,38 +115,22 @@ Item {
             NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing }
         }
 
-        // top's CPU graph, drawn identically to the local CpuContent but bound to
-        // TopStats' ring buffers. Anchored to the drawer's FULL content height
-        // (not the clipped height) so it does not reflow as the clip opens.
-        MetricChart {
+        // top's OWN card grid, drawn by the same component book's tile uses, but
+        // sourced from TopStats' ring buffers. noGpu is false — top has an nvidia
+        // GPU, so it shows the gpu/vram/fan set. wheelTarget is null: scrolling
+        // top's fan card must not touch book's backlight. Anchored to the FULL
+        // content height so it does not reflow as the clip opens.
+        MetricCardGrid {
             id: mirror
             anchors { left: parent.left; right: parent.right; top: parent.top }
-            height: root.drawerContentH
+            height: implicitHeight
             active: root.active && TopStats.reachable
-            title: "top cpu"
-            series: [
-                { data: TopStats.tempHist, color: Theme.crit },   // temperature
-                { data: TopStats.cpuHist,  color: Theme.accent }, // usage, on top
-            ]
-
-            Row {
-                spacing: 12
-                PixelText {
-                    text: "use " + (TopStats.cpuUsage < 0 ? "--" : TopStats.cpuUsage + "%")
-                    color: Theme.accent
-                }
-                PixelText {
-                    text: "tmp " + (TopStats.cpuTemp < 0 ? "--" : TopStats.cpuTemp + "C")
-                    color: Theme.crit
-                }
-                PixelText {
-                    text: "mem " + (TopStats.memUsage < 0 ? "--" : TopStats.memUsage + "%")
-                    color: Theme.text
-                }
-            }
+            src: TopStats
+            noGpu: false
+            wheelTarget: null
         }
 
-        // Reachability overlay — an honest message instead of a blank chart when
+        // Reachability overlay — an honest message instead of a blank grid when
         // top is asleep, off the tailnet, or has no key set up yet
         // (docs/DESIGN.md §10.2: refuse visibly, never silently no-op).
         Rectangle {

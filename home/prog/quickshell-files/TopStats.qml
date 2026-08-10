@@ -3,13 +3,15 @@ import Quickshell
 import Quickshell.Io
 import QtQuick
 
-// Book-only: mirrors `top`'s CPU/mem/network stats over the tailnet, so the
-// system-info popup can show top's proc graphs beneath book's own (see
-// TopProcDrawer.qml / CpuPanel.qml). It reaches top by ssh to the MagicDNS name
-// `top` — sys/net/tailscale.nix opens 22 on tailscale0 and lam is the operator,
-// so it is passwordless — and runs the SAME scripts/sysinfo.sh the local
-// SysInfo polls. That script's pipe line is parsed here into ring buffers shaped
-// like SysInfo's own, so MetricChart draws them with no special-casing.
+// Book-only: mirrors `top`'s full system stats over the tailnet, so the
+// dock's system-info tile can roll out a copy of top's OWN square-card grid
+// beneath book's own (see TopProcDrawer.qml / MetricCardGrid.qml). It reaches
+// top by ssh to the MagicDNS name `top` — sys/net/tailscale.nix opens 22 on
+// tailscale0 and lam is the operator, so it is passwordless — and runs the SAME
+// scripts/sysinfo.sh the local SysInfo polls. That script's pipe line is parsed
+// here into ring buffers shaped exactly like SysInfo's own, and this singleton
+// exposes the SAME property/method surface MetricCardGrid reads off SysInfo, so
+// the grid draws top with no special-casing.
 //
 // No new listener anywhere: this is an OUTBOUND ssh with a persistent
 // ControlMaster, exactly the loopback/tailnet-only rule the comfy tunnel
@@ -24,11 +26,74 @@ import QtQuick
 Singleton {
     id: root
 
+    // ---- cpu -------------------------------------------------------------
     property int  cpuUsage: -1
     property int  cpuTemp: -1
-    property int  memUsage: -1
+    property var  cpuHist: []
+    property var  tempHist: []
+
+    // ---- gpu (top has an nvidia card) ------------------------------------
+    property int  gpuUsage: -1
+    property int  gpuTemp: -1
+    property var  gpuHist: []
+    property var  gpuTempHist: []
+    property int  gpuFanPct: -1
+    property int  gpuMemUsedMb: -1
+    property int  gpuMemTotalMb: -1
+    readonly property int gpuMemUsage: gpuMemTotalMb > 0
+        ? Math.round(100 * gpuMemUsedMb / gpuMemTotalMb) : -1
+    property var  vramHist: []
+
+    // ---- memory / swap ---------------------------------------------------
+    property int  memTotalKb: 0
+    property int  memAvailKb: 0
+    readonly property int memUsedKb: Math.max(0, memTotalKb - memAvailKb)
+    readonly property int memUsage: memTotalKb > 0
+        ? Math.round(100 * memUsedKb / memTotalKb) : -1
+    property var  memHist: []
+    property int  swapTotalKb: 0
+    property int  swapFreeKb: 0
+    readonly property int swapUsage: swapTotalKb > 0
+        ? Math.round(100 * (swapTotalKb - swapFreeKb) / swapTotalKb) : -1
+    property var  swapHist: []
+
+    // ---- network ---------------------------------------------------------
     property real rxSpeed: 0            // bytes/s
     property real txSpeed: 0
+    property var  rxHist: []
+    property var  txHist: []
+
+    // ---- load ------------------------------------------------------------
+    property real load1: -1
+    property var  loadHist: []
+
+    // ---- fans (parsed from fanDetail + the gpu fan) ----------------------
+    property var  fans: []
+    property var  fanPctHist: ({})
+    property var  fanVaried: ({})
+    property var  fanHadRpm: ({})
+    // No remote alarm: a stopped fan on top is top's own notification to raise,
+    // not book's. The grid tolerates this being "".
+    readonly property string fanAlarm: ""
+
+    // ---- inert on the mirror: book's psi/io/batt substitute cards are
+    //      instantiated but hidden (noGpu=false), so their bindings still
+    //      evaluate and need somewhere to read. Never populated. ------------
+    readonly property real psiCpu: -1
+    readonly property real psiIo: -1
+    readonly property real psiMem: -1
+    readonly property var  psiCpuHist: []
+    readonly property var  psiIoHist: []
+    readonly property var  psiMemHist: []
+    readonly property real dskRead: -1
+    readonly property real dskWrite: -1
+    readonly property var  dskRHist: []
+    readonly property var  dskWHist: []
+    readonly property int  batteryPct: -1
+    readonly property int  batteryStatus: 0
+    readonly property string batteryLabel: ""
+    readonly property var  batteryHist: []
+
     // Did the last poll connect? Cleared on any non-zero ssh exit.
     property bool reachable: false
     // Has a poll EVER completed? Separates "connecting…" from "unreachable".
@@ -36,9 +101,6 @@ Singleton {
 
     // Same 90-sample window as SysInfo's hover charts (90 * 2s = 3 min).
     readonly property int chartLen: 90
-    property var cpuHist: []
-    property var tempHist: []
-    property var memHist: []
 
     // Cumulative counters the next poll diffs against, exactly as SysInfo does —
     // cpu total/idle and the network byte totals are counters, not rates.
@@ -49,6 +111,17 @@ Singleton {
     property real _prevAt: 0
 
     readonly property real intervalSec: SettingsStore.d.monPollSec
+
+    // ---- the same human-readable helpers SysInfo exposes -----------------
+    function fmtSpeed(bps) {
+        if (bps < 1024) return "0";
+        if (bps < 1024 * 1024) return Math.round(bps / 1024) + "K";
+        return (bps / 1024 / 1024).toFixed(1) + "M";
+    }
+    function fmtSize(kb) {
+        if (kb < 1024 * 1024) return Math.round(kb / 1024) + "M";
+        return (kb / 1024 / 1024).toFixed(0) + "G";
+    }
 
     // ---- on-screen registry: poll only while watched ---------------------
     property var _watchers: []
@@ -69,6 +142,50 @@ Singleton {
         h.push(v);
         while (h.length > chartLen) h.shift();
         return h;
+    }
+
+    // Parse sysinfo.sh's fanDetail ("name:rpm:pct,…") plus the gpu fan into
+    // `fans`, and push this poll's sample onto each fan's own history keyed by
+    // NAME. A simplified mirror of SysInfo._setFans: no stopped-fan re-emission
+    // and no alarm — those are the watched machine's own to raise.
+    function _setFans(raw) {
+        const out = [];
+        if (raw) {
+            for (const e of String(raw).split(",")) {
+                if (!e) continue;
+                const p = e.split(":");
+                if (p.length < 3) continue;
+                const rpm = parseInt(p[1]);
+                const pct = parseInt(p[2]);
+                out.push({
+                    name: p[0],
+                    rpm: isNaN(rpm) ? -1 : rpm,
+                    pct: isNaN(pct) || pct < 0 ? -1 : pct,
+                });
+            }
+        }
+        if (gpuFanPct >= 0)
+            out.push({ name: "gpu", rpm: -1, pct: gpuFanPct });
+
+        const h = {};
+        const varied = {};
+        for (const name in fanVaried) varied[name] = fanVaried[name];
+        for (const fan of out) {
+            if (fan.pct < 0) continue;
+            const prev = fanPctHist[fan.name] || [];
+            if (prev.length > 0 && prev[prev.length - 1] !== fan.pct)
+                varied[fan.name] = true;
+            h[fan.name] = _pushHist(prev, fan.pct);
+        }
+        const hadRpm = {};
+        for (const name in fanHadRpm) hadRpm[name] = fanHadRpm[name];
+        for (const fan of out)
+            if (fan.rpm > 0) hadRpm[fan.name] = true;
+
+        fans = out;
+        fanPctHist = h;
+        fanVaried = varied;
+        fanHadRpm = hadRpm;
     }
 
     function parse(text) {
@@ -104,18 +221,44 @@ Singleton {
         const rawTemp = parseInt(f[8]);
         cpuTemp = isNaN(rawTemp) || rawTemp < 0 ? -1 : Math.round(rawTemp / 1000);
 
-        // Mem was appended for the task manager (f[13]/f[14]); guarded so a line
-        // from an older/foreign sysinfo.sh still parses the cpu half.
-        if (f.length >= 15) {
-            const mt = parseInt(f[13]) || 0;
-            const ma = parseInt(f[14]) || 0;
-            memUsage = mt > 0 ? Math.round(100 * (mt - ma) / mt) : -1;
+        const gu = parseInt(f[9]);
+        gpuUsage = isNaN(gu) || gu < 0 ? -1 : gu;
+        const gt = parseInt(f[10]);
+        gpuTemp = isNaN(gt) || gt < 0 ? -1 : gt;
+
+        // The task-manager block (mem/swap/load/gpu extras/fans), guarded so a
+        // line from an older/foreign sysinfo.sh still parses the cpu half.
+        if (f.length >= 23) {
+            memTotalKb  = parseInt(f[13]) || 0;
+            memAvailKb  = parseInt(f[14]) || 0;
+            swapTotalKb = parseInt(f[15]) || 0;
+            swapFreeKb  = parseInt(f[16]) || 0;
+            const l1 = parseFloat(f[17]);
+            load1 = isNaN(l1) ? -1 : l1;
+            const gf = parseInt(f[19]);
+            gpuFanPct = isNaN(gf) || gf < 0 ? -1 : gf;
+            const gmu = parseInt(f[21]);
+            gpuMemUsedMb = isNaN(gmu) || gmu < 0 ? -1 : gmu;
+            const gmt = parseInt(f[22]);
+            gpuMemTotalMb = isNaN(gmt) || gmt < 0 ? -1 : gmt;
+            if (f.length >= 33)
+                _setFans(f[32]);
+
+            if (memUsage >= 0) memHist = _pushHist(memHist, memUsage);
+            if (load1 >= 0) loadHist = _pushHist(loadHist, load1);
+            if (swapUsage >= 0) swapHist = _pushHist(swapHist, swapUsage);
+            if (gpuMemUsage >= 0) vramHist = _pushHist(vramHist, gpuMemUsage);
         }
 
         _prevAt = now;
         if (cpuUsage >= 0) cpuHist = _pushHist(cpuHist, cpuUsage);
         if (cpuTemp >= 0) tempHist = _pushHist(tempHist, cpuTemp);
-        if (memUsage >= 0) memHist = _pushHist(memHist, memUsage);
+        if (gpuUsage >= 0) gpuHist = _pushHist(gpuHist, gpuUsage);
+        if (gpuTemp >= 0) gpuTempHist = _pushHist(gpuTempHist, gpuTemp);
+        if (_prevRx >= 0 && _prevAt > 0) {
+            rxHist = _pushHist(rxHist, rxSpeed);
+            txHist = _pushHist(txHist, txSpeed);
+        }
         stateRev++;
     }
 
@@ -153,14 +296,20 @@ Singleton {
     // ---- reload continuity (see shell.qml's `persist` block) --------------
     // Same contract as SysInfo: shell.qml snapshots this on stateRev and hands
     // it back before the first frame, so a reload with the drawer open keeps its
-    // chart instead of emptying and refilling one poll later.
+    // grid instead of emptying and refilling one poll later.
     property int stateRev: 0
 
     function stateJson() {
         return JSON.stringify({
-            cu: cpuUsage, ct: cpuTemp, mu: memUsage, rx: rxSpeed, tx: txSpeed,
+            cu: cpuUsage, ct: cpuTemp, ch: cpuHist, th: tempHist,
+            gu: gpuUsage, gt: gpuTemp, gh: gpuHist, gth: gpuTempHist,
+            gf: gpuFanPct, gmu: gpuMemUsedMb, gmt: gpuMemTotalMb, vh: vramHist,
+            mt: memTotalKb, ma: memAvailKb, mh: memHist,
+            st: swapTotalKb, sf: swapFreeKb, sh: swapHist,
+            rx: rxSpeed, tx: txSpeed, rxh: rxHist, txh: txHist,
+            l1: load1, lh: loadHist,
+            fns: fans, fph: fanPctHist, fvd: fanVaried, fhr: fanHadRpm,
             re: reachable, er: everReached,
-            ch: cpuHist, th: tempHist, mh: memHist,
             pct: _prevCpuTotal, pci: _prevCpuIdle,
             prx: _prevRx, ptx: _prevTx, pat: _prevAt,
         });
@@ -169,10 +318,22 @@ Singleton {
         if (!s) return;
         let d;
         try { d = JSON.parse(s); } catch (e) { return; }
-        cpuUsage = d.cu; cpuTemp = d.ct; memUsage = d.mu;
+        cpuUsage = d.cu; cpuTemp = d.ct; cpuHist = d.ch || []; tempHist = d.th || [];
+        gpuUsage = d.gu === undefined ? -1 : d.gu;
+        gpuTemp = d.gt === undefined ? -1 : d.gt;
+        gpuHist = d.gh || []; gpuTempHist = d.gth || [];
+        gpuFanPct = d.gf === undefined ? -1 : d.gf;
+        gpuMemUsedMb = d.gmu === undefined ? -1 : d.gmu;
+        gpuMemTotalMb = d.gmt === undefined ? -1 : d.gmt;
+        vramHist = d.vh || [];
+        memTotalKb = d.mt || 0; memAvailKb = d.ma || 0; memHist = d.mh || [];
+        swapTotalKb = d.st || 0; swapFreeKb = d.sf || 0; swapHist = d.sh || [];
         rxSpeed = d.rx || 0; txSpeed = d.tx || 0;
+        rxHist = d.rxh || []; txHist = d.txh || [];
+        load1 = d.l1 === undefined ? -1 : d.l1; loadHist = d.lh || [];
+        fans = d.fns || []; fanPctHist = d.fph || ({});
+        fanVaried = d.fvd || ({}); fanHadRpm = d.fhr || ({});
         reachable = !!d.re; everReached = !!d.er;
-        cpuHist = d.ch || []; tempHist = d.th || []; memHist = d.mh || [];
         _prevCpuTotal = d.pct === undefined ? -1 : d.pct;
         _prevCpuIdle  = d.pci === undefined ? -1 : d.pci;
         _prevRx = d.prx === undefined ? -1 : d.prx;

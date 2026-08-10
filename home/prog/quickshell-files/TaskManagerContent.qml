@@ -6,18 +6,16 @@ import Quickshell
 //
 // Three sections, top to bottom: a 4x2 block of square chart cards (cpu, gpu,
 // mem, net, load, vram, swap, fan — see `noGpu` for the psi/io/batt set book
-// puts in the gpu/vram/fan slots instead), a chassis-fan bar, and the process table
-// taking everything that is left. A row's [x] ends it politely; right-clicking
-// anywhere in a row opens ProcMenu.qml, which is where everything else a
-// process can be asked to do lives. The table is the point of the widget, so it
-// gets the slack — the cards are SQUARE, i.e. their height follows the panel
-// width, and a taller tile turns into more visible processes rather than
-// letterboxed charts.
+// puts in the gpu/vram/fan slots instead), the book-only top-mirror drawer, and
+// the process table taking everything that is left. A row's [x] ends it
+// politely; right-clicking anywhere in a row opens ProcMenu.qml, which is where
+// everything else a process can be asked to do lives. The table is the point of
+// the widget, so it gets the slack — the cards are SQUARE, i.e. their height
+// follows the panel width, and a taller tile turns into more visible processes
+// rather than letterboxed charts.
 //
-// The cards draw through the same ChartCanvas the cpu/gpu/eth popups use, so
-// there is one implementation of the plot. They were thin sparkline strips
-// first, to save height; tightening the dock's other widgets bought back the
-// room for the real thing.
+// The card block lives in MetricCardGrid.qml so the top-mirror drawer can draw
+// the SAME grid sourced from `top` (see TopProcDrawer / TopStats).
 Item {
     id: root
 
@@ -67,350 +65,39 @@ Item {
         Procs.filterLatch = false;
     }
 
-    // Every fan, reduced to lines, a headline and a tooltip. A plain object, not
-    // a singleton: it is pure derivation over SysInfo's readings, and keeping it
-    // out of the data layer is what lets tools/fan-harness.sh drive it offscreen
-    // with synthetic fan sets — 0, 1, 2 and 5 fans, none of which this board can
-    // be made to produce.
-    Fans {
-        id: fans
-        rows: SysInfo.fans
-        hist: SysInfo.fanPctHist
-        varied: SysInfo.fanVaried
-        showFixed: SettingsStore.d.fanShowFixed
-    }
-
-    function fmtUptime(s) {
-        if (!s || s <= 0) return "--";
-        const d = Math.floor(s / 86400);
-        const h = Math.floor((s % 86400) / 3600);
-        const m = Math.floor((s % 3600) / 60);
-        if (d > 0) return d + "d" + h + "h";
-        if (h > 0) return h + "h" + m + "m";
-        return m + "m";
-    }
-
-    // ---- one metric as a card: label + readout over its history ----------
-    component MetricCard: Item {
-        id: card
-        property string label: ""
-        property string value: ""
-        // Secondary reading, shown to the left of the primary one on the same
-        // line.
-        property string sub: ""
-        property color valueColor: Theme.text
-        // Hover text. These labels are four characters of jargon each — "psi",
-        // "vram", "res" — and the card cannot say what it is measuring in the
-        // space it has, so it says it here instead.
-        property string tip: ""
-        property alias series: plot.series
-        property alias scaleMax: plot.scaleMax
-        property alias autoFloor: plot.autoFloor
-        // Optional wheel stepper, null on every card that has none. Same two
-        // signals and the same semantics as StatusPanel's Stat, so a card and a
-        // status row scroll identically: NOTCH-based via WheelNotch (a coast
-        // must not walk a value to 0), and a multi-notch burst is COLLAPSED to
-        // one call rather than replayed — at most one subprocess spawn per
-        // event by construction, which is what keeps a flick off the ~1.5s DDC
-        // write. The card stays generic: what a step does is the caller's.
-        property var onWheelUp: null
-        property var onWheelDown: null
-
-        PixelText {
-            id: cardLabel
-            anchors { left: parent.left; top: parent.top }
-            text: card.label
-            color: Theme.accent
-        }
-        PixelText {
-            id: cardValue
-            anchors { right: parent.right; top: parent.top }
-            text: card.value
-            color: card.valueColor
-        }
-        // The secondary reading sits to the LEFT of the primary one on the SAME
-        // line, not under it: two stacked lines cost a card of this size a
-        // third of its chart.
-        //
-        // Dropped when the three would not all fit, measured against their own
-        // implicit widths rather than a guessed card width — a fixed threshold
-        // was wrong for "vram 0.5G 4%", whose label and value are both wider
-        // than cpu's, so it collided while the others had room.
-        PixelText {
-            id: cardSub
-            anchors { right: cardValue.left; rightMargin: 5; top: parent.top }
-            visible: card.sub.length > 0
-                     && cardLabel.implicitWidth + implicitWidth
-                        + cardValue.implicitWidth + 10 <= card.width
-            text: card.sub
-            color: Theme.textDim
-        }
-        // Hover anywhere on the card, chart included. HoverHandler rather than a
-        // MouseArea so it cannot eat a click the card might want later.
-        HoverHandler { id: cardHover }
-        // The wheel zone. `acceptedButtons: Qt.NoButton` is what keeps the rule
-        // above intact — a MouseArea is the only way to reach `onWheel` here,
-        // but with no buttons accepted it still declines every press, so the
-        // card is exactly as clickable as it was before.
-        MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.NoButton
-            enabled: card.onWheelUp !== null || card.onWheelDown !== null
-            WheelNotch { id: cardNotch }
-            onWheel: (wheel) => {
-                const n = cardNotch.steps(wheel);
-                if (n > 0) { if (card.onWheelUp) card.onWheelUp(); }
-                else if (n < 0) { if (card.onWheelDown) card.onWheelDown(); }
-            }
-        }
-        Tooltip {
-            target: card
-            show: cardHover.hovered && card.tip !== "" && card.visible
-            text: card.tip
-        }
-
-        ChartCanvas {
-            id: plot
-            // Both card sets are instantiated and the unused three are hidden
-            // (a Grid lays out only its visible children), so gate the canvas on
-            // visibility too — otherwise the hidden trio repaints every poll.
-            active: root.active && card.visible
-            anchors {
-                left: parent.left; right: parent.right
-                top: cardValue.bottom
-                topMargin: 3
-                bottom: parent.bottom
-            }
-        }
-    }
-
-    // Eight squares, 4 x 2. Square is the point: the width is whatever the
-    // panel is, so the HEIGHT follows it, and the block grows and shrinks with
-    // the panel instead of the charts going letterbox at one end of the range.
-    readonly property real cardW: (inner - Theme.gap * 3) / 4
-    readonly property real cardH: cardW
-
-    Grid {
+    // ---- the local machine's own load: the square-card block --------------
+    MetricCardGrid {
         id: cards
         anchors { top: parent.top; topMargin: root.pad; horizontalCenter: parent.horizontalCenter }
         width: root.inner
-        columns: 4
-        columnSpacing: Theme.gap
-        rowSpacing: Theme.gap
+        height: implicitHeight
+        active: root.active
+        src: SysInfo
+        noGpu: root.noGpu
+        // The fan card scrolls screen brightness on the real tile; the mirror
+        // below leaves this null so top's fan card cannot drive book's backlight.
+        wheelTarget: SysInfo
+    }
 
-        MetricCard {
-            width: root.cardW; height: root.cardH
-            label: "cpu"
-            tip: "busy time across all cores, sampled every poll\nred: package temperature"
-            value: SysInfo.cpuUsage < 0 ? "--" : SysInfo.cpuUsage + "%"
-            sub: SysInfo.cpuTemp < 0 ? "" : SysInfo.cpuTemp + "C"
-            series: [
-                { data: SysInfo.tempHist, color: Theme.crit },
-                { data: SysInfo.cpuHist,  color: Theme.accent },
-            ]
-        }
-        MetricCard {
-            width: root.cardW; height: root.cardH
-            visible: !root.noGpu
-            label: "gpu"
-            tip: "nvidia-smi utilization\nred: gpu temperature"
-            value: SysInfo.gpuUsage < 0 ? "--" : SysInfo.gpuUsage + "%"
-            sub: SysInfo.gpuTemp < 0 ? "" : SysInfo.gpuTemp + "C"
-            series: [
-                { data: SysInfo.gpuTempHist, color: Theme.crit },
-                { data: SysInfo.gpuHist,     color: Theme.accent },
-            ]
-        }
-        // In the gpu slot on book: pressure stall, the share of the last 10s in
-        // which something was blocked waiting for cpu / io / memory. Unlike
-        // utilization it says whether the machine is actually costing you time —
-        // a pegged cpu with nothing waiting on it reads 0 here. Three series,
-        // cpu on top because it is the one the readout shows.
-        MetricCard {
-            width: root.cardW; height: root.cardH
-            visible: root.noGpu
-            label: "psi"
-            tip: "pressure stall: share of the last 10s spent\nwaiting on cpu (blue), disk io (amber), memory (red)"
-            value: SysInfo.psiCpu < 0 ? "--" : SysInfo.psiCpu.toFixed(1) + "%"
-            sub: SysInfo.psiIo < 0 ? "" : "io" + SysInfo.psiIo.toFixed(0)
-            valueColor: SysInfo.psiCpu >= 50 ? Theme.crit
-                      : SysInfo.psiCpu >= 20 ? Theme.warn : Theme.text
-            // Autoscaled off a floor of 20%: a desktop sits in the low single
-            // digits, so a fixed 0-100 axis would draw a permanent flat line.
-            scaleMax: 0
-            autoFloor: 20
-            series: [
-                { data: SysInfo.psiMemHist, color: Theme.crit },
-                { data: SysInfo.psiIoHist,  color: Theme.warn },
-                { data: SysInfo.psiCpuHist, color: Theme.accent },
-            ]
-        }
-        MetricCard {
-            width: root.cardW; height: root.cardH
-            label: "mem"
-            tip: "memory in use: total minus MemAvailable,\ni.e. what a new allocation could not have"
-            value: SysInfo.memUsage < 0 ? "--" : SysInfo.memUsage + "%"
-            sub: SysInfo.fmtSize(SysInfo.memUsedKb)
-            series: [ { data: SysInfo.memHist, color: Theme.accent } ]
-        }
-        MetricCard {
-            width: root.cardW; height: root.cardH
-            label: "net"
-            tip: "network throughput\nblue: down (the readout)   amber: up"
-            value: SysInfo.fmtSpeed(SysInfo.rxSpeed)
-            sub: SysInfo.fmtSpeed(SysInfo.txSpeed)
-            scaleMax: 0
-            autoFloor: 64 * 1024
-            series: [
-                { data: SysInfo.txHist, color: Theme.warn },
-                { data: SysInfo.rxHist, color: Theme.info },
-            ]
-        }
-
-        MetricCard {
-            width: root.cardW; height: root.cardH
-            label: "load"
-            tip: "load average over 1 minute:\nthreads running or waiting for a core"
-            value: SysInfo.load1 < 0 ? "--" : SysInfo.load1.toFixed(2)
-            // 16 threads on this box; a run queue past a quarter of them is
-            // where it starts being something you can feel
-            valueColor: SysInfo.load1 >= 8 ? Theme.crit
-                      : SysInfo.load1 >= 4 ? Theme.warn : Theme.text
-            scaleMax: 0
-            autoFloor: 4
-            series: [ { data: SysInfo.loadHist, color: Theme.accent } ]
-        }
-        MetricCard {
-            width: root.cardW; height: root.cardH
-            visible: !root.noGpu
-            label: "vram"
-            tip: "gpu memory in use, and how much of it"
-            value: SysInfo.gpuMemUsage < 0 ? "--" : SysInfo.gpuMemUsage + "%"
-            sub: SysInfo.gpuMemUsedMb < 0 ? "" : (SysInfo.gpuMemUsedMb / 1024).toFixed(1) + "G"
-            valueColor: SysInfo.gpuMemUsage >= 90 ? Theme.crit : Theme.text
-            series: [ { data: SysInfo.vramHist, color: Theme.accent } ]
-        }
-        // In the vram slot on book: disk throughput, drawn exactly like the net
-        // card next to it — read as the primary reading, write as the secondary,
-        // both autoscaled together off a shared floor so the two lines stay
-        // comparable to each other.
-        MetricCard {
-            width: root.cardW; height: root.cardH
-            visible: root.noGpu
-            label: "io"
-            tip: "disk throughput across the physical drives\nblue: read (the readout)   amber: write"
-            value: SysInfo.fmtSpeed(SysInfo.dskRead)
-            sub: SysInfo.fmtSpeed(SysInfo.dskWrite)
-            scaleMax: 0
-            autoFloor: 1024 * 1024
-            series: [
-                { data: SysInfo.dskWHist, color: Theme.warn },
-                { data: SysInfo.dskRHist, color: Theme.info },
-            ]
-        }
-        MetricCard {
-            width: root.cardW; height: root.cardH
-            label: "swap"
-            tip: "swap in use; anything sustained here\nmeans the machine is short of memory"
-            value: SysInfo.swapUsage < 0 ? "--" : SysInfo.swapUsage + "%"
-            sub: SysInfo.swapTotalKb > 0
-                 ? SysInfo.fmtSize(SysInfo.swapTotalKb - SysInfo.swapFreeKb) : ""
-            valueColor: SysInfo.swapUsage >= 25 ? Theme.warn : Theme.text
-            series: [ { data: SysInfo.swapHist, color: Theme.accent } ]
-        }
-        MetricCard {
-            width: root.cardW; height: root.cardH
-            visible: !root.noGpu
-            label: "fan"
-            // EVERY fan in the box, one line each — the chassis and cooler fans
-            // from hwmon plus the GPU fan, which used to have this card to
-            // itself. It was not displaced: it is one more line, and it is still
-            // the only fan here whose 0% is a real reading rather than a missing
-            // one (the graphics card stops its fans entirely when it is cool).
-            //
-            // The readout is the FASTEST fan going. See Fans.qml for what that
-            // percentage is and — more importantly — what it is not: the chassis
-            // fans' figure is the duty the chip is COMMANDING, not a fraction of
-            // a maximum RPM, because sysfs publishes no maximum and there is no
-            // honest denominator for one. The exact speeds live in the tooltip,
-            // where they are never rounded into that axis.
-            tip: "every fan, brightest line first. the readout is the\n"
-                 + "fastest going - percent of each fan's own full scale\n"
-                 + "(commanded pwm duty for the chassis fans), not of a\n"
-                 + "maximum rpm, which sysfs does not publish\n\n"
-                 + fans.detail
-                 + "\n\na fan pinned at full that has never once been seen to\n"
-                 + "move is not shown at all - it says nothing about load.\n"
-                 + "a fan that STOPS reappears, marked, since that is the\n"
-                 + "one thing hiding it would cost you\n"
-                 + "\nscroll: screen brightness"
-            // A STOPPED fixed-speed fan takes the card over. It has to: the
-            // fan it is about is the one the card deliberately does not draw,
-            // so there is no line to go crit and no row to dim. Said TWICE
-            // (docs/DESIGN.md 3.5) — the readout goes `crit`, AND the secondary
-            // reading is replaced by the fan's name, because a colour alone is
-            // missable on a card that is four characters wide and the
-            // notification may have been dismissed hours ago.
-            value: fans.headline
-            sub: SysInfo.fanAlarm !== "" ? SysInfo.fanAlarm + "!" : fans.subline
-            valueColor: SysInfo.fanAlarm !== "" ? Theme.crit : Theme.text
-            // Fixed 0-100 axis, for the same reason the battery card has one:
-            // these are percentages, and autoscaling a set of fans that are all
-            // idling at 20% against their own peak would draw them flat out.
-            scaleMax: 100
-            series: fans.series
-            // Scrolling this card is screen brightness — asked for by name
-            // ("make the fan widget something i can scroll on and change the
-            // brightness of the screen"). It routes through the SAME
-            // SysInfo.adjustBrightness the `bri` status row and the
-            // XF86MonBrightness keys use, so all three share one debounce, one
-            // OSD, and one continuous range: the hardware level down to 0, then
-            // the gamma layer below it, and the gamma given back in full before
-            // the hardware climbs again. The tip says so, because a wheel is
-            // otherwise an invisible affordance.
-            onWheelUp: () => SysInfo.adjustBrightness(SettingsStore.d.brightnessStep)
-            onWheelDown: () => SysInfo.adjustBrightness(-SettingsStore.d.brightnessStep)
-        }
-        // In the fan slot on book: the BATTERY — charge over the last hour, with
-        // the wattage kept as the secondary reading.
-        //
-        // This slot held whole-machine watts first, on the reasoning that it is
-        // what a fanless box has in place of a fan gauge. But "how hard is it
-        // working" is already the cpu, psi and io cards' job three times over,
-        // while on a laptop the one question none of them answer is how long it
-        // has left — which is a slope, and therefore exactly the thing a graph
-        // says better than a number. The watts did not have to be given up for
-        // it: they are the sub reading, next to the state in words ("chg", "ac",
-        // "full"), so the card still shows the draw AND says which way it is
-        // pushing the line.
-        //
-        // CHARGING is called twice, deliberately. The sub line is the one the
-        // card drops when the three readings won't fit (MetricCard.sub), and a
-        // panel dragged narrow is exactly when you'd still want to know you are
-        // plugged in — so the percentage itself carries a "+" as well, on the
-        // line that is never dropped, and the readout goes Theme.info with it.
-        //
-        // FIXED 0-100 axis, and no arithmetic on a capacity that could be zero:
-        // this is the one card that must not autoscale, or a battery sitting at
-        // 96% would be drawn against a 96% ceiling and read as full-to-empty.
-        // With no battery found at all (a desktop, or a node named something
-        // nobody predicted) `batteryPct` is -1: the readout is "--", the history
-        // stays empty and the plot draws its frame with no line in it — the same
-        // way every other card here reports a sensor it hasn't got.
-        MetricCard {
-            width: root.cardW; height: root.cardH
-            visible: root.noGpu
-            label: "batt"
-            tip: "battery charge, one sample per 40s (an hour across).\n+ and \"chg\" mean charging; \"ac\" is plugged in but idle"
-            value: SysInfo.batteryPct < 0 ? "--"
-                   : (SysInfo.batteryStatus === 2 ? "+" : "") + SysInfo.batteryPct + "%"
-            sub: SysInfo.batteryLabel
-            // Charging outranks the level: 15% and climbing is not a warning.
-            valueColor: SysInfo.batteryPct < 0 ? Theme.text
-                      : SysInfo.batteryStatus === 2 ? Theme.info
-                      : SysInfo.batteryPct <= 10 ? Theme.crit
-                      : SysInfo.batteryPct <= 20 ? Theme.warn : Theme.text
-            series: [ { data: SysInfo.batteryHist, color: Theme.accent } ]
+    // ---- book-only: watching top from book -------------------------------
+    // The top-mirror disclosure — an 18px "top v" button that rolls out a copy
+    // of top's OWN card grid (TopStats/TopProcDrawer), directly UNDERNEATH the
+    // local graphs above. On top there is no drawer: `mirror` is false, the
+    // height collapses to 0 and the process list runs straight up to the graphs.
+    readonly property bool mirror: Host.name === "air"
+    TopProcDrawer {
+        id: topDrawer
+        visible: root.mirror
+        active: root.active
+        // Explicit height so the non-book tile does not lose the button's 18px:
+        // an invisible Item still occupies its implicitHeight for the anchor
+        // below, so collapse it to 0 off book. On book it follows its own
+        // gliding implicitHeight (disc + clipped grid), so the list below reflows.
+        height: root.mirror ? implicitHeight : 0
+        width: root.inner
+        anchors {
+            top: cards.bottom; topMargin: root.mirror ? 4 : 0
+            horizontalCenter: parent.horizontalCenter
         }
     }
 
@@ -422,7 +109,7 @@ Item {
     // hands it straight back.
     Rectangle {
         id: filterBox
-        anchors { top: cards.bottom; topMargin: 6; horizontalCenter: parent.horizontalCenter }
+        anchors { top: topDrawer.bottom; topMargin: 6; horizontalCenter: parent.horizontalCenter }
         width: root.inner
         height: 19
         color: Theme.bgAlt
@@ -602,10 +289,11 @@ Item {
         id: list
         anchors {
             top: header.bottom; topMargin: 3
-            // On book the process table gives up its bottom to the top-mirror
-            // disclosure below it; on top there is no drawer and the list runs
-            // to the tile's bottom edge as before (topDrawer height 0 there).
-            bottom: topDrawer.top; bottomMargin: root.mirror ? 4 : root.pad
+            // The process table takes everything left below the header, down to
+            // the tile's bottom edge — the top-mirror drawer now sits ABOVE it
+            // (under the graphs), so opening the drawer reflows the list down
+            // rather than eating its bottom.
+            bottom: parent.bottom; bottomMargin: root.pad
             horizontalCenter: parent.horizontalCenter
         }
         width: root.inner
@@ -741,32 +429,6 @@ Item {
             visible: Procs.rows.length === 0
             text: "reading..."
             color: Theme.textDim
-        }
-    }
-
-    // ---- book-only: watching top from book -------------------------------
-    // The top-mirror disclosure — an 18px "top v" button under the process
-    // list that rolls out a copy of top's cpu graph (TopStats/TopProcDrawer).
-    // It moved here from the cpu corner popup: the reveal shrinks the process
-    // list above it (the tile's grid height is fixed, so the chart's room comes
-    // off the list first — "then weather" would need the tile to grow into the
-    // forecast, which the list's slack makes unnecessary at this panel's size).
-    // On top there is no drawer: `mirror` is false, height collapses to 0 and
-    // the list runs to the tile bottom unchanged.
-    readonly property bool mirror: Host.name === "air"
-    TopProcDrawer {
-        id: topDrawer
-        visible: root.mirror
-        active: root.active
-        // Explicit height so the non-book tile does not lose the button's 18px:
-        // an invisible Item still occupies its implicitHeight for the anchor
-        // above, so collapse it to 0 off book. On book it follows its own
-        // gliding implicitHeight (disc + clipped chart), so the list reflows.
-        height: root.mirror ? implicitHeight : 0
-        width: root.inner
-        anchors {
-            bottom: parent.bottom; bottomMargin: root.mirror ? root.pad : 0
-            horizontalCenter: parent.horizontalCenter
         }
     }
 
