@@ -155,7 +155,11 @@ in
     };
     Service = {
       Type = "oneshot";
-      Environment = [ "PATH=${lib.makeBinPath [ pkgs.git pkgs.gh pkgs.coreutils ]}" ];
+      # findutils for xargs: sync_index() clears phantom staged deletions with
+      # `git diff -z | xargs -0 git reset`, and coreutils has no xargs — without
+      # it every sync left the committed wallpaper staged-for-deletion in the
+      # shared index.
+      Environment = [ "PATH=${lib.makeBinPath [ pkgs.git pkgs.gh pkgs.coreutils pkgs.findutils ]}" ];
       ExecStart = "%h/.config/scripts/wal-repo-sync.sh";
     };
   };
