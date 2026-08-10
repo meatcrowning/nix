@@ -136,6 +136,43 @@ The request is `POST https://api.tavily.com/search` with `api_key` in the body,
 `include_answer: true`, `max_results: 5`; the reply's `answer` and each hit's
 `title`/`url`/`content` are fed back to the model and shown in the disclosure.
 
+## File tools (jailed, on top)
+
+oracle offers the model a set of **file tools on every turn** — `list_dir`,
+`read_file`, `write_file`, `edit_file`, `move_path`, `delete_path`, `make_dir`
+(`FILE_TOOLS` in `main.py`). Reading *and* manipulation, always available: **no
+toggle**, his call. The consequence is deliberate and worth knowing — because
+every request now carries `tools`, a model with **no tool support rejects it**
+(the same reason the `web` toggle was opt-in). oracle is a tool-calling window
+now; point it at a tool-capable model.
+
+**The jail.** Every op runs through `tools/sandbox-fs.py`, which takes one ROOT
+directory and refuses to touch anything outside it, **symlinks included**
+(`os.path.realpath` + a containment check). Paths the model gives are always
+sandbox-relative. That script is the entire security model: the model gets a
+sandbox, not the filesystem. The root is `SANDBOX_ROOT` — one constant,
+`~/.local/share/oracle/sandbox`, overridable with `$ORACLE_SANDBOX`. To **widen
+it later** ("maybe we let it run free"), point that env at `~` or `/`; no code
+change.
+
+**It lives on `top`.** oracle's compute is ollama on top, so the sandbox is
+there too. On `top` `main.py` runs `sandbox-fs.py` locally; on `book` it runs it
+**over the same ssh master** `tools/ollama-tunnel.sh` holds open
+(`OLLAMA_SSH*`) — `ssh top python3 tools/sandbox-fs.py <root>` — so the tools
+operate on top's filesystem whichever machine the window is on
+(`Ollama._fs_argv`, host-branched exactly like `Backend._systemctl`). The
+executor is **pure stdlib** so top's system `python3` runs it over ssh, and it
+`mkdir -p`s the root on first use, so a fresh top needs nothing set up by hand.
+`sandbox-fs.py` speaks one JSON request on stdin → one JSON result on stdout;
+`main.py` dispatches each call as an async `QProcess` in the existing tool loop,
+concurrent with any web search, and surfaces it as a third per-turn disclosure
+(`fileToolStarted`/`fileToolDone` → the "files · N" block in `Main.qml`, §9.1).
+
+**Context is respected** (his rule 5): reads are paginated (default ~300 lines,
+a 40 KB byte ceiling, over-long lines clipped, `next_offset` to page on),
+listings are capped at 200 entries with `truncated`, binary files are refused
+rather than dumped, and every tool result is a compact JSON object.
+
 ## Packaging & verifying
 
 `home/prog/oracle.nix` builds the live-source wrapper (board.nix's template,
