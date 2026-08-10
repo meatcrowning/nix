@@ -95,7 +95,7 @@ CLAUDE_COMMS = ("claude", ".claude-wrapped")
 # HOW LONG A SPAWN MAY GO UNCONFIRMED before its card is drawn anyway. [his,
 # 2026-07-30] *"a card should appear only once the summon has actually
 # completed"* — a registration written the instant `systemd-run` returns is a
-# claim that a minister is working when all that has happened is an `execve`,
+# claim that a spirit is working when all that has happened is an `execve`,
 # and a `claude` that dies two seconds later on an API 500 left a card behind
 # for an agent that never started. Measured on book 2026-07-30: `systemd-run
 # --service-type=exec` returns 19 ms after the call, i.e. at the exec and not at
@@ -401,13 +401,13 @@ def register(agent_id, title, pid, kind="note", where="board-watch", session="",
     — board-watch registering itself, a stash, a test — leaves it True and
     nothing changes for it.
 
-    `parent` is set only for a **deepseek subminister** (`kind="subminister"`,
-    `boardwork.subminister`): it is the inbox id of the Claude minister or
-    orchestrator that delegated the chunk, so the UI can draw the subminister's
+    `parent` is set only for a **deepseek subspirit** (`kind="subspirit"`,
+    `boardwork.subspirit`): it is the inbox id of the Claude spirit or
+    orchestrator that delegated the chunk, so the UI can draw the subspirit's
     card INSET under the row that spawned it. `parentName` is resolved beside it
     (best-effort, the parent's own record) so a reader need not re-derive it.
     Both keys are ABSENT for every other kind, which is what marks a record as a
-    subminister as much as `kind` does.
+    subspirit as much as `kind` does.
     """
     rec = {"id": clean_id(agent_id), "title": title, "pid": pid,
            "confirmed": bool(confirmed),
@@ -877,7 +877,7 @@ def _stash_agents():
             state = "unowned"
         # A decision agent HAS a name — [his, 2026-08-01] two cards (an answered
         # decision each) sat in the triangle with no name on them while the
-        # minister board-watch had spawned worked on, and he came back to have
+        # spirit board-watch had spawned worked on, and he came back to have
         # it fixed. There IS somebody on it: `boardmove.start()` has already
         # stashed a live process. So the "a name is a claim that somebody is on
         # it" rule is satisfied, unlike a queued task or an interactive session,
@@ -926,8 +926,8 @@ def agents(procs=None):
                     "name": rec.get("name") or name_for(rec.get("id") or ""),
                     "where": rec.get("where") or "", "pid": rec.get("pid") or 0,
                     "session": rec.get("session") or "",
-                    # For a deepseek subminister only (else ""): the id and name
-                    # of the minister/orchestrator that delegated the chunk, so
+                    # For a deepseek subspirit only (else ""): the id and name
+                    # of the spirit/orchestrator that delegated the chunk, so
                     # the UI can inset its card under that parent's row. Every
                     # other kind carries "" here.
                     "parent": rec.get("parent") or "",
@@ -989,11 +989,11 @@ def agents(procs=None):
     # is no single one to name, none and there is nobody — both get a wording
     # that names nobody rather than an empty cell or the literal word "agent".
     # ...and it is one of the CARDS, so an unconfirmed summon does not put a
-    # name in Solomon's mouth for a minister that is not on the board yet.
+    # name in Solomon's mouth for a spirit that is not on the board yet.
     # THE TIER A WORKER RUNS ON, for a record written before the tier was stamped
     # at registration (`register(model=)`) — an agent already running when that
     # landed. The dispatch record in `taken/` is the authoritative per-task tier
-    # (`boardwork.dispatch`), joined by agent id here so an in-flight minister
+    # (`boardwork.dispatch`), joined by agent id here so an in-flight spirit
     # shows its model at once rather than only once its successor is spawned.
     # Bounded: `taken/` holds only unreaped tasks, `reap()` moving the rest out.
     taken_tier = {}
@@ -1008,7 +1008,7 @@ def agents(procs=None):
              if a.get("kind") != ORCHESTRATOR_KIND and a.get("state") == "running"
              and a.get("confirmed", True)]
     peers = [p for p in peers if p]
-    awaits = peers[0] if len(peers) == 1 else ("his ministers" if peers else "")
+    awaits = peers[0] if len(peers) == 1 else ("his spirits" if peers else "")
     for a in out:
         a["unread"] = len(for_agent(a["id"]))
         obs = bph.observe(a["id"], session=a.get("session"))
@@ -1105,7 +1105,7 @@ def agents(procs=None):
         # drawn instead of withheld. What it replaced (`speaks`) held a card back
         # until its top line was a real sentence [his, 2026-07-30], which was
         # right for the two seconds a healthy spawn takes and was also why a
-        # wedged minister was invisible for 45 minutes while burning a core
+        # wedged spirit was invisible for 45 minutes while burning a core
         # [top, 2026-07-31]: one that never reached its first API call is
         # registered, linked and has genuinely done nothing — precisely the
         # withheld state. A placeholder that is ALWAYS drawn has no such hole,
@@ -1245,10 +1245,10 @@ def describe(a):
     plus the one thing about the inbox he needs to see.
     """
     if a["state"] == "queued":
-        return "not started yet - a minister starts when a slot frees"
+        return "not started yet - a spirit starts when a slot frees"
     # The one row on this list that is not a process: Solomon standing by, and
     # he gets NO detail line. [his, 2026-07-29] his resting card is two lines —
-    # `Solomon awaits` and `summons a minister to do your bidding.` — and the
+    # `Solomon awaits` and `summons a spirit to do your bidding.` — and the
     # third, which said what you type at the top of the window goes to him, is
     # gone. The box it described is directly above the card and says so itself.
     if a["state"] == "idle":

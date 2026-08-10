@@ -1,6 +1,6 @@
 """boardundo — Ctrl+Z: take back the last thing he typed into the box.
 
-[his, 2026-07-29] *"before solomon summons a minister, allow the user to crtl+z
+[his, 2026-07-29] *"before solomon summons a spirit, allow the user to crtl+z
 to stop solomon from doing that (he should not send any messages he should just
 stop doing that specific inbox item) and then insert the prompt back into the
 prompt box for the user to edit. if the last prompt had to be placed in the
@@ -20,7 +20,7 @@ does not have to know which one it hit:
 ...and the third case, which is the one this module exists to be honest about:
 **the summon has already gone out**, and then Ctrl+Z does NOTHING and says so.
 `docs/DESIGN.md` §10.2 — refuse visibly, never no-op, and never half-cancel a
-thing that has already reached a minister.
+thing that has already reached a spirit.
 
 HOW A RUNNING SOLOMON IS ACTUALLY STOPPED. He is a `claude -p` process, so
 nothing here can reason with him — but every act he is allowed to perform goes
@@ -36,7 +36,7 @@ The stamp and the mark take the same `flock` on the same file, in the opposite
 order, which is what makes the answer never a guess: either the mark lands first
 (nothing was dispatched, and nothing now can be) or the stamp did (something is
 already out there, and `cancel()` reports it gone and changes nothing). There is
-no interleaving that both dispatches a minister and tells him it did not.
+no interleaving that both dispatches a spirit and tells him it did not.
 
 NOTHING IS DELETED. `cancelled/` is a fifth resting place beside `queue/`,
 `to/`, `taken/`, `dropped/` and `editing/`, and the conservation property
@@ -108,7 +108,7 @@ def _last_path():
 def remember(msg):
     """Called by the app when what he typed went into the queue as an ORDER.
 
-    Only the top box: a note addressed to a running minister is a different act
+    Only the top box: a note addressed to a running spirit is a different act
     with its own row, its own menu and no summon to cancel.
     """
     if not msg or msg.get("to"):
@@ -185,7 +185,7 @@ def _locked(path):
     Advisory, on the run file itself, and held across the read AND the write —
     that is what makes `claim()` and `cancel()` order themselves rather than
     race. Returns an open file, or None when there is no run (an ordinary
-    minister, a shell, a test) — in which case there is nothing to gate.
+    spirit, a shell, a test) — in which case there is nothing to gate.
     """
     if path is None or not os.path.exists(path):
         return None
@@ -225,7 +225,7 @@ def _write(fh, rec):
 def claim(aid=None):
     """May the caller act? Called by every WRITE verb in `boardctl.py`.
 
-    True for anything that is not a summoner run at all — a minister, his own
+    True for anything that is not a summoner run at all — a spirit, his own
     shell, a test — which is most callers and must stay unaffected.
 
     False only for a run he has cancelled, and then the verb refuses. Acting is

@@ -1,13 +1,13 @@
-"""What a HERMES minister is doing, read out of hermes's own session store.
+"""What a HERMES spirit is doing, read out of hermes's own session store.
 
 `boardphase` is written around Claude Code's live JSONL transcript: the spawner
 CHOOSES the session uuid (`--session-id`), so the file to tail is known before
 the agent exists, and every tool call is one `tool_use` entry in it. **A hermes
-minister has neither half of that**, and until 2026-07-31 the board simply said
+spirit has neither half of that**, and until 2026-07-31 the board simply said
 so — `HermesBackend.transcript()` returned None, the card was claim-only, and
 the log header pointed at a `~/.claude/projects/*/<uuid>.jsonl` that was never
 going to exist for that run. That last part is the one he saw: a card for a live
-minister whose drawer had nothing in it and whose header named a file that is
+spirit whose drawer had nothing in it and whose header named a file that is
 not there.
 
 WHAT HERMES ACTUALLY WRITES, measured on `top` 2026-07-31 against a live worker
@@ -25,7 +25,7 @@ the same three `boardphase`'s docstring records for the transcript:
      exact key, but hermes hides `source='tool'` sessions from his own
      `sessions list` by comparing that string LITERALLY
      (`hermes_state.py`: `COALESCE(source,'') != 'tool'`), so tagging our runs
-     `board:<id>` would put every minister in his session list. So the id is
+     `board:<id>` would put every spirit in his session list. So the id is
      DISCOVERED instead — see `resolve`.
 
 THE BINDING, and why it is a hash of the query
@@ -34,7 +34,7 @@ The spawner knows the exact text it passed to `-q`, and hermes stores that text
 verbatim as the session's first `user` message. So the spawn records a SHA-1 of
 it (`boardphase.arm`) and this module finds the one session, started at or after
 the spawn, whose first user message hashes to it. Exact, not a guess by mtime:
-two ministers spawned in the same second are two different task texts, and a
+two spirits spawned in the same second are two different task texts, and a
 RE-SEND of a byte-identical prompt is disambiguated by the time floor (the
 earlier run's session started before this spawn).
 
@@ -82,7 +82,7 @@ def fingerprint(query):
 
 
 def _connect():
-    """A READ-ONLY connection, or None. Read-only because a live minister is
+    """A READ-ONLY connection, or None. Read-only because a live spirit is
     writing this database and nothing here may ever hold a write lock on it —
     `immutable` is deliberately NOT set, since the file is being appended to."""
     path = db_path()
@@ -98,7 +98,7 @@ def _connect():
 
 def available():
     """Is there a hermes store on this host at all? A machine that has never
-    run a hermes minister has none, and that is not an error."""
+    run a hermes spirit has none, and that is not an error."""
     return os.path.isfile(db_path())
 
 
@@ -181,7 +181,7 @@ def hint(session):
 #: **Translation rather than a second classifier**: the phase vocabulary and the
 #: wording of the observed line are judgements this desktop has already made
 #: once (`boardphase`'s TOOL_PHASE / BASH_PHASE / describe_call, and his rules
-#: about the words on a card). A minister on a different runtime must not get a
+#: about the words on a card). A spirit on a different runtime must not get a
 #: different sentence for the same act.
 TRANSLATE = {
     "terminal":      ("Bash",      {"command": "command"}),
@@ -309,7 +309,7 @@ TAIL_ROWS = 12
 def _tool_lines(call):
     """A hermes tool CALL as its literal arguments — the same shape
     `main.Agents._tool_use_lines` builds for a Claude one, on purpose: the
-    drawer is one surface and a minister's runtime is not something he should
+    drawer is one surface and a spirit's runtime is not something he should
     have to read differently."""
     fn = (call or {}).get("function") or {}
     name = str(fn.get("name") or "tool")
@@ -360,7 +360,7 @@ def _result_lines(content):
 
 
 def lines(session, tail=TAIL_ROWS, tools_only=False):
-    """THE MINISTER'S LITERAL OUTPUT, live, newest at the tail.
+    """THE SPIRIT'S LITERAL OUTPUT, live, newest at the tail.
 
     The hermes half of `main.Agents._transcript_lines`, and the same rule for
     what belongs in it: every assistant turn's reasoning and text, every tool
@@ -368,7 +368,7 @@ def lines(session, tail=TAIL_ROWS, tools_only=False):
     prompt read back at him.
 
     With `tools_only`, ONLY the tool calls — for the shell band, which shows the
-    tools a minister uses and not its prose, reasoning or a tool's own output.
+    tools a spirit uses and not its prose, reasoning or a tool's own output.
     """
     if not session:
         return []

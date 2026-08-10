@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Write THIS host's hermes minister spend to ~/nix/docs/spend.<host>.json.
+"""Write THIS host's hermes spirit spend to ~/nix/docs/spend.<host>.json.
 
 [his answer, 2026-08-03] on combining the hermes spend rows across top and
 book: *build the hermes per-host export and sum both*. The Claude side of the
 board's spend section already combines — the transcripts sync through
 `claude-state` — but `~/.hermes/state.db` does not, so until this file existed
-each board only ever saw its own host's hermes ministers.
+each board only ever saw its own host's hermes spirits.
 
 THE MECHANISM. Each host runs this writer quarterly-hourly (unit in
 home/srvs/board-spend-export.nix). It reads the local ledger's `source='tool'`
@@ -58,7 +58,7 @@ def export_path():
 
 def read_sessions():
     """`[{model, started_at, ...token columns..., estimated_cost_usd}]` for this
-    host's board ministers (source='tool'), or None when the ledger cannot be
+    host's board spirits (source='tool'), or None when the ledger cannot be
     read. None means UNKNOWN — the writer keeps the previous export rather than
     overwriting a good file with nothing."""
     path = boardusage._hermes_db_path()

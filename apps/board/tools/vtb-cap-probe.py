@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""What does goetia PUSH down the vtb socket when the minister cap changes?
+"""What does goetia PUSH down the vtb socket when the spirit cap changes?
 
 The producer half of the inner-titlebar flash. `tools/vtb-flash-test.sh` and
 `tools/vtb-titletext-test.sh` measure the PIXELS the running plugin draws; this
@@ -21,7 +21,7 @@ Two things are asserted, and the second is the invariant.
 
 1. **A successful cap change publishes NOTHING** — no FOOTER, no re-REGISTER,
    no flag line — so the slot reads the same before, during and after.
-   [his, 2026-07-30] *"when i change the number of ministers in goetia itll
+   [his, 2026-07-30] *"when i change the number of spirits in goetia itll
    flash text indicating that on the inner bar"*: the confirmation was the
    flash, and it is gone (`Main.qml` -> `capItems`).
 2. **NO `FOOTER` LINE CARRYING TEXT IS EVER SENT, whatever happens** —
