@@ -209,9 +209,24 @@ FOUNDRY = "botis"
 # per authored pixel — an exact 2x2 block, pixel-identical to the old 8x12 BDF.
 PX_UNITS = 100
 UPM = round(H * PX_UNITS / 0.8)     # 750
-ASCENT_U = ASCENT * PX_UNITS         # 500 units above the baseline
-DESCENT_U = DESCENT * PX_UNITS       # 100 units below the baseline
+ASCENT_U = ASCENT * PX_UNITS         # 500 units above the baseline (GLYPH geometry)
+DESCENT_U = DESCENT * PX_UNITS       # 100 units below the baseline (GLYPH geometry)
 ADVANCE_U = ADVANCE * PX_UNITS       # 500 units
+
+# LINE-BOX metrics carry the leading the glyph cell does not. ASCENT_U/DESCENT_U
+# above are the GLYPH outline extents — the authored 6-row cell is 600u, ink
+# flush to both edges. Handing that same 600u to the hhea/OS2 line box packs
+# rows with ZERO gap: a descender (row 5) touches the next line's cap (row 0),
+# which reads as cramped/compressed line spacing EVERYWHERE the face is used
+# (measured: QFontMetrics.height() = 12px at 15px, against the DOS faces' 15px —
+# that 3px is real leading, not "dead" leading to remove). So the line box is a
+# full em (UPM), the same line height More Perfect DOS VGA carries (ascent 11 /
+# descent 4 at 15px), distributed to match it: 1px of air above the caps and 2px
+# below the descenders. Glyph OUTLINES are untouched — this only sizes the line
+# box, so a row measures 15px at 15px like every other face and rows breathe the
+# same. deskstyle.py's lineHeight table and DESIGN.md §2.1 track these numbers.
+FACE_ASCENT_U = 550                  # 500u glyph + 50u (1px) air above caps
+FACE_DESCENT_U = UPM - FACE_ASCENT_U # 200u: 100u glyph + 100u (2px) below descenders
 
 
 def merged_contours(rows):
@@ -331,7 +346,7 @@ def build_ttf(out):
 
     fb.setupGlyf(glyphs)
     fb.setupHorizontalMetrics(metrics)
-    fb.setupHorizontalHeader(ascent=ASCENT_U, descent=-DESCENT_U)
+    fb.setupHorizontalHeader(ascent=FACE_ASCENT_U, descent=-FACE_DESCENT_U)
     fb.setupNameTable({
         "familyName": FAMILY,
         "styleName": "Regular",
@@ -341,9 +356,17 @@ def build_ttf(out):
         "uniqueFontIdentifier": f"{FOUNDRY};{FAMILY};1.0",
     })
     fb.setupOS2(
-        sTypoAscender=ASCENT_U, sTypoDescender=-DESCENT_U, sTypoLineGap=0,
-        usWinAscent=ASCENT_U, usWinDescent=DESCENT_U,
+        sTypoAscender=FACE_ASCENT_U, sTypoDescender=-FACE_DESCENT_U, sTypoLineGap=0,
+        usWinAscent=FACE_ASCENT_U, usWinDescent=FACE_DESCENT_U,
     )
+    # USE_TYPO_METRICS (fsSelection bit 7) makes the padded typo line box above
+    # AUTHORITATIVE. Without it Qt/FreeType (and so every consumer: the apps, the
+    # Quickshell panel, the Pango titlebar) size a text row from the GLYPH
+    # BOUNDING BOX — 600u / 12px at 15px, ink flush to both edges — and the
+    # leading is discarded, which is exactly the cramped spacing this fixes
+    # (measured: bit clear -> QFontMetrics.height 12px, bit set -> 15px, matching
+    # More Perfect DOS VGA). Bit 6 marks the face Regular.
+    fb.font["OS/2"].fsSelection = (1 << 6) | (1 << 7)
     fb.setupPost(isFixedPitch=1)
     fb.font["head"].lowestRecPPEM = 6
     fb.save(str(out))

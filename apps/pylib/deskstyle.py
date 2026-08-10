@@ -251,18 +251,22 @@ class DeskStyle(QObject):
         off a QML `FontMetrics`); the apps never did, so every app row was
         pinned to `fontSize` and inherited whatever gap that left.
 
-        Measured on `top` 2026-08-07, `QFontMetrics.height()` per face:
+        `QFontMetrics.height()` per face (Botis re-measured 2026-08-09):
 
             px:                  10   15   17   24
             More Perfect DOS VGA 11   15   17   24
             Perfect DOS VGA 437  11   15   17   24
-            Botis 4x6             8   12   13   19
+            Botis 4x6            10   15   17   24
 
-        So the two coincide for the DOS pair only in the middle of the slider —
-        at 10px even they are a pixel out — and **Botis is 3px short at the
-        default 15**, which is the dead leading under every label in every app
-        that this property exists to remove. Bind `lineHeight` for anything that
-        means "one text row"; bind `fontSize` only for an actual font size.
+        The three now coincide across the slider. Botis used to read 8/12/13/19
+        — 3px short at the default — because its outline TTF sized a row from
+        the glyph BOUNDING BOX (the authored 6-row cell, ink flush to both
+        edges, zero leading), which read as cramped rows everywhere the face
+        was used. That is a font-build fix, not an app one: build-4x6.py now
+        pads the typo line box to a full em and flags USE_TYPO_METRICS so this
+        `height()` (and Pango's, and the panel's) sees the leading. Bind
+        `lineHeight` for anything that means "one text row"; bind `fontSize`
+        only for an actual font size.
         """
         f = QFont(self._family)
         f.setPixelSize(self._size)
