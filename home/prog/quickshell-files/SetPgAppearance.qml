@@ -2,8 +2,8 @@ import QtQuick
 import Quickshell.Io
 
 // Appearance = Paper + theme (the embedded chooser) + Wallpaper + Theme
-// (accent, font, palette + the swatch picker, rgb) + Window decorations +
-// Motion.
+// (accent, font, palette + the swatch picker, rgb) + Titlebar + Window
+// decorations + Motion.
 // (The wallpaper DRIVES this palette via wal, so it leads: it is the top
 // section, not a separate page.)
 Column {
@@ -227,8 +227,12 @@ Column {
         }
     }
 
+    // The titlebar (hyprvtb) — its own section so the controls that shape the
+    // compositor-drawn bar sit together: orientation, side, compact, its drop
+    // shadow and its unfocused dimming (docs/DESIGN.md 12). The rows below in
+    // "window decorations" are the desktop-wide chrome that is NOT the bar.
     SetSection {
-        title: "window decorations"
+        title: "titlebar"
         SetRow {
             label: "title orientation"
             SetSelect {
@@ -261,6 +265,17 @@ Column {
             }
         }
         SetRow {
+            label: "dim unfocused windows"
+            SetToggle {
+                checked: page.d.dimUnfocused
+                onToggled: (v) => { page.d.dimUnfocused = v; SettingsStore.save(); }
+            }
+        }
+    }
+
+    SetSection {
+        title: "window decorations"
+        SetRow {
             // Desktop-wide: it reaches all seven apps through settings.json ->
             // pylib/deskstyle.py -> apps/qmlcommon/VScroll.qml. It sits under
             // Appearance beside the font and the motion controls because those
@@ -287,13 +302,6 @@ Column {
             SetToggle {
                 checked: page.d.desktopIcons
                 onToggled: (v) => { page.d.desktopIcons = v; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "dim unfocused windows"
-            SetToggle {
-                checked: page.d.dimUnfocused
-                onToggled: (v) => { page.d.dimUnfocused = v; SettingsStore.save(); }
             }
         }
     }
