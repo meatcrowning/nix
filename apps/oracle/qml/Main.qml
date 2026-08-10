@@ -316,22 +316,91 @@ Window {
             id: replyFlick
             anchors { fill: parent; margins: 8; rightMargin: replyScroll.barW + 4 }
             contentWidth: width
-            contentHeight: reply.height
+            contentHeight: replyCol.height
             clip: true
 
-            PixelText {
-                id: reply
+            Column {
+                id: replyCol
                 width: replyFlick.width
-                wrapMode: Text.Wrap
-                // The answer once it starts; the reasoning (dimmed) while a
-                // thinking model is still reasoning; an error; else a hint.
-                text: win.replyText !== "" ? win.replyText
-                      : (win.thinkText !== "" ? win.thinkText
-                         : (win.status !== "" ? win.status
-                            : (Ollama.busy ? "…" : "ask the model something below.")))
-                color: win.replyText !== "" ? Theme.text
-                       : (win.thinkText !== "" ? Theme.textDim
-                          : (win.status !== "" ? Theme.crit : Theme.textDim))
+                spacing: 8
+
+                // The model's reasoning, in a COLLAPSIBLE disclosure rather than
+                // shown inline in full. It auto-opens while a thinking model is
+                // still reasoning with no answer yet (so the window is not blank),
+                // and folds to its one-line toggle the moment the answer starts;
+                // the user may toggle it either way, which then wins. Subordinated
+                // per docs/DESIGN.md §9.1 — indented, a `border` hairline at the
+                // indent, text one step dim, never accent — and revealed by §6.2's
+                // clipped growth from under the toggle.
+                Item {
+                    id: think
+                    width: parent.width
+                    visible: win.thinkText !== ""
+                    height: visible ? thinkToggle.height + thinkReveal.height : 0
+
+                    property bool userSet: false
+                    property bool userOpen: false
+                    readonly property bool expanded: userSet ? userOpen
+                                        : (Ollama.busy && win.replyText === "")
+
+                    Item {
+                        id: thinkToggle
+                        width: parent.width
+                        height: Theme.lineHeight
+                        Row {
+                            anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                            spacing: 6
+                            PixelText { text: think.expanded ? "-" : "+"; color: Theme.textDim }
+                            PixelText { text: "thinking"; color: Theme.textDim }
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: { think.userOpen = !think.expanded; think.userSet = true; }
+                        }
+                    }
+
+                    Item {
+                        id: thinkReveal
+                        anchors { top: thinkToggle.bottom; left: parent.left; right: parent.right }
+                        clip: true
+                        height: think.expanded ? thinkBody.height : 0
+                        Behavior on height {
+                            NumberAnimation { duration: motion.ms(motion.slideMs)
+                                              easing.type: motion.slideEasing }
+                        }
+                        Rectangle {
+                            anchors { left: parent.left; leftMargin: 3
+                                      top: parent.top; bottom: parent.bottom }
+                            width: Theme.ctrlBorder
+                            color: Theme.border
+                        }
+                        PixelText {
+                            id: thinkBody
+                            anchors { top: parent.top; left: parent.left; right: parent.right
+                                      leftMargin: 12 }
+                            wrapMode: Text.Wrap
+                            text: win.thinkText
+                            color: Theme.textDim
+                        }
+                    }
+                }
+
+                // The answer once it starts, an error, or the opening hint. While
+                // a thinking model is still reasoning (the block above carries it)
+                // this stays empty rather than repeating a "…".
+                PixelText {
+                    id: reply
+                    width: parent.width
+                    wrapMode: Text.Wrap
+                    visible: text !== ""
+                    text: win.replyText !== "" ? win.replyText
+                          : (win.status !== "" ? win.status
+                             : (Ollama.busy ? (win.thinkText !== "" ? "" : "…")
+                                : "ask the model something below."))
+                    color: win.replyText !== "" ? Theme.text
+                           : (win.status !== "" ? Theme.crit : Theme.textDim)
+                }
             }
 
             // Follow the stream to the bottom as it grows.
