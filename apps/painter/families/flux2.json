@@ -35,13 +35,14 @@
     "resolution_steps": 1,
     "upscale_method": "nearest-exact",
     "shift": 6.0,
+    "ref_strength": 0.7,
     "filename_prefix": "painter-edit",
     "defaults": {
       "steps": 15,
-      "cfg": 1.0,
+      "cfg": 2.5,
       "sampler_name": "euler"
     },
-    "note": "Editing is a different pipeline, not a flag: no empty latent, no negative prompt, and the size comes out of the dropped image. Numbers transcribed from the workflow behind Flux2-Klein_0000*.png."
+    "note": "Editing is a different pipeline, not a flag: no empty latent, no negative prompt, and the size comes out of the dropped image. Numbers transcribed from the workflow behind Flux2-Klein_0000*.png. ref_strength (0.7) attenuates the ReferenceLatent prime and cfg (2.5, up from the source workflow's 1.0) lets the prompt drive regeneration: measured on a mirror-blur OUTPAINT prime, this doubles the regenerated margin's high-frequency detail over the blur floor instead of the margins reading as a passthrough of the blur."
   },
   "lora": {
     "aliases": {},

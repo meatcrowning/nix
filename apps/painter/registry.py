@@ -570,6 +570,19 @@ class Registry:
         # BOTH conditioning tails. ReferenceLatent's own schema: "If the model
         # supports it you can chain multiple to set multiple reference images."
         # Only the primary (above) sizes the output; the rest are references.
+        # Reference strength: the VAE-encoded prime is attenuated by
+        # `ref_scale` (LatentMultiply) before it reaches the ReferenceLatent
+        # nodes.  At 1.0 the model tracks the reference so tightly that an
+        # OUTPAINT prime's mirror-blur margins read as a passthrough of the
+        # blur rather than real regeneration; pulling it below 1.0 (with a
+        # matching CFG lift, see below) frees the margins to regenerate while
+        # the shared reference still holds the canvas coherent.  Measured on a
+        # real mirror-blur prime, ref 0.7 + cfg 2.5 doubled the margin's
+        # high-frequency energy over the blur floor at the lowest centre drift
+        # of the strong-regen settings.
+        ref_strength = float(p.get("ref_strength", spec.get("ref_strength", 1.0)))
+        g.set_input("ref_scale", "multiplier", ref_strength)
+
         pos_tail = [g.id_of("ref_pos"), 0]
         neg_tail = [g.id_of("ref_neg"), 0]
         for i, ref in enumerate(images[1:], start=2):
@@ -582,21 +595,26 @@ class Registry:
             ve = g.add_node("VAEEncode",
                             {"pixels": [si, 0], "vae": [g.id_of("vae"), 0]},
                             f"vae_encode_{i}", f"VAE Encode {i}")
+            rl = g.add_node("LatentMultiply",
+                            {"samples": [ve, 0], "multiplier": ref_strength},
+                            f"ref_scale_{i}", f"Reference Strength {i}")
             rp = g.add_node("ReferenceLatent",
-                            {"conditioning": list(pos_tail), "latent": [ve, 0]},
+                            {"conditioning": list(pos_tail), "latent": [rl, 0]},
                             f"ref_pos_{i}", f"Set Reference Latent {i}")
             rn = g.add_node("ReferenceLatent",
-                            {"conditioning": list(neg_tail), "latent": [ve, 0]},
+                            {"conditioning": list(neg_tail), "latent": [rl, 0]},
                             f"ref_neg_{i}", f"Set Reference Latent (negative) {i}")
             pos_tail, neg_tail = [rp, 0], [rn, 0]
         if len(images) > 1:
             g.set_input("guider", "positive", pos_tail)
             g.set_input("guider", "negative", neg_tail)
 
+        ed = spec.get("defaults") or {}
         g.set_input("model_sampling", "shift", float(p.get("shift", spec.get("shift", 6.0))))
-        g.set_input("sampler_select", "sampler_name", p.get("sampler_name", "euler"))
-        g.set_input("scheduler", "steps", int(p.get("steps", 15)))
-        g.set_input("guider", "cfg", float(p.get("cfg", 1.0)))
+        g.set_input("sampler_select", "sampler_name",
+                    p.get("sampler_name", ed.get("sampler_name", "euler")))
+        g.set_input("scheduler", "steps", int(p.get("steps", ed.get("steps", 15))))
+        g.set_input("guider", "cfg", float(p.get("cfg", ed.get("cfg", 1.0))))
         g.set_input("noise", "noise_seed", int(p.get("seed", 0)))
         g.set_input("latent", "batch_size", int(p.get("batch_size", 1)))
         g.set_input("save", "filename_prefix",
@@ -609,7 +627,10 @@ class Registry:
                 raise G.ValidationError(problems)
         params = {**p, "positive": pos, "negative": "", "kind": "edit",
                   "megapixels": mp, "input_image": image,
-                  "input_images": images, "edit": True}
+                  "input_images": images, "edit": True,
+                  "cfg": float(p.get("cfg", ed.get("cfg", 1.0))),
+                  "steps": int(p.get("steps", ed.get("steps", 15))),
+                  "ref_strength": ref_strength}
         # What the recorded parameters must NOT claim: Flux2Scheduler takes a
         # step count and the image's size and nothing else, so the family's
         # image-path scheduler/denoise/add_noise would be three settings the PNG
