@@ -1,5 +1,11 @@
 # `oracle` — a minimal ollama chat window
 
+**User-facing name is "chatter"** (window title, `Name=` in the desktop
+entry) — presentation only, same as goetia keeps its store named board. The
+source directory, module/file names, `ORACLE_SANDBOX`, and the runtime data
+paths (`~/.local/share/oracle/{sandbox,sessions}`) all keep the `oracle` name
+on purpose, so existing sessions and the sandbox jail need no migration.
+
 The smallest of the vendored apps, and deliberately so. Two things at its core:
 a **model selector** filled from the local ollama daemon's `/api/tags`, and a
 **prompt box** that sends one chat turn to `/api/chat` and shows the reply as it
@@ -51,8 +57,16 @@ used and an agent-suggested ranking (see *The model selector* below).
   reduceMotion). The token count PERSISTS in the heading once counted (the
   ellipsis is the only part that ends with the thinking), so a folded block
   still reports its size after the answer starts — the heading is all that shows
-  when it is collapsed. No conversation history persists across launches (the
-  selected model does — see *The model selector*).
+  when it is collapsed. **The model sees the whole current chat, not just the
+  latest prompt**: every `send()` builds `history` from `chatLog` (skipping
+  error rows and empty streams) and calls `Ollama.send(model, prompt,
+  JSON.stringify(history))`; no cap on its length yet, so a very long chat
+  resends its whole transcript every turn. Nothing persists **across
+  launches** — only the current session's turns feed a send, and only while
+  the window stays open (the selected model does persist — see *The model
+  selector*; a whole conversation persists too, but only via *Sessions*
+  below, and the model cannot see a past session unless it calls
+  `read_session`).
   - **The sources disclosure** is the same subordinated, folded-by-default
     block for a turn's web searches: `searching the web…` (one step brighter,
     animated ellipsis) while a search is live, settling to `web · N sources`
@@ -115,6 +129,19 @@ naming modal.
   override `$ORACLE_SESSIONS`). ONE canonical store, not per-machine (his call,
   "for now"), kept where oracle's compute is — on `top`, reached from `book`
   over the tunnel's ssh master exactly like the file-tool sandbox.
+- **The model can read past sessions too**, not just this one — a small
+  **read-only** tool pair (`SESSION_TOOLS` in `main.py`, offered on every turn
+  alongside the file/web/time tools): `list_sessions` (id, title, updated,
+  turn count) and `read_session` (full transcript by id, see
+  `SESSION_TOOL_NAMES`, dispatched in `_run_tool_calls` via
+  `_run_session_tool`). It shells out to `tools/sessions-store.py` exactly
+  like `Sessions` does — `list`/`load` ops only — over the same host branch
+  (`Ollama._sessions_argv`, local on `top`, ssh from `book`, since `Ollama`
+  and `Sessions` are separate QObjects with no cross-ref). No `save`/`delete`
+  is ever exposed to the model, and `sessions-store.py`'s own id validation
+  (a bare filename) is the only jail this needs — sessions already live
+  outside `ORACLE_SANDBOX`, so this was the narrower option over widening the
+  sandbox to cover them.
 
 ## Talking to ollama
 
