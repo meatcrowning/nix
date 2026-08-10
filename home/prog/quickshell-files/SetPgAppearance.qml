@@ -233,29 +233,12 @@ Column {
     // "window decorations" are the desktop-wide chrome that is NOT the bar.
     SetSection {
         title: "titlebar"
-        SetRow {
-            label: "title orientation"
-            SetSelect {
-                options: ["vertical", "horizontal"]
-                value: page.d.titleOrientation
-                onChanged: (v) => { page.d.titleOrientation = v; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "titlebar side"
-            SetSelect {
-                options: ["right", "left", "top", "bottom"]
-                value: page.d.titlebarEdge
-                onChanged: (v) => { page.d.titlebarEdge = v; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "compact titlebar"
-            SetToggle {
-                checked: page.d.compact
-                onToggled: (v) => { page.d.compact = v; SettingsStore.save(); }
-            }
-        }
+        // Side, orientation and compact are set by direct manipulation on an
+        // interactive mock of the bar — the three GLOBAL knobs only; there is
+        // no global key for which app buttons show (they are per-app over the
+        // vtbclient socket). It writes the same store keys the old three rows
+        // did, so SettingsApply.qml's live-apply is unchanged.
+        SetTitlebarMock { }
         SetRow {
             label: "drop shadow"
             SetSlider {
