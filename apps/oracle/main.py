@@ -1030,8 +1030,22 @@ class Sessions(QObject):
     @staticmethod
     def _store_argv():
         """The command that runs one store op through tools/sessions-store.py
-        against the canonical store. Local here; the `book`-over-ssh branch lands
-        with the shared-store change."""
+        against the canonical store on top. On `top` it is local; on `book` it
+        goes over the same ssh master tools/ollama-tunnel.sh holds open
+        (OLLAMA_SSH*), so the sessions/transcripts live in one canonical place
+        keyed to top and both machines share them. The op JSON is written to
+        stdin."""
+        if ON_BOOK:
+            host = os.environ.get("OLLAMA_SSH_HOST", "top")
+            ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+            argv = [ssh, "-o", "BatchMode=yes"]
+            ctl = os.environ.get("OLLAMA_SSH_CTL")
+            if ctl:
+                argv += ["-o", "ControlMaster=auto", "-o", "ControlPersist=30",
+                         "-o", "ControlPath=" + ctl]
+            argv += [host, "python3", shlex.quote(SESSIONS_SCRIPT),
+                     shlex.quote(SESSIONS_ROOT)]
+            return argv
         return [sys.executable, SESSIONS_SCRIPT, SESSIONS_ROOT]
 
     def _run(self, req, on_done):
