@@ -158,6 +158,7 @@ class Ollama(QObject):
     replyStarted = Signal()
     replyChunk = Signal(str)
     replyThinking = Signal(str)   # a "thinking" model's reasoning deltas
+    replyThinkTokens = Signal(int)  # running count of reasoning tokens this turn
     replyDone = Signal()
     replyError = Signal(str)
 
@@ -168,6 +169,7 @@ class Ollama(QObject):
         self._busy = False
         self._reply = None       # the in-flight chat QNetworkReply, if any
         self._buf = b""          # partial NDJSON line carried between reads
+        self._think_tokens = 0   # reasoning tokens seen this turn (one per delta)
 
     # ---- model list ----
 
@@ -223,6 +225,7 @@ class Ollama(QObject):
         req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
                       "application/json")
         self._buf = b""
+        self._think_tokens = 0
         self._set_busy(True)
         self.replyStarted.emit()
         reply = self._nam.post(req, body)
@@ -264,6 +267,11 @@ class Ollama(QObject):
             think = msg.get("thinking", "")
             if think:
                 self.replyThinking.emit(think)
+                # ollama streams one token per NDJSON frame, so a running frame
+                # count is the reasoning's live token count — surfaced so the
+                # collapsed heading can show progress while it thinks.
+                self._think_tokens += 1
+                self.replyThinkTokens.emit(self._think_tokens)
             piece = msg.get("content", "")
             if piece:
                 self.replyChunk.emit(piece)

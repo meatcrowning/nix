@@ -78,6 +78,12 @@ Window {
             if (!cur.thinkingActive)
                 chatLog.setProperty(win.activeIndex, "thinkingActive", true);
         }
+        // The live reasoning-token count, written into the active row so the
+        // collapsed heading shows it climbing while the model thinks.
+        function onReplyThinkTokens(n) {
+            if (win.activeIndex < 0) return;
+            chatLog.setProperty(win.activeIndex, "thinkTokens", n);
+        }
         function onReplyDone() {
             if (win.activeIndex < 0) return;
             chatLog.setProperty(win.activeIndex, "streaming", false);
@@ -116,7 +122,7 @@ Window {
                          thinking: "", thinkingActive: false,
                          streaming: false, isError: false });
         chatLog.append({ isUser: false, who: win.model, body: "",
-                         thinking: "", thinkingActive: false,
+                         thinking: "", thinkingActive: false, thinkTokens: 0,
                          streaming: true, isError: false });
         win.activeIndex = chatLog.count - 1;
         Ollama.send(win.model, p);
@@ -424,13 +430,37 @@ Window {
                                     id: thinkToggle
                                     width: parent.width
                                     height: Theme.lineHeight
+                                    // The ellipsis cycles 0→1→2→3 dots while the
+                                    // reasoning streams, so the heading reads as
+                                    // alive even between token deltas. One roll
+                                    // beat per dot (§6.2) — no fresh literal, and
+                                    // reduceMotion collapses it to a static "…".
+                                    property int dotPhase: 0
+                                    readonly property string dots:
+                                        motion.reduceMotion ? "…" : "...".substring(0, dotPhase)
+                                    Timer {
+                                        interval: motion.ms(motion.slideMs)
+                                        running: thinkingActive && !motion.reduceMotion
+                                        repeat: true
+                                        onTriggered: thinkToggle.dotPhase = (thinkToggle.dotPhase + 1) % 4
+                                    }
                                     Row {
                                         anchors { left: parent.left; verticalCenter: parent.verticalCenter }
                                         spacing: 6
                                         PixelText { text: think.expanded ? "-" : "+"; color: Theme.textDim }
                                         PixelText {
-                                            text: thinkingActive ? "thinking…" : "thinking"
+                                            text: "thinking"
                                             color: thinkingActive ? Theme.text : Theme.textDim
+                                        }
+                                        // Live token count + animated ellipsis while
+                                        // active; both gone once the answer starts
+                                        // (§9.1 subordinated — one step dim, never
+                                        // accent, so it does not compete).
+                                        PixelText {
+                                            visible: thinkingActive
+                                            text: (thinkTokens > 0 ? "· " + thinkTokens + " " : "")
+                                                  + thinkToggle.dots
+                                            color: Theme.textDim
                                         }
                                     }
                                     MouseArea {
@@ -466,18 +496,28 @@ Window {
                                 }
                             }
 
-                            // The turn's text: the prompt for a `you` row, the
-                            // answer for a model row. A model row with no content
-                            // yet shows "…" only when nothing else is speaking (no
+                            // The turn's text. User prompts and error lines stay
+                            // verbatim on PixelText (PlainText — never interpreted,
+                            // the shared guard). A model row with no content yet
+                            // shows "…" only when nothing else is speaking (no
                             // reasoning block carrying the wait).
                             PixelText {
                                 width: parent.width
                                 wrapMode: Text.Wrap
                                 visible: text !== ""
-                                text: body !== "" ? body
-                                      : (!isUser && streaming
+                                text: isUser || isError ? body
+                                      : (body === "" && streaming
                                          ? (thinking !== "" ? "" : "…") : "")
                                 color: isError ? Theme.crit : Theme.text
+                            }
+
+                            // The model's answer, rendered as Markdown (the reply
+                            // comes back in it — docs/DESIGN.md §2). Only the
+                            // assistant body; user text and errors above stay plain.
+                            MarkdownText {
+                                width: parent.width
+                                visible: !isUser && !isError && body !== ""
+                                text: body
                             }
                         }
                     }
