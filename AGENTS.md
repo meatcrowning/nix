@@ -424,12 +424,19 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   every commit touching `hyprland.lua` until 2026-08-07 — harness
   `seed-gate-test.sh`),
   `prune-worktrees.sh` (aliased `wtprune`),
-  `comfy-gate.sh` (**a heavy build and a ComfyUI render never overlap**: called
-  by `rebuild-top` when the plan has local compiles in it, it waits out any
-  render in flight — never interrupts one — then frees the weights, stops and
-  masks `comfy-painter`, and puts it back afterwards whatever happens to the
-  build, telling him each way. A power-cycle on 2026-08-09 is why. Harness
-  `comfy-gate-test.sh`, which drives a stub queue and never his backend),
+  `heavy-gate.sh` (**a heavy build never meets a loaded GPU backend without his
+  say-so**: called by `rebuild-top` when the plan has local compiles in it, it
+  raises a CRITICAL toast naming what is loaded — ComfyUI's resident weights,
+  ollama's warm models and their size — with **Stop & rebuild** / **Rebuild
+  anyway**. On *stop* it waits out any render in flight (never interrupts one),
+  frees the weights, stops and runtime-masks `comfy-painter` and/or `ollama`,
+  and puts back exactly what it took whatever happens to the build; on *anyway*,
+  or on no answer inside the timeout, the build runs throttled beside them. A
+  power-cycle on 2026-08-09 is why the gate exists, and his "ask me" is why it
+  no longer decides alone. `REBUILD_IGNORE_GPU=1` skips it,
+  `REBUILD_ASK_TIMEOUT` sets the wait. Harness `heavy-gate-test.sh`, which
+  drives stub endpoints and never his backends; `heavy-gate.sh demo` is how HE
+  raises the real toast),
   `sandbox.sh`, `leak-check.sh` (a test that leaked into his live session —
   residue *and* the live symptoms; preflight runs it) and `lib/session-guard.sh`
   (sourced by the harnesses; the anti-fall-through guards, see "Testing without

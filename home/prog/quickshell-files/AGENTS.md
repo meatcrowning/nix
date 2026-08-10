@@ -1916,6 +1916,14 @@ capability says, the card is what makes it true.
   A sender that needs the buttons should check the setting and offer a
   text fallback — `repo-updates` (`home/srvs/repo-updates.nix`) reads
   `settings.json` directly and names its CLI instead.
+- **Except at urgency 2, which always draws them.** A critical toast is the
+  level reserved for a question that has to be answered — `tools/heavy-gate.sh`
+  asking whether to stop ComfyUI/ollama for a heavy rebuild — and one whose
+  answer is drawn nowhere is the affordance-that-silently-fails DESIGN §10
+  forbids. Note the asymmetry that keeps this honest: the card draws MORE than
+  the server advertised, which loses nothing. The bug the gate exists to
+  prevent is the other direction, advertising buttons and then swallowing
+  them.
 
 **Do not test this by firing a toast.** A notification is his screen; the
 harness (`tools/repo-updates-test.py`) replaces `notify-send` with a log line,

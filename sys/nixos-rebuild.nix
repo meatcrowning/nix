@@ -84,7 +84,8 @@ let
       fi
     fi
 
-    # A heavy build and a ComfyUI render never run at the same time.
+    # A heavy build and a loaded GPU backend never run at the same time —
+    # unless he says they may.
     #
     # The freeze on 2026-08-09 was a rebuild that pulled in ollama-cuda — not
     # in any substituter at that revision, so nvcc started compiling ggml's
@@ -92,27 +93,34 @@ let
     # RAM. sys/nix-build-limits.nix makes that survivable; this makes it not
     # happen, which is better: rationing two heavy jobs against each other just
     # makes both of them bad. An agent has no way to know a one-line nix change
-    # means half an hour of nvcc, so the wrapper works it out itself — waits for
-    # any render to finish, gets comfy out of the way, builds, puts it back.
+    # means half an hour of nvcc, so the wrapper works it out itself.
     #
-    # WHICH SIGNAL, and this one is easy to get wrong: comfy keeps its weights
-    # resident after a run, so VRAM in use says nothing about whether it is
-    # working. The question is only ever "is a job in flight", which is comfy's
-    # own queue (`/prompt` -> queue_remaining). Weights merely sitting there are
-    # freed, not waited on.
+    # WHOSE CALL IT IS (2026-08-09, his): not the agent's. The wrapper used to
+    # suspend comfy on its own judgement; now a loaded backend in front of a
+    # heavy plan raises a CRITICAL toast — "Stop & rebuild" / "Rebuild anyway" —
+    # and does what he picks. Silence for the ask timeout is "anyway", because
+    # an unattended machine must not sit on the held rebuild lock waiting for a
+    # click; that path is the throttled one, which the cgroup caps make safe.
+    #
+    # BOTH backends count, and "loaded" is not "busy": comfy keeps its weights
+    # resident after a run and ollama keeps a model warm for its whole
+    # keep_alive, so a backend that is answering nothing at all can still be
+    # holding 23 GB. That is the memory the build has to fit around, so warm is
+    # reason enough to ask. (A comfy render actually in flight is still never
+    # interrupted — on "Stop & rebuild" it is waited out first.)
     #
     # "Heavy" is name-matched against the dry-run plan, because every switch
     # builds a handful of tiny units (etc, system-path, unit-*.drv) and gating
     # on those would mean gating always. The plan costs ~12s of eval, paid only
-    # when comfy is actually up. Skip the whole thing with REBUILD_IGNORE_GPU=1.
-    GATE=/home/lam/nix/tools/comfy-gate.sh
+    # when a backend is actually loaded. Skip the whole thing with
+    # REBUILD_IGNORE_GPU=1; REBUILD_ASK_TIMEOUT sets how long the toast waits.
+    GATE=/home/lam/nix/tools/heavy-gate.sh
     resume_needed=0
     throttle=
     cleanup() { [ "$resume_needed" = 1 ] && "$GATE" resume; }
     trap cleanup EXIT INT TERM
 
-    if [ "''${REBUILD_IGNORE_GPU:-0}" != 1 ] && [ -x "$GATE" ] \
-       && [ "$("$GATE" status)" != down ]; then
+    if [ "''${REBUILD_IGNORE_GPU:-0}" != 1 ] && [ -x "$GATE" ] && "$GATE" loaded; then
       heavy=$(${pkgs.nixos-rebuild}/bin/nixos-rebuild dry-build --flake /home/lam/nix#top 2>&1 \
         | ${pkgs.gnugrep}/bin/grep -oE '/nix/store/[^ ]*\.drv' \
         | ${pkgs.gnugrep}/bin/grep -Ei 'cuda|cudnn|torch|llama|ollama|hyprland|qtwebengine|chromium|llvm|linux-[0-9]|mesa|blender|rustc|gcc-[0-9]' \
@@ -120,15 +128,22 @@ let
       if [ -n "$heavy" ]; then
         echo "rebuild-top: this switch compiles locally:" >&2
         printf '  %s\n' "$heavy" >&2
-        # A render in flight is waited out, never interrupted. If it is STILL
-        # going an hour later, we do not suspend and do not wait forever — the
-        # build goes ahead beside it, where sys/nix-build-limits.nix is what
-        # keeps the machine alive. That is the only path that still throttles.
-        if "$GATE" wait 3600 && "$GATE" suspend; then
-          resume_needed=1
-        else
+        echo "rebuild-top: backends up: $("$GATE" status)" >&2
+        answer=$("$GATE" ask "''${REBUILD_ASK_TIMEOUT:-300}")
+        echo "rebuild-top: he answered: $answer" >&2
+        if [ "$answer" = stop ]; then
+          # A render in flight is waited out, never interrupted. If it is STILL
+          # going an hour later we do not suspend and do not wait forever — the
+          # build goes ahead beside it, under the cgroup caps.
+          if "$GATE" wait 3600 && "$GATE" suspend; then
+            resume_needed=1
+          else
+            throttle="-p MemoryHigh=8G -p MemoryMax=14G -p CPUWeight=20 -p IOWeight=20"
+            echo "rebuild-top: could not free the backends after all — building throttled to 8G/14G at a fifth of the CPU and I/O weight" >&2
+          fi
+        elif [ "$answer" != clear ]; then
           throttle="-p MemoryHigh=8G -p MemoryMax=14G -p CPUWeight=20 -p IOWeight=20"
-          echo "rebuild-top: building alongside comfy, throttled to 8G/14G at a fifth of the CPU and I/O weight" >&2
+          echo "rebuild-top: building alongside the backends, throttled to 8G/14G at a fifth of the CPU and I/O weight" >&2
         fi
       fi
     fi
