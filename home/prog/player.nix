@@ -17,7 +17,12 @@
 # Runs the LIVE source at ~/nix/apps/player/main.py — .py/.qml edits need no
 # rebuild, only dep/packaging changes do.
 let
-  pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ps.mpv ps.mutagen ps.mpris-server ]);
+  # ps.pillow: "create systheme" (main.py's createSysthemeFromAlbum) shells
+  # out to apps/pylib/systheme.py via sys.executable, i.e. THIS interpreter —
+  # without Pillow here the entry point dies with "Pillow is required" on top
+  # (book already has it for free: air-launch.sh runs /usr/bin/python3, which
+  # dnf's python3-pillow already covers).
+  pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ps.mpv ps.mutagen ps.mpris-server ps.pillow ]);
 
   player =
     if host == "air" then
