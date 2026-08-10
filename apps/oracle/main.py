@@ -51,10 +51,11 @@ OLLAMA = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 #: without a key the tool reports itself unavailable rather than reaching out.
 TAVILY_URL = "https://api.tavily.com/search"
 
-#: The web-search tool offered to ollama when the "web" toggle is on. ollama's
-#: function-calling: the model may emit a `tool_calls` entry naming this and we
-#: run it, feed the result back as a `role: tool` message, and let the model
-#: summarize and cite (the loop lives in `Ollama` below).
+#: The web-search tool offered to ollama on EVERY turn (his call — no toggle,
+#: same as the file tools). ollama's function-calling: the model may emit a
+#: `tool_calls` entry naming this and we run it, feed the result back as a
+#: `role: tool` message, and let the model summarize and cite (the loop lives in
+#: `Ollama` below).
 WEB_SEARCH_TOOL = {
     "type": "function",
     "function": {
@@ -356,7 +357,6 @@ class Ollama(QObject):
         self._buf = b""          # partial NDJSON line carried between reads
         self._think_tokens = 0   # reasoning tokens seen this turn (one per delta)
         self._model = ""         # the model for the current turn
-        self._web = False        # offer the web_search tool this turn?
         self._messages = []      # the growing message list across a tool loop
         self._acc_content = ""   # assistant content accumulated in this sub-turn
         self._tool_calls = []    # tool calls accumulated in this sub-turn
@@ -471,13 +471,12 @@ class Ollama(QObject):
 
     # ---- one streamed chat turn ----
 
-    @Slot(str, str, bool)
-    def send(self, model, prompt, web=False):
+    @Slot(str, str)
+    def send(self, model, prompt):
         if not model or not prompt.strip():
             return
         self.cancel()          # one turn at a time
         self._model = model
-        self._web = bool(web)
         self._messages = [{"role": "user", "content": prompt}]
         self._think_tokens = 0
         self._rounds = 0
@@ -486,21 +485,19 @@ class Ollama(QObject):
         self._post_chat()
 
     def _post_chat(self):
-        """POST the current message list, streaming, offering the web_search
-        tool when the turn asked for it. Re-entered after each tool round."""
+        """POST the current message list, streaming, offering every tool.
+        Re-entered after each tool round."""
         payload = {
             "model": self._model,
             "messages": self._messages,
             "stream": True,
         }
-        # The file tools are offered on EVERY turn (his call — no toggle); the
-        # web_search tool only when the web chip is lit. A model with no tool
-        # support will reject a request carrying tools — the tradeoff of
-        # always-on file tools, spelled out in apps/oracle/AGENTS.md.
-        tools = list(FILE_TOOLS)
-        if self._web:
-            tools.append(WEB_SEARCH_TOOL)
-        payload["tools"] = tools
+        # ALL tools are offered on EVERY turn (his call — no per-tool toggle):
+        # the file tools and web_search alike. A model with no tool support will
+        # reject a request carrying tools — the tradeoff of always-on tools,
+        # spelled out in apps/oracle/AGENTS.md; point oracle at a tool-capable
+        # model.
+        payload["tools"] = list(FILE_TOOLS) + [WEB_SEARCH_TOOL]
         body = json.dumps(payload).encode("utf-8")
         req = QNetworkRequest(QUrl(OLLAMA + "/api/chat"))
         req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,

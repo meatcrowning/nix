@@ -17,16 +17,17 @@ is the **model selector**: the model last used and an agent-suggested ranking
   a time — a new `send` aborts any reply still streaming. `Palette` and
   `Titlebar` are the same wal-palette-watch and vtb-chrome bridge every app here
   carries (copied from `reader/main.py`).
-  - **The web_search tool loop.** When the `web` toggle is on, `send` offers
-    ollama a `web_search` function tool (`WEB_SEARCH_TOOL`). If the model emits
-    a `tool_calls` frame, `_on_finished` runs each call — `web_search` hits
-    Tavily (`_tavily_search` → `TAVILY_URL`), the result is fed back as a
-    `role: tool` message, and `_post_chat` re-posts so the model summarizes and
-    cites. It loops until the model stops calling tools or `MAX_TOOL_ROUNDS`
-    (4). `webSearchStarted`/`webSearchDone`/`webSearchError` surface the search
-    to QML for its sources disclosure. The tool is **opt-in** because a model
-    with no tool support rejects a request that carries `tools` — off by default,
-    normal chat is unchanged and never handed tools it would refuse.
+  - **The web_search tool loop.** `send` offers ollama a `web_search` function
+    tool (`WEB_SEARCH_TOOL`) on **every** turn — no toggle, always on, same as
+    the file tools (his call). If the model emits a `tool_calls` frame,
+    `_on_finished` runs each call — `web_search` hits Tavily (`_tavily_search` →
+    `TAVILY_URL`), the result is fed back as a `role: tool` message, and
+    `_post_chat` re-posts so the model summarizes and cites. It loops until the
+    model stops calling tools or `MAX_TOOL_ROUNDS` (4).
+    `webSearchStarted`/`webSearchDone`/`webSearchError` surface the search to
+    QML for its sources disclosure. The consequence is the same one the file
+    tools already carry: **a model with no tool support rejects a request that
+    carries `tools`**, so point oracle at a tool-capable model.
 - **`qml/Main.qml`** — one file: the selector row, a `KineticFlickable`
   conversation area, and a prompt `TextEdit` (Ctrl+Enter sends). The model
   dropdown is inline rather than a shared `CtxMenu`, keeping this window's
@@ -117,8 +118,9 @@ tunnel for UI-only work with no top.
 
 ## Web search (Tavily)
 
-The `web` toggle beside the model selector lets the model reach the public web
-mid-turn. It is backed by **[Tavily](https://tavily.com)** — sign up there for
+The model can reach the public web mid-turn on **every** turn (always on, no
+toggle — his call, same as the file tools). It is backed by
+**[Tavily](https://tavily.com)** — sign up there for
 the **free tier** (a monthly quota, no card) and you get an API key like
 `tvly-…`. **oracle never hardcodes it**; `tavily_key()` reads, in order:
 
