@@ -212,9 +212,13 @@ Window {
         Sessions.save(id, title, JSON.stringify(turns));
     }
 
-    // Start a fresh, empty session. The old one is already saved; this just
-    // clears the view and forgets the id/title so the next turn opens a new one.
+    // Start a fresh, empty session. Persist the current conversation FIRST
+    // (auto-titled from its first prompt if it has no title yet) so starting a
+    // new one never discards it — saveCurrent snapshots the log synchronously
+    // before the async store write, so clearing right after is safe. Then clear
+    // the view and forget the id/title so the next turn opens a new session.
     function newSession() {
+        win.saveCurrent();
         Ollama.cancel();
         chatLog.clear();
         win.activeIndex = -1;
