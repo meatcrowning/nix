@@ -485,12 +485,18 @@ PanelWindow {
                         // Left click = pick it: select, apply the full theme,
                         // close. (Hover deliberately does NOT flip the selection
                         // — it caused accidental re-themes just from mousing
-                        // past.) Right click = the hide/unhide menu (§7.1).
-                        onClicked: (mouse) => {
-                            if (mouse.button === Qt.RightButton) {
+                        // past.) Right PRESS = the hide/unhide menu (§7.1): opened
+                        // on press, not `clicked`, so a right-RELEASE that never
+                        // completes the click across the compositor can't leave
+                        // the menu dead (the press always reaches the client) —
+                        // the same fix the settings paper grid carries.
+                        onPressed: (mouse) => {
+                            if (mouse.button === Qt.RightButton)
                                 paperMenu.openFor(delegateRoot, cell.path, cell.hidden, mouse.x, mouse.y);
+                        }
+                        onClicked: (mouse) => {
+                            if (mouse.button === Qt.RightButton)
                                 return;
-                            }
                             applyTimer.stop();
                             list.userNav(cell.index);   // marks dirty so it commits on close
                             root.open = false;

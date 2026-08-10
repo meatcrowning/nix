@@ -434,11 +434,24 @@ Item {
                                         // Left click = pick it; hover deliberately
                                         // never selects (the picker's lesson —
                                         // mousing past must not re-theme). Right
-                                        // click = the hide/unhide menu (§7.1).
-                                        onClicked: (mouse) => {
+                                        // PRESS = the hide/unhide menu (§7.1).
+                                        //
+                                        // The menu opens on the right PRESS, not on
+                                        // `clicked`: a context menu opens on press
+                                        // anyway, and `clicked` needs the RELEASE to
+                                        // also land in-bounds to fire — the release
+                                        // is the fragile link across the compositor
+                                        // (the press always reaches the client), so
+                                        // a release that never completes the click
+                                        // left the affordance dead. Left stays on
+                                        // click: it is a deliberate pick, never a
+                                        // press-twitch.
+                                        onPressed: (mouse) => {
                                             if (mouse.button === Qt.RightButton)
                                                 paperMenu.openFor(tile, cell.path, cell.hidden, mouse.x, mouse.y);
-                                            else
+                                        }
+                                        onClicked: (mouse) => {
+                                            if (mouse.button !== Qt.RightButton)
                                                 root.applyPath(cell.path);
                                         }
                                     }
