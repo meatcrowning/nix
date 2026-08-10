@@ -2859,6 +2859,7 @@ class Bridge(QObject):
 
         self._current_album = 0
         self._current_smart = ""
+        self._systheme_proc = None
 
         # A library scan/import/watcher refresh must keep the user's place: the
         # grid, the open album section and the open playlist all reconcile in
@@ -2934,6 +2935,60 @@ class Bridge(QObject):
         return {**album_row(a),
                 "fullArt": str(ART / a["full_art"]) if a.get("full_art") else "",
                 "trackCount": len(self._library.album_tracks(album_id))}
+
+    # ---- systheme ("create systheme" on an album's right-click menu) ----
+
+    @Property(bool, constant=True)
+    def canSystheme(self):
+        """Whether the cemented album-cover -> systheme entry point is present.
+        Gates the menu entry so a missing script greys out rather than the
+        action silently doing nothing (docs/DESIGN.md §7.2)."""
+        return (HERE.parent / "pylib" / "systheme.py").is_file()
+
+    @Slot(int)
+    def createSysthemeFromAlbum(self, album_id):
+        """Turn this album's cover into the desktop systheme.
+
+        Shells out to the one cemented entry point (apps/pylib/systheme.py)
+        rather than reimplementing any of its crop/outpaint/apply pipeline.
+        Runs async so the UI never blocks, and always reports a result on
+        scanStatus — success or failure — per the no-silent-failure rule."""
+        if self._systheme_proc is not None:
+            self.scanStatus.emit("systheme already in progress")
+            return
+        info = self.albumInfo(album_id)
+        art = info.get("fullArt") if info else ""
+        if not art or not os.path.isfile(art):
+            self.scanStatus.emit("systheme: no cover art for this album")
+            return
+        script = HERE.parent / "pylib" / "systheme.py"
+        if not script.is_file():
+            self.scanStatus.emit("systheme: entry point not installed")
+            return
+        self.scanStatus.emit("creating systheme…")
+        self._systheme_proc = QProcess(self)
+        self._systheme_proc.finished.connect(self._on_systheme_done)
+        self._systheme_proc.start(sys.executable, [str(script), art, "--json"])
+
+    def _on_systheme_done(self, code, _status):
+        proc = self._systheme_proc
+        self._systheme_proc = None
+        if proc is None:
+            return
+        out = bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")
+        err = bytes(proc.readAllStandardError()).decode("utf-8", "replace")
+        if code == 0 and out.strip():
+            try:
+                result = json.loads(out.strip().splitlines()[-1])
+            except Exception:
+                result = {}
+            if result.get("applied"):
+                self.scanStatus.emit(f"systheme applied ({result.get('method', '?')})")
+            else:
+                self.scanStatus.emit("systheme created but not applied")
+        else:
+            reason = err.strip().splitlines()[-1] if err.strip() else f"exit {code}"
+            self.scanStatus.emit(f"systheme failed: {reason}")
 
     # ---- smart playlists ----
     #

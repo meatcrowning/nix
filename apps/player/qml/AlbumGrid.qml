@@ -329,6 +329,14 @@ Item {
                                           trigger: function() { root.opened(aid === root.expandedAlbumId ? 0 : aid); } },
                                         { label: "search artist", enabled: art !== "",
                                           trigger: function() { root.searchArtist(art); } },
+                                        { separator: true },
+                                        // Applies the theme desktop-wide, so it
+                                        // sits behind a separator like any other
+                                        // action with a wide blast radius (§7.2
+                                        // orders destructive/high-impact last).
+                                        { label: "create systheme",
+                                          enabled: Library.canSystheme && !!Library.albumInfo(aid).fullArt,
+                                          trigger: function() { Library.createSysthemeFromAlbum(aid); } },
                                     ]);
                                 } else {
                                     // A second click on the open cover closes it.
