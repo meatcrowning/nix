@@ -70,21 +70,22 @@ VARIANTS = {
     "pastel":  {"light_cap": 0.34, "accent_v": 0.92, "struct_mul": 1.00, "status_s": 0.42, "light_ink": 0.40, "light_ink_v": 0.42},
     "muted":   {"light_cap": 0.20, "accent_v": 0.78, "struct_mul": 0.55, "status_s": 0.30, "light_ink": 0.10, "light_ink_v": 0.40},
     "vivid":   {"light_cap": 0.85, "accent_v": 1.00, "struct_mul": 1.45, "status_s": 0.90, "light_ink": 0.85, "light_ink_v": 0.55},
-    # `normal` is the plain, un-stylised baseline — every knob sits about
-    # halfway between pastel and vivid, so it neither softens the palette the
-    # way pastel does nor pushes the chroma the way vivid does. A
-    # middle-of-the-road, straightforward rendition of the wallpaper palette.
-    # TWO things set it apart from the others, both so its main colour reads as
-    # the wallpaper's own colour rather than a neon version of it (§3.1.2):
-    #   * `main_dominant` — the accent hue/sat come from the wallpaper's
-    #     DOMINANT (most-prevalent) colour, not the vibrant-winner cluster the
-    #     other variants use. So a mostly-green wallpaper gives a green main
-    #     colour, whatever small vivid speck the scorer would otherwise chase.
-    #   * `accent_v` is a legibility FLOOR (0.70), not the near-max 0.96 the
-    #     others force. `max(v, 0.70)` lifts a deep dominant colour just enough
-    #     to read on pure black and leaves an already-bright one alone — where
-    #     0.96 fabricated a fluorescent tint out of a deep forest green.
-    "normal":  {"light_cap": 0.55, "accent_v": 0.70, "struct_mul": 1.20, "status_s": 0.65, "light_ink": 0.60, "light_ink_v": 0.48, "main_dominant": True},
+    # `normal` is the plain, un-stylised baseline — the structural tones and the
+    # status ramp still sit about halfway between pastel and vivid. But its MAIN
+    # colour and its BACKGROUND are not transformed at all: in DARK mode they are
+    # lifted VERBATIM off the wallpaper, so the desktop reads as the picture's own
+    # two colours rather than a dressed-up version of them (§3.1.2, his 2026-08-09
+    # refinement — the re-saturated approximation was rejected):
+    #   * `main_exact` — the accent/text colour is the EXACT pixel of the
+    #     wallpaper's DOMINANT (most-prevalent real) cluster, straight through:
+    #     no hue rebuild, no saturation floor, no value floor. A mostly-#1e4733
+    #     wallpaper gives #1e4733, not a brightened #50b283 of it.
+    #   * `bg_darkest` — the background is the DARKEST real cluster actually
+    #     present in the image (the picture's own shadow), not a synthesised
+    #     black. It overrides `pureBlackBg` for this variant, dark mode only.
+    # The `light_cap`/`accent_v`/`struct_mul`/… knobs still shape the structural
+    # tones, TEXTDIM and the status ramp, and the whole LIGHT branch is unchanged.
+    "normal":  {"light_cap": 0.55, "accent_v": 0.70, "struct_mul": 1.20, "status_s": 0.65, "light_ink": 0.60, "light_ink_v": 0.48, "main_dominant": True, "main_exact": True, "bg_darkest": True},
 }
 
 
@@ -182,7 +183,58 @@ def status_color(anchor, band, clusters, ss, base_v, s_floor, v_floor, light=Fal
     return hsv_hex(hue, sat, val)
 
 
-def full_palette(h, s, v, clusters, pure_bg, variant, light=False):
+def rel_lum(rgb):
+    """WCAG relative luminance of an (r, g, b) 0-255 triple."""
+    def ch(c):
+        c /= 255.0
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = (ch(x) for x in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast_ratio(a, b):
+    la, lb = rel_lum(a), rel_lum(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+# The `normal` variant lifts its main colour VERBATIM off the wallpaper — but a
+# colour that cannot be read on the background it sits on is not a palette, it
+# is an invisible desktop. Measured 2026-08-09 across all 69 wallpapers in
+# ~/Pictures/wall: on `1658782593057758.jpg` the dominant real cluster and the
+# darkest cluster were the SAME pixel (272216), text and background identical;
+# ten more came out under a 3:1 ratio.
+#
+# So the exact pixel is used whenever it reads, and otherwise moved the SMALLEST
+# distance that clears MIN_CONTRAST — blended toward whichever of white/black
+# the background is furthest from. Raising the VALUE alone (the first attempt)
+# is not enough and cannot be: blue carries 7% of luminance, so a saturated
+# #2525ff tops out at 2.12 against its own dark background however bright it
+# goes. Blending keeps the hue recognisable while actually reaching the floor.
+MIN_CONTRAST = 3.0
+
+
+def legible_over(rgb, bg_hex):
+    bg = tuple(int(bg_hex[i:i + 2], 16) for i in (0, 2, 4))
+    if contrast_ratio(rgb, bg) >= MIN_CONTRAST:
+        return "%02x%02x%02x" % rgb
+    # Toward whichever pole the background is NOT: on a near-black bg that is
+    # white, on a pale one (a light wallpaper's own darkest cluster can still be
+    # light) it is black. Picking by measured contrast rather than a luminance
+    # threshold means no cutoff to tune.
+    pole = (255, 255, 255) if contrast_ratio((255, 255, 255), bg) \
+        >= contrast_ratio((0, 0, 0), bg) else (0, 0, 0)
+    cand = rgb
+    for i in range(1, 51):
+        t = i / 50.0
+        cand = tuple(round(rgb[j] + (pole[j] - rgb[j]) * t) for j in range(3))
+        if contrast_ratio(cand, bg) >= MIN_CONTRAST:
+            break
+    return "%02x%02x%02x" % cand
+
+
+def full_palette(h, s, v, clusters, pure_bg, variant, light=False,
+                 dom_rgb=None, dark_rgb=None):
     """The desktop palette: the accent stays the primary hue, but the
     structural tones take the wallpaper's secondary hue and the status ramp
     takes real colour-coded hues nudged toward the wallpaper. Twelve tokens.
@@ -259,7 +311,7 @@ def full_palette(h, s, v, clusters, pure_bg, variant, light=False):
     # red are narrow; green and blue tolerate a wider pull) so a status colour
     # never stops reading as its state. CRIT keeps a chroma floor so an alarm
     # reads even in the muted variant. See status_color().
-    return {
+    out = {
         "ACCENT":    FG,
         "TEXT":      FG,       # body text is still the accent (§3.1.1 focus rule)
         "TEXTDIM":   hsv_hex(h, min(s, lcap * 1.15), 0.60),
@@ -273,6 +325,30 @@ def full_palette(h, s, v, clusters, pure_bg, variant, light=False):
         "CRIT":      status_color(0.00, 0.05, clusters, max(ss, 0.65),  0.98, 0.55, 0.85),
         "INFO":      status_color(0.57, 0.07, clusters, min(ss, 0.55),  0.74, 0.20, 0.60),
     }
+
+    # The `normal` variant's two verbatim lifts (§3.1.2): the MAIN colour
+    # (accent = text) is the exact dominant wallpaper pixel and the BACKGROUND is
+    # the darkest real cluster, both straight off the image with no transform, so
+    # the desktop shows the picture's own colours rather than a re-saturated
+    # approximation. Applied last, overriding FG/BG (and pureBlackBg), so the
+    # structural tones and status ramp above still derive normally.
+    #
+    # DARK MODE ONLY, and the `light` guard is the whole of it: the light branch
+    # inverts the ladder onto a pale background with dark ink, so lifting the
+    # picture's darkest cluster into BG there paints a black page, and the exact
+    # dominant pixel is not guaranteed to read as ink on it. Light keeps the
+    # derived palette it already had.
+    if not light:
+        # …and only if that darkest cluster is actually DARK. A pale wallpaper's
+        # own darkest colour can be #c5dcfc (MoonBG.gif), and painting the dark
+        # mode's desktop with it makes dark mode light — a bigger surprise than
+        # the synthesised background it replaced.
+        if (vp.get("bg_darkest") and dark_rgb is not None
+                and rel_lum(dark_rgb) < 0.15):
+            out["BG"] = "%02x%02x%02x" % dark_rgb
+        if vp.get("main_exact") and dom_rgb is not None:
+            out["ACCENT"] = out["TEXT"] = legible_over(dom_rgb, out["BG"])
+    return out
 
 
 def main():
@@ -351,6 +427,8 @@ def main():
     all_hexes = []    # every cluster, dominant first, dropped ones included
     img_hsv = None    # (h, s, v, avg_sat) from the image's winning cluster
     dom_hsv = None    # (h, s, v) of the most-PREVALENT real colour (normal variant)
+    dom_rgb = None    # exact RGB of that dominant cluster — the `normal` main
+    dark_rgb = None   # exact RGB of the darkest real cluster — the `normal` bg
     if True:
         if path is None:
             sys.stderr.write("usage: wal-extract.py IMAGE [--colors N] "
@@ -385,6 +463,7 @@ def main():
                 kept = allc
             best, best_score = None, -1.0
             dom, dom_cnt = None, -1.0
+            dark_v = 2.0
             total = 0.0
             sat_sum = 0.0
             for (r, g, b), cnt in kept:
@@ -396,10 +475,15 @@ def main():
                 if score > best_score:
                     best_score, best = score, (h, s, v)
                 # Most-prevalent cluster that is a real COLOUR (not the near-black
-                # background, not a near-grey) — the `normal` variant's main hue.
-                # kept is dominant-first, so the first qualifier by count wins.
+                # background, not a near-grey) — the `normal` variant's main hue,
+                # and the EXACT pixel it lifts as its accent. kept is
+                # dominant-first, so the first qualifier by count wins.
                 if s >= 0.15 and v >= 0.12 and cnt > dom_cnt:
-                    dom_cnt, dom = cnt, (h, s, v)
+                    dom_cnt, dom, dom_rgb = cnt, (h, s, v), (r, g, b)
+                # Darkest real cluster present — the `normal` variant's exact
+                # background (the picture's own shadow, never a synthesised dark).
+                if v < dark_v:
+                    dark_v, dark_rgb = v, (r, g, b)
             bh, bs, bv = best
             img_hsv = (bh, bs, bv, sat_sum / total if total else 0.0)
             dom_hsv = dom if dom is not None else (bh, bs, bv)
@@ -432,6 +516,15 @@ def main():
             and dom_hsv is not None):
         h, s, v = dom_hsv
 
+    # In DARK mode the `normal` variant lifts its main colour and background
+    # verbatim off the image (full_palette applies `main_exact`/`bg_darkest`), so
+    # it must NOT be re-saturated first — that is exactly the approximation he
+    # rejected. TEXTDIM and the structural tones then track the real dominant
+    # saturation, faithful to the picture.
+    exact_main = (manual_hsv is None and not light
+                  and VARIANTS.get(variant, {}).get("main_exact")
+                  and dom_rgb is not None)
+
     # A near-greyscale wallpaper (silver/steel gradient, etc.) has no real
     # accent hue — the "winning" pixel is just faintly tinted grey. Forcing
     # saturation up would fabricate a vivid colour (e.g. prussian blue) that
@@ -441,10 +534,11 @@ def main():
     # in full mode never RAISE saturation, so silver stays silver there too.)
     if avg_sat < 0.15:
         s = min(s, 0.12)   # stay grey/silver
-    else:
+    elif not exact_main:
         s = max(s, 0.55)   # keep a defined hue to derive the palette from
 
-    out = full_palette(h, s, v, clusters, pure_bg, variant, light)
+    out = full_palette(h, s, v, clusters, pure_bg, variant, light,
+                       dom_rgb=dom_rgb, dark_rgb=dark_rgb)
     mode_label = "manual" if manual_hsv is not None else "auto"
 
     # The options this palette was derived under. wal-set.sh evals the file, so
