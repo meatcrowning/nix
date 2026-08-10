@@ -48,10 +48,41 @@ PanelWindow {
     readonly property string wallSetPath: "$HOME/.config/scripts/wal-set.sh"
     readonly property string listScriptPath: "$HOME/.config/quickshell/scripts/list-wallpapers.sh"
 
-    property var images: []          // absolute source paths, name-sorted
-    property var thumbs: []          // cached thumbnail path per image (parallel to images)
-    property var palettes: []        // "#hex,#hex,…" strip per image (parallel), solid mode
+    // raw* are the full listing off list-wallpapers.sh; images/thumbs/palettes
+    // are the VISIBLE view, with hidden papers dropped unless "show hidden" is
+    // on (applyFilter). Same hidden set as the settings paper grid — one stored
+    // key (SettingsStore.wallpaperHidden), so the two surfaces never disagree.
+    property var rawImages: []
+    property var rawThumbs: []
+    property var rawPalettes: []
+    property var images: []          // absolute source paths, name-sorted (visible subset)
+    property var thumbs: []          // cached thumbnail path per visible image (parallel to images)
+    property var palettes: []        // "#hex,#hex,…" strip per visible image (parallel), solid mode
     property string currentPath: ""  // the wallpaper active when the picker opened
+
+    // Recompute the visible arrays from raw* + the hidden set + show-hidden.
+    // Only reassign `images` when its contents change — it is the GridView model
+    // and a reassign resets currentIndex (see listProc below).
+    function applyFilter() {
+        const hidden = SettingsStore.d.wallpaperHidden || [];
+        const showH = SettingsStore.d.wallpaperShowHidden;
+        const imgs = [], ths = [], pals = [];
+        for (let i = 0; i < rawImages.length; i++) {
+            if (hidden.indexOf(rawImages[i]) !== -1 && !showH) continue;
+            imgs.push(rawImages[i]);
+            ths.push(rawThumbs[i]);
+            pals.push(rawPalettes[i]);
+        }
+        if (imgs.length !== images.length || imgs.some((v, i) => v !== images[i]))
+            images = imgs;
+        thumbs = ths;
+        palettes = pals;
+    }
+    Connections {
+        target: SettingsStore.d
+        function onWallpaperHiddenChanged() { root.applyFilter(); root.trySyncSelection(); }
+        function onWallpaperShowHiddenChanged() { root.applyFilter(); root.trySyncSelection(); }
+    }
     // True once the user actually flipped to a different wallpaper this
     // session — opening and closing the picker without touching anything
     // must NOT re-apply the theme. Set ONLY by userNav()/the click handler, so
@@ -158,18 +189,15 @@ PanelWindow {
                     const raw = (f.length > 2 && f[2]) ? f[2] : "";
                     nextPalettes.push(raw ? raw.split(",").filter(s => s.length > 0).map(h => "#" + h) : []);
                 }
-                // Only reassign `images` when the source set actually changed:
-                // assigning a new array (even an identical one) resets the
-                // GridView, clobbering currentIndex. `thumbs`/`palettes` are
-                // always refreshed — reassigning them does NOT reset the view
-                // (the model is `images`), so a thumbnail or palette that
-                // finished generating between polls swaps in live without
-                // disturbing the selection.
-                if (nextImages.length !== root.images.length
-                        || nextImages.some((v, i) => v !== root.images[i]))
-                    root.images = nextImages;
-                root.thumbs = nextThumbs;
-                root.palettes = nextPalettes;
+                // Feed the raw arrays; applyFilter derives the visible subset
+                // (dropping hidden papers unless "show hidden" is on) and does
+                // the change-guarded reassign of `images` — assigning a new
+                // array (even an identical one) resets the GridView, clobbering
+                // currentIndex. thumbs/palettes stay aligned to the visible set.
+                root.rawImages = nextImages;
+                root.rawThumbs = nextThumbs;
+                root.rawPalettes = nextPalettes;
+                root.applyFilter();
                 root.trySyncSelection();
             }
         }
@@ -371,6 +399,10 @@ PanelWindow {
                 // Cached thumbnail (parallel `thumbs` array); falls back to the
                 // full-res source if its thumbnail hasn't been generated yet.
                 readonly property string thumb: (root.thumbs && root.thumbs[index]) || modelData
+                // Only ever true while "show hidden" reveals it — otherwise a
+                // hidden paper is not in the model. Drawn dimmed (§10.1),
+                // right-clickable to unhide.
+                readonly property bool hidden: path !== "" && (SettingsStore.d.wallpaperHidden || []).indexOf(path) !== -1
 
                 width: list.cellWidth
                 height: list.cellHeight
@@ -379,6 +411,7 @@ PanelWindow {
                     id: delegateRoot
                     anchors.fill: parent
                     anchors.margins: 4   // gutter between cells
+                    opacity: cell.hidden ? 0.4 : 1.0
                     color: Theme.bgAlt
                     radius: Theme.windowRounding
                     border.width: cell.index === list.currentIndex ? Theme.ctrlBorder + 1 : Theme.ctrlBorder
@@ -447,11 +480,17 @@ PanelWindow {
 
                     MouseArea {
                         anchors.fill: parent
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
                         cursorShape: Qt.PointingHandCursor
-                        // Click = pick it: select, apply the full theme, close.
-                        // (Hover deliberately does NOT flip the selection — it
-                        // caused accidental re-themes just from mousing past.)
-                        onClicked: {
+                        // Left click = pick it: select, apply the full theme,
+                        // close. (Hover deliberately does NOT flip the selection
+                        // — it caused accidental re-themes just from mousing
+                        // past.) Right click = the hide/unhide menu (§7.1).
+                        onClicked: (mouse) => {
+                            if (mouse.button === Qt.RightButton) {
+                                paperMenu.openFor(delegateRoot, cell.path, cell.hidden, mouse.x, mouse.y);
+                                return;
+                            }
                             applyTimer.stop();
                             list.userNav(cell.index);   // marks dirty so it commits on close
                             root.open = false;
@@ -459,6 +498,14 @@ PanelWindow {
                     }
                 }
             }
+        }
+
+        // The shared right-click hide/unhide menu (§7.2, written once) — same
+        // component the settings paper grid uses.
+        PaperCtxMenu {
+            id: paperMenu
+            onHide: (p) => SettingsStore.hideWallpaper(p)
+            onUnhide: (p) => SettingsStore.unhideWallpaper(p)
         }
     }
 }
