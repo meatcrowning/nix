@@ -23,7 +23,9 @@ import os
 import re
 import socket
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import shlex
 
@@ -148,6 +150,27 @@ FILE_TOOLS = [
             "path": {"type": "string", "description": "Directory to create, sandbox-relative."}},
             "required": ["path"]}}},
 ]
+
+#: The CURRENT-TIME tool, offered on every turn beside the file and web tools.
+#: Without it the model answers "now" from its training and gets timezone/DST
+#: conversions wrong (it put Juneau an hour out — the classic AKDT/AKST slip).
+#: This resolves any IANA zone through Python's zoneinfo, which carries the real
+#: DST rules, so the model never has to compute an offset itself. Handled
+#: locally in `Ollama` (no subprocess — a wall-clock instant is host-neutral).
+TIME_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "get_current_time",
+        "description": (
+            "Get the current date and time. Pass an IANA timezone name to get "
+            "the time there (correct for daylight saving); omit it for UTC. "
+            "Always use this instead of computing a timezone offset yourself."),
+        "parameters": {"type": "object", "properties": {
+            "timezone": {"type": "string",
+                         "description": ("IANA timezone, e.g. 'America/Juneau' "
+                                         "or 'Europe/London'. Omit for UTC.")}},
+            "required": []}},
+}
 
 #: tool name -> the `op` tools/sandbox-fs.py dispatches on.
 FILE_OP = {"list_dir": "list", "read_file": "read", "write_file": "write",
@@ -488,12 +511,50 @@ class Ollama(QObject):
             return
         self.cancel()          # one turn at a time
         self._model = model
-        self._messages = [{"role": "user", "content": prompt}]
+        self._messages = [{"role": "system", "content": self._system_prompt()},
+                          {"role": "user", "content": prompt}]
         self._think_tokens = 0
         self._rounds = 0
         self._set_busy(True)
         self.replyStarted.emit()
         self._post_chat()
+
+    @staticmethod
+    def _system_prompt():
+        """A minimal system message that pins an unambiguous `now`. The model
+        otherwise dates itself from its training; here it gets the real instant
+        in UTC and local time, and is told to call get_current_time for any
+        other zone rather than guessing a DST offset."""
+        now = datetime.now(timezone.utc)
+        local = now.astimezone()
+        return ("The current time is %s (UTC), which is %s local time (%s). "
+                "For the time or date in any other place, call get_current_time "
+                "with an IANA timezone rather than converting it yourself."
+                % (now.strftime("%Y-%m-%d %H:%M:%S"),
+                   local.strftime("%Y-%m-%d %H:%M:%S"),
+                   local.tzname() or local.strftime("%z")))
+
+    def _time_now(self, tz_name, idx, remaining, calls):
+        """Resolve the current time in an IANA zone through zoneinfo (real DST
+        rules), fed back like any other tool result. Synchronous — a wall clock
+        needs no subprocess and the instant is the same on either host."""
+        now = datetime.now(timezone.utc)
+        tz_name = (tz_name or "").strip()
+        try:
+            zone = ZoneInfo(tz_name) if tz_name else timezone.utc
+            here = now.astimezone(zone)
+            result = {"timezone": tz_name or "UTC",
+                      "iso": here.isoformat(),
+                      "date": here.strftime("%Y-%m-%d"),
+                      "time": here.strftime("%H:%M:%S"),
+                      "abbreviation": here.tzname() or "",
+                      "utc_offset": here.strftime("%z"),
+                      "utc": now.isoformat()}
+        except (ZoneInfoNotFoundError, ValueError):
+            result = {"error": "unknown timezone: " + tz_name}
+        self._tool_results[idx] = {"role": "tool", "tool_name": "get_current_time",
+                                   "content": json.dumps(result)}
+        self._tool_done(remaining, calls)
 
     def _post_chat(self):
         """POST the current message list, streaming, offering every tool.
@@ -508,7 +569,7 @@ class Ollama(QObject):
         # reject a request carrying tools — the tradeoff of always-on tools,
         # spelled out in apps/oracle/AGENTS.md; point oracle at a tool-capable
         # model.
-        payload["tools"] = list(FILE_TOOLS) + [WEB_SEARCH_TOOL]
+        payload["tools"] = list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL]
         body = json.dumps(payload).encode("utf-8")
         req = QNetworkRequest(QUrl(OLLAMA + "/api/chat"))
         req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
@@ -617,6 +678,8 @@ class Ollama(QObject):
             if name == "web_search":
                 self._tavily_search(str(args.get("query", "")).strip(),
                                     i, remaining, calls)
+            elif name == "get_current_time":
+                self._time_now(str(args.get("timezone", "")), i, remaining, calls)
             elif name in FILE_TOOL_NAMES:
                 self._run_fs_tool(name, args, i, remaining, calls)
             else:
