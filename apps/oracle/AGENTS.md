@@ -10,11 +10,21 @@ scope was *"right now i think thats all i need"*.
 
 - **`main.py`** — the whole app. `Ollama` (on `QNetworkAccessManager`) is the
   only non-boilerplate class: `refreshModels()` GETs the tag list, `send(model,
-  prompt)` POSTs a single-turn `stream: true` `/api/chat` and emits each NDJSON
+  prompt, web)` POSTs a `stream: true` `/api/chat` and emits each NDJSON
   delta (`replyStarted`/`replyChunk`/`replyDone`, or `replyError`). One turn at
   a time — a new `send` aborts any reply still streaming. `Palette` and
   `Titlebar` are the same wal-palette-watch and vtb-chrome bridge every app here
   carries (copied from `reader/main.py`).
+  - **The web_search tool loop.** When the `web` toggle is on, `send` offers
+    ollama a `web_search` function tool (`WEB_SEARCH_TOOL`). If the model emits
+    a `tool_calls` frame, `_on_finished` runs each call — `web_search` hits
+    Tavily (`_tavily_search` → `TAVILY_URL`), the result is fed back as a
+    `role: tool` message, and `_post_chat` re-posts so the model summarizes and
+    cites. It loops until the model stops calling tools or `MAX_TOOL_ROUNDS`
+    (4). `webSearchStarted`/`webSearchDone`/`webSearchError` surface the search
+    to QML for its sources disclosure. The tool is **opt-in** because a model
+    with no tool support rejects a request that carries `tools` — off by default,
+    normal chat is unchanged and never handed tools it would refuse.
 - **`qml/Main.qml`** — one file: the selector row, a `KineticFlickable`
   conversation area, and a prompt `TextEdit` (Ctrl+Enter sends). The model
   dropdown is inline rather than a shared `CtxMenu`, keeping this window's
@@ -34,8 +44,16 @@ scope was *"right now i think thats all i need"*.
   **animated ellipsis** beside it (dim, §9.1) — the count is the running frame
   count `Ollama` emits on `replyThinkTokens` (ollama streams one token per NDJSON
   frame), the ellipsis cycles 0–3 dots at one roll beat each (§6.2, static under
-  reduceMotion). Both vanish and the heading settles to `thinking` (textDim) the
-  moment the answer's first delta arrives. No history persists across launches.
+  reduceMotion). The token count PERSISTS in the heading once counted (the
+  ellipsis is the only part that ends with the thinking), so a folded block
+  still reports its size after the answer starts — the heading is all that shows
+  when it is collapsed. No history persists across launches.
+  - **The sources disclosure** is the same subordinated, folded-by-default
+    block for a turn's web searches: `searching the web…` (one step brighter,
+    animated ellipsis) while a search is live, settling to `web · N sources`
+    once results land. Its body is Tavily's own `answer` plus a themed-link list
+    of the hits, drawn through `MarkdownText`. Several searches in one turn
+    accumulate into it.
 - **`qml/theme/Theme.qml`, `qml/PixelText.qml`** — verbatim copies of reader's
   (the theme-as-context-property idiom, see `apps/AGENTS.md`).
 
@@ -59,6 +77,27 @@ boot, so the tunnel script only reports its state, never starts it; the
 a *local* `sudo -A systemctl`, which correctly fails (not silently) on book,
 where there is no such unit. `ORACLE_NO_TUNNEL=1` skips the tunnel for
 UI-only work with no top.
+
+## Web search (Tavily)
+
+The `web` toggle beside the model selector lets the model reach the public web
+mid-turn. It is backed by **[Tavily](https://tavily.com)** — sign up there for
+the **free tier** (a monthly quota, no card) and you get an API key like
+`tvly-…`. **oracle never hardcodes it**; `tavily_key()` reads, in order:
+
+1. **`$TAVILY_API_KEY`** — the environment variable (the same shape `OLLAMA`
+   reads its endpoint from). Export it in your shell, or set it in home-manager
+   so oracle's wrapper inherits it.
+2. **`~/.config/oracle/tavily.key`** — a one-line file, the key and nothing
+   else. The no-rebuild path: drop the key in and relaunch.
+
+With neither present the tool reports itself unavailable to the model (which
+then answers without it) and the sources block shows `search failed: no Tavily
+API key configured` — it never silently does nothing (docs/DESIGN.md §10) and
+oracle opens no listener and reaches Tavily only when a search is actually run.
+The request is `POST https://api.tavily.com/search` with `api_key` in the body,
+`include_answer: true`, `max_results: 5`; the reply's `answer` and each hit's
+`title`/`url`/`content` are fed back to the model and shown in the disclosure.
 
 ## Packaging & verifying
 
