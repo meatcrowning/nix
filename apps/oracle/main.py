@@ -244,6 +244,25 @@ SESSION_TOOL_NAMES = {"list_sessions", "read_session"}
 #: model answer with what it has — a guard against a model that keeps searching.
 MAX_TOOL_ROUNDS = 4
 
+#: The recall guidance, on the system prompt of EVERY turn. Without it the model
+#: treats a fact it does not see in the CURRENT chat as unknown — or, worse, as
+#: something it must have made up — and denies it, even though he told it in an
+#: earlier conversation and list_sessions/read_session can reach that chat. This
+#: tells the model those past sessions are its own genuine memory of real
+#: conversations with the same person, to be consulted and TRUSTED (never
+#: dismissed as a hallucination) before it says it does not know something —
+#: especially personal facts like his name or his preferences.
+RECALL_GUIDANCE = (
+    "You are talking with the same person across many separate conversations, "
+    "and you can read your earlier ones: call list_sessions to see your past "
+    "conversations with him and read_session to read any of them in full. "
+    "Those transcripts are a real record of things he actually told you — treat "
+    "anything he stated there as true, not as something you imagined. When he "
+    "refers to something you do not see in the current conversation (his name, a "
+    "preference, an earlier decision), do NOT assume you never knew it or that it "
+    "is a hallucination: look through your recent past sessions first, and only "
+    "say you do not know it once you have checked and genuinely cannot find it.")
+
 #: How wide a web search fans out, scaled to the query's apparent complexity
 #: (see `Ollama._research_budget`). A simple factual ask (a weather lookup, a
 #: definition) needs a handful of sources; a genuinely broad research question
@@ -714,6 +733,7 @@ class Ollama(QObject):
                 % (local.strftime("%Y-%m-%d %H:%M:%S"),
                    local.tzname() or local.strftime("%z"),
                    now.strftime("%Y-%m-%d %H:%M:%S")))
+        base += "\n\n" + RECALL_GUIDANCE
         if research:
             base += "\n\n" + research
         return base
