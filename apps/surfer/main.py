@@ -2811,12 +2811,20 @@ class DarkMode(QObject):
                 "size-adjust:" + adj + ";font-weight:1 1000;font-style:italic;}")
 
     def _adj_fam(self):
-        # The family chain the inherit layer and the force actually impose:
-        # the size-adjusted alias first, then the plain pick, so an
-        # @font-face registration failure degrades to today's rendering
-        # rather than to Chromium's Times.
-        return (json.dumps(self._fam() + " (web)")
-                + "," + json.dumps(self._fam()))
+        # The family the inherit layer and the force impose: the PLAIN pick, by
+        # its real name. NOT a `src:local()` @font-face alias — Chromium renders
+        # any @font-face-resolved face with grayscale antialiasing and ignores
+        # the family's fontconfig `antialias=false` pin, even for a local()
+        # source, so routing the pixel font through an alias SOFTENED every web
+        # glyph (measured offscreen 2026-08-09: the plain family came back with
+        # 0 grey pixels at every size — pixel-exact aliased, matching goetia and
+        # the rest of the desktop — while the identical face via a local()
+        # @font-face came back ~60-80% grey). Naming the family directly is the
+        # only way the antialias pin reaches it, and crisp is the whole point.
+        # The cost is the x-height parity the alias bought (site text in the
+        # pixel face reads ~14% small at the site's own sizes): size-adjust is
+        # an @font-face-only descriptor, so it cannot be had without the blur.
+        return json.dumps(self._fam())
 
     def _inherit_css(self):
         # Webpages INHERIT the desktop font: family, apparent size and (via the
@@ -2853,7 +2861,7 @@ class DarkMode(QObject):
                 z = float(self._zoom.level) or 1.0
             except (TypeError, ValueError):
                 z = 1.0
-        px = ("%.4f" % ((self._px() / self._XHEIGHT_ADJUST) / z)).rstrip("0").rstrip(".")
+        px = ("%.4f" % (self._px() / z)).rstrip("0").rstrip(".")
         return (
             "@layer __surfer_inherit__{"
             ":root{font-family:" + f + ",monospace;font-size:" + px + "px}"
@@ -2903,7 +2911,10 @@ class DarkMode(QObject):
         return self._css(url)
 
     def _css(self, url):
-        parts = [self._face_css(), self._inherit_css()]
+        # No @font-face alias any more (see _adj_fam): it blurred every web
+        # glyph. The pick is imposed by its plain family name so Chromium honours
+        # its fontconfig antialias=false pin and renders it pixel-crisp.
+        parts = [self._inherit_css()]
         if self._enabled and self.isSiteEnabled(url):
             parts.append(self._dark_css())
         if self.isSystemFontSite(url):
