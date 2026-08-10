@@ -22,11 +22,19 @@ scope was *"right now i think thats all i need"*.
   conversation is a **persistent in-session LOG** (`ListModel chatLog`, a
   `Repeater` per turn): every send appends a `you` row and an assistant row and
   streams into the latter; prior turns stay in place and scrolled back, never
-  scrubbed (docs/DESIGN.md §14). It follows the newest turn to the bottom only
+  scrubbed (docs/DESIGN.md §14). A model row's answer is drawn through
+  **`qml/MarkdownText.qml`** (`Text.MarkdownText`, pixel idiom, themed links) —
+  the replies come back in Markdown; user prompts and error lines stay verbatim
+  on `PixelText` (pinned `PlainText`, the shared guard), so only trusted-shape
+  strings are ever interpreted. It follows the newest turn to the bottom only
   while a stream is live — idle, the scroll stays where he put it. A model's
   reasoning is a **collapsible disclosure, folded by default** (§9.1
-  subordinated), whose heading reports progress: `thinking…` (one brightness
-  step up) while the reasoning streams, settling to `thinking` (textDim) the
+  subordinated), whose heading reports progress: while the reasoning streams it
+  reads `thinking` (one brightness step up) with a **live token count** and an
+  **animated ellipsis** beside it (dim, §9.1) — the count is the running frame
+  count `Ollama` emits on `replyThinkTokens` (ollama streams one token per NDJSON
+  frame), the ellipsis cycles 0–3 dots at one roll beat each (§6.2, static under
+  reduceMotion). Both vanish and the heading settles to `thinking` (textDim) the
   moment the answer's first delta arrives. No history persists across launches.
 - **`qml/theme/Theme.qml`, `qml/PixelText.qml`** — verbatim copies of reader's
   (the theme-as-context-property idiom, see `apps/AGENTS.md`).
