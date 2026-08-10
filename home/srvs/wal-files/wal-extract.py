@@ -74,7 +74,17 @@ VARIANTS = {
     # halfway between pastel and vivid, so it neither softens the palette the
     # way pastel does nor pushes the chroma the way vivid does. A
     # middle-of-the-road, straightforward rendition of the wallpaper palette.
-    "normal":  {"light_cap": 0.55, "accent_v": 0.96, "struct_mul": 1.20, "status_s": 0.65, "light_ink": 0.60, "light_ink_v": 0.48},
+    # TWO things set it apart from the others, both so its main colour reads as
+    # the wallpaper's own colour rather than a neon version of it (§3.1.2):
+    #   * `main_dominant` — the accent hue/sat come from the wallpaper's
+    #     DOMINANT (most-prevalent) colour, not the vibrant-winner cluster the
+    #     other variants use. So a mostly-green wallpaper gives a green main
+    #     colour, whatever small vivid speck the scorer would otherwise chase.
+    #   * `accent_v` is a legibility FLOOR (0.70), not the near-max 0.96 the
+    #     others force. `max(v, 0.70)` lifts a deep dominant colour just enough
+    #     to read on pure black and leaves an already-bright one alone — where
+    #     0.96 fabricated a fluorescent tint out of a deep forest green.
+    "normal":  {"light_cap": 0.55, "accent_v": 0.70, "struct_mul": 1.20, "status_s": 0.65, "light_ink": 0.60, "light_ink_v": 0.48, "main_dominant": True},
 }
 
 
@@ -340,6 +350,7 @@ def main():
     clusters = []
     all_hexes = []    # every cluster, dominant first, dropped ones included
     img_hsv = None    # (h, s, v, avg_sat) from the image's winning cluster
+    dom_hsv = None    # (h, s, v) of the most-PREVALENT real colour (normal variant)
     if True:
         if path is None:
             sys.stderr.write("usage: wal-extract.py IMAGE [--colors N] "
@@ -373,6 +384,7 @@ def main():
                                  "ignoring paletteDropped\n")
                 kept = allc
             best, best_score = None, -1.0
+            dom, dom_cnt = None, -1.0
             total = 0.0
             sat_sum = 0.0
             for (r, g, b), cnt in kept:
@@ -383,8 +395,14 @@ def main():
                 score = (s ** 1.5) * (v ** 0.5) * cnt
                 if score > best_score:
                     best_score, best = score, (h, s, v)
+                # Most-prevalent cluster that is a real COLOUR (not the near-black
+                # background, not a near-grey) — the `normal` variant's main hue.
+                # kept is dominant-first, so the first qualifier by count wins.
+                if s >= 0.15 and v >= 0.12 and cnt > dom_cnt:
+                    dom_cnt, dom = cnt, (h, s, v)
             bh, bs, bv = best
             img_hsv = (bh, bs, bv, sat_sum / total if total else 0.0)
+            dom_hsv = dom if dom is not None else (bh, bs, bv)
         except Exception as e:
             # In full+manual we can still proceed with just the picked hue (the
             # structural/status tones then degrade to canonical, no wallpaper
@@ -402,6 +420,17 @@ def main():
         avg_sat = s
     else:
         h, s, v, avg_sat = img_hsv
+
+    # The `normal` variant takes its main colour from the wallpaper's DOMINANT
+    # colour (most-prevalent real cluster) rather than the vibrancy-scored
+    # winner the other variants use — so the accent reads as the wallpaper's
+    # own colour, and its low `accent_v` floor (VARIANTS) then lifts a deep
+    # dominant just to legibility instead of forcing it fluorescent. Only in
+    # auto mode: a hand-picked accent still wins. avg_sat (the image mean) is
+    # left as-is so the greyscale guard below still keys on the whole image.
+    if (manual_hsv is None and VARIANTS.get(variant, {}).get("main_dominant")
+            and dom_hsv is not None):
+        h, s, v = dom_hsv
 
     # A near-greyscale wallpaper (silver/steel gradient, etc.) has no real
     # accent hue — the "winning" pixel is just faintly tinted grey. Forcing
