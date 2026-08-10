@@ -244,6 +244,19 @@ SESSION_TOOL_NAMES = {"list_sessions", "read_session"}
 #: model answer with what it has — a guard against a model that keeps searching.
 MAX_TOOL_ROUNDS = 4
 
+#: The context window (tokens) to request per chat. Ollama's own default (4096
+#: here, set by the model's Modelfile/server default, well under the 262144 a
+#: model like qwen3.6:35b-a3b actually supports) is small enough that the
+#: system prompt + tool schemas + history + a couple of tool results (a session
+#: read pulls in a whole past transcript) can fill it mid-turn — and this
+#: server's KV cache does not support context-shift for this model ("KV cache
+#: shifting is not supported for this context"), so a turn that outgrows 4096
+#: is hard-truncated wherever it happens to be, including mid-thinking, with
+#: only a handful of tokens left to generate. Asking for a much larger window
+#: costs little (the KV cache for this model is ~80 MiB at 4096, so 32768 is
+#: still well under a gigabyte) and turns a hard cutoff into headroom.
+CHAT_NUM_CTX = 32768
+
 #: The file tools' JAIL. Every file op runs against this one directory and
 #: cannot escape it (tools/sandbox-fs.py enforces it, symlinks included). It is
 #: the ONLY thing to change to widen the sandbox later ("maybe we let it run
@@ -611,16 +624,25 @@ class Ollama(QObject):
     def _system_prompt():
         """A minimal system message that pins an unambiguous `now`. The model
         otherwise dates itself from its training; here it gets the real instant
-        in UTC and local time, and is told to call get_current_time for any
-        other zone rather than guessing a DST offset."""
+        in local time and UTC, and is told to call get_current_time for any
+        other zone rather than guessing a DST offset.
+
+        Local time leads: a bare "what time is it" means "here", and UTC can be
+        a calendar day ahead of a negative-offset zone (Alaska at night, say) —
+        leading with UTC's date made the model report that later date as "the
+        current time" and it read as reporting the future. Naming local time
+        first as *the* current time, with UTC only as a cross-reference, is
+        what keeps the model's default answer matching what "now" means to him."""
         now = datetime.now(timezone.utc)
         local = now.astimezone()
-        return ("The current time is %s (UTC), which is %s local time (%s). "
-                "For the time or date in any other place, call get_current_time "
+        return ("The current time right now is %s local time (%s), which is "
+                "%s UTC. When asked for the current time or date with no place "
+                "specified, answer with the local time above, not the UTC one. "
+                "For the time or date somewhere else, call get_current_time "
                 "with an IANA timezone rather than converting it yourself."
-                % (now.strftime("%Y-%m-%d %H:%M:%S"),
-                   local.strftime("%Y-%m-%d %H:%M:%S"),
-                   local.tzname() or local.strftime("%z")))
+                % (local.strftime("%Y-%m-%d %H:%M:%S"),
+                   local.tzname() or local.strftime("%z"),
+                   now.strftime("%Y-%m-%d %H:%M:%S")))
 
     def _time_now(self, tz_name, idx, remaining, calls):
         """Resolve the current time in an IANA zone through zoneinfo (real DST
@@ -651,6 +673,7 @@ class Ollama(QObject):
             "model": self._model,
             "messages": self._messages,
             "stream": True,
+            "options": {"num_ctx": CHAT_NUM_CTX},
         }
         # ALL tools are offered on EVERY turn (his call — no per-tool toggle):
         # the file tools and web_search alike. A model with no tool support will
