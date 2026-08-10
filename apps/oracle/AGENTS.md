@@ -15,10 +15,19 @@ scope was *"right now i think thats all i need"*.
   a time — a new `send` aborts any reply still streaming. `Palette` and
   `Titlebar` are the same wal-palette-watch and vtb-chrome bridge every app here
   carries (copied from `reader/main.py`).
-- **`qml/Main.qml`** — one file: the selector row, a `KineticFlickable` reply
-  area, and a prompt `TextEdit` (Ctrl+Enter sends). The model dropdown is inline
-  rather than a shared `CtxMenu`, keeping this window's imports to the theme,
-  `PixelText` and the `qmlcommon` Kinetic views.
+- **`qml/Main.qml`** — one file: the selector row, a `KineticFlickable`
+  conversation area, and a prompt `TextEdit` (Ctrl+Enter sends). The model
+  dropdown is inline rather than a shared `CtxMenu`, keeping this window's
+  imports to the theme, `PixelText` and the `qmlcommon` Kinetic views. The
+  conversation is a **persistent in-session LOG** (`ListModel chatLog`, a
+  `Repeater` per turn): every send appends a `you` row and an assistant row and
+  streams into the latter; prior turns stay in place and scrolled back, never
+  scrubbed (docs/DESIGN.md §14). It follows the newest turn to the bottom only
+  while a stream is live — idle, the scroll stays where he put it. A model's
+  reasoning is a **collapsible disclosure, folded by default** (§9.1
+  subordinated), whose heading reports progress: `thinking…` (one brightness
+  step up) while the reasoning streams, settling to `thinking` (textDim) the
+  moment the answer's first delta arrives. No history persists across launches.
 - **`qml/theme/Theme.qml`, `qml/PixelText.qml`** — verbatim copies of reader's
   (the theme-as-context-property idiom, see `apps/AGENTS.md`).
 

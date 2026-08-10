@@ -21,9 +21,13 @@ Window {
     title: "oracle"
 
     property string model: ""
-    property string replyText: ""
-    property string thinkText: ""
     property string status: ""
+    // The conversation is a persistent LOG, not one turn swapped out under the
+    // last: every send appends a `you` row and an assistant row to `chatLog`,
+    // prior turns stay in place and scrolled back, readable (docs/DESIGN.md §14 —
+    // nothing scrubs history from view). `activeIndex` is the assistant row the
+    // in-flight stream is writing into.
+    property int activeIndex: -1
     // The result of the last start/stop/unload — its OWN readout (docs/DESIGN.md
     // §10.6), never folded into the observed up/down above and never routed to
     // the reply area, where a finished answer would hide whether the stop worked.
@@ -41,6 +45,12 @@ Window {
 
     Motion { id: motion }
 
+    // The whole conversation, one row per turn. Roles: `isUser` (bool), `who`
+    // (the caption — "you" or the answering model), `body`, `thinking`,
+    // `thinkingActive` (the reasoning is streaming right now), `streaming` (the
+    // answer is), `isError`.
+    ListModel { id: chatLog }
+
     Component.onCompleted: Titlebar.setFooter(ollamaHost.replace(/^https?:\/\//, ""))
 
     // Keep a model selected: default to the first the daemon reports, and never
@@ -51,11 +61,35 @@ Window {
             if (win.model === "" || Ollama.models.indexOf(win.model) < 0)
                 win.model = Ollama.models.length > 0 ? Ollama.models[0] : "";
         }
-        function onReplyStarted() { win.replyText = ""; win.thinkText = ""; win.status = ""; }
-        function onReplyChunk(piece) { win.replyText += piece; }
-        function onReplyThinking(piece) { win.thinkText += piece; }
-        function onReplyDone() { win.status = ""; }
-        function onReplyError(reason) { win.status = "error: " + reason; }
+        // The turns are appended by send() before the stream opens; these deltas
+        // only ever write into the active assistant row. The first content delta
+        // is also what SETTLES the thinking heading from "thinking…" to "thinking".
+        function onReplyChunk(piece) {
+            if (win.activeIndex < 0) return;
+            var cur = chatLog.get(win.activeIndex);
+            chatLog.setProperty(win.activeIndex, "body", cur.body + piece);
+            if (cur.thinkingActive)
+                chatLog.setProperty(win.activeIndex, "thinkingActive", false);
+        }
+        function onReplyThinking(piece) {
+            if (win.activeIndex < 0) return;
+            var cur = chatLog.get(win.activeIndex);
+            chatLog.setProperty(win.activeIndex, "thinking", cur.thinking + piece);
+            if (!cur.thinkingActive)
+                chatLog.setProperty(win.activeIndex, "thinkingActive", true);
+        }
+        function onReplyDone() {
+            if (win.activeIndex < 0) return;
+            chatLog.setProperty(win.activeIndex, "streaming", false);
+            chatLog.setProperty(win.activeIndex, "thinkingActive", false);
+        }
+        function onReplyError(reason) {
+            if (win.activeIndex < 0) return;
+            chatLog.setProperty(win.activeIndex, "body", "error: " + reason);
+            chatLog.setProperty(win.activeIndex, "isError", true);
+            chatLog.setProperty(win.activeIndex, "streaming", false);
+            chatLog.setProperty(win.activeIndex, "thinkingActive", false);
+        }
         function onModelsError(reason) { win.status = "no models: " + reason; }
     }
 
@@ -75,6 +109,16 @@ Window {
         var p = input.text.trim();
         if (p === "" || win.model === "" || Ollama.busy)
             return;
+        win.status = "";
+        // Append the pair now, then stream into the assistant row. Prior turns
+        // are left untouched — the log grows downward (docs/DESIGN.md §14).
+        chatLog.append({ isUser: true, who: "you", body: p,
+                         thinking: "", thinkingActive: false,
+                         streaming: false, isError: false });
+        chatLog.append({ isUser: false, who: win.model, body: "",
+                         thinking: "", thinkingActive: false,
+                         streaming: true, isError: false });
+        win.activeIndex = chatLog.count - 1;
         Ollama.send(win.model, p);
         input.clear();
     }
@@ -322,88 +366,126 @@ Window {
             Column {
                 id: replyCol
                 width: replyFlick.width
-                spacing: 8
+                spacing: 12
 
-                // The model's reasoning, in a COLLAPSIBLE disclosure rather than
-                // shown inline in full. It auto-opens while a thinking model is
-                // still reasoning with no answer yet (so the window is not blank),
-                // and folds to its one-line toggle the moment the answer starts;
-                // the user may toggle it either way, which then wins. Subordinated
-                // per docs/DESIGN.md §9.1 — indented, a `border` hairline at the
-                // indent, text one step dim, never accent — and revealed by §6.2's
-                // clipped growth from under the toggle.
-                Item {
-                    id: think
+                // The opening hint / model-list error, shown only on an empty log.
+                PixelText {
                     width: parent.width
-                    visible: win.thinkText !== ""
-                    height: visible ? thinkToggle.height + thinkReveal.height : 0
-
-                    property bool userSet: false
-                    property bool userOpen: false
-                    readonly property bool expanded: userSet ? userOpen
-                                        : (Ollama.busy && win.replyText === "")
-
-                    Item {
-                        id: thinkToggle
-                        width: parent.width
-                        height: Theme.lineHeight
-                        Row {
-                            anchors { left: parent.left; verticalCenter: parent.verticalCenter }
-                            spacing: 6
-                            PixelText { text: think.expanded ? "-" : "+"; color: Theme.textDim }
-                            PixelText { text: "thinking"; color: Theme.textDim }
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: { think.userOpen = !think.expanded; think.userSet = true; }
-                        }
-                    }
-
-                    Item {
-                        id: thinkReveal
-                        anchors { top: thinkToggle.bottom; left: parent.left; right: parent.right }
-                        clip: true
-                        height: think.expanded ? thinkBody.height : 0
-                        Behavior on height {
-                            NumberAnimation { duration: motion.ms(motion.slideMs)
-                                              easing.type: motion.slideEasing }
-                        }
-                        Rectangle {
-                            anchors { left: parent.left; leftMargin: 3
-                                      top: parent.top; bottom: parent.bottom }
-                            width: Theme.ctrlBorder
-                            color: Theme.border
-                        }
-                        PixelText {
-                            id: thinkBody
-                            anchors { top: parent.top; left: parent.left; right: parent.right
-                                      leftMargin: 12 }
-                            wrapMode: Text.Wrap
-                            text: win.thinkText
-                            color: Theme.textDim
-                        }
-                    }
+                    visible: chatLog.count === 0
+                    wrapMode: Text.Wrap
+                    text: win.status !== "" ? win.status
+                                            : "ask the model something below."
+                    color: win.status !== "" ? Theme.crit : Theme.textDim
                 }
 
-                // The answer once it starts, an error, or the opening hint. While
-                // a thinking model is still reasoning (the block above carries it)
-                // this stays empty rather than repeating a "…".
-                PixelText {
-                    id: reply
-                    width: parent.width
-                    wrapMode: Text.Wrap
-                    visible: text !== ""
-                    text: win.replyText !== "" ? win.replyText
-                          : (win.status !== "" ? win.status
-                             : (Ollama.busy ? (win.thinkText !== "" ? "" : "…")
-                                : "ask the model something below."))
-                    color: win.replyText !== "" ? Theme.text
-                           : (win.status !== "" ? Theme.crit : Theme.textDim)
+                // One row per turn — user prompts and model answers alike stay in
+                // the log as it grows (docs/DESIGN.md §14).
+                Repeater {
+                    model: chatLog
+                    delegate: Item {
+                        id: turn
+                        width: replyCol.width
+                        height: turnCol.height
+
+                        // The disclosure's open/closed is VIEW state, per row, and
+                        // it defaults CLOSED: reasoning is collapsed until he opens
+                        // it (docs/DESIGN.md §9.1 — subordinated, never in his way).
+                        property bool userSet: false
+                        property bool userOpen: false
+
+                        Column {
+                            id: turnCol
+                            width: parent.width
+                            spacing: 4
+
+                            PixelText {
+                                text: who
+                                color: Theme.textDim
+                            }
+
+                            // The reasoning, a COLLAPSIBLE disclosure that starts
+                            // folded. Its heading reports progress: "thinking…"
+                            // (one step brighter) while the reasoning streams, and
+                            // settles to "thinking" (textDim) once the answer
+                            // starts. Subordinated per docs/DESIGN.md §9.1 —
+                            // indented, a `border` hairline at the indent, text one
+                            // step dim, never accent — revealed by §6.2's clipped
+                            // growth from under the toggle.
+                            Item {
+                                id: think
+                                width: parent.width
+                                visible: !isUser && thinking !== ""
+                                height: visible ? thinkToggle.height + thinkReveal.height : 0
+
+                                readonly property bool expanded: turn.userSet ? turn.userOpen
+                                                                              : false
+
+                                Item {
+                                    id: thinkToggle
+                                    width: parent.width
+                                    height: Theme.lineHeight
+                                    Row {
+                                        anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                                        spacing: 6
+                                        PixelText { text: think.expanded ? "-" : "+"; color: Theme.textDim }
+                                        PixelText {
+                                            text: thinkingActive ? "thinking…" : "thinking"
+                                            color: thinkingActive ? Theme.text : Theme.textDim
+                                        }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: { turn.userOpen = !think.expanded; turn.userSet = true; }
+                                    }
+                                }
+
+                                Item {
+                                    id: thinkReveal
+                                    anchors { top: thinkToggle.bottom; left: parent.left; right: parent.right }
+                                    clip: true
+                                    height: think.expanded ? thinkBody.height : 0
+                                    Behavior on height {
+                                        NumberAnimation { duration: motion.ms(motion.slideMs)
+                                                          easing.type: motion.slideEasing }
+                                    }
+                                    Rectangle {
+                                        anchors { left: parent.left; leftMargin: 3
+                                                  top: parent.top; bottom: parent.bottom }
+                                        width: Theme.ctrlBorder
+                                        color: Theme.border
+                                    }
+                                    PixelText {
+                                        id: thinkBody
+                                        anchors { top: parent.top; left: parent.left; right: parent.right
+                                                  leftMargin: 12 }
+                                        wrapMode: Text.Wrap
+                                        text: thinking
+                                        color: Theme.textDim
+                                    }
+                                }
+                            }
+
+                            // The turn's text: the prompt for a `you` row, the
+                            // answer for a model row. A model row with no content
+                            // yet shows "…" only when nothing else is speaking (no
+                            // reasoning block carrying the wait).
+                            PixelText {
+                                width: parent.width
+                                wrapMode: Text.Wrap
+                                visible: text !== ""
+                                text: body !== "" ? body
+                                      : (!isUser && streaming
+                                         ? (thinking !== "" ? "" : "…") : "")
+                                color: isError ? Theme.crit : Theme.text
+                            }
+                        }
+                    }
                 }
             }
 
-            // Follow the stream to the bottom as it grows.
+            // Follow the newest turn to the bottom while it streams; when idle,
+            // leave the scroll where he put it so he can read back up the log.
             onContentHeightChanged: if (Ollama.busy)
                 contentY = Math.max(0, contentHeight - height)
 
@@ -495,8 +577,16 @@ Window {
                 cursorShape: (sendBtn.armed || Ollama.busy)
                              ? Qt.PointingHandCursor : Qt.ArrowCursor
                 onClicked: {
-                    if (Ollama.busy) Ollama.cancel();
-                    else win.send();
+                    if (Ollama.busy) {
+                        Ollama.cancel();
+                        // cancel() fires no replyDone/replyError, so settle the
+                        // in-flight row here (docs/DESIGN.md §10.6 — the row shows
+                        // what happened, and a stopped stream is not still going).
+                        if (win.activeIndex >= 0) {
+                            chatLog.setProperty(win.activeIndex, "streaming", false);
+                            chatLog.setProperty(win.activeIndex, "thinkingActive", false);
+                        }
+                    } else win.send();
                 }
             }
         }
