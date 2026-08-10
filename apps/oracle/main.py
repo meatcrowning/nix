@@ -149,6 +149,43 @@ FILE_TOOLS = [
         "parameters": {"type": "object", "properties": {
             "path": {"type": "string", "description": "Directory to create, sandbox-relative."}},
             "required": ["path"]}}},
+    {"type": "function", "function": {
+        "name": "find_files",
+        "description": ("Find files and directories by shell glob pattern within "
+                        "your sandbox. Use '**' to match across subdirectories "
+                        "(e.g. '**/*.py'). Returns matching paths; long result "
+                        "lists are truncated."),
+        "parameters": {"type": "object", "properties": {
+            "pattern": {"type": "string",
+                        "description": "Glob, e.g. '*.md' or '**/*.py'."},
+            "path": {"type": "string",
+                     "description": "Directory to search under, sandbox-relative. Default '.'."}},
+            "required": ["pattern"]}}},
+    {"type": "function", "function": {
+        "name": "search_text",
+        "description": ("Search file contents for a regular expression within "
+                        "your sandbox (like grep). Returns matching lines with "
+                        "their file and line number. Binary files are skipped and "
+                        "long result sets are truncated."),
+        "parameters": {"type": "object", "properties": {
+            "pattern": {"type": "string", "description": "Regular expression to search for."},
+            "path": {"type": "string",
+                     "description": "File or directory to search, sandbox-relative. Default '.'."},
+            "glob": {"type": "string",
+                     "description": "Only search files whose name matches this glob, e.g. '*.py'."},
+            "ignore_case": {"type": "boolean",
+                            "description": "Case-insensitive match."}},
+            "required": ["pattern"]}}},
+    {"type": "function", "function": {
+        "name": "show_tree",
+        "description": ("Show the directory structure under a path in your sandbox "
+                        "as an indented tree. Depth- and entry-limited."),
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string",
+                     "description": "Directory to show, sandbox-relative. Default '.'."},
+            "depth": {"type": "integer",
+                      "description": "How many levels deep to descend. Default 5."}},
+            "required": []}}},
 ]
 
 #: The CURRENT-TIME tool, offered on every turn beside the file and web tools.
@@ -175,7 +212,8 @@ TIME_TOOL = {
 #: tool name -> the `op` tools/sandbox-fs.py dispatches on.
 FILE_OP = {"list_dir": "list", "read_file": "read", "write_file": "write",
            "edit_file": "edit", "move_path": "move", "delete_path": "delete",
-           "make_dir": "mkdir"}
+           "make_dir": "mkdir", "find_files": "glob", "search_text": "grep",
+           "show_tree": "tree"}
 FILE_TOOL_NAMES = set(FILE_OP)
 
 #: How many tool rounds one turn may take before we stop looping and let the
@@ -848,11 +886,14 @@ class Ollama(QObject):
     @staticmethod
     def _fs_heading(name, args):
         a = args if isinstance(args, dict) else {}
+        if name in ("find_files", "search_text"):
+            verb = "finding" if name == "find_files" else "searching"
+            return verb + " " + str(a.get("pattern") or "")
         p = str(a.get("path") or a.get("src") or ".")
         verb = {"list_dir": "listing", "read_file": "reading",
                 "write_file": "writing", "edit_file": "editing",
                 "move_path": "moving", "delete_path": "deleting",
-                "make_dir": "creating"}.get(name, name)
+                "make_dir": "creating", "show_tree": "tree of"}.get(name, name)
         return verb + " " + p
 
     @staticmethod
@@ -884,6 +925,21 @@ class Ollama(QObject):
             return "deleted " + str(result.get("path", ""))
         if name == "make_dir":
             return "created " + str(result.get("path", "")) + "/"
+        if name == "find_files":
+            return "found %d match%s for %s" % (
+                result.get("count", 0),
+                "" if result.get("count", 0) == 1 else "es",
+                str(a.get("pattern", "")))
+        if name == "search_text":
+            return "%d line%s in %d file%s for %s" % (
+                result.get("match_count", 0),
+                "" if result.get("match_count", 0) == 1 else "s",
+                result.get("files_matched", 0),
+                "" if result.get("files_matched", 0) == 1 else "s",
+                str(a.get("pattern", "")))
+        if name == "show_tree":
+            return "tree of %s · %d entries" % (result.get("path", "."),
+                                                result.get("count", 0))
         return name + " ok"
 
 

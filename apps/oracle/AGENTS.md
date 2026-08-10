@@ -168,9 +168,22 @@ The request is `POST https://api.tavily.com/search` with `api_key` in the body,
 ## File tools (jailed, on top)
 
 oracle offers the model a set of **file tools on every turn** — `list_dir`,
-`read_file`, `write_file`, `edit_file`, `move_path`, `delete_path`, `make_dir`
-(`FILE_TOOLS` in `main.py`). Reading *and* manipulation, always available: **no
-toggle**, his call. The consequence is deliberate and worth knowing — because
+`read_file`, `write_file`, `edit_file`, `move_path`, `delete_path`, `make_dir`,
+plus the **search tools** `find_files` (glob), `search_text` (regex grep) and
+`show_tree` (`FILE_TOOLS` in `main.py`). Reading, searching *and* manipulation,
+always available: **no toggle**, his call.
+
+**Adding another tool.** The seam is four small edits and no plumbing: add an
+`op_<name>` to `tools/sandbox-fs.py`'s `OPS` dict (it gets the jail root and the
+request, returns a dict), add the tool schema to `FILE_TOOLS` in `main.py`, map
+its tool name to the op in `FILE_OP`, and give it a heading/outcome line in
+`_fs_heading`/`_fs_outcome`. `FILE_TOOL_NAMES` and the dispatch (`_run_fs_tool`,
+tool-result feedback with `tool_name`) pick it up automatically. Any op that
+WALKS the tree (`glob`/`grep`/`tree`) must descend with
+`os.walk(followlinks=False)` and pass every candidate through `contained()`
+before reading or reporting it — the same realpath guard `resolve()` uses, so a
+symlinked file cannot leak a path outside the jail. Cap every result (a match
+list, a scan, a tree) so it can never blow the model's context window. The consequence is deliberate and worth knowing — because
 every request now carries `tools`, a model with **no tool support rejects it**
 (the same reason the `web` toggle was opt-in). oracle is a tool-calling window
 now; point it at a tool-capable model.

@@ -2,7 +2,8 @@
 """oracle's jailed filesystem executor — the muscle behind its file tools.
 
 oracle offers the local ollama model a set of file tools (list/read/write/edit/
-move/delete/mkdir; see apps/oracle/main.py `FILE_TOOLS`). Every one of them runs
+move/delete/mkdir, plus the search ops glob/grep/tree; see apps/oracle/main.py
+`FILE_TOOLS`). Every one of them runs
 THROUGH this script, and this script is the jail: it takes a single ROOT
 directory as argv[1] and refuses to touch anything outside it, symlinks
 included. That is the whole security model right now — the model gets a sandbox,
@@ -24,8 +25,10 @@ model as the tool result, never a crash (docs/DESIGN.md §10: report, don't
 silently fail). Results are CAPPED so a giant file or directory cannot blow the
 model's context window (READ_MAX_LINES / READ_MAX_BYTES / LIST_MAX_ENTRIES).
 """
+import fnmatch
 import json
 import os
+import re
 import shutil
 import sys
 
@@ -35,6 +38,12 @@ READ_MAX_BYTES = 40000    # hard byte ceiling on a read's content, whatever the 
 READ_MAX_LINE = 1000      # a single line longer than this is truncated with a marker
 LIST_MAX_ENTRIES = 200    # a directory listing is cut here, with `truncated: true`
 WRITE_MAX_BYTES = 2_000_000   # refuse an absurd write outright
+GLOB_MAX_ENTRIES = 300    # a glob's match list is cut here, with `truncated: true`
+GREP_MAX_MATCHES = 200    # a content search stops after this many matching lines
+GREP_MAX_FILES = 5000     # ...and never scans more files than this (runaway guard)
+GREP_MAX_LINE = 400       # a matching line longer than this is truncated in the result
+TREE_MAX_ENTRIES = 400    # a tree is cut here, with `truncated: true`
+TREE_MAX_DEPTH = 5        # how deep a tree descends by default (and its hard ceiling)
 
 
 def fail(reason):
@@ -65,6 +74,28 @@ def resolve(root, rel, *, must_exist):
 def rel_to_root(root, path):
     r = os.path.relpath(path, root)
     return "." if r == "." else r
+
+
+def contained(root, path):
+    """True iff `path`, symlinks resolved, is the jail root or lives under it.
+
+    The escape guard for the walking ops (grep/glob/tree): they descend with
+    os.walk(followlinks=False) so a symlinked DIRECTORY is never entered, but a
+    symlinked FILE could still resolve outside the jail, so every candidate is
+    checked here before it is read or reported — same realpath test `resolve`
+    uses, never weakened."""
+    real = os.path.realpath(path)
+    return real == root or real.startswith(root + os.sep)
+
+
+def _is_binary(path):
+    """A file is treated as binary (skipped by grep) if its first block has a
+    NUL byte — the same cheap test op_read uses before dumping a file."""
+    try:
+        with open(path, "rb") as f:
+            return b"\x00" in f.read(8192)
+    except OSError:
+        return True
 
 
 def op_list(root, req):
@@ -233,8 +264,148 @@ def op_mkdir(root, req):
     return {"ok": True, "path": rel_to_root(root, p)}
 
 
+def op_glob(root, req):
+    """Find files/dirs by shell glob, sandbox-relative. `**` recurses. Results
+    are the matching paths (relative to the root), capped."""
+    base = resolve(root, req.get("path", "."), must_exist=True)
+    if not os.path.isdir(base):
+        fail("not a directory: " + req.get("path", "."))
+    pattern = (req.get("pattern") or "").strip()
+    if not pattern:
+        fail("pattern is required")
+    matches, total = [], 0
+    # os.walk keeps the descent inside the jail (followlinks=False), then each
+    # candidate name is fnmatched against the pattern relative to the base.
+    recursive = "**" in pattern
+    pat = pattern.replace("**/", "").replace("**", "*") if recursive else pattern
+    for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
+        dirnames.sort(key=str.lower)
+        for name in sorted(filenames + dirnames, key=str.lower):
+            full = os.path.join(dirpath, name)
+            rel = os.path.relpath(full, base)
+            hay = rel if recursive else name
+            if not fnmatch.fnmatch(hay, pat):
+                continue
+            if not contained(root, full):
+                continue
+            total += 1
+            if len(matches) < GLOB_MAX_ENTRIES:
+                kind = "dir" if os.path.isdir(full) else (
+                    "link" if os.path.islink(full) else "file")
+                matches.append({"path": rel_to_root(root, full), "type": kind})
+        if not recursive:
+            del dirnames[:]        # a non-recursive glob is one level only
+    return {"ok": True, "path": rel_to_root(root, base), "pattern": pattern,
+            "matches": matches, "count": total,
+            "truncated": total > GLOB_MAX_ENTRIES}
+
+
+def op_grep(root, req):
+    """Search file CONTENTS for a regex, sandbox-relative. Optionally restrict to
+    files matching `glob`. Binary files are skipped; matches are capped."""
+    pattern = req.get("pattern") or ""
+    if not pattern:
+        fail("pattern is required")
+    try:
+        rx = re.compile(pattern, re.IGNORECASE if req.get("ignore_case") else 0)
+    except re.error as e:
+        fail("bad regex: " + str(e))
+    base = resolve(root, req.get("path", "."), must_exist=True)
+    file_glob = (req.get("glob") or "").strip()
+    matches, files_scanned, files_matched = [], 0, 0
+    truncated_hits = truncated_scan = False
+
+    def search_file(full):
+        nonlocal files_scanned, files_matched, truncated_hits, truncated_scan
+        if not contained(root, full) or _is_binary(full):
+            return
+        files_scanned += 1
+        if files_scanned > GREP_MAX_FILES:
+            truncated_scan = True
+            return
+        try:
+            with open(full, "r", encoding="utf-8", errors="replace") as f:
+                hit = False
+                for n, line in enumerate(f, 1):
+                    if rx.search(line):
+                        hit = True
+                        if len(matches) < GREP_MAX_MATCHES:
+                            text = line.rstrip("\n")
+                            if len(text) > GREP_MAX_LINE:
+                                text = text[:GREP_MAX_LINE] + " …[truncated]"
+                            matches.append({"path": rel_to_root(root, full),
+                                            "line": n, "text": text})
+                        else:
+                            truncated_hits = True
+                if hit:
+                    files_matched += 1
+        except OSError:
+            return
+
+    if os.path.isdir(base):
+        for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
+            dirnames.sort(key=str.lower)
+            for name in sorted(filenames, key=str.lower):
+                if file_glob and not fnmatch.fnmatch(name, file_glob):
+                    continue
+                search_file(os.path.join(dirpath, name))
+                if truncated_scan:
+                    break
+            if truncated_scan:
+                break
+    else:
+        search_file(base)
+    return {"ok": True, "path": rel_to_root(root, base), "pattern": pattern,
+            "matches": matches, "match_count": len(matches),
+            "files_matched": files_matched, "files_scanned": files_scanned,
+            "truncated": truncated_hits or truncated_scan}
+
+
+def op_tree(root, req):
+    """Render the directory structure under a path as an indented tree, depth-
+    and entry-capped so a deep tree never blows the context window."""
+    base = resolve(root, req.get("path", "."), must_exist=True)
+    if not os.path.isdir(base):
+        fail("not a directory: " + req.get("path", "."))
+    try:
+        max_depth = int(req.get("depth", TREE_MAX_DEPTH) or TREE_MAX_DEPTH)
+    except (TypeError, ValueError):
+        max_depth = TREE_MAX_DEPTH
+    max_depth = max(1, min(max_depth, TREE_MAX_DEPTH))
+    lines, count = [rel_to_root(root, base)], 0
+    truncated = [False]
+
+    def walk(d, depth, prefix):
+        if depth > max_depth or truncated[0]:
+            return
+        try:
+            names = sorted(os.listdir(d), key=str.lower)
+        except OSError:
+            return
+        for name in names:
+            if count >= TREE_MAX_ENTRIES:
+                truncated[0] = True
+                return
+            full = os.path.join(d, name)
+            is_dir = os.path.isdir(full) and not os.path.islink(full)
+            mark = "/" if is_dir else ("@" if os.path.islink(full) else "")
+            lines.append(prefix + name + mark)
+            _bump()
+            if is_dir and depth < max_depth and contained(root, full):
+                walk(full, depth + 1, prefix + "  ")
+
+    def _bump():
+        nonlocal count
+        count += 1
+
+    walk(base, 1, "  ")
+    return {"ok": True, "path": rel_to_root(root, base), "depth": max_depth,
+            "tree": "\n".join(lines), "count": count, "truncated": truncated[0]}
+
+
 OPS = {"list": op_list, "read": op_read, "write": op_write, "edit": op_edit,
-       "move": op_move, "delete": op_delete, "mkdir": op_mkdir}
+       "move": op_move, "delete": op_delete, "mkdir": op_mkdir,
+       "glob": op_glob, "grep": op_grep, "tree": op_tree}
 
 
 def main():
