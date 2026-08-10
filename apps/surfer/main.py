@@ -4375,8 +4375,28 @@ def main():
         # SURFER_GPU=hwvideo restores the accelerated decoder, to re-test this
         # after an NVIDIA or Qt bump.
         _gpu = "" if _mode == "hwvideo" else "--disable-features=AcceleratedVideoDecodeLinuxGL"
-    if _gpu:
-        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (_flags + " " + _gpu).strip()
+
+    # GRAYSCALE text, to match the rest of the desktop. The whole box pins
+    # `rgba=none` (grayscale AA, no LCD subpixel) desktop-wide
+    # (/etc/fonts/conf.d/10-sub-pixel-none.conf, from font.nix), and every
+    # native consumer — kitty, goetia, the Qt apps — honours it. Chromium does
+    # NOT: it force-enables LCD subpixel rendering for any ANTIALIASED face
+    # regardless of the fontconfig `rgba` pin, so every web/fallback font
+    # surfer drew came out with coloured RGB edge fringes the native stack has
+    # none of — [his] the "aliasing / edge treatment" he could see on surfer
+    # but not the other programs, and it hit every non-pinned face, not just
+    # one (the pinned pixel faces are aliased or already grayscale, so they
+    # were unaffected — which is why it read as a whole-desktop mismatch).
+    # Measured offscreen 2026-08-09 (subpixel probe, top): DejaVu Sans at 15px
+    # came back with 883 chromatic pixels vs 0 native; with this flag it is 0,
+    # grayscale, matching native. Same axis as the Botis autohint carve-out
+    # (chromium-forces-autohint-on-aliased-faces): Chromium ignores fontconfig
+    # rasterisation pins, so surfer has to name the render mode itself. This is
+    # both hosts — the pin is desktop-wide on top and book alike.
+    _text = "--disable-lcd-text"
+    _extra = " ".join(x for x in (_gpu, _text) if x)
+    if _extra:
+        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (_flags + " " + _extra).strip()
 
     # Register the gmxhr:// scheme used for the SCOPED CORS bypass (only
     # userscripts' GM_xmlhttpRequest goes through it — see GmXhrHandler). Must be
