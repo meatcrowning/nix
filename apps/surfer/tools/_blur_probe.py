@@ -42,7 +42,7 @@ CASES = [
     ("twin@16",        '"More Perfect DOS VGA (web)"', 16),      # site 16px: = plain@18.24
     ("twin@20",        '"More Perfect DOS VGA (web)"', 20),      # site 20px: = plain@22.8
     ("DejaVuSans@15",  '"DejaVu Sans"', 15),   # smooth reference: high grey, no pin
-    ("Botis@14",       '"Botis 4x6"', 14),     # second pixel face: 0 grey
+    ("Botis@14",       '"Botis 4x6"', 14),     # 2nd pixel face: 0 grey on its 15px grid; soft off-grid (surfer.nix's AA carve-out)
 ]
 
 page = QWebEnginePage()
