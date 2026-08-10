@@ -1874,6 +1874,14 @@ class OneeTheme(QObject):
             ".dd-menu ul{border-color:%s%s}" % (border, i),
             "input:focus,textarea:focus,#qr-filename-container:focus,select:focus,"
             ".captcha-root:focus{border-color:%s%s}" % (link, i),
+            # The per-post header strip carries a `border-bottom` (near-black in
+            # OneeChan's ch4SS) that reads as a rule down the middle of every
+            # post, splitting the `.postInfo` header from the post body. Drop it
+            # on every palette so header and body read as one block — this is the
+            # separating line only; the dark-palette header-vs-body inset (the
+            # `.postInfo` tint) is untouched, and the light collapse below still
+            # folds that tint into the page bg.
+            ".postInfo{border-bottom:none%s}" % i,
             # --- highlights ---
             ".highlight{outline-color:%s%s}" % (replyslct, i),
             ":root.hl-border .post.reply,"
@@ -1884,16 +1892,15 @@ class OneeTheme(QObject):
         ]
         if light:
             # The per-post header strip. OneeChan paints `.postInfo` from
-            # `mainColor` too — `background:rgba(mainColor,.2)` plus a near-black
-            # `border-bottom` (ch4SS) — and the `.reply` collapse above only
-            # reaches the post body, so on a light page the strip stays a grey
-            # tint over cream with a dark line under it: "post headers still
-            # darker than the background". Collapse the tint to the page `bg` and
-            # drop the border to the theme `border`; light-palette only, so a
-            # dark palette keeps OneeChan's header-vs-body inset.
+            # `mainColor` too — `background:rgba(mainColor,.2)` — and the
+            # `.reply` collapse above only reaches the post body, so on a light
+            # page the strip stays a grey tint over cream: "post headers still
+            # darker than the background". Collapse the tint to the page `bg`;
+            # light-palette only, so a dark palette keeps OneeChan's
+            # header-vs-body inset. (The separating border-bottom is dropped for
+            # every palette above, not here.)
             parts.append(
-                ".postInfo{background:%s%s;border-bottom-color:%s%s}"
-                % (bg, i, border, i))
+                ".postInfo{background:%s%s}" % (bg, i))
         return "".join(parts)
 
     @Slot(str, result=str)
