@@ -1,8 +1,8 @@
 import QtQuick
 
-// ONE MINISTER'S LIVE SHELL — the little tail the triangle draws under its
+// ONE SPIRIT'S LIVE SHELL — the little tail the triangle draws under its
 // cards, [his ask, 2026-08-01]: *"the last couple of lines"* of each running
-// minister's own output, so a bound spirit reads as a live process.
+// spirit's own output, so a bound spirit reads as a live process.
 //
 // THE LINES ARE HANDS OFF FOR THIS COMPONENT. They travel ready in the shell
 // dict (`Agents.shells`), built in `main.py` off the SAME transcript the card
@@ -17,7 +17,7 @@ import QtQuick
 // drawn once, above its lines, so the tail is never anonymous and the name is
 // never repeated on every row of a wrapped line.
 //
-// `bg` carries the BACKGROUNDED LONG-RUNNERS the minister started and left
+// `bg` carries the BACKGROUNDED LONG-RUNNERS the spirit started and left
 // running, read from its own worker unit cgroup in `main.py` — a separate fact
 // from the foreground tail, one this component only has to draw. Each is a
 // clipped line marked with a leading `&` so it can never be mistaken for one of
@@ -72,7 +72,7 @@ Item {
         }
 
         // THE BACKGROUNDED LONG-RUNNERS, [his ask, 2026-08-01]: processes the
-        // minister started and left running (`&`/nohup), read from its worker
+        // spirit started and left running (`&`/nohup), read from its worker
         // unit cgroup in main.py. Drawn as their own line(s) under the
         // foreground tail — a process is a fact, not a transcript line, so
         // each is marked with a leading `&` to keep it from reading as one of

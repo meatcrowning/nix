@@ -66,7 +66,7 @@ Regression layer: four checks in `test_window`, measured against the real items.
 ### FOUR dropdowns beside the box, and the order is his
 
 [his, 2026-07-29] *"1. number of summoners 2. summoner model 3. number of
-ministers 4. minister model"*. Top to bottom, in that order, in one column to the
+spirits 4. spirit model"*. Top to bottom, in that order, in one column to the
 right of the box he types in, with the usage meters under the last of them.
 
 - **Each COUNT names the role of the MODEL under it**, which is what lets the
@@ -119,18 +119,18 @@ allows the user to select which model they wish the orchestrator to be. if this
 changes in the middle of the orchestrator working, simply change it to the
 defined model on the next prompt it recieves."* — and, later, the reasoning
 effort of the summoner too, so this control now picks a `(model, effort)` PAIR,
-exactly as the minister chooser (§4) does. One pick, one label (`opus 5 xhigh`).
+exactly as the spirit chooser (§4) does. One pick, one label (`opus 5 xhigh`).
 
 - **The list and the choice live in `boardwork`** — `ORCH_MODELS`,
   `orch_model()`, `set_orch_model()`, `orch_label()` — because `boardctl.py
   model`, both spawners and the control all read the same functions. A copy of
   the list in the QML would be a second answer to "what may he pick".
 - **`(flag, effort, label)`, a curated spread, NOT a ceiling.** Unlike
-  `MINISTER_MODELS` this list has no clamp behind it: the summoner's judgement is
+  `SPIRIT_MODELS` this list has no clamp behind it: the summoner's judgement is
   the whole of its job and he asked to be able to buy as much of it as he likes,
   so the higher efforts (`xhigh`, `max`) are offered on the reasoning models and
   `role_flags("orchestrator")` never clamps the pair. It is curated rather than
-  the full model×effort cross product for the same reason the minister list is —
+  the full model×effort cross product for the same reason the spirit list is —
   a dropdown is a short list of sensible pairs.
 - **Full model names, never the `opus`/`sonnet` aliases.** An alias means *the
   latest of that family* and would silently re-point his choice the day a new
@@ -157,12 +157,12 @@ exactly as the minister chooser (§4) does. One pick, one label (`opus 5 xhigh`)
   can summon on different models and efforts, and neither surprises the other.
 
 **Workers and decision agents default to `deepseek v4 flash`** — [his,
-2026-08-02] the minister default is deepseek, so an unnamed dispatch runs cheap
+2026-08-02] the spirit default is deepseek, so an unnamed dispatch runs cheap
 and off the weekly Claude window, and Solomon tiers UP from there per piece of
 work. The `opus 5 medium` the fourth dropdown tops out at stays the CEILING (the
-hard cap, *"do not allow ministers to be anything higher than opus 5 medium"*
-[his, 2026-07-29]) — the two are no longer the same value: `MINISTER_DEFAULT`
-(the last row) is what an unset dial gives, `MINISTER_CEILING` (the first) is
+hard cap, *"do not allow spirits to be anything higher than opus 5 medium"*
+[his, 2026-07-29]) — the two are no longer the same value: `SPIRIT_DEFAULT`
+(the last row) is what an unset dial gives, `SPIRIT_CEILING` (the first) is
 what a stale or out-of-range one clamps to.
 
 ### 3. ...and under THAT, how many agents may run at once
@@ -199,37 +199,37 @@ drop down for the max number of agents available."*
   wide as the model selection box" generalised, since labels of different lengths
   would otherwise give that column five edges.
 
-### 4. ...and under that, what the MINISTERS run on — CAPPED
+### 4. ...and under that, what the SPIRITS run on — CAPPED
 
-[his, 2026-07-29] *"do not allow ministers to be anything higher than opus 5
+[his, 2026-07-29] *"do not allow spirits to be anything higher than opus 5
 medium thinking."* That is a hard ceiling and it is enforced in **two independent
 places**, because a control is not a guard against a file:
 
-- **The list cannot offer more.** `boardwork.MINISTER_MODELS` is an ALLOWLIST of
+- **The list cannot offer more.** `boardwork.SPIRIT_MODELS` is an ALLOWLIST of
   `(flag, effort, label)`, ceiling first, and it is the only list — the dropdown,
-  `boardctl.py minister` and `resolve_minister` all read it. An allowlist rather
+  `boardctl.py spirit` and `resolve_spirit` all read it. An allowlist rather
   than an ordering, because *"higher"* needs no definition if nothing above the
   ceiling is reachable. Effort never exceeds `medium` for any family: his
   sentence caps the thinking budget as well as the model, and a bigger budget on
   a smaller model is still a tier he did not offer. `fable 5` is deliberately
   absent — it is what a SUMMONER defaults to, and this list may not exceed opus 5.
-- **The spawn cannot pass more.** `role_flags()` reads `minister_model()` for
-  both `MINISTER_ROLES` (`worker`, `decision`) and then clamps the pair to
-  `MINISTER_CEILING` if it is not in the list — **after** the `BOARD_WORKER_*` /
-  `BOARD_DECISION_*` environment overrides, so those can lower a minister and
+- **The spawn cannot pass more.** `role_flags()` reads `spirit_model()` for
+  both `SPIRIT_ROLES` (`worker`, `decision`) and then clamps the pair to
+  `SPIRIT_CEILING` if it is not in the list — **after** the `BOARD_WORKER_*` /
+  `BOARD_DECISION_*` environment overrides, so those can lower a spirit and
   never raise one, and an emptied override cannot inherit whatever
   `~/.claude/settings.json` says. A stale, hand-edited or retired value is the
   ceiling, not a spawn dying on a CLI usage error and a `FAILED:` bullet he has
   to decode.
-- **`minister_model()` returns a `(flag, effort)` PAIR** — one choice, so the
+- **`spirit_model()` returns a `(flag, effort)` PAIR** — one choice, so the
   label carries both (`opus 5 medium`). A chooser that showed only half of what
   it sets would be the §10 failure with a shorter string.
-- **The store** is `~/.local/state/board/minister-model`, one line,
-  `<flag> <effort>`; `boardctl.py minister [name]` is the typed half and is
+- **The store** is `~/.local/state/board/spirit-model`, one line,
+  `<flag> <effort>`; `boardctl.py spirit [name]` is the typed half and is
   forgiving the way `resolve_model` is (exact, or one unambiguous substring —
-  ambiguity is an error). A model this board offers a summoner but not a minister
+  ambiguity is an error). A model this board offers a summoner but not a spirit
   is refused **with the reason** rather than silently becoming the ceiling.
-- Read at spawn, cached nowhere: a minister already running keeps what it started
+- Read at spawn, cached nowhere: a spirit already running keeps what it started
   with, and the next one dispatched reads the file again.
 
 ### ...and under that, how much of his usage is gone
@@ -356,8 +356,8 @@ summoner`, and every sentence about one — the menu entry, the footer after a
 removal or an edit — says *order* and *summoner*. Identifiers did not move: the
 directory is still `inbox/queue/`, the slots are still `boardagents.pending()`
 and `Agents.queued`, exactly as `kind="worker"` survived the rename to
-*minister*. And what a pending order waits for is a **summoner**, never a
-minister: Solomon is who drains the queue and decides who does it.
+*spirit*. And what a pending order waits for is a **summoner**, never a
+spirit: Solomon is who drains the queue and decides who does it.
 
 **It is drawn at the foot of the SUMMONER section** — [his, 2026-07-30]
 *"pending orders for solomon should be shown at the bottom of the summoner
@@ -389,7 +389,7 @@ mid-edit, older than `EDIT_RESCUE_AFTER_S`) to the queue.
 
 ### Ctrl+Z takes the last order back — and it is a real cancellation
 
-[his, 2026-07-29] *"before solomon summons a minister, allow the user to crtl+z to
+[his, 2026-07-29] *"before solomon summons a spirit, allow the user to crtl+z to
 stop solomon from doing that (he should not send any messages he should just stop
 doing that specific inbox item) and then insert the prompt back into the prompt
 box for the user to edit. if the last prompt had to be placed in the pending
@@ -413,13 +413,13 @@ run as having acted and returns False — refusing the verb — if he cancelled 
 same file in the opposite order, which is why the answer is never a guess: either
 the mark landed first (nothing went out, and nothing now can) or the stamp did
 (something is already out there). **There is no interleaving that both summons a
-minister and tells him it did not.**
+spirit and tells him it did not.**
 
 - **The ungated verbs are `list`, `agents`, `phase` and `inbox take`.**
   Everything else is gated, and gating is the DEFAULT — a verb added later is
   refused after a ctrl+z without anybody remembering to add it to a list.
 - **A summon that has ALREADY gone out is reported, not half-undone** (§10.2).
-  `summoned` → *"too late - a minister has already been summoned for it"*, and
+  `summoned` → *"too late - a spirit has already been summoned for it"*, and
   nothing is touched: no worker is killed, no note is retracted.
 - **One order out of a summoner's several is refused too** (`shared`). The gate
   is per run, so cancelling would abandon the other orders — and *"that specific

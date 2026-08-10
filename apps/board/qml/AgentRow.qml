@@ -128,8 +128,8 @@ Item {
     signal contextRequested(real mx, real my)
 
     // ---- WHAT IT IS ACTUALLY SAYING, in its own words ----
-    // [his, 2026-07-30] *"a minister card should expand to show what that
-    // minister is actually saying"*: clicking anywhere on the card slides a
+    // [his, 2026-07-30] *"a spirit card should expand to show what that
+    // spirit is actually saying"*: clicking anywhere on the card slides a
     // drawer down out from under it with the last couple of lines the agent
     // logged, and clicking again slides it back up.
     //
@@ -185,7 +185,7 @@ Item {
     // There is no `visible` binding here on purpose, and putting one back is a
     // regression. The gate this replaced (`speaks`) withheld a card until its
     // top line was a real sentence [his, 2026-07-30] — correct for the two
-    // seconds a healthy spawn takes, and the reason a minister wedged before
+    // seconds a healthy spawn takes, and the reason a spirit wedged before
     // its first API call was undrawable and burned a core behind an empty
     // triangle for 45 minutes [top, 2026-07-31].
     //
@@ -284,9 +284,9 @@ Item {
     readonly property bool summoner: agent && agent.kind === "orchestrator"
     readonly property color leadTone: (running || summoner) ? fgText : fgDim
 
-    // ---- A DEEPSEEK SUBMINISTER, drawn INSET under its parent's card ----
-    // [his, follow-up to the subminister feature] a subminister gets its OWN
-    // card, and it reads as subordinate to the minister that spawned it: it is
+    // ---- A DEEPSEEK SUBSPIRIT, drawn INSET under its parent's card ----
+    // [his, follow-up to the subspirit feature] a subspirit gets its OWN
+    // card, and it reads as subordinate to the spirit that spawned it: it is
     // a §9.1 block that belongs to the row above it, so it is INDENTED one 8px
     // step with a `Theme.accent2` hairline at the indent (§3.8: the secondary
     // hue is this desktop's "group rule" tone) and its own text a step
@@ -296,16 +296,16 @@ Item {
     // otherwise an ordinary agent card, visuals unchanged (his call — follow
     // the existing card, do not invent a look).
     //
-    // ORPHANED — a subminister whose parent card is gone — drops the inset and
+    // ORPHANED — a subspirit whose parent card is gone — drops the inset and
     // draws as a plain top-level card, there being nothing above it to be
-    // subordinate to (`main.py` sets the flag). A parent with no subminister is
+    // subordinate to (`main.py` sets the flag). A parent with no subspirit is
     // just an ordinary card: nothing here fires for it.
     readonly property bool orphaned: agent && agent.orphan === true
-    readonly property bool subminister: agent && agent.subminister === true
+    readonly property bool subspirit: agent && agent.subspirit === true
                                         && !orphaned
     //: §9.1's two steps off the parent card's own text (`col.x` 10): the
     //  `accent2` hairline rule sits 8px in, this card's text 8px past that.
-    readonly property real subInset: subminister ? Theme.gap * 2 : 0
+    readonly property real subInset: subspirit ? Theme.gap * 2 : 0
 
     // ---- the tick, and WHICH line carries it ----
     // His, three times over, and the LAST word wins. *"at the end of the second
@@ -427,10 +427,10 @@ Item {
     Rectangle {
         anchors.fill: parent
         anchors.bottomMargin: 2
-        // An inset subminister's highlight starts at its subordination hairline
+        // An inset subspirit's highlight starts at its subordination hairline
         // (10 + one 8px step), so the lit region reads as the inset card and not
         // the empty gutter to its left.
-        anchors.leftMargin: row.subminister ? 10 + Theme.gap : 0
+        anchors.leftMargin: row.subspirit ? 10 + Theme.gap : 0
         color: openArea.containsMouse ? Theme.highlight : "transparent"
     }
 
@@ -448,16 +448,16 @@ Item {
     Rectangle {
         width: 2
         height: parent.height - 6
-        // ...but NOT on an inset subminister: that card carries the §9.1
+        // ...but NOT on an inset subspirit: that card carries the §9.1
         // subordination hairline below instead, and accent + hairline on one
         // card would be the two-accents-say-nothing case the rule rules out.
         visible: (row.running || row.finished) && !row.summoner
-                 && !row.subminister
+                 && !row.subspirit
         color: row.fgAccent
     }
 
-    // §9.1's subordination hairline: a subminister's card is a block that
-    // belongs to the minister's card above it, so it hangs a rule (never
+    // §9.1's subordination hairline: a subspirit's card is a block that
+    // belongs to the spirit's card above it, so it hangs a rule (never
     // accent — that still means "current row", not "belongs to") one 8px step
     // in from that card's text (`col.x` 10), with this card's own text a
     // further step (`subInset`, in `col.x` below). `Theme.accent2` since
@@ -465,7 +465,7 @@ Item {
     // is for, so the belongs-to relationship reads in a second hue rather
     // than the same neutral line every other hairline on the card uses.
     Rectangle {
-        visible: row.subminister
+        visible: row.subspirit
         x: 10 + Theme.gap
         y: 3
         width: 1
@@ -557,7 +557,7 @@ Item {
 
     Column {
         id: col
-        // 10 is every card's own text inset; a subminister adds §9.1's two 8px
+        // 10 is every card's own text inset; a subspirit adds §9.1's two 8px
         // steps (`subInset`) so its text sits one step past its hairline.
         x: 10 + row.subInset
         width: parent.width - x
@@ -795,7 +795,7 @@ Item {
             placeholder: row.running
                 ? "send " + (row.name !== "" ? row.name : "it")
                   + " a command, an idea or a fix"
-                : "leave a note - it goes to the next minister"
+                : "leave a note - it goes to the next spirit"
             openCaret: row.openCaret
             onDraftEdited: (b) => row.draftEdited(b)
             onSubmitted: (b) => { row.composing = false; row.send(b); }
@@ -814,7 +814,7 @@ Item {
         // literal, ever (§6.2).
         //
         // The spine is `Theme.accent2` (§3.8): the same "belongs to the card
-        // above it" rule the subminister hairline draws in the secondary hue
+        // above it" rule the subspirit hairline draws in the secondary hue
         // above, not the neutral `Theme.border` every other hairline on this
         // desktop uses — this is subordination, not attention, and the accent
         // here still means "current" (§9.1's gutter, two pixels to its left).

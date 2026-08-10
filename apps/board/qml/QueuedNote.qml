@@ -102,7 +102,7 @@ Item {
 
     // THE WORD IS ORDER — [his, 2026-07-29] this list says orders, not messages
     // — and what it waits for is the next SUMMONER, which drains the queue
-    // (`board-watch.work_the_queue`); never a minister. Solomon reads it and
+    // (`board-watch.work_the_queue`); never a spirit. Solomon reads it and
     // decides who does it.
     readonly property string bodyText:
         "order waiting for the next summoner: " + (row.note ? row.note.text : "")

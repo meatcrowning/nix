@@ -1,6 +1,6 @@
 # The orchestrator's half (`boardwork.py`): spawning, the cap, the handoff
 
-*How an ask becomes ministers: the box, the concurrency cap, handing an item to a worker already in those files, what every spawn is told and what it starts with, the transient unit, and the summon note's life.*
+*How an ask becomes spirits: the box, the concurrency cap, handing an item to a worker already in those files, what every spawn is told and what it starts with, the transient unit, and the summon note's life.*
 
 Part of goetia's guide — the map and the shared
 rules are in [`../AGENTS.md`](../AGENTS.md); read that first.
@@ -168,7 +168,7 @@ Rules that fall out of it, all of them load-bearing:
   newly answered, and the same tick fires a fresh session of it — that IS the
   auto-restart Alloces survives the cap on, and the cap-cut hand-back bullet
   (`reconcile`'s `capped` verdict, read off the unit's journal) says the work
-  is handed on rather than that the minister died. A hand-edited answer has
+  is handed on rather than that the spirit died. A hand-edited answer has
   no stamp and does NOT re-fire: it comes back to NEEDS YOU and sits there
   with the bullet saying what happened, and re-answering it is what starts it
   again — deliberately, because the alternative is a crash loop spawning an
@@ -422,14 +422,14 @@ the other is invisible until the numbers stop matching.
 started at **51,425 tokens**, and that floor is re-read on *every turn* of the
 session. Over one day — 215 sessions, 11,987 assistant turns — the floor alone
 accounted for **~600M of 1,510M input tokens, 40%**. A token cut here is paid
-back once per turn, and the long ministers run 150-350 turns each.
+back once per turn, and the long spirits run 150-350 turns each.
 
 | | worker floor |
 |---|---|
 | before | 51,425 |
 | `--tools` restricted to `boardwork.TOOLS` | -10.5k |
 | `--disable-slash-commands` | -2.2k |
-| superpowers off (`MINISTER_SETTINGS`) | -2.0k, and it arrived TWICE |
+| superpowers off (`SPIRIT_SETTINGS`) | -2.0k, and it arrived TWICE |
 | **now** | **36,417 (-29%)** |
 
 `--tools` is the big one, and it is a *different axis from `ALLOW`*: `ALLOW` is
@@ -437,9 +437,9 @@ a permission filter and the schema loads either way, while `--tools` decides
 which built-in tools exist at all. It drops the deferred-tool block, `Workflow`
 (~6k of description by itself), `Artifact`, `ScheduleWakeup`, `ToolSearch`,
 `AskUserQuestion`, `ReportFindings`, `Skill`, and the Task/todo reminders that
-fire every few turns. `Task` stays — a minister that cannot fan out reads
+fire every few turns. `Task` stays — a spirit that cannot fan out reads
 serially in its own context, which is the expensive shape — and so does the web
-pair, which costs ~1k and has no recorded use: a minister sent at an upstream
+pair, which costs ~1k and has no recorded use: a spirit sent at an upstream
 API it cannot look up flounders for far more than that.
 
 **`--exclude-dynamic-system-prompt-sections` is in no row of that table and is
@@ -451,13 +451,13 @@ any other agent's differing git status would have broken regardless. Writes cost
 1.25x and reads 0.1x, against ~200 spawns a day.
 
 **SOLOMON IS EXEMPT FROM EVERYTHING BUT THAT ONE FLAG.** [his, 2026-07-29]
-*"def disable superpowers for ministers but solomon should still have it
+*"def disable superpowers for spirits but solomon should still have it
 enabled"*. The split follows the shape of the two runs rather than the quality
 of the advice: the superpowers injection is ~2k and arrives twice, plus ~2.2k of
 skill listing, so it costs a 6-12 turn orchestrator ~50k a run and a 150-350
-turn minister ~1.2M. And its first instruction — invoke a skill before
+turn spirit ~1.2M. And its first instruction — invoke a skill before
 answering, brainstorm before building — is advice for somebody with a human to
-check with; a minister has none, has its whole task in one prompt, and has
+check with; a spirit has none, has its whole task in one prompt, and has
 `RULES`. Passing `--tools` to Solomon would also have taken its skills away by
 the back door, since `Skill` is not in the list, leaving an injected text at war
 with its own tool list. Solomon measures 53,281 -> 52,984: nearly nothing, and
@@ -469,15 +469,15 @@ the PostToolUse inbox hook both still fire, and an inbox note reaching a worker
 mid-flight is load-bearing for rule 11.
 
 **The floor is not the whole bill.** It is ~35% of it (measured across 25
-long minister sessions on `top`, 2026-07-30: 3,872 turns, an average floor of
+long spirit sessions on `top`, 2026-07-30: 3,872 turns, an average floor of
 39.1k against an average final context of 154.6k, 438.6M input tokens re-read
-in total). The rest is that context grows over a long minister and every turn
+in total). The rest is that context grows over a long spirit and every turn
 re-reads all of it, and what fills it is **the agents' own output — 81% of the
 growth, nearly all of it thinking**; tool results are the other 19%. Shortening
 sessions is the other lever and it is not this one.
 
 **The floor is not the whole STARTUP either — a nested `CLAUDE.md` used to
-double it, silently.** [measured on `top`, 2026-07-30] A minister's floor is
+double it, silently.** [measured on `top`, 2026-07-30] A spirit's floor is
 36.5k, of which 16.5k is the CLI itself (system prompt + the nine `--tools`
 schemas) and ~20k is repo context — the root `AGENTS.md` (11.7k), `~/CLAUDE.md`
 (1.2k) and `MEMORY.md` (3.7k). But **the nested `CLAUDE.md` symlinks were
@@ -488,11 +488,11 @@ read of a file outside those trees cost 27.7k, the difference being
 `home/prog/AGENTS.md` and `quickshell-files/AGENTS.md` swallowed whole for a
 900-token file. The three nested symlinks are gone (same measurement after:
 **27.9k**, -17.9k *per turn*); the guides themselves are untouched and rule 5
-still sends every minister to the nearest one, in slices. **Never re-add a
+still sends every spirit to the nearest one, in slices. **Never re-add a
 nested `CLAUDE.md`** — see `~/nix/AGENTS.md` -> "How to work here".
 
 **And a guide can be a token bomb on its own.** This one was a single
-2,598-line file until 2026-07-30 — past `Read`'s 2,000-line cap, so a minister
+2,598-line file until 2026-07-30 — past `Read`'s 2,000-line cap, so a spirit
 sent at goetia paid ~44k *and* got a truncated guide. It is an index plus
 `guide/*.md` now. When a nested guide here goes past ~700 lines, split it
 rather than letting the next agent swallow it.
@@ -543,56 +543,56 @@ running. The zombie clause stays: it was a real bug for the old path (two stub
 workers that ran for one second still counted as running two and a half seconds
 later, holding slots against the cap and keeping cards on his board).
 
-### The deepseek subminister: a Claude minister OR the orchestrator delegates a chunk
+### The deepseek subspirit: a Claude spirit OR the orchestrator delegates a chunk
 
-A **Claude** minister — **or Solomon, the orchestrator himself** — that knows it
+A **Claude** spirit — **or Solomon, the orchestrator himself** — that knows it
 is about to burn context on wide, bulk, mechanical work — reading many files at
 once, a wide grep, a normalising transform — can hand that one chunk to a
-cheaper **deepseek subminister** instead of doing it in its own (expensive,
+cheaper **deepseek subspirit** instead of doing it in its own (expensive,
 long-context) session, then fold the compact result back in. This is a
-worker-to-worker delegation, distinct from a `dispatch`/handoff: the subminister
-is not a new board minister. Solomon's case is the same pull `dispatch` answers
+worker-to-worker delegation, distinct from a `dispatch`/handoff: the subspirit
+is not a new board spirit. Solomon's case is the same pull `dispatch` answers
 for real work — a WAITED-ON session should not spend itself on bulk reading it
 can delegate — for the rare survey he must do himself to name a `--where` or
 count the jobs an ask holds.
 
 ```bash
-# from a CLAUDE minister's OR the orchestrator's own shell:
-python3 apps/board/tools/boardctl.py subminister \
+# from a CLAUDE spirit's OR the orchestrator's own shell:
+python3 apps/board/tools/boardctl.py subspirit \
     'read apps/pylib/**/*.py and list every public function with file:line'
 ```
 
-- **The model is PINNED.** Whatever the minister's own dropdown (`minister_model()`)
-  says, a subminister ALWAYS runs on `deepseek/deepseek-v4-flash-0731`
-  (`boardwork.DEEPSEEK_SUBMINISTER_MODEL`) — that is the whole point of it — and
+- **The model is PINNED.** Whatever the spirit's own dropdown (`spirit_model()`)
+  says, a subspirit ALWAYS runs on `deepseek/deepseek-v4-flash-0731`
+  (`boardwork.DEEPSEEK_SUBSPIRIT_MODEL`) — that is the whole point of it — and
   because that model is in `HERMES_MODELS` it rides the **hermes** runtime
-  (`hermes chat -q …`, nous provider), not Claude. `boardwork.subminister()`
-  builds the same argv a hermes minister gets, with the model fixed.
-- **It is gated on the RUNTIME, not the role — a Claude minister and the
+  (`hermes chat -q …`, nous provider), not Claude. `boardwork.subspirit()`
+  builds the same argv a hermes spirit gets, with the model fixed.
+- **It is gated on the RUNTIME, not the role — a Claude spirit and the
   orchestrator are treated identically.** `boardwork.calling_backend()` walks the
   caller's process ancestors and takes the NEAREST agent runtime — `hermes` or
-  claude. Solomon is a `claude` process, so he passes exactly as a minister does;
-  a minister already on deepseek, an orchestrator on a hermes model, AND a
-  deepseek subminister (whose parents include a claude ancestor but whose nearest
+  claude. Solomon is a `claude` process, so he passes exactly as a spirit does;
+  a spirit already on deepseek, an orchestrator on a hermes model, AND a
+  deepseek subspirit (whose parents include a claude ancestor but whose nearest
   runtime is hermes) are all refused with a "do this chunk yourself" message. Env
-  is not trusted for this: a subminister inherits its claude parent's env, so only
+  is not trusted for this: a subspirit inherits its claude parent's env, so only
   the process tree tells the truth. Neighbour-runtime detection reused the same
   `/proc` walk `boardagents.session_pid` uses.
 - **It is synchronous and its whole result is stdout.** The caller's shell tool
   captures what comes back and it is folded into the caller's own context — so
-  the subminister's framing (`boardwork.SUBMINISTER_FRAME`) tells it to return
+  the subspirit's framing (`boardwork.SUBSPIRIT_FRAME`) tells it to return
   something **COMPACT** relative to the work (a summary, an inventory, a list),
   and NOT to write to any board, commit, or spawn anything further. That
   compactness is what makes the hop a saving. No unit, no bullet, no cap slot; a
   killed one is simply retried by the caller.
 - **It DOES draw its own inset card while it runs.** [his follow-up, 2026-08-01]
-  a subminister is given its OWN demon name from the Lesser Key (`ba.pick_name`,
-  which moves it off any live minister's or sibling subminister's name) and a
-  registration record keyed on a minted `sub…` id. `boardwork.subminister()`
-  registers it via `boardagents.register(..., kind="subminister", name=…,
+  a subspirit is given its OWN demon name from the Lesser Key (`ba.pick_name`,
+  which moves it off any live spirit's or sibling subspirit's name) and a
+  registration record keyed on a minted `sub…` id. `boardwork.subspirit()`
+  registers it via `boardagents.register(..., kind="subspirit", name=…,
   parent=…)` for the length of the run and drops it in a `finally`. The record
   publishes, for the UI to draw the card INSET under its spawner:
-  `kind="subminister"`, `name` (its own), `parent` (the caller's inbox id) and
+  `kind="subspirit"`, `name` (its own), `parent` (the caller's inbox id) and
   `parentName` (the caller's demon name), all surfaced on the `boardagents.agents()`
   walk. It is kept out of the flat `cards()` list (like a `session`) so the inset
   render is the only place it appears; `main.py` + `qml` (Murmur) place it under
@@ -608,7 +608,7 @@ python3 apps/board/tools/boardctl.py subminister \
   discretionary or judgement work you would have to re-read the whole output of
   to trust — if you would ingest all of it anyway, doing the work yourself is
   still cheaper.
-- Harness: `test_subminister` in `tools/board-test.py`.
+- Harness: `test_subspirit` in `tools/board-test.py`.
 
 ### A DISPATCH IS A START, NOT A RESULT
 
@@ -656,7 +656,7 @@ assumed.
   pushed.` and nothing under it. Detail earns its place only for what he would
   otherwise be surprised by: a failure, a choice made on his behalf, a rebuild
   left pending, work deliberately left out. Never dress a plain success up.
-  Leaving another minister's work alone is implied, not news — a note never says it.
+  Leaving another spirit's work alone is implied, not news — a note never says it.
 - **A transient platform death is REQUEUED once, not failed** (2026-07-29). A
   worker that recorded nothing and whose log ENDS on an API 5xx/overload line
   (`boardwork.TRANSIENT_RE`) died at the platform's hand, usually before its

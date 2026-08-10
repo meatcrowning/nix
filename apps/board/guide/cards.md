@@ -1,4 +1,4 @@
-# The triangle: what a minister's card says
+# The triangle: what a spirit's card says
 
 *The `agents` section — the only part of the window that is not the store. A summon becoming a card, names, claimed vs observed work, the rising card, and the output drawer.*
 
@@ -30,7 +30,7 @@ Rules, all of them load-bearing:
 ### A SUMMON IS NOT A CARD until the agent is really up
 
 [his, 2026-07-30] *a card should appear only once the summon has actually
-completed* — a minister's card was showing while Solomon was still summoning it.
+completed* — a spirit's card was showing while Solomon was still summoning it.
 `_spawn_worker` registers the instant the spawn call returns, and that return is
 an `execve`, not a running agent: `systemd-run --service-type=exec` came back in
 **19 ms** (measured, book, 2026-07-30). A `claude` that then died on an API 500
@@ -108,7 +108,7 @@ names, until he asked for the full seventy-two.]
   words.
 - **A decision agent has a name too — because somebody IS on it.** [his,
   2026-08-01] two cards (an answered decision each) sat in the triangle with no
-  name on them while the minister board-watch had spawned worked on, and he
+  name on them while the spirit board-watch had spawned worked on, and he
   came back to have it fixed. A decision HE answered has a real stashed process
   on the job, so the "claim that somebody is on it" rule is satisfied — the
   name is derived off the stable stash key in `boardagents._stash_agents`
@@ -144,7 +144,7 @@ separable rules, and `board-test.py` asserts each of them separately.
   a note left for an orchestrator that does not exist would have nobody to read
   it, and the box at the top of the window already queues one for the next.
   `describe()` returns `""` for it: [his, 2026-07-29] the resting card is TWO
-  lines — `Solomon awaits`, then `summons a minister to do your bidding.` — and
+  lines — `Solomon awaits`, then `summons a spirit to do your bidding.` — and
   the third, which said what you type at the top of the window goes to him, is
   gone. The row's own `detail` is `""` for the same reason, so the two things
   that can feed that line cannot disagree.
@@ -152,13 +152,13 @@ separable rules, and `board-test.py` asserts each of them separately.
   `Main.qml`'s `nothingRunning` (any card that is not the standing row) rather
   than on the list's length.
 - `boardctl.py inbox send --to` takes either the name or the id.
-- **His card names his MODEL too, same as a minister's** — [his, 2026-08-02]
+- **His card names his MODEL too, same as a spirit's** — [his, 2026-08-02]
   *"Solomon (deepseek v4 flash)"*, the same `"[name] ([model])"` a worker's
   row carries (`boardagents.agents()`, `tier_label`). It is not hardcoded:
   `board-watch._summon` resolves the pair he chose for the NEXT orchestrator
   run (`boardwork.orch_model()`, overridable by `BOARD_ORCH_MODEL`/
   `BOARD_ORCH_EFFORT` like every other role) once, at the spawn, and stamps it
-  on the registration exactly like `_spawn_worker` does for a minister — so a
+  on the registration exactly like `_spawn_worker` does for a spirit — so a
   future run on a different model shows that model with no code change. A
   record with no stamped model (a hand call, an old record) falls back to
   `boardwork.orch_label()`, the currently-chosen pair, rather than showing
@@ -246,7 +246,7 @@ The short version, and every line of it is a rule:
   **The CIRCLE is his and the TRIANGLE is theirs** — [his, 2026-07-29] the
   magician stands in the circle and the spirit is bound in the triangle, so that
   line named the wrong shape. `triangle` is not retired: it now names the AREA
-  THE MINISTERS RESIDE IN, the agents section under Solomon's summoner section,
+  THE SPIRITS RESIDE IN, the agents section under Solomon's summoner section,
   whose `SectionHead` draws the label `triangle` (the section **id** stays
   `agents` — it keys the collapse state, `jump()` and the `ag` titlebar cell).
   The "no triangles in this font" lines elsewhere in this guide are about the
@@ -372,7 +372,7 @@ The short version, and every line of it is a rule:
   is doing"* with no error anywhere. `tools/board-watch-test.py` asserts the
   spawn passes it.
 - **...and where it cannot be chosen it is BOUND, still never guessed.** A
-  minister on the hermes runtime has no transcript file and no `--session-id`:
+  spirit on the hermes runtime has no transcript file and no `--session-id`:
   its history is rows in `~/.hermes/state.db`. The spawn therefore records a
   SHA-1 of the query it sent (`boardphase.arm`), and hermes stores that query
   verbatim as its session's first user message, so `boardhermes.resolve` finds
@@ -470,7 +470,7 @@ all of it.
   ordering key cannot quietly become a second counter.
 - **A finished agent leaves the list at once, and the DRAWING is what makes
   that true** (`boardwork._drawable` skips a row that is `exited` AND
-  `finished`) — [his, 2026-07-30] *"are ministers sometimes staying in the
+  `finished`) — [his, 2026-07-30] *"are spirits sometimes staying in the
   triangle unfocused colored until the user clears their completion
   message?"*. They were, and "sometimes" was a race: the card is only deleted
   from disk by `boardagents.sweep()`, on a board-watch tick, and the tick a
@@ -518,7 +518,7 @@ all of it.
   title for it.
 - **...but it is not drawn any more — [his, 2026-07-31] *"agents started by the
   user can be hidden from the triangle"*.** Those anonymous rows (no name, no
-  `--where`, an id like `s831183`) are HIS terminals, not summoned ministers,
+  `--where`, an id like `s831183`) are HIS terminals, not summoned spirits,
   so `boardwork.cards()` drops every `kind == "session"` row and the triangle
   no longer shows them. The filter lives in `cards()`, the one surface that
   draws the window — **not** in `_drawable()`, so `boardctl.py agents` (which
@@ -526,24 +526,24 @@ all of it.
   collision check where a live session of his still matters. Board-dispatched
   workers (named rows) and Solomon are never a `session` and are unaffected.
 - **THE SECTION DESCRIBES ITSELF WITH CARDS — it has no description of its
-  own.** [his, 2026-07-30] bound ministers → the cards and nothing else; none
+  own.** [his, 2026-07-30] bound spirits → the cards and nothing else; none
   bound → the one empty line below and nothing else. Two things went for that:
-  the paragraph that framed the cards (*"each minister says what it is doing,
+  the paragraph that framed the cards (*"each spirit says what it is doing,
   and the line under it is what it is actually doing…"*) and the watcher's
   systemd sentence that sat under them. `Agents.watcher`/`Agents.armed` are
   still read and still polled — the only place either is DRAWN now is the
   not-armed line below, which §10 does not let us drop. Do not reintroduce a
   subtitle here; the other sections keep theirs.
-- **Empty is the resting state**: `binds ministers.`, in `Theme.dim`, with the
+- **Empty is the resting state**: `binds spirits.`, in `Theme.dim`, with the
   box still there — [his, 2026-07-29] what the triangle IS, rather than a report
   that it currently holds nobody.
 - **The band says how many it BINDS, in words — [his, 2026-07-31] *"the
-  triangle binds three ministers"*.** Once any minister is running the
-  `SectionHead` label reads `the triangle binds <n> minister(s)` (one/two/
+  triangle binds three spirits"*.** Once any spirit is running the
+  `SectionHead` label reads `the triangle binds <n> spirit(s)` (one/two/
   three/four, matching the cap); with none it falls back to the plain `the
-  triangle`, because the dim `binds ministers.` line below already says the
-  empty state and `binds no ministers` would contradict it. The number is
-  `Agents.boundMinisters` (`main.py`), counting the RUNNING, non-orchestrator
+  triangle`, because the dim `binds spirits.` line below already says the
+  empty state and `binds no spirits` would contradict it. The number is
+  `Agents.boundSpirits` (`main.py`), counting the RUNNING, non-orchestrator
   cards in the exact set the triangle draws — so it inherits the session
   filter (`cards()` drops `kind == "session"`), and an anonymous session the
   user started is never counted. A queued task (no process yet) and an exited
@@ -587,7 +587,7 @@ awakens...' with an animated elipsies"* — the name-led top line he asked for o
 - **There is no `visible` binding on `AgentRow`, and putting one back is a
   regression.** This replaced `speaks`, a gate that withheld a card until its top
   line was a real sentence [his, 2026-07-30] — right for the two seconds a
-  healthy spawn takes, and the reason a minister wedged before its first API call
+  healthy spawn takes, and the reason a spirit wedged before its first API call
   was *undrawable*: registered, linked, and having genuinely never done anything
   was exactly the withheld state. One burned a core behind an empty triangle for
   45 minutes [top, 2026-07-31]. There is now no state in which a running agent
@@ -602,7 +602,7 @@ awakens...' with an animated elipsies"* — the name-led top line he asked for o
 
 ### ...and clicking the card opens what it is ACTUALLY SAYING
 
-[his, 2026-07-30] *"a minister card should expand to show what that minister is
+[his, 2026-07-30] *"a spirit card should expand to show what that spirit is
 actually saying"* — a drawer slides down out from under the card with the last
 couple of lines that agent logged, and clicking the card again slides it back up.
 The card's three lines are this app's account of the agent; the drawer is the
@@ -617,21 +617,21 @@ agent's own voice, uncut except for width.
   (§10). The right-click menu is untouched: that `MouseArea` takes
   `RightButton` only, which is why a left button reached nothing here before.
 
-### Right-clicking a card can FORCE-STOP that minister
+### Right-clicking a card can FORCE-STOP that spirit
 
 [his] the card's right-click menu (`Main.qml`'s `agentRowMenu`) ends with a
-**force-stop** entry for a RUNNING worker or decision minister — the destructive
+**force-stop** entry for a RUNNING worker or decision spirit — the destructive
 act §10.3 makes a menu entry rather than a click, at the FOOT of the menu behind
 its own separator (the same shape `todoMenu` uses for its one removal), so the
 two deliberate acts are the right-click and the entry, and the pointer never
 lands on it by accident.
 
 - **The kill is HONEST, per §10** — `boardwork.force_stop` SIGKILLs the
-  minister's own transient unit (`systemctl --user kill --signal=KILL
+  spirit's own transient unit (`systemctl --user kill --signal=KILL
   board-worker-<id>` / `board-decision-<id>`, the whole cgroup), then RE-READS
   the one liveness rule (`boardmove._alive` via `boardagents.agents()`) and
   reports what is actually true — never success off the command's own exit. A
-  minister with no unit (the detached fallback) is SIGKILLed by pid group
+  spirit with no unit (the detached fallback) is SIGKILLed by pid group
   instead; the verdict is still the re-read, so nothing here can silently no-op.
   `main.py`'s `Agents.forceStop` returns that verified line for the footer and
   re-polls so the card redraws stopped at once.
@@ -639,8 +639,8 @@ lands on it by accident.
   `worker` or `decision`. **Solomon is excluded**: the orchestrator is a brief
   planning burst that holds the board-watch tick and then delegates, its resting
   card has no process to stop, and killing it mid-plan would abandon a dispatch
-  he asked for. **A subminister is excluded too**: it has no unit of its own and
-  lives in its parent minister's cgroup, so force-stopping that parent takes it
+  he asked for. **A subspirit is excluded too**: it has no unit of its own and
+  lives in its parent spirit's cgroup, so force-stopping that parent takes it
   down with it. `force_stop` refuses both regardless, as defence in depth.
   Harness: `test_force_stop`.
 - **The state is the WINDOW's, keyed by the agent's id** (`Main.qml`'s
