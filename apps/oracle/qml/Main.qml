@@ -18,7 +18,7 @@ Window {
     height: 720
     visible: true
     color: Theme.bg
-    title: "oracle"
+    title: "chatter"
 
     property string model: ""
     property string status: ""
@@ -267,6 +267,17 @@ Window {
         if (p === "" || win.model === "" || Ollama.busy)
             return;
         win.status = "";
+        // The prior turns of THIS chat, so the model sees the whole conversation
+        // rather than just the new prompt — built before the pair below is
+        // appended, and skipping error placeholders / empty streams, which are
+        // never real conversation content.
+        var history = [];
+        for (var i = 0; i < chatLog.count; i++) {
+            var h = chatLog.get(i);
+            if (h.isError || h.body.trim() === "")
+                continue;
+            history.push({ role: h.isUser ? "user" : "assistant", content: h.body });
+        }
         // Append the pair now, then stream into the assistant row. Prior turns
         // are left untouched — the log grows downward (docs/DESIGN.md §14).
         chatLog.append({ isUser: true, who: "you", body: p,
@@ -281,7 +292,7 @@ Window {
                          streaming: true, isError: false });
         win.activeIndex = chatLog.count - 1;
         Ollama.rememberModel(win.model);   // the model he last used is next launch's default
-        Ollama.send(win.model, p);
+        Ollama.send(win.model, p, JSON.stringify(history));
         input.clear();
     }
 
