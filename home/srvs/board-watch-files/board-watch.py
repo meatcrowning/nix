@@ -137,9 +137,9 @@ filter, the queue and the dedupe can be exercised without spawning anything:
     BOARD_ORCH_TIMEOUT      seconds an orchestrator run may take (default 900)
     BOARD_ORCH_MODEL        `--model` for the orchestrator (default
     BOARD_ORCH_EFFORT       claude-fable-5 / high); the WORKER_ and DECISION_
-                            pair are his minister choice and are CLAMPED to
-                            `boardwork.MINISTER_CEILING` — they can lower a
-                            minister, never raise one. See `boardwork.ROLES`.
+                            pair are his spirit choice and are CLAMPED to
+                            `boardwork.SPIRIT_CEILING` — they can lower a
+                            spirit, never raise one. See `boardwork.ROLES`.
     BOARD_WORK_SPAWN        command run INSTEAD of `claude` for a WORKER
     BOARD_MAX_WORKERS       the concurrency cap, overriding the file
     BOARD_MAX_SUMMONERS     how many orchestrators one tick may run at once,
@@ -519,7 +519,7 @@ def save_state(d):
 FAIL_TEMPLATE = (
     "- FAILED: **board-watch did not finish decision {num}** - nothing was "
     "committed.\n"
-    "    It was {title}; the minister exited {how}. The answer is still "
+    "    It was {title}; the spirit exited {how}. The answer is still "
     "above. Log: `~/.cache/board-watch.log`\n")
 
 
@@ -538,7 +538,7 @@ FAIL_TEMPLATE = (
 #: ...and the span is the FORMATTER'S, never the template's — see FAIL_TEMPLATE
 #: above for what the doubled pair cost.
 WORKER_FAIL = (
-    "- FAILED: **a minister stopped without finishing** - it was working on "
+    "- FAILED: **a spirit stopped without finishing** - it was working on "
     "{task}.\n"
     "    Dispatched from something you typed into the box; it recorded "
     "nothing on this board, so nothing landed for it. Answer or type it "
@@ -549,11 +549,11 @@ WORKER_FAIL = (
 #: worker off mid-work. Not a failure of the work, and — unlike a decision
 #: agent — not something that resumes on its own, so the tag stays FAILED and
 #: the wording says what actually happened rather than leaving him to guess
-#: why a minister that was working fine stopped. `boardwork.reap()` stamps the
+#: why a spirit that was working fine stopped. `boardwork.reap()` stamps the
 #: record (`capped`) from the unit's journal, which is the one record of the
 #: cap that survives `--collect`.
 WORKER_CAP_FAIL = (
-    "- FAILED: **the {cap}-minute cap cut the minister off mid-work**\n"
+    "- FAILED: **the {cap}-minute cap cut the spirit off mid-work**\n"
     "    It was working on {task} when the cap SIGTERMed it; nothing landed, "
     "and a worker does not resume on its own. Answer or type it again to "
     "have another go. {where}\n")
@@ -606,7 +606,7 @@ def note_on_board(bullet, agent_id=None):
     died, so `BOARD_AGENT_ID` would name the wrong one or nobody.
 
     ...and for exactly that reason the gutter's `by=` is **this program**, not
-    that agent. The bullet says the minister recorded nothing; an attribution
+    that agent. The bullet says the spirit recorded nothing; an attribution
     naming it would be the same sentence claiming it did. `boardmove.note`
     resolves the author from the environment, which here names nobody, so this
     is the fallback and it is an honest one — the watcher genuinely is what put
@@ -789,7 +789,7 @@ def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision",
     # missing, every run fails identically and the board must say why.
     #
     # **It is the BACKEND'S binary, not `claude`.** [top, 2026-07-31] with the
-    # minister model set to a hermes one and no `hermes` on the box, every
+    # spirit model set to a hermes one and no `hermes` on the box, every
     # dispatch died at `execve` with a bare `[Errno 2] 'hermes'` — while this
     # check, looking for a binary that run was never going to use, passed.
     backend = bw.get_backend_for_role(role, model=model)
@@ -909,7 +909,7 @@ def _summon(notes, index, total):
     aid = "orch-%d" % os.getpid() if total == 1 else "orch-%d-%d" % (os.getpid(), index)
     session = str(uuid.uuid4())
     # THE TIER THIS RUN SPAWNS ON, resolved ONCE here — same shape as
-    # `boardwork._spawn_worker`'s `minister_tier` resolution — so the record and
+    # `boardwork._spawn_worker`'s `spirit_tier` resolution — so the record and
     # the actual `--model`/`--effort` this run is launched with can never
     # disagree: his choice (`boardwork.orch_model()`), overridable by the same
     # `BOARD_ORCH_MODEL`/`BOARD_ORCH_EFFORT` env `role_flags` already honours.
@@ -925,7 +925,7 @@ def _summon(notes, index, total):
     # already said it did.
     #
     # `model=`/`effort=` stamped here too — [his, 2026-08-02] the same tier a
-    # minister's card names beside it now names Solomon's, dynamically: change
+    # spirit's card names beside it now names Solomon's, dynamically: change
     # his choice of orchestrator model and the very next summon's card reads
     # the new one, with nothing to touch in `boardagents.py`.
     ba.register(aid, notes[0]["text"][:70], os.getpid(), kind="orchestrator",
@@ -1126,7 +1126,7 @@ def drain_queue():
     # A BURST IS ONE PLANNING PROBLEM. Wait out the rest of what he is typing
     # before planning any of it, so two sentences a minute apart reach ONE
     # summoner that can group them by file set, instead of two that each
-    # dispatch a minister into the same files.
+    # dispatch a spirit into the same files.
     #
     # It SLEEPS here rather than returning and being re-triggered, and that is
     # deliberate twice over: `board-inbox.path` is level-triggered, so returning

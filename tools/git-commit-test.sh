@@ -13,7 +13,7 @@ git init -q && git config user.email test@test && git config user.name test
 seq 1 40 | sed 's/^/L/' > boardwork.py   # pretend: the swept file
 git add boardwork.py && git commit -qm base
 
-# Two changes, far apart: MY hunk at the top, ANOTHER minister's WIP at bottom.
+# Two changes, far apart: MY hunk at the top, ANOTHER spirit's WIP at bottom.
 sed -i '1a cards_session_filter=True' boardwork.py          # mine
 sed -i '$a unit_name_prefix="D"' boardwork.py               # theirs
 
@@ -24,7 +24,7 @@ bad()  { echo "  FAIL: $1"; fail=$((fail+1)); }
 echo "== 1) default mode must REFUSE the mixed file (env-forced tiny threshold) =="
 GIT_COMMIT_MAX_HUNKS=2 GIT_COMMIT_MAX_LINES=5 "$HC" -m "cards: filter" -- boardwork.py >out1.txt 2>&1
 rc1=$?
-[ "$rc1" -ne 0 ] && grep -q "REFUSING" out1.txt && grep -qi "another minister" out1.txt \
+[ "$rc1" -ne 0 ] && grep -q "REFUSING" out1.txt && grep -qi "another spirit" out1.txt \
   && ok "refused mixed file (rc=$rc1)" || bad "did not refuse (rc=$rc1): $(tail -2 out1.txt)"
 [ "$(git log --oneline | wc -l)" -eq 1 ] && ok "no commit landed" || bad "a commit landed"
 

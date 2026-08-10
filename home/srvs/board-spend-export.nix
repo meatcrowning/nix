@@ -1,6 +1,6 @@
 { pkgs, lib, host, config, ... }:
 
-# Write this host's hermes minister spend to ~/nix/docs/spend.<host>.json,
+# Write this host's hermes spirit spend to ~/nix/docs/spend.<host>.json,
 # quarterly-hourly, so the board's spend section can sum BOTH machines' hermes
 # rows (apps/board/boardspend.py reads the other host's export beside the local
 # ledger). The Claude side of that section already combines — transcripts sync
@@ -14,7 +14,7 @@
 # ~/nix/docs; the existing nix-docs-sync (every 5 min, `git add -A` + commit +
 # push) carries it to the other machine like any other doc. This file only
 # owns the cadence: 15 minutes, because the figures move on the order of a
-# minister run and the sync is 5 anyway.
+# spirit run and the sync is 5 anyway.
 #
 # WHY A TIMER AND NOT A PATH UNIT: nothing on this desktop writes a file when a
 # hermes session ends — the ledger just gains a row — so the timer is the only
@@ -24,7 +24,7 @@
 # is not rewritten at all, so a quiet host mints no commits in the docs repo.
 {
   systemd.user.services.board-spend-export = {
-    Unit.Description = "Export this host's hermes minister spend to ~/nix/docs";
+    Unit.Description = "Export this host's hermes spirit spend to ~/nix/docs";
     Service = {
       Type = "oneshot";
       # Same pinned-PATH shape as board-reminder: the ambient systemd-user PATH
