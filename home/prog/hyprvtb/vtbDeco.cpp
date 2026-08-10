@@ -5303,6 +5303,19 @@ void CVtbDeco::onConfigReloaded() {
                           // not keep the pre-install breeze fallback path
     if (!validMapped(m_pWindow))
         return;
+    // A rolled-up (hidden) window froze m_rollBox at roll time — but if this
+    // reload is the second half of a plugin HOT-SWAP, the re-roll ran in
+    // PLUGIN_INIT (vtbApplyHandoff) BEFORE the plugin's own config values were
+    // parsed, so barSide() there returned the built-in default ("right") and
+    // barBoxFor() froze the bar on the wrong edge — a bottom bar re-rolled as a
+    // right-side strip, drawn nowhere near where the titlebar belongs, i.e.
+    // "invisible in place" (his report). The config is applied by the time this
+    // fires, so recompute the frozen box now with the correct edge. Skips a
+    // live roll/drag, which owns m_rollBox itself.
+    if (m_bRolledUp && m_rollAnim == ROLL_NONE && !m_bRollDragging) {
+        Hl::damage(CBox{effectiveBoxGlobal()}.expand(VTB_SHADOW_SIZE + 4)); // clear the stale box
+        m_rollBox = assignedBoxGlobal();
+    }
     g_pDecorationPositioner->repositionDeco(this);
     damageEntire();
 }
