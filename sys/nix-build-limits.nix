@@ -51,11 +51,13 @@
 # to itself should use it: 20G of headroom is more than anything in this flake
 # has ever needed, so these ceilings cost nothing in the normal case and only
 # stop a build that has genuinely run away. The real collision — a build and a
-# ComfyUI render at once — is not rationed, it is avoided: `rebuild-top` waits
-# out any render in flight, then stops and masks comfy for the duration
-# (tools/comfy-gate.sh, with a notification each way). The tight numbers live
-# THERE, applied to that one scope, on the one path where comfy could not be
-# got out of the way — a render still running an hour later.
+# ComfyUI render at once — is not rationed by default, it is put to him:
+# `rebuild-top` asks (a critical toast) whether to stop the loaded backends,
+# and on yes waits out any render in flight, then stops and masks comfy and/or
+# ollama for the duration (tools/heavy-gate.sh, with a notification each way).
+# The tight numbers live THERE, applied to that one scope, on the paths where
+# the backends stayed up — he said build anyway, he was not at the machine to
+# answer, or a render was still running an hour later.
 { pkgs, ... }:
 
 let
@@ -104,7 +106,7 @@ in
       tight=0
       while :; do
         # A dead or unreachable comfy answers nothing, which is `not rendering`
-        # — the same rule tools/comfy-gate.sh uses, for the same reason.
+        # — the same rule tools/heavy-gate.sh uses, for the same reason.
         q=$(curl -sf -m 3 http://127.0.0.1:8188/prompt 2>/dev/null \
             | grep -o '"queue_remaining"[[:space:]]*:[[:space:]]*[0-9]\+' \
             | grep -o '[0-9]\+$' | head -1)

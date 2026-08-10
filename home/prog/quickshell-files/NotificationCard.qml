@@ -229,8 +229,18 @@ Rectangle {
     // The actions this toast carries, split the way the spec splits them: the
     // `default` one is the card's own click, everything else is a button. Capped
     // at three so a sender cannot push the text off a 300px card.
+    //
+    // A CRITICAL toast draws its buttons whatever `notifActions` says. The
+    // setting exists so ordinary toasts stay text-only, and the server only
+    // advertises the capability when it is on — but urgency 2 is the level
+    // reserved for a question that has to be answered (the rebuild gate asking
+    // whether to stop ComfyUI/ollama), and a question whose answer is drawn
+    // nowhere is exactly the affordance-that-silently-fails docs/DESIGN.md §10
+    // forbids. Drawing MORE than was advertised drops nothing; the bug that
+    // rule guards against is advertising buttons and then swallowing them.
     readonly property var allActions:
-        (SettingsStore.d.notifActions && notif && notif.actions) ? notif.actions : []
+        ((SettingsStore.d.notifActions || card.critical) && notif && notif.actions)
+            ? notif.actions : []
     readonly property var buttonActions: {
         const out = [];
         for (let i = 0; i < card.allActions.length && out.length < 3; i++) {
