@@ -841,10 +841,17 @@ Window {
                 focus: true
 
                 // Ctrl+Return sends; a bare Return keeps typing a paragraph.
+                // Escape dismisses the prompt box — the desktop-wide
+                // Escape-to-dismiss (editor's PathBar/FindBar, reader's search):
+                // focus leaves for the reply view, so the accent border and the
+                // caret clear and the placeholder returns.
                 Keys.onPressed: function (e) {
                     if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter)
                         && (e.modifiers & Qt.ControlModifier)) {
                         win.send();
+                        e.accepted = true;
+                    } else if (e.key === Qt.Key_Escape) {
+                        replyFlick.forceActiveFocus();
                         e.accepted = true;
                     }
                 }
