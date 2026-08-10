@@ -2841,6 +2841,13 @@ class Bridge(QObject):
     scanStatus = Signal(str)
     scanRunning = Signal(bool)
     smartListsChanged = Signal()
+    # systheme creation surfaces as a TOAST with a progress bar (SysthemeToast.qml),
+    # not as in-window status text. The map carries {active, fraction, label,
+    # outcome}: `active` toggles the toast, `fraction` (0..1) drives the bar,
+    # `label` names the current phase, `outcome` is "" while running and
+    # "ok"/"partial"/"fail" once done (so the toast can tint + linger the result
+    # instead of vanishing — the no-silent-failure rule, docs/DESIGN.md §7.2).
+    systhemeProgress = Signal("QVariantMap")
 
     def __init__(self, library, player, lyrics, parent=None):
         super().__init__(parent)
@@ -2860,6 +2867,18 @@ class Bridge(QObject):
         self._current_album = 0
         self._current_smart = ""
         self._systheme_proc = None
+        # Progress-bar state for the systheme toast. `_frac` is what the bar
+        # shows; `_target` is the ceiling the current phase eases it toward on a
+        # timer, so the bar creeps forward during the long (unknown-length) comfy
+        # render instead of freezing, and never reaches 1.0 until the run truly
+        # ends — a bar that reads "done" before it is would be a silent lie.
+        self._systheme_frac = 0.0
+        self._systheme_target = 0.0
+        self._systheme_label = ""
+        self._systheme_last_err = ""
+        self._systheme_ease = QTimer(self)
+        self._systheme_ease.setInterval(120)
+        self._systheme_ease.timeout.connect(self._systheme_tick)
 
         # A library scan/import/watcher refresh must keep the user's place: the
         # grid, the open album section and the open playlist all reconcile in
@@ -2945,29 +2964,94 @@ class Bridge(QObject):
         action silently doing nothing (docs/DESIGN.md §7.2)."""
         return (HERE.parent / "pylib" / "systheme.py").is_file()
 
+    # systheme.py logs its phases to stderr as `systheme: <msg>` lines. Each
+    # recognised phase moves the bar to a milestone and renames the toast; the
+    # long comfy render sits between two milestones and the ease timer creeps
+    # the bar across the gap. Reusing systheme's own progress output (streamed
+    # live) rather than inventing a second one — the same state that used to
+    # print as in-window text, now driving a progress bar.
+    _SYSTHEME_PHASES = (
+        ("background uniformity", 0.15, "analysing cover"),
+        ("subject ", 0.30, "composing layout"),
+        ("edit graph built", 0.40, "preparing render"),
+        ("submitted; waiting", 0.90, "rendering"),
+        ("falling back to flat", 0.60, "rendering (flat)"),
+        ("using flat route", 0.60, "rendering (flat)"),
+        ("applying theme", 0.95, "applying theme"),
+    )
+
+    def _systheme_emit(self, active, outcome=""):
+        self.systhemeProgress.emit({
+            "active": active,
+            "fraction": round(self._systheme_frac, 4),
+            "label": self._systheme_label,
+            "outcome": outcome,
+        })
+
+    def _systheme_tick(self):
+        # Ease the shown fraction a fraction of the way to the phase ceiling.
+        gap = self._systheme_target - self._systheme_frac
+        if gap <= 0.001:
+            return
+        self._systheme_frac += gap * 0.06
+        self._systheme_emit(True)
+
+    def _systheme_phase(self, frac, label):
+        self._systheme_target = max(self._systheme_target, frac)
+        if label:
+            self._systheme_label = label
+        self._systheme_emit(True)
+
+    def _on_systheme_stderr(self):
+        proc = self._systheme_proc
+        if proc is None:
+            return
+        chunk = bytes(proc.readAllStandardError()).decode("utf-8", "replace")
+        for raw in chunk.splitlines():
+            line = raw.strip()
+            if not line:
+                continue
+            self._systheme_last_err = line
+            for needle, frac, label in self._SYSTHEME_PHASES:
+                if needle in line:
+                    self._systheme_phase(frac, label)
+                    break
+
     @Slot(int)
     def createSysthemeFromAlbum(self, album_id):
         """Turn this album's cover into the desktop systheme.
 
         Shells out to the one cemented entry point (apps/pylib/systheme.py)
         rather than reimplementing any of its crop/outpaint/apply pipeline.
-        Runs async so the UI never blocks, and always reports a result on
-        scanStatus — success or failure — per the no-silent-failure rule."""
+        Runs async so the UI never blocks; progress and the final result are
+        surfaced on `systhemeProgress` (the toast), success or failure alike,
+        per the no-silent-failure rule (docs/DESIGN.md §7.2)."""
         if self._systheme_proc is not None:
-            self.scanStatus.emit("systheme already in progress")
+            self._systheme_label = "already creating a systheme"
+            self._systheme_emit(True, "partial")
             return
         info = self.albumInfo(album_id)
         art = info.get("fullArt") if info else ""
         if not art or not os.path.isfile(art):
-            self.scanStatus.emit("systheme: no cover art for this album")
+            self._systheme_frac = 0.0
+            self._systheme_label = "no cover art for this album"
+            self._systheme_emit(True, "fail")
             return
         script = HERE.parent / "pylib" / "systheme.py"
         if not script.is_file():
-            self.scanStatus.emit("systheme: entry point not installed")
+            self._systheme_frac = 0.0
+            self._systheme_label = "entry point not installed"
+            self._systheme_emit(True, "fail")
             return
-        self.scanStatus.emit("creating systheme…")
+        self._systheme_last_err = ""
+        self._systheme_frac = 0.03
+        self._systheme_target = 0.08
+        self._systheme_label = "creating systheme…"
+        self._systheme_emit(True)
+        self._systheme_ease.start()
         self._systheme_proc = QProcess(self)
         self._systheme_proc.finished.connect(self._on_systheme_done)
+        self._systheme_proc.readyReadStandardError.connect(self._on_systheme_stderr)
 
         # On book there is no local GPU: the preferred generative (comfy) route
         # runs on top's ComfyUI, reached over the same ssh tunnel painter uses.
@@ -2993,23 +3077,32 @@ class Bridge(QObject):
 
     def _on_systheme_done(self, code, _status):
         proc = self._systheme_proc
-        self._systheme_proc = None
+        self._systheme_ease.stop()
         if proc is None:
             return
+        # Drain any final stderr (the phase parser tracks the last line as the
+        # failure reason) BEFORE nulling the handle it reads through.
+        self._on_systheme_stderr()
+        self._systheme_proc = None
         out = bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")
-        err = bytes(proc.readAllStandardError()).decode("utf-8", "replace")
+        err_last = getattr(self, "_systheme_last_err", "")
+        self._systheme_frac = 1.0
+        self._systheme_target = 1.0
         if code == 0 and out.strip():
             try:
                 result = json.loads(out.strip().splitlines()[-1])
             except Exception:
                 result = {}
             if result.get("applied"):
-                self.scanStatus.emit(f"systheme applied ({result.get('method', '?')})")
+                self._systheme_label = f"systheme applied ({result.get('method', '?')})"
+                self._systheme_emit(False, "ok")
             else:
-                self.scanStatus.emit("systheme created but not applied")
+                self._systheme_label = "systheme created but not applied"
+                self._systheme_emit(False, "partial")
         else:
-            reason = err.strip().splitlines()[-1] if err.strip() else f"exit {code}"
-            self.scanStatus.emit(f"systheme failed: {reason}")
+            reason = err_last or f"exit {code}"
+            self._systheme_label = f"systheme failed: {reason}"
+            self._systheme_emit(False, "fail")
 
     # ---- smart playlists ----
     #

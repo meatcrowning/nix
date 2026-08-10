@@ -445,7 +445,9 @@ Window {
         }
     }
 
-    // Scan progress / drive status, unobtrusive in the bottom corner.
+    // Scan progress / drive status, unobtrusive in the bottom corner. (systheme
+    // creation used to share this line; it is a toast with a progress bar now —
+    // SysthemeToast below.)
     PixelText {
         anchors.left: parent.left
         anchors.bottom: parent.bottom
@@ -454,6 +456,12 @@ Window {
         visible: text !== ""
         text: win.scanStatus
         color: win.fgDim
+    }
+
+    // systheme creation reports itself as a toast + progress bar, bottom-right.
+    SysthemeToast {
+        fgText: win.fgText
+        fgDim: win.fgDim
     }
 
     // ---- global keys ----
