@@ -78,6 +78,6 @@ in
     Icon=oracle
     Terminal=false
     Categories=Utility;
-    Keywords=ollama;chat;llm;ai;
+    Keywords=bespoke;ollama;chat;llm;ai;
   '';
 }
