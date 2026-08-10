@@ -367,6 +367,7 @@ Scope {
         property string media: ""
         property string meters: ""
         property string procs: ""
+        property string topstats: ""
 
         onLoaded: {
             SysInfo.restoreState(sysinfo);
@@ -375,6 +376,7 @@ Scope {
             Disks.restoreState(disk);
             Media.restoreState(media);
             Procs.restoreState(procs);
+            TopStats.restoreState(topstats);
         }
     }
 
@@ -396,6 +398,12 @@ Scope {
     Connections {
         target: Procs
         function onStateRevChanged() { persist.procs = Procs.stateJson(); }
+    }
+    // book's top-mirror (TopStats); increments only while the cpu popup's top
+    // drawer is open, so on top and with the drawer closed this stays "".
+    Connections {
+        target: TopStats
+        function onStateRevChanged() { persist.topstats = TopStats.stateJson(); }
     }
     // The VU and spectrum feeds run at cava's 60fps — far too hot to stringify
     // per frame, and a snapshot a quarter-second old is indistinguishable from
