@@ -5,7 +5,7 @@
 # yours" — which until now was prose an agent could skip.
 #
 # Why it exists: a pathspec commit `git commit -m msg -- f.txt` takes the WHOLE
-# working-tree copy of f.txt, so if another minister is mid-edit on that same
+# working-tree copy of f.txt, so if another spirit is mid-edit on that same
 # file, its half-finished WIP is swept silently into your commit. That really
 # happened: commit 9c1f477 was meant to carry one agent's cards() session-filter
 # hunk, but boardwork.py also held another agent's decision-unit WIP in the
@@ -23,7 +23,7 @@
 #     of each path, which is precisely what a pathspec commit sweeps in.
 #   - REFUSES (exit 1) any path whose uncommitted diff vs HEAD is large enough
 #     to plausibly carry more than your one change — that is the smell of
-#     another minister's WIP riding along. Escape hatches, in order of safety:
+#     another spirit's WIP riding along. Escape hatches, in order of safety:
 #         --hunks            commit only the hunks you pick, leave theirs behind
 #         drop the path      leave that file alone, commit the rest
 #         --yes-file <path>  you reviewed the printed diff and accept sweeping
@@ -36,11 +36,11 @@
 #
 # --hunks mode:
 #   Interactively `git add -p` the given paths, keeping only the hunks you say
-#   are yours, then commit the index. The other minister's WIP stays behind,
+#   are yours, then commit the index. The other spirit's WIP stays behind,
 #   unstaged in the working tree, exactly as you found it. An index commit is
 #   the "bare commit" AGENTS.md warns about, but it is safe ONLY because this
 #   mode first asserts the index holds nothing but your own staged hunks; if the
-#   shared index already holds another minister's staged content it aborts
+#   shared index already holds another spirit's staged content it aborts
 #   rather than sweep it.
 set -u
 usage() { sed -n '1,2p' "$0" >&2; echo "usage: $0 -m MSG [--hunks] [--yes-file PATH]... -- PATH..." >&2; }
@@ -146,7 +146,7 @@ for p in "$@"; do
     if [ "$ack" -eq 0 ]; then
       flagged="$flagged $p"
       echo "WARN: $p has $hunks hunk(s), $churn changed line(s) vs HEAD — larger than a focused"
-      echo "      single change looks; this is the smell of ANOTHER MINISTER'S WIP riding along."
+      echo "      single change looks; this is the smell of ANOTHER SPIRIT'S WIP riding along."
     fi
   fi
 done
@@ -154,7 +154,7 @@ done
 if [ -n "$flagged" ]; then
   echo "======================================================================"
   echo " REFUSING — a pathspec commit takes the WHOLE working-tree copy, so this"
-  echo " would sweep the other minister's half-finished edits into one commit."
+  echo " would sweep the other spirit's half-finished edits into one commit."
   echo " Do one of:"
   echo "   tools/git-commit.sh -m '$subj' --hunks -- <path>   # commit only YOUR hunks"
   echo "   drop the path / narrow the pathspec                # leave that file alone"

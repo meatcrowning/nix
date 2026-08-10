@@ -1,6 +1,6 @@
 { pkgs, lib, host, config, ... }:
 
-# A desktop notification when a minister's completion lands on this host's
+# A desktop notification when a spirit's completion lands on this host's
 # board (`docs/board.<hostname>.md`).
 #
 # board-watch (home/srvs/board-watch.nix) closes the loop on the OTHER half of
@@ -54,7 +54,7 @@ in
   };
 
   systemd.user.services.board-notify = {
-    Unit.Description = "Toast when a minister's completion lands on this host's board";
+    Unit.Description = "Toast when a spirit's completion lands on this host's board";
     Service = {
       Type = "simple";
       Restart = "on-failure";

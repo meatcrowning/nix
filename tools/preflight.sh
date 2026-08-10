@@ -45,7 +45,7 @@ if [ -n "$staged" ]; then
 fi
 
 # 8. Tracked files carrying a LARGE uncommitted diff vs HEAD — the "mixed WIP"
-#    smell. A file another minister is mid-edit on, on top of your own change,
+#    smell. A file another spirit is mid-edit on, on top of your own change,
 #    shows up here. The hazard: a pathspec commit takes the WHOLE working-tree
 #    copy, so it silently sweeps their half-finished edits into your commit
 #    (really happened: 9c1f477). This is a HEURISTIC — a big single change is
@@ -61,7 +61,7 @@ for f in $(git -C "$REPO" diff --name-only HEAD); do
   churn=$(git -C "$REPO" diff --numstat HEAD -- "$f" | awk '{s=$1+$2} END{print s+0}')
   if [ "$hunks" -ge "$MH" ] || [ "$churn" -ge "$ML" ]; then
     echo "WARN: $f carries $hunks uncommitted hunks / $churn changed lines vs HEAD —"
-    echo "      possibly another minister's WIP in the same file. A pathspec commit"
+    echo "      possibly another spirit's WIP in the same file. A pathspec commit"
     echo "      would sweep it all in. Commit through tools/git-commit.sh (or --hunks"
     echo "      to take only your part), not bare 'git commit -- $f'."
   fi

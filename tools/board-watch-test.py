@@ -62,7 +62,7 @@ What it asserts, in order:
               TRANSCRIPT when the failed record carries one, and falls back to
               the log-only wording when it does not — both shapes placed
               through the real checks
-  cap         a minister cut off by the 45-minute cap is a CAUSE, not a death:
+  cap         a spirit cut off by the 45-minute cap is a CAUSE, not a death:
               a decision comes back with a handoff INFORMATION bullet ("it
               resumes automatically") instead of the FAILED "the agent working
               X is gone" one, a cap-cut worker's failure bullet names the cap,
@@ -378,14 +378,14 @@ class Rig:
 
 def _run_is_bound(cmd, session, prompt):
     """A decision run is bound to its card by ONE of two mechanisms, and which
-    one depends on the backend its minister model rides. On `claude` it is the
+    one depends on the backend its spirit model rides. On `claude` it is the
     `--session-id` we mint, which names the transcript at
-    `~/.claude/projects/*/<uuid>.jsonl`. On `hermes` — the deepseek-v4 minister
+    `~/.claude/projects/*/<uuid>.jsonl`. On `hermes` — the deepseek-v4 spirit
     DEFAULT since 2026-08-02, which has no session flag — it is the `-q` query
     text `boardphase.arm` hashes to find the run in `~/.hermes/state.db`. Either
     way `apps/board/boardphase.py` can tail what it is doing; lose BOTH and a
     card silently degrades to "cannot see what it is doing". Backend-aware so
-    this survives a change of the default minister model.
+    this survives a change of the default spirit model.
 
     Returns `(ok, detail)`.
     """
@@ -408,7 +408,7 @@ def check_session_id_is_passed(r):
     is found by it and tailed by `apps/board/boardphase.py`. Lose it and every
     card silently degrades to "cannot see what it is doing" — a regression with
     no error anywhere. BOTH backends are exercised here (the default hermes path
-    and a forced claude minister model) so neither binding can rot unnoticed
+    and a forced claude spirit model) so neither binding can rot unnoticed
     when the default flips.
 
     Checked by importing the watcher and intercepting `subprocess.Popen`,
@@ -449,16 +449,16 @@ def check_session_id_is_passed(r):
                 mod.subprocess.Popen = real
             return seen.get("cmd") or []
 
-        # The default minister model is deepseek/hermes: bound by the query text.
+        # The default spirit model is deepseek/hermes: bound by the query text.
         cmd = run_spawn()
         ok, detail = _run_is_bound(cmd, "fixed-uuid-here", "a prompt")
         check("the spawn binds the default decision run to its card", ok, detail)
 
-        # A claude minister model takes the `--session-id` we mint instead.
+        # A claude spirit model takes the `--session-id` we mint instead.
         cmd = run_spawn(model="claude-opus-5", effort="medium")
         ok = ("--session-id" in cmd
               and cmd[cmd.index("--session-id") + 1] == "fixed-uuid-here")
-        check("...and a claude minister model takes the session id we mint",
+        check("...and a claude spirit model takes the session id we mint",
               ok, str(cmd[:8]))
     finally:
         os.environ.clear()
@@ -567,8 +567,8 @@ def test_worker_outlives_the_tick():
             time.sleep(0.1)
         subprocess.run(run, capture_output=True, text=True, timeout=180)
         bullets = [l for l in r.text().splitlines()
-                   if "a minister stopped without finishing" in l]
-        check("a minister that records nothing is reported as a FAILURE, in words",
+                   if "a spirit stopped without finishing" in l]
+        check("a spirit that records nothing is reported as a FAILURE, in words",
               len(bullets) == 1, str(bullets))
         check("...quoting the task, since its card has already left the board",
               bool(bullets) and "outlive the tick" in bullets[0], str(bullets))
@@ -1427,7 +1427,7 @@ def test_dead_worker_names_its_transcript():
             {"agent": "we12345", "task": "outlive the tick", "transcript": tx,
              "capped": True})
         check("a cap-cut worker's bullet names the cap, not a mystery death",
-              "cap cut the minister off" in capped
+              "cap cut the spirit off" in capped
               and "stopped without finishing" not in capped, capped)
         check("...and still names the transcript and the log",
               tx in capped and "board-work/we12345.log" in capped, capped)
@@ -1441,11 +1441,11 @@ def test_dead_worker_names_its_transcript():
             why = open(r.log).read()[-300:] if os.path.exists(r.log) else ""
             check("the board accepts the bullet %s" % label, bool(ok), why)
         placed = [l for l in r.text().splitlines()
-                  if "a minister stopped without finishing" in l]
+                  if "a spirit stopped without finishing" in l]
         check("...both landing as their own FAILED bullet", len(placed) == 2,
               str(placed))
         placed = [l for l in r.text().splitlines()
-                  if "cap cut the minister off" in l]
+                  if "cap cut the spirit off" in l]
         check("...and the cap one as its own bullet too", len(placed) == 1,
               str(placed))
         check("...and the transcript path reaches the file intact",
@@ -1480,7 +1480,7 @@ def test_cap_cut_decision_is_a_handoff_not_a_death():
               moved[0].get("capped") is True, str(moved[0]))
         t = r.text()
         check("the bullet names the cap and says the work resumes",
-              "INFORMATION:" in t and "cap cut the minister off" in t
+              "INFORMATION:" in t and "cap cut the spirit off" in t
               and "resumes automatically" in t, t[-400:])
         check("...and NOT that the agent died or failed",
               "FAILED:" not in t and "agent working" not in t, t[-400:])
@@ -1494,7 +1494,7 @@ def test_cap_cut_decision_is_a_handoff_not_a_death():
         moved = r.state_home(lambda: bm.reconcile(path=r.board, capped=None))
         t = r.text()
         check("without the capped verdict the death bullet is unchanged",
-              "the minister working" in t and "exited without finishing" in t,
+              "the spirit working" in t and "exited without finishing" in t,
               t[-400:])
         check("...and reconcile still returned it", len(moved) == 1, str(moved))
     finally:
@@ -1772,7 +1772,7 @@ def main():
                                      "- [x] Do it the short way")
         check("...and nothing else in the file moved",
               unmoved(after, rest_before, "board-watch did not finish",
-                      "the minister exited"),
+                      "the spirit exited"),
               "%d vs %d chars" % (len(after), len(rest_before)))
         r.clear()
         r.run()
@@ -1828,7 +1828,7 @@ def main():
               "RULES bind you and every worker you dispatch" in note_prompt
               and "they are in your system prompt" in note_prompt)
         # The rules themselves now live in the appended SYSTEM prompt, not the
-        # `-p` body (see docs/agents/minister-context.md), so the channel that
+        # `-p` body (see docs/agents/spirit-context.md), so the channel that
         # carries them to the agent is the spawn argv, and "the same rules a
         # decision run gets" means: the same RULES block is appended for the
         # orchestrator as for a decision agent.

@@ -604,7 +604,7 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   `ENACTED` (renamed from `COMPLETION` 2026-08-01), both accepted, so the
   rename cannot stop it. Kill switch `~/.local/state/board-notify/off`. Harness
   `tools/board-notify-test.py`.
-- `home/srvs/board-spend-export.nix` — **mints this host's hermes minister spend
+- `home/srvs/board-spend-export.nix` — **mints this host's hermes spirit spend
   into `~/nix/docs/spend.<host>.json` quarterly-hourly**, so the board's spend
   section can show BOTH machines' hermes rows (the Claude side already combines
   — transcripts sync — but `~/.hermes/state.db` does not). The writer is live
@@ -883,7 +883,7 @@ Corollary: stage and commit adjacently, or don't stage.
 -- f.py` takes the WORKING-TREE copy of it — verified empirically: even your own
 partially-staged hunks are ignored and the whole working tree is committed, their
 half-finished edits and debug probes included. That is what happened at 9c1f477:
-boardwork.py held another minister's decision-unit WIP in the working tree, and
+boardwork.py held another spirit's decision-unit WIP in the working tree, and
 the pathspec commit swept both agents' work into one commit. **Commit through
 `tools/git-commit.sh`, not a bare `git commit`.** It is the enforcement half of
 "confirm every hunk is yours":
@@ -895,7 +895,7 @@ the pathspec commit swept both agents' work into one commit. **Commit through
   reviewed the printed diff and accept sweeping that file.
 - `tools/git-commit.sh -m "subj" --hunks -- path`: `git add -p` only the hunks
   you own, then commits the index
-  — your hunks land, the other minister's WIP stays behind, unstaged, exactly
+  — your hunks land, the other spirit's WIP stays behind, unstaged, exactly
   as you found it. (An index commit, safe only because it first asserts the
   index holds nothing but your own staged hunks.)
 - It refuses bare/`-a` invocations mechanically, so the shared index is never

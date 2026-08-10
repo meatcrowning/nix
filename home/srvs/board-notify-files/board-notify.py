@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""board-notify — a desktop notification when a minister's completion lands.
+"""board-notify — a desktop notification when a spirit's completion lands.
 
 `~/nix/docs/board.<hostname>.md` (one board per host) is where a finishing
 worker parks its result: a WAITING ON YOU TO DO bullet tagged COMPLETION — the
@@ -27,7 +27,7 @@ the same process rather than a second round of units.
 
 THE TAG IT MATCHES, and the rename it survives: the marker is the bullet's tag,
 read from `boardparse.tag_of` — the underlying marker, never the human label.
-Currently `COMPLETION`; a parallel minister is renaming that display/tag to
+Currently `COMPLETION`; a parallel spirit is renaming that display/tag to
 `ENACTED` right now (2026-08-01). Both words are accepted, and a bullet is ALSO
 matched by its raw text leading `COMPLETION:` / `ENACTED:` even if the parser's
 tag set has already forgotten one of them, so the rename cannot silently stop

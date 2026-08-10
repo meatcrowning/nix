@@ -222,7 +222,7 @@ in
       #                                   Hence `pkgs.systemd` is top-only.
       #   ~/.local/bin                    the hermes launcher, curl-installed
       #                                   (home/prog/hermes-agent.nix) — a
-      #                                   deepseek-tuned summoner or minister
+      #                                   deepseek-tuned summoner or spirit
       #                                   spawns `hermes`, not `claude`, and
       #                                   the shell PATH fixes there never
       #                                   reach a systemd unit. Absent, every
