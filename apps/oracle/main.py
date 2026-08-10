@@ -244,6 +244,17 @@ SESSION_TOOL_NAMES = {"list_sessions", "read_session"}
 #: model answer with what it has — a guard against a model that keeps searching.
 MAX_TOOL_ROUNDS = 4
 
+#: How wide a web search fans out, scaled to the query's apparent complexity
+#: (see `Ollama._research_budget`). A simple factual ask (a weather lookup, a
+#: definition) needs a handful of sources; a genuinely broad research question
+#: may want many. The number of Tavily results per search is capped to one of
+#: these, and the model is TOLD in the system prompt how much fan-out this ask
+#: warrants — so a "10 hour weather report" no longer pulls 20 sources, while a
+#: real research question can still go wide. Never below RESEARCH_MIN (some
+#: sources are always useful) nor above RESEARCH_MAX (context guard).
+RESEARCH_MIN = 3
+RESEARCH_MAX = 8
+
 #: The context window (tokens) to request per chat. Ollama's own default (4096
 #: here, set by the model's Modelfile/server default, well under the 262144 a
 #: model like qwen3.6:35b-a3b actually supports) is small enough that the
@@ -471,6 +482,7 @@ class Ollama(QObject):
         self._tool_calls = []    # tool calls accumulated in this sub-turn
         self._tool_results = []  # results being gathered for the current round
         self._rounds = 0         # tool rounds taken this turn (MAX_TOOL_ROUNDS cap)
+        self._max_results = RESEARCH_MAX  # per-search source cap for this turn (set in send)
         self._procs = []         # live file-tool QProcesses, so none is GC'd mid-run
 
     # ---- model list ----
@@ -590,7 +602,12 @@ class Ollama(QObject):
             return
         self.cancel()          # one turn at a time
         self._model = model
-        self._messages = ([{"role": "system", "content": self._system_prompt()}]
+        # Scale research depth to the ask: a simple factual question gets a small
+        # source cap and is told not to fan out; a broad one may go wide.
+        budget = self._research_budget(prompt)
+        self._max_results = budget["max_results"]
+        self._messages = ([{"role": "system",
+                            "content": self._system_prompt(budget["guidance"])}]
                           + self._parse_history(history_json)
                           + [{"role": "user", "content": prompt}])
         self._think_tokens = 0
@@ -621,7 +638,61 @@ class Ollama(QObject):
         return out
 
     @staticmethod
-    def _system_prompt():
+    def _research_budget(prompt):
+        """How wide the web search should fan out for this prompt.
+
+        A cheap keyword+length heuristic, not a model call: a simple, focused
+        ask (a weather lookup, a definition, a single fact) scores low and gets
+        a small source cap with a "do not fan out" instruction; a broad research
+        question (compare, overview, history of, several sub-questions) scores
+        high and may pull many sources. Returns the per-search `max_results`
+        cap and the sentence handed to the model so the guidance and the cap
+        agree. The point is proportion — the ability to go wide is kept, not
+        removed (a "10 hour weather report" was pulling 20 sources)."""
+        text = " " + (prompt or "").lower() + " "
+        words = re.findall(r"[a-z0-9']+", text)
+        n = len(words)
+        score = 0
+        BROAD = ("compare", "comprehensive", "in depth", "in-depth", "deep dive",
+                 "research", "analyz", "analyse", "overview", "survey",
+                 "pros and cons", "advantages", "disadvantages", "history of",
+                 "everything about", "trade-off", "tradeoff", " versus ", " vs ",
+                 "review of", "state of the", "landscape", "alternatives",
+                 "options for", "explain how", "why does", "why do", "how does")
+        for m in BROAD:
+            if m in text:
+                score += 2
+        q = text.count("?")
+        if q > 1:                       # several distinct questions widen it
+            score += q - 1
+        if n >= 40:
+            score += 2
+        elif n >= 20:
+            score += 1
+        NARROW = ("weather", "temperature", "forecast", "what time", "current time",
+                  "define ", "definition of", "how do you spell", "capital of",
+                  "who is ", "who was ", "when is ", "when was ", "where is ",
+                  "how tall", "how far", "how old", "how much is", "convert ",
+                  "how many", "what is the ", "what's the ")
+        for m in NARROW:
+            if m in text:
+                score -= 2
+        if n <= 8:                      # a terse prompt is usually a simple ask
+            score -= 1
+        if score <= -1:
+            cap, depth = RESEARCH_MIN, ("This is a simple, focused question. If "
+                "you need the web at all, one search returning a few sources is "
+                "plenty — do not fan out into many searches.")
+        elif score <= 2:
+            cap, depth = 5, ("Search the web only as much as this actually needs "
+                "— a couple of focused searches at most, not a broad sweep.")
+        else:
+            cap, depth = RESEARCH_MAX, ("This is a broad question; you may run "
+                "several searches to cover it well, but keep each one on point.")
+        return {"max_results": cap, "guidance": depth}
+
+    @staticmethod
+    def _system_prompt(research=""):
         """A minimal system message that pins an unambiguous `now`. The model
         otherwise dates itself from its training; here it gets the real instant
         in local time and UTC, and is told to call get_current_time for any
@@ -635,7 +706,7 @@ class Ollama(QObject):
         what keeps the model's default answer matching what "now" means to him."""
         now = datetime.now(timezone.utc)
         local = now.astimezone()
-        return ("The current time right now is %s local time (%s), which is "
+        base = ("The current time right now is %s local time (%s), which is "
                 "%s UTC. When asked for the current time or date with no place "
                 "specified, answer with the local time above, not the UTC one. "
                 "For the time or date somewhere else, call get_current_time "
@@ -643,6 +714,9 @@ class Ollama(QObject):
                 % (local.strftime("%Y-%m-%d %H:%M:%S"),
                    local.tzname() or local.strftime("%z"),
                    now.strftime("%Y-%m-%d %H:%M:%S")))
+        if research:
+            base += "\n\n" + research
+        return base
 
     def _time_now(self, tz_name, idx, remaining, calls):
         """Resolve the current time in an IANA zone through zoneinfo (real DST
@@ -817,7 +891,7 @@ class Ollama(QObject):
             "query": query,
             "search_depth": "basic",
             "include_answer": True,
-            "max_results": 5,
+            "max_results": self._max_results,
         }).encode("utf-8")
         req = QNetworkRequest(QUrl(TAVILY_URL))
         req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
