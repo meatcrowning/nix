@@ -103,11 +103,17 @@ modelled directly on painter's `comfy-tunnel.sh` (probe `top`/`top.local`,
 forward the port over ssh, reuse an already-open forward). No sshfs mounts:
 oracle has no model files or output gallery of its own to peer. `ollama` is a
 SYSTEM unit (unlike `--user` `comfy-painter`) and already `enable = true` at
-boot, so the tunnel script only reports its state, never starts it; the
-`Backend.startServer()`/`stopServer()` buttons in `main.py` still shell out to
-a *local* `sudo -A systemctl`, which correctly fails (not silently) on book,
-where there is no such unit. `ORACLE_NO_TUNNEL=1` skips the tunnel for
-UI-only work with no top.
+boot, so the tunnel script only reports its state, never starts it. The
+`Backend.startServer()`/`stopServer()` buttons in `main.py` are host-branched:
+on top they run a *local* `sudo -A systemctl {start,stop} ollama.service`; on
+book, which has no local unit, they run the same command over ssh to top —
+`ssh top sudo -n systemctl …`, reusing the tunnel's ssh master (the tunnel
+exports `OLLAMA_SSH_HOST`/`OLLAMA_SSH`/`OLLAMA_SSH_CTL` for it). That needs
+passwordless sudo for exactly those two commands on top, granted by the
+`security.sudo.extraRules` block in `sys/ai/ollama.nix` (top-only, deployed on
+top's next rebuild) — top askpass cannot prompt over a tty-less ssh. Both start
+and stop work from book once top has rebuilt. `ORACLE_NO_TUNNEL=1` skips the
+tunnel for UI-only work with no top.
 
 ## Web search (Tavily)
 

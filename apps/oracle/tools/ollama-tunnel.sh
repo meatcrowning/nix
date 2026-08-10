@@ -11,13 +11,13 @@
 #
 #   * ollama is a SYSTEM unit (sys/ai/ollama.nix), not a `--user` one like
 #     comfy-painter, and it is `enable = true` (started at boot) rather than
-#     started on demand. So there is nothing here to start over ssh — root's
-#     job, not this script's — and oracle's own Backend.startServer()
-#     (apps/oracle/main.py) already reports "start failed" rather than
-#     silently doing nothing when the local `systemctl` it shells out to
-#     finds no such unit on book. That is the correct, non-silent failure
-#     mode for a control that is genuinely top-only; fixing it is a separate
-#     task from making chat reachable.
+#     started on demand. So there is nothing here to start over ssh — that
+#     runs from oracle's own Backend (apps/oracle/main.py): on book its
+#     start/stop buttons `ssh $HOST sudo -n systemctl {start,stop}
+#     ollama.service`, which is why this script exports OLLAMA_SSH_HOST /
+#     OLLAMA_SSH / OLLAMA_SSH_CTL below (the Backend reuses this master).
+#     top grants lam passwordless sudo for exactly those two commands
+#     (sys/ai/ollama.nix); top askpass cannot prompt over a tty-less ssh.
 #   * no models/output sshfs mounts — oracle has no model files of its own to
 #     read (ollama resolves model names against ITS OWN store) and no
 #     generated-output gallery to peer.
@@ -101,6 +101,14 @@ for cand in "${CANDIDATES[@]}"; do
 done
 [ -n "$HOST" ] || die "can't reach top (tried: ${CANDIDATES[*]}) - is it awake? Off the home LAN this needs the tailnet up on both machines (tailscale status)."
 say "reaching top as '$HOST'"
+
+# Hand the resolved host, ssh binary and control path to oracle's Backend so its
+# start/stop buttons (apps/oracle/main.py) drive top's ollama.service over the
+# SAME ssh — `ssh $HOST sudo -n systemctl {start,stop} ollama.service`, reusing
+# this master. Chat + UNLOAD are HTTP over the forward; only start/stop need ssh.
+export OLLAMA_SSH_HOST="$HOST"
+export OLLAMA_SSH="$SSH"
+export OLLAMA_SSH_CTL="$SSH_CTL"
 
 # Already tunnelled — a second oracle, or a manual forward being held. Use it
 # rather than fight over the port. THIS TEST MUST COME BEFORE OUR OWN FORWARD
