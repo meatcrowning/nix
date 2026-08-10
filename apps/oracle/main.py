@@ -240,6 +240,48 @@ SESSION_TOOLS = [
 ]
 SESSION_TOOL_NAMES = {"list_sessions", "read_session"}
 
+#: oracle's OWN durable memories — distinct from the read-only session tools
+#: above. A session is a past transcript it can READ; a memory is a fact it
+#: deliberately WROTE and keeps across conversations (the board / Claude-memory
+#: pattern: one fact per entry with a shared index). These three tools let the
+#: model create, revise and forget its memories itself; the current set is also
+#: injected into every turn's system prompt (see `_system_prompt`) so it recalls
+#: them without having to call a tool first. Backed by tools/memory-store.py.
+MEMORY_TOOLS = [
+    {"type": "function", "function": {
+        "name": "save_memory",
+        "description": ("Save a durable fact you want to remember across all "
+                        "future conversations, or UPDATE one you already saved. "
+                        "Use this for lasting things about him (his name, his "
+                        "preferences, ongoing projects, decisions) — not for "
+                        "one-off details of the current chat. Omit id to create a "
+                        "new memory; pass the id of an existing memory to replace "
+                        "its text. Your current memories are listed for you in "
+                        "your context each turn."),
+        "parameters": {"type": "object", "properties": {
+            "text": {"type": "string", "description": "The fact to remember, one "
+                     "self-contained sentence or two."},
+            "id": {"type": "string", "description": "Optional: the id of an "
+                   "existing memory to update (from your memory list). Omit to "
+                   "create a new one."}},
+            "required": ["text"]}}},
+    {"type": "function", "function": {
+        "name": "list_memories",
+        "description": ("List every durable memory you have saved (id, text, when "
+                        "created and last updated), newest first. Your memories "
+                        "are already shown in your context, so you usually do not "
+                        "need this — reach for it to get ids or double-check."),
+        "parameters": {"type": "object", "properties": {}, "required": []}}},
+    {"type": "function", "function": {
+        "name": "delete_memory",
+        "description": ("Delete a durable memory by id (from your memory list) "
+                        "when it is wrong or no longer true."),
+        "parameters": {"type": "object", "properties": {
+            "id": {"type": "string", "description": "Memory id to delete."}},
+            "required": ["id"]}}},
+]
+MEMORY_TOOL_NAMES = {"save_memory", "list_memories", "delete_memory"}
+
 #: How many tool rounds one turn may take before we stop looping and let the
 #: model answer with what it has — a guard against a model that keeps searching.
 MAX_TOOL_ROUNDS = 4
@@ -312,6 +354,23 @@ FS_SCRIPT = str(HERE / "tools" / "sandbox-fs.py")
 SESSIONS_ROOT = os.path.expanduser(
     os.environ.get("ORACLE_SESSIONS", "~/.local/share/oracle/sessions"))
 SESSIONS_SCRIPT = str(HERE / "tools" / "sessions-store.py")
+
+#: oracle's OWN memory store — the durable facts it manages itself (MEMORY_TOOLS
+#: above). One `memories.json` under this root, driven through
+#: tools/memory-store.py exactly like the session store, and living in the same
+#: canonical place on `top` (run locally there, over the tunnel's ssh from
+#: `book`) so both machines share one set of memories. Absolute /home/lam/...
+#: path (identical on both, user `lam`) so it needs no tilde-expansion over ssh.
+#: Override with $ORACLE_MEMORY.
+MEMORY_ROOT = os.path.expanduser(
+    os.environ.get("ORACLE_MEMORY", "~/.local/share/oracle/memory"))
+MEMORY_SCRIPT = str(HERE / "tools" / "memory-store.py")
+
+#: How much of the memory store to inject into each turn's system prompt (newest
+#: first): a bound so a large store can never crowd out the conversation. The
+#: store itself caps at 500 entries; this caps what any single turn carries.
+MEMORY_CTX_MAX = 60
+MEMORY_CTX_CHARS = 8000
 
 #: Which machine we run on, by OS hostname (`top` / `book`) — NOT the flake
 #: attribute. On `book` there is no local `ollama.service`; the daemon lives on
@@ -503,6 +562,7 @@ class Ollama(QObject):
         self._rounds = 0         # tool rounds taken this turn (MAX_TOOL_ROUNDS cap)
         self._max_results = RESEARCH_MAX  # per-search source cap for this turn (set in send)
         self._procs = []         # live file-tool QProcesses, so none is GC'd mid-run
+        self._memories = []      # oracle's own durable memories, injected each turn
 
     # ---- model list ----
 
@@ -710,8 +770,34 @@ class Ollama(QObject):
                 "several searches to cover it well, but keep each one on point.")
         return {"max_results": cap, "guidance": depth}
 
-    @staticmethod
-    def _system_prompt(research=""):
+    def _memory_block(self):
+        """The durable memories oracle has saved, rendered for the system prompt.
+
+        Prepended to every turn so the model recalls its own memories as real
+        facts without having to call list_memories first (distinct from the
+        session tools, which read past TRANSCRIPTS). Capped to keep the context
+        bounded: newest-updated first, at most MEMORY_CTX_MAX entries and
+        MEMORY_CTX_CHARS characters. Empty when it has saved nothing yet."""
+        mems = self._memories or []
+        if not mems:
+            return ""
+        lines, used = [], 0
+        for m in mems[:MEMORY_CTX_MAX]:
+            text = str(m.get("text", "")).strip()
+            if not text:
+                continue
+            line = "- [%s] %s" % (m.get("id", ""), text)
+            if used + len(line) > MEMORY_CTX_CHARS:
+                break
+            lines.append(line)
+            used += len(line)
+        if not lines:
+            return ""
+        return ("Durable memories you have saved (real facts you chose to "
+                "remember — trust them as true, and keep them current with "
+                "save_memory/delete_memory as you learn more):\n" + "\n".join(lines))
+
+    def _system_prompt(self, research=""):
         """A minimal system message that pins an unambiguous `now`. The model
         otherwise dates itself from its training; here it gets the real instant
         in local time and UTC, and is told to call get_current_time for any
@@ -733,6 +819,9 @@ class Ollama(QObject):
                 % (local.strftime("%Y-%m-%d %H:%M:%S"),
                    local.tzname() or local.strftime("%z"),
                    now.strftime("%Y-%m-%d %H:%M:%S")))
+        memory_block = self._memory_block()
+        if memory_block:
+            base += "\n\n" + memory_block
         base += "\n\n" + RECALL_GUIDANCE
         if research:
             base += "\n\n" + research
@@ -774,7 +863,8 @@ class Ollama(QObject):
         # reject a request carrying tools — the tradeoff of always-on tools,
         # spelled out in apps/oracle/AGENTS.md; point oracle at a tool-capable
         # model.
-        payload["tools"] = list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL] + list(SESSION_TOOLS)
+        payload["tools"] = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL]
+                            + list(SESSION_TOOLS) + list(MEMORY_TOOLS))
         body = json.dumps(payload).encode("utf-8")
         req = QNetworkRequest(QUrl(OLLAMA + "/api/chat"))
         req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
@@ -889,6 +979,8 @@ class Ollama(QObject):
                 self._run_fs_tool(name, args, i, remaining, calls)
             elif name in SESSION_TOOL_NAMES:
                 self._run_session_tool(name, args, i, remaining, calls)
+            elif name in MEMORY_TOOL_NAMES:
+                self._run_memory_tool(name, args, i, remaining, calls)
             else:
                 self._tool_results[i] = {
                     "role": "tool", "tool_name": name,
@@ -1183,6 +1275,108 @@ class Ollama(QObject):
             n = len(result.get("sessions", []))
             return "listed %d session%s" % (n, "" if n == 1 else "s")
         return "read session " + str(result.get("id", args.get("id", "")))
+
+    # ---- oracle's own durable memories (create / read / update / delete) ----
+
+    @staticmethod
+    def _memories_argv():
+        """The command that runs one memory-store op through
+        tools/memory-store.py — the same host branch as `_sessions_argv`: local
+        on `top`, over the tunnel's ssh master from `book`, so the memories live
+        in one canonical place both machines share."""
+        if ON_BOOK:
+            host = os.environ.get("OLLAMA_SSH_HOST", "top")
+            ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+            argv = [ssh, "-o", "BatchMode=yes"]
+            ctl = os.environ.get("OLLAMA_SSH_CTL")
+            if ctl:
+                argv += ["-o", "ControlMaster=auto", "-o", "ControlPersist=30",
+                         "-o", "ControlPath=" + ctl]
+            argv += [host, "python3", shlex.quote(MEMORY_SCRIPT),
+                     shlex.quote(MEMORY_ROOT)]
+            return argv
+        return [sys.executable, MEMORY_SCRIPT, MEMORY_ROOT]
+
+    def _memory_store(self, req, on_done):
+        """Run one memory-store op as an async QProcess (never blocks the UI),
+        handing the parsed JSON reply to `on_done`. The shared idiom of the
+        session/file stores: one JSON request on stdin, one JSON reply on stdout."""
+        proc = QProcess(self)
+        self._procs.append(proc)
+
+        def finished(*_):
+            if proc not in self._procs:
+                return
+            self._procs.remove(proc)
+            try:
+                out = bytes(proc.readAllStandardOutput())
+                err = bytes(proc.readAllStandardError())
+                rc = proc.exitCode()
+            except RuntimeError:
+                return
+            proc.deleteLater()
+            on_done(self._fs_result(out, err, rc))
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(lambda *_: None)   # surfaced through finished
+        argv = self._memories_argv()
+        proc.start(argv[0], argv[1:])
+        proc.write(json.dumps(req).encode("utf-8"))
+        proc.closeWriteChannel()
+
+    @Slot()
+    def refreshMemories(self):
+        """Reload the memory cache the system prompt injects. Called at launch
+        and again after a save/delete tool lands, so the next turn sees the
+        current set."""
+        def done(obj):
+            if isinstance(obj, dict) and "error" not in obj:
+                self._memories = obj.get("memories", []) or []
+        self._memory_store({"op": "list"}, done)
+
+    def _run_memory_tool(self, name, args, idx, remaining, calls):
+        """save_memory / list_memories / delete_memory: oracle managing its own
+        durable memories. A save/delete refreshes the injected cache so the very
+        next turn reflects the change, then the tool result is fed back like any
+        other so the model knows it landed."""
+        a = args if isinstance(args, dict) else {}
+        if name == "list_memories":
+            req = {"op": "list"}
+            heading = "listing memories"
+        elif name == "delete_memory":
+            req = {"op": "delete", "id": str(a.get("id", ""))}
+            heading = "forgetting " + str(a.get("id", ""))
+        else:
+            req = {"op": "save", "text": str(a.get("text", ""))}
+            if a.get("id"):
+                req["id"] = str(a.get("id"))
+            heading = ("updating a memory" if a.get("id") else "saving a memory")
+        self.fileToolStarted.emit(heading)
+
+        def done(result):
+            self._tool_results[idx] = {"role": "tool", "tool_name": name,
+                                       "content": json.dumps(result)}
+            if name in ("save_memory", "delete_memory") and "error" not in result:
+                self.refreshMemories()    # keep the injected cache current
+            self.fileToolDone.emit(self._memory_outcome(name, a, result),
+                                   "error" not in result)
+            self._tool_done(remaining, calls)
+
+        self._memory_store(req, done)
+
+    @staticmethod
+    def _memory_outcome(name, args, result):
+        a = args if isinstance(args, dict) else {}
+        if "error" in result:
+            return (name + ": " + str(result["error"]))[:200]
+        if name == "list_memories":
+            n = len(result.get("memories", []))
+            return "listed %d memor%s" % (n, "y" if n == 1 else "ies")
+        if name == "delete_memory":
+            return "forgot " + str(a.get("id", ""))
+        mem = result.get("memory") or {}
+        verb = "updated" if a.get("id") else "saved"
+        return "%s memory %s" % (verb, mem.get("id", ""))
 
 
 class Backend(QObject):
@@ -1523,6 +1717,7 @@ def main():
     ollama.refreshModels()
     backend.pollStatus()
     sessions.refresh()
+    ollama.refreshMemories()
     sys.exit(app.exec())
 
 

@@ -143,6 +143,41 @@ naming modal.
   outside `ORACLE_SANDBOX`, so this was the narrower option over widening the
   sandbox to cover them.
 
+## Memory (chatter's own durable facts)
+
+Distinct from *Sessions*: a session is a past **transcript** the model can read;
+a memory is a **fact chatter chose to keep**, created/edited/deleted by the model
+itself and carried across every conversation — the board / Claude-memory pattern
+(one fact per entry with a shared index). It is what stops "you told me your name
+last week" from being distrusted: the model no longer has to go re-read an old
+session to recall a durable fact, it saved one.
+
+- **`tools/memory-store.py`** is the store: ONE `memories.json` under a root, a
+  list of `{id,text,created,updated}`, pure stdlib, one JSON request on stdin →
+  one JSON result on stdout. Ops: `list` (newest-updated first), `save`
+  (`{text}` mints a `mem-<ms>-<rand>` id; `{text,id}` updates that entry), and
+  `delete` (`{id}`). Writes are atomic (`os.replace`). Caps: ~4000 chars/entry,
+  ~500 entries (a create past the cap drops the oldest-updated). Unlike the
+  session store, the id is **minted here** so a create is one round-trip. Errors
+  are `{"error": …}` with exit 0 — reported, never a crash (docs/DESIGN.md §10).
+- **The three tools** (`MEMORY_TOOLS` in `main.py`, offered every turn beside
+  the file/web/time/session tools): `save_memory(text, id?)`,
+  `list_memories()`, `delete_memory(id)` (`MEMORY_TOOL_NAMES`, dispatched in
+  `_run_tool_calls` via `_run_memory_tool`). It shells out to
+  `tools/memory-store.py` over the same host branch as the session tools
+  (`Ollama._memories_argv`, local on `top`, ssh from `book`) — the store lives
+  on `top` with oracle's compute, so both machines share one set.
+- **Recall is automatic, not a tool call.** `Ollama._memories` caches the list
+  (`refreshMemories()` at launch, re-run after any `save_memory`/`delete_memory`
+  lands), and `_system_prompt` prepends it as a "durable memories you saved
+  (real facts, trust them)" block each turn — capped at `MEMORY_CTX_MAX` (60)
+  entries / `MEMORY_CTX_CHARS` (8000) chars so a big store never crowds out the
+  chat. So the model sees its memories every turn without calling
+  `list_memories`; the tools are for writing and housekeeping.
+- **Where it lives** — `MEMORY_ROOT` (`~/.local/share/oracle/memory`, override
+  `$ORACLE_MEMORY`), an absolute `/home/lam/...` path like `SESSIONS_ROOT`.
+  No UI surface: chatter manages these itself, they are not a picker.
+
 ## Talking to ollama
 
 `OLLAMA` defaults to `http://127.0.0.1:11434` (override with `$OLLAMA_HOST`).
