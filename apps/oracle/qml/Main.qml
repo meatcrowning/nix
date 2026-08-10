@@ -434,7 +434,16 @@ Window {
             TextEdit {
                 id: input
                 width: inputFlick.width
+                // The pair, not one half of it: the whole QFont carries
+                // NoAntialias (the only lever that reaches the rasteriser on an
+                // editable item — docs/DESIGN.md §2.2), and NativeRendering is
+                // what stops Qt drawing it through the distance-field renderer.
+                // Shipped with the font alone, which is why the box he types
+                // into came out aliased and blurry while every label around it
+                // was crisp. Same pairing as editor's CodeView and board's
+                // InputBox.
                 font: Theme.editorFont
+                renderType: Text.NativeRendering
                 color: Theme.text
                 selectionColor: Theme.accent
                 selectedTextColor: Theme.bg
