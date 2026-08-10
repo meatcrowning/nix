@@ -302,7 +302,7 @@ Singleton {
             property bool   lightMode: false
             // The wallpaper-derived multi-colour palette (§3.1.2) is always on;
             // paletteVariant styles it. (There is no one-hue toggle any more.)
-            property string paletteVariant: "pastel"   // vivid | normal | muted | pastel
+            property string paletteVariant: "pastel"   // vivid | normal | fidelity | muted | pastel
             property int    windowBorderWidth: 2
             property int    windowRounding: 0
             property bool   trayTint: true
