@@ -511,15 +511,20 @@ The style it carries has three parts (all computed by `DarkMode`):
   from the faces' fontconfig pins, which Chromium honours (verified by
   canvas raster offscreen 2026-08-08: mono glyphs, ink and advance identical
   to the QML PixelText pipeline at 15px). The layer's size is **divided by
-  the shared page zoom AND the face's x-height size-adjust** (`Zoom.levelChanged` chained onto
+  the shared page zoom** (`Zoom.levelChanged` chained onto
   `darkmode.changed`, like `style.changed`), because zoom multiplies every
   CSS px on the way to the screen — at his live 0.83 the pixel font was
   rasterising at ~12.4 device px, which is what *"more perfect doesn't look
   like a pixel font anymore"* was. Same idiom as the scrollbar's
   zoom-compensated width. Site-styled text still zooms; only the inherited
-  default holds the desktop's device-pixel size. The ÷adjust is the second
-  half of the 2026-08-09 x-height settlement: the inherited text's computed
-  px shrinks so the 1.14x face still lands on the desktop's 15 device px.
+  default holds the desktop's device-pixel size. The family is the **PLAIN
+  pick** (`_adj_fam`), never a `src:local()` `@font-face` alias: Chromium
+  grayscale-antialiases any `@font-face`-resolved face and ignores the
+  fontconfig `antialias=false` pin, so the alias SOFTENED every web glyph
+  (measured offscreen 2026-08-09: plain family 0 grey pixels at every size,
+  the identical face via `local()` @font-face ~60-80% grey). Naming the
+  family directly is the only way the antialias pin reaches it — crisp,
+  pixel-exact, matching goetia and the rest of the desktop.
 - **the dark filter** (global toggle, per-site exceptions), top frame only;
 - **the system-font force** — the desktop family imposed on page text so ALL
   of a page reads in the pick, not just the runs a site left unstyled.
@@ -528,16 +533,17 @@ The style it carries has three parts (all computed by `DarkMode`):
   *"fails to capture all the text in a given webpage"*). Family only +
   `font-synthesis:none`, never sizes — the full reskin was retracted,
   `ad868e4` / DESIGN.md §16 — and icon-font elements (`_ICON_CARVE`) are
-  excluded by class so pictogram fonts don't render as tofu. Since 2026-08-09
-  the family it imposes is a **size-adjusted `@font-face` alias** (the pick +
-  `" (web)"`, `src:local()`, `size-adjust:114%`, `font-weight:1 1000` +
-  an italic twin): the pixel face's x-height is only ~44% of its em against
-  the ~51% of the proportional fonts a site's sizes were designed around, so
-  the site's size numbers render at the proportional x-height the site
-  assumed — sizes still never imposed, apparent scale adjusted. Measured
-  offscreen 2026-08-09: an adopted-sheet `@font-face` with `size-adjust`
-  renders scaled exactly (document.fonts.check() lies about adopted sheets;
-  the canvas ink does not), bold/italic requests match the range'd rule.
+  excluded by class so pictogram fonts don't render as tofu. The family it
+  imposes is the **PLAIN pick** (`_adj_fam`), same as the inherit layer, for
+  the same reason: a `src:local()` `@font-face` alias forced grayscale-AA and
+  blurred the forced text (`970147b`'s `size-adjust:114%` alias was that
+  route). It was dropped 2026-08-09 (`310cdc3`) for crisp, pixel-exact text —
+  verified by `pagestyle-test.py`, which canvas-measures the forced face at
+  the site's own size and asserts 0 grey pixels. The cost: pixel-font site
+  text reads ~14% small at the site's own sizes (the pixel face's x-height is
+  only ~44% of its em against the ~51% the proportional fonts assumed);
+  `size-adjust` is an `@font-face`-only descriptor, so that parity cannot be
+  had without the blur.
 
 The plumbing:
 
