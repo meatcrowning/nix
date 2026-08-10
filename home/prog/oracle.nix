@@ -17,13 +17,21 @@
 # It has no MimeType= and is not a default for anything: oracle is a GUI over a
 # daemon, not a file opener (the same reason painter and goetia declare none).
 # The desktop entry exists so it is in the runner like the other apps.
+#
+# On air, ollama is top's — loopback-pinned there (sys/ai/ollama.nix) same as
+# painter's ComfyUI, so it is reached the identical way: an ssh port forward,
+# never a new listener (root AGENTS.md → "Off-LAN: the tailnet"). The launcher
+# is apps/oracle/tools/ollama-tunnel.sh, modelled on painter's
+# comfy-tunnel.sh; oracle's OLLAMA env var defaults to 127.0.0.1:11434, so with
+# the forward up it needs no further configuration.
 let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
 
   oracle =
     if host == "air" then
       pkgs.writeShellScriptBin "oracle" ''
-        exec /usr/bin/python3 /home/lam/nix/apps/oracle/main.py "$@"
+        exec /home/lam/nix/apps/oracle/tools/ollama-tunnel.sh -- \
+             /usr/bin/python3 /home/lam/nix/apps/oracle/main.py "$@"
       ''
     else
       pkgs.stdenv.mkDerivation {

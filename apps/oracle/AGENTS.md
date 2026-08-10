@@ -30,6 +30,19 @@ listener. The daemon is the `ollama` service; if it is down, the model list is
 empty and the reply area draws the error rather than nothing (docs/DESIGN.md
 §10).
 
+**On book, ollama is top's.** `sys/ai/ollama.nix` pins it to `127.0.0.1` on
+top same as painter's ComfyUI, so `home/prog/oracle.nix`'s `air` branch execs
+`apps/oracle/tools/ollama-tunnel.sh -- python3 main.py` as oracle's launcher —
+modelled directly on painter's `comfy-tunnel.sh` (probe `top`/`top.local`,
+forward the port over ssh, reuse an already-open forward). No sshfs mounts:
+oracle has no model files or output gallery of its own to peer. `ollama` is a
+SYSTEM unit (unlike `--user` `comfy-painter`) and already `enable = true` at
+boot, so the tunnel script only reports its state, never starts it; the
+`Backend.startServer()`/`stopServer()` buttons in `main.py` still shell out to
+a *local* `sudo -A systemctl`, which correctly fails (not silently) on book,
+where there is no such unit. `ORACLE_NO_TUNNEL=1` skips the tunnel for
+UI-only work with no top.
+
 ## Packaging & verifying
 
 `home/prog/oracle.nix` builds the live-source wrapper (board.nix's template,
