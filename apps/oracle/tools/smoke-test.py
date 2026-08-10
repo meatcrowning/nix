@@ -36,11 +36,13 @@ from deskstyle import DeskStyle                              # noqa: E402
 style = DeskStyle()
 titlebar = oracle.Titlebar()
 ollama = oracle.Ollama()
+backend = oracle.Backend()
 
 ctx.setContextProperty("WalPalette", palette)
 ctx.setContextProperty("DeskStyle", style)
 ctx.setContextProperty("Titlebar", titlebar)
 ctx.setContextProperty("Ollama", ollama)
+ctx.setContextProperty("Backend", backend)
 ctx.setContextProperty("ollamaHost", oracle.OLLAMA)
 
 theme_comp = QQmlComponent(engine, QUrl.fromLocalFile(str(APP / "qml" / "theme" / "Theme.qml")))
