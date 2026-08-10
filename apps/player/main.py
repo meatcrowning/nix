@@ -54,7 +54,7 @@ from pathlib import Path
 
 from PySide6.QtCore import (QObject, QProcess, Qt, QThread, QTimer, QUrl, Signal,
                             Slot, Property, QFileSystemWatcher)
-from PySide6.QtCore import QAbstractListModel, QModelIndex
+from PySide6.QtCore import QAbstractListModel, QModelIndex, QProcessEnvironment
 from PySide6.QtGui import QColor, QGuiApplication, QImage
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 
@@ -2968,7 +2968,28 @@ class Bridge(QObject):
         self.scanStatus.emit("creating systheme…")
         self._systheme_proc = QProcess(self)
         self._systheme_proc.finished.connect(self._on_systheme_done)
-        self._systheme_proc.start(sys.executable, [str(script), art, "--json"])
+
+        # On book there is no local GPU: the preferred generative (comfy) route
+        # runs on top's ComfyUI, reached over the same ssh tunnel painter uses.
+        # Route the render through comfy-tunnel.sh so the forward, the model
+        # mount (PAINTER_MODELS, needed because the registry fingerprints tensor
+        # headers) and a scoped temporary backend all come up around it and tear
+        # down after — and force --method comfy, since the whole point of going
+        # to top is the generative pass. On top the backend and models are local,
+        # so run the entry point directly, method auto. Same book test as OnAir.
+        on_book = socket.gethostname().split(".")[0] == "book"
+        if on_book:
+            tunnel = HERE.parent / "painter" / "tools" / "comfy-tunnel.sh"
+            env = QProcessEnvironment.systemEnvironment()
+            env.insert("COMFY_ENSURE_BACKEND", "1")
+            self._systheme_proc.setProcessEnvironment(env)
+            self._systheme_proc.start(
+                "bash",
+                [str(tunnel), "--", "/usr/bin/python3", str(script),
+                 art, "--method", "comfy", "--json"],
+            )
+        else:
+            self._systheme_proc.start(sys.executable, [str(script), art, "--json"])
 
     def _on_systheme_done(self, code, _status):
         proc = self._systheme_proc

@@ -191,6 +191,22 @@ unmount_ours() {
     done
 }
 
+# COMFY_ENSURE_BACKEND: for a NON-interactive consumer that will not start the
+# backend itself the way painter's main.py does — systheme's headless render. It
+# turns comfy-painter on before the app and, ONLY if we were the one who turned
+# it on, off again after, so a temporary generative pass leaves top exactly as
+# it found it and never fights a painter the user has open (which owns its own
+# lifecycle). Left unset, nothing here touches the unit — painter's launch path
+# is unchanged.
+STARTED_BACKEND=""
+stop_backend_ours() {
+    [ -n "$STARTED_BACKEND" ] || return 0
+    say "stopping comfy-painter on $HOST (we started it)"
+    "$SSH" "${SSH_MUX[@]}" -o BatchMode=yes "$HOST" \
+        'systemctl --user stop comfy-painter.service' 2>/dev/null || true
+    STARTED_BACKEND=""
+}
+
 if [ -z "${PAINTER_NO_MODELS_MOUNT:-}" ] && [ ${#APP[@]} -gt 0 ]; then
     # The path is known before the mount exists, so the app can be told where the
     # models WILL be and started straight away — sshfs takes about a second, and
@@ -265,7 +281,7 @@ if [ ${#APP[@]} -gt 0 ]; then
     # One trap, set once, covering every exit including the die()s below: a
     # forward left running or a mount left behind is exactly the residue that
     # makes the NEXT launch take a stale path.
-    trap 'kill "$TUN" 2>/dev/null; unmount_ours' EXIT
+    trap 'stop_backend_ours; kill "$TUN" 2>/dev/null; unmount_ours' EXIT
 fi
 
 # STARTING THE BACKEND IS THE APP'S JOB, NOT THIS SCRIPT'S — when there is an
@@ -306,5 +322,36 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
     sleep 0.1
 done
 say "forwarding 127.0.0.1:$PORT -> $HOST:$PORT; starting painter"
+
+# COMFY_ENSURE_BACKEND: the consumer will not start comfy-painter itself, so do
+# it here and wait for it to actually SERVE before running the app — a headless
+# render has no window to sit in front of while the backend warms. Only stop it
+# after if we were the one who started it (stop_backend_ours checks the flag).
+if [ -n "${COMFY_ENSURE_BACKEND:-}" ]; then
+    STATE="$("$SSH" "${SSH_MUX[@]}" -o BatchMode=yes "$HOST" \
+             'systemctl --user is-active comfy-painter.service' 2>/dev/null)"
+    if [ "$STATE" = "active" ] && comfy_answers; then
+        say "comfy-painter already serving on $HOST - leaving it as found"
+    else
+        if [ "$STATE" != "active" ]; then
+            say "comfy-painter is ${STATE:-unknown} on $HOST - starting it"
+            "$SSH" "${SSH_MUX[@]}" -o BatchMode=yes "$HOST" \
+                'systemctl --user start comfy-painter.service' 2>/dev/null ||
+                die "could not start comfy-painter on top (is a user session up there?)"
+            STARTED_BACKEND=1
+        fi
+        say "waiting up to ${READY_TIMEOUT}s for comfy-painter to serve"
+        deadline=$(( $(date +%s) + READY_TIMEOUT ))
+        until comfy_answers; do
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+                die "comfy-painter did not serve within ${READY_TIMEOUT}s - on top: journalctl --user -u comfy-painter -n50"
+            fi
+            kill -0 "$TUN" 2>/dev/null ||
+                die "ssh forward to $HOST died while waiting for the backend"
+            sleep 1
+        done
+        say "comfy-painter is serving on $HOST"
+    fi
+fi
 
 "${APP[@]}"
