@@ -1,12 +1,13 @@
 import QtQuick
 
-// Book-only disclosure that sits UNDER the local CPU chart in the cpu popup
-// (CpuPanel gates it on Host.name === "air"). A thin "top v / top ^" button; a
-// click rolls out a copy of the CPU graph sourced from `top` (TopStats),
-// animated exactly like the media queue drawer — a CLIP whose height glides over
-// ViewMode.slideMs on ViewMode.slideEasing, with the popup's implicitHeight
-// following it so top's chart grows out from beneath the local one rather than a
-// window snapping to a new size.
+// Book-only disclosure that sits UNDER the process list in the dock's
+// system-info tile (TaskManagerContent gates it on Host.name === "air"). A thin
+// "top v / top ^" button; a click rolls out a copy of the CPU graph sourced from
+// `top` (TopStats), animated exactly like the media queue drawer — a CLIP whose
+// height glides over ViewMode.slideMs on ViewMode.slideEasing, with this Item's
+// implicitHeight following it so the process list above reflows up rather than
+// the chart snapping in. (It lived under CpuContent in the cpu corner popup
+// until 2026-08-09; moved to the dock so the reveal squishes the process list.)
 //
 // TopStats polls top only while this drawer is BOTH on screen and expanded, so a
 // closed disclosure costs nothing (see TopStats.watch).
