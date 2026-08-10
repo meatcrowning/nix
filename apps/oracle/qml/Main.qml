@@ -24,6 +24,10 @@ Window {
     property string replyText: ""
     property string thinkText: ""
     property string status: ""
+    // The result of the last start/stop/unload — its OWN readout (docs/DESIGN.md
+    // §10.6), never folded into the observed up/down above and never routed to
+    // the reply area, where a finished answer would hide whether the stop worked.
+    property string serverNote: ""
 
     // The pixel font is monospace; one measurement gives the column advance.
     TextMetrics {
@@ -60,7 +64,7 @@ Window {
     // model list the moment the daemon comes back up.
     Connections {
         target: Backend
-        function onNote(msg) { win.status = msg; }
+        function onNote(msg) { win.serverNote = msg; }
         function onStatusChanged() {
             if (Backend.serverUp && Ollama.models.length === 0)
                 Ollama.refreshModels();
@@ -223,6 +227,24 @@ Window {
         }
     }
 
+    // The last server-action result, drawn right under its controls so it is
+    // seen wherever the reply area happens to be (docs/DESIGN.md §10 — a failed
+    // or in-flight stop must be visible, not assumed). Collapsed until an action
+    // has spoken; "…" while one is in flight (textDim), crit on failure.
+    PixelText {
+        id: serverNoteText
+        anchors { top: serverRow.bottom; left: parent.left; right: parent.right
+                  leftMargin: 10; rightMargin: 10
+                  topMargin: win.serverNote !== "" ? 4 : 0 }
+        height: win.serverNote !== "" ? Theme.lineHeight : 0
+        visible: height > 0
+        clip: true
+        elide: Text.ElideRight
+        text: win.serverNote
+        color: win.serverNote.indexOf("failed") >= 0 ? Theme.crit
+               : (Backend.busy ? Theme.textDim : Theme.ok)
+    }
+
     // The dropdown floats over the reply area, overlaying the picker exactly.
     // It anchors to `top` (a sibling) and takes the picker's width rather than
     // anchoring to `picker` itself — the picker is `top`'s child, a nephew of
@@ -281,7 +303,7 @@ Window {
     // --------------------------------------------------------- the reply area
     Rectangle {
         id: replyBox
-        anchors { top: serverRow.bottom; topMargin: 10
+        anchors { top: serverNoteText.bottom; topMargin: 10
                   left: parent.left; right: parent.right
                   bottom: promptBox.top
                   leftMargin: 10; rightMargin: 10; bottomMargin: 10 }
