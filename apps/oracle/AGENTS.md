@@ -1,12 +1,12 @@
 # `oracle` — a minimal ollama chat window
 
-The smallest of the vendored apps, and deliberately so. Two things and nothing
-more: a **model selector** filled from the local ollama daemon's `/api/tags`,
-and a **prompt box** that sends one chat turn to `/api/chat` and shows the reply
-as it streams. No conversation-history persistence and no system prompt — his
-scope was *"right now i think thats all i need"*. The one thing it does remember
-is the **model selector**: the model last used and an agent-suggested ranking
-(see *The model selector* below).
+The smallest of the vendored apps, and deliberately so. Two things at its core:
+a **model selector** filled from the local ollama daemon's `/api/tags`, and a
+**prompt box** that sends one chat turn to `/api/chat` and shows the reply as it
+streams. It also keeps its **conversation sessions**: every conversation is a
+named, persisted transcript you can switch between (*Sessions* below). Beyond
+that, no system prompt. It remembers the **model selector** too — the model last
+used and an agent-suggested ranking (see *The model selector* below).
 
 ## Shape
 
@@ -88,6 +88,33 @@ newest text to the bottom only while he is already AT the bottom
 (`replyFlick.followBottom`); the moment he scrolls up mid-stream it stops forcing
 the position, and it re-arms when he scrolls back down to the bottom
 (docs/DESIGN.md §6.1 — never yank his position).
+
+## Sessions
+
+Every conversation is a **session**: a named transcript that persists and can be
+switched to later. The session row (under the model row) is a picker showing the
+current session, opening a list of every saved session, and a **+ new** that
+starts a fresh one. The whole log always belongs to a session — nothing to opt
+into — and it **titles itself from the first prompt** (truncated), so there is no
+naming modal.
+
+- **`Sessions`** (`main.py`) is the seam. It drives `tools/sessions-store.py` as
+  a `QProcess` — the same async idiom the file tools use, so a save never blocks
+  the UI — and exposes `sessions` (a list of `{id,title,updated,turns}`, newest
+  first) plus `refresh` / `open` / `save` / `remove`. The **id is generated in
+  QML** (`ensureSessionId`, a stable `sess-<ms>-<rand>`), so the store never
+  mints one and there is no round-trip before the first save.
+- **`tools/sessions-store.py`** is the store: one JSON transcript file per
+  session under a root, pure stdlib, one JSON request on stdin → one JSON result
+  on stdout (`list`/`load`/`save`/`delete`). Writes are atomic (`os.replace`).
+  The id is validated as a bare filename so a crafted one cannot escape the root.
+- **When it saves.** `saveCurrent()` persists the whole log on every finished
+  turn (`replyDone`/`replyError`) and on a stop — never mid-stream. Only the
+  display fields are stored; the transient stream flags are reset on load.
+- **Where it lives** — `SESSIONS_ROOT` (`~/.local/share/oracle/sessions`,
+  override `$ORACLE_SESSIONS`). ONE canonical store, not per-machine (his call,
+  "for now"), kept where oracle's compute is — on `top`, reached from `book`
+  over the tunnel's ssh master exactly like the file-tool sandbox.
 
 ## Talking to ollama
 

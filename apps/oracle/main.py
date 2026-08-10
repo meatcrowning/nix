@@ -174,6 +174,17 @@ SANDBOX_ROOT = os.path.expanduser(
 #: over ssh to top from book. Pure stdlib — top's system python3 runs it.
 FS_SCRIPT = str(HERE / "tools" / "sandbox-fs.py")
 
+#: The named-session store. ONE canonical location so both machines share one
+#: set of conversations rather than a per-machine split ("for now", his words).
+#: Like the file-tool sandbox it lives where oracle's compute is — on `top` —
+#: run locally there and over the tunnel's ssh master from `book`
+#: (`Sessions._store_argv`, host-branched exactly like the file tools). Absolute
+#: /home/lam/... path (identical on both, user `lam`) so it needs no shell
+#: tilde-expansion when handed to top over ssh. Override with $ORACLE_SESSIONS.
+SESSIONS_ROOT = os.path.expanduser(
+    os.environ.get("ORACLE_SESSIONS", "~/.local/share/oracle/sessions"))
+SESSIONS_SCRIPT = str(HERE / "tools" / "sessions-store.py")
+
 #: Which machine we run on, by OS hostname (`top` / `book`) — NOT the flake
 #: attribute. On `book` there is no local `ollama.service`; the daemon lives on
 #: `top` and oracle reaches both its HTTP API (over the tunnel that forwards
@@ -989,6 +1000,115 @@ class Backend(QObject):
         proc.start(argv[0], argv[1:])
 
 
+class Sessions(QObject):
+    """Named conversation sessions and their transcripts.
+
+    Each session is one JSON transcript file in the canonical store
+    (`SESSIONS_ROOT`), reached through `tools/sessions-store.py` — the same
+    QProcess idiom the file tools use, so a save never blocks the UI and
+    list/load results arrive on signals. oracle GENERATES the session id (a
+    stable `sess-<ms>-<rand>` token, in QML), so the store only ever validates
+    and writes; there is no id to mint and thus no round-trip before the first
+    save. The list is `[{"id","title","updated","turns"}]`, newest first, for the
+    session picker; `loaded` hands a whole transcript back as JSON for QML to
+    rebuild the log from."""
+
+    listChanged = Signal()
+    loaded = Signal(str, str, str)     # id, title, turns as a JSON string
+    saved = Signal(str, str)           # id, title — after a persist landed
+    error = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._list = []
+        self._procs = []               # live QProcesses, so none is GC'd mid-run
+
+    @Property("QVariantList", notify=listChanged)
+    def sessions(self):
+        return self._list
+
+    @staticmethod
+    def _store_argv():
+        """The command that runs one store op through tools/sessions-store.py
+        against the canonical store. Local here; the `book`-over-ssh branch lands
+        with the shared-store change."""
+        return [sys.executable, SESSIONS_SCRIPT, SESSIONS_ROOT]
+
+    def _run(self, req, on_done):
+        proc = QProcess(self)
+        self._procs.append(proc)
+
+        def finished(*_):
+            if proc not in self._procs:
+                return
+            self._procs.remove(proc)
+            try:
+                out = bytes(proc.readAllStandardOutput())
+                err = bytes(proc.readAllStandardError())
+            except RuntimeError:
+                return
+            proc.deleteLater()
+            try:
+                obj = json.loads(out.decode("utf-8", "replace") or "{}")
+            except ValueError:
+                tail = err.decode("utf-8", "replace").strip().splitlines()
+                obj = {"error": "session store failed: "
+                       + (tail[-1] if tail else "no output")}
+            on_done(obj if isinstance(obj, dict) else {"error": "bad store reply"})
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(lambda *_: None)   # surfaced through finished
+        argv = self._store_argv()
+        proc.start(argv[0], argv[1:])
+        proc.write(json.dumps(req).encode("utf-8"))
+        proc.closeWriteChannel()
+
+    @Slot()
+    def refresh(self):
+        def done(obj):
+            if "error" in obj:
+                self.error.emit(obj["error"])
+                return
+            self._list = obj.get("sessions", [])
+            self.listChanged.emit()
+        self._run({"op": "list"}, done)
+
+    @Slot(str)
+    def open(self, sid):
+        def done(obj):
+            if "error" in obj:
+                self.error.emit(obj["error"])
+                return
+            self.loaded.emit(obj.get("id", ""), obj.get("title", ""),
+                             json.dumps(obj.get("turns", [])))
+        self._run({"op": "load", "id": sid}, done)
+
+    @Slot(str, str, str)
+    def save(self, sid, title, turns_json):
+        try:
+            turns = json.loads(turns_json or "[]")
+        except ValueError:
+            turns = []
+        if not sid or not turns:
+            return                      # nothing to persist yet
+        def done(obj):
+            if "error" in obj:
+                self.error.emit(obj["error"])
+                return
+            self.saved.emit(obj.get("id", sid), obj.get("title", title))
+            self.refresh()
+        self._run({"op": "save", "id": sid, "title": title, "turns": turns}, done)
+
+    @Slot(str)
+    def remove(self, sid):
+        def done(obj):
+            if "error" in obj:
+                self.error.emit(obj["error"])
+                return
+            self.refresh()
+        self._run({"op": "delete", "id": sid}, done)
+
+
 def main():
     app = QGuiApplication(sys.argv)
     app.setApplicationName("oracle")
@@ -1002,12 +1122,14 @@ def main():
     titlebar = Titlebar()
     ollama = Ollama()
     backend = Backend()
+    sessions = Sessions()
 
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("DeskStyle", style)
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Ollama", ollama)
     ctx.setContextProperty("Backend", backend)
+    ctx.setContextProperty("Sessions", sessions)
     ctx.setContextProperty("ollamaHost", OLLAMA)
 
     theme_comp = QQmlComponent(engine, QUrl.fromLocalFile(str(QML / "theme" / "Theme.qml")))
@@ -1024,6 +1146,7 @@ def main():
 
     ollama.refreshModels()
     backend.pollStatus()
+    sessions.refresh()
     sys.exit(app.exec())
 
 
