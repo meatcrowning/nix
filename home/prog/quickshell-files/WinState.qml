@@ -175,12 +175,16 @@ Singleton {
     // they are separated by a sentinel rather than being expected to combine.
     // Every mapped window's FRAME — the outer edge a person sees, decorations
     // and border included. `hyprctl clients` reports the CONTENT box; hyprvtb's
-    // titlebar column (two cells of plugin:hyprvtb:bar_width) hangs off the
-    // RIGHT of it and Hyprland's own border outside that, so the edge that
-    // touches something is content + 2*barWidth + border on the right, and
-    // content - border on the left. Measured, not assumed: a window whose frame
-    // Hyprland had laid flush against the panel's reserved area read
-    // content-right 2252, border at 2316 — 64px of chrome, = 2*31 + 2.
+    // titlebar column (two cells of plugin:hyprvtb:bar_width) hangs off ONE edge
+    // — the one plugin:hyprvtb:titlebar_edge names (right/left/top/bottom) — and
+    // Hyprland's own border outside that. So the edge carrying the titlebar is
+    // content ± (2*barWidth + border) and the other three are content ± border.
+    // Measured, not assumed: with the titlebar on the right, a window Hyprland
+    // had laid flush against the panel's reserved area read content-right 2252,
+    // border at 2316 — 64px of chrome, = 2*31 + 2. Reading the edge from the
+    // plugin (not hardcoding "right") is what stopped the notch's flush test
+    // firing at a window 64px away when the bar is on the right but the titlebar
+    // hangs off the bottom.
     //
     // Published for whatever the panel draws AGAINST a window: the notch's seam
     // (NotchSeam.qml) is the first, and it is the reason the monitor name is
@@ -205,6 +209,11 @@ Singleton {
     property var _monName: ({})
     property var _virt: ({})
     property int _barW: 31
+    // Which window edge hyprvtb hangs the titlebar off (plugin:hyprvtb:titlebar_edge:
+    // right/left/top/bottom, default right). The chrome (2 cells of bar_width)
+    // extends the frame on THAT edge only — the other three are just the border.
+    // Read from the plugin so the frame maths tracks a retitled bar, not a guess.
+    property string _tbEdge: "right"
     property bool _monsReady: false
 
     function applyMonitors(mons) {
@@ -241,6 +250,13 @@ Singleton {
             return;
         const shown = root._shown, box = root._box;
         const monName = root._monName, virt = root._virt, barW = root._barW;
+        const tbEdge = root._tbEdge;
+        // Titlebar chrome (2 cells of bar_width) hangs off exactly one edge.
+        const bw = Theme.windowBorderWidth;
+        const chL = tbEdge === "left" ? 2 * barW : 0;
+        const chR = tbEdge === "right" ? 2 * barW : 0;
+        const chT = tbEdge === "top" ? 2 * barW : 0;
+        const chB = tbEdge === "bottom" ? 2 * barW : 0;
 
         const next = {};
         const addrs = {};
@@ -274,10 +290,10 @@ Singleton {
                     && (!c.workspace || shown[c.workspace.id]))
                 frames.push({
                     mon: monName[c.monitor] || "",
-                    l: c.at[0] - Theme.windowBorderWidth,
-                    r: c.at[0] + c.size[0] + 2 * barW + Theme.windowBorderWidth,
-                    t: c.at[1],
-                    b: c.at[1] + c.size[1],
+                    l: c.at[0] - bw - chL,
+                    r: c.at[0] + c.size[0] + bw + chR,
+                    t: c.at[1] - bw - chT,
+                    b: c.at[1] + c.size[1] + bw + chB,
                     // Hyprland's fullscreen mode: 0 none, 1 MAXIMIZED,
                     // 2 fullscreen. A maximized window is laid out
                     // against the reserved area BY DEFINITION, which is
@@ -338,21 +354,24 @@ Singleton {
     Process {
         id: clientsProc
         onRunningChanged: if (!running && root._pending) pendingKick.restart()
-        command: ["sh", "-c", "hyprctl -j monitors; echo '#--#'; hyprctl -j clients; echo '#--#'; hyprctl -j getoption plugin:hyprvtb:bar_width"]
+        command: ["sh", "-c", "hyprctl -j monitors; echo '#--#'; hyprctl -j clients; echo '#--#'; hyprctl -j getoption plugin:hyprvtb:bar_width; echo '#--#'; hyprctl -j getoption plugin:hyprvtb:titlebar_edge"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const halves = this.text.split("#--#");
                 if (halves.length < 2) return;
-                let mons = [], clients = [], vtb = null;
+                let mons = [], clients = [], vtb = null, tbe = null;
                 try {
                     mons = JSON.parse(halves[0]) || [];
                     clients = JSON.parse(halves[1]) || [];
                     if (halves.length > 2) vtb = JSON.parse(halves[2]);
+                    if (halves.length > 3) tbe = JSON.parse(halves[3]);
                 } catch (e) { return; }
                 // The plugin's own bar width, so the frame maths is the
                 // plugin's number and not a copy of it. Its shipped default is
                 // the fallback for the moment before the plugin answers.
                 root._barW = (vtb && vtb.int > 0) ? vtb.int : 31;
+                // Which edge the titlebar hangs off, same source, same reason.
+                if (tbe && tbe.str) root._tbEdge = tbe.str;
                 root.applyMonitors(mons);
                 root.applyClients(clients);
             }
