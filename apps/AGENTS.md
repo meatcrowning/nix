@@ -1,6 +1,6 @@
 # `apps/` — the vendored desktop apps
 
-Eleven standalone Qt/QML apps that ship with this config, plus the shared Python
+Twelve standalone Qt/QML apps that ship with this config, plus the shared Python
 helpers they all import. Each has its own `AGENTS.md` with the detail:
 
 **Read `~/nix/docs/DESIGN.md` before you draw anything in here.** These apps are not
@@ -25,6 +25,7 @@ each other. This guide owns the *mechanics*; that one owns the *look*.
 | [`editor/`](editor/AGENTS.md) | text editor with Kate's core editing | `home/prog/editor.nix` |
 | [`slsk/`](slsk/AGENTS.md) | Soulseek search + downloads over the local slskd daemon | `home/prog/slsk.nix` |
 | [`updater/`](updater/AGENTS.md) | GUI for this flake's package (input) updates | `home/prog/updater.nix` |
+| [`oracle/`](oracle/AGENTS.md) | minimal chat window for the local ollama daemon | `home/prog/oracle.nix` |
 | `pylib/` | shared helpers — see below | (imported, not packaged) |
 | `qmlcommon/` | shared QML components — see below | (imported, not packaged) |
 
