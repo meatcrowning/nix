@@ -56,6 +56,18 @@ in
 {
   home.packages = [ oracle ];
 
+  # App icon: the seal of Gusion (an eleventh-spirit duke of the Ars Goetia;
+  # his office is to discern all things past, present and to come and to resolve
+  # all questions asked of him), redrawn as clean vector SVG in app-icons/ —
+  # the seal of a divination window. Installed into the hicolor icon theme so
+  # the desktop entry's Icon= AND the titlebar program-icon slot find it
+  # (hyprvtb resolves class -> .desktop -> Icon= -> icon theme; a currentColor
+  # SVG it tints to the title colour) — same pattern as player's seal.
+  home.file.".local/share/icons/hicolor/scalable/apps/oracle.svg".source = ./app-icons/oracle.svg;
+  # …and declare it a SEAL, so the panel paints its currentColor strokes in the
+  # focus colour instead of the file's baked fallback (app-icons/seals.nix).
+  my.appSeals = [ "oracle" ];
+
   home.file.".local/share/applications/oracle.desktop".text = ''
     [Desktop Entry]
     Type=Application
@@ -63,6 +75,7 @@ in
     GenericName=Ollama Chat
     Comment=Chat with the local ollama daemon
     Exec=${oracle}/bin/oracle
+    Icon=oracle
     Terminal=false
     Categories=Utility;
     Keywords=ollama;chat;llm;ai;
