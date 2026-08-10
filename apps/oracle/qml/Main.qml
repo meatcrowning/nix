@@ -116,11 +116,31 @@ Window {
                                 prefix + "search failed: " + reason);
             chatLog.setProperty(win.activeIndex, "searching", false);
         }
+        // The file-tool loop, drawn as its own subordinated per-turn disclosure
+        // (docs/DESIGN.md §9.1, §10 — the model touching files is shown, never
+        // silent). Each op appends one outcome line; the heading counts them.
+        function onFileToolStarted(heading) {
+            if (win.activeIndex < 0) return;
+            var cur = chatLog.get(win.activeIndex);
+            chatLog.setProperty(win.activeIndex, "filesPending", cur.filesPending + 1);
+            chatLog.setProperty(win.activeIndex, "filesActive", true);
+        }
+        function onFileToolDone(line, ok) {
+            if (win.activeIndex < 0) return;
+            var cur = chatLog.get(win.activeIndex);
+            var prefix = cur.files !== "" ? cur.files + "\n" : "";
+            chatLog.setProperty(win.activeIndex, "files", prefix + line);
+            chatLog.setProperty(win.activeIndex, "fileCount", cur.fileCount + 1);
+            var pending = Math.max(0, cur.filesPending - 1);
+            chatLog.setProperty(win.activeIndex, "filesPending", pending);
+            chatLog.setProperty(win.activeIndex, "filesActive", pending > 0);
+        }
         function onReplyDone() {
             if (win.activeIndex < 0) return;
             chatLog.setProperty(win.activeIndex, "streaming", false);
             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
             chatLog.setProperty(win.activeIndex, "searching", false);
+            chatLog.setProperty(win.activeIndex, "filesActive", false);
         }
         function onReplyError(reason) {
             if (win.activeIndex < 0) return;
@@ -129,6 +149,7 @@ Window {
             chatLog.setProperty(win.activeIndex, "streaming", false);
             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
             chatLog.setProperty(win.activeIndex, "searching", false);
+            chatLog.setProperty(win.activeIndex, "filesActive", false);
         }
         function onModelsError(reason) { win.status = "no models: " + reason; }
     }
@@ -155,10 +176,12 @@ Window {
         chatLog.append({ isUser: true, who: "you", body: p,
                          thinking: "", thinkingActive: false, thinkTokens: 0,
                          sources: "", searchCount: 0, searching: false,
+                         files: "", fileCount: 0, filesActive: false, filesPending: 0,
                          streaming: false, isError: false });
         chatLog.append({ isUser: false, who: win.model, body: "",
                          thinking: "", thinkingActive: false, thinkTokens: 0,
                          sources: "", searchCount: 0, searching: false,
+                         files: "", fileCount: 0, filesActive: false, filesPending: 0,
                          streaming: true, isError: false });
         win.activeIndex = chatLog.count - 1;
         Ollama.rememberModel(win.model);   // the model he last used is next launch's default
@@ -475,6 +498,9 @@ Window {
                         // Same, for the web-search sources disclosure below.
                         property bool srcUserSet: false
                         property bool srcUserOpen: false
+                        // Same, for the file-tool activity disclosure.
+                        property bool fileUserSet: false
+                        property bool fileUserOpen: false
 
                         Column {
                             id: turnCol
@@ -653,6 +679,83 @@ Window {
                                 }
                             }
 
+                            // The file-tool activity: the same subordinated,
+                            // folded-by-default disclosure (docs/DESIGN.md §9.1),
+                            // showing which files the model read or changed. The
+                            // heading reads "working with files…" while an op is in
+                            // flight and settles to "files · N" once done; the body
+                            // is one plain outcome line per op (paths, not markdown
+                            // — PixelText verbatim, the shared guard).
+                            Item {
+                                id: fileAct
+                                width: parent.width
+                                visible: !isUser && (files !== "" || filesActive)
+                                height: visible ? fileToggle.height + fileReveal.height : 0
+
+                                readonly property bool expanded: turn.fileUserSet ? turn.fileUserOpen
+                                                                                  : false
+
+                                Item {
+                                    id: fileToggle
+                                    width: parent.width
+                                    height: Theme.lineHeight
+                                    property int dotPhase: 0
+                                    readonly property string dots:
+                                        motion.reduceMotion ? "…" : "...".substring(0, dotPhase)
+                                    Timer {
+                                        interval: motion.ms(motion.slideMs)
+                                        running: filesActive && !motion.reduceMotion
+                                        repeat: true
+                                        onTriggered: fileToggle.dotPhase = (fileToggle.dotPhase + 1) % 4
+                                    }
+                                    Row {
+                                        anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                                        spacing: 6
+                                        PixelText { text: fileAct.expanded ? "-" : "+"; color: Theme.textDim }
+                                        PixelText {
+                                            text: filesActive ? "working with files"
+                                                              : "files · " + fileCount
+                                            color: filesActive ? Theme.text : Theme.textDim
+                                        }
+                                        PixelText {
+                                            visible: filesActive
+                                            text: fileToggle.dots
+                                            color: Theme.textDim
+                                        }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: { turn.fileUserOpen = !fileAct.expanded; turn.fileUserSet = true; }
+                                    }
+                                }
+
+                                Item {
+                                    id: fileReveal
+                                    anchors { top: fileToggle.bottom; left: parent.left; right: parent.right }
+                                    clip: true
+                                    height: fileAct.expanded ? fileBody.height : 0
+                                    Behavior on height {
+                                        NumberAnimation { duration: motion.ms(motion.slideMs)
+                                                          easing.type: motion.slideEasing }
+                                    }
+                                    Rectangle {
+                                        anchors { left: parent.left; leftMargin: 3
+                                                  top: parent.top; bottom: parent.bottom }
+                                        width: Theme.ctrlBorder
+                                        color: Theme.border
+                                    }
+                                    PixelText {
+                                        id: fileBody
+                                        anchors { top: parent.top; left: parent.left; right: parent.right
+                                                  leftMargin: 12 }
+                                        wrapMode: Text.Wrap
+                                        text: files
+                                        color: Theme.textDim
+                                    }
+                                }
+                            }
+
                             // The turn's text. User prompts and error lines stay
                             // verbatim on PixelText (PlainText — never interpreted,
                             // the shared guard). A model row with no content yet
@@ -790,6 +893,7 @@ Window {
                             chatLog.setProperty(win.activeIndex, "streaming", false);
                             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
                             chatLog.setProperty(win.activeIndex, "searching", false);
+                            chatLog.setProperty(win.activeIndex, "filesActive", false);
                         }
                     } else win.send();
                 }

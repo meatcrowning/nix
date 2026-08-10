@@ -25,6 +25,8 @@ import socket
 import sys
 from pathlib import Path
 
+import shlex
+
 from PySide6.QtCore import (QObject, Slot, Signal, Property, QUrl,
                             QFileSystemWatcher, QProcess, QProcessEnvironment,
                             QTimer)
@@ -74,9 +76,102 @@ WEB_SEARCH_TOOL = {
     },
 }
 
+#: The FILE TOOLS oracle offers the model on EVERY turn (no toggle — his call:
+#: "always available to the model"). Reading and manipulation both, but every
+#: one runs THROUGH tools/sandbox-fs.py against a jailed root the model cannot
+#: escape (see FS below and apps/oracle/AGENTS.md). Descriptions tell the model
+#: the paths are sandbox-relative and reads are paginated, so it asks for more
+#: rather than assuming a short read is the whole file.
+FILE_TOOLS = [
+    {"type": "function", "function": {
+        "name": "list_dir",
+        "description": ("List a directory in your sandbox. Paths are relative to "
+                        "the sandbox root; '.' is the root. Long listings are "
+                        "truncated."),
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string",
+                     "description": "Directory to list, sandbox-relative. Default '.'."}},
+            "required": []}}},
+    {"type": "function", "function": {
+        "name": "read_file",
+        "description": ("Read a text file from your sandbox. Returns at most a few "
+                        "hundred lines; if `truncated` is true read again with "
+                        "`offset` set to `next_offset` to page through the rest."),
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string", "description": "File to read, sandbox-relative."},
+            "offset": {"type": "integer",
+                       "description": "0-based line to start at. Default 0."},
+            "limit": {"type": "integer",
+                      "description": "Max lines to return this call."}},
+            "required": ["path"]}}},
+    {"type": "function", "function": {
+        "name": "write_file",
+        "description": ("Create or overwrite a text file in your sandbox with the "
+                        "given content. Parent directories are created."),
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string", "description": "File to write, sandbox-relative."},
+            "content": {"type": "string", "description": "Full new file contents."}},
+            "required": ["path", "content"]}}},
+    {"type": "function", "function": {
+        "name": "edit_file",
+        "description": ("Replace an exact substring in a sandbox file. `old` must "
+                        "match once unless `replace_all` is set. Use write_file to "
+                        "create a file or replace it wholesale."),
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string", "description": "File to edit, sandbox-relative."},
+            "old": {"type": "string", "description": "Exact text to find."},
+            "new": {"type": "string", "description": "Text to put in its place."},
+            "replace_all": {"type": "boolean",
+                            "description": "Replace every match, not just a unique one."}},
+            "required": ["path", "old", "new"]}}},
+    {"type": "function", "function": {
+        "name": "move_path",
+        "description": "Move or rename a file or directory within your sandbox.",
+        "parameters": {"type": "object", "properties": {
+            "src": {"type": "string", "description": "Path to move, sandbox-relative."},
+            "dst": {"type": "string", "description": "Destination, sandbox-relative."}},
+            "required": ["src", "dst"]}}},
+    {"type": "function", "function": {
+        "name": "delete_path",
+        "description": ("Delete a file or directory in your sandbox. Pass "
+                        "`recursive` to delete a non-empty directory."),
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string", "description": "Path to delete, sandbox-relative."},
+            "recursive": {"type": "boolean",
+                          "description": "Delete a directory and its contents."}},
+            "required": ["path"]}}},
+    {"type": "function", "function": {
+        "name": "make_dir",
+        "description": "Create a directory (and parents) in your sandbox.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string", "description": "Directory to create, sandbox-relative."}},
+            "required": ["path"]}}},
+]
+
+#: tool name -> the `op` tools/sandbox-fs.py dispatches on.
+FILE_OP = {"list_dir": "list", "read_file": "read", "write_file": "write",
+           "edit_file": "edit", "move_path": "move", "delete_path": "delete",
+           "make_dir": "mkdir"}
+FILE_TOOL_NAMES = set(FILE_OP)
+
 #: How many tool rounds one turn may take before we stop looping and let the
 #: model answer with what it has — a guard against a model that keeps searching.
 MAX_TOOL_ROUNDS = 4
+
+#: The file tools' JAIL. Every file op runs against this one directory and
+#: cannot escape it (tools/sandbox-fs.py enforces it, symlinks included). It is
+#: the ONLY thing to change to widen the sandbox later ("maybe we let it run
+#: free") — point ORACLE_SANDBOX at ~ or / and the tools reach further, no code
+#: change. It lives on TOP, where oracle's ollama compute is: expanded here to
+#: an absolute /home/lam/... path (identical on both machines, user `lam`) so it
+#: needs no shell tilde-expansion when handed to top over ssh.
+SANDBOX_ROOT = os.path.expanduser(
+    os.environ.get("ORACLE_SANDBOX", "~/.local/share/oracle/sandbox"))
+
+#: The jailed executor. Same absolute path on top and book (the repo lives at
+#: /home/lam/nix on both), so `python3 <this>` runs unchanged locally on top or
+#: over ssh to top from book. Pure stdlib — top's system python3 runs it.
+FS_SCRIPT = str(HERE / "tools" / "sandbox-fs.py")
 
 #: Which machine we run on, by OS hostname (`top` / `book`) — NOT the flake
 #: attribute. On `book` there is no local `ollama.service`; the daemon lives on
@@ -242,6 +337,13 @@ class Ollama(QObject):
     webSearchDone = Signal(str, str, int)   # query, sources markdown, result count
     webSearchError = Signal(str, str)       # query, reason
 
+    # The file-tool activity, surfaced so QML can draw the same subordinated
+    # per-turn disclosure the web search gets (docs/DESIGN.md §9.1, §10 — the
+    # model touching files is shown, never silent): one op began, and one
+    # finished with a short outcome line and whether it succeeded.
+    fileToolStarted = Signal(str)           # a short "read notes.md" heading
+    fileToolDone = Signal(str, bool)        # outcome line, ok
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._nam = QNetworkAccessManager(self)
@@ -260,6 +362,7 @@ class Ollama(QObject):
         self._tool_calls = []    # tool calls accumulated in this sub-turn
         self._tool_results = []  # results being gathered for the current round
         self._rounds = 0         # tool rounds taken this turn (MAX_TOOL_ROUNDS cap)
+        self._procs = []         # live file-tool QProcesses, so none is GC'd mid-run
 
     # ---- model list ----
 
@@ -390,8 +493,14 @@ class Ollama(QObject):
             "messages": self._messages,
             "stream": True,
         }
+        # The file tools are offered on EVERY turn (his call — no toggle); the
+        # web_search tool only when the web chip is lit. A model with no tool
+        # support will reject a request carrying tools — the tradeoff of
+        # always-on file tools, spelled out in apps/oracle/AGENTS.md.
+        tools = list(FILE_TOOLS)
         if self._web:
-            payload["tools"] = [WEB_SEARCH_TOOL]
+            tools.append(WEB_SEARCH_TOOL)
+        payload["tools"] = tools
         body = json.dumps(payload).encode("utf-8")
         req = QNetworkRequest(QUrl(OLLAMA + "/api/chat"))
         req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
@@ -500,6 +609,8 @@ class Ollama(QObject):
             if name == "web_search":
                 self._tavily_search(str(args.get("query", "")).strip(),
                                     i, remaining, calls)
+            elif name in FILE_TOOL_NAMES:
+                self._run_fs_tool(name, args, i, remaining, calls)
             else:
                 self._tool_results[i] = {
                     "role": "tool",
@@ -593,6 +704,115 @@ class Ollama(QObject):
             lines.append("- [" + title + "](" + url + ")" if url
                          else "- " + title)
         return "\n".join(lines)
+
+    # ---- the file tools (jailed, on top) ----
+
+    @staticmethod
+    def _fs_argv():
+        """The command that runs one file op through tools/sandbox-fs.py against
+        the sandbox on top. On `top` it is local; on `book` it goes over the same
+        ssh master tools/ollama-tunnel.sh holds open (OLLAMA_SSH*), so the tools
+        always operate on top's filesystem. The op JSON is written to stdin."""
+        if ON_BOOK:
+            host = os.environ.get("OLLAMA_SSH_HOST", "top")
+            ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+            argv = [ssh, "-o", "BatchMode=yes"]
+            ctl = os.environ.get("OLLAMA_SSH_CTL")
+            if ctl:
+                argv += ["-o", "ControlMaster=auto", "-o", "ControlPersist=30",
+                         "-o", "ControlPath=" + ctl]
+            argv += [host, "python3", shlex.quote(FS_SCRIPT),
+                     shlex.quote(SANDBOX_ROOT)]
+            return argv
+        return [sys.executable, FS_SCRIPT, SANDBOX_ROOT]
+
+    def _run_fs_tool(self, name, args, idx, remaining, calls):
+        """Run one file tool as an async QProcess, feeding the JSON result back
+        into the tool loop exactly as the web search does. Concurrent with any
+        other call in the round."""
+        req = {k: v for k, v in args.items()} if isinstance(args, dict) else {}
+        req["op"] = FILE_OP[name]
+        self.fileToolStarted.emit(self._fs_heading(name, args))
+        proc = QProcess(self)
+        self._procs.append(proc)
+
+        def finished(*_):
+            if proc not in self._procs:
+                return
+            self._procs.remove(proc)
+            try:
+                out = bytes(proc.readAllStandardOutput())
+                err = bytes(proc.readAllStandardError())
+                rc = proc.exitCode()
+            except RuntimeError:
+                return
+            proc.deleteLater()
+            result = self._fs_result(out, err, rc)
+            self._tool_results[idx] = {"role": "tool",
+                                       "content": json.dumps(result)}
+            self.fileToolDone.emit(self._fs_outcome(name, args, result),
+                                   "error" not in result)
+            self._tool_done(remaining, calls)
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(lambda *_: None)  # surfaced through finished
+        proc.start(self._fs_argv()[0], self._fs_argv()[1:])
+        proc.write(json.dumps(req).encode("utf-8"))
+        proc.closeWriteChannel()
+
+    @staticmethod
+    def _fs_result(out, err, rc):
+        """The sandbox executor prints one JSON object; anything else (an ssh
+        failure, a crash) becomes an error result the model still gets."""
+        try:
+            obj = json.loads(out.decode("utf-8", "replace") or "{}")
+            if isinstance(obj, dict):
+                return obj
+        except ValueError:
+            pass
+        tail = (err.decode("utf-8", "replace").strip().splitlines() or [""])[-1]
+        return {"error": "file tool failed: " + (tail or ("exit %d" % rc))}
+
+    @staticmethod
+    def _fs_heading(name, args):
+        a = args if isinstance(args, dict) else {}
+        p = str(a.get("path") or a.get("src") or ".")
+        verb = {"list_dir": "listing", "read_file": "reading",
+                "write_file": "writing", "edit_file": "editing",
+                "move_path": "moving", "delete_path": "deleting",
+                "make_dir": "creating"}.get(name, name)
+        return verb + " " + p
+
+    @staticmethod
+    def _fs_outcome(name, args, result):
+        a = args if isinstance(args, dict) else {}
+        if "error" in result:
+            p = str(a.get("path") or a.get("src") or "")
+            return (name + ": " + str(result["error"]))[:200]
+        if name == "list_dir":
+            return "listed %s · %d entries" % (result.get("path", "."),
+                                               result.get("count", 0))
+        if name == "read_file":
+            s, e, t = (result.get("start_line", 0), result.get("end_line", 0),
+                       result.get("total_lines", 0))
+            if result.get("binary"):
+                return "read %s · binary, %d B" % (result.get("path", ""),
+                                                   result.get("bytes", 0))
+            return "read %s · lines %d–%d of %d" % (result.get("path", ""), s, e, t)
+        if name == "write_file":
+            return "%s %s · %d B" % ("created" if result.get("created") else "wrote",
+                                     result.get("path", ""), result.get("bytes", 0))
+        if name == "edit_file":
+            n = result.get("replacements", 0)
+            return "edited %s · %d replacement%s" % (result.get("path", ""), n,
+                                                     "" if n == 1 else "s")
+        if name == "move_path":
+            return "moved %s → %s" % (result.get("src", ""), result.get("dst", ""))
+        if name == "delete_path":
+            return "deleted " + str(result.get("path", ""))
+        if name == "make_dir":
+            return "created " + str(result.get("path", "")) + "/"
+        return name + " ok"
 
 
 class Backend(QObject):
