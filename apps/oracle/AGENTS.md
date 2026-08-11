@@ -420,21 +420,35 @@ every request now carries `tools`, a model with **no tool support rejects it**
 (the same reason the `web` toggle was opt-in). oracle is a tool-calling window
 now; point it at a tool-capable model.
 
-**The jail.** Every op runs through `tools/sandbox-fs.py`, which takes one ROOT
-directory and refuses to touch anything outside it, **symlinks included**
-(`os.path.realpath` + a containment check). Paths the model gives are always
-sandbox-relative. That script is the entire security model: the model gets a
-sandbox, not the filesystem. (`sandbox-fs.py` also carries a `put` op that
-writes base64 bytes — binary-safe, same jail — used only by oracle's own
-attachment staging, never offered to the model.) The root is `SANDBOX_ROOT` — one constant,
-`~/.local/share/oracle/sandbox`, overridable with `$ORACLE_SANDBOX`. To **widen
-it later** ("maybe we let it run free"), point that env at `~` or `/`; no code
-change.
+**The jail — two roots since 2026-08-11.** Every op runs through
+`tools/sandbox-fs.py`, which refuses to touch anything outside its root,
+**symlinks included** (`os.path.realpath` + a containment check). The catch is
+that the **read-only ops reach a wider root than the mutating ops**: the model
+gets **read access to the user's files** (his ask — chatter agents needed to
+read his files), while writes stay confined to the sandbox.
+
+- `list_dir`, `read_file`, `find_files`, `search_text`, `show_tree` (the
+  `READ_OPS` set in `sandbox-fs.py`) resolve against `READ_ROOT` — his **home**
+  by default (`~`, overridable with `$ORACLE_READ_ROOT`; set it to `/` to widen
+  or to `SANDBOX_ROOT` to restore jailed reads). Their paths are **home-relative**.
+- `write_file`, `edit_file`, `move_path`, `delete_path`, `make_dir` (and the
+  internal `put`) resolve against `SANDBOX_ROOT` — `~/.local/share/oracle/sandbox`,
+  overridable with `$ORACLE_SANDBOX`. Their paths are **sandbox-relative**. The
+  `FILE_TOOLS` descriptions carry that split so the model uses the right base.
+
+`sandbox-fs.py` takes the write root as `argv[1]` and the read root as an
+optional `argv[2]`; with no `argv[2]` the read ops fall back to the write root,
+so an older executor over ssh (top not yet pulled) keeps the old jailed-both
+behaviour rather than breaking. There is still deliberately **no write access to
+his home** — that would hand a local model delete/overwrite over everything and
+is a separate decision for him. (`sandbox-fs.py` also carries a `put` op that
+writes base64 bytes — binary-safe, sandbox-jailed — used only by oracle's own
+attachment staging, never offered to the model.)
 
 **It lives on `top`.** oracle's compute is ollama on top, so the sandbox is
 there too. On `top` `main.py` runs `sandbox-fs.py` locally; on `book` it runs it
 **over the same ssh master** `tools/ollama-tunnel.sh` holds open
-(`OLLAMA_SSH*`) — `ssh top python3 tools/sandbox-fs.py <root>` — so the tools
+(`OLLAMA_SSH*`) — `ssh top python3 tools/sandbox-fs.py <write-root> <read-root>` — so the tools
 operate on top's filesystem whichever machine the window is on
 (`Ollama._fs_argv`, host-branched exactly like `Backend._systemctl`). The
 executor is **pure stdlib** so top's system `python3` runs it over ssh, and it
