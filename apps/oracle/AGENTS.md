@@ -116,6 +116,16 @@ newest text to the bottom only while he is already AT the bottom
 the position, and it re-arms when he scrolls back down to the bottom
 (docs/DESIGN.md §6.1 — never yank his position).
 
+**Model stats** (the `statsRow` readout, under the server note): the selected
+model's **context ceiling** and the reply's **generation rate**, both true
+numbers not guesses (docs/DESIGN.md §10). `contextMax` is read from ollama's
+`/api/show` — the model's own `<arch>.context_length` in `model_info`, keyed off
+`general.architecture`, never the filename (`refreshModelInfo`, run on every
+model change and every send; 0/hidden when unknown). `tokensPerSec` is a running
+estimate while a reply streams (one content frame ≈ one token, clocked from the
+first frame) that settles to ollama's exact `eval_count / eval_duration` on the
+final `done` frame. The row collapses to nothing until at least one stat exists.
+
 ## The base prompt
 
 A selectable **base system prompt** leads every turn's system message: a handful

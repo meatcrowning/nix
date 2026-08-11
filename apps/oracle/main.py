@@ -25,6 +25,7 @@ import platform
 import re
 import socket
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -714,6 +715,14 @@ class Ollama(QObject):
     imageFetchStarted = Signal(str)         # url
     imageFetchResult = Signal(str)          # one JSON entry (the contract above)
 
+    # Live model stats, drawn as readouts in the status area. `contextMax` is the
+    # selected model's real context ceiling read from ollama's /api/show (the
+    # model's own `<arch>.context_length`, not a filename guess); `tokensPerSec`
+    # is the generation rate — a running estimate while a reply streams, settled
+    # to ollama's exact eval_count/eval_duration on the done frame.
+    contextMaxChanged = Signal()
+    tokensPerSecChanged = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._nam = QNetworkAccessManager(self)
@@ -735,6 +744,11 @@ class Ollama(QObject):
         self._procs = []         # live file-tool QProcesses, so none is GC'd mid-run
         self._memories = []      # oracle's own durable memories, injected each turn
         self._prompt_choice, self._custom_prompt = self._load_prompt_config()
+        self._ctx_max = 0        # selected model's context ceiling (0 = unknown)
+        self._ctx_model = ""     # which model _ctx_max was read for
+        self._tps = 0.0          # generation rate of the current/last reply
+        self._resp_t0 = 0.0      # monotonic start of the reply's content stream
+        self._resp_tokens = 0    # content frames seen this reply (≈ tokens)
 
     # ---- model list ----
 
@@ -895,6 +909,85 @@ class Ollama(QObject):
                 return p["text"].strip()
         return ""
 
+    # ---- model stats (context ceiling + generation rate) ----
+
+    @Property(int, notify=contextMaxChanged)
+    def contextMax(self):
+        """The selected model's context window in tokens, 0 while unknown."""
+        return self._ctx_max
+
+    @Property(float, notify=tokensPerSecChanged)
+    def tokensPerSec(self):
+        """Generation rate of the current/last reply, 0 before one has run."""
+        return self._tps
+
+    def _set_tps(self, v):
+        v = float(v) if v and v > 0 else 0.0
+        if abs(v - self._tps) > 1e-6:
+            self._tps = v
+            self.tokensPerSecChanged.emit()
+
+    @Slot(str)
+    def refreshModelInfo(self, model):
+        """Read the model's real context ceiling from ollama's /api/show —
+        `<arch>.context_length` in `model_info`, the model's own trained window,
+        not a filename guess (docs/DESIGN.md §10: a shown number is a true one).
+        Async; leaves the stat at 0/unknown on any failure rather than inventing
+        a value."""
+        model = (model or "").strip()
+        if not model:
+            self._ctx_model = ""
+            if self._ctx_max:
+                self._ctx_max = 0
+                self.contextMaxChanged.emit()
+            return
+        if model == self._ctx_model and self._ctx_max:
+            return                          # already known for this model
+        self._ctx_model = model
+        req = QNetworkRequest(QUrl(OLLAMA + "/api/show"))
+        req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
+                      "application/json")
+        reply = self._nam.post(req, json.dumps({"model": model}).encode("utf-8"))
+
+        def done():
+            ctx = 0
+            try:
+                if reply.error() == QNetworkReply.NetworkError.NoError:
+                    obj = json.loads(bytes(reply.readAll().data()).decode(
+                        "utf-8", "replace") or "{}")
+                    ctx = self._parse_context_length(obj)
+            except (ValueError, RuntimeError):
+                ctx = 0
+            reply.deleteLater()
+            if model != self._ctx_model:
+                return                      # a newer selection superseded this
+            if ctx != self._ctx_max:
+                self._ctx_max = ctx
+                self.contextMaxChanged.emit()
+
+        reply.finished.connect(done)
+
+    @staticmethod
+    def _parse_context_length(show):
+        """The context ceiling from an /api/show reply: the architecture's own
+        `<arch>.context_length` in `model_info`. Falls back to any *.context_length
+        key, then 0 (unknown — never a guess)."""
+        info = show.get("model_info") or {}
+        if not isinstance(info, dict):
+            return 0
+        arch = ""
+        if isinstance(show.get("details"), dict):
+            arch = show["details"].get("family") or ""
+        arch = info.get("general.architecture") or arch
+        if arch:
+            v = info.get(str(arch) + ".context_length")
+            if isinstance(v, (int, float)) and v > 0:
+                return int(v)
+        for k, v in info.items():
+            if k.endswith(".context_length") and isinstance(v, (int, float)) and v > 0:
+                return int(v)
+        return 0
+
     @Slot()
     def refreshModels(self):
         req = QNetworkRequest(QUrl(OLLAMA + "/api/tags"))
@@ -944,6 +1037,10 @@ class Ollama(QObject):
                           + [{"role": "user", "content": prompt}])
         self._think_tokens = 0
         self._rounds = 0
+        self._resp_t0 = 0.0
+        self._resp_tokens = 0
+        self._set_tps(0.0)
+        self.refreshModelInfo(model)   # keep the context stat matched to the turn
         self._set_busy(True)
         self.replyStarted.emit()
         self._post_chat()
@@ -1230,12 +1327,29 @@ class Ollama(QObject):
             piece = msg.get("content", "")
             if piece:
                 self._acc_content += piece
+                # A running tok/s estimate: clock from the first content frame,
+                # one frame ≈ one token (same assumption the reasoning counter
+                # uses). Settled to ollama's exact numbers on the done frame below.
+                if self._resp_t0 == 0.0:
+                    self._resp_t0 = time.monotonic()
+                self._resp_tokens += 1
+                dt = time.monotonic() - self._resp_t0
+                if dt > 0.2 and self._resp_tokens > 1:
+                    self._set_tps(self._resp_tokens / dt)
                 self.replyChunk.emit(piece)
             # Tool calls arrive assembled by ollama (not partial deltas); a turn
             # may carry several. Accumulate them for the round.
             calls = msg.get("tool_calls")
             if calls:
                 self._tool_calls.extend(calls)
+            # The final frame carries ollama's own token accounting — the exact
+            # generation rate, which replaces the running estimate.
+            if obj.get("done"):
+                ec = obj.get("eval_count")
+                ed = obj.get("eval_duration")     # nanoseconds
+                if isinstance(ec, (int, float)) and isinstance(ed, (int, float)) \
+                        and ec > 0 and ed > 0:
+                    self._set_tps(ec / (ed / 1e9))
 
     def _on_finished(self, reply):
         if reply is not self._reply:

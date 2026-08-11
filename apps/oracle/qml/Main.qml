@@ -21,6 +21,9 @@ Window {
     title: "chatter"
 
     property string model: ""
+    // Read the newly-selected model's context ceiling as soon as it changes, so
+    // the stat is right before the first send (send() refreshes it again).
+    onModelChanged: if (model !== "") Ollama.refreshModelInfo(model)
     property string status: ""
     // The current conversation SESSION: its store id (empty until the first
     // turn is saved — oracle mints a stable one client-side then) and its title
@@ -689,6 +692,36 @@ Window {
                : (Backend.busy ? Theme.textDim : Theme.ok)
     }
 
+    // Model stats: the selected model's context ceiling and the last/live
+    // generation rate, a subordinated readout (docs/DESIGN.md §9 — a stat line,
+    // §9.1 — one step dim). Collapses to nothing until at least one stat is
+    // known. `ctx` is read from ollama's /api/show (the model's own trained
+    // window); `tok/s` is the estimate while a reply streams, exact once done.
+    Row {
+        id: statsRow
+        anchors { top: serverNoteText.bottom; left: parent.left
+                  leftMargin: 10; topMargin: visible ? 4 : 0 }
+        spacing: 12
+        readonly property bool hasCtx: Ollama.contextMax > 0
+        readonly property bool hasTps: Ollama.tokensPerSec > 0
+        visible: hasCtx || hasTps
+        height: visible ? Theme.lineHeight : 0
+
+        PixelText {
+            visible: statsRow.hasCtx
+            text: "ctx " + (Ollama.contextMax >= 1000
+                            ? (Ollama.contextMax / 1024).toFixed(
+                                  Ollama.contextMax % 1024 === 0 ? 0 : 1) + "K"
+                            : Ollama.contextMax) + " tok"
+            color: Theme.textDim
+        }
+        PixelText {
+            visible: statsRow.hasTps
+            text: Ollama.tokensPerSec.toFixed(1) + " tok/s"
+            color: Theme.textDim
+        }
+    }
+
     // The dropdown floats over the reply area, overlaying the picker exactly.
     // It anchors to `top` (a sibling) and takes the picker's width rather than
     // anchoring to `picker` itself — the picker is `top`'s child, a nephew of
@@ -1060,7 +1093,7 @@ Window {
     // --------------------------------------------------------- the reply area
     Rectangle {
         id: replyBox
-        anchors { top: serverNoteText.bottom; topMargin: 10
+        anchors { top: statsRow.bottom; topMargin: 10
                   left: parent.left; right: parent.right
                   bottom: promptBox.top
                   leftMargin: 10; rightMargin: 10; bottomMargin: 10 }
