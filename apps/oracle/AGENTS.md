@@ -227,6 +227,38 @@ The request is `POST https://api.tavily.com/search` with `api_key` in the body,
 `include_answer: true`, `max_results: 5`; the reply's `answer` and each hit's
 `title`/`url`/`content` are fed back to the model and shown in the disclosure.
 
+## Web images (fetch_image)
+
+The model can DOWNLOAD an image from the web and have it shown inline in the
+chat — the one place a reply becomes a picture, not text. `IMAGE_TOOL`
+(`fetch_image`, offered every turn beside the web/file/time tools) takes a
+direct image URL and an optional `alt` caption; `Ollama._fetch_image` GETs it on
+the shared `QNetworkAccessManager` (Qt6 follows redirects), and `_on_image`
+validates the result.
+
+**One data contract, `imageFetchResult` (a single JSON entry).** Success is
+`{ok:true, url, path, alt, w, h}` — `path` is the local file, `w`/`h` the real
+decoded pixel size; failure is `{ok:false, url, error}`. QML's `onImageFetchResult`
+parses it and appends to the turn row's `images` array (a JSON-string field); the
+Main.qml delegate renders each ok entry as a framed inline `Image` (1px border,
+`Theme.rounding`, `sourceSize.width` capped to the column so it never upscales)
+with the caption under it, and each failure as a crit line. `imageFetchStarted`/
+`imagesActive` drive the in-flight line. The model also gets a text tool result
+(`{ok, note}` or `{error}`) so it knows the outcome.
+
+**It does NOT run on top** (unlike the sandbox/session/memory stores): a QML
+`Image` loads a LOCAL file, and the fetch is an in-process web GET, so it runs
+wherever the window is and saves under `IMAGES_ROOT`
+(`~/.local/share/oracle/images`, override `$ORACLE_IMAGES`), content-addressed by
+URL so a re-fetch reuses the file. `IMAGE_MAX_BYTES` (20 MB) caps one download.
+
+**Failure is surfaced, never swallowed** (docs/DESIGN.md §10): a non-http(s) URL
+is refused before the network, a body that does not decode as an image (a web
+page, a 404 HTML) reports the content-type, an over-large body is rejected, and a
+saved file that will not load draws its own crit line. All three reach both the
+user (a visible line) and the model (a tool error). The saved `path` persists in
+the session transcript, so a reloaded conversation still shows its images.
+
 ## File tools (jailed, on top)
 
 oracle offers the model a set of **file tools on every turn** — `list_dir`,

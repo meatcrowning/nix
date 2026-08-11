@@ -18,6 +18,7 @@ for the model list, and a STREAMING `/api/chat` POST whose NDJSON reply is
 parsed line by line and emitted as it arrives, so the reply grows on screen the
 way it comes off the model.
 """
+import hashlib
 import json
 import os
 import re
@@ -32,7 +33,7 @@ import shlex
 from PySide6.QtCore import (QObject, Slot, Signal, Property, QUrl,
                             QFileSystemWatcher, QProcess, QProcessEnvironment,
                             QTimer)
-from PySide6.QtGui import QGuiApplication, QColor
+from PySide6.QtGui import QGuiApplication, QColor, QImage
 from PySide6.QtNetwork import (QNetworkAccessManager, QNetworkRequest,
                                QNetworkReply)
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
@@ -78,6 +79,56 @@ WEB_SEARCH_TOOL = {
         },
     },
 }
+
+#: The IMAGE-FETCH tool, offered on every turn beside the web/file/time tools.
+#: The model calls it with a direct image URL; oracle downloads the bytes,
+#: verifies they decode as an image, saves them LOCALLY and hands the local path
+#: to QML, which renders the picture inline in the chat log (the one place a
+#: model reply becomes a picture rather than text). Failure is surfaced, never
+#: swallowed (docs/DESIGN.md §10): a non-URL, a non-image response and an
+#: undecodable body each come back as a visible error line AND a tool error the
+#: model sees. Unlike the file/session/memory stores this does NOT run on top —
+#: the image must be a local file the QML Image element can load, and the fetch
+#: is a plain in-process web GET, so it runs wherever the window is (see FETCH
+#: below).
+IMAGE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "fetch_image",
+        "description": (
+            "Download an image from a public web URL and DISPLAY it inline in the "
+            "chat for the user to see. Use it when he asks to see a picture, "
+            "photo, chart, diagram or logo, or when showing an image makes your "
+            "answer clearer. Pass the DIRECT url of an image file (one that "
+            "returns image data — typically ending in .png/.jpg/.jpeg/.gif/.webp); "
+            "a link to a web PAGE will not work. The image is shown to him "
+            "automatically, so you need not describe it unless he asks. If the "
+            "fetch fails you get an error back and nothing is shown — tell him."),
+        "parameters": {"type": "object", "properties": {
+            "url": {"type": "string",
+                    "description": "Direct URL of the image file to download."},
+            "alt": {"type": "string",
+                    "description": "A short caption describing the image (optional)."}},
+            "required": ["url"]}},
+}
+IMAGE_TOOL_NAMES = {"fetch_image"}
+
+#: Where fetched images land — LOCAL to the machine running the window (not top,
+#: unlike the sandbox/sessions/memory), because a QML Image loads a local file
+#: and the download is an in-process web GET that needs no ssh. Override with
+#: $ORACLE_IMAGES.
+IMAGES_ROOT = os.path.expanduser(
+    os.environ.get("ORACLE_IMAGES", "~/.local/share/oracle/images"))
+
+#: A ceiling on a single image download, so a mis-pointed URL cannot pull a
+#: multi-gigabyte body into memory.
+IMAGE_MAX_BYTES = 20 * 1024 * 1024
+
+#: content-type → file extension for a saved image (cosmetic — QML's Image sniffs
+#: the bytes — but tidy). Anything else falls back to the URL's suffix, then .img.
+IMAGE_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
+             "image/webp": ".webp", "image/bmp": ".bmp", "image/svg+xml": ".svg",
+             "image/tiff": ".tiff", "image/x-icon": ".ico", "image/avif": ".avif"}
 
 #: The FILE TOOLS oracle offers the model on EVERY turn (no toggle — his call:
 #: "always available to the model"). Reading and manipulation both, but every
@@ -543,6 +594,15 @@ class Ollama(QObject):
     fileToolStarted = Signal(str)           # a short "read notes.md" heading
     fileToolDone = Signal(str, bool)        # outcome line, ok
 
+    # The image-fetch tool, surfaced so QML can render the picture INLINE (the
+    # whole point of the tool) and, on failure, an honest error line in its place
+    # (docs/DESIGN.md §10). ONE data contract with QML: `imageFetchResult` carries
+    # a single JSON entry — {ok:true, url, path, alt, w, h} for a fetched image,
+    # or {ok:false, url, error} for any failure — which QML parses and appends to
+    # the turn's image list.
+    imageFetchStarted = Signal(str)         # url
+    imageFetchResult = Signal(str)          # one JSON entry (the contract above)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._nam = QNetworkAccessManager(self)
@@ -863,8 +923,8 @@ class Ollama(QObject):
         # reject a request carrying tools — the tradeoff of always-on tools,
         # spelled out in apps/oracle/AGENTS.md; point oracle at a tool-capable
         # model.
-        payload["tools"] = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL]
-                            + list(SESSION_TOOLS) + list(MEMORY_TOOLS))
+        payload["tools"] = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL,
+                            IMAGE_TOOL] + list(SESSION_TOOLS) + list(MEMORY_TOOLS))
         body = json.dumps(payload).encode("utf-8")
         req = QNetworkRequest(QUrl(OLLAMA + "/api/chat"))
         req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
@@ -975,6 +1035,10 @@ class Ollama(QObject):
                                     i, remaining, calls)
             elif name == "get_current_time":
                 self._time_now(str(args.get("timezone", "")), i, remaining, calls)
+            elif name in IMAGE_TOOL_NAMES:
+                self._fetch_image(str(args.get("url", "")).strip(),
+                                  str(args.get("alt", "")).strip(),
+                                  i, remaining, calls)
             elif name in FILE_TOOL_NAMES:
                 self._run_fs_tool(name, args, i, remaining, calls)
             elif name in SESSION_TOOL_NAMES:
@@ -1075,6 +1139,109 @@ class Ollama(QObject):
             lines.append("- [" + title + "](" + url + ")" if url
                          else "- " + title)
         return "\n".join(lines)
+
+    # ---- the image-fetch tool (in-process download, rendered inline) ----
+
+    @staticmethod
+    def _image_error(url, reason):
+        """The one failure shape, split for its two audiences: the entry QML
+        draws as a crit line, and the tool result the model reads (§10 — the
+        failure is reported to both, never silently dropped)."""
+        return ({"ok": False, "url": url, "error": reason},
+                {"error": "image fetch failed: " + reason})
+
+    def _fetch_image(self, url, alt, idx, remaining, calls):
+        """Download one image by URL and hand the local path to QML to render.
+
+        A GET on the shared QNAM (Qt6 follows redirects by default), validated on
+        completion in `_on_image`. A URL that is not http(s) never reaches the
+        network — it is failed immediately, still through the same contract so
+        QML and the model both see the refusal."""
+        if not url or not re.match(r"^https?://", url, re.I):
+            self.imageFetchStarted.emit(url or "(no url)")
+            entry, result = self._image_error(url, "not a valid http(s) image URL")
+            self.imageFetchResult.emit(json.dumps(entry))
+            self._tool_results[idx] = {"role": "tool", "tool_name": "fetch_image",
+                                       "content": json.dumps(result)}
+            self._tool_done(remaining, calls)
+            return
+        self.imageFetchStarted.emit(url)
+        req = QNetworkRequest(QUrl(url))
+        req.setHeader(QNetworkRequest.KnownHeaders.UserAgentHeader,
+                      "oracle-chatter/1.0")
+        reply = self._nam.get(req)
+        reply.finished.connect(
+            lambda: self._on_image(reply, url, alt, idx, remaining, calls))
+
+    def _on_image(self, reply, url, alt, idx, remaining, calls):
+        """Validate the download, save it locally, and feed both audiences.
+
+        Three honest failure modes (docs/DESIGN.md §10): a network/HTTP error, a
+        body that does not decode as an image (a web page, a 404 HTML), and a
+        body too large. Success saves the bytes under IMAGES_ROOT and returns the
+        path plus real pixel dimensions for QML to size the frame."""
+        if not self._busy:            # turn was cancelled mid-fetch
+            reply.deleteLater()
+            return
+        try:
+            data = bytes(reply.readAll().data())
+            ctype = str(reply.header(QNetworkRequest.KnownHeaders.ContentTypeHeader)
+                        or "").split(";")[0].strip().lower()
+            if reply.error() != QNetworkReply.NetworkError.NoError:
+                entry, result = self._image_error(url, reply.errorString())
+            elif len(data) > IMAGE_MAX_BYTES:
+                entry, result = self._image_error(
+                    url, "image too large (%d MB, limit %d MB)"
+                    % (len(data) // (1024 * 1024),
+                       IMAGE_MAX_BYTES // (1024 * 1024)))
+            else:
+                img = QImage()
+                if not img.loadFromData(data) or img.isNull():
+                    reason = "server did not return a decodable image"
+                    if ctype:
+                        reason += " (content-type: %s)" % ctype
+                    entry, result = self._image_error(url, reason)
+                else:
+                    path = self._save_image(data, url, ctype)
+                    if not path:
+                        entry, result = self._image_error(
+                            url, "could not save the image locally")
+                    else:
+                        entry = {"ok": True, "url": url, "path": path, "alt": alt,
+                                 "w": img.width(), "h": img.height()}
+                        result = {"ok": True, "url": url, "width": img.width(),
+                                  "height": img.height(),
+                                  "note": ("Image downloaded and now shown inline "
+                                           "in the chat for the user to see.")}
+        except (ValueError, TypeError, OSError) as e:
+            entry, result = self._image_error(url, str(e))
+        finally:
+            reply.deleteLater()
+        self.imageFetchResult.emit(json.dumps(entry))
+        self._tool_results[idx] = {"role": "tool", "tool_name": "fetch_image",
+                                   "content": json.dumps(result)}
+        self._tool_done(remaining, calls)
+
+    @staticmethod
+    def _save_image(data, url, ctype):
+        """Write the bytes under IMAGES_ROOT, returning the absolute path or "".
+        Content-addressed by URL so re-fetching the same image reuses one file;
+        the extension is derived from the content-type (else the URL suffix, else
+        .img) and is cosmetic — QML's Image sniffs the data itself."""
+        ext = IMAGE_EXT.get(ctype, "")
+        if not ext:
+            m = re.search(r"\.(png|jpe?g|gif|webp|bmp|svg|tiff?|ico|avif)(?:$|[?#])",
+                          url, re.I)
+            ext = ("." + m.group(1).lower()) if m else ".img"
+        name = hashlib.sha1(url.encode("utf-8", "replace")).hexdigest()[:16] + ext
+        try:
+            os.makedirs(IMAGES_ROOT, exist_ok=True)
+            path = os.path.join(IMAGES_ROOT, name)
+            with open(path, "wb") as f:
+                f.write(data)
+            return path
+        except OSError:
+            return ""
 
     # ---- the file tools (jailed, on top) ----
 
