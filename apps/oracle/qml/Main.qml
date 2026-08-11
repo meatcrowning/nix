@@ -1358,18 +1358,26 @@ Window {
                             }
 
                             // The turn's text. User prompts and error lines stay
-                            // verbatim on PixelText (PlainText — never interpreted,
-                            // the shared guard). A model row with no content yet
-                            // shows "…" only when nothing else is speaking (no
-                            // reasoning block carrying the wait).
+                            // verbatim on the plain SelectableText (PlainText —
+                            // never interpreted, the shared guard — but read-only
+                            // selectable so he can copy them). A model row with no
+                            // content yet shows "…" only when nothing else is
+                            // speaking (no reasoning block carrying the wait); that
+                            // placeholder is not selectable content, so it stays a
+                            // plain PixelText.
+                            SelectableText {
+                                width: parent.width
+                                visible: (isUser || isError) && body !== ""
+                                text: body
+                                color: isError ? Theme.crit : Theme.text
+                            }
                             PixelText {
                                 width: parent.width
                                 wrapMode: Text.Wrap
-                                visible: text !== ""
-                                text: isUser || isError ? body
-                                      : (body === "" && streaming
-                                         ? (thinking !== "" ? "" : "…") : "")
-                                color: isError ? Theme.crit : Theme.text
+                                visible: !isUser && !isError && body === "" && streaming
+                                         && thinking === ""
+                                text: "…"
+                                color: Theme.text
                             }
 
                             // The model's answer, rendered as Markdown (the reply

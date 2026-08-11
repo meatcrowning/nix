@@ -42,17 +42,23 @@ model selector* below).
     tools already carry: **a model with no tool support rejects a request that
     carries `tools`**, so point oracle at a tool-capable model.
 - **`qml/Main.qml`** — one file: the selector row, a `KineticFlickable`
-  conversation area, and a prompt `TextEdit` (Ctrl+Enter sends). The model
-  dropdown is inline rather than a shared `CtxMenu`, keeping this window's
-  imports to the theme, `PixelText` and the `qmlcommon` Kinetic views. The
-  conversation is a **persistent in-session LOG** (`ListModel chatLog`, a
+  conversation area, and a prompt `TextEdit` (Enter sends, Shift+Enter newline).
+  The model dropdown is inline rather than a shared `CtxMenu`, keeping this
+  window's imports to the theme, `PixelText` and the `qmlcommon` Kinetic views.
+  The conversation is a **persistent in-session LOG** (`ListModel chatLog`, a
   `Repeater` per turn): every send appends a `you` row and an assistant row and
   streams into the latter; prior turns stay in place and scrolled back, never
-  scrubbed (docs/DESIGN.md §14). A model row's answer is drawn through
-  **`qml/MarkdownText.qml`** (`Text.MarkdownText`, pixel idiom, themed links) —
-  the replies come back in Markdown; user prompts and error lines stay verbatim
-  on `PixelText` (pinned `PlainText`, the shared guard), so only trusted-shape
-  strings are ever interpreted. It auto-follows the newest text to the bottom
+  scrubbed (docs/DESIGN.md §14). **The whole log is read-only selectable** so any
+  message can be highlighted and copied: a model row's answer is drawn through
+  **`qml/MarkdownText.qml`** (a read-only, `selectByMouse` `TextEdit.MarkdownText`,
+  pixel idiom, themed links via `palette.link`) — the replies come back in
+  Markdown, with fenced code blocks in the monospaced pixel face; user prompts
+  and error lines stay verbatim on **`qml/SelectableText.qml`** (a read-only
+  selectable `TextEdit`, pinned `PlainText`, the shared guard — the selectable
+  twin of `PixelText`), so only trusted-shape strings are ever interpreted. Both
+  selectable types pin the face as a whole `Theme.editorFont` QFont (an editable
+  item ignores `antialiasing:false`, §2.2) and carry no `lineHeight` (Text-only).
+  It auto-follows the newest text to the bottom
   only while he is already at the bottom (see *The model selector* §streaming) —
   scroll up mid-stream and it stops yanking. A model's
   reasoning is a **collapsible disclosure, folded by default** (§9.1
