@@ -1587,11 +1587,29 @@ def sandbox_allow(sandbox):
     """`--allowedTools` for a SANDBOX spawn: the read + shell + web tools bare
     (so `default` mode auto-allows them with nothing to ask), and the write tools
     SCOPED to files under `sandbox`. Anything the list does not name — an Edit or
-    Write outside the dir — falls through to a headless permission deny."""
+    Write outside the dir — falls through to a headless permission deny.
+
+    ONE `Edit(//<dir>/**)` rule, not three, and with the `//` the CLI's path
+    matcher actually needs for an absolute path. Two bugs stacked here,
+    verified empirically against the installed CLI (both left a sandboxed
+    Write denied, even for a path safely inside the sandbox — the exact
+    "cannot write at all" shape two workers hit):
+
+    * The permission checker only understands a path pattern on the `Edit`
+      rule name — `Write(...)` and `NotebookEdit(...)` with a path are
+      silently unmatched (the CLI says so on stderr: "only Edit(path) rules
+      are... Edit rules cover all file-editing tools"), so the old three-rule
+      form left every Write/NotebookEdit call matching no allow rule.
+    * A single leading `/` is read as a *relative* pattern, not an absolute
+      path — `Edit(/tmp/x/**)` never matches `/tmp/x/y`. The double slash is
+      the CLI's own convention for "from the filesystem root" (see the
+      `Read(//usr/lib/**)`-style rules in `.claude/settings.local.json`).
+    `sandbox` is already an absolute path (`sandbox_dir`), so `//%s/**` is the
+    one rule that actually grants a sandboxed Write. Bare `Edit`/`Write`/
+    `NotebookEdit` in `TOOLS` still load the tool schemas (see
+    `context_flags`); this is only the permission grant."""
     return ["Bash", "Read", "Glob", "Grep", "Task", "TodoWrite",
-            "WebFetch", "WebSearch",
-            "Edit(%s/**)" % sandbox, "Write(%s/**)" % sandbox,
-            "NotebookEdit(%s/**)" % sandbox]
+            "WebFetch", "WebSearch", "Edit(/%s/**)" % sandbox]
 
 
 #: The sandbox constraint appended to a sandbox spawn's system prompt — the
