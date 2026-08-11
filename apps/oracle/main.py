@@ -163,6 +163,15 @@ ATTACH_FILE_MAX = 128 * 1024        # per attachment, bytes of text inlined
 ATTACH_TOTAL_MAX = 512 * 1024       # all attachments in one turn, bytes
 ATTACH_IMAGE_MAX = 8 * 1024 * 1024  # per dropped image, bytes sent to a vision model
 
+#: Beyond inlining a dropped file's text, oracle also STAGES each non-image
+#: attachment into the file-tool sandbox (ATTACH_STAGE_DIR under SANDBOX_ROOT on
+#: top), so the model can read the FULL file (the inline text is capped) and
+#: read/edit/write it through the same file tools. Capped to the sandbox's own
+#: WRITE_MAX_BYTES (2 MB) so a copy over the ssh master stays quick and cannot
+#: outrun what the tools would accept back.
+ATTACH_STAGE_MAX = 2_000_000        # per file copied into the sandbox for the tools
+ATTACH_STAGE_DIR = "attachments"    # sandbox subdir dropped files are staged under
+
 #: content-type → file extension for a saved image (cosmetic — QML's Image sniffs
 #: the bytes — but tidy). Anything else falls back to the URL's suffix, then .img.
 IMAGE_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
@@ -435,6 +444,28 @@ SAVE_GUIDANCE = (
     "without announcing it. Save only lasting things, not one-off details of the "
     "current chat, and update or delete a memory with save_memory/delete_memory "
     "when it changes or turns out wrong.")
+
+#: On every turn: an HONEST, static summary of what this app actually lets the
+#: model do, so it reports its abilities correctly instead of guessing from
+#: training (gemma4:e4b told him it "has no code-execution env" — true, but it
+#: reached for it blind rather than from its real tool inventory). describe_self
+#: gives the exact live tool list on demand; a model does not call it
+#: spontaneously, so the families it has — and the ones it does NOT — are named
+#: here too (docs/DESIGN.md §10 affordance honesty: never imply an ability that
+#: silently is not there, in either direction). There is deliberately no
+#: arbitrary code/shell execution: adding one would run untrusted model output
+#: on `top` and is a security decision for him, not a default.
+CAPABILITY_NOTE = (
+    "What you can actually do in this app, through function tools offered every "
+    "turn: search the public web; fetch and display images; read the current "
+    "time in any timezone; read, write, edit, move, delete and search files in a "
+    "jailed sandbox on the host (including any files the user drags onto the "
+    "window, which are staged into that sandbox for you); read your past "
+    "conversations; and save, list and delete your own durable memories. You do "
+    "NOT have arbitrary code or shell execution, and no general internet access "
+    "beyond web search and image fetch. Describe your abilities in these terms, "
+    "and call describe_self for the exact live tool list — never claim a "
+    "capability you do not have, and never deny one you do.")
 
 #: How wide a web search fans out, scaled to the query's apparent complexity
 #: (see `Ollama._research_budget`). A simple factual ask (a weather lookup, a
@@ -1120,9 +1151,16 @@ class Ollama(QObject):
         vision = self._ctx_model == model and "vision" in (self._caps or [])
         attach_block = self._read_attachments(file_items)
         images_b64, img_note = self._read_image_attachments(image_items, vision)
+        # Beyond the bounded inline text, stage each dropped file INTO the file-
+        # tool sandbox so the model can read the FULL file and edit it in place.
+        staged, stage_errs = (self._stage_attachments(file_items)
+                              if file_items else ([], []))
+        stage_note = self._stage_note(staged, stage_errs)
         content = prompt
         if attach_block:
             content += "\n\n" + attach_block
+        if stage_note:
+            content += "\n\n" + stage_note
         if img_note:
             content += "\n\n" + img_note
         user_msg = {"role": "user", "content": content}
@@ -1289,6 +1327,89 @@ class Ollama(QObject):
                 + "\n\n".join(blocks))
 
     @staticmethod
+    def _safe_stage_name(name):
+        """A dropped file's own name, reduced to a bare sandbox filename: the
+        basename with path separators neutralised. `resolve()` in the executor
+        already jails an escaping path, but keeping the staged name clean means a
+        file called `../x` lands as `.._x` rather than erroring on the guard."""
+        base = os.path.basename(str(name)) or "file"
+        return base.replace("/", "_").replace("\\", "_") or "file"
+
+    def _stage_attachments(self, file_items):
+        """Copy each dropped NON-image attachment into the sandbox on top (under
+        ATTACH_STAGE_DIR) so the model's file tools can read the FULL file and
+        edit it — not just the bounded inline text. Runs the same jailed
+        executor the file tools use (`_fs_argv`, local on top / over the ssh
+        master on book), once per file, SYNCHRONOUSLY: the files are small and
+        must be in place before the model's first tool round. Best-effort — a
+        failure (too big, unreadable, executor/ssh down) is NAMED, never silent
+        (docs/DESIGN.md §10). Returns `(staged, errors)` where staged is a list
+        of `{name, rel}` sandbox-relative paths."""
+        staged, errors = [], []
+        for it in file_items:
+            path, name = it["path"], it["name"]
+            try:
+                size = os.path.getsize(path)
+                if size > ATTACH_STAGE_MAX:
+                    errors.append("%s (%d KB, over the %d KB stage limit)"
+                                  % (name, size // 1024, ATTACH_STAGE_MAX // 1024))
+                    continue
+                with open(path, "rb") as fh:
+                    data = fh.read()
+            except OSError as e:
+                errors.append("%s (could not read: %s)" % (name, e.strerror))
+                continue
+            rel = ATTACH_STAGE_DIR + "/" + self._safe_stage_name(name)
+            ok, err = self._run_fs_sync({
+                "op": "put", "path": rel,
+                "data": base64.b64encode(data).decode("ascii")})
+            if ok:
+                staged.append({"name": name, "rel": rel})
+            else:
+                errors.append("%s (%s)" % (name, err))
+        return staged, errors
+
+    @staticmethod
+    def _stage_note(staged, errors):
+        """The model-facing note that names where the staged attachments landed
+        and how to use them, plus any that could not be staged (never silent)."""
+        parts = []
+        if staged:
+            listing = ", ".join("`%s` (%s)" % (s["rel"], s["name"]) for s in staged)
+            parts.append(
+                "These attachments are also saved in your file sandbox: "
+                + listing + ". Use read_file to read one in full (the inlined "
+                "text above may be truncated), and edit_file/write_file to modify "
+                "it in place there.")
+        if errors:
+            parts.append("Could not stage for the file tools: "
+                         + "; ".join(errors) + ".")
+        return "\n\n".join(parts)
+
+    def _run_fs_sync(self, req):
+        """Run one sandbox-fs op and BLOCK for its result — used only for staging
+        an attachment before the chat POST (the model tool loop stays async via
+        `_run_fs_tool`). Returns `(ok, error_string)`. A copy over the already-
+        open ssh master is subsecond; the timeouts are the honest failure path
+        for a down executor, not a normal wait."""
+        argv = self._fs_argv()
+        proc = QProcess()
+        proc.start(argv[0], argv[1:])
+        if not proc.waitForStarted(4000):
+            return False, "could not start the file executor"
+        proc.write(json.dumps(req).encode("utf-8"))
+        proc.closeWriteChannel()
+        if not proc.waitForFinished(8000):
+            proc.kill()
+            return False, "file executor timed out"
+        result = self._fs_result(bytes(proc.readAllStandardOutput()),
+                                 bytes(proc.readAllStandardError()),
+                                 proc.exitCode())
+        if "error" in result:
+            return False, str(result["error"])
+        return True, ""
+
+    @staticmethod
     def _parse_history(history_json):
         """Validate the prior-turns array QML sends: only user/assistant roles
         with non-empty string content survive (QML already drops error rows and
@@ -1417,6 +1538,7 @@ class Ollama(QObject):
             base += "\n\n" + memory_block
         base += "\n\n" + RECALL_GUIDANCE
         base += "\n\n" + SAVE_GUIDANCE
+        base += "\n\n" + CAPABILITY_NOTE
         if research:
             base += "\n\n" + research
         # His chosen base (a preset or his own custom text) LEADS — the time
