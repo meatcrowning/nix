@@ -61,6 +61,25 @@ Window {
     // answer is), `isError`.
     ListModel { id: chatLog }
 
+    // Files he dragged onto the window, attached to the NEXT message and cleared
+    // once it is sent (docs/DESIGN.md §13 — dropping into a window works like a
+    // file manager). Each row is {name, path}; the paths are read locally and
+    // inlined as context by Ollama.send.
+    ListModel { id: attachments }
+    function addAttachmentUrl(u) {
+        var info = Ollama.localFileInfo("" + u);   // QUrl decode in Python (§13)
+        if (!info || !info.path)
+            return;
+        for (var i = 0; i < attachments.count; i++)
+            if (attachments.get(i).path === info.path)
+                return;                            // already attached
+        attachments.append({ name: info.name, path: info.path });
+    }
+    function removeAttachment(i) {
+        if (i >= 0 && i < attachments.count) attachments.remove(i);
+    }
+    function clearAttachments() { attachments.clear(); }
+
     Component.onCompleted: Titlebar.setFooter(ollamaHost.replace(/^https?:\/\//, ""))
 
     // Keep a model selected, and never point at a model that has gone away.
@@ -317,9 +336,25 @@ Window {
 
     function send() {
         var p = input.text.trim();
-        if (p === "" || win.model === "" || Ollama.busy)
+        // A message may be text, files, or both — but never empty of both.
+        if ((p === "" && attachments.count === 0) || win.model === "" || Ollama.busy)
             return;
         win.status = "";
+        // Snapshot the attachments for this turn, then clear the tray.
+        var atts = [];
+        var names = [];
+        for (var a = 0; a < attachments.count; a++) {
+            var at = attachments.get(a);
+            atts.push({ name: at.name, path: at.path });
+            names.push(at.name);
+        }
+        // What the model gets as the prompt (Ollama.send inlines the file text
+        // after it); a files-only message still needs an instruction.
+        var sendPrompt = p !== "" ? p : "Please look at the attached file(s).";
+        // What is DISPLAYED and saved: his text plus a dim note of the filenames
+        // (the file bodies are not dumped into the visible log).
+        var shownBody = (p !== "" ? p : "(attached files)")
+                      + (names.length > 0 ? "\n[attached: " + names.join(", ") + "]" : "");
         // The prior turns of THIS chat, so the model sees the whole conversation
         // rather than just the new prompt — built before the pair below is
         // appended, and skipping error placeholders / empty streams, which are
@@ -333,7 +368,7 @@ Window {
         }
         // Append the pair now, then stream into the assistant row. Prior turns
         // are left untouched — the log grows downward (docs/DESIGN.md §14).
-        chatLog.append({ isUser: true, who: "you", body: p,
+        chatLog.append({ isUser: true, who: "you", body: shownBody,
                          thinking: "", thinkingActive: false, thinkTokens: 0,
                          sources: "", searchCount: 0, searching: false,
                          files: "", fileCount: 0, filesActive: false, filesPending: 0,
@@ -347,8 +382,9 @@ Window {
                          streaming: true, isError: false });
         win.activeIndex = chatLog.count - 1;
         Ollama.rememberModel(win.model);   // the model he last used is next launch's default
-        Ollama.send(win.model, p, JSON.stringify(history));
+        Ollama.send(win.model, sendPrompt, JSON.stringify(history), JSON.stringify(atts));
         input.clear();
+        win.clearAttachments();
     }
 
     // ---------------------------------------------------------------- top row
@@ -1095,7 +1131,7 @@ Window {
         id: replyBox
         anchors { top: statsRow.bottom; topMargin: 10
                   left: parent.left; right: parent.right
-                  bottom: promptBox.top
+                  bottom: attachBar.top
                   leftMargin: 10; rightMargin: 10; bottomMargin: 10 }
         color: Theme.bgAlt
         radius: Theme.rounding
@@ -1547,6 +1583,89 @@ Window {
                 contentY >= Math.max(0, contentHeight - height) - 2
 
             ScrollBar.vertical: VScroll { id: replyScroll }
+        }
+    }
+
+    // ---------------------------------------------------- the attachment tray
+    // The files he dragged on, sitting just above the compose box until the next
+    // message carries them — each a removable chip (docs/DESIGN.md §7.2 boxed,
+    // §10.2 a control that shows a file offers to drop it). Collapses to nothing
+    // when the tray is empty.
+    Flow {
+        id: attachBar
+        anchors { left: parent.left; right: parent.right; bottom: promptBox.top
+                  leftMargin: 10; rightMargin: 10
+                  bottomMargin: attachments.count > 0 ? 6 : 0 }
+        spacing: 6
+        visible: attachments.count > 0
+
+        Repeater {
+            model: attachments
+            delegate: Rectangle {
+                height: 22
+                width: chipRow.implicitWidth + 12
+                radius: Theme.rounding
+                color: chipMouse.containsMouse ? Theme.highlight : Theme.bgAlt
+                border.width: Theme.ctrlBorder
+                border.color: Theme.border
+                Row {
+                    id: chipRow
+                    anchors.centerIn: parent
+                    spacing: 6
+                    PixelText {
+                        text: model.name
+                        color: Theme.text
+                        elide: Text.ElideRight
+                        width: Math.min(implicitWidth, 220)
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    // The remove affordance: an [x] that drops this one before
+                    // sending (§10 — a shown attachment can be taken back).
+                    PixelText {
+                        text: "x"
+                        color: Theme.textDim
+                        anchors.verticalCenter: parent.verticalCenter
+                        MouseArea {
+                            id: chipMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: win.removeAttachment(index)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Drop files ANYWHERE on the window to attach them to the next message
+    // (docs/DESIGN.md §13 — dropping into a window works like a file manager;
+    // the target highlights while a drag hovers it). The URLs are resolved in
+    // Python (Ollama.localFileInfo), never decoded in QML.
+    DropArea {
+        id: fileDrop
+        anchors.fill: parent
+        keys: ["text/uri-list"]
+        onDropped: (drop) => {
+            if (drop.hasUrls) {
+                for (var i = 0; i < drop.urls.length; i++)
+                    win.addAttachmentUrl(drop.urls[i]);
+                drop.accept();
+            }
+        }
+    }
+    Rectangle {
+        anchors.fill: parent
+        visible: fileDrop.containsDrag
+        z: 200
+        color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.10)
+        border.width: 2
+        border.color: Theme.accent
+        radius: Theme.rounding
+        PixelText {
+            anchors.centerIn: parent
+            text: "drop files to attach"
+            color: Theme.accent
         }
     }
 
