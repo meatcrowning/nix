@@ -268,6 +268,11 @@ Window {
     function loadTurns(id, title, turnsJson) {
         var arr;
         try { arr = JSON.parse(turnsJson); } catch (e) { arr = []; }
+        // Persist the outgoing session before it is replaced, the same guard
+        // "+ new session" carries — switching away must not drop an unsaved
+        // turn (e.g. one still mid-stream). saveCurrent snapshots synchronously;
+        // it no-ops on an empty log.
+        win.saveCurrent();
         Ollama.cancel();
         chatLog.clear();
         for (var i = 0; i < arr.length; i++) {
@@ -293,8 +298,16 @@ Window {
         target: Sessions
         function onLoaded(id, title, turnsJson) { win.loadTurns(id, title, turnsJson); }
         function onSaved(id, title) {
-            win.sessionId = id;
-            if (win.sessionTitle === "") win.sessionTitle = title;
+            // Deliberately does NOT touch win.sessionId / win.sessionTitle.
+            // saveCurrent() sets both SYNCHRONOUSLY (ensureSessionId + the title
+            // derivation) before this async store result ever arrives, so
+            // re-applying them here is redundant — and worse, a hazard: a save
+            // that lands AFTER "+ new session" (or a session switch) has reset
+            // the identity would stamp the OLD id back onto the fresh, empty
+            // session, and the next turn would then overwrite the old
+            // conversation. That is exactly the "new session loses the previous
+            // one" data loss. The store never rewrites the id, so there is
+            // nothing to reflect back; refresh() already ran in Sessions.save.
         }
         function onError(reason) { win.status = "session store: " + reason; }
     }
