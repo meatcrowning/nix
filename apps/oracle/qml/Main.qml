@@ -138,12 +138,39 @@ Window {
             chatLog.setProperty(win.activeIndex, "filesPending", pending);
             chatLog.setProperty(win.activeIndex, "filesActive", pending > 0);
         }
+        // The image-fetch tool: the model asked for an image, and one entry came
+        // back — either a fetched picture (rendered inline) or a failure line
+        // (docs/DESIGN.md §10 — the failure is shown, never dropped). ONE data
+        // contract: `imageFetchResult` is a single JSON entry we append to the
+        // row's image list, which the delegate renders.
+        function onImageFetchStarted(url) {
+            if (win.activeIndex < 0) return;
+            var cur = chatLog.get(win.activeIndex);
+            chatLog.setProperty(win.activeIndex, "imagesPending", cur.imagesPending + 1);
+            chatLog.setProperty(win.activeIndex, "imagesActive", true);
+        }
+        function onImageFetchResult(entryJson) {
+            if (win.activeIndex < 0) return;
+            var cur = chatLog.get(win.activeIndex);
+            var arr;
+            try { arr = JSON.parse(cur.images); } catch (e) { arr = []; }
+            var entry;
+            try { entry = JSON.parse(entryJson); } catch (e2) { entry = null; }
+            if (entry) {
+                arr.push(entry);
+                chatLog.setProperty(win.activeIndex, "images", JSON.stringify(arr));
+            }
+            var pending = Math.max(0, cur.imagesPending - 1);
+            chatLog.setProperty(win.activeIndex, "imagesPending", pending);
+            chatLog.setProperty(win.activeIndex, "imagesActive", pending > 0);
+        }
         function onReplyDone() {
             if (win.activeIndex < 0) return;
             chatLog.setProperty(win.activeIndex, "streaming", false);
             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
             chatLog.setProperty(win.activeIndex, "searching", false);
             chatLog.setProperty(win.activeIndex, "filesActive", false);
+            chatLog.setProperty(win.activeIndex, "imagesActive", false);
             win.saveCurrent();          // the finished turn persists to the session
         }
         function onReplyError(reason) {
@@ -154,6 +181,7 @@ Window {
             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
             chatLog.setProperty(win.activeIndex, "searching", false);
             chatLog.setProperty(win.activeIndex, "filesActive", false);
+            chatLog.setProperty(win.activeIndex, "imagesActive", false);
             win.saveCurrent();
         }
         function onModelsError(reason) { win.status = "no models: " + reason; }
@@ -207,6 +235,7 @@ Window {
                          thinking: t.thinking, thinkTokens: t.thinkTokens,
                          sources: t.sources, searchCount: t.searchCount,
                          files: t.files, fileCount: t.fileCount,
+                         images: t.images,
                          isError: t.isError });
         }
         Sessions.save(id, title, JSON.stringify(turns));
@@ -243,6 +272,7 @@ Window {
                              searching: false,
                              files: t.files || "", fileCount: t.fileCount || 0,
                              filesActive: false, filesPending: 0,
+                             images: t.images || "[]", imagesActive: false, imagesPending: 0,
                              streaming: false, isError: !!t.isError });
         }
         win.sessionId = id;
@@ -284,11 +314,13 @@ Window {
                          thinking: "", thinkingActive: false, thinkTokens: 0,
                          sources: "", searchCount: 0, searching: false,
                          files: "", fileCount: 0, filesActive: false, filesPending: 0,
+                         images: "[]", imagesActive: false, imagesPending: 0,
                          streaming: false, isError: false });
         chatLog.append({ isUser: false, who: win.model, body: "",
                          thinking: "", thinkingActive: false, thinkTokens: 0,
                          sources: "", searchCount: 0, searching: false,
                          files: "", fileCount: 0, filesActive: false, filesPending: 0,
+                         images: "[]", imagesActive: false, imagesPending: 0,
                          streaming: true, isError: false });
         win.activeIndex = chatLog.count - 1;
         Ollama.rememberModel(win.model);   // the model he last used is next launch's default
@@ -1007,6 +1039,90 @@ Window {
                                 visible: !isUser && !isError && body !== ""
                                 text: body
                             }
+
+                            // Images the model fetched from the web with
+                            // fetch_image, rendered INLINE — the one place a reply
+                            // becomes a picture. Each entry (the Python↔QML
+                            // contract) is either a fetched image, framed like
+                            // every surface here (1px border, Theme.rounding,
+                            // never upscaled past its own size), with the model's
+                            // caption under it, or an honest crit line for a fetch
+                            // that failed or a file that will not load
+                            // (docs/DESIGN.md §10 — surfaced, never vanished).
+                            Column {
+                                id: imageCol
+                                width: parent.width
+                                spacing: 6
+                                visible: !isUser && (images !== "[]" || imagesActive)
+
+                                Repeater {
+                                    model: {
+                                        try { return JSON.parse(images); }
+                                        catch (e) { return []; }
+                                    }
+                                    delegate: Column {
+                                        width: imageCol.width
+                                        spacing: 2
+
+                                        Rectangle {
+                                            visible: !!modelData.ok
+                                            width: pic.width + 2
+                                            height: pic.height + 2
+                                            color: Theme.bgAlt
+                                            radius: Theme.rounding
+                                            border.width: Theme.ctrlBorder
+                                            border.color: Theme.border
+                                            Image {
+                                                id: pic
+                                                x: 1; y: 1
+                                                // sourceSize.width caps the decode
+                                                // to the column and, set alone,
+                                                // scales height by the real aspect
+                                                // — and never upscales past native.
+                                                readonly property real natW:
+                                                    (modelData.w && modelData.w > 0)
+                                                    ? modelData.w : (imageCol.width - 2)
+                                                sourceSize.width:
+                                                    Math.min(imageCol.width - 2, natW)
+                                                fillMode: Image.PreserveAspectFit
+                                                asynchronous: true
+                                                source: modelData.ok
+                                                        ? "file://" + modelData.path : ""
+                                            }
+                                        }
+                                        // The caption (the model's alt text),
+                                        // subordinated (§9.1 — one step dim).
+                                        PixelText {
+                                            visible: !!modelData.ok
+                                                     && !!modelData.alt && modelData.alt !== ""
+                                            width: imageCol.width
+                                            wrapMode: Text.Wrap
+                                            text: modelData.alt || ""
+                                            color: Theme.textDim
+                                        }
+                                        // The honest failure: a refused/failed
+                                        // fetch, or a saved file that will not
+                                        // load (§10 — say so, never a blank).
+                                        PixelText {
+                                            visible: !modelData.ok || pic.status === Image.Error
+                                            width: imageCol.width
+                                            wrapMode: Text.Wrap
+                                            text: "image: "
+                                                  + (modelData.error ? modelData.error
+                                                                     : "could not display")
+                                                  + (modelData.url ? " (" + modelData.url + ")" : "")
+                                            color: Theme.crit
+                                        }
+                                    }
+                                }
+
+                                // A fetch still in flight (§10 — the wait is shown).
+                                PixelText {
+                                    visible: imagesActive
+                                    text: "fetching an image…"
+                                    color: Theme.text
+                                }
+                            }
                         }
                     }
                 }
@@ -1129,6 +1245,7 @@ Window {
                             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
                             chatLog.setProperty(win.activeIndex, "searching", false);
                             chatLog.setProperty(win.activeIndex, "filesActive", false);
+                            chatLog.setProperty(win.activeIndex, "imagesActive", false);
                             win.saveCurrent();   // keep the partial turn in the session
                         }
                     } else win.send();
