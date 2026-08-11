@@ -282,10 +282,13 @@ def _warn_overlaps(rec):
 
 def cmd_dispatch(a):
     rec = bw.dispatch(" ".join(a.task), where=a.where, context=a.context,
-                      model=a.model)
+                      model=a.model, read_only=a.read_only)
     if rec is None:
         print("boardctl: nothing to dispatch", file=sys.stderr)
         return 1
+    if a.read_only:
+        print("read-only: reads + IPC/log only (no edits, commits, "
+              "rebuilds or writes)")
     # WHAT IT WILL ACTUALLY RUN ON, said out loud whenever the caller asked for
     # something — a tier this board cannot name falls back to his dial rather
     # than raising (`boardwork.spirit_tier`), and a silent fallback that the
@@ -622,6 +625,9 @@ def main(argv=None):
                    help="the tier this piece runs on (a label like 'sonnet 5 "
                         "medium'); left off, it runs on the setting, which is "
                         "also the ceiling")
+    s.add_argument("--read-only", dest="read_only", action="store_true",
+                   help="bind this spirit to reads + IPC/log only: no edits, "
+                        "commits, rebuilds or writes (research/inventory)")
     s.set_defaults(fn=cmd_dispatch)
 
     s = sub.add_parser("turns", help="how much of your turn budget is spent, "
