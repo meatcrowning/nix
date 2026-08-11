@@ -456,43 +456,68 @@ every request now carries `tools`, a model with **no tool support rejects it**
 (the same reason the `web` toggle was opt-in). oracle is a tool-calling window
 now; point it at a tool-capable model.
 
-**The jail — two roots since 2026-08-11.** Every op runs through
-`tools/sandbox-fs.py`, which refuses to touch anything outside its root,
-**symlinks included** (`os.path.realpath` + a containment check). The catch is
-that the **read-only ops reach a wider root than the mutating ops**: the model
-gets **read access to the user's files** (his ask — chatter agents needed to
-read his files), while writes stay confined to the sandbox.
+**The jail — two roots since 2026-08-11, the read root widened to the FULL
+filesystem the same day.** Every op runs through `tools/sandbox-fs.py`, which
+refuses to touch anything outside its root, **symlinks included**
+(`os.path.realpath` + a containment check — `_under()`, which has to normalize
+a root of `/` specially, since `"/" + os.sep` is `"//"`, a prefix nothing
+starts with; that bug shipped and was caught the same day the root widened to
+`/`). The catch is that the **read-only ops reach a wider root than the
+mutating ops**: the model gets **read access to the WHOLE filesystem** (his
+ask — chatter agents needed to read his files, then widened past just his home
+the same day), while writes stay confined to the sandbox.
 
 - `list_dir`, `read_file`, `find_files`, `search_text`, `show_tree` (the
-  `READ_OPS` set in `sandbox-fs.py`) resolve against `READ_ROOT` — his **home**
-  by default (`~`, overridable with `$ORACLE_READ_ROOT`; set it to `/` to widen
-  or to `SANDBOX_ROOT` to restore jailed reads). Their paths are **home-relative**.
+  `READ_OPS` set in `sandbox-fs.py`) resolve against `READ_ROOT` — **`/`** by
+  default (overridable with `$ORACLE_READ_ROOT`; point it at his home to
+  restore the 2026-08-11 scope, or at `SANDBOX_ROOT` to restore jailed reads).
+  Their paths are **root-relative** (`'.'` is `/`).
 - `write_file`, `edit_file`, `move_path`, `delete_path`, `make_dir` (and the
   internal `put`) resolve against `SANDBOX_ROOT` — `~/.local/share/oracle/sandbox`,
   overridable with `$ORACLE_SANDBOX`. Their paths are **sandbox-relative**. The
   `FILE_TOOLS` descriptions carry that split so the model uses the right base.
+  **This jail is unchanged** by the read-root widening — a local model still
+  cannot write, edit, move or delete anything outside its own sandbox, on
+  either machine.
 
 `sandbox-fs.py` takes the write root as `argv[1]` and the read root as an
 optional `argv[2]`; with no `argv[2]` the read ops fall back to the write root,
-so an older executor over ssh (top not yet pulled) keeps the old jailed-both
-behaviour rather than breaking. There is still deliberately **no write access to
-his home** — that would hand a local model delete/overwrite over everything and
-is a separate decision for him. (`sandbox-fs.py` also carries a `put` op that
-writes base64 bytes — binary-safe, sandbox-jailed — used only by oracle's own
-attachment staging, never offered to the model.)
+so an older executor over ssh (the OTHER host not yet pulled) keeps the old
+jailed-both behaviour rather than breaking. There is still deliberately **no
+write access outside the sandbox** — that would hand a local model
+delete/overwrite over everything and is a separate decision for him.
+(`sandbox-fs.py` also carries a `put` op that writes base64 bytes —
+binary-safe, sandbox-jailed — used only by oracle's own attachment staging,
+never offered to the model.)
 
-**It lives on `top`.** oracle's compute is ollama on top, so the sandbox is
-there too. On `top` `main.py` runs `sandbox-fs.py` locally; on `book` it runs it
-**over the same ssh master** `tools/ollama-tunnel.sh` holds open
-(`OLLAMA_SSH*`) — `ssh top python3 tools/sandbox-fs.py <write-root> <read-root>` — so the tools
-operate on top's filesystem whichever machine the window is on
-(`Ollama._fs_argv`, host-branched exactly like `Backend._systemctl`). The
-executor is **pure stdlib** so top's system `python3` runs it over ssh, and it
-`mkdir -p`s the root on first use, so a fresh top needs nothing set up by hand.
-`sandbox-fs.py` speaks one JSON request on stdin → one JSON result on stdout;
-`main.py` dispatches each call as an async `QProcess` in the existing tool loop,
-concurrent with any web search, and surfaces it as a third per-turn disclosure
-(`fileToolStarted`/`fileToolDone` → the "files · N" block in `Main.qml`, §9.1).
+**Reads reach BOTH machines, not just the one the window runs on** (his ask,
+2026-08-11 — widened alongside the root). Every read-only tool schema carries
+an optional `host` ("top"/"book", default "top" for backward compat with the
+pre-widening behaviour) that the model sets to pick which machine's filesystem
+it wants; `Ollama._fs_argv(target_host)` resolves it: if `target_host` is the
+same machine the window already runs on, `sandbox-fs.py` runs **locally**;
+otherwise it opens a **fresh ssh call to that host over the tailnet** (both
+directions work — MagicDNS `top`/`book`; the book→top hop reuses
+`tools/ollama-tunnel.sh`'s already-open control master via `OLLAMA_SSH*`, no
+new listener). **Mutating tools take no `host`** — there is only one sandbox
+and it always lives on `top`, so `write_file`/`edit_file`/`move_path`/
+`delete_path`/`make_dir` always resolve `_fs_argv(None)`, i.e. local on `top`,
+over the tunnel's master from `book` — exactly the pre-2026-08-11 behaviour,
+unwidened.
+
+Concretely: on `top`, `main.py` runs `sandbox-fs.py` locally for a `top` read
+or any write, and `ssh book python3 tools/sandbox-fs.py <sandbox> /` for a
+`book` read. On `book`, it's the mirror: local for a `book` read, `ssh top
+python3 tools/sandbox-fs.py <sandbox> /` (over the tunnel's master) for a `top`
+read or any write. The executor is **pure stdlib** so either host's system
+`python3` runs it over ssh with nothing installed, and it `mkdir -p`s the
+sandbox root on first use wherever it runs, so a fresh host needs nothing set
+up by hand. `sandbox-fs.py` speaks one JSON request on stdin → one JSON result
+on stdout; `main.py` dispatches each call as an async `QProcess` in the
+existing tool loop, concurrent with any web search, and surfaces it as a third
+per-turn disclosure (`fileToolStarted`/`fileToolDone` → the "files · N" block
+in `Main.qml`, §9.1) with a `(book)` suffix in the heading when reading the
+non-default host.
 
 **Context is respected** (his rule 5): reads are paginated (default ~300 lines,
 a 40 KB byte ceiling, over-long lines clipped, `next_offset` to page on),
