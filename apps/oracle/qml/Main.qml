@@ -1184,14 +1184,14 @@ Window {
                 persistentSelection: true
                 focus: true
 
-                // Ctrl+Return sends; a bare Return keeps typing a paragraph.
-                // Escape dismisses the prompt box — the desktop-wide
-                // Escape-to-dismiss (editor's PathBar/FindBar, reader's search):
-                // focus leaves for the reply view, so the accent border and the
-                // caret clear and the placeholder returns.
+                // A bare Return sends; Shift+Return keeps typing a paragraph
+                // (matches board's InputBox). Escape dismisses the prompt box —
+                // the desktop-wide Escape-to-dismiss (editor's PathBar/FindBar,
+                // reader's search): focus leaves for the reply view, so the
+                // accent border and the caret clear and the placeholder returns.
                 Keys.onPressed: function (e) {
                     if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter)
-                        && (e.modifiers & Qt.ControlModifier)) {
+                        && !(e.modifiers & Qt.ShiftModifier)) {
                         win.send();
                         e.accepted = true;
                     } else if (e.key === Qt.Key_Escape) {
@@ -1204,7 +1204,7 @@ Window {
                     anchors { left: parent.left; verticalCenter: parent.top
                               verticalCenterOffset: parent.implicitHeight / 2 }
                     visible: input.text === "" && !input.activeFocus
-                    text: "ask the model…  (Ctrl+Enter to send)"
+                    text: "ask the model…  (Enter to send, Shift+Enter for a newline)"
                     color: Theme.textDim
                 }
             }
