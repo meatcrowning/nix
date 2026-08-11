@@ -309,11 +309,15 @@ SELF_TOOL = {
     "function": {
         "name": "describe_self",
         "description": (
-            "Look up who and what you actually are right now: the exact model id "
-            "you are being served as this turn, the app you are running in, and "
-            "the machine you are running on (its hostname, operating system, CPU "
-            "architecture, core count and memory). Use this instead of guessing "
-            "your own model name or your host from your training."),
+            "Look up who and what you actually are right now — everything about "
+            "yourself you can access. The exact model id you are served as this "
+            "turn and your provider/backend; the app and the machine you run on "
+            "(hostname, OS, CPU architecture, cores, memory); your context "
+            "window ceiling and how much of it is currently filled; your last "
+            "generation speed in tokens/sec; your active persona / base system "
+            "prompt; the durable memories you have saved; the tools available to "
+            "you this turn; your sampling options; and this conversation's size. "
+            "Use this instead of guessing any of it from your training."),
         "parameters": {"type": "object", "properties": {}, "required": []}},
 }
 
@@ -1305,14 +1309,29 @@ class Ollama(QObject):
         self._tool_done(remaining, calls)
 
     def _describe_self(self, idx, remaining, calls):
-        """Report the model and machine this turn is actually running as/on.
-        Synchronous — every fact is in-process (the current-turn model id) or
+        """Report EVERYTHING the model can access about itself this turn — model
+        and provider, the machine, its context window and fill, generation
+        speed, active persona, saved memories, available tools, sampling options
+        and the conversation's size. Synchronous — every fact is in-process or
         read live off this host, so it needs no subprocess and is host-neutral.
         The machine facts are re-derived at call time (platform / os / proc)
         rather than hardcoded, so nothing from the private hardware notes is
         baked into this public source."""
+        # The persona / active base prompt (label + the actual text it leads with).
+        choice = self._prompt_choice
+        persona = ("custom" if choice == "custom"
+                   else next((p["label"] for p in PROMPT_PRESETS
+                              if p["id"] == choice), choice))
+        base_text = self._base_prompt()
+        # The durable memories, capped so a big store cannot blow the reply.
+        mems = [str(m.get("text", "")).strip()
+                for m in (self._memories or []) if str(m.get("text", "")).strip()]
+        # This conversation's size, counted off the message list built for the turn.
+        user_turns = sum(1 for m in self._messages if m.get("role") == "user")
+        asst_turns = sum(1 for m in self._messages if m.get("role") == "assistant")
         result = {
             "model": self._model or "(none selected)",
+            "provider": {"backend": "ollama", "endpoint": OLLAMA},
             "app": "chatter (the oracle ollama chat window)",
             "host": socket.gethostname(),
             "os": self._os_pretty(),
@@ -1320,10 +1339,37 @@ class Ollama(QObject):
             "cpu_logical": os.cpu_count(),
             "memory_total": self._mem_total(),
             "python": platform.python_version(),
+            "context": {
+                "ceiling_tokens": self._ctx_max or "unknown",
+                "used_tokens": self._ctx_used,
+                "num_ctx_requested": CHAT_NUM_CTX,
+            },
+            "last_tokens_per_sec": round(self._tps, 1) if self._tps else 0,
+            "persona": persona,
+            "base_prompt": (base_text[:800] if base_text
+                            else "(default — no persona)"),
+            "saved_memories": {"count": len(mems), "items": mems[:40]},
+            "conversation": {"your_prompts": user_turns,
+                             "your_replies_so_far": asst_turns},
+            "tools_available": self._offered_tool_names(),
+            "sampling": {"num_ctx": CHAT_NUM_CTX,
+                         "temperature": "model default (chatter does not override)"},
         }
         self._tool_results[idx] = {"role": "tool", "tool_name": "describe_self",
                                    "content": json.dumps(result)}
         self._tool_done(remaining, calls)
+
+    @staticmethod
+    def _offered_tool_names():
+        """The names of every tool offered this turn — the same list `_post_chat`
+        puts in the payload, so `describe_self` reports exactly what the model
+        can call (docs/DESIGN.md §10 — a true list, not a remembered one)."""
+        tools = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, SELF_TOOL,
+                 IMAGE_TOOL, SEARCH_IMAGE_TOOL]
+                 + list(SESSION_TOOLS) + list(MEMORY_TOOLS))
+        names = [t.get("function", {}).get("name", "") for t in tools
+                 if isinstance(t, dict) and t.get("function")]
+        return sorted(n for n in names if n)
 
     @staticmethod
     def _os_pretty():
