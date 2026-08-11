@@ -685,14 +685,18 @@ Window {
 
         KineticFlickable {
             id: replyFlick
-            anchors { fill: parent; margins: 8; rightMargin: replyScroll.barW + 4 }
+            anchors { fill: parent; margins: 8 }
             contentWidth: width
             contentHeight: replyCol.height
             clip: true
 
             Column {
                 id: replyCol
-                width: replyFlick.width
+                // Reserve the scrollbar's OWN width so no line runs under the
+                // always-on bar (docs/DESIGN.md §9.2) — barW ranges 11-16px with
+                // the desktop setting, so a literal gutter left text under an
+                // opaque win31 bar. The bar overlays this reserved right strip.
+                width: replyFlick.width - replyScroll.barW
                 spacing: 12
 
                 // The opening hint / model-list error, shown only on an empty log.
