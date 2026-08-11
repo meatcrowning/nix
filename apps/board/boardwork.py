@@ -1518,9 +1518,12 @@ DENY = ["Bash(hyprctl plugin:*)", "Bash(loginctl:*)",
 # even loaded, see `context_flags`) and the state-changing commands are denied.
 # A prefix matcher is not a sandbox (raw `>` redirection cannot be denied by
 # prefix); the clause is the backstop for what the deny list cannot reach.
-READONLY_ALLOW = [t for t in ALLOW if t not in ("Edit", "Write", "NotebookEdit")]
-READONLY_DENY = DENY + [
-    "Edit", "Write", "NotebookEdit",
+# The state-changing SHELL commands NEITHER a read-only NOR a sandbox spirit may
+# run: no commit, no rebuild, no reload — the two postures' common ground, in one
+# list so a command added here is denied in both and cannot drift between them.
+# (read-only ALSO drops the Edit/Write tools entirely, below; sandbox KEEPS them
+# but scopes them to its own dir, so this list is exactly what the two share.)
+STATE_CHANGE_DENY = [
     "Bash(git add:*)", "Bash(git commit:*)", "Bash(git push:*)",
     "Bash(git merge:*)", "Bash(git rebase:*)", "Bash(git cherry-pick:*)",
     "Bash(git am:*)", "Bash(git apply:*)", "Bash(git tag:*)",
@@ -1532,6 +1535,8 @@ READONLY_DENY = DENY + [
     "Bash(hyprctl reload:*)", "Bash(hyprctl keyword:*)",
     "Bash(hyprctl setprop:*)", "Bash(hyprctl dispatch:*)",
 ]
+READONLY_ALLOW = [t for t in ALLOW if t not in ("Edit", "Write", "NotebookEdit")]
+READONLY_DENY = DENY + ["Edit", "Write", "NotebookEdit"] + STATE_CHANGE_DENY
 
 #: The one-block read-only constraint appended to a read-only spawn's system
 #: prompt — the behavioural backstop the recorded decision makes primary, and
@@ -1552,6 +1557,63 @@ READONLY_CLAUSE = (
     "(`phase`/`note`/`land`/`inbox`/`turns`/`relay` via `boardctl`): that is your "
     "output channel for the findings you were sent to gather. If the task turns "
     "out to need a write, do NOT do it — say so in your finish note and stop.")
+
+# ---- the SANDBOX class: read his whole system, write only in a scratch dir ---
+# A worker DISPATCHED sandbox (`dispatch(sandbox=True)` / `boardctl dispatch
+# --sandbox`) is the THIRD posture, between the write-capable worker and the
+# read-only spirit. It may READ any file on the machine and run any shell command
+# to inspect it, and COPY what it finds into its OWN per-worker scratch dir — but
+# it may NOT write or modify anything on the real system OUTSIDE that dir, may NOT
+# commit, and may NOT rebuild. "Read his systems, pull a file into the sandbox,
+# then manipulate it there." Same premise as the read-only decision
+# (`docs/agents/read-only-agent-access.md`): a behavioural constraint, no
+# locked-down login; the prompt clause is primary and this is the mechanical
+# belt-and-braces.
+#
+# HOW THE WRITE-SCOPE IS ENFORCED at the tool layer (Claude backend). The write
+# tools STAY — a sandbox spirit's whole job is to write in its dir — but they are
+# ALLOWED only for paths under the sandbox: `Edit(<dir>/**)` / `Write(<dir>/**)`.
+# The run uses `--permission-mode default` (NOT `acceptEdits`), so an Edit/Write
+# to any path the allow rules do not name matches no rule, needs permission, and
+# in a headless `-p` run with nobody to ask that is a DENY. A write lands in the
+# sandbox or it does not land. The state-changing COMMANDS (`STATE_CHANGE_DENY`:
+# commit, rebuild, reload, ...) are denied exactly as for read-only. What a
+# prefix matcher cannot reach — a Bash `cp`/`>`/`sed -i` aimed outside the dir —
+# is the CLAUSE's job, the same admission the read-only design makes about `>`.
+SANDBOX_DENY = DENY + STATE_CHANGE_DENY
+
+
+def sandbox_allow(sandbox):
+    """`--allowedTools` for a SANDBOX spawn: the read + shell + web tools bare
+    (so `default` mode auto-allows them with nothing to ask), and the write tools
+    SCOPED to files under `sandbox`. Anything the list does not name — an Edit or
+    Write outside the dir — falls through to a headless permission deny."""
+    return ["Bash", "Read", "Glob", "Grep", "Task", "TodoWrite",
+            "WebFetch", "WebSearch",
+            "Edit(%s/**)" % sandbox, "Write(%s/**)" % sandbox,
+            "NotebookEdit(%s/**)" % sandbox]
+
+
+#: The sandbox constraint appended to a sandbox spawn's system prompt — the
+#: behavioural backstop the read-only decision makes primary, and the ONLY
+#: enforcement on hermes (whose CLI cannot path-scope a write). Constant, so the
+#: system prefix stays one cache entry; the actual dir is read at runtime from
+#: `$BOARD_WORK_SANDBOX` (per-worker, so it cannot ride a constant).
+SANDBOX_CLAUSE = (
+    "SANDBOX SPIRIT. You may READ any file on this machine and run any shell "
+    "command to inspect it, and you have a private scratch directory whose path "
+    "is in the environment variable $BOARD_WORK_SANDBOX. You may read and COPY "
+    "anything on his system INTO that directory, and write, edit and manipulate "
+    "files freely INSIDE it. FORBIDDEN, by any means including shell redirection: "
+    "writing or modifying ANY file outside $BOARD_WORK_SANDBOX, "
+    "`git add`/`commit`/`push`, any rebuild or `home-manager switch`, "
+    "`hyprctl reload`/plugin swaps — anything that changes state on the real "
+    "system outside your sandbox. The Edit and Write tools are allowed ONLY for "
+    "paths under $BOARD_WORK_SANDBOX and the state-changing commands are denied; "
+    "do not route around that with a raw shell write. Your board reporting rails "
+    "(`phase`/`note`/`inbox`/`turns`/`relay` via `boardctl`) are your output "
+    "channel and stay. If the task turns out to need a write outside the sandbox, "
+    "a commit or a rebuild, do NOT do it — say so in your finish note and stop.")
 
 # ------------------------------------------- what the STARTUP CONTEXT costs
 #: `ALLOW` above is a PERMISSION filter — it decides what a tool call is allowed
@@ -1634,7 +1696,7 @@ class AgentBackend:
         return []
 
     def args(self, *, prompt, session, role, label, model=None, effort=None,
-             read_only=False):
+             read_only=False, sandbox=None):
         """The full argv for one headless run. THE only place a backend's CLI
         is named. `session` may be None (no observable transcript -> claim-only
         card); `label` is the human name bound to the run. `model`/`effort`, when
@@ -1645,8 +1707,13 @@ class AgentBackend:
         `read_only` binds this run to reads + IPC/log: the write tools are
         dropped, the state-changing commands denied, and `READONLY_CLAUSE` is
         appended to the system prompt (`docs/agents/read-only-agent-access.md`).
-        Only a dispatch explicitly tagged read-only sets it; the default keeps
-        the write-capable worker exactly as it was."""
+
+        `sandbox` (a scratch dir path, or None) is the third posture: reads and
+        shell across the whole system, but the write tools are ALLOWED only for
+        paths under that dir, the state-changing commands denied, and
+        `SANDBOX_CLAUSE` appended. `read_only` and `sandbox` are mutually
+        exclusive; the default (neither) keeps the write-capable worker as it
+        was."""
         raise NotImplementedError
 
     def transcript(self, session):  # type: (str | None) -> str | None
@@ -1678,19 +1745,32 @@ class ClaudeBackend(AgentBackend):
         return [RULES]
 
     def args(self, *, prompt, session, role, label, model=None, effort=None,
-             read_only=False):
+             read_only=False, sandbox=None):
         argv = ["claude", "-p", prompt]
         if session:
             argv += ["--session-id", session]
         argv += role_flags(role, model=model, effort=effort)  # his choice, capped
+        # sandbox keeps the FULL tool set (its job is to write, in its dir);
+        # read_only drops the write tools' schemas. Never both at once.
         argv += context_flags(role, read_only=read_only)  # cache prefix + trimmed tools
         for block in self.system_blocks(role):
             argv += ["--append-system-prompt", block]
         if read_only:                       # the behavioural backstop, constant
             argv += ["--append-system-prompt", READONLY_CLAUSE]
-        argv += ["--permission-mode", "acceptEdits",
-                 "--allowedTools", *(READONLY_ALLOW if read_only else ALLOW),
-                 "--disallowedTools", *(READONLY_DENY if read_only else DENY),
+        elif sandbox:
+            argv += ["--append-system-prompt", SANDBOX_CLAUSE]
+        if sandbox:
+            # `default`, not `acceptEdits`: an Edit/Write the allow rules do not
+            # name (i.e. outside the sandbox) then needs permission, and headless
+            # that is a deny. See the SANDBOX class note.
+            allow, deny, pmode = sandbox_allow(sandbox), SANDBOX_DENY, "default"
+        elif read_only:
+            allow, deny, pmode = READONLY_ALLOW, READONLY_DENY, "acceptEdits"
+        else:
+            allow, deny, pmode = ALLOW, DENY, "acceptEdits"
+        argv += ["--permission-mode", pmode,
+                 "--allowedTools", *allow,
+                 "--disallowedTools", *deny,
                  "--output-format", "text",
                  "-n", label]
         return argv
@@ -1762,17 +1842,19 @@ class HermesBackend(AgentBackend):
         return [RULES]
 
     def args(self, *, prompt, session, role, label, model=None, effort=None,
-             read_only=False):
+             read_only=False, sandbox=None):
         q = prompt
         for b in self.system_blocks(role):
             q += "\n\n" + b
         # Hermes has no `--allowedTools`/`--tools` granularity to drop just the
-        # write path while keeping file-READ and the shell a researcher needs,
-        # so on this backend the read-only constraint is the CLAUSE in the query
-        # body (the behavioural backstop the recorded decision makes primary) —
-        # there is no OS/tool backstop here, exactly as that decision accepts.
+        # write path or to path-scope a write, so on this backend BOTH the
+        # read-only and the sandbox constraints are the CLAUSE in the query body
+        # (the behavioural backstop the recorded decision makes primary) — there
+        # is no OS/tool backstop here, exactly as that decision accepts.
         if read_only:
             q += "\n\n" + READONLY_CLAUSE
+        elif sandbox:
+            q += "\n\n" + SANDBOX_CLAUSE
         return ["hermes", "chat", "-q", q, "-Q",
                 "--source", "tool",
                 "-m", _role_model(role, model), "--provider", HERMES_PROVIDER,
@@ -2182,6 +2264,18 @@ def _log_path(agent_id):
     return os.path.join(d, ba.clean_id(agent_id) + ".log")
 
 
+def sandbox_dir(agent_id):
+    """`$XDG_CACHE_HOME/board-work/sandbox/<id>/`, created — a SANDBOX worker's
+    private scratch tree, the one place it may write. XDG-aware for the same
+    reason `_log_path` is: a harness redirecting `XDG_CACHE_HOME` must not scatter
+    scratch dirs into his real cache."""
+    d = os.path.join(os.environ.get("XDG_CACHE_HOME")
+                     or os.path.expanduser("~/.cache"),
+                     "board-work", "sandbox", ba.clean_id(agent_id))
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
 # ------------------------------------------------- a log that survives a kill
 # **A worker's `.log` is empty for the whole run, and empty forever if it is
 # killed.** `claude -p` with no tty writes its result ONCE, at exit, so there is
@@ -2384,7 +2478,7 @@ def order_of(agent_id):
 
 
 def dispatch(task, phase="", where="", context="", cap_=None, model="",
-             read_only=False):
+             read_only=False, sandbox=False):
     """One piece of work -> one worker, or -> the pending queue if we are full.
 
     Returns the task record with `state` in `running` / `queued`. It never
@@ -2410,10 +2504,12 @@ def dispatch(task, phase="", where="", context="", cap_=None, model="",
     rec = {"task": task, "phase": (phase or "").strip().lower(),
            "where": (where or "").strip(), "context": (context or "").strip(),
            "model": flag, "effort": effort, "turns": RELAY_TURNS, "relay": 0,
-           # READ-ONLY rides the record (not read at spawn time), so a task that
-           # queues above the cap and is `promote()`d later runs read-only exactly
-           # as it was dispatched. Absent/false is the write-capable default.
+           # READ-ONLY / SANDBOX ride the record (not read at spawn time), so a
+           # task that queues above the cap and is `promote()`d later runs in the
+           # posture it was dispatched with. Absent/false both -> the ordinary
+           # write-capable worker. The two are mutually exclusive.
            "readOnly": bool(read_only),
+           "sandbox": bool(sandbox) and not read_only,
            "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "sent": time.time(),
            "host": os.uname().nodename,
            "order": _order_now()}
@@ -2585,6 +2681,10 @@ def _spawn_worker(rec):
         relay=relay_block(budget, int(rec.get("relay") or 0)),
         context=("--- what the orchestrator knows that you do not ---\n%s\n--- end ---\n\n"
                  % rec["context"]) if rec.get("context") else "")
+    # A SANDBOX worker gets its own scratch dir minted here, on `aid`, and the
+    # dir is what the backend scopes the write tools to. `None` for every other
+    # posture, so nothing is created for a worker that will never write to it.
+    sbx = sandbox_dir(aid) if rec.get("sandbox") else None
     stub = os.environ.get("BOARD_WORK_SPAWN")
     if stub:
         cmd = ["/bin/sh", "-c", stub]
@@ -2599,7 +2699,7 @@ def _spawn_worker(rec):
         cmd = backend.args(
             prompt=prompt, session=session, role="worker",
             label="board: " + rec["task"][:50], model=flag, effort=effort,
-            read_only=bool(rec.get("readOnly")))
+            read_only=bool(rec.get("readOnly")), sandbox=sbx)
         # BEFORE the spawn, and before the header that names it: a backend whose
         # session id we cannot choose is bound by the query instead, and the
         # binding has to be on disk before the run it identifies can appear in
@@ -2623,7 +2723,13 @@ def _spawn_worker(rec):
                BOARD_WORK_MODEL=flag, BOARD_WORK_EFFORT=effort,
                # So the worker's own shell and any hook it fires can see it is
                # read-only; the enforcing surfaces are the argv above, not this.
-               BOARD_WORK_READONLY="1" if rec.get("readOnly") else "")
+               BOARD_WORK_READONLY="1" if rec.get("readOnly") else "",
+               # The sandbox worker's scratch dir — the one place it may write,
+               # and the path its SANDBOX_CLAUSE tells it to copy into. Empty for
+               # every other posture. Unlike READONLY, this one is load-bearing:
+               # the clause names $BOARD_WORK_SANDBOX rather than a baked path, so
+               # the constant system prefix stays one cache entry.
+               BOARD_WORK_SANDBOX=sbx or "")
     logpath = _log_path(aid)
     # BEFORE the spawn, so a worker killed at second one still leaves a log that
     # names it and points at its transcript. See "a log that survives a kill".
