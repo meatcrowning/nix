@@ -317,6 +317,30 @@ saved file that will not load draws its own crit line. All three reach both the
 user (a visible line) and the model (a tool error). The saved `path` persists in
 the session transcript, so a reloaded conversation still shows its images.
 
+## Dropped-file attachments
+
+Drag files from the file manager onto the window and they attach to the **next**
+message as context (docs/DESIGN.md §13 — dropping into a window works like a file
+manager). A window-filling `DropArea` (`fileDrop`, keyed `text/uri-list`)
+highlights while a drag hovers, drops append to the `attachments` `ListModel`
+(one removable chip each in the `attachBar` above the compose box), and the tray
+clears when the message is sent. A message may be text, files, or both.
+
+- **Read LOCALLY, not on top.** These are the user's own dropped files, not
+  sandbox paths, so `Ollama._read_attachments` reads each where the window runs
+  and inlines its **text** into that one user message (`send`'s 4th arg,
+  `attachments_json` = `[{name, path}]`). Bounded per his context rule:
+  `ATTACH_FILE_MAX` (128 KB) per file, `ATTACH_TOTAL_MAX` (512 KB) per turn, with
+  a truncation note; a **binary or unreadable** file is NAMED with the reason,
+  never dumped (docs/DESIGN.md §10). The budget heuristic runs on the prompt
+  BEFORE inlining, so a big file cannot fan the web search wide.
+- **URLs are resolved in Python** (`Ollama.localFileInfo` → `QUrl.toLocalFile`),
+  never decoded in QML (§13 — `decodeURI` mangles `#`/`?` in a uri-list).
+- **Per-message, not persisted as context.** The visible/saved turn shows the
+  prompt plus a dim `[attached: …]` filename note; the file bodies go only to the
+  model on the turn they were dropped, so history stays clean and a later turn
+  does not silently re-see them.
+
 ## File tools (jailed, on top)
 
 oracle offers the model a set of **file tools on every turn** — `list_dir`,

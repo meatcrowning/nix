@@ -153,6 +153,14 @@ IMAGES_ROOT = os.path.expanduser(
 #: multi-gigabyte body into memory.
 IMAGE_MAX_BYTES = 20 * 1024 * 1024
 
+#: Attachments dragged onto the window and inlined into the outgoing message as
+#: context. Read LOCALLY where the window runs (they are the user's own dropped
+#: files, not sandbox paths), text only, capped so a big file cannot blow the
+#: model's context: per-file and whole-turn byte ceilings, respecting his
+#: context-budget rule. A binary or over-cap file is NAMED, not inlined.
+ATTACH_FILE_MAX = 128 * 1024        # per attachment, bytes of text inlined
+ATTACH_TOTAL_MAX = 512 * 1024       # all attachments in one turn, bytes
+
 #: content-type → file extension for a saved image (cosmetic — QML's Image sniffs
 #: the bytes — but tidy). Anything else falls back to the URL's suffix, then .img.
 IMAGE_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
@@ -1018,23 +1026,34 @@ class Ollama(QObject):
     # ---- one streamed chat turn ----
 
     @Slot(str, str, str)
-    def send(self, model, prompt, history_json):
+    @Slot(str, str, str, str)
+    def send(self, model, prompt, history_json, attachments_json=""):
         """`history_json` is the CURRENT chat's prior turns (QML's chatLog,
         user+assistant, before this one), so the model sees the whole
         conversation so far rather than just the latest prompt — the tool-call
-        loop below still only accumulates within THIS turn on top of it."""
+        loop below still only accumulates within THIS turn on top of it.
+
+        `attachments_json` is the files he dragged onto the window this turn
+        (`[{name, path}]`): their text is read LOCALLY (they are his own dropped
+        files, not sandbox paths) and inlined into THIS user message as context,
+        so the model receives them. Capped and binary-aware (see
+        `_read_attachments`)."""
         if not model or not prompt.strip():
             return
         self.cancel()          # one turn at a time
         self._model = model
         # Scale research depth to the ask: a simple factual question gets a small
-        # source cap and is told not to fan out; a broad one may go wide.
+        # source cap and is told not to fan out; a broad one may go wide. Judged
+        # on the PROMPT, before attachments are inlined — a dropped file's bulk
+        # must not read as a "broad" question and fan the web search wide.
         budget = self._research_budget(prompt)
         self._max_results = budget["max_results"]
+        attach_block = self._read_attachments(attachments_json)
+        content = prompt + ("\n\n" + attach_block if attach_block else "")
         self._messages = ([{"role": "system",
                             "content": self._system_prompt(budget["guidance"])}]
                           + self._parse_history(history_json)
-                          + [{"role": "user", "content": prompt}])
+                          + [{"role": "user", "content": content}])
         self._think_tokens = 0
         self._rounds = 0
         self._resp_t0 = 0.0
@@ -1044,6 +1063,70 @@ class Ollama(QObject):
         self._set_busy(True)
         self.replyStarted.emit()
         self._post_chat()
+
+    @Slot(str, result="QVariant")
+    def localFileInfo(self, url):
+        """Resolve a dropped file URL to {name, path}. QUrl does the decode, in
+        Python, once — never `decodeURI` in QML, which mangles `#`/`?` in a
+        uri-list (docs/DESIGN.md §13). Returns {} for a non-local URL."""
+        p = QUrl(url).toLocalFile()
+        if not p:
+            return {}
+        return {"name": os.path.basename(p) or p, "path": p}
+
+    @staticmethod
+    def _read_attachments(attachments_json):
+        """Turn the dragged files (`[{name, path}]`) into one context block
+        inlined into the user message, or "" if there are none.
+
+        Read LOCALLY (his own dropped files), text only, and bounded: each file
+        is capped at ATTACH_FILE_MAX and the whole turn at ATTACH_TOTAL_MAX, with
+        a truncation note when a file is clipped. A binary file (undecodable, or
+        a NUL byte) or one that cannot be read is NAMED with the reason rather
+        than dumped (docs/DESIGN.md §10 — the attachment is acknowledged, never
+        silently dropped; §5 his context-budget rule — never blow the window)."""
+        try:
+            items = json.loads(attachments_json or "[]")
+        except ValueError:
+            return ""
+        if not isinstance(items, list) or not items:
+            return ""
+        blocks, total = [], 0
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            path = str(it.get("path", ""))
+            name = str(it.get("name", "")) or os.path.basename(path) or "file"
+            if not path:
+                continue
+            note, body = "", ""
+            try:
+                with open(path, "rb") as fh:
+                    raw = fh.read(ATTACH_FILE_MAX + 1)
+                if b"\x00" in raw:
+                    note = "binary file, not inlined"
+                else:
+                    try:
+                        body = raw[:ATTACH_FILE_MAX].decode("utf-8")
+                    except UnicodeDecodeError:
+                        note = "binary file, not inlined"
+                    else:
+                        if len(raw) > ATTACH_FILE_MAX:
+                            note = "truncated to %d KB" % (ATTACH_FILE_MAX // 1024)
+            except OSError as e:
+                note = "could not read: " + e.strerror
+            header = "=== %s%s ===" % (name, (" (%s)" % note if note else ""))
+            piece = header + ("\n" + body if body else "")
+            if total + len(piece) > ATTACH_TOTAL_MAX:
+                blocks.append("=== %s (omitted — attachment budget reached) ==="
+                              % name)
+                break
+            total += len(piece)
+            blocks.append(piece)
+        if not blocks:
+            return ""
+        return ("The user attached these files as context for this message:\n\n"
+                + "\n\n".join(blocks))
 
     @staticmethod
     def _parse_history(history_json):
