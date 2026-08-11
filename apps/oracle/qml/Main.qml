@@ -1322,10 +1322,21 @@ Window {
                             // The model's answer, rendered as Markdown (the reply
                             // comes back in it — docs/DESIGN.md §2). Only the
                             // assistant body; user text and errors above stay plain.
+                            //
+                            // A markdown IMAGE (`![alt](url)`) is DEMOTED to a plain
+                            // link (`[alt](url)`) first: Text.MarkdownText would draw
+                            // it at its intrinsic pixel size — overflowing the column
+                            // — and fetch the URL on render (the risk MarkdownText.qml
+                            // itself flags). A picture the model wants shown comes
+                            // through fetch_image and the capped `images` delegate
+                            // below, exactly ONCE; a stray `![](…)` in the prose must
+                            // not become a second, giant, uncontrolled copy. As a link
+                            // the URL is still there and clickable (docs/DESIGN.md §10
+                            // — nothing hidden), just not auto-fetched or upscaled.
                             MarkdownText {
                                 width: parent.width
                                 visible: !isUser && !isError && body !== ""
-                                text: body
+                                text: body.replace(/!\[([^\]]*)\]\(/g, "[$1](")
                             }
 
                             // Images the model fetched from the web with
