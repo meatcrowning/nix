@@ -114,9 +114,12 @@ the position, and it re-arms when he scrolls back down to the bottom
 
 A selectable **base system prompt** leads every turn's system message: a handful
 of built-in **presets** (`default` — no persona, the historical behaviour —
-plus `concise`, `coder`, `tutor`, `writer`) and **your own custom text**,
-picked from the *prompt* row (a boxed selector, docs/DESIGN.md §7.2, like the
-model/session pickers) with an **edit** button that opens the custom-text editor.
+plus `concise`, `coder`, `tutor`, `writer`, `casual`) and **your own custom
+text**, picked from the *prompt* row (a boxed selector, docs/DESIGN.md §7.2, like
+the model/session pickers) with an **edit** button that opens the custom-text
+editor. The dropdown carries a **preview pane** (docs/DESIGN.md §9.1) that shows
+the full text of the hovered preset — and the active custom text — so a base can
+be read before it is chosen, not picked blind from a label.
 
 - **`PROMPT_PRESETS`** (`main.py`) defines the presets (`id`/`label`/`text`);
   `custom` is offered in the QML dropdown alongside them. `_base_prompt()`
