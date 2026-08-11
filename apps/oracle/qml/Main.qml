@@ -804,16 +804,29 @@ Window {
         x: promptRow.x + promptPicker.x
         y: promptRow.y + promptRow.height - 6
         width: promptPicker.width
-        // presets + the one "custom…" row
+        // presets + the one "custom…" row, each carrying its `text` so the
+        // preview pane below can show what a base actually instructs before
+        // he picks it (the inbox ask: let him SEE each preset's text).
         readonly property var items: {
             var out = [];
             var ps = Ollama.promptPresets;
             for (var i = 0; i < ps.length; i++)
-                out.push({ id: ps[i].id, label: ps[i].label });
-            out.push({ id: "custom", label: "custom…" });
+                out.push({ id: ps[i].id, label: ps[i].label, text: ps[i].text });
+            out.push({ id: "custom", label: "custom…", text: Ollama.customPrompt });
             return out;
         }
-        height: Math.min(items.length * 22 + 2, 240)
+        function textFor(id) {
+            for (var i = 0; i < items.length; i++)
+                if (items[i].id === id) return items[i].text;
+            return "";
+        }
+        // Which row's text the preview shows: whatever he last hovered, reset to
+        // the active base each time the dropdown opens.
+        property string previewId: Ollama.promptChoice
+        onVisibleChanged: if (visible) previewId = Ollama.promptChoice
+        readonly property int listH: Math.min(items.length * 22 + 2, 240)
+        readonly property int previewH: 108
+        height: listH + previewH
         z: 50
         color: Theme.bgAlt
         radius: Theme.rounding
@@ -822,7 +835,9 @@ Window {
 
         KineticListView {
             id: promptList
-            anchors { fill: parent; margins: 1 }
+            anchors { top: parent.top; left: parent.left; right: parent.right
+                      margins: 1 }
+            height: promptDropdown.listH - 1
             clip: true
             model: promptDropdown.items
             delegate: Rectangle {
@@ -850,6 +865,7 @@ Window {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
+                    onEntered: promptDropdown.previewId = modelData.id
                     onClicked: {
                         promptPicker.open = false;
                         if (modelData.id === "custom") win.openPromptEditor();
@@ -858,6 +874,43 @@ Window {
                 }
             }
             ScrollBar.vertical: VScroll {}
+        }
+
+        // The preview pane: the full text of the hovered (or active) base, so he
+        // reads what a preset instructs before choosing it (docs/DESIGN.md §9.1
+        // — a subordinated detail, one step dim; §10 — nothing hidden behind a
+        // bare label). Scrolls when the text is long (a big custom prompt).
+        Rectangle {
+            id: promptPreview
+            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+            height: promptDropdown.previewH
+            color: "transparent"
+            Rectangle {
+                anchors { top: parent.top; left: parent.left; right: parent.right }
+                height: Theme.ctrlBorder
+                color: Theme.border
+            }
+            Flickable {
+                id: promptPreviewFlick
+                anchors { fill: parent; margins: 8 }
+                clip: true
+                contentHeight: promptPreviewText.height
+                boundsBehavior: Flickable.StopAtBounds
+                PixelText {
+                    id: promptPreviewText
+                    width: promptPreviewFlick.width
+                    wrapMode: Text.Wrap
+                    color: Theme.textDim
+                    text: {
+                        var t = promptDropdown.textFor(promptDropdown.previewId);
+                        if (t !== "") return t;
+                        if (promptDropdown.previewId === "custom")
+                            return "(no custom prompt yet — the “edit” button writes one)";
+                        return "(no persona — the model answers in its own voice)";
+                    }
+                }
+                ScrollBar.vertical: VScroll {}
+            }
         }
     }
 
