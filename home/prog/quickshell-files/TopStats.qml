@@ -270,10 +270,22 @@ Singleton {
     // ControlMaster+ControlPersist so 2s polls reuse one connection rather than a
     // fresh handshake each time. `$HOME` inside the single quotes is top's home,
     // resolved remotely.
+    //
+    // ServerAlive*+`timeout` are the recovery path for the ControlMaster going
+    // half-dead (book sleeping/waking or roaming off the tailnet leaves the
+    // shared master's TCP connection gone with no FIN ever received): measured
+    // live, a poll wedged on the stale mux socket for 19h8m with `reachable`
+    // frozen at its last value and NOTHING in `qs log` — `ConnectTimeout` only
+    // bounds the initial TCP handshake, not a session request over an already
+    // -established master. ServerAliveInterval/CountMax make the MASTER itself
+    // detect the dead link (~10s) and tear down, so a wedged mux client fails
+    // fast instead of hanging forever; the local `timeout` is a backstop for a
+    // dead link a NAT keeps acking, which ServerAlive alone cannot see.
     Process {
         id: poll
         command: ["sh", "-c",
-            "exec /usr/bin/ssh -o BatchMode=yes -o ConnectTimeout=4"
+            "exec /usr/bin/timeout 15 /usr/bin/ssh -o BatchMode=yes -o ConnectTimeout=4"
+            + " -o ServerAliveInterval=5 -o ServerAliveCountMax=2"
             + " -o ControlMaster=auto"
             + " -o ControlPath=\"${XDG_RUNTIME_DIR:-/tmp}/qs-topstats-ssh\""
             + " -o ControlPersist=30 top"
