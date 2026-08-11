@@ -124,7 +124,11 @@ numbers not guesses (docs/DESIGN.md §10). `contextMax` is read from ollama's
 model change and every send; 0/hidden when unknown). `tokensPerSec` is a running
 estimate while a reply streams (one content frame ≈ one token, clocked from the
 first frame) that settles to ollama's exact `eval_count / eval_duration` on the
-final `done` frame. The row collapses to nothing until at least one stat exists.
+final `done` frame. **`contextUsed`** is how full the context is — ollama's own
+`prompt_eval_count + eval_count` from the last turn — drawn as `used/ceiling`, a
+percentage, and a proportional **fill bar** (docs/DESIGN.md §9 meter; accent,
+`warn` past 75%, `crit` past 90%; width animated §6). The row collapses to
+nothing until at least one stat exists.
 
 ## The base prompt
 

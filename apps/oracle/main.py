@@ -730,6 +730,7 @@ class Ollama(QObject):
     # to ollama's exact eval_count/eval_duration on the done frame.
     contextMaxChanged = Signal()
     tokensPerSecChanged = Signal()
+    contextUsedChanged = Signal()   # tokens in play as of the last turn (prompt+gen)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -757,6 +758,7 @@ class Ollama(QObject):
         self._tps = 0.0          # generation rate of the current/last reply
         self._resp_t0 = 0.0      # monotonic start of the reply's content stream
         self._resp_tokens = 0    # content frames seen this reply (≈ tokens)
+        self._ctx_used = 0       # tokens the context held at the last turn (prompt+gen)
 
     # ---- model list ----
 
@@ -928,6 +930,19 @@ class Ollama(QObject):
     def tokensPerSec(self):
         """Generation rate of the current/last reply, 0 before one has run."""
         return self._tps
+
+    @Property(int, notify=contextUsedChanged)
+    def contextUsed(self):
+        """Tokens the model's context held at the last turn (its own
+        prompt_eval_count + eval_count), 0 before one has run — the numerator of
+        the context-fill readout against contextMax."""
+        return self._ctx_used
+
+    def _set_ctx_used(self, v):
+        v = int(v) if v and v > 0 else 0
+        if v != self._ctx_used:
+            self._ctx_used = v
+            self.contextUsedChanged.emit()
 
     def _set_tps(self, v):
         v = float(v) if v and v > 0 else 0.0
@@ -1433,6 +1448,17 @@ class Ollama(QObject):
                 if isinstance(ec, (int, float)) and isinstance(ed, (int, float)) \
                         and ec > 0 and ed > 0:
                     self._set_tps(ec / (ed / 1e9))
+                # How full the context is now: what ollama actually read as the
+                # prompt plus what it just generated — the real fill, not an
+                # estimate (docs/DESIGN.md §10).
+                pec = obj.get("prompt_eval_count")
+                used = 0
+                if isinstance(pec, (int, float)) and pec > 0:
+                    used += int(pec)
+                if isinstance(ec, (int, float)) and ec > 0:
+                    used += int(ec)
+                if used > 0:
+                    self._set_ctx_used(used)
 
     def _on_finished(self, reply):
         if reply is not self._reply:

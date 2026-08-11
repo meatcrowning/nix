@@ -735,24 +735,70 @@ Window {
     // window); `tok/s` is the estimate while a reply streams, exact once done.
     Row {
         id: statsRow
-        anchors { top: serverNoteText.bottom; left: parent.left
-                  leftMargin: 10; topMargin: visible ? 4 : 0 }
-        spacing: 12
+        anchors { top: serverNoteText.bottom; left: parent.left; right: parent.right
+                  leftMargin: 10; rightMargin: 10; topMargin: visible ? 4 : 0 }
+        spacing: 10
         readonly property bool hasCtx: Ollama.contextMax > 0
         readonly property bool hasTps: Ollama.tokensPerSec > 0
+        readonly property bool hasFill: hasCtx && Ollama.contextUsed > 0
+        readonly property real fillFrac: hasFill
+            ? Math.min(1, Ollama.contextUsed / Ollama.contextMax) : 0
         visible: hasCtx || hasTps
         height: visible ? Theme.lineHeight : 0
 
+        // Compact token formatter: 8192 → "8K", 8000 → "7.8K", 512 → "512".
+        function fmtTok(n) {
+            if (n >= 1000)
+                return (n / 1024).toFixed(n % 1024 === 0 ? 0 : 1) + "K";
+            return "" + n;
+        }
+
+        // "ctx used/ceiling" (or just the ceiling before a turn has run).
         PixelText {
             visible: statsRow.hasCtx
-            text: "ctx " + (Ollama.contextMax >= 1000
-                            ? (Ollama.contextMax / 1024).toFixed(
-                                  Ollama.contextMax % 1024 === 0 ? 0 : 1) + "K"
-                            : Ollama.contextMax) + " tok"
+            anchors.verticalCenter: parent.verticalCenter
+            text: "ctx " + (statsRow.hasFill
+                            ? statsRow.fmtTok(Ollama.contextUsed) + "/"
+                              + statsRow.fmtTok(Ollama.contextMax)
+                            : statsRow.fmtTok(Ollama.contextMax) + " tok")
             color: Theme.textDim
         }
+
+        // The fill bar: a track with a proportional fill, animated (docs/DESIGN.md
+        // §9 meter, §4 corners, §6 motion). Warns as it approaches full.
+        Rectangle {
+            visible: statsRow.hasFill
+            anchors.verticalCenter: parent.verticalCenter
+            width: 88
+            height: 6
+            radius: Theme.rounding
+            color: Theme.bgAlt
+            border.width: Theme.ctrlBorder
+            border.color: Theme.border
+            Rectangle {
+                anchors { left: parent.left; top: parent.top; bottom: parent.bottom
+                          margins: 1 }
+                width: Math.max(0, (parent.width - 2) * statsRow.fillFrac)
+                radius: Theme.rounding
+                color: statsRow.fillFrac > 0.9 ? Theme.crit
+                       : statsRow.fillFrac > 0.75 ? Theme.warn : Theme.accent
+                Behavior on width {
+                    NumberAnimation { duration: motion.ms(motion.slideMs)
+                                      easing.type: motion.slideEasing }
+                }
+            }
+        }
+        // The percentage, beside the bar.
+        PixelText {
+            visible: statsRow.hasFill
+            anchors.verticalCenter: parent.verticalCenter
+            text: Math.round(statsRow.fillFrac * 100) + "%"
+            color: Theme.textDim
+        }
+
         PixelText {
             visible: statsRow.hasTps
+            anchors.verticalCenter: parent.verticalCenter
             text: Ollama.tokensPerSec.toFixed(1) + " tok/s"
             color: Theme.textDim
         }
