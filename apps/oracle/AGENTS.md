@@ -251,6 +251,16 @@ with the caption under it, and each failure as a crit line. `imageFetchStarted`/
 `imagesActive` drive the in-flight line. The model also gets a text tool result
 (`{ok, note}` or `{error}`) so it knows the outcome.
 
+**Finding a real URL first — `search_images`.** `fetch_image` only GETs a URL
+the model already holds, and a model asked for "a picture of X" tends to GUESS
+a plausible image URL that 404s (the fetch then fails honestly, but no picture
+shows). `SEARCH_IMAGE_TOOL` (`search_images`, offered every turn) closes that:
+it queries Tavily with `include_images` and returns real direct image URLs
+(with descriptions) through the web-search disclosure signals, and both tool
+descriptions tell the model to search first and never invent a URL. So a "show
+me X" resolves to a URL that actually loads. No Tavily key → the same honest
+"unavailable" the web search reports (docs/DESIGN.md §10).
+
 **It does NOT run on top** (unlike the sandbox/session/memory stores): a QML
 `Image` loads a LOCAL file, and the fetch is an in-process web GET, so it runs
 wherever the window is and saves under `IMAGES_ROOT`
