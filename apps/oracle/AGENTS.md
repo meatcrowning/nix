@@ -246,14 +246,50 @@ keeping this public source clean.
 
 **Honest capabilities every turn (`CAPABILITY_NOTE`).** A model does not call
 `describe_self` on its own, so a static, honest summary of what the app actually
-lets it do — the tool families it HAS, and that it has **no arbitrary code/shell
-execution** and no general internet beyond web search / image fetch — is
-appended to every system prompt (docs/DESIGN.md §10, honesty in both
-directions). It exists because gemma4:e4b told him it "has no code-execution
-env": true, but reached for blind rather than from its real inventory. A
-sandboxed code-runner is deliberately NOT added — running untrusted model output
-on `top` is a security decision for him, raised as a board question, not a
-default; `describe_self` still gives the exact live tool list on demand.
+lets it do — the tool families it HAS, and the **limits** on them (no shell, no
+general internet beyond web search / image fetch, and the exact bounds of the
+code runner) — is appended to every system prompt (docs/DESIGN.md §10, honesty
+in both directions, and never overstating a jail). It exists because gemma4:e4b
+told him it "has no code-execution env": true at the time, but reached for blind
+rather than from its real inventory. That gap is now closed — see *Code runner*
+below — and `describe_self` still gives the exact live tool list on demand.
+
+## Code runner (run_python, jailed, on top)
+
+`run_python` (`EXEC_TOOL`, offered every turn, dispatched `_run_exec_tool` →
+`_exec_argv`) lets the model actually **execute Python** instead of only
+reasoning about it — the board decision of 2026-08-11 (he ticked *add a jailed
+code-runner*; running untrusted model output is a security call he took
+deliberately). It runs through **`tools/sandbox-exec.py`**, which IS the jail,
+and returns `{stdout, stderr, exit_code, timed_out, network_isolated, …}` fed
+back into the same async tool loop as the file tools (`fileToolStarted`/
+`fileToolDone` → the "files · N" disclosure; heading `running python`).
+
+**What the jail is — and honestly is not.** The runner is confined by what a
+pure-stdlib script over ssh can actually enforce, no more:
+
+- **working directory = the file-tool sandbox** (`SANDBOX_ROOT`), so relative
+  writes land beside what `read_file`/`write_file` see — the model can write a
+  file, run it, and read the result back;
+- **no network** — an unprivileged user+net namespace (`unshare -rn`, probed
+  once and reported in `network_isolated`; degrades honestly to `false` on a
+  host without user namespaces rather than failing every run);
+- **bounded** — wall clock (default 10 s, max 30), CPU, address space, file
+  size and per-stream output all capped, and a timeout kills the whole process
+  group (not just python), so spawned children can't linger;
+- **NOT a container.** The code runs as `lam`, so it can still **read** files
+  outside the sandbox (exactly what the read-only file tools already grant) and,
+  with an absolute path, write outside it. `EXEC_TOOL`'s description and
+  `CAPABILITY_NOTE` say this plainly — the confinement that is real (cwd,
+  no-net, bounded) is claimed; a filesystem container that is not there is not.
+  To harden later, wrap the invocation in `bwrap`/`firejail` (neither is on top
+  today) in `sandbox-exec.py`'s `argv`.
+
+**Where it runs** — on `top`, like every other executor: local on `top`, over
+the tunnel's ssh master from `book` (`ssh top python3 sandbox-exec.py
+<sandbox>`). Pure stdlib so top's system python3 runs it with nothing installed.
+**Because it runs on top, top's checkout needs `sandbox-exec.py`** — a `book`
+edit is inert until top pulls (same caveat the `put` op carries).
 
 ## Talking to ollama
 

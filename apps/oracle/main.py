@@ -413,6 +413,41 @@ MEMORY_TOOLS = [
 ]
 MEMORY_TOOL_NAMES = {"save_memory", "list_memories", "delete_memory"}
 
+#: The CODE-RUNNER tool, offered every turn beside the file tools. It lets the
+#: model actually RUN Python instead of only reasoning about it — the gap
+#: gemma4:e4b named honestly ("no code-execution env"). Running model-written
+#: code on `top` is a security decision he took deliberately (board, 2026-08-11);
+#: tools/sandbox-exec.py is the jail it runs in — the sandbox dir as working
+#: directory, NETWORK cut with an unprivileged namespace, and wall-time / CPU /
+#: memory / output all capped. It is NOT a container: the code runs as the user
+#: and can still read his files (as the read tools already allow) and, with an
+#: absolute path, write outside the sandbox — the description says so plainly
+#: (docs/DESIGN.md §10, honesty in both directions), and there is no toggle
+#: (his call, like every other tool here).
+EXEC_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "run_python",
+        "description": (
+            "Run a Python 3 program and get its stdout, stderr and exit code "
+            "back — use this to actually compute, test or verify code instead "
+            "of working the answer out in your head. It runs on the host in a "
+            "sandbox: the working directory is your file-tool sandbox (so files "
+            "you write with a relative path land there and you can read them "
+            "back with read_file), the network is disabled, and it is killed "
+            "after a few seconds. Only the standard library is available. Print "
+            "what you want to see; a bare expression is not echoed."),
+        "parameters": {"type": "object", "properties": {
+            "code": {"type": "string",
+                     "description": "The Python 3 source to run."},
+            "stdin": {"type": "string",
+                      "description": "Optional text fed to the program's stdin."},
+            "timeout": {"type": "integer",
+                        "description": "Wall-clock seconds to allow (default 10, max 30)."}},
+            "required": ["code"]}},
+}
+EXEC_TOOL_NAMES = {"run_python"}
+
 #: How many tool rounds one turn may take before we stop looping and let the
 #: model answer with what it has — a guard against a model that keeps searching.
 MAX_TOOL_ROUNDS = 4
@@ -455,25 +490,28 @@ SAVE_GUIDANCE = (
 
 #: On every turn: an HONEST, static summary of what this app actually lets the
 #: model do, so it reports its abilities correctly instead of guessing from
-#: training (gemma4:e4b told him it "has no code-execution env" — true, but it
-#: reached for it blind rather than from its real tool inventory). describe_self
-#: gives the exact live tool list on demand; a model does not call it
-#: spontaneously, so the families it has — and the ones it does NOT — are named
+#: training (gemma4:e4b told him it "has no code-execution env" — true at the
+#: time, but it reached for it blind rather than from its real tool inventory,
+#: and that gap is what the board question of 2026-08-11 closed with `run_python`).
+#: describe_self gives the exact live tool list on demand; a model does not call
+#: it spontaneously, so the families it has — and the LIMITS on them — are named
 #: here too (docs/DESIGN.md §10 affordance honesty: never imply an ability that
-#: silently is not there, in either direction). There is deliberately no
-#: arbitrary code/shell execution: adding one would run untrusted model output
-#: on `top` and is a security decision for him, not a default.
+#: silently is not there, in either direction, and never overstate a jail).
 CAPABILITY_NOTE = (
     "What you can actually do in this app, through function tools offered every "
     "turn: search the public web; fetch and display images; read the current "
     "time in any timezone; read, write, edit, move, delete and search files in a "
     "jailed sandbox on the host (including any files the user drags onto the "
     "window, which are staged into that sandbox for you); read your past "
-    "conversations; and save, list and delete your own durable memories. You do "
-    "NOT have arbitrary code or shell execution, and no general internet access "
-    "beyond web search and image fetch. Describe your abilities in these terms, "
-    "and call describe_self for the exact live tool list — never claim a "
-    "capability you do not have, and never deny one you do.")
+    "conversations; save, list and delete your own durable memories; and RUN "
+    "Python code (run_python) — real execution on the host, not a simulation. "
+    "The code runs with your file sandbox as its working directory and no "
+    "network, and is killed after a few seconds; it is not a full container, so "
+    "it runs as the user and can read files outside the sandbox, but writes "
+    "should stay in the sandbox. You do NOT have shell access or general "
+    "internet beyond web search and image fetch. Describe your abilities in "
+    "these terms, and call describe_self for the exact live tool list — never "
+    "claim a capability you do not have, and never deny one you do.")
 
 #: How wide a web search fans out, scaled to the query's apparent complexity
 #: (see `Ollama._research_budget`). A simple factual ask (a weather lookup, a
@@ -546,6 +584,13 @@ SESSIONS_SCRIPT = str(HERE / "tools" / "sessions-store.py")
 MEMORY_ROOT = os.path.expanduser(
     os.environ.get("ORACLE_MEMORY", "~/.local/share/oracle/memory"))
 MEMORY_SCRIPT = str(HERE / "tools" / "memory-store.py")
+
+#: The code runner. Same absolute path on both machines and pure stdlib, so
+#: `python3 <this> <sandbox>` runs unchanged locally on top or over ssh from
+#: book — identical to FS_SCRIPT. Runs against SANDBOX_ROOT (the WRITE jail):
+#: the sandbox is the code's working directory, so files it writes relatively
+#: sit beside what the file tools see.
+EXEC_SCRIPT = str(HERE / "tools" / "sandbox-exec.py")
 
 #: How much of the memory store to inject into each turn's system prompt (newest
 #: first): a bound so a large store can never crowd out the conversation. The
@@ -1648,7 +1693,7 @@ class Ollama(QObject):
         puts in the payload, so `describe_self` reports exactly what the model
         can call (docs/DESIGN.md §10 — a true list, not a remembered one)."""
         tools = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, SELF_TOOL,
-                 IMAGE_TOOL, SEARCH_IMAGE_TOOL]
+                 IMAGE_TOOL, SEARCH_IMAGE_TOOL, EXEC_TOOL]
                  + list(SESSION_TOOLS) + list(MEMORY_TOOLS))
         names = [t.get("function", {}).get("name", "") for t in tools
                  if isinstance(t, dict) and t.get("function")]
@@ -1696,7 +1741,7 @@ class Ollama(QObject):
         # spelled out in apps/oracle/AGENTS.md; point oracle at a tool-capable
         # model.
         payload["tools"] = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL,
-                            SELF_TOOL, IMAGE_TOOL, SEARCH_IMAGE_TOOL]
+                            SELF_TOOL, IMAGE_TOOL, SEARCH_IMAGE_TOOL, EXEC_TOOL]
                             + list(SESSION_TOOLS) + list(MEMORY_TOOLS))
         body = json.dumps(payload).encode("utf-8")
         req = QNetworkRequest(QUrl(OLLAMA + "/api/chat"))
@@ -1850,6 +1895,8 @@ class Ollama(QObject):
                                     i, remaining, calls)
             elif name in FILE_TOOL_NAMES:
                 self._run_fs_tool(name, args, i, remaining, calls)
+            elif name in EXEC_TOOL_NAMES:
+                self._run_exec_tool(args, i, remaining, calls)
             elif name in SESSION_TOOL_NAMES:
                 self._run_session_tool(name, args, i, remaining, calls)
             elif name in MEMORY_TOOL_NAMES:
@@ -2184,6 +2231,76 @@ class Ollama(QObject):
         proc.start(self._fs_argv()[0], self._fs_argv()[1:])
         proc.write(json.dumps(req).encode("utf-8"))
         proc.closeWriteChannel()
+
+    # ---- the code runner (jailed, on top) ----
+
+    @staticmethod
+    def _exec_argv():
+        """The command that runs one Python program through tools/sandbox-exec.py
+        against the sandbox on top — the same host branch as `_fs_argv`: local on
+        `top`, over the tunnel's ssh master from `book`, so the code always runs
+        where oracle's compute is. Only SANDBOX_ROOT (the write jail) is passed;
+        the runner uses it as the working directory."""
+        if ON_BOOK:
+            host = os.environ.get("OLLAMA_SSH_HOST", "top")
+            ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+            argv = [ssh, "-o", "BatchMode=yes"]
+            ctl = os.environ.get("OLLAMA_SSH_CTL")
+            if ctl:
+                argv += ["-o", "ControlMaster=auto", "-o", "ControlPersist=30",
+                         "-o", "ControlPath=" + ctl]
+            argv += [host, "python3", shlex.quote(EXEC_SCRIPT),
+                     shlex.quote(SANDBOX_ROOT)]
+            return argv
+        return [sys.executable, EXEC_SCRIPT, SANDBOX_ROOT]
+
+    def _run_exec_tool(self, args, idx, remaining, calls):
+        """run_python: execute a model-written program in the sandbox and feed
+        its stdout/stderr/exit code back into the tool loop, async and concurrent
+        exactly like the file tools. The jail is tools/sandbox-exec.py itself."""
+        a = args if isinstance(args, dict) else {}
+        req = {"code": str(a.get("code", ""))}
+        if a.get("stdin") is not None:
+            req["stdin"] = str(a.get("stdin"))
+        if a.get("timeout") is not None:
+            req["timeout"] = a.get("timeout")
+        self.fileToolStarted.emit("running python")
+        proc = QProcess(self)
+        self._procs.append(proc)
+
+        def finished(*_):
+            if proc not in self._procs:
+                return
+            self._procs.remove(proc)
+            try:
+                out = bytes(proc.readAllStandardOutput())
+                err = bytes(proc.readAllStandardError())
+                rc = proc.exitCode()
+            except RuntimeError:
+                return
+            proc.deleteLater()
+            result = self._fs_result(out, err, rc)
+            self._tool_results[idx] = {"role": "tool", "tool_name": "run_python",
+                                       "content": json.dumps(result)}
+            self.fileToolDone.emit(self._exec_outcome(result),
+                                   "error" not in result)
+            self._tool_done(remaining, calls)
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(lambda *_: None)  # surfaced through finished
+        proc.start(self._exec_argv()[0], self._exec_argv()[1:])
+        proc.write(json.dumps(req).encode("utf-8"))
+        proc.closeWriteChannel()
+
+    @staticmethod
+    def _exec_outcome(result):
+        """The one-line disclosure for a run_python call (the "files · N" block)."""
+        if "error" in result:
+            return ("run_python: " + str(result["error"]))[:200]
+        if result.get("timed_out"):
+            return "python timed out after %gs" % result.get("timeout", 0)
+        rc = result.get("exit_code")
+        return "python exited %s" % (rc if rc is not None else "?")
 
     @staticmethod
     def _fs_result(out, err, rc):
