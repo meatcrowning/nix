@@ -377,6 +377,23 @@ RECALL_GUIDANCE = (
     "is a hallucination: look through your recent past sessions first, and only "
     "say you do not know it once you have checked and genuinely cannot find it.")
 
+#: On every turn too: tells the model it MAY, and should, save durable facts on
+#: its OWN initiative — not only when asked to remember something. Without this
+#: the model treats save_memory as something it does when told; a test where it
+#: was expected to keep a fact it had just learned "could not", because nothing
+#: authorised it to write one unprompted. This makes proactive saving explicit
+#: (still bounded to lasting facts, not chat trivia, matching the tool's own
+#: description). It is guidance, not a mechanism: a model with no tool support
+#: still cannot call the tool at all — point chatter at a tool-capable model.
+SAVE_GUIDANCE = (
+    "You may save durable facts to your memory on your own initiative — you do "
+    "not need to be asked. Whenever he tells you something lasting (his name, a "
+    "preference, an ongoing project, a decision) or you learn a fact worth "
+    "keeping across conversations, call save_memory to record it right then, "
+    "without announcing it. Save only lasting things, not one-off details of the "
+    "current chat, and update or delete a memory with save_memory/delete_memory "
+    "when it changes or turns out wrong.")
+
 #: How wide a web search fans out, scaled to the query's apparent complexity
 #: (see `Ollama._research_budget`). A simple factual ask (a weather lookup, a
 #: definition) needs a handful of sources; a genuinely broad research question
@@ -904,6 +921,7 @@ class Ollama(QObject):
         if memory_block:
             base += "\n\n" + memory_block
         base += "\n\n" + RECALL_GUIDANCE
+        base += "\n\n" + SAVE_GUIDANCE
         if research:
             base += "\n\n" + research
         return base
