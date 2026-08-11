@@ -804,6 +804,53 @@ Window {
         }
     }
 
+    // Capability chips: the selected model's native capabilities (vision, tool
+    // use, thinking, …), read live off ollama's /api/show, drawn as small
+    // NON-clickable indicator chips on the right of the stats area, opposite the
+    // context bar (docs/DESIGN.md §3.2 — a subordinated indicator, §2140 chip
+    // spec: bgAlt + 1px border + radius 3). Indicators only, no action. They
+    // reflect the actual selected model and update when it changes.
+    Row {
+        id: capsRow
+        visible: Ollama.capabilities.length > 0
+        anchors { right: parent.right; rightMargin: 10
+                  verticalCenter: statsRow.verticalCenter }
+        spacing: 4
+
+        // A friendlier label for the capabilities ollama names tersely; an
+        // unknown capability falls through to its raw name rather than vanishing.
+        function capLabel(c) {
+            switch (c) {
+            case "vision":    return "vision";
+            case "tools":     return "tools";
+            case "thinking":  return "thinking";
+            case "audio":     return "audio";
+            case "insert":    return "insert";
+            case "embedding": return "embed";
+            default:          return c;
+            }
+        }
+
+        Repeater {
+            model: Ollama.capabilities
+            delegate: Rectangle {
+                required property string modelData
+                height: capLabelText.implicitHeight + 4
+                width: capLabelText.implicitWidth + 10
+                radius: 3
+                color: Theme.bgAlt
+                border.width: Theme.ctrlBorder
+                border.color: Theme.border
+                PixelText {
+                    id: capLabelText
+                    anchors.centerIn: parent
+                    text: capsRow.capLabel(parent.modelData)
+                    color: Theme.textDim
+                }
+            }
+        }
+    }
+
     // The dropdown floats over the reply area, overlaying the picker exactly.
     // It anchors to `top` (a sibling) and takes the picker's width rather than
     // anchoring to `picker` itself — the picker is `top`'s child, a nephew of

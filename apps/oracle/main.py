@@ -735,6 +735,7 @@ class Ollama(QObject):
     contextMaxChanged = Signal()
     tokensPerSecChanged = Signal()
     contextUsedChanged = Signal()   # tokens in play as of the last turn (prompt+gen)
+    capabilitiesChanged = Signal()  # the model's native capabilities (/api/show)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -759,6 +760,7 @@ class Ollama(QObject):
         self._prompt_choice, self._custom_prompt = self._load_prompt_config()
         self._ctx_max = 0        # selected model's context ceiling (0 = unknown)
         self._ctx_model = ""     # which model _ctx_max was read for
+        self._caps = []          # selected model's native capabilities (/api/show)
         self._tps = 0.0          # generation rate of the current/last reply
         self._resp_t0 = 0.0      # monotonic start of the reply's content stream
         self._resp_tokens = 0    # content frames seen this reply (≈ tokens)
@@ -930,6 +932,15 @@ class Ollama(QObject):
         """The selected model's context window in tokens, 0 while unknown."""
         return self._ctx_max
 
+    @Property("QStringList", notify=capabilitiesChanged)
+    def capabilities(self):
+        """The selected model's native capabilities as ollama reports them
+        (/api/show `capabilities`, e.g. vision/tools/thinking/audio) — the real
+        list for the selected model, empty while unknown. Drawn as indicator
+        chips beside the context bar; the baseline `completion` is filtered out
+        as noise (every chat model has it)."""
+        return self._caps
+
     @Property(float, notify=tokensPerSecChanged)
     def tokensPerSec(self):
         """Generation rate of the current/last reply, 0 before one has run."""
@@ -967,6 +978,9 @@ class Ollama(QObject):
             if self._ctx_max:
                 self._ctx_max = 0
                 self.contextMaxChanged.emit()
+            if self._caps:
+                self._caps = []
+                self.capabilitiesChanged.emit()
             return
         if model == self._ctx_model and self._ctx_max:
             return                          # already known for this model
@@ -978,21 +992,38 @@ class Ollama(QObject):
 
         def done():
             ctx = 0
+            caps = []
             try:
                 if reply.error() == QNetworkReply.NetworkError.NoError:
                     obj = json.loads(bytes(reply.readAll().data()).decode(
                         "utf-8", "replace") or "{}")
                     ctx = self._parse_context_length(obj)
+                    caps = self._parse_capabilities(obj)
             except (ValueError, RuntimeError):
-                ctx = 0
+                ctx, caps = 0, []
             reply.deleteLater()
             if model != self._ctx_model:
                 return                      # a newer selection superseded this
             if ctx != self._ctx_max:
                 self._ctx_max = ctx
                 self.contextMaxChanged.emit()
+            if caps != self._caps:
+                self._caps = caps
+                self.capabilitiesChanged.emit()
 
         reply.finished.connect(done)
+
+    @staticmethod
+    def _parse_capabilities(show):
+        """The model's native capabilities from an /api/show reply: ollama's own
+        top-level `capabilities` list (vision/tools/thinking/audio/insert/…),
+        with the baseline `completion` dropped as noise. Order preserved; [] when
+        the field is absent or malformed (never a guess)."""
+        caps = show.get("capabilities")
+        if not isinstance(caps, list):
+            return []
+        return [str(c) for c in caps
+                if isinstance(c, str) and c and c != "completion"]
 
     @staticmethod
     def _parse_context_length(show):
@@ -1345,6 +1376,7 @@ class Ollama(QObject):
                 "num_ctx_requested": CHAT_NUM_CTX,
             },
             "last_tokens_per_sec": round(self._tps, 1) if self._tps else 0,
+            "native_capabilities": self._caps,
             "persona": persona,
             "base_prompt": (base_text[:800] if base_text
                             else "(default — no persona)"),
