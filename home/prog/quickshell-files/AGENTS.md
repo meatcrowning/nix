@@ -924,7 +924,12 @@ transport:
   book), through `sh -c` for `$XDG_RUNTIME_DIR` expansion, with
   `BatchMode`+`ControlMaster`+`ControlPersist` so 2s polls reuse one connection
   and a missing key fails fast. **No new listener** — an outbound tailnet ssh,
-  the same loopback/tailnet-only rule as the comfy tunnel.
+  the same loopback/tailnet-only rule as the comfy tunnel. **`ConnectTimeout`
+  only bounds the initial handshake, not a session request over an
+  already-established master** — measured live, a poll wedged on a stale mux
+  socket (book sleeping/waking) for 19h with `reachable` frozen and nothing in
+  `qs log`. `ServerAliveInterval=5`/`ServerAliveCountMax=2` plus a local
+  `timeout 15` backstop bound the recovery instead.
 - **`MetricCardGrid.qml` is the shared card block** — the 4x2 square-card grid,
   extracted from `TaskManagerContent` so book's own tile and this mirror of top's
   cannot drift apart. It takes `src` (a SysInfo-shaped object — `SysInfo` for the
