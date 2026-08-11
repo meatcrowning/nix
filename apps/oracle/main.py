@@ -507,6 +507,45 @@ CONFIG_DIR = Path.home() / ".config" / "oracle"
 LAST_MODEL_PATH = CONFIG_DIR / "last-model"
 SUGGESTED_PATH = CONFIG_DIR / "suggested.json"
 
+#: The chosen base system prompt, persisted like `last-model`: one small JSON,
+#: `{"choice": <preset id or "custom">, "custom": <the user's own text>}`. The
+#: `custom` text is kept even while a preset is active, so switching back to it
+#: does not lose what he wrote. Missing/malformed → the built-in default (no
+#: base). This is the ONLY user-facing base text; whatever it resolves to is
+#: prepended ahead of the time line + memory block + recall/save guidance, which
+#: ALWAYS run regardless of which base is active (see `_system_prompt`).
+SYSPROMPT_PATH = CONFIG_DIR / "system-prompt.json"
+
+#: The built-in base-prompt presets, selectable in the UI, with `custom` (his
+#: own text) offered alongside them. `default` is empty — the historical
+#: behaviour, no leading base at all. The id is stored; the label is shown; the
+#: text is what gets prepended. Kept deliberately short and host-neutral (no
+#: machine deixis — this list syncs to both hosts). Order here is the UI order.
+PROMPT_PRESETS = [
+    {"id": "default", "label": "Default (no persona)", "text": ""},
+    {"id": "concise", "label": "Concise", "text": (
+        "Answer as briefly as the question allows. Lead with the answer, skip "
+        "preamble and filler, and stop once it is said. Use a list only when it "
+        "genuinely reads better than a sentence.")},
+    {"id": "coder", "label": "Coding assistant", "text": (
+        "You are a pragmatic programming assistant. Prefer correct, idiomatic "
+        "code that matches the surrounding style, and show it in fenced blocks "
+        "with the language tagged. Explain only what is not obvious from the "
+        "code, name the trade-off when there is one, and say plainly when "
+        "something will not work rather than guessing.")},
+    {"id": "tutor", "label": "Socratic tutor", "text": (
+        "You are a patient tutor. Build understanding step by step, check what "
+        "he already knows, and prefer a guiding question or a small worked "
+        "example over a wall of exposition. Correct mistakes gently and "
+        "concretely.")},
+    {"id": "writer", "label": "Creative writer", "text": (
+        "You are a sharp creative writer. Favour vivid, concrete language and a "
+        "clear voice over cliché and hedging. Match the tone and length he asks "
+        "for, and when a prompt is open-ended, make a strong choice rather than "
+        "offering a menu.")},
+]
+PROMPT_PRESET_IDS = {p["id"] for p in PROMPT_PRESETS}
+
 
 def tavily_key():
     """The Tavily API key, never hardcoded (see apps/oracle/AGENTS.md).
@@ -634,6 +673,7 @@ class Ollama(QObject):
 
     modelsChanged = Signal()
     lastModelChanged = Signal()
+    promptChanged = Signal()      # the chosen base prompt or its custom text
     busyChanged = Signal()
     modelsError = Signal(str)
 
@@ -688,6 +728,7 @@ class Ollama(QObject):
         self._max_results = RESEARCH_MAX  # per-search source cap for this turn (set in send)
         self._procs = []         # live file-tool QProcesses, so none is GC'd mid-run
         self._memories = []      # oracle's own durable memories, injected each turn
+        self._prompt_choice, self._custom_prompt = self._load_prompt_config()
 
     # ---- model list ----
 
@@ -766,6 +807,87 @@ class Ollama(QObject):
         except OSError:
             pass
         self.lastModelChanged.emit()
+
+    # ---- the base system prompt (a preset, or his own custom text) ----
+
+    @staticmethod
+    def _load_prompt_config():
+        """`(choice, custom_text)` from SYSPROMPT_PATH. A missing/malformed file,
+        or a choice that names no known preset and is not "custom", falls back to
+        the built-in default with empty custom text — never an error."""
+        try:
+            data = json.loads(SYSPROMPT_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return ("default", "")
+        if not isinstance(data, dict):
+            return ("default", "")
+        choice = data.get("choice", "default")
+        custom = data.get("custom", "")
+        if not isinstance(custom, str):
+            custom = ""
+        if choice != "custom" and choice not in PROMPT_PRESET_IDS:
+            choice = "default"
+        return (choice, custom)
+
+    def _save_prompt_config(self):
+        """Persist the current choice + custom text. Swallowed on failure — the
+        setting is a convenience, not load-bearing (same as `rememberModel`)."""
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            SYSPROMPT_PATH.write_text(
+                json.dumps({"choice": self._prompt_choice,
+                            "custom": self._custom_prompt}),
+                encoding="utf-8")
+        except OSError:
+            pass
+
+    @Property("QVariantList", constant=True)
+    def promptPresets(self):
+        """The built-in presets (id/label/text) for the picker; `custom` is
+        offered by QML alongside these."""
+        return [dict(p) for p in PROMPT_PRESETS]
+
+    @Property(str, notify=promptChanged)
+    def promptChoice(self):
+        return self._prompt_choice
+
+    @Property(str, notify=promptChanged)
+    def customPrompt(self):
+        return self._custom_prompt
+
+    @Slot(str)
+    def setPromptChoice(self, choice):
+        """Select which base prompt is active (a preset id, or "custom")."""
+        choice = (choice or "").strip()
+        if choice != "custom" and choice not in PROMPT_PRESET_IDS:
+            return
+        if choice == self._prompt_choice:
+            return
+        self._prompt_choice = choice
+        self._save_prompt_config()
+        self.promptChanged.emit()
+
+    @Slot(str)
+    def setCustomPrompt(self, text):
+        """Persist his own custom base text (and leave the choice as-is; QML
+        selects "custom" when he wants it applied)."""
+        text = text or ""
+        if text == self._custom_prompt:
+            return
+        self._custom_prompt = text
+        self._save_prompt_config()
+        self.promptChanged.emit()
+
+    def _base_prompt(self):
+        """The active base text prepended to every turn's system prompt — the
+        custom text when "custom" is chosen, else the chosen preset's text, else
+        empty (the default). Empty contributes nothing (see `_system_prompt`)."""
+        if self._prompt_choice == "custom":
+            return self._custom_prompt.strip()
+        for p in PROMPT_PRESETS:
+            if p["id"] == self._prompt_choice:
+                return p["text"].strip()
+        return ""
 
     @Slot()
     def refreshModels(self):
@@ -951,6 +1073,12 @@ class Ollama(QObject):
         base += "\n\n" + SAVE_GUIDANCE
         if research:
             base += "\n\n" + research
+        # His chosen base (a preset or his own custom text) LEADS — the time
+        # line, memory block and recall/save guidance above always run whatever
+        # base is active; only this leading block swaps.
+        lead = self._base_prompt()
+        if lead:
+            base = lead + "\n\n" + base
         return base
 
     def _time_now(self, tz_name, idx, remaining, calls):

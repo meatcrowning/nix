@@ -257,6 +257,13 @@ Window {
         sessionPicker.open = false;
     }
 
+    // Open the custom-prompt editor (from the picker's "custom…" or the "edit"
+    // button), prefilled with his saved custom text.
+    function openPromptEditor() {
+        promptPicker.open = false;
+        promptEditor.load();
+    }
+
     // Rebuild the log from a loaded transcript (transient flags reset).
     function loadTurns(id, title, turnsJson) {
         var arr;
@@ -468,13 +475,106 @@ Window {
         }
     }
 
+    // ----------------------------------------------------------- prompt row
+    // The base system prompt: a boxed picker (docs/DESIGN.md §7.2, same as the
+    // model/session selectors — no combo boxes) showing the active base, opening
+    // a list of the built-in presets plus "custom…". Choosing a preset applies
+    // it at once; "custom…" opens an editor for his own text. The memory block
+    // and recall/save guidance are injected regardless of which base is active
+    // (main.py `_system_prompt`); only this leading text swaps.
+    Item {
+        id: promptRow
+        anchors { top: sessionRow.bottom; topMargin: 8
+                  left: parent.left; right: parent.right; margins: 10 }
+        height: 24
+
+        // The label of the active base: the chosen preset's label, or "custom".
+        function activeLabel() {
+            if (Ollama.promptChoice === "custom")
+                return "custom";
+            var ps = Ollama.promptPresets;
+            for (var i = 0; i < ps.length; i++)
+                if (ps[i].id === Ollama.promptChoice)
+                    return ps[i].label;
+            return ps.length > 0 ? ps[0].label : "default";
+        }
+
+        PixelText {
+            id: promptLabel
+            anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+            text: "prompt"
+            color: Theme.textDim
+        }
+
+        // "edit" — open the custom-text editor (writing/selecting custom text).
+        Rectangle {
+            id: editPromptBtn
+            anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+            width: 52
+            height: 24
+            radius: Theme.rounding
+            border.width: Theme.ctrlBorder
+            border.color: Theme.border
+            color: editPromptMouse.containsMouse ? Theme.highlight : Theme.bg
+            PixelText {
+                anchors.centerIn: parent
+                text: "edit"
+                color: Theme.accent
+            }
+            MouseArea {
+                id: editPromptMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: win.openPromptEditor()
+            }
+        }
+
+        Rectangle {
+            id: promptPicker
+            anchors { left: promptLabel.right; leftMargin: 10
+                      right: editPromptBtn.left; rightMargin: 10
+                      verticalCenter: parent.verticalCenter }
+            height: 24
+            color: promptMouse.containsMouse ? Theme.highlight : Theme.bgAlt
+            radius: Theme.rounding
+            border.width: Theme.ctrlBorder
+            border.color: Theme.border
+
+            property bool open: false
+
+            PixelText {
+                anchors { left: parent.left; leftMargin: 6
+                          right: promptCaret.left; rightMargin: 6
+                          verticalCenter: parent.verticalCenter }
+                elide: Text.ElideRight
+                text: promptRow.activeLabel()
+                color: Theme.text
+            }
+            PixelText {
+                id: promptCaret
+                anchors { right: parent.right; rightMargin: 6
+                          verticalCenter: parent.verticalCenter }
+                text: promptPicker.open ? "^" : "v"
+                color: Theme.textDim
+            }
+            MouseArea {
+                id: promptMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: promptPicker.open = !promptPicker.open
+            }
+        }
+    }
+
     // -------------------------------------------------- server / backend row
     // Observed state on the left (up/down + the loaded model, polled from
     // /api/ps, docs/DESIGN.md §10.6 — never claimed from a click), the two
     // controls on the right: unload the loaded model, and start/stop the daemon.
     Item {
         id: serverRow
-        anchors { top: sessionRow.bottom; topMargin: 8
+        anchors { top: promptRow.bottom; topMargin: 8
                   left: parent.left; right: parent.right; margins: 10 }
         height: 22
 
@@ -695,12 +795,200 @@ Window {
         }
     }
 
+    // The prompt dropdown — the presets plus a "custom…" entry — floats under
+    // the prompt picker (positioned by arithmetic, like the session dropdown,
+    // since the picker is a grandchild of `win`).
+    Rectangle {
+        id: promptDropdown
+        visible: promptPicker.open
+        x: promptRow.x + promptPicker.x
+        y: promptRow.y + promptRow.height - 6
+        width: promptPicker.width
+        // presets + the one "custom…" row
+        readonly property var items: {
+            var out = [];
+            var ps = Ollama.promptPresets;
+            for (var i = 0; i < ps.length; i++)
+                out.push({ id: ps[i].id, label: ps[i].label });
+            out.push({ id: "custom", label: "custom…" });
+            return out;
+        }
+        height: Math.min(items.length * 22 + 2, 240)
+        z: 50
+        color: Theme.bgAlt
+        radius: Theme.rounding
+        border.width: Theme.ctrlBorder
+        border.color: Theme.border
+
+        KineticListView {
+            id: promptList
+            anchors { fill: parent; margins: 1 }
+            clip: true
+            model: promptDropdown.items
+            delegate: Rectangle {
+                width: promptList.width
+                height: 22
+                color: promptRowMouse.containsMouse ? Theme.highlight : "transparent"
+                // A 1px rule above the "custom…" row, separating his own text
+                // from the built-in presets (docs/DESIGN.md §7.2).
+                Rectangle {
+                    visible: modelData.id === "custom"
+                    anchors { top: parent.top; left: parent.left; right: parent.right }
+                    height: Theme.ctrlBorder
+                    color: Theme.border
+                }
+                PixelText {
+                    anchors { left: parent.left; leftMargin: 6
+                              right: parent.right; rightMargin: 6
+                              verticalCenter: parent.verticalCenter }
+                    elide: Text.ElideRight
+                    text: modelData.label
+                    color: modelData.id === Ollama.promptChoice ? Theme.accent : Theme.text
+                }
+                MouseArea {
+                    id: promptRowMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        promptPicker.open = false;
+                        if (modelData.id === "custom") win.openPromptEditor();
+                        else Ollama.setPromptChoice(modelData.id);
+                    }
+                }
+            }
+            ScrollBar.vertical: VScroll {}
+        }
+    }
+
+    // The custom-prompt editor — a floating panel over the reply area with a
+    // TextEdit for his own base text and Save / Cancel (docs/DESIGN.md §10:
+    // Save applies it; Cancel discards, nothing changes silently). Selecting
+    // "custom…" in the dropdown, or the "edit" button, opens it.
+    Rectangle {
+        id: promptEditor
+        visible: false
+        anchors { left: parent.left; right: parent.right
+                  leftMargin: 20; rightMargin: 20
+                  top: promptRow.bottom; topMargin: 8 }
+        height: 220
+        z: 60
+        color: Theme.bgAlt
+        radius: Theme.rounding
+        border.width: Theme.ctrlBorder
+        border.color: Theme.accent
+
+        function load() {
+            editorArea.text = Ollama.customPrompt;
+            promptEditor.visible = true;
+            editorArea.forceActiveFocus();
+        }
+
+        PixelText {
+            id: editorHeading
+            anchors { top: parent.top; left: parent.left; right: parent.right
+                      margins: 10 }
+            text: "your custom system prompt"
+            color: Theme.textDim
+            wrapMode: Text.NoWrap
+            elide: Text.ElideRight
+        }
+
+        Rectangle {
+            anchors { top: editorHeading.bottom; topMargin: 8
+                      left: parent.left; right: parent.right
+                      bottom: editorButtons.top; bottomMargin: 8
+                      leftMargin: 10; rightMargin: 10 }
+            color: Theme.bg
+            radius: Theme.rounding
+            border.width: Theme.ctrlBorder
+            border.color: editorArea.activeFocus ? Theme.accent : Theme.border
+
+            KineticFlickable {
+                id: editorFlick
+                anchors { fill: parent; margins: 8 }
+                contentWidth: width
+                contentHeight: editorArea.implicitHeight
+                clip: true
+                TextEdit {
+                    id: editorArea
+                    width: editorFlick.width
+                    font: Theme.editorFont
+                    renderType: Text.NativeRendering
+                    color: Theme.text
+                    selectionColor: Theme.accent
+                    selectedTextColor: Theme.bg
+                    wrapMode: TextEdit.Wrap
+                    persistentSelection: true
+                    Keys.onPressed: function (e) {
+                        if (e.key === Qt.Key_Escape) {
+                            promptEditor.visible = false;
+                            e.accepted = true;
+                        }
+                    }
+                    PixelText {
+                        anchors { left: parent.left; verticalCenter: parent.top
+                                  verticalCenterOffset: parent.implicitHeight / 2 }
+                        visible: editorArea.text === "" && !editorArea.activeFocus
+                        text: "write the base instructions the model gets every turn…"
+                        color: Theme.textDim
+                    }
+                }
+            }
+        }
+
+        Row {
+            id: editorButtons
+            anchors { bottom: parent.bottom; right: parent.right; margins: 10 }
+            spacing: 8
+
+            Rectangle {
+                width: 64; height: 24
+                radius: Theme.rounding
+                border.width: Theme.ctrlBorder
+                border.color: Theme.border
+                color: cancelMouse.containsMouse ? Theme.highlight : Theme.bg
+                PixelText { anchors.centerIn: parent; text: "cancel"; color: Theme.textDim }
+                MouseArea {
+                    id: cancelMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: promptEditor.visible = false
+                }
+            }
+            Rectangle {
+                width: 64; height: 24
+                radius: Theme.rounding
+                border.width: Theme.ctrlBorder
+                border.color: Theme.border
+                color: saveMouse.containsMouse ? Theme.highlight : Theme.bg
+                PixelText { anchors.centerIn: parent; text: "save"; color: Theme.accent }
+                MouseArea {
+                    id: saveMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    // Persist the text AND select custom as the active base, so
+                    // saving is also applying it (docs/DESIGN.md §10 — the button
+                    // does what it says).
+                    onClicked: {
+                        Ollama.setCustomPrompt(editorArea.text);
+                        Ollama.setPromptChoice("custom");
+                        promptEditor.visible = false;
+                    }
+                }
+            }
+        }
+    }
+
     // A click anywhere else closes an open dropdown.
     MouseArea {
         anchors.fill: parent
         z: 40
-        visible: picker.open || sessionPicker.open
-        onClicked: { picker.open = false; sessionPicker.open = false; }
+        visible: picker.open || sessionPicker.open || promptPicker.open
+        onClicked: { picker.open = false; sessionPicker.open = false;
+                     promptPicker.open = false; }
     }
 
     // --------------------------------------------------------- the reply area
