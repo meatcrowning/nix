@@ -18,6 +18,7 @@ for the model list, and a STREAMING `/api/chat` POST whose NDJSON reply is
 parsed line by line and emitted as it arrives, so the reply grows on screen the
 way it comes off the model.
 """
+import base64
 import hashlib
 import json
 import os
@@ -160,6 +161,7 @@ IMAGE_MAX_BYTES = 20 * 1024 * 1024
 #: context-budget rule. A binary or over-cap file is NAMED, not inlined.
 ATTACH_FILE_MAX = 128 * 1024        # per attachment, bytes of text inlined
 ATTACH_TOTAL_MAX = 512 * 1024       # all attachments in one turn, bytes
+ATTACH_IMAGE_MAX = 8 * 1024 * 1024  # per dropped image, bytes sent to a vision model
 
 #: content-type → file extension for a saved image (cosmetic — QML's Image sniffs
 #: the bytes — but tidy). Anything else falls back to the URL's suffix, then .img.
@@ -1098,12 +1100,30 @@ class Ollama(QObject):
         # must not read as a "broad" question and fan the web search wide.
         budget = self._research_budget(prompt)
         self._max_results = budget["max_results"]
-        attach_block = self._read_attachments(attachments_json)
-        content = prompt + ("\n\n" + attach_block if attach_block else "")
+        # Split the dropped files: images go to the model as native vision blocks
+        # (if the model supports vision), everything else is inlined as text.
+        items = self._parse_attachment_items(attachments_json)
+        image_items, file_items = [], []
+        for it in items:
+            (image_items if self._sniff_image(it["path"]) else file_items).append(it)
+        # Trust the capability list only when it was read for THIS model (the
+        # selection triggers the /api/show that fills it); otherwise treat vision
+        # as unknown, which falls back to the honest "not sent" note below.
+        vision = self._ctx_model == model and "vision" in (self._caps or [])
+        attach_block = self._read_attachments(file_items)
+        images_b64, img_note = self._read_image_attachments(image_items, vision)
+        content = prompt
+        if attach_block:
+            content += "\n\n" + attach_block
+        if img_note:
+            content += "\n\n" + img_note
+        user_msg = {"role": "user", "content": content}
+        if images_b64:                     # ollama /api/chat: base64 on the message
+            user_msg["images"] = images_b64
         self._messages = ([{"role": "system",
                             "content": self._system_prompt(budget["guidance"])}]
                           + self._parse_history(history_json)
-                          + [{"role": "user", "content": content}])
+                          + [user_msg])
         self._think_tokens = 0
         self._rounds = 0
         self._resp_t0 = 0.0
@@ -1125,9 +1145,95 @@ class Ollama(QObject):
         return {"name": os.path.basename(p) or p, "path": p}
 
     @staticmethod
-    def _read_attachments(attachments_json):
-        """Turn the dragged files (`[{name, path}]`) into one context block
-        inlined into the user message, or "" if there are none.
+    def _parse_attachment_items(attachments_json):
+        """Validate the dragged-file list (`[{name, path}]`) QML sends into a
+        clean list of `{name, path}` dicts, dropping anything malformed or
+        path-less. The single place the raw JSON boundary is parsed."""
+        try:
+            items = json.loads(attachments_json or "[]")
+        except ValueError:
+            return []
+        if not isinstance(items, list):
+            return []
+        out = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            path = str(it.get("path", ""))
+            if not path:
+                continue
+            name = str(it.get("name", "")) or os.path.basename(path) or "file"
+            out.append({"name": name, "path": path})
+        return out
+
+    @staticmethod
+    def _sniff_image(path):
+        """The image media-type of a file from its MAGIC BYTES (never the
+        extension — his rule for the attachment path), or "" if it is not one of
+        the raster image types a vision model accepts (png/jpeg/gif/webp)."""
+        try:
+            with open(path, "rb") as fh:
+                head = fh.read(16)
+        except OSError:
+            return ""
+        if head[:8] == b"\x89PNG\r\n\x1a\n":
+            return "image/png"
+        if head[:3] == b"\xff\xd8\xff":
+            return "image/jpeg"
+        if head[:6] in (b"GIF87a", b"GIF89a"):
+            return "image/gif"
+        if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+            return "image/webp"
+        return ""
+
+    @classmethod
+    def _read_image_attachments(cls, image_items, vision):
+        """Turn dropped IMAGE files into what the turn needs.
+
+        For a **vision-capable** model: base64-encode each (bounded by
+        ATTACH_IMAGE_MAX) for ollama's `images` message field, plus a short text
+        note naming them so the visible/saved turn acknowledges them. For a model
+        with **no vision support**: send NO image bytes and return a text note
+        that images were attached but this model cannot see them — never silently
+        dropped (docs/DESIGN.md §10 affordance honesty). Returns
+        `(base64_list, note)`; an oversized or unreadable image is NAMED in the
+        note either way."""
+        if not image_items:
+            return [], ""
+        b64, ok_names, skipped = [], [], []
+        for it in image_items:
+            path, name = it["path"], it["name"]
+            if not vision:
+                continue               # bytes are read only for a vision model
+            try:
+                size = os.path.getsize(path)
+                if size > ATTACH_IMAGE_MAX:
+                    skipped.append("%s (%d MB, over the %d MB image limit)"
+                                   % (name, size // (1024 * 1024),
+                                      ATTACH_IMAGE_MAX // (1024 * 1024)))
+                    continue
+                with open(path, "rb") as fh:
+                    b64.append(base64.b64encode(fh.read()).decode("ascii"))
+                ok_names.append(name)
+            except OSError as e:
+                skipped.append("%s (could not read: %s)" % (name, e.strerror))
+        if not vision:
+            names = ", ".join(it["name"] for it in image_items)
+            return [], ("[attached image(s): %s — the selected model has no "
+                        "vision support, so they were not sent. Pick a "
+                        "vision-capable model to have it see them.]" % names)
+        parts = []
+        if ok_names:
+            parts.append("[attached image(s): %s]" % ", ".join(ok_names))
+        if skipped:
+            parts.append("[image(s) not sent: %s]" % "; ".join(skipped))
+        return b64, "\n".join(parts)
+
+    @staticmethod
+    def _read_attachments(items):
+        """Turn the dragged TEXT files (`[{name, path}]`, images already routed
+        away) into one context block inlined into the user message, or "" if
+        there are none.
 
         Read LOCALLY (his own dropped files), text only, and bounded: each file
         is capped at ATTACH_FILE_MAX and the whole turn at ATTACH_TOTAL_MAX, with
@@ -1135,11 +1241,7 @@ class Ollama(QObject):
         a NUL byte) or one that cannot be read is NAMED with the reason rather
         than dumped (docs/DESIGN.md §10 — the attachment is acknowledged, never
         silently dropped; §5 his context-budget rule — never blow the window)."""
-        try:
-            items = json.loads(attachments_json or "[]")
-        except ValueError:
-            return ""
-        if not isinstance(items, list) or not items:
+        if not items:
             return ""
         blocks, total = [], 0
         for it in items:

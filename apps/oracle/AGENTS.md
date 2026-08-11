@@ -352,6 +352,17 @@ clears when the message is sent. A message may be text, files, or both.
   a truncation note; a **binary or unreadable** file is NAMED with the reason,
   never dumped (docs/DESIGN.md §10). The budget heuristic runs on the prompt
   BEFORE inlining, so a big file cannot fan the web search wide.
+- **An IMAGE goes to the model as vision, not text.** `send` classifies each
+  dropped file by its MAGIC BYTES (`_sniff_image`, never the extension —
+  png/jpeg/gif/webp); image items are routed away from the text block and, for a
+  **vision-capable** model (the `capabilities` list read off `/api/show`, gated
+  on it being for THIS model), base64-encoded onto ollama's `images` message
+  field (`_read_image_attachments`), bounded by `ATTACH_IMAGE_MAX` (8 MB/image;
+  an over-cap or unreadable one is named, not dropped). For a model with **no
+  vision support** no image bytes are sent and the message carries an honest note
+  that images were attached but this model cannot see them (docs/DESIGN.md §10 —
+  never silently dropped; pick a vision model). Either way a `[attached
+  image(s): …]` line is added to the visible/saved turn.
 - **URLs are resolved in Python** (`Ollama.localFileInfo` → `QUrl.toLocalFile`),
   never decoded in QML (§13 — `decodeURI` mangles `#`/`?` in a uri-list).
 - **Per-message, not persisted as context.** The visible/saved turn shows the
