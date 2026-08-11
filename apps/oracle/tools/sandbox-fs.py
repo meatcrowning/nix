@@ -4,11 +4,14 @@
 oracle offers the local ollama model a set of file tools (list/read/write/edit/
 move/delete/mkdir, plus the search ops glob/grep/tree; see apps/oracle/main.py
 `FILE_TOOLS`). Every one of them runs
-THROUGH this script, and this script is the jail: it takes a single ROOT
-directory as argv[1] and refuses to touch anything outside it, symlinks
-included. That is the whole security model right now — the model gets a sandbox,
-not the filesystem ("later we will let it run free maybe", his words, so the
-jail root is one path, widened by pointing `ORACLE_SANDBOX` elsewhere).
+THROUGH this script, and this script is the jail: it takes a WRITE root as
+argv[1] and refuses to write, edit, move or delete anything outside it, symlinks
+included. The MUTATING ops stay jailed to that sandbox; the READ-ONLY ops
+(list/read/glob/grep/tree — see READ_OPS) resolve against an optional wider READ
+root passed as argv[2], so the model gets read access to the user's files (his
+ask, 2026-08-11) while writes cannot escape the sandbox. Both roots are widened
+by pointing `ORACLE_SANDBOX` / `ORACLE_READ_ROOT` elsewhere; with no argv[2] the
+read ops fall back to the write root (older executor, one-path behaviour).
 
 WHERE it runs: oracle's compute is ollama on `top`, so the sandbox lives on top
 too. On `top` oracle runs this locally; on `book` oracle runs it over the SAME
@@ -438,13 +441,23 @@ OPS = {"list": op_list, "read": op_read, "write": op_write, "edit": op_edit,
        "move": op_move, "delete": op_delete, "mkdir": op_mkdir, "put": op_put,
        "glob": op_glob, "grep": op_grep, "tree": op_tree}
 
+# The READ-ONLY ops. They may reach a WIDER root than the mutating ops: the
+# model gets read access to the user's files (his ask, 2026-08-11) while writes
+# stay confined to the sandbox. argv[1] is the WRITE root (the sandbox); an
+# optional argv[2] is the READ root (his home). Absent argv[2], read ops fall
+# back to the write root — so an older executor over ssh (top not yet pulled)
+# just keeps the old jailed-both behaviour rather than breaking.
+READ_OPS = {"list", "read", "glob", "grep", "tree"}
+
 
 def main():
     if len(sys.argv) < 2:
         fail("no sandbox root given")
-    root = os.path.realpath(os.path.expanduser(sys.argv[1]))
+    write_root = os.path.realpath(os.path.expanduser(sys.argv[1]))
+    read_root = (os.path.realpath(os.path.expanduser(sys.argv[2]))
+                 if len(sys.argv) > 2 and sys.argv[2] else write_root)
     try:
-        os.makedirs(root, exist_ok=True)   # a fresh top has no sandbox yet
+        os.makedirs(write_root, exist_ok=True)   # a fresh top has no sandbox yet
     except OSError as e:
         fail("cannot create sandbox root: " + str(e))
     try:
@@ -453,9 +466,11 @@ def main():
             raise ValueError
     except ValueError:
         fail("bad request")
-    op = OPS.get(req.get("op", ""))
+    opname = req.get("op", "")
+    op = OPS.get(opname)
     if op is None:
-        fail("unknown op: " + str(req.get("op", "")))
+        fail("unknown op: " + str(opname))
+    root = read_root if opname in READ_OPS else write_root
     try:
         print(json.dumps(op(root, req)))
     except SystemExit:

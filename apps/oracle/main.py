@@ -181,26 +181,32 @@ IMAGE_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
 #: The FILE TOOLS oracle offers the model on EVERY turn (no toggle — his call:
 #: "always available to the model"). Reading and manipulation both, but every
 #: one runs THROUGH tools/sandbox-fs.py against a jailed root the model cannot
-#: escape (see FS below and apps/oracle/AGENTS.md). Descriptions tell the model
-#: the paths are sandbox-relative and reads are paginated, so it asks for more
-#: rather than assuming a short read is the whole file.
+#: escape (see FS below and apps/oracle/AGENTS.md). TWO jails: the READ-ONLY
+#: tools (list_dir/read_file/find_files/search_text/show_tree) reach the user's
+#: whole HOME so the model can read his files, their paths home-relative; the
+#: MUTATING tools (write/edit/move/delete/make_dir) stay confined to the sandbox,
+#: their paths sandbox-relative. Descriptions carry that split, and note reads
+#: are paginated so the model asks for more rather than assuming a short read is
+#: the whole file.
 FILE_TOOLS = [
     {"type": "function", "function": {
         "name": "list_dir",
-        "description": ("List a directory in your sandbox. Paths are relative to "
-                        "the sandbox root; '.' is the root. Long listings are "
-                        "truncated."),
+        "description": ("List a directory of the user's files. Paths are relative "
+                        "to their home directory; '.' is home. Read-only. Long "
+                        "listings are truncated."),
         "parameters": {"type": "object", "properties": {
             "path": {"type": "string",
-                     "description": "Directory to list, sandbox-relative. Default '.'."}},
+                     "description": "Directory to list, relative to the user's home. Default '.'."}},
             "required": []}}},
     {"type": "function", "function": {
         "name": "read_file",
-        "description": ("Read a text file from your sandbox. Returns at most a few "
+        "description": ("Read a text file from the user's files (paths relative to "
+                        "their home directory; read-only). Returns at most a few "
                         "hundred lines; if `truncated` is true read again with "
                         "`offset` set to `next_offset` to page through the rest."),
         "parameters": {"type": "object", "properties": {
-            "path": {"type": "string", "description": "File to read, sandbox-relative."},
+            "path": {"type": "string",
+                     "description": "File to read, relative to the user's home."},
             "offset": {"type": "integer",
                        "description": "0-based line to start at. Default 0."},
             "limit": {"type": "integer",
@@ -250,26 +256,27 @@ FILE_TOOLS = [
             "required": ["path"]}}},
     {"type": "function", "function": {
         "name": "find_files",
-        "description": ("Find files and directories by shell glob pattern within "
-                        "your sandbox. Use '**' to match across subdirectories "
-                        "(e.g. '**/*.py'). Returns matching paths; long result "
-                        "lists are truncated."),
+        "description": ("Find files and directories in the user's files by shell "
+                        "glob pattern (paths relative to their home; read-only). "
+                        "Use '**' to match across subdirectories (e.g. '**/*.py'). "
+                        "Returns matching paths; long result lists are truncated."),
         "parameters": {"type": "object", "properties": {
             "pattern": {"type": "string",
                         "description": "Glob, e.g. '*.md' or '**/*.py'."},
             "path": {"type": "string",
-                     "description": "Directory to search under, sandbox-relative. Default '.'."}},
+                     "description": "Directory to search under, relative to the user's home. Default '.'."}},
             "required": ["pattern"]}}},
     {"type": "function", "function": {
         "name": "search_text",
-        "description": ("Search file contents for a regular expression within "
-                        "your sandbox (like grep). Returns matching lines with "
-                        "their file and line number. Binary files are skipped and "
-                        "long result sets are truncated."),
+        "description": ("Search the contents of the user's files for a regular "
+                        "expression (like grep; paths relative to their home, "
+                        "read-only). Returns matching lines with their file and "
+                        "line number. Binary files are skipped and long result "
+                        "sets are truncated."),
         "parameters": {"type": "object", "properties": {
             "pattern": {"type": "string", "description": "Regular expression to search for."},
             "path": {"type": "string",
-                     "description": "File or directory to search, sandbox-relative. Default '.'."},
+                     "description": "File or directory to search, relative to the user's home. Default '.'."},
             "glob": {"type": "string",
                      "description": "Only search files whose name matches this glob, e.g. '*.py'."},
             "ignore_case": {"type": "boolean",
@@ -277,11 +284,12 @@ FILE_TOOLS = [
             "required": ["pattern"]}}},
     {"type": "function", "function": {
         "name": "show_tree",
-        "description": ("Show the directory structure under a path in your sandbox "
-                        "as an indented tree. Depth- and entry-limited."),
+        "description": ("Show the directory structure under a path in the user's "
+                        "files as an indented tree (paths relative to their home; "
+                        "read-only). Depth- and entry-limited."),
         "parameters": {"type": "object", "properties": {
             "path": {"type": "string",
-                     "description": "Directory to show, sandbox-relative. Default '.'."},
+                     "description": "Directory to show, relative to the user's home. Default '.'."},
             "depth": {"type": "integer",
                       "description": "How many levels deep to descend. Default 5."}},
             "required": []}}},
@@ -500,6 +508,17 @@ CHAT_NUM_CTX = 32768
 #: needs no shell tilde-expansion when handed to top over ssh.
 SANDBOX_ROOT = os.path.expanduser(
     os.environ.get("ORACLE_SANDBOX", "~/.local/share/oracle/sandbox"))
+
+#: The READ jail — WIDER than SANDBOX_ROOT. The read-only file ops (list_dir/
+#: read_file/find_files/search_text/show_tree) resolve against this instead, so
+#: the model can READ the user's files (his ask, 2026-08-11) while write/edit/
+#: move/delete stay confined to SANDBOX_ROOT. Defaults to his home on the host
+#: oracle's compute lives on (top); the read ops still cannot escape it (symlinks
+#: included — tools/sandbox-fs.py enforces it per-root). Point ORACLE_READ_ROOT
+#: at `/` to widen further, or at SANDBOX_ROOT to restore the old jailed-reads
+#: behaviour. Absolute /home/lam/... (identical on both, user `lam`) so it needs
+#: no tilde-expansion when handed to top over ssh.
+READ_ROOT = os.path.expanduser(os.environ.get("ORACLE_READ_ROOT", "~"))
 
 #: The jailed executor. Same absolute path on top and book (the repo lives at
 #: /home/lam/nix on both), so `python3 <this>` runs unchanged locally on top or
@@ -2128,9 +2147,9 @@ class Ollama(QObject):
                 argv += ["-o", "ControlMaster=auto", "-o", "ControlPersist=30",
                          "-o", "ControlPath=" + ctl]
             argv += [host, "python3", shlex.quote(FS_SCRIPT),
-                     shlex.quote(SANDBOX_ROOT)]
+                     shlex.quote(SANDBOX_ROOT), shlex.quote(READ_ROOT)]
             return argv
-        return [sys.executable, FS_SCRIPT, SANDBOX_ROOT]
+        return [sys.executable, FS_SCRIPT, SANDBOX_ROOT, READ_ROOT]
 
     def _run_fs_tool(self, name, args, idx, remaining, calls):
         """Run one file tool as an async QProcess, feeding the JSON result back
