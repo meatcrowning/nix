@@ -230,6 +230,20 @@ session to recall a durable fact, it saved one.
   `$ORACLE_MEMORY`), an absolute `/home/lam/...` path like `SESSIONS_ROOT`.
   No UI surface: chatter manages these itself, they are not a picker.
 
+## Self-introspection (describe_self)
+
+`SELF_TOOL` (`describe_self`, offered every turn, dispatched `_describe_self`)
+lets the model look up **everything it can access about itself** rather than
+guess from training: the exact served model id and provider/backend, the app and
+machine (hostname, OS, arch, cores, memory), the **context ceiling and current
+fill**, the last **tokens/sec**, the active **persona / base prompt** (label plus
+the leading text), the **saved memories** (count + capped list), the **tools
+available this turn** (`_offered_tool_names`, the same list `_post_chat` sends —
+so it is true, not remembered), the sampling options, and the conversation's
+size. Synchronous and host-neutral; every fact is in-process or read live off the
+host, and the machine facts are re-derived (never the private hardware notes),
+keeping this public source clean.
+
 ## Talking to ollama
 
 `OLLAMA` defaults to `http://127.0.0.1:11434` (override with `$OLLAMA_HOST`).
