@@ -1626,16 +1626,27 @@ class Ollama(QObject):
 
     @staticmethod
     def _fs_result(out, err, rc):
-        """The sandbox executor prints one JSON object; anything else (an ssh
-        failure, a crash) becomes an error result the model still gets."""
-        try:
-            obj = json.loads(out.decode("utf-8", "replace") or "{}")
-            if isinstance(obj, dict):
-                return obj
-        except ValueError:
-            pass
+        """The store executor (file/session/memory) prints exactly one JSON
+        object and exits 0; anything else — an ssh failure, a missing script, a
+        crash — is a FAILURE the model and the user must see, never a silent
+        empty result (docs/DESIGN.md §10).
+
+        EMPTY stdout is such a failure and must not be read as an empty-but-ok
+        `{}`: an `or "{}"` fallback there turned a broken store (e.g. ssh to a
+        host whose checkout lacks the script) into a bogus success — `list`
+        reported "0 memories" instead of the real error, and `refreshMemories`
+        cached an empty set. Empty or unparseable stdout now falls through to
+        the stderr-carrying error path."""
+        text = out.decode("utf-8", "replace").strip()
+        if text:
+            try:
+                obj = json.loads(text)
+                if isinstance(obj, dict):
+                    return obj
+            except ValueError:
+                pass
         tail = (err.decode("utf-8", "replace").strip().splitlines() or [""])[-1]
-        return {"error": "file tool failed: " + (tail or ("exit %d" % rc))}
+        return {"error": "tool failed: " + (tail or ("exit %d" % rc))}
 
     @staticmethod
     def _fs_heading(name, args):
