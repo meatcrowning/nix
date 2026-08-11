@@ -141,21 +141,27 @@ let
   # the look the desktop wants. The pins themselves live in
   # home/pkgs/desktop/font.nix; QtWebEngineProcess children inherit this env.
   #
-  # The web twin ("More Perfect DOS VGA (web)") gets its antialias=false pin
-  # RE-ASSERTED here, not just in font.nix's conf.d, because on book a stale
-  # unmanaged ~/.config/fontconfig/fonts.conf (a regular file, not a
-  # home-manager symlink) carries a GLOBAL antialias=true plus per-family
-  # antialias=false overrides for the plain pixel faces only — and Fedora loads
-  # that user fonts.conf AFTER conf.d, so its global true clobbers the twin's
-  # conf.d pin (the plain face survives because it has its own override there,
-  # the twin has none). Result measured offscreen on book 2026-08-09: the twin,
-  # which is the family surfer forces on ALL page text (_adj_fam in main.py),
-  # came back grayF~0.59 — grayscale-antialiased, soft, not matching goetia's
-  # crisp pixel text — while the plain face stayed 0 grey. surfer's fcConf
-  # includes /etc/fonts/fonts.conf and then runs its own match target="font"
-  # LAST, so pinning the twin here wins over that stale file on both hosts (a
-  # no-op on top, where the twin already renders 0 grey). Verified: twin 0 grey,
-  # pixel-identical to the plain face, via a real WebEngineView grab.
+  # The web twin ("More Perfect DOS VGA (web)") renders ANTIALIASED in surfer —
+  # same rule as Botis above, for the same reason, settled by his board
+  # decision 2026-08-10. The twin is the family surfer forces on ALL page text
+  # (_adj_fam in main.py), at each site's OWN font size — and most web sizes
+  # fall off the pixel grid. Off-grid, an aliased pixel face is autohint-sliced
+  # by Chromium into the horizontal stripes he called "weirdly rendered": the
+  # panel and goetia stay clean only because they ever draw ONE on-grid size.
+  # There is no crisp-at-arbitrary-size option at fractional scale, so the
+  # honest choice is striped-but-crisp-on-grid vs uniformly soft — and he
+  # picked soft, matching the panel/goetia look he calls crisp. antialias=true
+  # disarms Chromium's autohint clamp (the striping) and lets the soft raster
+  # through; at an integral grid the AA render is still pixel-exact (0 grey),
+  # so exact-grid sizes keep the crisp pixels and only off-grid ones go soft.
+  #
+  # It is pinned EXPLICITLY (not left to inherit) because the hosts disagree at
+  # rest: font.nix's conf.d pins the twin antialias=false on top, while on book
+  # a stale unmanaged ~/.config/fontconfig/fonts.conf carries a GLOBAL
+  # antialias=true that Fedora loads AFTER conf.d. surfer's fcConf includes
+  # /etc/fonts/fonts.conf and runs this match target="font" LAST, so the twin
+  # renders soft on BOTH hosts regardless. (Until 2026-08-10 this pin was
+  # antialias=false, re-asserting the crisp render; the decision flipped it.)
   fcConf = pkgs.writeText "surfer-fontconfig.conf" ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
@@ -167,7 +173,7 @@ let
       </match>
       <match target="font">
         <test name="family"><string>More Perfect DOS VGA (web)</string></test>
-        <edit name="antialias" mode="assign"><bool>false</bool></edit>
+        <edit name="antialias" mode="assign"><bool>true</bool></edit>
       </match>
     </fontconfig>
   '';

@@ -39,9 +39,13 @@ The pick is imposed by a REAL installed face — its size-adjusted web twin
 (home/pkgs/desktop/font-files/scale-vga.py) — never a `src:local()`
 @font-face alias: Chromium grayscale-antialiases any @font-face-resolved
 face and ignores the fontconfig `antialias=false` pin, which softened every
-web glyph (970147b's size-adjust alias, dropped 2026-08-09 in 310cdc3). The
-crispness checks below are the regression guard for that; the ink checks
-guard the parity the twin restores.
+web glyph (970147b's size-adjust alias, dropped 2026-08-09 in 310cdc3). Naming
+a real face keeps the AA under fontconfig's control — and since his board
+decision 2026-08-10 surfer PINS the twin antialias=true (home/prog/surfer.nix),
+so off-grid web text goes soft instead of autohint-striped. The grey checks
+below are the regression guard for that soft render; the ink checks guard the
+parity the twin restores. (The alias could not be turned off at all; the real
+face can, which is why the alias route is still wrong.)
 
 Deliberately only the page-style courier is installed here — cosmetic
 ad-blocking has its own harness (cosmetic-test.py) and must not interfere.
@@ -309,16 +313,17 @@ def main():
         # The face is the pick's web TWIN (a real installed family) - NO
         # @font-face alias (dropped 310cdc3): the alias forced grayscale-AA
         # and blurred every web glyph. Inherited text renders at the desktop's
-        # apparent size (twin@13.158px ink = the raw 15px face) and
-        # pixel-crisp (0 grey). A SITE-styled run keeps its own numbers and
-        # its own face.
+        # apparent size (twin@13.158px ink = the raw 15px face). At that
+        # off-grid size the antialias=true pin (his 2026-08-10 decision) renders
+        # it SOFT, not the old striped-aliased render - so grey > 0 here is the
+        # regression guard. A SITE-styled run keeps its own numbers and face.
         check("unstyled text inherits the pick's web twin (real family, no @font-face)",
               "(web)" in (out.get("u") or "")
               and "More Perfect DOS VGA" in (out.get("u") or ""))
         check("inherited text renders the desktop's apparent size (twin ink = raw 15px)",
               abs((out.get("uInk") or 0) - (out.get("raw15Ink") or 0)) <= 1)
-        check("inherited text is pixel-crisp (0 antialiased grey pixels)",
-              (out.get("uGrey") if out.get("uGrey") is not None else 999) == 0)
+        check("inherited text renders soft-AA off-grid (antialias=true, not striped)",
+              (out.get("uGrey") if out.get("uGrey") is not None else 0) > 0)
         check("a page's own font styling beats the inherit layer",
               "serif" in (out.get("s") or "").split("|")[0]
               and "More Perfect DOS VGA" not in (out.get("s") or "")
@@ -422,8 +427,8 @@ def main():
               and "20px" in (out.get("s") or ""))
         check("forced site text reads the proportional x-height (twin@20 ink = raw 22.8px)",
               abs((out.get("sInk") or 0) - (out.get("raw22_8Ink") or 0)) <= 1)
-        check("forced site text is pixel-crisp (0 antialiased grey pixels)",
-              (out.get("sGrey") if out.get("sGrey") is not None else 999) == 0)
+        check("forced site text renders soft-AA off-grid (antialias=true, not striped)",
+              (out.get("sGrey") if out.get("sGrey") is not None else 0) > 0)
         check("icon-font elements are carved out of the force",
               "More Perfect DOS VGA" not in (out.get("ic") or "ERR")
               and "Material Icons" in (out.get("ic") or ""))
