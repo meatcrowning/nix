@@ -720,6 +720,14 @@ class Ollama(QObject):
     fileToolStarted = Signal(str)           # a short "read notes.md" heading
     fileToolDone = Signal(str, bool)        # outcome line, ok
 
+    # The generic per-round tool indicator (docs/DESIGN.md §9.1, §10 — every tool
+    # the model calls is shown, named, never silent). Emitted once per call for
+    # EVERY tool in a round, before it is dispatched, so a tool with no richer
+    # disclosure of its own (get_current_time, describe_self, a future one) still
+    # surfaces in the transcript. The rich blocks above (web sources, files,
+    # inline images) remain the DETAIL view for the tools that have one.
+    toolCallStarted = Signal(str)           # the tool name
+
     # The image-fetch tool, surfaced so QML can render the picture INLINE (the
     # whole point of the tool) and, on failure, an honest error line in its place
     # (docs/DESIGN.md §10). ONE data contract with QML: `imageFetchResult` carries
@@ -1682,6 +1690,9 @@ class Ollama(QObject):
                     args = json.loads(args)
                 except ValueError:
                     args = {}
+            # Name every call in the transcript, whatever it is — the generic
+            # indicator, so a tool with no richer disclosure is never silent.
+            self.toolCallStarted.emit(name or "tool")
             if name == "web_search":
                 self._tavily_search(str(args.get("query", "")).strip(),
                                     i, remaining, calls)

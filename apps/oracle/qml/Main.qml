@@ -160,6 +160,19 @@ Window {
             chatLog.setProperty(win.activeIndex, "filesPending", pending);
             chatLog.setProperty(win.activeIndex, "filesActive", pending > 0);
         }
+        // The generic per-round tool indicator: every tool the model calls is
+        // named in the transcript (docs/DESIGN.md §9.1, §10 — never silent),
+        // whether or not it also has a richer disclosure (web sources, files,
+        // images) below. Each call appends one name; the heading counts them and
+        // the ellipsis runs until the whole reply settles (onReplyDone/Error).
+        function onToolCallStarted(name) {
+            if (win.activeIndex < 0) return;
+            var cur = chatLog.get(win.activeIndex);
+            var prefix = cur.tools !== "" ? cur.tools + "\n" : "";
+            chatLog.setProperty(win.activeIndex, "tools", prefix + name);
+            chatLog.setProperty(win.activeIndex, "toolCount", cur.toolCount + 1);
+            chatLog.setProperty(win.activeIndex, "toolsActive", true);
+        }
         // The image-fetch tool: the model asked for an image, and one entry came
         // back — either a fetched picture (rendered inline) or a failure line
         // (docs/DESIGN.md §10 — the failure is shown, never dropped). ONE data
@@ -193,6 +206,7 @@ Window {
             chatLog.setProperty(win.activeIndex, "searching", false);
             chatLog.setProperty(win.activeIndex, "filesActive", false);
             chatLog.setProperty(win.activeIndex, "imagesActive", false);
+            chatLog.setProperty(win.activeIndex, "toolsActive", false);
             win.saveCurrent();          // the finished turn persists to the session
         }
         function onReplyError(reason) {
@@ -204,6 +218,7 @@ Window {
             chatLog.setProperty(win.activeIndex, "searching", false);
             chatLog.setProperty(win.activeIndex, "filesActive", false);
             chatLog.setProperty(win.activeIndex, "imagesActive", false);
+            chatLog.setProperty(win.activeIndex, "toolsActive", false);
             win.saveCurrent();
         }
         function onModelsError(reason) { win.status = "no models: " + reason; }
@@ -258,6 +273,7 @@ Window {
                          sources: t.sources, searchCount: t.searchCount,
                          files: t.files, fileCount: t.fileCount,
                          images: t.images,
+                         tools: t.tools, toolCount: t.toolCount,
                          isError: t.isError });
         }
         Sessions.save(id, title, JSON.stringify(turns));
@@ -307,6 +323,7 @@ Window {
                              files: t.files || "", fileCount: t.fileCount || 0,
                              filesActive: false, filesPending: 0,
                              images: t.images || "[]", imagesActive: false, imagesPending: 0,
+                             tools: t.tools || "", toolCount: t.toolCount || 0, toolsActive: false,
                              streaming: false, isError: !!t.isError });
         }
         win.sessionId = id;
@@ -373,13 +390,15 @@ Window {
                          sources: "", searchCount: 0, searching: false,
                          files: "", fileCount: 0, filesActive: false, filesPending: 0,
                          images: "[]", imagesActive: false, imagesPending: 0,
-                         streaming: false, isError: false });
+                         tools: "", toolCount: 0, toolsActive: false,
+                         streaming:false, isError: false });
         chatLog.append({ isUser: false, who: win.model, body: "",
                          thinking: "", thinkingActive: false, thinkTokens: 0,
                          sources: "", searchCount: 0, searching: false,
                          files: "", fileCount: 0, filesActive: false, filesPending: 0,
                          images: "[]", imagesActive: false, imagesPending: 0,
-                         streaming: true, isError: false });
+                         tools: "", toolCount: 0, toolsActive: false,
+                         streaming:true, isError: false });
         win.activeIndex = chatLog.count - 1;
         Ollama.rememberModel(win.model);   // the model he last used is next launch's default
         Ollama.send(win.model, sendPrompt, JSON.stringify(history), JSON.stringify(atts));
@@ -1277,6 +1296,9 @@ Window {
                         // Same, for the file-tool activity disclosure.
                         property bool fileUserSet: false
                         property bool fileUserOpen: false
+                        // Same, for the generic tool-activity disclosure.
+                        property bool toolUserSet: false
+                        property bool toolUserOpen: false
 
                         Column {
                             id: turnCol
@@ -1374,6 +1396,84 @@ Window {
                                                   leftMargin: 12 }
                                         wrapMode: Text.Wrap
                                         text: thinking
+                                        color: Theme.textDim
+                                    }
+                                }
+                            }
+
+                            // The generic tool activity: every tool the model
+                            // called this round, named — the same subordinated,
+                            // folded-by-default disclosure (docs/DESIGN.md §9.1,
+                            // §10 — a tool call is shown, never silent), so a tool
+                            // with no richer block of its own still appears. The
+                            // heading reads "calling tools…" while the round is in
+                            // flight and settles to "tools · N"; the body is one
+                            // tool name per line (PixelText verbatim, dim).
+                            Item {
+                                id: toolAct
+                                width: parent.width
+                                visible: !isUser && (tools !== "" || toolsActive)
+                                height: visible ? toolToggle.height + toolReveal.height : 0
+
+                                readonly property bool expanded: turn.toolUserSet ? turn.toolUserOpen
+                                                                                  : false
+
+                                Item {
+                                    id: toolToggle
+                                    width: parent.width
+                                    height: Theme.lineHeight
+                                    property int dotPhase: 0
+                                    readonly property string dots:
+                                        motion.reduceMotion ? "…" : "...".substring(0, dotPhase)
+                                    Timer {
+                                        interval: motion.ms(motion.slideMs)
+                                        running: toolsActive && !motion.reduceMotion
+                                        repeat: true
+                                        onTriggered: toolToggle.dotPhase = (toolToggle.dotPhase + 1) % 4
+                                    }
+                                    Row {
+                                        anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                                        spacing: 6
+                                        PixelText { text: toolAct.expanded ? "-" : "+"; color: Theme.textDim }
+                                        PixelText {
+                                            text: toolsActive ? "calling tools"
+                                                              : "tools · " + toolCount
+                                            color: toolsActive ? Theme.text : Theme.textDim
+                                        }
+                                        PixelText {
+                                            visible: toolsActive
+                                            text: toolToggle.dots
+                                            color: Theme.textDim
+                                        }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: { turn.toolUserOpen = !toolAct.expanded; turn.toolUserSet = true; }
+                                    }
+                                }
+
+                                Item {
+                                    id: toolReveal
+                                    anchors { top: toolToggle.bottom; left: parent.left; right: parent.right }
+                                    clip: true
+                                    height: toolAct.expanded ? toolBody.height : 0
+                                    Behavior on height {
+                                        NumberAnimation { duration: motion.ms(motion.slideMs)
+                                                          easing.type: motion.slideEasing }
+                                    }
+                                    Rectangle {
+                                        anchors { left: parent.left; leftMargin: 3
+                                                  top: parent.top; bottom: parent.bottom }
+                                        width: Theme.ctrlBorder
+                                        color: Theme.border
+                                    }
+                                    PixelText {
+                                        id: toolBody
+                                        anchors { top: parent.top; left: parent.left; right: parent.right
+                                                  leftMargin: 12 }
+                                        wrapMode: Text.Wrap
+                                        text: tools
                                         color: Theme.textDim
                                     }
                                 }
