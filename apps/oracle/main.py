@@ -21,6 +21,7 @@ way it comes off the model.
 import hashlib
 import json
 import os
+import platform
 import re
 import socket
 import sys
@@ -258,6 +259,26 @@ TIME_TOOL = {
                          "description": ("IANA timezone, e.g. 'America/Juneau' "
                                          "or 'Europe/London'. Omit for UTC.")}},
             "required": []}},
+}
+
+#: The SELF-DESCRIPTION tool, offered every turn beside the time tool. Without
+#: it a model answers "which model are you?" from whatever its training baked in
+#: — usually a different model's name — and "what machine are you on?" with a
+#: guess. This resolves both from the live process: the model id ollama is
+#: actually serving this turn with (`self._model`), and the host/OS/arch/cores/
+#: RAM read off the machine the window runs on (book or top). Handled locally in
+#: `Ollama` (no subprocess — it is all in-process facts and is host-neutral).
+SELF_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "describe_self",
+        "description": (
+            "Look up who and what you actually are right now: the exact model id "
+            "you are being served as this turn, the app you are running in, and "
+            "the machine you are running on (its hostname, operating system, CPU "
+            "architecture, core count and memory). Use this instead of guessing "
+            "your own model name or your host from your training."),
+        "parameters": {"type": "object", "properties": {}, "required": []}},
 }
 
 #: tool name -> the `op` tools/sandbox-fs.py dispatches on.
@@ -909,6 +930,54 @@ class Ollama(QObject):
                                    "content": json.dumps(result)}
         self._tool_done(remaining, calls)
 
+    def _describe_self(self, idx, remaining, calls):
+        """Report the model and machine this turn is actually running as/on.
+        Synchronous — every fact is in-process (the current-turn model id) or
+        read live off this host, so it needs no subprocess and is host-neutral.
+        The machine facts are re-derived at call time (platform / os / proc)
+        rather than hardcoded, so nothing from the private hardware notes is
+        baked into this public source."""
+        result = {
+            "model": self._model or "(none selected)",
+            "app": "chatter (the oracle ollama chat window)",
+            "host": socket.gethostname(),
+            "os": self._os_pretty(),
+            "arch": platform.machine(),
+            "cpu_logical": os.cpu_count(),
+            "memory_total": self._mem_total(),
+            "python": platform.python_version(),
+        }
+        self._tool_results[idx] = {"role": "tool", "tool_name": "describe_self",
+                                   "content": json.dumps(result)}
+        self._tool_done(remaining, calls)
+
+    @staticmethod
+    def _os_pretty():
+        """A human OS name (e.g. 'Fedora Linux Asahi Remix 42'), from
+        /etc/os-release when readable, else uname's system + release."""
+        try:
+            rel = platform.freedesktop_os_release()
+            name = rel.get("PRETTY_NAME") or rel.get("NAME")
+            if name:
+                return name
+        except (OSError, AttributeError):
+            pass
+        return (platform.system() + " " + platform.release()).strip()
+
+    @staticmethod
+    def _mem_total():
+        """Total RAM as a human string, read live from /proc/meminfo; '' if it
+        cannot be read (never guessed)."""
+        try:
+            with open("/proc/meminfo", encoding="ascii") as f:
+                for line in f:
+                    if line.startswith("MemTotal:"):
+                        kb = int(line.split()[1])
+                        return "%.1f GiB" % (kb / (1024 * 1024))
+        except (OSError, ValueError, IndexError):
+            pass
+        return ""
+
     def _post_chat(self):
         """POST the current message list, streaming, offering every tool.
         Re-entered after each tool round."""
@@ -924,7 +993,8 @@ class Ollama(QObject):
         # spelled out in apps/oracle/AGENTS.md; point oracle at a tool-capable
         # model.
         payload["tools"] = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL,
-                            IMAGE_TOOL] + list(SESSION_TOOLS) + list(MEMORY_TOOLS))
+                            SELF_TOOL, IMAGE_TOOL] + list(SESSION_TOOLS)
+                            + list(MEMORY_TOOLS))
         body = json.dumps(payload).encode("utf-8")
         req = QNetworkRequest(QUrl(OLLAMA + "/api/chat"))
         req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
@@ -1035,6 +1105,8 @@ class Ollama(QObject):
                                     i, remaining, calls)
             elif name == "get_current_time":
                 self._time_now(str(args.get("timezone", "")), i, remaining, calls)
+            elif name == "describe_self":
+                self._describe_self(i, remaining, calls)
             elif name in IMAGE_TOOL_NAMES:
                 self._fetch_image(str(args.get("url", "")).strip(),
                                   str(args.get("alt", "")).strip(),
