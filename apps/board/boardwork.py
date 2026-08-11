@@ -1162,6 +1162,11 @@ WHAT YOU MAY DO, and it is a short list:
 worker sees only this>' --where '<the files it will touch>' \\
         --model '<the tier - see WHICH TIER below>'
 
+Add `--read-only` when the piece is pure READING, RESEARCH or INVENTORY and \
+must change nothing — that spirit is bound to reads + IPC/log at dispatch (no \
+Edit/Write, no commit, no rebuild, no writes). Do NOT use it for a piece that \
+builds: an ordinary worker edits and commits as its whole job.
+
     python3 apps/board/tools/boardctl.py ask '<the question>' \\
         --context '<what makes it a question>' \\
         --option '<one way>' --option '<another way>' \\
@@ -1491,6 +1496,63 @@ DENY = ["Bash(hyprctl plugin:*)", "Bash(loginctl:*)",
         "Bash(git reset:*)", "Bash(git checkout:*)", "Bash(git restore:*)",
         "Bash(git stash:*)", "Bash(git clean:*)"]
 
+# ---- the READ-ONLY class: reads + IPC/log, nothing that changes state -------
+# A worker DISPATCHED read-only (research / inventory / inspection) is bound to
+# reads and IPC/log inspection only. The mechanism CHOSEN for read-only agent
+# access was a BEHAVIOURAL constraint, not a locked-down login
+# (`docs/agents/read-only-agent-access.md`); this is the tool-layer half of it,
+# and `READONLY_CLAUSE` below is the prompt backstop that decision names as the
+# primary defence.
+#
+# SCOPE, the sub-question the builder resolved: this binds ONLY a dispatch
+# explicitly tagged read-only (`dispatch(read_only=True)` /
+# `boardctl dispatch --read-only`), never the ordinary write-capable worker or
+# decision spirit — those edit, commit and rebuild as their whole job and are
+# unchanged. It is not, and must never become, a blanket rule over all agents.
+#
+# A read-only worker STAYS a worker: its board reporting rails
+# (`phase`/`note`/`land`/`inbox`/`turns`/`relay` via `boardctl`) are its output
+# channel and how it delivers its findings, not a mutation of either host's
+# state, so `Bash` and `boardctl` stay. What is removed is every way of changing
+# the machine under study — the Edit/Write/NotebookEdit tools are dropped (not
+# even loaded, see `context_flags`) and the state-changing commands are denied.
+# A prefix matcher is not a sandbox (raw `>` redirection cannot be denied by
+# prefix); the clause is the backstop for what the deny list cannot reach.
+READONLY_ALLOW = [t for t in ALLOW if t not in ("Edit", "Write", "NotebookEdit")]
+READONLY_DENY = DENY + [
+    "Edit", "Write", "NotebookEdit",
+    "Bash(git add:*)", "Bash(git commit:*)", "Bash(git push:*)",
+    "Bash(git merge:*)", "Bash(git rebase:*)", "Bash(git cherry-pick:*)",
+    "Bash(git am:*)", "Bash(git apply:*)", "Bash(git tag:*)",
+    "Bash(git commit-tree:*)", "Bash(git update-ref:*)",
+    "Bash(tools/git-commit.sh:*)", "Bash(./tools/git-commit.sh:*)",
+    "Bash(home-manager:*)", "Bash(nixos-rebuild:*)",
+    "Bash(rebuild-top:*)", "Bash(rebuild-air:*)",
+    "Bash(sudo:*)", "Bash(nix-pull:*)",
+    "Bash(hyprctl reload:*)", "Bash(hyprctl keyword:*)",
+    "Bash(hyprctl setprop:*)", "Bash(hyprctl dispatch:*)",
+]
+
+#: The one-block read-only constraint appended to a read-only spawn's system
+#: prompt — the behavioural backstop the recorded decision makes primary, and
+#: the ONLY enforcement on a backend whose tool layer cannot express it (hermes).
+#: Constant, so a read-only spawn's system prefix is itself a stable cache entry.
+READONLY_CLAUSE = (
+    "READ-ONLY SPIRIT. You were dispatched to READ, RESEARCH or take INVENTORY, "
+    "and you are bound to reads and IPC/log inspection ONLY. Allowed: reading "
+    "files and state (Read, `git log`/`git diff`/`git status`, `ls`), and "
+    "inspecting the running system (`qs ipc call ...`, `qs log`, `hyprctl` "
+    "queries, `journalctl`, `systemctl --user status`, `~/.cache/*.log`). "
+    "FORBIDDEN, by any means including shell redirection: editing files, "
+    "`git add`/`commit`/`push`, any rebuild or `home-manager switch`, "
+    "`hyprctl reload`/plugin swaps, writing settings or dotfiles — anything that "
+    "changes state on either host. The Edit and Write tools are not loaded and "
+    "the state-changing commands are denied; do not try to route around that. "
+    "The one exception is your board reporting rails "
+    "(`phase`/`note`/`land`/`inbox`/`turns`/`relay` via `boardctl`): that is your "
+    "output channel for the findings you were sent to gather. If the task turns "
+    "out to need a write, do NOT do it — say so in your finish note and stop.")
+
 # ------------------------------------------- what the STARTUP CONTEXT costs
 #: `ALLOW` above is a PERMISSION filter — it decides what a tool call is allowed
 #: to do, and the schema loads either way. `--tools` is the other axis: which
@@ -1519,6 +1581,11 @@ DENY = ["Bash(hyprctl plugin:*)", "Bash(loginctl:*)",
 #: either, and every skill this machine has is unreachable from a headless run.
 TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "Task",
          "WebFetch", "WebSearch"]
+
+#: The read-only spirit's `--tools` set: the same, minus the file-writing tools,
+#: so their schemas are never even loaded for a read-only run (the permission
+#: filter `READONLY_DENY` denies them too, belt-and-braces).
+READONLY_TOOLS = [t for t in TOOLS if t not in ("Edit", "Write")]
 
 #: Turn the superpowers plugin OFF for a SPIRIT, and only for a spirit.
 #: [his, 2026-07-29] *"def disable superpowers for spirits but solomon should
@@ -1566,13 +1633,20 @@ class AgentBackend:
         spawns, and must never be interpolated after variable content."""
         return []
 
-    def args(self, *, prompt, session, role, label, model=None, effort=None):
+    def args(self, *, prompt, session, role, label, model=None, effort=None,
+             read_only=False):
         """The full argv for one headless run. THE only place a backend's CLI
         is named. `session` may be None (no observable transcript -> claim-only
         card); `label` is the human name bound to the run. `model`/`effort`, when
         given, are the caller's already-resolved pick and win over the role's
         env/default — how one spawn stays independent of another's running at
-        the same time, with no process-global state between them."""
+        the same time, with no process-global state between them.
+
+        `read_only` binds this run to reads + IPC/log: the write tools are
+        dropped, the state-changing commands denied, and `READONLY_CLAUSE` is
+        appended to the system prompt (`docs/agents/read-only-agent-access.md`).
+        Only a dispatch explicitly tagged read-only sets it; the default keeps
+        the write-capable worker exactly as it was."""
         raise NotImplementedError
 
     def transcript(self, session):  # type: (str | None) -> str | None
@@ -1603,17 +1677,20 @@ class ClaudeBackend(AgentBackend):
     def system_blocks(self, role):
         return [RULES]
 
-    def args(self, *, prompt, session, role, label, model=None, effort=None):
+    def args(self, *, prompt, session, role, label, model=None, effort=None,
+             read_only=False):
         argv = ["claude", "-p", prompt]
         if session:
             argv += ["--session-id", session]
         argv += role_flags(role, model=model, effort=effort)  # his choice, capped
-        argv += context_flags(role)         # cache prefix + trimmed tools (NO superpowers)
+        argv += context_flags(role, read_only=read_only)  # cache prefix + trimmed tools
         for block in self.system_blocks(role):
             argv += ["--append-system-prompt", block]
+        if read_only:                       # the behavioural backstop, constant
+            argv += ["--append-system-prompt", READONLY_CLAUSE]
         argv += ["--permission-mode", "acceptEdits",
-                 "--allowedTools", *ALLOW,
-                 "--disallowedTools", *DENY,
+                 "--allowedTools", *(READONLY_ALLOW if read_only else ALLOW),
+                 "--disallowedTools", *(READONLY_DENY if read_only else DENY),
                  "--output-format", "text",
                  "-n", label]
         return argv
@@ -1684,10 +1761,18 @@ class HermesBackend(AgentBackend):
     def system_blocks(self, role):
         return [RULES]
 
-    def args(self, *, prompt, session, role, label, model=None, effort=None):
+    def args(self, *, prompt, session, role, label, model=None, effort=None,
+             read_only=False):
         q = prompt
         for b in self.system_blocks(role):
             q += "\n\n" + b
+        # Hermes has no `--allowedTools`/`--tools` granularity to drop just the
+        # write path while keeping file-READ and the shell a researcher needs,
+        # so on this backend the read-only constraint is the CLAUSE in the query
+        # body (the behavioural backstop the recorded decision makes primary) —
+        # there is no OS/tool backstop here, exactly as that decision accepts.
+        if read_only:
+            q += "\n\n" + READONLY_CLAUSE
         return ["hermes", "chat", "-q", q, "-Q",
                 "--source", "tool",
                 "-m", _role_model(role, model), "--provider", HERMES_PROVIDER,
@@ -1911,8 +1996,11 @@ SUBSPIRIT_FRAME = (
     "--- the chunk ---\n{prompt}\n--- end ---")
 
 
-def context_flags(role):
+def context_flags(role, read_only=False):
     """argv fragment trimming the startup context for `role`.
+
+    `read_only` swaps the trimmed tool set for `READONLY_TOOLS` (no Edit/Write),
+    so a read-only spawn never even loads the write tools' schemas.
 
     Both spawners call this for the same reason they share `ALLOW`/`DENY`: a
     flag set in one and not the other is invisible until the day the numbers
@@ -1941,7 +2029,7 @@ def context_flags(role):
     """
     argv = ["--exclude-dynamic-system-prompt-sections"]
     if role in SPIRIT_ROLES:
-        argv += ["--tools", *TOOLS,
+        argv += ["--tools", *(READONLY_TOOLS if read_only else TOOLS),
                  "--disable-slash-commands",
                  "--settings", SPIRIT_SETTINGS]
     return argv
@@ -2295,7 +2383,8 @@ def order_of(agent_id):
     return " ".join(str(rec.get("title") or "").split())
 
 
-def dispatch(task, phase="", where="", context="", cap_=None, model=""):
+def dispatch(task, phase="", where="", context="", cap_=None, model="",
+             read_only=False):
     """One piece of work -> one worker, or -> the pending queue if we are full.
 
     Returns the task record with `state` in `running` / `queued`. It never
@@ -2321,6 +2410,10 @@ def dispatch(task, phase="", where="", context="", cap_=None, model=""):
     rec = {"task": task, "phase": (phase or "").strip().lower(),
            "where": (where or "").strip(), "context": (context or "").strip(),
            "model": flag, "effort": effort, "turns": RELAY_TURNS, "relay": 0,
+           # READ-ONLY rides the record (not read at spawn time), so a task that
+           # queues above the cap and is `promote()`d later runs read-only exactly
+           # as it was dispatched. Absent/false is the write-capable default.
+           "readOnly": bool(read_only),
            "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "sent": time.time(),
            "host": os.uname().nodename,
            "order": _order_now()}
@@ -2505,7 +2598,8 @@ def _spawn_worker(rec):
         backend = get_backend_for_model(flag)
         cmd = backend.args(
             prompt=prompt, session=session, role="worker",
-            label="board: " + rec["task"][:50], model=flag, effort=effort)
+            label="board: " + rec["task"][:50], model=flag, effort=effort,
+            read_only=bool(rec.get("readOnly")))
         # BEFORE the spawn, and before the header that names it: a backend whose
         # session id we cannot choose is bound by the query instead, and the
         # binding has to be on disk before the run it identifies can appear in
@@ -2526,7 +2620,10 @@ def _spawn_worker(rec):
                BOARD_WORK_TURNS=str(budget),
                BOARD_WORK_RELAY=str(int(rec.get("relay") or 0)),
                BOARD_WORK_WHERE=rec.get("where") or "",
-               BOARD_WORK_MODEL=flag, BOARD_WORK_EFFORT=effort)
+               BOARD_WORK_MODEL=flag, BOARD_WORK_EFFORT=effort,
+               # So the worker's own shell and any hook it fires can see it is
+               # read-only; the enforcing surfaces are the argv above, not this.
+               BOARD_WORK_READONLY="1" if rec.get("readOnly") else "")
     logpath = _log_path(aid)
     # BEFORE the spawn, so a worker killed at second one still leaves a log that
     # names it and points at its transcript. See "a log that survives a kill".
