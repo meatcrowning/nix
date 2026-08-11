@@ -566,7 +566,8 @@ Scope {
                 + " drives=" + Disks.drives.length
                 + " days=" + Weather.days.length
                 + " spectrum=" + Media.spectrumLevels.length
-                + " tasks=" + Procs.rows.length;
+                + " tasks=" + Procs.rows.length
+                + " topstats=" + persist.topstats.length;
         }
     }
 
@@ -581,8 +582,10 @@ Scope {
                 + " disks=" + Disks.live
                 + " media=" + Media.live
                 + " procs=" + Procs.live
+                + " topstats=" + TopStats.live
+                + " topReachable=" + TopStats.reachable
                 + " watchers=" + (Disks._watchers.length + Media._watchers.length
-                                  + Procs._watchers.length);
+                                  + Procs._watchers.length + TopStats._watchers.length);
         }
         // Per dock tile: the height the grid gave it, the height its content
         // wants, and the difference. Negative slack = the tile is clipping;
