@@ -15,9 +15,11 @@ The smallest of the vendored apps, and deliberately so. Two things at its core:
 a **model selector** filled from the local ollama daemon's `/api/tags`, and a
 **prompt box** that sends one chat turn to `/api/chat` and shows the reply as it
 streams. It also keeps its **conversation sessions**: every conversation is a
-named, persisted transcript you can switch between (*Sessions* below). Beyond
-that, no system prompt. It remembers the **model selector** too — the model last
-used and an agent-suggested ranking (see *The model selector* below).
+named, persisted transcript you can switch between (*Sessions* below), and a
+selectable **base system prompt** — a handful of built-in presets plus your own
+editable custom text (*The base prompt* below). It remembers the **model
+selector** too — the model last used and an agent-suggested ranking (see *The
+model selector* below).
 
 ## Shape
 
@@ -107,6 +109,28 @@ newest text to the bottom only while he is already AT the bottom
 (`replyFlick.followBottom`); the moment he scrolls up mid-stream it stops forcing
 the position, and it re-arms when he scrolls back down to the bottom
 (docs/DESIGN.md §6.1 — never yank his position).
+
+## The base prompt
+
+A selectable **base system prompt** leads every turn's system message: a handful
+of built-in **presets** (`default` — no persona, the historical behaviour —
+plus `concise`, `coder`, `tutor`, `writer`) and **your own custom text**,
+picked from the *prompt* row (a boxed selector, docs/DESIGN.md §7.2, like the
+model/session pickers) with an **edit** button that opens the custom-text editor.
+
+- **`PROMPT_PRESETS`** (`main.py`) defines the presets (`id`/`label`/`text`);
+  `custom` is offered in the QML dropdown alongside them. `_base_prompt()`
+  resolves the active base (the custom text when `custom` is chosen, else the
+  preset's text, else empty).
+- **It only swaps the LEADING block.** `_system_prompt` prepends the resolved
+  base ahead of the time line, the injected memory block, and the recall/save
+  guidance — **all of which run regardless of which base is active**. A preset
+  changes the model's persona; it never turns off memory recall.
+- **Persisted** like `last-model`, no rebuild: `~/.config/oracle/system-prompt.json`,
+  `{"choice": <preset id or "custom">, "custom": <your text>}`. The custom text
+  is kept even while a preset is active. `setPromptChoice`/`setCustomPrompt`
+  (slots) write it; `promptPresets`/`promptChoice`/`customPrompt` (properties)
+  feed the UI. Malformed/absent → the `default` preset.
 
 ## Sessions
 
