@@ -102,7 +102,9 @@ IMAGE_TOOL = {
             "photo, chart, diagram or logo, or when showing an image makes your "
             "answer clearer. Pass the DIRECT url of an image file (one that "
             "returns image data — typically ending in .png/.jpg/.jpeg/.gif/.webp); "
-            "a link to a web PAGE will not work. The image is shown to him "
+            "a link to a web PAGE will not work. Do NOT guess or invent an image "
+            "URL — if you do not already have a real one, call search_images "
+            "first and pass a url it returns. The image is shown to him "
             "automatically, so you need not describe it unless he asks. If the "
             "fetch fails you get an error back and nothing is shown — tell him."),
         "parameters": {"type": "object", "properties": {
@@ -113,6 +115,31 @@ IMAGE_TOOL = {
             "required": ["url"]}},
 }
 IMAGE_TOOL_NAMES = {"fetch_image"}
+
+#: The IMAGE-SEARCH tool. fetch_image can only GET a URL the model already has,
+#: and a model asked for "a picture of X" tends to GUESS a plausible-looking
+#: image URL that 404s — the fetch then honestly fails, but no picture shows.
+#: This closes that gap: it searches the web (Tavily, include_images) and returns
+#: REAL direct image URLs the model can then hand straight to fetch_image, so a
+#: "show me X" actually resolves instead of relying on a hallucinated link.
+SEARCH_IMAGE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "search_images",
+        "description": (
+            "Find real image URLs on the web for a subject. Use this FIRST "
+            "whenever he asks to see a picture/photo/logo of something and you do "
+            "not already have a known-good direct image URL — do NOT guess or "
+            "invent an image URL, they will not load. Returns a list of direct "
+            "image URLs (with short descriptions). Pick the best match and pass "
+            "its url to fetch_image to display it."),
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string",
+                      "description": "What to find an image of, e.g. 'spongebob "
+                      "squarepants' or 'mount fuji at sunrise'."}},
+            "required": ["query"]}},
+}
+SEARCH_IMAGE_TOOL_NAMES = {"search_images"}
 
 #: Where fetched images land — LOCAL to the machine running the window (not top,
 #: unlike the sandbox/sessions/memory), because a QML Image loads a local file
@@ -1011,8 +1038,8 @@ class Ollama(QObject):
         # spelled out in apps/oracle/AGENTS.md; point oracle at a tool-capable
         # model.
         payload["tools"] = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL,
-                            SELF_TOOL, IMAGE_TOOL] + list(SESSION_TOOLS)
-                            + list(MEMORY_TOOLS))
+                            SELF_TOOL, IMAGE_TOOL, SEARCH_IMAGE_TOOL]
+                            + list(SESSION_TOOLS) + list(MEMORY_TOOLS))
         body = json.dumps(payload).encode("utf-8")
         req = QNetworkRequest(QUrl(OLLAMA + "/api/chat"))
         req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
@@ -1129,6 +1156,9 @@ class Ollama(QObject):
                 self._fetch_image(str(args.get("url", "")).strip(),
                                   str(args.get("alt", "")).strip(),
                                   i, remaining, calls)
+            elif name in SEARCH_IMAGE_TOOL_NAMES:
+                self._search_images(str(args.get("query", "")).strip(),
+                                    i, remaining, calls)
             elif name in FILE_TOOL_NAMES:
                 self._run_fs_tool(name, args, i, remaining, calls)
             elif name in SESSION_TOOL_NAMES:
@@ -1201,6 +1231,84 @@ class Ollama(QObject):
             self.webSearchError.emit(query, str(e))
             self._tool_results[idx] = {
                 "role": "tool", "tool_name": "web_search",
+                "content": json.dumps({"error": str(e)})}
+        finally:
+            reply.deleteLater()
+            self._tool_done(remaining, calls)
+
+    def _search_images(self, query, idx, remaining, calls):
+        """Find real direct image URLs for a subject via Tavily (include_images),
+        so the model can hand a KNOWN-GOOD url to fetch_image instead of guessing
+        one that 404s. Reuses the web-search disclosure signals for its UI."""
+        key = tavily_key()
+        if not key:
+            self.webSearchError.emit(query, "no Tavily API key configured")
+            self._tool_results[idx] = {
+                "role": "tool", "tool_name": "search_images",
+                "content": json.dumps({"error": "image search unavailable: no "
+                                       "Tavily API key configured"})}
+            self._tool_done(remaining, calls)
+            return
+        self.webSearchStarted.emit(query)
+        body = json.dumps({
+            "api_key": key,
+            "query": query,
+            "search_depth": "basic",
+            "include_answer": False,
+            "include_images": True,
+            "include_image_descriptions": True,
+            "max_results": 5,
+        }).encode("utf-8")
+        req = QNetworkRequest(QUrl(TAVILY_URL))
+        req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
+                      "application/json")
+        reply = self._nam.post(req, body)
+        reply.finished.connect(
+            lambda: self._on_search_images(reply, query, idx, remaining, calls))
+
+    def _on_search_images(self, reply, query, idx, remaining, calls):
+        if not self._busy:            # turn was cancelled mid-search
+            reply.deleteLater()
+            return
+        try:
+            data = bytes(reply.readAll().data())
+            if reply.error() != QNetworkReply.NetworkError.NoError:
+                msg = reply.errorString()
+                try:
+                    o = json.loads(data or b"{}")
+                    if isinstance(o, dict) and (o.get("error") or o.get("detail")):
+                        msg = str(o.get("error") or o.get("detail"))
+                except ValueError:
+                    pass
+                self.webSearchError.emit(query, msg)
+                self._tool_results[idx] = {
+                    "role": "tool", "tool_name": "search_images",
+                    "content": json.dumps({"error": "image search failed: " + msg})}
+                return
+            obj = json.loads(data or b"{}")
+            images = []
+            for im in (obj.get("images") or []):
+                if isinstance(im, dict):
+                    url = str(im.get("url", "")).strip()
+                    desc = str(im.get("description", "")).strip()
+                else:
+                    url, desc = str(im).strip(), ""
+                if url:
+                    images.append({"url": url, "description": desc})
+            self._tool_results[idx] = {
+                "role": "tool", "tool_name": "search_images",
+                "content": json.dumps({"query": query, "images": images})
+                if images else json.dumps(
+                    {"query": query, "images": [],
+                     "note": "no images found for this query"})}
+            md = "\n".join(
+                "- [" + (im["description"] or im["url"]) + "](" + im["url"] + ")"
+                for im in images) or "no images found"
+            self.webSearchDone.emit(query, md, len(images))
+        except (ValueError, TypeError) as e:
+            self.webSearchError.emit(query, str(e))
+            self._tool_results[idx] = {
+                "role": "tool", "tool_name": "search_images",
                 "content": json.dumps({"error": str(e)})}
         finally:
             reply.deleteLater()
