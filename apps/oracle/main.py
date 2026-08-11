@@ -182,35 +182,44 @@ IMAGE_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
 #: "always available to the model"). Reading and manipulation both, but every
 #: one runs THROUGH tools/sandbox-fs.py against a jailed root the model cannot
 #: escape (see FS below and apps/oracle/AGENTS.md). TWO jails: the READ-ONLY
-#: tools (list_dir/read_file/find_files/search_text/show_tree) reach the user's
-#: whole HOME so the model can read his files, their paths home-relative; the
-#: MUTATING tools (write/edit/move/delete/make_dir) stay confined to the sandbox,
-#: their paths sandbox-relative. Descriptions carry that split, and note reads
-#: are paginated so the model asks for more rather than assuming a short read is
-#: the whole file.
+#: tools (list_dir/read_file/find_files/search_text/show_tree) reach the WHOLE
+#: filesystem (root '/', his ask, widened 2026-08-11 from just his home) of
+#: EITHER machine — they take an optional `host` ("top"/"book") so the model can
+#: read book's files from a top window and top's from a book window, not just
+#: whichever machine its own compute happens to run on; their paths are
+#: root-relative. The MUTATING tools (write/edit/move/delete/make_dir) stay
+#: confined to the sandbox on top, their paths sandbox-relative, and take no
+#: `host` — there is only one sandbox and it always lives on top. Descriptions
+#: carry that split, and note reads are paginated so the model asks for more
+#: rather than assuming a short read is the whole file.
 FILE_TOOLS = [
     {"type": "function", "function": {
         "name": "list_dir",
-        "description": ("List a directory of the user's files. Paths are relative "
-                        "to their home directory; '.' is home. Read-only. Long "
-                        "listings are truncated."),
+        "description": ("List a directory anywhere on the filesystem (top or "
+                        "book). Paths are relative to the filesystem root '/'; "
+                        "'.' is '/'. Read-only. Long listings are truncated."),
         "parameters": {"type": "object", "properties": {
             "path": {"type": "string",
-                     "description": "Directory to list, relative to the user's home. Default '.'."}},
+                     "description": "Directory to list, relative to '/'. Default '.'."},
+            "host": {"type": "string", "enum": ["top", "book"],
+                     "description": "Which machine to read. Default 'top'."}},
             "required": []}}},
     {"type": "function", "function": {
         "name": "read_file",
-        "description": ("Read a text file from the user's files (paths relative to "
-                        "their home directory; read-only). Returns at most a few "
-                        "hundred lines; if `truncated` is true read again with "
-                        "`offset` set to `next_offset` to page through the rest."),
+        "description": ("Read a text file from anywhere on the filesystem (top or "
+                        "book; paths relative to '/'; read-only). Returns at most "
+                        "a few hundred lines; if `truncated` is true read again "
+                        "with `offset` set to `next_offset` to page through the "
+                        "rest."),
         "parameters": {"type": "object", "properties": {
             "path": {"type": "string",
-                     "description": "File to read, relative to the user's home."},
+                     "description": "File to read, relative to '/'."},
             "offset": {"type": "integer",
                        "description": "0-based line to start at. Default 0."},
             "limit": {"type": "integer",
-                      "description": "Max lines to return this call."}},
+                      "description": "Max lines to return this call."},
+            "host": {"type": "string", "enum": ["top", "book"],
+                     "description": "Which machine to read. Default 'top'."}},
             "required": ["path"]}}},
     {"type": "function", "function": {
         "name": "write_file",
@@ -256,42 +265,49 @@ FILE_TOOLS = [
             "required": ["path"]}}},
     {"type": "function", "function": {
         "name": "find_files",
-        "description": ("Find files and directories in the user's files by shell "
-                        "glob pattern (paths relative to their home; read-only). "
-                        "Use '**' to match across subdirectories (e.g. '**/*.py'). "
-                        "Returns matching paths; long result lists are truncated."),
+        "description": ("Find files and directories anywhere on the filesystem "
+                        "(top or book) by shell glob pattern (paths relative to "
+                        "'/'; read-only). Use '**' to match across subdirectories "
+                        "(e.g. '**/*.py'). Returns matching paths; long result "
+                        "lists are truncated."),
         "parameters": {"type": "object", "properties": {
             "pattern": {"type": "string",
                         "description": "Glob, e.g. '*.md' or '**/*.py'."},
             "path": {"type": "string",
-                     "description": "Directory to search under, relative to the user's home. Default '.'."}},
+                     "description": "Directory to search under, relative to '/'. Default '.'."},
+            "host": {"type": "string", "enum": ["top", "book"],
+                     "description": "Which machine to search. Default 'top'."}},
             "required": ["pattern"]}}},
     {"type": "function", "function": {
         "name": "search_text",
-        "description": ("Search the contents of the user's files for a regular "
-                        "expression (like grep; paths relative to their home, "
-                        "read-only). Returns matching lines with their file and "
-                        "line number. Binary files are skipped and long result "
-                        "sets are truncated."),
+        "description": ("Search file contents anywhere on the filesystem (top or "
+                        "book) for a regular expression (like grep; paths relative "
+                        "to '/', read-only). Returns matching lines with their "
+                        "file and line number. Binary files are skipped and long "
+                        "result sets are truncated."),
         "parameters": {"type": "object", "properties": {
             "pattern": {"type": "string", "description": "Regular expression to search for."},
             "path": {"type": "string",
-                     "description": "File or directory to search, relative to the user's home. Default '.'."},
+                     "description": "File or directory to search, relative to '/'. Default '.'."},
             "glob": {"type": "string",
                      "description": "Only search files whose name matches this glob, e.g. '*.py'."},
             "ignore_case": {"type": "boolean",
-                            "description": "Case-insensitive match."}},
+                            "description": "Case-insensitive match."},
+            "host": {"type": "string", "enum": ["top", "book"],
+                     "description": "Which machine to search. Default 'top'."}},
             "required": ["pattern"]}}},
     {"type": "function", "function": {
         "name": "show_tree",
-        "description": ("Show the directory structure under a path in the user's "
-                        "files as an indented tree (paths relative to their home; "
-                        "read-only). Depth- and entry-limited."),
+        "description": ("Show the directory structure under a path anywhere on "
+                        "the filesystem (top or book) as an indented tree (paths "
+                        "relative to '/'; read-only). Depth- and entry-limited."),
         "parameters": {"type": "object", "properties": {
             "path": {"type": "string",
-                     "description": "Directory to show, relative to the user's home. Default '.'."},
+                     "description": "Directory to show, relative to '/'. Default '.'."},
             "depth": {"type": "integer",
-                      "description": "How many levels deep to descend. Default 5."}},
+                      "description": "How many levels deep to descend. Default 5."},
+            "host": {"type": "string", "enum": ["top", "book"],
+                     "description": "Which machine to show. Default 'top'."}},
             "required": []}}},
 ]
 
@@ -346,6 +362,11 @@ FILE_OP = {"list_dir": "list", "read_file": "read", "write_file": "write",
            "make_dir": "mkdir", "find_files": "glob", "search_text": "grep",
            "show_tree": "tree"}
 FILE_TOOL_NAMES = set(FILE_OP)
+
+#: The READ-ONLY tool names — these five (and only these) accept a `host`
+#: argument, since only they resolve against the whole-filesystem READ_ROOT
+#: rather than the single sandbox on top (see `Ollama._fs_argv`).
+FILE_READ_TOOL_NAMES = {"list_dir", "read_file", "find_files", "search_text", "show_tree"}
 
 #: The SESSION-READ tools (list_sessions / read_session), offered beside the
 #: file and web tools so the model can reach past conversations he has had with
@@ -547,16 +568,18 @@ CHAT_NUM_CTX = 32768
 SANDBOX_ROOT = os.path.expanduser(
     os.environ.get("ORACLE_SANDBOX", "~/.local/share/oracle/sandbox"))
 
-#: The READ jail — WIDER than SANDBOX_ROOT. The read-only file ops (list_dir/
+#: The READ jail — WIDER than SANDBOX_ROOT: the whole filesystem, root '/'
+#: (widened from just his home, 2026-08-11). The read-only file ops (list_dir/
 #: read_file/find_files/search_text/show_tree) resolve against this instead, so
-#: the model can READ the user's files (his ask, 2026-08-11) while write/edit/
-#: move/delete stay confined to SANDBOX_ROOT. Defaults to his home on the host
-#: oracle's compute lives on (top); the read ops still cannot escape it (symlinks
-#: included — tools/sandbox-fs.py enforces it per-root). Point ORACLE_READ_ROOT
-#: at `/` to widen further, or at SANDBOX_ROOT to restore the old jailed-reads
-#: behaviour. Absolute /home/lam/... (identical on both, user `lam`) so it needs
-#: no tilde-expansion when handed to top over ssh.
-READ_ROOT = os.path.expanduser(os.environ.get("ORACLE_READ_ROOT", "~"))
+#: the model can READ anything on the machine while write/edit/move/delete stay
+#: confined to SANDBOX_ROOT; the read ops still cannot escape THIS root either
+#: (symlinks included — tools/sandbox-fs.py enforces it per-root), '/' just
+#: happens to make that a no-op. Point ORACLE_READ_ROOT at SANDBOX_ROOT to
+#: restore the old jailed-reads behaviour, or at his home to restore the
+#: 2026-08-11 scope. Applies on whichever machine the executor actually runs
+#: on — see `host` on the read tools and `Ollama._fs_argv` for reading the
+#: OTHER machine from here.
+READ_ROOT = os.path.expanduser(os.environ.get("ORACLE_READ_ROOT", "/"))
 
 #: The jailed executor. Same absolute path on top and book (the repo lives at
 #: /home/lam/nix on both), so `python3 <this>` runs unchanged locally on top or
@@ -2180,31 +2203,53 @@ class Ollama(QObject):
     # ---- the file tools (jailed, on top) ----
 
     @staticmethod
-    def _fs_argv():
-        """The command that runs one file op through tools/sandbox-fs.py against
-        the sandbox on top. On `top` it is local; on `book` it goes over the same
-        ssh master tools/ollama-tunnel.sh holds open (OLLAMA_SSH*), so the tools
-        always operate on top's filesystem. The op JSON is written to stdin."""
-        if ON_BOOK:
-            host = os.environ.get("OLLAMA_SSH_HOST", "top")
-            ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
-            argv = [ssh, "-o", "BatchMode=yes"]
+    def _fs_argv(target_host=None):
+        """The command that runs one file op through tools/sandbox-fs.py.
+
+        Mutating ops, and read ops with no explicit `target_host`, always land
+        on `top` — unchanged from before, since the sandbox only ever lives
+        there: local when this window IS top, over the ssh master
+        tools/ollama-tunnel.sh already holds open (OLLAMA_SSH*) when it is
+        book. A read-only op may instead ask for the OTHER machine via
+        `target_host` ("top"/"book", his ask, 2026-08-11): if that is the
+        machine this window already runs on it is once again a local call
+        (SANDBOX_ROOT/READ_ROOT are the same paths on both — user `lam`,
+        identical layout); otherwise it is a fresh ssh call to that host over
+        the tailnet (both directions work — MagicDNS `top`/`book`; see
+        AGENTS.md "Off-LAN: the tailnet"), reusing the tunnel's control master
+        only for the one hop (book asking for top) that already has one open.
+        The op JSON is written to stdin regardless of which branch runs."""
+        host = target_host if target_host in ("top", "book") else "top"
+        local = "book" if ON_BOOK else "top"
+        if host == local:
+            return [sys.executable, FS_SCRIPT, SANDBOX_ROOT, READ_ROOT]
+        ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+        argv = [ssh, "-o", "BatchMode=yes"]
+        if ON_BOOK and host == "top":
+            ssh_host = os.environ.get("OLLAMA_SSH_HOST", "top")
             ctl = os.environ.get("OLLAMA_SSH_CTL")
             if ctl:
                 argv += ["-o", "ControlMaster=auto", "-o", "ControlPersist=30",
                          "-o", "ControlPath=" + ctl]
-            argv += [host, "python3", shlex.quote(FS_SCRIPT),
-                     shlex.quote(SANDBOX_ROOT), shlex.quote(READ_ROOT)]
-            return argv
-        return [sys.executable, FS_SCRIPT, SANDBOX_ROOT, READ_ROOT]
+        else:
+            ssh_host = host
+        argv += [ssh_host, "python3", shlex.quote(FS_SCRIPT),
+                 shlex.quote(SANDBOX_ROOT), shlex.quote(READ_ROOT)]
+        return argv
 
     def _run_fs_tool(self, name, args, idx, remaining, calls):
         """Run one file tool as an async QProcess, feeding the JSON result back
         into the tool loop exactly as the web search does. Concurrent with any
-        other call in the round."""
+        other call in the round. `host`, on a read-only tool, is stripped from
+        the args before they become the op request (sandbox-fs.py doesn't know
+        about it) and instead selects which machine `_fs_argv` targets."""
         req = {k: v for k, v in args.items()} if isinstance(args, dict) else {}
+        target_host = str(req.pop("host", "") or "").strip().lower() or None
+        if name not in FILE_READ_TOOL_NAMES:
+            target_host = None   # mutating tools have no host arg; ignore stray input
         req["op"] = FILE_OP[name]
         self.fileToolStarted.emit(self._fs_heading(name, args))
+        argv = self._fs_argv(target_host)
         proc = QProcess(self)
         self._procs.append(proc)
 
@@ -2228,7 +2273,7 @@ class Ollama(QObject):
 
         proc.finished.connect(finished)
         proc.errorOccurred.connect(lambda *_: None)  # surfaced through finished
-        proc.start(self._fs_argv()[0], self._fs_argv()[1:])
+        proc.start(argv[0], argv[1:])
         proc.write(json.dumps(req).encode("utf-8"))
         proc.closeWriteChannel()
 
@@ -2329,15 +2374,17 @@ class Ollama(QObject):
     @staticmethod
     def _fs_heading(name, args):
         a = args if isinstance(args, dict) else {}
+        host = str(a.get("host") or "").strip().lower()
+        suffix = " (book)" if name in FILE_READ_TOOL_NAMES and host == "book" else ""
         if name in ("find_files", "search_text"):
             verb = "finding" if name == "find_files" else "searching"
-            return verb + " " + str(a.get("pattern") or "")
+            return verb + " " + str(a.get("pattern") or "") + suffix
         p = str(a.get("path") or a.get("src") or ".")
         verb = {"list_dir": "listing", "read_file": "reading",
                 "write_file": "writing", "edit_file": "editing",
                 "move_path": "moving", "delete_path": "deleting",
                 "make_dir": "creating", "show_tree": "tree of"}.get(name, name)
-        return verb + " " + p
+        return verb + " " + p + suffix
 
     @staticmethod
     def _fs_outcome(name, args, result):

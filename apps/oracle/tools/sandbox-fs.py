@@ -8,17 +8,24 @@ THROUGH this script, and this script is the jail: it takes a WRITE root as
 argv[1] and refuses to write, edit, move or delete anything outside it, symlinks
 included. The MUTATING ops stay jailed to that sandbox; the READ-ONLY ops
 (list/read/glob/grep/tree — see READ_OPS) resolve against an optional wider READ
-root passed as argv[2], so the model gets read access to the user's files (his
-ask, 2026-08-11) while writes cannot escape the sandbox. Both roots are widened
-by pointing `ORACLE_SANDBOX` / `ORACLE_READ_ROOT` elsewhere; with no argv[2] the
-read ops fall back to the write root (older executor, one-path behaviour).
+root passed as argv[2], so the model gets read access to the FULL filesystem
+(root '/', his ask, widened 2026-08-11 from just his home) while writes cannot
+escape the sandbox. Both roots are widened/narrowed by pointing `ORACLE_SANDBOX`
+/ `ORACLE_READ_ROOT` elsewhere; with no argv[2] the read ops fall back to the
+write root (older executor, one-path behaviour — the fallback a caller relies
+on when the OTHER host hasn't pulled the argv[2] change yet).
 
-WHERE it runs: oracle's compute is ollama on `top`, so the sandbox lives on top
-too. On `top` oracle runs this locally; on `book` oracle runs it over the SAME
-ssh master that tools/ollama-tunnel.sh already holds open — `ssh top python3
-<this> <root>` — so the tools operate on top's filesystem regardless of which
-machine the window is on. This file is pure stdlib on purpose: top's system
-python3 runs it over ssh with nothing installed.
+WHERE it runs: THIS invocation runs on whichever host it was started on — that
+is the whole point. The WRITE root (sandbox) only ever exists on `top`, so
+mutating ops always run there: locally when oracle's window IS top, over the
+ssh master tools/ollama-tunnel.sh already holds open when it is book. The
+READ-ONLY ops can target EITHER machine: oracle's main.py (`Ollama._fs_argv`)
+picks which host to invoke THIS script on per read call — local when it's the
+same machine the window runs on, a fresh ssh call over the tailnet (both
+directions: `ssh top` from book, `ssh book` from top) otherwise — so the model
+can read book's filesystem from a top window and top's from a book window. This
+file is pure stdlib on purpose: the target's system python3 runs it over ssh
+with nothing installed.
 
 PROTOCOL: one JSON request object on stdin, one JSON result object on stdout.
     {"op": "read", "path": "notes.md", "offset": 0, "limit": 300}
@@ -56,6 +63,18 @@ def fail(reason):
     sys.exit(0)
 
 
+def _under(root, path):
+    """True iff `path` is exactly `root` or lives under it, as plain strings.
+
+    `root + os.sep` is the obvious containment prefix, except when root IS the
+    filesystem root ("/"): then it is "//", which no absolute path starts
+    with, so a jail widened to "/" (his ask, 2026-08-11) rejected every read
+    with "path escapes the sandbox" until this normalizes the root to already
+    carry its trailing separator first."""
+    root_with_sep = root if root.endswith(os.sep) else root + os.sep
+    return path == root or path.startswith(root_with_sep)
+
+
 def resolve(root, rel, *, must_exist):
     """Map a model-supplied path to an absolute path INSIDE the jail, or fail.
 
@@ -69,7 +88,7 @@ def resolve(root, rel, *, must_exist):
     else:
         target = os.path.normpath(os.path.join(root, rel.lstrip("/")))
     real = os.path.realpath(target)
-    if real != root and not real.startswith(root + os.sep):
+    if not _under(root, real):
         fail("path escapes the sandbox: " + rel)
     if must_exist and not os.path.lexists(real):
         fail("no such path: " + rel)
@@ -89,8 +108,7 @@ def contained(root, path):
     symlinked FILE could still resolve outside the jail, so every candidate is
     checked here before it is read or reported — same realpath test `resolve`
     uses, never weakened."""
-    real = os.path.realpath(path)
-    return real == root or real.startswith(root + os.sep)
+    return _under(root, os.path.realpath(path))
 
 
 def _is_binary(path):
@@ -442,11 +460,12 @@ OPS = {"list": op_list, "read": op_read, "write": op_write, "edit": op_edit,
        "glob": op_glob, "grep": op_grep, "tree": op_tree}
 
 # The READ-ONLY ops. They may reach a WIDER root than the mutating ops: the
-# model gets read access to the user's files (his ask, 2026-08-11) while writes
-# stay confined to the sandbox. argv[1] is the WRITE root (the sandbox); an
-# optional argv[2] is the READ root (his home). Absent argv[2], read ops fall
-# back to the write root — so an older executor over ssh (top not yet pulled)
-# just keeps the old jailed-both behaviour rather than breaking.
+# model gets read access to the whole filesystem, root '/' (his ask,
+# 2026-08-11) while writes stay confined to the sandbox. argv[1] is the WRITE
+# root (the sandbox); an optional argv[2] is the READ root ('/' by default).
+# Absent argv[2], read ops fall back to the write root — so an older executor
+# over ssh (the OTHER host not yet pulled) just keeps the old jailed-both
+# behaviour rather than breaking.
 READ_OPS = {"list", "read", "glob", "grep", "tree"}
 
 
