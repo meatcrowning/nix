@@ -522,11 +522,14 @@ The style it carries has three parts (all computed by `DarkMode`):
   the desktop's. The family is the pick's **size-adjusted WEB TWIN**
   (`_adj_fam`), a real installed face, never a `src:local()` `@font-face`
   alias: Chromium grayscale-antialiases any `@font-face`-resolved face and
-  ignores the fontconfig `antialias=false` pin, so the alias SOFTENED every
-  web glyph (measured offscreen 2026-08-09: plain family 0 grey pixels at
-  every size, the identical face via `local()` @font-face ~60-80% grey).
-  Naming a real family directly is the only way the antialias pin reaches
-  it — crisp, pixel-exact, matching goetia and the rest of the desktop.
+  ignores the fontconfig antialias pin, forcing AA always-on (measured
+  offscreen 2026-08-09: the identical face via `local()` @font-face ~60-80%
+  grey, ungovernable). Naming a real family directly is the only way surfer's
+  fontconfig pin reaches the face at all — and since his 2026-08-10 board
+  decision that pin is `antialias=true` (`home/prog/surfer.nix`), so the twin
+  renders **soft** off the pixel grid (matching the panel/goetia look he calls
+  crisp) instead of Chromium's autohint stripes, and stays pixel-exact at
+  integral-grid sizes. See the dark-mode force bullet below.
 - **the dark filter** (global toggle, per-site exceptions), top frame only;
 - **the system-font force** — the desktop family imposed on page text so ALL
   of a page reads in the pick, not just the runs a site left unstyled.
@@ -538,23 +541,25 @@ The style it carries has three parts (all computed by `DarkMode`):
   excluded by class so pictogram fonts don't render as tofu. The family it
   imposes is the pick's **size-adjusted WEB TWIN** (`_adj_fam`), same as the
   inherit layer, for the same reason: a `src:local()` `@font-face` alias
-  forced grayscale-AA and blurred the forced text (`970147b`'s
-  `size-adjust:114%` alias was that route; dropped 2026-08-09, `310cdc3`,
-  for crisp, pixel-exact text — verified by `pagestyle-test.py`, which
-  canvas-measures the forced face at the site's own size and asserts 0 grey
-  pixels). The parity the alias bought is back via a **font-file twin**: the
-  default pick ships a second installed family, " (web)", whose outlines,
-  advances and vertical metrics are pre-scaled 1.14x by
-  `home/pkgs/desktop/font-files/scale-vga.py` (installed by `font.nix`,
-  with its own fontconfig pins). It is a REAL face, so the antialias=false
-  pin reaches it — site text at the site's own sizes reads the proportional
-  x-height (~51% of em, against the pixel face's ~44%) AND pixel-crisp
-  (measured offscreen 2026-08-09: the twin came back 0 grey, pixel-identical
-  to the plain face at the scaled size). The inherit layer divides its px by
-  the same factor, so inherited text still lands on the desktop's device
-  pixels. Only the default pick has a twin; a different pick (Botis 4x6,
-  Phenex) imposes the plain face, unadjusted — its ratio would need its own
-  measured factor + twin.
+  forced grayscale-AA that could not be turned off and blurred the forced
+  text (`970147b`'s `size-adjust:114%` alias was that route; dropped
+  2026-08-09, `310cdc3`). The parity the alias bought is back via a
+  **font-file twin**: the default pick ships a second installed family,
+  " (web)", whose outlines, advances and vertical metrics are pre-scaled 1.14x
+  by `home/pkgs/desktop/font-files/scale-vga.py` (installed by `font.nix`,
+  with its own fontconfig pins). It is a REAL face, so surfer's own
+  fontconfig pin governs its AA — and since his 2026-08-10 board decision that
+  pin is **`antialias=true`** (`fcConf` in `home/prog/surfer.nix`): forced at
+  each site's OWN (mostly off-grid) size, an aliased pixel face is autohint-
+  striped by Chromium — the "weirdly rendered" look — so the twin renders soft
+  off-grid to match the panel/goetia look, staying pixel-exact only at
+  integral-grid sizes. Site text at the site's own sizes reads the
+  proportional x-height (~51% of em, against the pixel face's ~44%);
+  `pagestyle-test.py` canvas-measures the forced face and asserts grey > 0
+  (soft, not striped). The inherit layer divides its px by the same factor,
+  so inherited text still lands on the desktop's device pixels. Only the
+  default pick has a twin; a different pick (Botis 4x6 — already
+  `antialias=true` in surfer — Phenex) imposes the plain face, unadjusted.
 
 The plumbing:
 
