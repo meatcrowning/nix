@@ -6,6 +6,11 @@ source directory, module/file names, `ORACLE_SANDBOX`, and the runtime data
 paths (`~/.local/share/oracle/{sandbox,sessions}`) all keep the `oracle` name
 on purpose, so existing sessions and the sandbox jail need no migration.
 
+**Commit messages for this app say `chatter:`, not `oracle:`** (his call) —
+the subject line and any human-facing prose about it use the presented name,
+matching every other reference he reads. Only the directory and identifiers
+(`apps/oracle`, `ORACLE_*`, module names) keep `oracle`; those are internal.
+
 The smallest of the vendored apps, and deliberately so. Two things at its core:
 a **model selector** filled from the local ollama daemon's `/api/tags`, and a
 **prompt box** that sends one chat turn to `/api/chat` and shows the reply as it
