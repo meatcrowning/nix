@@ -25,6 +25,8 @@ model as the tool result, never a crash (docs/DESIGN.md §10: report, don't
 silently fail). Results are CAPPED so a giant file or directory cannot blow the
 model's context window (READ_MAX_LINES / READ_MAX_BYTES / LIST_MAX_ENTRIES).
 """
+import base64
+import binascii
 import fnmatch
 import json
 import os
@@ -264,6 +266,35 @@ def op_mkdir(root, req):
     return {"ok": True, "path": rel_to_root(root, p)}
 
 
+def op_put(root, req):
+    """Stage raw bytes into the sandbox: decode base64 `data` and write it at
+    `path`. Not a model tool — it has no schema in FILE_TOOLS and no name in
+    FILE_OP, so a model cannot call it; oracle's OWN attachment-staging code
+    (main.py `_stage_attachments`) uses it to drop a file the user dragged onto
+    the window INTO the sandbox, so the model's read/edit/write tools can then
+    reach the full file. Same jail (`resolve`) and same write cap as op_write,
+    but binary-safe (op_write only takes UTF-8 text)."""
+    data_b64 = req.get("data", "")
+    if not isinstance(data_b64, str):
+        fail("data must be a base64 string")
+    try:
+        data = base64.b64decode(data_b64, validate=True)
+    except (ValueError, binascii.Error):
+        fail("data is not valid base64")
+    if len(data) > WRITE_MAX_BYTES:
+        fail("refusing to stage %d bytes (cap %d)" % (len(data), WRITE_MAX_BYTES))
+    p = resolve(root, req.get("path", ""), must_exist=False)
+    if os.path.isdir(p):
+        fail("is a directory: " + req.get("path", ""))
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "wb") as f:
+            f.write(data)
+    except OSError as e:
+        fail("cannot stage: " + str(e))
+    return {"ok": True, "path": rel_to_root(root, p), "bytes": len(data)}
+
+
 def op_glob(root, req):
     """Find files/dirs by shell glob, sandbox-relative. `**` recurses. Results
     are the matching paths (relative to the root), capped."""
@@ -404,7 +435,7 @@ def op_tree(root, req):
 
 
 OPS = {"list": op_list, "read": op_read, "write": op_write, "edit": op_edit,
-       "move": op_move, "delete": op_delete, "mkdir": op_mkdir,
+       "move": op_move, "delete": op_delete, "mkdir": op_mkdir, "put": op_put,
        "glob": op_glob, "grep": op_grep, "tree": op_tree}
 
 

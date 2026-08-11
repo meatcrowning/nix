@@ -244,6 +244,17 @@ size. Synchronous and host-neutral; every fact is in-process or read live off th
 host, and the machine facts are re-derived (never the private hardware notes),
 keeping this public source clean.
 
+**Honest capabilities every turn (`CAPABILITY_NOTE`).** A model does not call
+`describe_self` on its own, so a static, honest summary of what the app actually
+lets it do — the tool families it HAS, and that it has **no arbitrary code/shell
+execution** and no general internet beyond web search / image fetch — is
+appended to every system prompt (docs/DESIGN.md §10, honesty in both
+directions). It exists because gemma4:e4b told him it "has no code-execution
+env": true, but reached for blind rather than from its real inventory. A
+sandboxed code-runner is deliberately NOT added — running untrusted model output
+on `top` is a security decision for him, raised as a board question, not a
+default; `describe_self` still gives the exact live tool list on demand.
+
 ## Talking to ollama
 
 `OLLAMA` defaults to `http://127.0.0.1:11434` (override with `$OLLAMA_HOST`).
@@ -365,10 +376,26 @@ clears when the message is sent. A message may be text, files, or both.
   image(s): …]` line is added to the visible/saved turn.
 - **URLs are resolved in Python** (`Ollama.localFileInfo` → `QUrl.toLocalFile`),
   never decoded in QML (§13 — `decodeURI` mangles `#`/`?` in a uri-list).
+- **Staged into the sandbox for the file tools.** Beyond inlining a text file's
+  (bounded) body, `send` also COPIES every non-image attachment into the file-tool
+  sandbox under `attachments/` (`_stage_attachments` → the `put` op on
+  `sandbox-fs.py`, run through the same `_fs_argv` executor — local on top, over
+  the ssh master on book), and the user message names where each landed. So the
+  model can `read_file attachments/<name>` for the FULL file (the inline text is
+  capped at 128 KB) and `edit_file`/`write_file` to manipulate it — the "read and
+  MANIPULATE the dropped file" path, reusing the existing jail rather than a new
+  tool surface. Staging is synchronous (the files are small and must be in place
+  before the first tool round), capped at `ATTACH_STAGE_MAX` (2 MB, the sandbox's
+  own write ceiling), and best-effort: a file too big or an executor/ssh failure
+  is NAMED in the note, never silent (docs/DESIGN.md §10). `put` is NOT a model
+  tool (no schema in `FILE_TOOLS`, no name in `FILE_OP`) — only oracle's own
+  staging code calls it. **Because the tools run on top, top's checkout needs the
+  `put` op** (any `sandbox-fs.py` change is live on top only once top pulls).
 - **Per-message, not persisted as context.** The visible/saved turn shows the
   prompt plus a dim `[attached: …]` filename note; the file bodies go only to the
   model on the turn they were dropped, so history stays clean and a later turn
-  does not silently re-see them.
+  does not silently re-see them. (The staged copies under `attachments/` do
+  persist in the sandbox — the model may have edited them on purpose.)
 
 ## File tools (jailed, on top)
 
@@ -397,7 +424,9 @@ now; point it at a tool-capable model.
 directory and refuses to touch anything outside it, **symlinks included**
 (`os.path.realpath` + a containment check). Paths the model gives are always
 sandbox-relative. That script is the entire security model: the model gets a
-sandbox, not the filesystem. The root is `SANDBOX_ROOT` — one constant,
+sandbox, not the filesystem. (`sandbox-fs.py` also carries a `put` op that
+writes base64 bytes — binary-safe, same jail — used only by oracle's own
+attachment staging, never offered to the model.) The root is `SANDBOX_ROOT` — one constant,
 `~/.local/share/oracle/sandbox`, overridable with `$ORACLE_SANDBOX`. To **widen
 it later** ("maybe we let it run free"), point that env at `~` or `/`; no code
 change.
