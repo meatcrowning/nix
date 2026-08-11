@@ -282,13 +282,16 @@ def _warn_overlaps(rec):
 
 def cmd_dispatch(a):
     rec = bw.dispatch(" ".join(a.task), where=a.where, context=a.context,
-                      model=a.model, read_only=a.read_only)
+                      model=a.model, read_only=a.read_only, sandbox=a.sandbox)
     if rec is None:
         print("boardctl: nothing to dispatch", file=sys.stderr)
         return 1
     if a.read_only:
         print("read-only: reads + IPC/log only (no edits, commits, "
               "rebuilds or writes)")
+    elif a.sandbox:
+        print("sandbox: reads + shell across the system, writes only in its "
+              "own scratch dir (no commits, no rebuilds)")
     # WHAT IT WILL ACTUALLY RUN ON, said out loud whenever the caller asked for
     # something — a tier this board cannot name falls back to his dial rather
     # than raising (`boardwork.spirit_tier`), and a silent fallback that the
@@ -625,9 +628,15 @@ def main(argv=None):
                    help="the tier this piece runs on (a label like 'sonnet 5 "
                         "medium'); left off, it runs on the setting, which is "
                         "also the ceiling")
-    s.add_argument("--read-only", dest="read_only", action="store_true",
-                   help="bind this spirit to reads + IPC/log only: no edits, "
-                        "commits, rebuilds or writes (research/inventory)")
+    posture = s.add_mutually_exclusive_group()
+    posture.add_argument("--read-only", dest="read_only", action="store_true",
+                         help="bind this spirit to reads + IPC/log only: no "
+                              "edits, commits, rebuilds or writes "
+                              "(research/inventory)")
+    posture.add_argument("--sandbox", dest="sandbox", action="store_true",
+                         help="reads + shell across the whole system and may "
+                              "COPY files into its own scratch dir, but writes "
+                              "nothing outside it and cannot commit or rebuild")
     s.set_defaults(fn=cmd_dispatch)
 
     s = sub.add_parser("turns", help="how much of your turn budget is spent, "
