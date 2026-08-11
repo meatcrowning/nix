@@ -3618,6 +3618,55 @@ def test_work(tmp):
           bw.role_flags("worker"))
     del os.environ["BOARD_WORKER_MODEL"], os.environ["BOARD_WORKER_EFFORT"]
 
+    # ---- the three POSTURES a worker's argv can spawn under ----
+    # Nothing here was exercised before: `sandbox_allow`/`READONLY_ALLOW`/
+    # `ClaudeBackend.args` had zero test coverage, which is how the invalid
+    # `Write(dir/**)`/`NotebookEdit(dir/**)` syntax (91ecf90) shipped and sat
+    # unnoticed. Reads are NEVER scoped in any posture — only the write tools
+    # ever narrow, and only for `sandbox`.
+    sbx_allow = bw.sandbox_allow("/tmp/some-sandbox-dir")
+    check("a sandbox spawn's Read/Glob/Grep/Bash are BARE - unrestricted, "
+          "never scoped to the sandbox dir",
+          all(t in sbx_allow for t in ("Bash", "Read", "Glob", "Grep"))
+          and not any(t.startswith(("Read(", "Glob(", "Grep(", "Bash("))
+                      for t in sbx_allow),
+          sbx_allow)
+    check("...and the ONE scoped rule is Edit(//dir/**) - the CLI's own "
+          "absolute-path form, covering Write/NotebookEdit too (91ecf90: "
+          "Write(...)/NotebookEdit(...) with a path are silently unmatched)",
+          sbx_allow.count("Edit(//tmp/some-sandbox-dir/**)") == 1
+          and not any(t.startswith(("Write(", "NotebookEdit(")) for t in sbx_allow),
+          sbx_allow)
+    check("a read-only spawn's Read/Glob/Grep/Bash are just as bare",
+          all(t in bw.READONLY_ALLOW for t in ("Bash", "Read", "Glob", "Grep"))
+          and not any(t.startswith(("Read(", "Glob(", "Grep(", "Bash("))
+                      for t in bw.READONLY_ALLOW)
+          and not any(t in bw.READONLY_ALLOW
+                      for t in ("Edit", "Write", "NotebookEdit")),
+          bw.READONLY_ALLOW)
+    backend = bw.ClaudeBackend()
+    sbx_argv = backend.args(prompt="x", session=None, role="worker",
+                            label="l", sandbox="/tmp/some-sandbox-dir")
+    check("a sandbox worker's argv runs `default` mode (not acceptEdits), so "
+          "an unlisted write is denied headless rather than silently accepted",
+          "--permission-mode" in sbx_argv
+          and sbx_argv[sbx_argv.index("--permission-mode") + 1] == "default",
+          sbx_argv)
+    check("...carries the SANDBOX_CLAUSE (the behavioural backstop) and the "
+          "same allowedTools sandbox_allow() built",
+          bw.SANDBOX_CLAUSE in sbx_argv
+          and sbx_argv[sbx_argv.index("--allowedTools") + 1:
+                       sbx_argv.index("--allowedTools") + 1 + len(sbx_allow)]
+          == sbx_allow,
+          sbx_argv)
+    ro_argv = backend.args(prompt="x", session=None, role="worker",
+                           label="l", read_only=True)
+    check("a read-only worker's argv keeps `acceptEdits` (nothing to accept - "
+          "Edit/Write are not even in its --tools) and carries READONLY_CLAUSE",
+          ro_argv[ro_argv.index("--permission-mode") + 1] == "acceptEdits"
+          and bw.READONLY_CLAUSE in ro_argv,
+          ro_argv)
+
     # ---- how many SUMMONERS plan at once ----
     # The count is a ceiling on the fan-out, not a quota: `board-watch` splits
     # what he typed across up to that many runs, and `tools/board-watch-test.py`
