@@ -2020,7 +2020,7 @@ Component {
                 SectionHead {
                     id: summonerHead
                     width: page.width
-                    label: "summoner"
+                    label: "the magic circle"
                     collapsed: win.isCollapsed("summoner")
                     fgAccent: win.fgAccent
                     fgAccent2: win.fgAccent2
