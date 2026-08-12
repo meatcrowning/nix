@@ -134,7 +134,7 @@ nothing until at least one stat exists.
 
 A selectable **base system prompt** leads every turn's system message: a handful
 of built-in **presets** (`default` — no persona, the historical behaviour —
-plus `concise`, `coder`, `tutor`, `writer`, `casual`) and **your own custom
+plus `concise`, `coder`, `tutor`, `writer`, `casual`, `vidprompt`) and **your own custom
 text**, picked from the *prompt* row (a boxed selector, docs/DESIGN.md §7.2, like
 the model/session pickers) with an **edit** button that opens the custom-text
 editor. The dropdown carries a **preview pane** (docs/DESIGN.md §9.1) that shows
@@ -154,6 +154,18 @@ be read before it is chosen, not picked blind from a label.
   is kept even while a preset is active. `setPromptChoice`/`setCustomPrompt`
   (slots) write it; `promptPresets`/`promptChoice`/`customPrompt` (properties)
   feed the UI. Malformed/absent → the `default` preset.
+- **`vidprompt` is the one preset that reads a file.** It is Claude Code's own
+  `video-prompt` skill turned into a persona: the output contract (the whole
+  reply is the prompt, never a clarifying question), the T2VA / I2VA / FL2VA /
+  L2VA / full-reference routing, the defaults and the traps are inline — a
+  small model must not need a tool call to get the shape right — while the
+  field-by-field format stays in the skill's own guides, which the preset tells
+  the model to `read_file` at
+  `.claude/skills/video-prompt/references/{base-modes,full-reference-mode}.md`.
+  That works because the read-only file tools reach his whole home (see *FS*),
+  and `~/.claude` syncs to both hosts, so the guides are **not vendored here**
+  — one source of truth with the skill, and nothing of it lands in this public
+  repo.
 
 ## Sessions
 
