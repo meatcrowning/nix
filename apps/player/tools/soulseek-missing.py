@@ -1069,9 +1069,11 @@ def main():
                     help="re-source a queued-remotely transfer whose peer "
                          "reported NO queue position and has not progressed "
                          "this many hours (default %(default)s)")
-    ap.add_argument("--library-skip/--no-library-skip",
-                    dest="library_skip", action="store_true", default=True,
+    ap.add_argument("--library-skip", dest="library_skip", action="store_true",
+                    default=True,
                     help="re-check the live library and skip what is present")
+    ap.add_argument("--no-library-skip", dest="library_skip", action="store_false",
+                    help="skip the live-library presence check (grab regardless)")
     ap.add_argument("--no-import", dest="import_step", action="store_false",
                     default=True,
                     help="skip the move-into-library + rescan import step "
