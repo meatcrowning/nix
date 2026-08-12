@@ -149,7 +149,14 @@
       # budget. systemd creates the directory under $XDG_STATE_HOME.
       StateDirectory = "slskd-cwd";
       WorkingDirectory = "%S/slskd-cwd";
-      Restart = "on-failure";
+      Restart = "always";
+      # always, not on-failure: when the Soulseek server connection drops,
+      # slskd exits CLEANLY (code 0, NRestarts=0) so Restart=on-failure never
+      # fires and the daemon stays down, silently taking the fill feeder with
+      # it. Measured repeatedly 2026-08-09 (fill passes 2, 3, 4, 5 all died
+      # this way). A clean-exit restart is idempotent and harmless here: slskd
+      # re-enqueues its persisted download queue on startup and the feeder's
+      # rescue/reconcile passes absorb the rest.
       RestartSec = 5;
     };
     # No Install.WantedBy: must not auto-start at login while the pipeline is
