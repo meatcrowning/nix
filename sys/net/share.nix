@@ -42,18 +42,23 @@ in
         # peers only, so the share works when book is off the home LAN.
         "hosts allow" = "${lanCidr} 100.64.0.0/10 127.0.0.1";
         "hosts deny" = "0.0.0.0/0";
-        # SMB2 floor, not SMB3: verified live (2026-08-11) that `server min
-        # protocol = SMB3` makes smbd flatly refuse a client whose dialect
-        # list tops out at SMB2 (`smbclient -m SMB2` -> NT_STATUS_NOT_SUPPORTED
-        # at negotiation, before auth even runs) — and that is exactly what an
-        # Android SMB client defaults to (jcifs-ng: SMB3 is "experimental",
-        # off unless the app opts in). This was Symfonium's "cannot list the
-        # content of the folder": a negotiation failure at the wire, reported
-        # by the app as a generic listing error. SMB1/NT1 is still refused
-        # (real insecurity); SMB2 is not, and sign nothing on a wired LAN we
-        # control — signing costs real throughput on a 208 GB library and buys
-        # nothing here.
-        "server min protocol" = "SMB2";
+        # SMB2 floor, not SMB3 — but spelled as the EXACT dialect, not the
+        # "SMB2" alias. `server min protocol = SMB2` still made smbd flatly
+        # refuse a client whose dialect list tops out at bare SMB 2.0.2
+        # (`smbclient` forced to offer only SMB2_02 -> NT_STATUS_NOT_SUPPORTED
+        # at negotiation, verified live 2026-08-11 both directly against smbd
+        # and against a throwaway smbd instance): the smb.conf(5) manpage
+        # says outright "By default SMB2 selects the SMB2_10 variant", so the
+        # bare "SMB2" alias floors at 2.1, not 2.0.2. jcifs-ng (Symfonium's
+        # backend) offers only the SMB2_02 baseline dialect when SMB3 is off
+        # (its default) — so the SMB3->SMB2 change in this file's prior
+        # revision changed nothing for it, and "cannot list the content of
+        # the folder" was still a negotiation failure at the wire, one rung
+        # lower than before. SMB1/NT1 is still refused (real insecurity);
+        # SMB2_02 is not, and sign nothing on a wired LAN we control —
+        # signing costs real throughput on a 208 GB library and buys nothing
+        # here.
+        "server min protocol" = "SMB2_02";
         "server smb encrypt" = "off";
         # exFAT has no POSIX attributes to store; asking Samba to emulate them
         # in xattrs it cannot write is a per-file error path, so turn the whole
