@@ -584,15 +584,23 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   daemon checks `origin/main` at session start (started from `hyprland.lua`, so
   a boot and a login both count), on resume from suspend — detected by
   `CLOCK_BOOTTIME` outrunning `CLOCK_MONOTONIC`, which needs no system-bus match
-  rule and therefore works on book — and on a 30-minute backstop poll. The
+  rule and therefore works on book — on a **once-a-minute `git ls-remote`
+  peek** (one round trip, no objects, no local writes; the full fetch-and-diff
+  runs only when that sha is new, which is what took the toast's latency from
+  "up to half an hour" to a minute) and on a 30-minute backstop poll. The
   persistent toast carries the commit count, a couple of subjects and what
   applying will **cost**, read off the diff: a moved compositor pin means a
   from-source Hyprland build on book *and* no live plugin hot-swap on either
   host (next login), while an `apps/`-only change means no rebuild at all.
   `Pull & apply` pulls `--ff-only`, rebuilds through the host's own wrapper
   (which owns preflight and the shared lock) and reloads what can be reloaded,
-  morphing one progress toast in place; `Dismiss` stays quiet until a NEWER sha
-  lands. It never stashes, resets or checks out — a tree that blocks the
+  under **one toast raised the instant the button is clicked and morphed in
+  place until the result** — each step named, with a **progress bar** for it
+  (the `value` hint; the panel's NotificationCard draws it, `docs/DESIGN.md`
+  §8.1). The bar is measured where a count exists (paths built against nix's
+  own printed plan, git's "Receiving objects: N%") and creeps toward 90% where
+  none does (the evaluation). `--demo-progress` shows the whole thing without
+  pulling anything. `Dismiss` stays quiet until a NEWER sha lands. It never stashes, resets or checks out — a tree that blocks the
   fast-forward is reported and the pull abandoned. `nix-pull [check|apply]` is
   the same code by hand, and what the toast names when the panel's
   `notifActions` setting is off. Kill switch

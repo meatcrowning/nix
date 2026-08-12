@@ -10,14 +10,18 @@
 # reachable instead of remembered.
 #
 # The daemon (repo-updates-files/repo-updates.py, and the reasoning is in its
-# docstring) checks origin/main at session start, on resume from suspend and on
-# a slow poll, then offers a persistent toast carrying what the change will
+# docstring) checks origin/main at session start, on resume from suspend, on a
+# once-a-minute `git ls-remote` peek (one round trip, no objects — the full
+# fetch only runs when that sha is new) and on a slow poll as the backstop,
+# then offers a persistent toast carrying what the change will
 # COST: a compositor pin bump means a from-source Hyprland build on book and no
 # live plugin hot-swap either way, while an apps/-only change means no rebuild
 # at all. Click "Pull & apply" and it pulls, rebuilds through the host's own
 # wrapper (which owns preflight and the shared rebuild lock) and reloads what
-# can be reloaded; click "Dismiss" and it stays quiet until something NEWER
-# lands.
+# can be reloaded — under ONE toast, raised the moment the button is clicked and
+# morphed in place until the result, naming each step and drawing a progress bar
+# for it (the `value` hint, docs/DESIGN.md §8.1); click "Dismiss" and it stays
+# quiet until something NEWER lands.
 #
 # BOTH MACHINES, one file: the host branch is inside the script (`sudo
 # rebuild-top` vs `rebuild-air`), because everything else about it — the fetch,
