@@ -42,9 +42,18 @@ in
         # peers only, so the share works when book is off the home LAN.
         "hosts allow" = "${lanCidr} 100.64.0.0/10 127.0.0.1";
         "hosts deny" = "0.0.0.0/0";
-        # SMB3 only, and sign nothing on a wired LAN we control — signing
-        # costs real throughput on a 208 GB library and buys nothing here.
-        "server min protocol" = "SMB3";
+        # SMB2 floor, not SMB3: verified live (2026-08-11) that `server min
+        # protocol = SMB3` makes smbd flatly refuse a client whose dialect
+        # list tops out at SMB2 (`smbclient -m SMB2` -> NT_STATUS_NOT_SUPPORTED
+        # at negotiation, before auth even runs) — and that is exactly what an
+        # Android SMB client defaults to (jcifs-ng: SMB3 is "experimental",
+        # off unless the app opts in). This was Symfonium's "cannot list the
+        # content of the folder": a negotiation failure at the wire, reported
+        # by the app as a generic listing error. SMB1/NT1 is still refused
+        # (real insecurity); SMB2 is not, and sign nothing on a wired LAN we
+        # control — signing costs real throughput on a 208 GB library and buys
+        # nothing here.
+        "server min protocol" = "SMB2";
         "server smb encrypt" = "off";
         # exFAT has no POSIX attributes to store; asking Samba to emulate them
         # in xattrs it cannot write is a per-file error path, so turn the whole
