@@ -21,6 +21,8 @@ What it asserts, in order:
             bullet does not re-fire it               [the rename]
   rename-tolerant  the raw-text-prefix match catches a completion even when the
             parser's own tag set no longer knows the word (tag == "")
+  failed    a FAILED bullet fires at CRITICAL urgency, named by its `by:`
+            stamp, deduped and seeded independently of the completion set
   focus     vanish when goetia is the focused window; fire when focus is on
             nothing; fire when focus is unknown (no compositor) — never wrongly
             suppress (the whole point of the event-socket design)
@@ -114,9 +116,39 @@ def main():
         # ---- rename-tolerant: tag not in parser set, raw prefix matches --
         lines, _ = run(tmp, BOARD_HEAD
                        + "- COMPLETION: **the thing** - done, no errors. pushed.\n"
-                       + "- FAILED: **nope** - did not land\n")
+                       + "- ENACTED: **second task** - recap landed\n"
+                       + "- INFORMATION: **nope** - a fact, not a completion\n")
         n = notify_lines(lines)
-        assert not any("nope" in x for x in n), "FAILED must not fire: %r" % n
+        assert not any("nope" in x for x in n), "INFORMATION must not fire: %r" % n
+
+        # ---- failed: fires at CRITICAL urgency, named by its `by:` stamp ----
+        lines, state = run(tmp, BOARD_HEAD
+                           + "- COMPLETION: **the thing** - done, no errors. pushed.\n"
+                           + "- ENACTED: **second task** - recap landed\n"
+                           + "- FAILED: **broken thing** - nothing landed\n"
+                           + "<!-- by: Amdusias -->\n")
+        n = notify_lines(lines)
+        assert len(n) == 1, "expected one FAILED fire, got %r" % n
+        assert "urgency=critical" in n[0], "FAILED must be critical: %r" % n
+        assert "broken thing" in n[0]
+        assert "Amdusias" in n[0], "FAILED toast must name the worker: %r" % n
+        # dedupe: same board again fires nothing
+        lines, _ = run(tmp, BOARD_HEAD
+                       + "- COMPLETION: **the thing** - done, no errors. pushed.\n"
+                       + "- ENACTED: **second task** - recap landed\n"
+                       + "- FAILED: **broken thing** - nothing landed\n"
+                       + "<!-- by: Amdusias -->\n")
+        assert not notify_lines(lines), "re-run must not re-fire FAILED: %r" % notify_lines(lines)
+        # a FAILURE-worded synonym is matched too (rename-tolerant, like ENACTED)
+        lines, _ = run(tmp, BOARD_HEAD
+                       + "- COMPLETION: **the thing** - done, no errors. pushed.\n"
+                       + "- ENACTED: **second task** - recap landed\n"
+                       + "- FAILED: **broken thing** - nothing landed\n"
+                       + "<!-- by: Amdusias -->\n"
+                       + "- FAILURE: **another break** - also nothing landed\n")
+        n = notify_lines(lines)
+        assert any("another break" in x and "urgency=critical" in x for x in n), \
+            "FAILURE synonym must fire critical: %r" % n
         # ---- focus: goetia suppresses, nothing/unknown fires -------------
         # Each case is its own life-cycle: a fresh state dir seeded WITHOUT the
         # focus task, then that task lands — because a completed landing is
