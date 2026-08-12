@@ -23,8 +23,15 @@ in
   services.samba = {
     enable = true;
     # netbios name resolution — air finds this host over mDNS (avahi, below),
-    # which is the modern path; nmbd is dead weight and another listener.
-    nmbd.enable = false;
+    # which is the modern path. But Symfonium (Android, jcifs-ng) still
+    # resolves an SMB server it browses for by NetBIOS name query
+    # (UDP 137), not mDNS — with nmbd off there was nothing on the LAN to
+    # answer that query, so browsing/resolving `top` from Symfonium failed
+    # even though negotiation/auth/RPC were all clean by IP (verified
+    # 2026-08-11 over loopback+LAN+tailnet). nmbd on, scoped to the LAN
+    # interface exactly like every other hole below — it is a broadcast
+    # protocol, so it buys nothing over the tailnet anyway.
+    nmbd.enable = true;
     openFirewall = false; # scoped by interface below instead of globally
 
     settings = {
@@ -33,10 +40,12 @@ in
         "server string" = "top";
         "server role" = "standalone server";
         "map to guest" = "never";
-        # SMB direct only — drop the legacy NetBIOS session service on 139. nmbd
-        # is already off, nothing here uses NBT, and 139 was a dead-weight
-        # 0.0.0.0 listener (firewall-dropped on the LAN, but reachable from the
-        # tailnet, which trusts the whole interface).
+        # SMB direct only — drop the legacy NetBIOS session service on 139.
+        # nmbd (name service, 137/138) is a separate daemon/ports and stays on
+        # for Symfonium's NetBIOS resolution below; smbd itself has no reason
+        # to also listen on 139, which was a dead-weight 0.0.0.0 listener
+        # (firewall-dropped on the LAN, but reachable from the tailnet, which
+        # trusts the whole interface).
         "smb ports" = "445";
         # 100.64.0.0/10 is the tailnet (sys/net/tailscale.nix) — authenticated
         # peers only, so the share works when book is off the home LAN.
@@ -145,9 +154,12 @@ in
 
   # Every hole is bound to the wired LAN interface, matching the deliberately
   # narrow style of the WiZ rule in hosts/top/configuration.nix. 445 = SMB,
-  # 22 = ssh (dbsync), 5353/udp = mDNS.
+  # 22 = ssh (dbsync), 5353/udp = mDNS, 137/138/udp = NetBIOS name service +
+  # datagram (nmbd, for Symfonium's name resolution — LAN-only, same as
+  # everything else here, and useless over the tailnet anyway since it's
+  # broadcast-based).
   networking.firewall.interfaces.${lan} = {
     allowedTCPPorts = [ 445 22 ];
-    allowedUDPPorts = [ 5353 ];
+    allowedUDPPorts = [ 5353 137 138 ];
   };
 }
