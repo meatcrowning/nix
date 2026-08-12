@@ -69,6 +69,14 @@ in
         # here.
         "server min protocol" = "SMB2_02";
         "server smb encrypt" = "off";
+        # No DFS roots exist here (one standalone share) — turn the whole
+        # machinery off rather than leave it advertised-but-unused. jcifs-ng
+        # (Symfonium's backend) is documented to get confused by servers that
+        # advertise SMB2 DFS capability with no working referral behind it
+        # (AgNO3/jcifs-ng#259 lists `dfs.disabled` as a required workaround
+        # against several real NAS/Samba boxes) — untested against a real
+        # phone here, but it is a correct simplification either way.
+        "host msdfs" = "no";
         # exFAT has no POSIX attributes to store; asking Samba to emulate them
         # in xattrs it cannot write is a per-file error path, so turn the whole
         # unix-extensions layer off and let the mount's uid/gid do the work.
