@@ -27,8 +27,18 @@ import tagclusters as TC
 ATOMICSAVE = None
 
 
-def _canonical(variants):
-    """(canonical_artist, canonical_album) by majority file count."""
+def _canonical(variants, global_artist_counts=None):
+    """(canonical_artist, canonical_album) by majority file count.
+
+    artist: the spelling the LIBRARY as a whole already uses most for this
+    artist wins — not just the cluster-local majority. A cluster where a
+    mis-cased minority (2t 'Ross from Friends') beats the correct spelling
+    (1t 'Ross From Friends') locally is exactly the case that must not choose
+    the wrong casing, because everywhere else in the library the artist is
+    spelled correctly. Falls back to cluster-local majority when the global
+    count has nothing for the artist. album: cluster-local majority, then MB
+    title if a release id casefold-matches.
+    """
     def majority(idx):
         counts = collections.Counter()
         for (aa, al), recs in variants.items():
@@ -36,7 +46,42 @@ def _canonical(variants):
         top = max(counts.values())
         cands = [s for s, n in counts.items() if n == top]
         return max(cands, key=len)
-    return majority(0), majority(1)
+    cluster_artist = majority(0)
+    if global_artist_counts:
+        fa = C.fold(cluster_artist)
+        gk = None
+        best_n = -1
+        for g, val in global_artist_counts.items():
+            if C.fold(g) == fa:
+                n = val[1] if isinstance(val, (list, tuple)) else val
+                if n > best_n:
+                    best_n, gk = n, g
+        if gk is not None:
+            # global_counts keys are folded; the display spelling is val[0]
+            disp = global_artist_counts[gk]
+            cluster_artist = disp[0] if isinstance(disp, (list, tuple)) else gk
+    return cluster_artist, majority(1)
+
+
+def _global_artist_counts(rows):
+    """folded-artist -> (display spelling, track count), library-wide. Used to
+    pick the canonical artist casing that the library already mostly uses."""
+    counts = {}
+    for r in rows:
+        aa = (r.get("album_artist") or r.get("artist") or "").strip()
+        if not aa:
+            continue
+        fa = C.fold(aa)
+        if not fa or fa in TC._NOT_AN_ARTIST:
+            continue
+        cur = counts.get(fa)
+        if cur is None:
+            counts[fa] = [aa, 1]
+        else:
+            cur[1] += 1
+            if len(aa) > len(cur[0]):
+                cur[0] = aa  # longest spelling as display tiebreak
+    return counts
 
 
 def _retag_file(path, album, album_artist):
@@ -59,10 +104,11 @@ def main():
     args = p.parse_args()
 
     rows = json.loads(C.SCAN_JSON.read_text())
+    global_counts = _global_artist_counts(rows)
     todo = [c for c in TC.clusters(rows) if c["action"] == "retag"]
     results = []
     for c in todo:
-        aa, al = _canonical(c["variants"])
+        aa, al = _canonical(c["variants"], global_counts)
         n_files = sum(len(v) for v in c["variants"].values())
         changed = 0
         for (v_aa, v_al), recs in c["variants"].items():

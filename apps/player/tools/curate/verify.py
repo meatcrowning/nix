@@ -22,7 +22,9 @@ The four invariants:
 """
 import collections
 import json
+import re
 import sys
+from pathlib import Path
 
 import common as C
 import tagclusters as TC
@@ -126,17 +128,70 @@ def _incomplete_albums():
     return {"count": n, "albums": albums}
 
 
+def _missing_art(rows):
+    """Album dirs with no folder cover AND no embedded art on any track.
+    These are albums the player shows blank — fixable by album-art.py."""
+    dirs = {}
+    for r in rows:
+        if r["album_dir"] is None:
+            continue
+        dirs.setdefault(f"{r['album_artist_dir']}/{r['album_dir']}", []).append(r)
+    n = 0
+    albums = []
+    for key, recs in dirs.items():
+        dirpath = Path(recs[0]["path"]).parent
+        if not dirpath.is_dir():
+            continue
+        if any(_ART_RE.match(f.name) for f in dirpath.iterdir() if f.is_file()):
+            continue
+        if any(C._has_embedded(r["path"]) for r in recs[:3]):
+            continue
+        n += 1
+        albums.append(key)
+    return {"count": n, "albums": albums}
+
+
+_ART_RE = re.compile(
+    r"^(cover|folder|front|albumart.*)\.(jpe?g|png|webp|gif|bmp)$", re.I)
+
+
+def _track_number_issues(rows):
+    """Files with a wrong or missing track number, using the same MB-release
+    tracklist resolution as normalize.py. Counts only files that HAVE an MB id
+    and an unambiguous title match but disagree on track number. (Files with
+    no MB id have no authority to check against — out of scope here.)"""
+    import normalize as N
+    issues = 0
+    releases = {}
+    for r in rows:
+        mbid = C.read_mbid(r["path"])
+        if not mbid:
+            continue
+        if mbid not in releases:
+            releases[mbid] = N._load_release(mbid)
+        rel = releases[mbid]
+        if not rel:
+            continue
+        idx = N._match_index(N.release_tracks(rel), r["title"] or Path(r["path"]).stem)
+        if idx and r.get("track") != idx[1]:
+            issues += 1
+    return issues
+
+
 def verify(rows):
     cl = TC.clusters(rows)
     by_action = collections.Counter(c["action"] for c in cl)
     ndupe, nredundant = _dup_clusters(rows)
     inv = _incomplete_albums()
+    art = _missing_art(rows)
     return {
         "splits": {"total": len(cl), "retag": by_action.get("retag", 0),
                    "merge": by_action.get("merge", 0),
                    "board": by_action.get("board", 0)},
         "dupes": {"clusters": ndupe, "redundant_files": nredundant},
         "incomplete": inv,          # None = inventory stale/absent
+        "missing_art": art,
+        "track_number_issues": _track_number_issues(rows),
         # remaster-date check needs MB per album; run by `curate run`, not
         # on every verify (rate-limited). Reuses merge._resolve_earliest_date.
         "remaster_dates": "deferred to run",
@@ -160,8 +215,11 @@ def main():
             print("incomplete      : unknown (run album-inventory.py first)")
         else:
             print(f"incomplete      : {inv['count']} albums under reference")
+        print(f"missing art     : {rep['missing_art']['count']} albums blank")
+        print(f"track numbers   : {rep['track_number_issues']} files disagree with MB")
     dirty = (rep["splits"]["total"] or rep["dupes"]["clusters"]
-             or (rep["incomplete"] or {}).get("count", 0))
+             or (rep["incomplete"] or {}).get("count", 0)
+             or rep["missing_art"]["count"] or rep["track_number_issues"])
     sys.exit(1 if dirty else 0)
 
 

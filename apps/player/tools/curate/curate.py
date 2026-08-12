@@ -385,13 +385,42 @@ def cmd_groups(args):
     for g in report[:25]:
         print(f"  [{g['action']}] {g['album']!r}: "
               + " | ".join(f"{d['path']} ({d['n_tracks']}t)" for d in g["dirs"])[:100])
+def cmd_touch(_args):
+    """Bump the mtime of every audio file to NOW.
+
+    Why this exists: every write in this pipeline goes through atomicsave,
+    which PRESERVES mtime, and the player's rescan only re-reads a file whose
+    (mtime, size) differs from its DB row. So after a retag/merge/normalize/
+    art pass the player would never re-read the corrected files and the DB
+    would stay stale — exactly the "I restarted and it's still split" bug. This
+    is the player-owned fix: bump mtime so its next startup rescan re-reads
+    everything, through its own machinery. Cheap and idempotent (~17k files,
+    a few seconds)."""
+    import time
+    n = 0
+    now = time.time()
+    for absp, rel in C.reorg.walk_root():
+        if os.path.splitext(absp)[1].lower() not in C.reorg.AUDIO_EXTS:
+            continue
+        try:
+            os.utime(absp, (now, now))
+            n += 1
+        except OSError:
+            pass
+    print(f"bumped mtime on {n} audio files to now")
+    print("the player's next startup rescan will re-read them (player-owned)")
+
+
 def cmd_run(args):
-    """scan -> dupes -> groups -> retag -> merge -> verify, idempotent.
+    """scan -> dupes -> groups -> retag -> merge -> normalize -> album-art ->
+    touch -> verify, idempotent.
 
     Every stage is a no-op when the library is already converged, so `run`
     is safe behind a timer: silent when clean, a work list when not. Board
     clusters are reported, never acted on. Without --apply the mutating
-    stages (dupes/retag/merge) run dry."""
+    stages (dupes/retag/merge/normalize/album-art) run dry. touch is the final
+    step that makes the player re-read the corrected files on its next rescan.
+    """
     import subprocess
     here = os.path.dirname(os.path.abspath(__file__))
     py = sys.executable
@@ -409,14 +438,20 @@ def cmd_run(args):
     stage("groups", ["curate.py", "groups"])
     stage("retag", ["retag.py"] + (["--apply"] if args.apply else []))
     stage("merge", ["merge.py"] + (["--apply"] if args.apply else []))
+    stage("normalize", ["normalize.py"] + (["--apply"] if args.apply else []))
+    stage("album-art", ["album-art.py"] + (["--apply"] if args.apply else []))
     if args.apply:
-        # files moved/retagged: the scan is stale, refresh before verifying
+        # files moved/retagged/normalized: the scan is stale, refresh before
+        # verifying AND before the mtime bump so verify sees current tags.
         stage("scan (post-apply)", ["curate.py", "scan"])
     stage("verify", ["verify.py"])
+    if args.apply:
+        # last: bump mtimes so the player re-reads everything the run changed.
+        stage("touch", ["curate.py", "touch"])
 
 
 CMDS = {"scan": cmd_scan, "dupes": cmd_dupes, "groups": cmd_groups,
-        "run": cmd_run}
+        "touch": cmd_touch, "run": cmd_run}
 
 if __name__ == "__main__":
     import argparse
@@ -426,6 +461,7 @@ if __name__ == "__main__":
     dp = sub.add_parser("dupes")
     dp.add_argument("--apply", action="store_true")
     sub.add_parser("groups")
+    sub.add_parser("touch")
     rp = sub.add_parser("run")
     rp.add_argument("--apply", action="store_true")
     a = p.parse_args()
