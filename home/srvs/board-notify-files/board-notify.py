@@ -34,14 +34,28 @@ tag set has already forgotten one of them, so the rename cannot silently stop
 notifications. The dedupe fingerprint strips the leading tag word, so a global
 relabel of already-stored bullets cannot re-fire them either.
 
-ONCE PER NEWLY-LANDED COMPLETION — mirrored from board-watch's newly-answered
-semantics. `~/.local/state/board-notify/state.json` keeps the set of every
-completion fingerprint already recorded (`seen`); a bullet present in the file
-but not in `seen` is new and fires (once). A docs-sync pull or an edit that
-adds no new completion leaves `fresh == seen` and changes nothing. The FIRST
-ever run seeds the whole board and fires nothing — waking up to a stack of
-toasts for completions that predated this feature is not the point — exactly as
-board-watch seeds answers.
+THE FAILED COUNTERPART. A worker that finishes with nothing landed writes a
+`FAILED:` bullet (`boardparse.TODO_TAGS`) into the same WAITING ON YOU TO DO
+list, the same shape as a `FAILED`/`ENACTED` result. That case must never
+sink quietly under the good news, so it gets its own CRITICAL-urgency toast
+instead of the normal one — same dedupe, same goetia-focus suppression, same
+raw-text-prefix fallback for a future rename, just a different urgency and a
+different tag set (`BOARD_NOTIFY_FAIL_TAGS`, default `FAILED,FAILURE,ERROR`
+— `FAILED` is the one the store actually writes today; the other two are
+accepted defensively in case a future rename repeats the COMPLETION ->
+ENACTED history). The toast names the worker: the bullet's `by:` stamp
+(`boardparse.by_now`, whoever's `whoami()` wrote the result) is prefixed onto
+the body when present.
+
+ONCE PER NEWLY-LANDED COMPLETION OR FAILURE — mirrored from board-watch's
+newly-answered semantics. `~/.local/state/board-notify/state.json` keeps two
+sets of fingerprints already recorded (`seen` for completions, `seen_fail`
+for failures); a bullet present in the file but not in the matching set is new
+and fires (once). A docs-sync pull or an edit that adds no new bullet leaves
+`fresh == seen` and changes nothing. The FIRST ever run seeds the whole board
+and fires nothing for either kind — waking up to a stack of toasts for results
+that predated this feature is not the point — exactly as board-watch seeds
+answers.
 
 BOTH MACHINES, HOST-NEUTRAL. `home/` is shared verbatim to book; the daemon
 discovers the live Hyprland instance from `$XDG_RUNTIME_DIR/hypr/*` (never
@@ -63,6 +77,7 @@ and the focus gate can be exercised without a real session or a real board:
     BOARD_NOTIFY_STATE    state dir          (default ~/.local/state/board-notify)
     BOARD_NOTIFY_LOG      log file           (default ~/.cache/board-notify.log)
     BOARD_NOTIFY_TAGS     comma tag words    (default COMPLETION,ENACTED)
+    BOARD_NOTIFY_FAIL_TAGS comma tag words   (default FAILED,FAILURE,ERROR)
     BOARD_NOTIFY_FOCUS    fake focus "class,title", or "" for "on nothing"
     BOARD_NOTIFY_NOTIFY   command run INSTEAD of notify-send ('' to dry-run)
     BOARD_NOTIFY_POLL     board poll seconds (default 3)
@@ -95,6 +110,17 @@ COMPLETION_TAGS = frozenset(
     if t.strip())
 _TAG_LEAD_RE = re.compile(
     r"^\s*[-*+]?\s*(?:%s):" % "|".join(sorted(COMPLETION_TAGS)), re.I)
+
+#: The tag(s) a worker that landed NOTHING writes — `FAILED` is the live word
+#: (`boardparse.TODO_TAGS`); `FAILURE`/`ERROR` are accepted defensively in case
+#: a future rename repeats the COMPLETION -> ENACTED history (see module
+#: docstring).
+FAILURE_TAGS = frozenset(
+    t.strip().upper() for t in
+    os.environ.get("BOARD_NOTIFY_FAIL_TAGS", "FAILED,FAILURE,ERROR").split(",")
+    if t.strip())
+_FAIL_TAG_LEAD_RE = re.compile(
+    r"^\s*[-*+]?\s*(?:%s):" % "|".join(sorted(FAILURE_TAGS)), re.I)
 
 sys.path[:0] = [os.path.join(REPO, "apps", "board"),
                 os.path.join(REPO, "apps", "pylib")]
@@ -136,8 +162,9 @@ def load_state():
         with open(os.path.join(STATE, "state.json")) as f:
             d = json.load(f)
     except (OSError, ValueError):
-        return {"version": 1, "seen": {}, "seeded": False}
+        return {"version": 1, "seen": {}, "seen_fail": {}, "seeded": False}
     d.setdefault("seen", {})
+    d.setdefault("seen_fail", {})
     # EXISTENCE of the file is the evidence of seeding, as in board-watch: only
     # a completed pass writes one, so a state file implies a past seed.
     d.setdefault("seeded", True)
@@ -194,6 +221,39 @@ def completions_of(doc):
     """[(fingerprint, body)] for every completion bullet, file order."""
     return [(completion_fingerprint(t), completion_body(t))
             for t in doc.get("todo", []) if is_completion(t)]
+
+
+# ------------------------------------------------------------- the failure set
+def is_failure(t):
+    """Is this WAITING bullet a worker's FAILED result? Same two-way match as
+    `is_completion`, against `FAILURE_TAGS` instead."""
+    if (t.get("tag") or "").upper() in FAILURE_TAGS:
+        return True
+    return bool(_FAIL_TAG_LEAD_RE.match(str(t.get("headRaw") or t.get("text") or "")))
+
+
+def failure_body(t):
+    """The human line for the toast, worker-named: the bullet's `by:` stamp
+    (`boardparse.by_now` — who wrote the result) prefixed when present, so a
+    CRITICAL toast never reads as an anonymous failure."""
+    body = _norm(t.get("headRaw") or t.get("text") or "")
+    who = _norm(t.get("by") or "")
+    return "%s - %s" % (who, body) if who else body
+
+
+def failure_fingerprint(t):
+    """Identity for dedupe = the bullet's own text, minus the leading tag word.
+    Same reasoning as `completion_fingerprint`; deliberately excludes `by` so a
+    later stamp correction on the same bullet does not re-fire it."""
+    raw = _FAIL_TAG_LEAD_RE.sub("", _norm(t.get("headRaw") or t.get("raw")
+                                          or t.get("text") or ""))
+    return raw.strip()
+
+
+def failures_of(doc):
+    """[(fingerprint, body)] for every FAILED bullet, file order."""
+    return [(failure_fingerprint(t), failure_body(t))
+            for t in doc.get("todo", []) if is_failure(t)]
 
 
 # -------------------------------------------------------------- focus (socket)
@@ -309,10 +369,10 @@ class FocusTracker(threading.Thread):
 
 
 # ---------------------------------------------------------------------- fire
-def notify(body):
+def notify(body, urgency="normal"):
     stub = os.environ.get("BOARD_NOTIFY_NOTIFY")
     if stub == "":
-        log("notify (dry-run): " + (body or "")[:120])
+        log("notify (dry-run) urgency=%s: %s" % (urgency, (body or "")[:120]))
         return
     try:
         if stub:
@@ -324,12 +384,15 @@ def notify(body):
             # candidates from .desktop files (X-GNOME-UsesNotifications), so
             # without the hint the row it offers would be keyed `board` while
             # this notification arrives as `goetia`, and a rule set on it would
-            # silently never fire.
+            # silently never fire. `--` before the positionals: a FAILED
+            # body's `by:`-prefixed text is worker-controlled and must never
+            # be read as another option (notify-send-dash-body memory).
             subprocess.run(["notify-send", "-a", "goetia",
                             "-h", "string:desktop-entry:board",
+                            "-u", urgency, "--",
                             "goetia", body or ""],
                            timeout=10)
-        log("notified: " + (body or "")[:120])
+        log("notified (%s): %s" % (urgency, (body or "")[:120]))
     except (OSError, subprocess.SubprocessError) as e:
         log("could not notify: %s" % e)
 
@@ -342,20 +405,26 @@ def handle_board(state, focus):
         log("cannot read %s: %s" % (BOARD, e))
         return
 
-    completions = completions_of(bp.parse(src))
-    fresh = {fp for fp, _ in completions}
+    doc = bp.parse(src)
+    completions = completions_of(doc)
+    failures = failures_of(doc)
     seen = state["seen"]
+    seen_fail = state["seen_fail"]
 
     if not state.get("seeded"):
         for fp, _ in completions:
             seen[fp] = True
+        for fp, _ in failures:
+            seen_fail[fp] = True
         state["seeded"] = True
         save_state(state)
-        log("first run: recorded %d completion(s), fired nothing" % len(completions))
+        log("first run: recorded %d completion(s), %d failure(s), fired nothing"
+            % (len(completions), len(failures)))
         return
 
     new = [t for t in completions if t[0] not in seen]
-    if not new:
+    new_fail = [t for t in failures if t[0] not in seen_fail]
+    if not new and not new_fail:
         return                            # nothing newly landed — HAZARD 1/2
 
     for fp, body in new:
@@ -364,6 +433,14 @@ def handle_board(state, focus):
             log("suppressed - goetia is the focused window: %s" % body[:80])
             continue
         notify(body)
+
+    for fp, body in new_fail:
+        seen_fail[fp] = True              # never re-attempt, suppressed or not
+        if focus.goetia:
+            log("suppressed (failure) - goetia is the focused window: %s" % body[:80])
+            continue
+        notify(body, urgency="critical")
+
     save_state(state)
 
 
