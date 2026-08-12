@@ -2058,6 +2058,25 @@ and, measured 2026-07-29, **outlives the bus teardown** and has to be killed by
 hand. The CLI's output shape is verifiable once against the live daemon; the
 stub is what keeps the harness off the network.
 
+### A `value` hint makes a toast a progress toast
+
+An int 0-100 in the `value` hint — the de-facto progress hint every other
+notification server reads, so `notify-send -h int:value:37` is the whole sender
+side — makes `NotificationCard.qml` draw docs/DESIGN.md §8.1's bar under the
+body, filled in the card's urgency tint. It is in `extraHints` for the usual
+reason: Quickshell drops a hint nobody asked for.
+
+Two things the sender owns, not the card. **Persistence**: a progress toast is
+sent at `-t 0` and updated with `--replace-id`, because the card's expiry timer
+would otherwise retire it mid-operation and the next update, naming an id the
+server no longer holds, would open a fresh toast (the surfer-downloads bug,
+§10.4). **Honesty about the fraction**: the card draws what it is given, so a
+step with no countable denominator must ease and stop short of 100 rather than
+sit at 0 or claim to be finished. `repo-updates` is the reference sender —
+`home/srvs/repo-updates-files/repo-updates.py`, harness
+`tools/repo-updates-test.py`. A bar-only update still restarts the card's
+expiry (`onHintsChanged`), so a sender that *did* set a timeout keeps it fresh.
+
 ### An image-download toast thumbnails + opens the file
 
 surfer's download **completion** toast for an image carries the downloaded

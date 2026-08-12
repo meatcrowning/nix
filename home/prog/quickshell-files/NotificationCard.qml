@@ -24,6 +24,14 @@ import Quickshell.Io
 // `x-open-path` differs from the thumbnail it is a path we control (a capture,
 // never in ~/Downloads), so the click opens it directly without dl-resolve.
 //
+// PROGRESS. A toast carrying the `value` hint (0-100) is reporting on an
+// operation that is still running, and draws a bar under its text — §8.1's
+// bar, the one player's SysthemeToast uses. Senders morph such a toast in place
+// with --replace-id at `-t 0` (§10.4: it stays up until the operation ends and
+// does not re-fire), so the card's own expiry never retires it underneath them.
+// repo-updates' pull-and-rebuild is the first sender: one toast from the click
+// to the last word, a bar per step.
+//
 // ACTIONS. A notification may carry freedesktop actions; they are drawn as a
 // right-aligned row of SetButtons under the text, and invoking one dismisses the
 // toast (Quickshell's invoke() only emits ActionInvoked — it closes nothing).
@@ -128,6 +136,21 @@ Rectangle {
         ? fileUrl(resolvedPath || imagePath)
         : ((SettingsStore.d.notifImages && notif && notif.image)
            ? notif.image : "")
+
+    // A progress toast's fraction, 0..1, from the `value` hint (0-100 — the
+    // de-facto freedesktop progress hint every other server reads, asked for by
+    // name in Notifications.qml's extraHints). -1 means "no bar", which is
+    // every toast that is not reporting on an operation still running:
+    // repo-updates' pull-and-rebuild is the first sender.
+    readonly property real progress: {
+        if (!notif || !notif.hints)
+            return -1;
+        const raw = notif.hints["value"];
+        if (raw === undefined || raw === null || raw === "")
+            return -1;
+        const v = Number(raw);
+        return isNaN(v) ? -1 : Math.max(0, Math.min(1, v / 100));
+    }
 
     // What clicking the card opens. `x-open-path` overrides the thumbnail path
     // (a recording thumbnails a poster frame but opens the video); it falls back
@@ -480,6 +503,32 @@ Rectangle {
                 visible: text.length > 0
             }
 
+            // The progress bar (docs/DESIGN.md §8.1: bgAlt box + 1px
+            // Theme.border, fill inset margins: 1, width = round((parent-2) *
+            // frac)) — the same geometry player's SysthemeToast draws, because
+            // a long op reporting itself in a card is one vocabulary whether
+            // the card is a toast or in-window. Only present when the sender
+            // ships a `value` hint, and the fill eases so a jump from 12% to
+            // 40% reads as movement rather than a teleport.
+            Rectangle {
+                width: parent.width
+                height: 8
+                visible: card.progress >= 0
+                color: Theme.bgAlt
+                border.width: 1
+                border.color: Theme.border
+
+                Rectangle {
+                    anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+                    anchors.margins: 1
+                    width: Math.max(0, Math.round((parent.width - 2) * card.progress))
+                    color: card.tint
+                    Behavior on width {
+                        NumberAnimation { duration: ViewMode.ms(120); easing.type: Easing.OutCubic }
+                    }
+                }
+            }
+
             // action buttons — right-aligned under the text, §7.5's dialog
             // button row. The wrapping Item is what lets a Row sit right-aligned
             // inside a Column (a Column owns its children's x, so the Row cannot
@@ -527,6 +576,10 @@ Rectangle {
         target: card.notif
         function onSummaryChanged() { if (expiry.running) expiry.restart(); }
         function onBodyChanged() { if (expiry.running) expiry.restart(); }
+        // A step that only moved the bar is still fresh content — and a sender
+        // that sent a timeout with its progress toast should not have it die
+        // mid-operation just because the wording did not change.
+        function onHintsChanged() { if (expiry.running) expiry.restart(); }
     }
 
     MouseArea {

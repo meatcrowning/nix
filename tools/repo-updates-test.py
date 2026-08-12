@@ -11,8 +11,10 @@ the module's REPO_UPDATES_* overrides exist for exactly this.
     ./tools/repo-updates-test.py -v         # ... and the module's own log
 
 Re-run it after touching the classifier (what a change is going to cost), the
-dedupe (a dismissed update must stay dismissed until something NEWER lands) or
-the apply flow (the ff-only pull and its refusals).
+dedupe (a dismissed update must stay dismissed until something NEWER lands), the
+peek (the cheap ls-remote that is what makes the toast prompt), the progress
+toast (one notification, morphed in place, a bar per step) or the apply flow
+(the ff-only pull and its refusals).
 """
 import json
 import os
@@ -124,19 +126,24 @@ class Sandbox:
     def logtext(self):
         return self.log.read_text() if self.log.exists() else ""
 
+    def pyrun(self, code, **envextra):
+        """Run `code` against the module loaded as `m`. Returns (proc, log tail)."""
+        before = len(self.logtext())
+        p = subprocess.run(
+            [sys.executable, "-c",
+             "import importlib.util,sys;"
+             f"spec=importlib.util.spec_from_file_location('ru', r'{MODULE}');"
+             "m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);"
+             + code],
+            capture_output=True, text=True, env=self.env(**envextra))
+        if VERBOSE:
+            print("    --- " + code)
+            print("    " + (p.stdout + p.stderr).replace("\n", "\n    "))
+        return p, self.logtext()[before:]
+
     def offer(self, **envextra):
         """One daemon pass: survey, decide, 'toast'. Returns the log tail."""
-        before = len(self.logtext())
-        code = ("import repo_updates as r; r.check_and_offer(None)")
-        env = self.env(**envextra)
-        env["PYTHONPATH"] = str(MODULE.parent)
-        subprocess.run([sys.executable, "-c",
-                        "import importlib.util,sys;"
-                        f"spec=importlib.util.spec_from_file_location('ru', r'{MODULE}');"
-                        "m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);"
-                        "m.check_and_offer(None)"],
-                       capture_output=True, text=True, env=env)
-        return self.logtext()[before:]
+        return self.pyrun("m.check_and_offer(None)", **envextra)[1]
 
 
 def case(title):
@@ -236,7 +243,8 @@ def main():
             env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/nonexistent/repo-updates-test"
             p = subprocess.run(
                 [nsend, "-a", "nix", "-i", "repo-updates", "-u", "normal",
-                 "-t", "0", "-p", "--action=apply=Pull & apply",
+                 "-t", "0", "-p", "-h", "int:value:42",
+                 "--action=apply=Pull & apply",
                  "--action=dismiss=Dismiss", "--",
                  "2 commits waiting in ~/nix",
                  "- curate: verify dupes union-finds\nplugin rebuild"],
@@ -255,6 +263,69 @@ def main():
         _, behind, _ = (0, sh("git", "rev-list", "--count", "HEAD..origin/main",
                               cwd=sb6.repo).stdout.strip(), 0)
         check("checkout is level afterwards", behind, "0")
+
+        case("the peek sees a push without fetching anything")
+        # The peek is what makes the toast prompt: one ls-remote a minute
+        # instead of a full fetch, so the poll is no longer the only thing that
+        # notices. It must see the new sha AND leave the checkout alone — a peek
+        # that quietly fetched would be the expensive thing it exists to avoid.
+        sbp = Sandbox(root / "p")
+        (root / "p" / "settings.json").write_text(json.dumps({"notifActions": True}))
+        before_ref = sh("git", "rev-parse", "origin/main", cwd=sbp.repo).stdout.strip()
+        sbp.push({"apps/x.py": "1\n"}, "one")
+        pushed = sh("git", "rev-parse", "HEAD", cwd=sbp.upstream).stdout.strip()
+        p, _ = sbp.pyrun("print(m.peek());print(m.head_sha())")
+        seen, head = (p.stdout.strip().split("\n") + ["", ""])[:2]
+        check("peek reports the pushed sha", seen, pushed)
+        check("and it is not what we have", head != seen, True)
+        check("nothing was fetched",
+              sh("git", "rev-parse", "origin/main", cwd=sbp.repo).stdout.strip(),
+              before_ref)
+        sh("git", "-C", str(sbp.repo), "config", "remote.origin.url", "/nonexistent")
+        p, _ = sbp.pyrun("print(repr(m.peek()))")
+        check("an unreachable remote is 'no news', not a crash",
+              p.stdout.strip(), "None")
+
+        # ---- the progress toast ---------------------------------------------
+        case("applying reports every step on one toast, with a bar")
+        sbq = Sandbox(root / "q")
+        (root / "q" / "settings.json").write_text(json.dumps({"notifActions": True}))
+        sbq.push({"home/prog/quickshell-files/Media.qml": "// z\n"}, "panel: z")
+        _, tail = sbq.pyrun("pr=m.Progress();pr.start();"
+                            "ok,msg=m.apply(prog=pr);pr.finish(ok,'~/nix applied',msg)")
+        steps = [ln for ln in tail.split("\n") if "notify (dry): applying ~/nix" in ln]
+        check("the toast is up before the survey is done",
+              "checking what is waiting" in tail, True)
+        check("every step draws on it", len(steps) >= 3, True)
+        check("each carries a bar value",
+              all("%" in s for s in steps), True)
+        check("and says which step of how many", "step 1 of 3" in tail, True)
+        check("the pull, the rebuild and the panel are all named",
+              ("pulling" in tail, "rebuilding" in tail,
+               "reloading the panel" in tail), (True, True, True))
+        check("it ends on a result, at 100%",
+              "~/nix applied" in tail and "| 100%" in tail, True)
+
+        case("a build's own plan drives the bar")
+        # nix prints its plan before it starts and one line per path as it
+        # goes — a real numerator over a real denominator, which is why the
+        # separate dry-run pass (a whole extra evaluation, minutes on book) is
+        # gone.
+        sbr = Sandbox(root / "r")
+        (root / "r" / "settings.json").write_text(json.dumps({"notifActions": True}))
+        p, _ = sbr.pyrun(
+            "pr=m.Progress(enabled=False);pr.plan([('build','rebuilding')]);"
+            "pr.step('build','evaluating',creep=90);w=m.build_watcher(pr);"
+            "w('these 3 derivations will be built:');"
+            "w(\"building '/nix/store/aaaa-hyprvtb-2.98.drv'\");"
+            "print(pr._state()[4]);"
+            "w(\"copying path '/nix/store/bbbb-foo' from 'https://cache.nixos.org'\");"
+            "w(\"copying path '/nix/store/cccc-bar' from 'https://cache.nixos.org'\");"
+            "print(pr._state()[3], pr._state()[4])")
+        out = p.stdout.strip().split("\n")
+        check("one of three is a third of the way", out[0], "33")
+        check("three of three is capped short of done — it is not over yet",
+              out[-1], "3/3 · bar 99")
 
         case("apply refuses a diverged checkout")
         sb7 = Sandbox(root / "g")

@@ -20,8 +20,14 @@ WHEN IT LOOKS
     ran further ahead than monotonic IS a resume. That needs no system-bus
     match rule (book has home-manager only and cannot install one), no
     privileges, and nothing to keep alive but this loop;
-  * every POLL_MIN minutes as a backstop, so a push that lands while he is
-    working is noticed the same day rather than at the next reboot.
+  * every PEEK_SEC (60s) it PEEKS: one `git ls-remote` round trip, no object
+    transfer, no local writes. The full survey — fetch, diff, flake.lock
+    comparison — only runs when that sha is one we have not already looked at.
+    This is what makes the toast prompt: the poll below used to be the only
+    thing that noticed a push, so a commit landed on the other machine could sit
+    unmentioned for the better part of half an hour;
+  * every POLL_MIN minutes regardless, as the backstop for a peek that has been
+    failing quietly (no network, no credentials, a remote that moved).
 
 WHAT IT SAYS. The toast carries the commit count, the first couple of subjects
 and a COST line, because "there are updates" is useless if applying them means a
@@ -32,9 +38,23 @@ whether anything under home/ or sys/ needs a switch at all, or whether it is
 only `apps/` live source that a rebuild would not touch in the first place.
 
 An estimate off a path list is a guess, so the honest number is taken at APPLY
-time instead: `nix build --dry-run` on the pulled config prints exactly how many
-derivations will be built rather than substituted, and that count goes in the
-progress toast.
+time instead — off the build's OWN plan ("these 37 derivations will be built"),
+which nix prints before it starts. That used to be a separate
+`nix build --dry-run` pass ahead of the rebuild; it cost a whole extra
+evaluation (minutes on book) during which the toast sat on the previous step
+saying nothing, and the rebuild then printed the same numbers anyway.
+
+WHAT IT LOOKS LIKE WHILE IT WORKS. One toast, from the click to the last word,
+morphing in place: never expiring (`-t 0`), naming the step it is on, and
+carrying a **progress bar** — the `value` hint, which the panel's
+NotificationCard draws (docs/DESIGN.md §8.1's bar). The bar is that STEP's own
+fraction, and the body says which step of how many, because those are two
+different denominators and §10.5 says so. Where a step can be measured it is:
+git's own "Receiving objects: N%" for the pull, and built+fetched store paths
+counted against the plan for the rebuild. Where it cannot — the evaluation
+before nix prints a plan — the bar eases toward 90% of the step on elapsed time
+and never claims to be finished, exactly as player's systheme toast does across
+its render.
 
 WHAT IT DOES NOT DO. It never applies anything on its own. It never stashes,
 resets or checks out — if the tree has work in it that blocks a fast-forward,
@@ -55,6 +75,7 @@ can be exercised without touching his session or his repo:
     REPO_UPDATES_LOG      log file              (default ~/.cache/repo-updates.log)
     REPO_UPDATES_NOTIFY   command instead of notify-send ('' = log only)
     REPO_UPDATES_POLL_MIN backstop poll minutes (default 30)
+    REPO_UPDATES_PEEK_SEC ls-remote peek seconds (default 60; 0 = off)
     REPO_UPDATES_NO_FETCH 1 = never touch the network (compare what is there)
     REPO_UPDATES_NO_APPLY 1 = print the apply plan, run nothing
     REPO_UPDATES_NO_RELOAD 1 = never bump Theme.qml or hyprctl reload
@@ -70,10 +91,13 @@ check its own work).
 """
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
+import threading
 import time
+from collections import deque
 from pathlib import Path
 
 HOME = Path.home()
@@ -83,6 +107,7 @@ LOG = Path(os.environ.get("REPO_UPDATES_LOG", HOME / ".cache/repo-updates.log"))
 SETTINGS = Path(os.environ.get("REPO_UPDATES_SETTINGS",
                                HOME / ".config/quickshell/settings.json"))
 POLL_MIN = int(os.environ.get("REPO_UPDATES_POLL_MIN", "30"))
+PEEK_SEC = int(os.environ.get("REPO_UPDATES_PEEK_SEC", "60"))
 NO_FETCH = os.environ.get("REPO_UPDATES_NO_FETCH") == "1"
 NO_APPLY = os.environ.get("REPO_UPDATES_NO_APPLY") == "1"
 # The harness points the rebuild at `true` and switches the reloads off: a test
@@ -221,6 +246,29 @@ def classify(files, moved_inputs, hostname):
     }
 
 
+def peek():
+    """The sha `origin/BRANCH` points at, for one round trip and no local writes.
+
+    ls-remote asks the remote for its refs and stops there: no objects come
+    down, no ref is updated, nothing in .git changes. Cheap enough to run every
+    minute, which is the point — the full survey below fetches, and fetching
+    every minute forever to notice a push every few days is not a trade worth
+    making. Returns None on any failure (offline, no credentials, no remote):
+    the caller treats that as "no news", and the POLL_MIN backstop still runs.
+    """
+    rc, out, _ = git("ls-remote", "--exit-code", "origin",
+                     f"refs/heads/{BRANCH}", timeout=25)
+    if rc != 0 or not out:
+        return None
+    sha = out.split()[0]
+    return sha if re.fullmatch(r"[0-9a-f]{40}", sha) else None
+
+
+def head_sha():
+    rc, out, _ = git("rev-parse", "HEAD")
+    return out if rc == 0 else ""
+
+
 def survey(fetch=True):
     """Fetch and describe what `origin/BRANCH` has that we do not.
 
@@ -281,7 +329,7 @@ def actions_drawn():
 
 
 def notify(summary, body, actions=(), replace_id=0, wait=False, urgency="normal",
-           expire="0"):
+           expire="0", value=None):
     """Raise (or replace) the toast. Returns (id, action_key).
 
     `action_key` is only ever set when `wait` is on — notify-send -w blocks
@@ -292,7 +340,11 @@ def notify(summary, body, actions=(), replace_id=0, wait=False, urgency="normal"
     override = os.environ.get("REPO_UPDATES_NOTIFY")
     if override == "":
         keys = " ".join(k for k, _ in actions)
-        log(f"notify (dry): {summary} | {body}" + (f" | actions: {keys}" if keys else ""))
+        # One log line per toast, so a multi-line body (every progress step has
+        # one) stays greppable as the single event it is.
+        log(f"notify (dry): {summary} | " + body.replace("\n", " / ")
+            + (f" | {value}%" if value is not None else "")
+            + (f" | actions: {keys}" if keys else ""))
         return 0, None
     cmd = (override.split() if override else ["notify-send"])
     # -i repo-updates: the Gaap seal (home/prog/app-icons/repo-updates.svg,
@@ -301,6 +353,11 @@ def notify(summary, body, actions=(), replace_id=0, wait=False, urgency="normal"
     cmd += ["-a", "nix", "-i", "repo-updates", "-u", urgency, "-t", str(expire), "-p"]
     if replace_id:
         cmd += ["-r", str(replace_id)]
+    # The de-facto progress hint: an int 0-100 that KDE, dunst and our own
+    # NotificationCard all read as "draw a bar this full". A toast without it
+    # draws no bar at all, which is every toast that is not this one applying.
+    if value is not None:
+        cmd += ["-h", "int:value:%d" % max(0, min(100, int(value)))]
     for key, label in actions:
         cmd += [f"--action={key}={label}"]
     if wait:
@@ -348,55 +405,206 @@ def toast_text(s):
 # applying it
 # ---------------------------------------------------------------------------
 
-def run(cmd, timeout=3600, env=None):
-    """Run a command, tee its tail into the log, return (rc, tail)."""
+def _stream_lines(fd):
+    """Yield output lines as they arrive, split on \\r as well as \\n.
+
+    A buffered read(n) would block until n bytes exist, which for a build that
+    prints one line a second means the progress toast learns about it a minute
+    late. os.read returns whatever the pipe has. The \\r matters for git, which
+    redraws "Receiving objects:  42%" in place and never sends a newline until
+    it is done.
+    """
+    buf = ""
+    while True:
+        try:
+            chunk = os.read(fd, 8192)
+        except OSError:
+            break
+        if not chunk:
+            break
+        buf += chunk.decode("utf-8", "replace")
+        parts = re.split(r"[\r\n]", buf)
+        buf = parts.pop()
+        for part in parts:
+            if part.strip():
+                yield part.rstrip()
+    if buf.strip():
+        yield buf.rstrip()
+
+
+def run(cmd, timeout=3600, env=None, on_line=None):
+    """Run a command, tee its tail into the log, return (rc, tail).
+
+    Streamed rather than collected, so `on_line` can drive the progress bar
+    while the command is still running — a rebuild is the longest thing this
+    program does and reading its output only after it finished is precisely the
+    silence the toast exists to end.
+    """
     log("run: " + " ".join(cmd))
     if NO_APPLY:
         return 0, "(REPO_UPDATES_NO_APPLY)"
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
-                           env=env, cwd=str(REPO))
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, env=env, cwd=str(REPO))
     except (OSError, subprocess.SubprocessError) as e:
         log(f"  failed to start: {e}")
         return 1, str(e)
-    tail = ((p.stdout or "") + (p.stderr or "")).strip().split("\n")
-    for line in tail[-40:]:
-        log("  | " + line)
-    return p.returncode, "\n".join(tail[-6:])
-
-
-def dry_run_count():
-    """How many derivations the pulled config will BUILD (not substitute).
-
-    The honest version of the toast's cost guess. `nix build --dry-run` prints
-    its plan on stderr; a line count off the "will be built" section is all we
-    want. Any failure here is non-fatal — it only costs the progress toast a
-    number.
-    """
-    if REBUILD_CMD:
-        return None
-    attr = ("nixosConfigurations.top.config.system.build.toplevel"
-            if host() == "top" else "homeConfigurations.air.activationPackage")
+    tail = deque(maxlen=40)
+    killer = threading.Timer(timeout, p.kill)
+    killer.start()
     try:
-        p = subprocess.run(["nix", "build", "--dry-run", "--no-link",
-                            f"{REPO}#{attr}"],
-                           capture_output=True, text=True, timeout=900)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    txt = p.stderr or ""
-    section = None
-    built = 0
-    for line in txt.split("\n"):
-        stripped = line.strip()
-        if "will be built" in stripped:
-            section = "build"
-            continue
-        if "will be fetched" in stripped or "will be copied" in stripped:
-            section = None
-            continue
-        if section == "build" and stripped.startswith("/nix/store/"):
-            built += 1
-    return built
+        for line in _stream_lines(p.stdout.fileno()):
+            tail.append(line)
+            if on_line:
+                try:
+                    on_line(line)
+                except Exception as e:      # a progress bar may never kill a build
+                    log(f"  (progress: {e})")
+        p.wait()
+    finally:
+        killer.cancel()
+        try:
+            p.stdout.close()
+        except OSError:
+            pass
+    for line in tail:
+        log("  | " + line)
+    return p.returncode, "\n".join(list(tail)[-6:])
+
+
+# ---------------------------------------------------------------------------
+# the progress toast
+# ---------------------------------------------------------------------------
+
+# What a build tells us about itself. nix prints its plan before it starts
+# ("these 12 derivations will be built:" / "these 40 paths will be fetched"),
+# then one line per store path it builds or substitutes — which is a real,
+# countable denominator and numerator, not an estimate.
+RE_PLAN_BUILD = re.compile(r"these? (\d+) derivations? will be built")
+RE_PLAN_FETCH = re.compile(r"these? (\d+) paths? will be fetched")
+RE_BUILDING = re.compile(r"^building '/nix/store/[a-z0-9]+-(.+?)(?:\.drv)?'")
+RE_COPYING = re.compile(r"^copying path '/nix/store/[a-z0-9]+-(.+?)'")
+RE_GIT_PCT = re.compile(r"(Receiving objects|Resolving deltas):\s+(\d+)%")
+
+
+class Progress:
+    """ONE toast, from the click to the last word, morphing in place.
+
+    docs/DESIGN.md §10.4: a status toast for an ongoing operation stays on
+    screen until it finishes and is replaced in place — it does not re-fire. So
+    this is raised the instant the button is clicked (before the fetch, which is
+    itself a wait worth showing) and every update after that is a --replace-id
+    on the same notification id, at `-t 0` so nothing expires it underneath us.
+
+    The bar is the CURRENT STEP's fraction and the body says which step of how
+    many: §10.5 — two percentages on one screen must not share a `%` sign
+    without sharing a denominator, and these two do not.
+
+    A step that cannot be measured (an evaluation, before nix has a plan to
+    print) CREEPS: the bar eases toward 90% of the step on elapsed time and
+    stops there. It is honest about being unfinished, and it moves, which is the
+    whole difference between "working" and "hung".
+    """
+
+    TICK = 1.5          # how often the creep and any pending change is drawn
+    CREEP_CEIL = 0.9
+
+    def __init__(self, enabled=True):
+        self.enabled = enabled
+        self.nid = 0
+        self.steps = [("check", "checking what is waiting")]
+        self.i = 0
+        self.frac = 0.0
+        self.detail = ""
+        self._creep_from = None
+        self._creep_half = 30.0
+        self._lock = threading.RLock()
+        self._last = None
+        self._stop = threading.Event()
+        self._thread = None
+
+    # -- lifecycle ---------------------------------------------------------
+    def start(self):
+        self._draw(force=True)
+        if not self.enabled:
+            return
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def _loop(self):
+        while not self._stop.wait(self.TICK):
+            self._draw()
+
+    def finish(self, ok, summary, body):
+        """The terminal toast, in the same slot. Never silent — §7.2."""
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=self.TICK * 2)
+        if not self.enabled:
+            return
+        notify(summary, body, replace_id=self.nid,
+               urgency="normal" if ok else "critical",
+               # Success expires like any other toast; a failure is urgency 2,
+               # which the card keeps up until he clicks it.
+               expire="-1" if ok else "0",
+               value=100 if ok else None)
+
+    # -- what it is doing --------------------------------------------------
+    def plan(self, steps):
+        """Fix the step list once the survey says which steps there are."""
+        with self._lock:
+            self.steps = list(steps)
+            self.i = 0
+
+    def step(self, key, detail="", creep=None):
+        with self._lock:
+            for n, (k, _) in enumerate(self.steps):
+                if k == key:
+                    self.i = n
+                    break
+            self.frac = 0.0
+            self.detail = detail
+            self._creep_from = time.monotonic() if creep else None
+            self._creep_half = float(creep or 30.0)
+            label = self.steps[self.i][1]
+        log("STEP: " + label + (f" · {detail}" if detail else ""))
+        self._draw(force=True)
+
+    def set(self, frac=None, detail=None, stop_creep=True):
+        with self._lock:
+            if frac is not None:
+                self.frac = max(0.0, min(1.0, frac))
+                if stop_creep:
+                    self._creep_from = None
+            if detail is not None:
+                self.detail = detail
+        self._draw()
+
+    # -- drawing -----------------------------------------------------------
+    def _state(self):
+        with self._lock:
+            label = self.steps[self.i][1]
+            frac = self.frac
+            if self._creep_from is not None:
+                e = time.monotonic() - self._creep_from
+                frac = max(frac, self.CREEP_CEIL * e / (e + self._creep_half))
+            return self.i, len(self.steps), label, self.detail, \
+                int(round(100 * max(0.0, min(1.0, frac))))
+
+    def _draw(self, force=False):
+        i, n, label, detail, pct = self._state()
+        key = (i, label, detail, pct)
+        if not force and key == self._last:
+            return
+        self._last = key
+        if not self.enabled:
+            return
+        body = label + (" · " + detail if detail else "")
+        if n > 1:
+            body += f"\nstep {i + 1} of {n}"
+        nid, _ = notify("applying ~/nix", body, replace_id=self.nid, value=pct)
+        if nid:
+            self.nid = nid
 
 
 def reload_panel():
@@ -441,66 +649,136 @@ def reload_hypr():
     return rc == 0
 
 
-def apply(progress=True):
+def build_watcher(prog):
+    """An on_line for the rebuild: turns nix's chatter into a real fraction.
+
+    The wrapper runs preflight, then nix evaluates (nothing countable to say),
+    then it prints its plan and starts working through it. Only the last of
+    those three has a denominator, so the first two creep and this switches to
+    the honest number the moment the plan appears.
+    """
+    st = {"total": 0, "done": 0, "planned": False}
+
+    def on_line(line):
+        line = line.strip()
+        m = RE_PLAN_BUILD.search(line) or RE_PLAN_FETCH.search(line)
+        if m:
+            st["total"] += int(m.group(1))
+            st["planned"] = True
+            prog.set(frac=0.0, detail=f"0/{st['total']} paths")
+            return
+        m = RE_BUILDING.match(line) or RE_COPYING.match(line)
+        if m:
+            st["done"] += 1
+            name = m.group(1)[:24]
+            if st["planned"] and st["total"]:
+                prog.set(frac=min(0.99, st["done"] / st["total"]),
+                         detail=f"{st['done']}/{st['total']} · {name}")
+            else:
+                # No plan line (a tiny build prints none): the count is all we
+                # have, so show it and keep the bar creeping.
+                prog.set(detail=f"{st['done']} paths · {name}", stop_creep=False)
+            return
+        if "preflight" in line.lower() and not st["planned"]:
+            prog.set(detail="preflight checks", stop_creep=False)
+        elif line.startswith("Activating ") or "activation" in line.lower():
+            prog.set(frac=0.99, detail="activating")
+
+    return on_line
+
+
+def apply(prog=None, progress=True):
     """Pull, rebuild, reload. Returns (ok, message).
 
-    The progress toast morphs in place: the first step opens one, every step
-    after it replaces that id. It cannot reuse the OFFER's id — the card
-    dismissed that notification the moment its button was invoked, and a
-    --replace-id naming a notification the server no longer holds opens a brand
-    new toast instead of updating (the same bug that made surfer's downloads
-    toast on every whole percent).
+    `prog` is the toast already on screen — settle() raises it the instant the
+    button is clicked, because the first thing this does is a fetch and a
+    survey, and on a slow link that was a good ten seconds of nothing after a
+    click that visibly dismissed the offer. Owning it here instead would put a
+    gap in the one guarantee the toast makes: something is on screen, saying
+    what is happening, from the click until it is done.
+
+    It cannot reuse the OFFER's id — the card dismissed that notification the
+    moment its button was invoked, and a --replace-id naming a notification the
+    server no longer holds opens a brand new toast instead of updating (the same
+    bug that made surfer's downloads toast on every whole percent).
     """
-    prog = {"id": 0}
-    s = survey()
-    if not s["ok"]:
-        return False, s["why"], prog["id"]
-    if s["behind"] == 0:
-        return True, "already up to date", prog["id"]
+    # No caller owns a VISIBLE toast here — `--apply` is the by-hand route and
+    # passes progress=False, so the steps go to the terminal and nothing is
+    # raised over what he is already looking at. A future caller that wants both
+    # must raise it and call finish() itself, the way settle() does; otherwise
+    # the last step's toast would sit there at -t 0 with nothing to retire it.
+    own = prog is None
+    if own:
+        prog = Progress(enabled=progress)
+        prog.start()
+    try:
+        prog.step("check", "fetching origin", creep=8)
+        s = survey()
+        if not s["ok"]:
+            return False, s["why"]
+        if s["behind"] == 0:
+            return True, "already up to date"
+        if s["ahead"]:
+            return False, (f"{s['ahead']} local commit(s) are not pushed — "
+                           "fast-forward impossible, land them first")
 
-    def step(text):
-        log("STEP: " + text)
-        if not progress:
-            return
-        nid, _ = notify("applying ~/nix", text, replace_id=prog["id"])
-        if nid:
-            prog["id"] = nid
+        steps = [("pull", "pulling")]
+        if s["needs_rebuild"]:
+            steps.append(("build", "rebuilding"))
+        if "panel" in s["reload"]:
+            steps.append(("panel", "reloading the panel"))
+        if "hyprctl" in s["reload"] and not s["needs_relog"]:
+            steps.append(("hypr", "reloading hyprland"))
+        prog.plan(steps)
 
-    if s["ahead"]:
-        return False, (f"{s['ahead']} local commit(s) are not pushed — "
-                       "fast-forward impossible, land them first"), prog["id"]
+        prog.step("pull", f"{s['behind']} commits", creep=6)
 
-    step(f"pulling {s['behind']} commits...")
-    rc, tail = run(["git", "pull", "--ff-only", "origin", BRANCH], timeout=180)
-    if rc != 0:
-        return False, "pull refused: " + tail.split("\n")[-1], prog["id"]
+        def pull_line(line):
+            m = RE_GIT_PCT.search(line)
+            if m:
+                # Receiving is the bulk of it; resolving is the tail.
+                base, span = (0.0, 0.8) if m.group(1).startswith("Receiving") \
+                    else (0.8, 0.2)
+                prog.set(frac=base + span * int(m.group(2)) / 100.0)
 
-    if s["needs_rebuild"]:
-        n = dry_run_count()
-        step("building..." if n is None else f"building, {n} derivation(s)...")
-        cmd = (REBUILD_CMD.split() if REBUILD_CMD
-               else (["sudo", "rebuild-top"] if host() == "top" else ["rebuild-air"]))
-        rc, tail = run(cmd, timeout=7200)
+        rc, tail = run(["git", "pull", "--ff-only", "--progress",
+                        "origin", BRANCH], timeout=180, on_line=pull_line)
         if rc != 0:
-            return False, "rebuild FAILED: " + tail.split("\n")[-1], prog["id"]
+            return False, "pull refused: " + tail.split("\n")[-1]
+        prog.set(frac=1.0, detail=f"{s['behind']} commits")
 
-    done = ["pulled"]
-    if s["needs_rebuild"]:
-        done.append("rebuilt")
-    if "panel" in s["reload"]:
-        step("reloading the panel...")
-        reload_panel()
-        done.append("panel reloaded")
-    if "hyprctl" in s["reload"] and not s["needs_relog"]:
-        step("reloading hyprland...")
-        if reload_hypr():
-            done.append("hyprctl reload")
-    if s["needs_relog"]:
-        done.append("compositor bumped — the plugin swaps at next login")
-    if not s["needs_rebuild"]:
-        done.append("no rebuild was needed")
+        if s["needs_rebuild"]:
+            # Creeps until nix prints its plan; build_watcher takes over then.
+            prog.step("build", "evaluating", creep=90)
+            cmd = (REBUILD_CMD.split() if REBUILD_CMD
+                   else (["sudo", "rebuild-top"] if host() == "top" else ["rebuild-air"]))
+            rc, tail = run(cmd, timeout=7200, on_line=build_watcher(prog))
+            if rc != 0:
+                return False, "rebuild FAILED: " + tail.split("\n")[-1]
+            prog.set(frac=1.0, detail="done")
 
-    return True, ", ".join(done), prog["id"]
+        done = ["pulled"]
+        if s["needs_rebuild"]:
+            done.append("rebuilt")
+        if "panel" in s["reload"]:
+            prog.step("panel")
+            reload_panel()
+            prog.set(frac=1.0)
+            done.append("panel reloaded")
+        if "hyprctl" in s["reload"] and not s["needs_relog"]:
+            prog.step("hypr")
+            if reload_hypr():
+                done.append("hyprctl reload")
+            prog.set(frac=1.0)
+        if s["needs_relog"]:
+            done.append("compositor bumped — the plugin swaps at next login")
+        if not s["needs_rebuild"]:
+            done.append("no rebuild was needed")
+
+        return True, ", ".join(done)
+    finally:
+        if own:
+            prog._stop.set()
 
 
 # ---------------------------------------------------------------------------
@@ -589,14 +867,16 @@ def settle(pending):
     st = load_state()
     if key == "apply":
         log("apply: he clicked")
-        ok, msg, pid = apply()
+        # Raised HERE, not inside apply(): the card dismissed the offer the
+        # instant the button was invoked, and the survey that follows can take
+        # ten seconds. Nothing on screen in between reads as a button that did
+        # nothing.
+        prog = Progress()
+        prog.start()
+        ok, msg = apply(prog=prog)
         log(("applied: " if ok else "apply failed: ") + msg)
-        # Success expires like any other toast; a failure is urgency 2, which
-        # the card keeps on screen until he clicks it.
-        notify("~/nix applied" if ok else "~/nix apply failed",
-               msg + f"\nlog: {LOG}", replace_id=pid,
-               urgency="normal" if ok else "critical",
-               expire="-1" if ok else "0")
+        prog.finish(ok, "~/nix applied" if ok else "~/nix apply failed",
+                    msg + f"\nlog: {LOG}")
         if ok:
             st.pop("dismissed", None)
     else:
@@ -609,9 +889,15 @@ def settle(pending):
 
 
 def daemon():
-    log(f"repo-updates: watching {REPO} on {host()}, poll {POLL_MIN}m")
+    log(f"repo-updates: watching {REPO} on {host()}, "
+        f"peek {PEEK_SEC}s, poll {POLL_MIN}m")
     pending = check_and_offer(None)
     last_check = time.monotonic()
+    last_peek = time.monotonic()
+    # The remote sha the last peek reported. A peek that says the same thing
+    # twice is not news, so the full survey does not run again for it — that is
+    # what lets the peek be cheap enough to run every minute.
+    peeked = None
     mono, boot = time.monotonic(), time.clock_gettime(time.CLOCK_BOOTTIME)
     while True:
         time.sleep(TICK_SEC)
@@ -630,6 +916,13 @@ def daemon():
             FLAGS["retry"] = False
         elif now_mono - last_check > POLL_MIN * 60:
             why = "poll"
+        elif PEEK_SEC and now_mono - last_peek >= PEEK_SEC and not off():
+            last_peek = now_mono
+            sha = peek()
+            if sha and sha != peeked:
+                peeked = sha
+                if sha != head_sha():
+                    why = f"origin/{BRANCH} is at {sha[:8]}"
         if why:
             log("checking: " + why)
             last_check = now_mono
@@ -656,7 +949,9 @@ def main():
             print(f"WARNING: {s['ahead']} local commit(s) unpushed — no fast-forward")
         return 10
     if cmd == "--apply":
-        ok, msg, _ = apply(progress=False)
+        # By hand (`nix-pull apply`): the steps go to the terminal via log(),
+        # so no toast is raised over whatever he is already looking at.
+        ok, msg = apply(progress=False)
         print(msg)
         return 0 if ok else 1
     if cmd == "--demo":
@@ -676,6 +971,29 @@ def main():
         proc.wait()
         key = (proc.stdout.readline() or "").strip()
         print(f"toast {nid} closed; button: {key or '(dismissed without a button)'}")
+        return 0
+    if cmd == "--demo-progress":
+        # The APPLY toast — the bar, the steps, the in-place morph — with
+        # nothing pulled and nothing built. Same reason as --demo: this is the
+        # only way to look at it without waiting for the other machine to push,
+        # and putting a notification on his screen is his call, not ours.
+        prog = Progress()
+        prog.plan([("pull", "pulling"), ("build", "rebuilding"),
+                   ("panel", "reloading the panel")])
+        prog.start()
+        prog.step("pull", "3 commits")
+        for pct in range(0, 101, 10):
+            prog.set(frac=pct / 100.0)
+            time.sleep(0.15)
+        prog.step("build", "evaluating", creep=6)
+        time.sleep(4)
+        for n in range(0, 41):
+            prog.set(frac=n / 40.0, detail=f"{n}/40 · demo-package")
+            time.sleep(0.12)
+        prog.step("panel")
+        prog.set(frac=1.0)
+        time.sleep(1)
+        prog.finish(True, "~/nix applied", "pulled, rebuilt, panel reloaded (demo)")
         return 0
     if cmd in ("--daemon", ""):
         daemon()

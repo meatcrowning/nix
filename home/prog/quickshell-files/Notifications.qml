@@ -310,8 +310,12 @@ Singleton {
         // / screen-recording toasts) carry the thumbnail path in, so the card can
         // thumbnail it and open it. `x-open-path` overrides what the click opens
         // when it differs from the thumbnail (a recording: poster thumb, mp4 open).
+        // `value` is the de-facto progress hint (KDE, dunst and GNOME all read
+        // it; `notify-send -h int:value:37` sends it): an int 0-100 that makes
+        // a toast a PROGRESS toast, drawn as the card's bar. repo-updates ships
+        // it on every step of a pull-and-rebuild.
         extraHints: ["x-kde-origin-name", "x-kdeconnect-source-device",
-                     "x-download-image", "x-open-path"]
+                     "x-download-image", "x-open-path", "value"]
 
         onNotification: function (n) {
             // Learn the sender before deciding anything, so an app whose
