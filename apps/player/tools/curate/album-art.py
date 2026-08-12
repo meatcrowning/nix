@@ -63,6 +63,63 @@ def caa_front(mbid):
     return None
 
 
+def discogs_front(album, artist):
+    """Front cover URL from the Discogs database API, or None.
+
+    The library is ~94% electronic; a large share of it is released on small
+    labels (netlabels, Molten Jets, ...) that never touch MusicBrainz's Cover
+    Art Archive but DO have a Discogs entry with art. Public-search endpoint
+    (no auth), so only usable for a whole-library pass, not a user-facing
+    server key. Matched on folded album + a token-overlap artist check, then
+    picks the first release with a front/primary image."""
+    try:
+        q = urllib.parse.quote(f"{artist} {album}".strip())
+        req = urllib.request.Request(
+            f"https://api.discogs.com/database/search?q={q}&type=release&per_page=10",
+            headers={"User-Agent": C.UA})
+        with urllib.request.urlopen(req, timeout=30) as f:
+            data = json.loads(f.read())
+    except Exception:
+        return None
+    falb = C.fold(album)
+    for rel in (data.get("results") or []):
+        # title must fold-match; artist credit must share a folded token
+        rtitle = C.fold(rel.get("title", ""))
+        # Discogs title is "Artist - Album" or "Album" — take the album side
+        rtitle = rtitle.split("-")[-1].strip() if "-" in rtitle else rtitle
+        if rtitle != falb:
+            continue
+        rart = C.fold(rel.get("title", "").split("-")[0].strip())
+        fart = C.fold(artist)
+        if fart and not (fart in rart or rart in fart):
+            continue
+        for img in (rel.get("cover_image") or []) if isinstance(rel.get("cover_image"), list) else ([rel.get("cover_image")] if rel.get("cover_image") else []):
+            if img:
+                return img
+    return None
+
+
+def itunes_front(album, artist):
+    """Front cover URL from the iTunes Search API, or None. Single-only fallback
+    for the releases that are absent from both CAA and Discogs."""
+    try:
+        q = urllib.parse.quote(f"{artist} {album}".strip())
+        req = urllib.request.Request(
+            f"https://itunes.apple.com/search?term={q}&entity=song&limit=10",
+            headers={"User-Agent": C.UA})
+        with urllib.request.urlopen(req, timeout=30) as f:
+            data = json.loads(f.read())
+    except Exception:
+        return None
+    for res in (data.get("results") or []):
+        if C.fold(res.get("collectionName") or "") == C.fold(album):
+            art = res.get("artworkUrl100")
+            if art:
+                # request the 600x600 source rather than the 100x100 thumb
+                return art.replace("100x100bb", "600x600bb")
+    return None
+
+
 def mb_search_release(album, artist):
     """release id of the top MB hit, only on a confident fold-match."""
     q = urllib.parse.quote(f'release:"{album}" AND artist:"{artist}"')
@@ -140,6 +197,19 @@ def main():
             continue
         url = caa_front(mbid)
         time.sleep(1.0)  # CAA asks for polite pacing too
+        how = how if url else "caa"
+        if not url:
+            # CAA has no art (small-label/netlabel releases); fall back to
+            # Discogs then iTunes before giving up. These are the sources that
+            # actually hold art for the library's long tail of electronic
+            # releases. Each is paced ~1 req/s like CAA.
+            url = discogs_front(album, artist)
+            time.sleep(1.0)
+            how = "discogs" if url else how
+        if not url:
+            url = itunes_front(album, artist)
+            time.sleep(1.0)
+            how = "itunes" if url else how
         if not url:
             entry["status"] = "no-art"
             entry["mbid"] = mbid
