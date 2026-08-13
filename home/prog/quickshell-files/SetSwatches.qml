@@ -74,10 +74,15 @@ Row {
         color: Theme.textDim
     }
 
+    // Each cluster is drawn as a SQUARE cell: the cell size is fixed and the
+    // strip's width follows the count (count * cellSize), so a column is always
+    // `cellSize` wide by `cellSize` tall whatever the wallpaper's cluster count
+    // — never the tall-and-thin sliver a fixed-width strip cut into N columns.
+    readonly property int cellSize: 20
     Item {
         id: strip
-        width: 220
-        height: 20
+        width: root.count * root.cellSize
+        height: root.cellSize
         visible: root.count > 0
 
         function cutAt(i) { return Math.round(i * strip.width / Math.max(1, root.count)); }
