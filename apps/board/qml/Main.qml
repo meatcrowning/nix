@@ -1785,6 +1785,12 @@ Component {
                                                     todoRow.modelData.when ? todoRow.modelData.when : ""
                                                 readonly property string metaCombined:
                                                     (metaBy ? metaBy + "  " : "") + metaWhen
+                                                // Is there anything pinned top-right when
+                                                // open? If not, the body starts at the top
+                                                // instead of a blank line under an empty
+                                                // gutter (an old bullet with no stamp).
+                                                readonly property bool hasRightMeta:
+                                                    metaBy !== "" || metaWhen !== ""
                                                 width: page.width
                                                 implicitHeight: bar.implicitHeight
                                                                 + (replying ? replyBox.height + 4 : 0)
@@ -1793,22 +1799,21 @@ Component {
                                                 Item {
                                                     id: bar
                                                     width: parent.width
-                                                    // ...and never shorter than the GUTTER
-                                                    // beside it. A one-line bullet with a
-                                                    // `by:` stamp has two lines of metadata
-                                                    // against one line of text, and without
-                                                    // this the name and the time spilled out
-                                                    // of the row and drew over the bullet
-                                                    // below — which is what a stack of
-                                                    // one-line SUMMONED lines is made of.
-                                                    implicitHeight: Math.max(
-                                                        todoText.implicitHeight
-                                                        + todoFor.height
-                                                        + (todoMore.visible
-                                                           ? todoMore.implicitHeight + 6 : 0),
-                                                        todoRow.folded
-                                                          ? todoMeta.implicitHeight
-                                                          : gutter.implicitHeight)
+                                                    // FOLDED, the summary and the combined
+                                                    // meta share one line, so the row is the
+                                                    // taller of the two. OPEN, the gutter is
+                                                    // top-right and the body stack starts a
+                                                    // blank line UNDER it (`todoText.y`), so
+                                                    // the row is that offset plus the stack —
+                                                    // no longer the max of body-beside-gutter,
+                                                    // because they no longer sit side by side.
+                                                    implicitHeight: todoRow.folded
+                                                        ? Math.max(todoText.implicitHeight,
+                                                                   todoMeta.implicitHeight)
+                                                        : todoText.y + todoText.implicitHeight
+                                                          + todoFor.height
+                                                          + (todoMore.visible
+                                                             ? todoMore.implicitHeight + 6 : 0)
                                                     height: implicitHeight
                                                     Rectangle {
                                                         anchors.fill: parent
@@ -1874,10 +1879,19 @@ Component {
                                                             ? todoRow.modelData.summary
                                                             : todoRow.modelData.text
                                                         x: todoMark.width + 8
-                                                        width: parent.width - x - 8
-                                                               - (todoRow.folded
-                                                                  ? todoRow.metaCombined.length * win.cellW
-                                                                  : 15 * win.cellW)
+                                                        // Open, the body starts a blank line
+                                                        // below the gutter (by + when) and
+                                                        // runs the full width to the right
+                                                        // edge; folded, it shares the top line
+                                                        // with the combined meta and reserves
+                                                        // its width as before.
+                                                        y: (todoRow.folded || !todoRow.hasRightMeta)
+                                                           ? 0
+                                                           : gutter.implicitHeight + Theme.lineHeight
+                                                        width: todoRow.folded
+                                                               ? parent.width - x - 8
+                                                                 - todoRow.metaCombined.length * win.cellW
+                                                               : parent.width - x
                                                         color: win.fgText
                                                         maximumLineCount: todoRow.folded ? 1 : 9999
                                                         text: todoRow.folded
@@ -1911,7 +1925,7 @@ Component {
                                                     PixelText {
                                                         id: todoFor
                                                         x: todoText.x
-                                                        y: todoText.height + 2
+                                                        y: todoText.y + todoText.height + 2
                                                         width: todoText.width
                                                         visible: todoRow.modelData.order
                                                                  && !todoRow.folded
@@ -1926,7 +1940,8 @@ Component {
                                                     Para {
                                                         id: todoMore
                                                         x: todoText.x
-                                                        y: todoText.height + todoFor.height + 6
+                                                        y: todoText.y + todoText.height
+                                                           + todoFor.height + 6
                                                         width: todoText.width
                                                         // Folded, the elaboration is the
                                                         // half that goes: the summary is
@@ -1990,7 +2005,12 @@ Component {
                                                     }
                                                     Column {
                                                         id: gutter
+                                                        // Top-right, and only when there is
+                                                        // something to pin there: an empty
+                                                        // gutter must not reserve the blank
+                                                        // line the body offsets past.
                                                         visible: !todoRow.folded
+                                                                 && todoRow.hasRightMeta
                                                         anchors.right: parent.right
                                                         anchors.top: parent.top
                                                         width: 15 * win.cellW
@@ -2010,6 +2030,8 @@ Component {
                                                             width: parent.width
                                                             horizontalAlignment: Text.AlignRight
                                                             color: Theme.dim
+                                                            visible: text !== ""
+                                                            height: visible ? implicitHeight : 0
                                                             text: todoRow.modelData.when
                                                                   ? todoRow.modelData.when : ""
                                                         }
@@ -2682,7 +2704,7 @@ Component {
                                                      + " " + lrow.modelData.what + " "
                                                      + (lrow.modelData.when || ""))
                                             width: landedCol.width
-                                            implicitHeight: lwhat.implicitHeight
+                                            implicitHeight: lwhat.y + lwhat.implicitHeight
                                             height: implicitHeight
                                             Rectangle {
                                                 anchors.fill: parent
@@ -2691,36 +2713,46 @@ Component {
                                             PixelText {
                                                 id: lcommit
                                                 x: 0
+                                                y: 0
                                                 width: 8 * win.cellW
                                                 elide: Text.ElideRight
                                                 color: Theme.dim
                                                 text: lrow.modelData.commit
                                             }
-                                            Para {
-                                                id: lwhat
-                                                x: lcommit.width + 8
-                                                width: parent.width - x
-                                                       - (lwhen.width > 0 ? lwhen.width + 8 : 0)
-                                                color: win.fgDim
-                                                text: lrow.modelData.what
-                                            }
                                             // WHEN it happened, at the trailing edge
-                                            // (§9.1: metadata clusters there) and a
-                                            // rung dimmer than the line it belongs to,
-                                            // because the what is the point and the
-                                            // time is not. Its width is a CHARACTER
-                                            // COUNT like the commit's — `implicitWidth`
-                                            // on an elided Text measures out at zero —
-                                            // and it is 0 for a row that has no time,
-                                            // so the old rows give the space back.
+                                            // (§9.1: metadata clusters there, and it no
+                                            // longer NARROWS the subject — the time
+                                            // sits on the top line by the commit and the
+                                            // `what` starts a blank line under it, so a
+                                            // one-line right strip stops eating the full
+                                            // row height). A rung dimmer than the line
+                                            // it belongs to, because the what is the
+                                            // point and the time is not. Its width is a
+                                            // CHARACTER COUNT like the commit's, and 0
+                                            // for a row that has no time, so an old row
+                                            // draws its subject on the top line.
                                             PixelText {
                                                 id: lwhen
                                                 anchors.right: parent.right
+                                                y: 0
                                                 width: lrow.modelData.when ? 8 * win.cellW : 0
                                                 visible: width > 0
                                                 horizontalAlignment: Text.AlignRight
                                                 color: Theme.dim
                                                 text: lrow.modelData.when ? lrow.modelData.when : ""
+                                            }
+                                            Para {
+                                                id: lwhat
+                                                x: lcommit.width + 8
+                                                // A blank line below the time when there
+                                                // is one; on the top line by the commit
+                                                // when the row has no stamp. Full width
+                                                // to the right edge either way.
+                                                y: lwhen.visible
+                                                   ? lwhen.height + Theme.lineHeight : 0
+                                                width: parent.width - x
+                                                color: win.fgDim
+                                                text: lrow.modelData.what
                                             }
                                             MouseArea {
                                                 id: lma
