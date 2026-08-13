@@ -173,6 +173,13 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
 - **`trackmatch.py`** — the one artist/title normaliser. Any new "are these two
   tag strings the same song?" code must use it rather than grow a second copy;
   see `player/AGENTS.md`.
+- **`pngmeta.py`** — the PNG tEXt/zTXt/iTXt reader and writer, stdlib only. Two
+  callers by design: painter WRITES the `painter` chunk holding a generation's
+  exact parameters, and filer's `Ctrl+F` READS that chunk plus whatever ComfyUI
+  (`prompt`, `workflow`) and cte (`cte_*`) left in the same place. It lived in
+  `painter/` until 2026-08-12; a second parser for the same bytes is the thing
+  to avoid. `read_text_path()` is the cheap route — it never touches the pixels;
+  see `filer/AGENTS.md` for what that costs and why the tail fallback exists.
 - **`deskstyle.py`** — **THE channel for every desktop-wide appearance setting
   that has to reach the apps. Add a key here; never build a second pipe.**
   Today: `fontFamily` / `fontSize`, the two motion settings `reduceMotion` /

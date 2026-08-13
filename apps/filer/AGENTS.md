@@ -141,6 +141,68 @@ against filer's real `Listener` and the real QML, off the GUI thread because the
 echo is a synchronous round trip. viewer's own half is
 `../viewer/tools/select-back-test.py`.
 
+## `Ctrl+F` filters the pane by GEN METADATA, not just by name
+
+The desktop's find key (docs/DESIGN.md §11.2) opened nothing in filer until
+2026-08-12 — the gap that file's open question 12 named. It filters, the way
+board's does, because every hit is a whole row or tile and they are all shown at
+once; there is nothing to step through and no mark to draw (§3.6 does not
+apply).
+
+**The corpus is the PNG text chunks his generators write**, which is the point
+of the feature: a directory of gens is a thousand files called
+`ComfyUI_07291_.png`, and the thing you remember about the one you want is what
+was in the prompt. `MetaSearch` (`main.py`) reads them through
+`pylib/pngmeta.py` — the same parser painter *writes* them with, which is why
+that module moved out of `painter/` — so ComfyUI's `prompt`/`workflow` JSON,
+cte's `cte_p1`/`cte_neg`/`cte_sampler`/`cte_steps`/… keys and painter's own
+`painter` chunk are all one haystack, alongside the filename.
+
+- **One substring AND, no field syntax.** Whitespace splits terms, `"a phrase"`
+  keeps its spaces, everything folds to lower case, and a term hits a filename,
+  a prompt or a sampler name indifferently. `model:`/`steps>40` was considered
+  and deliberately not built — his call when the feature was scoped.
+- **PNG only.** Every other file — and every directory — carries its NAME as the
+  whole haystack. A filter must never make a folder unreachable for lacking
+  metadata it cannot have, and a `.txt`'s *contents* are not indexed (that is a
+  grep, not a find).
+- **The current directory, not a recursive walk.** His call. Which also makes
+  the answer a flat one: while a filter is up, expansion is suppressed —
+  `buildRows` only descends into expanded subdirs when `filterSet === null`, so
+  you never get a filtered listing with unfiltered branches hanging off it.
+- **`filterSet` is `null` for "no query" and an empty `Set` for "no matches".**
+  Two different states, and the second one shows an EMPTY directory. Collapsing
+  them (the obvious `if (!filterSet)`) makes a query that found nothing look
+  exactly like no query at all.
+- **Off the GUI thread, cached on `(path, mtime, size)`.** The first pass over a
+  gen directory is disk work — ~0.3s per 500 PNGs — and every keystroke after it
+  is a substring scan over memory. Typing is debounced 120ms, and a newer query
+  retires an older one by generation count, so a fast typist never has a stale
+  set land on top of a fresh one.
+- **`read_text_path` stops at IDAT** and falls back to a CRC-validated scan of
+  the file's tail only when nothing was found in front of the pixels (1 file in
+  595 of his, measured, has its chunks appended). Walking the whole chunk table
+  instead finds the same text and costs 7.4s per 500 files — an IDAT-heavy PNG
+  is thousands of 8-byte reads.
+- **Per PANE, routed by `watchKey`.** A split window is filtering two different
+  directories; the token comes back with the answer so one pane's result cannot
+  empty the other. Same reason `DirWatch.setDirs` is keyed.
+- **A filter belongs to the directory it was typed in.** Navigating drops it and
+  leaves the bar open for the new dir. An external change (a render landing in
+  the watched folder) re-runs the query from `refresh()` — and from THERE only:
+  re-asking when `rows` changes loops, because the answer is what changes them.
+- The key is **window-scoped** in `Main.qml`, one `Shortcut` on `"Ctrl+F"` and
+  **not** `[StandardKey.Find, "Ctrl+F"]` — on this platform those are the same
+  chord, two Shortcuts claiming it makes it *ambiguous*, and Qt then fires
+  neither. Titlebar cell `fs`, tooltip `find (Ctrl+F)`, lit while the bar is up.
+  Dead in picker mode, which has its own filename box and file-type cycler.
+
+Harness: `tools/find-test.py` — the backend against real PNGs written by the
+test (including one with trailing chunks), and the real `Main.qml` driven by a
+genuine `QTest.keyClick` Ctrl+F, offscreen. `sendEvent` would not do: a QML
+`Shortcut` is resolved by the application's shortcut map, which only sees keys
+delivered through the window system.
+
 ## The preview grid: images AND video poster frames
 
 `preview_kind` (`main.py`) sorts every entry into `dir | image | video | file`;

@@ -13,7 +13,9 @@ import os
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PAINTER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PAINTER)
+sys.path.insert(0, os.path.join(os.path.dirname(PAINTER), "pylib"))  # pngmeta lives here
 
 from PySide6 import QtCore  # noqa: E402
 
