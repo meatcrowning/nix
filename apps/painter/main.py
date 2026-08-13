@@ -54,12 +54,14 @@ from spellcheck import SpellCheck  # noqa: E402  (pylib; the prompt boxes' spell
 # The QBuffer-safe encoder (see its docstring for the SEGV that shape avoids);
 # collage.py already pulls it in, so this costs nothing new.
 import imgfit  # noqa: E402
+# The PNG text-chunk reader/writer. In pylib because filer's metadata filter
+# reads the same chunks this app writes — one parser, not two.
+import pngmeta  # noqa: E402
 
 sys.path.insert(0, str(HERE))
 import collage as Collage  # noqa: E402
 import comfy as C  # noqa: E402
 import graph as G  # noqa: E402
-import pngmeta  # noqa: E402
 import registry as R  # noqa: E402
 
 OUT_DIR = Path(os.environ.get("PAINTER_OUT", Path.home() / "Pictures" / "painter" / "out"))

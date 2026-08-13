@@ -203,6 +203,10 @@ Window {
             { id: "paste",  label: "p",  state: view.clip !== null ? 0 : 2,    tip: "paste" },
             { id: "trash",  label: "t",  state: sel,                           tip: "move to trash" },
             { id: "hidden", label: "h",  state: view.showHidden ? 1 : 0,       tip: "toggle hidden files" },
+            // find: `fs` and "find (Ctrl+F)" are the desktop's cell for it
+            // (docs/DESIGN.md §11.2, §12.1) — lit while the bar is up, so the
+            // click that opened it closes it.
+            { id: "find",   label: "fs", state: view.findOpen ? 1 : 0,         tip: "find (Ctrl+F)" },
             // split view: two panes, one titlebar. Kitty's pair, same labels
             // and same meaning — `|` divides vertically (panes side by side),
             // `_` divides horizontally (panes stacked). The one matching the
@@ -291,6 +295,7 @@ Window {
             case "paste":  view.pasteInto(view.path); break;
             case "trash":  if (view.selection.length) { FileOps.run(["gio", "trash", "--"].concat(view.selection), ""); view.clearSelection(); } break;
             case "hidden": view.toggleHidden(); break;
+            case "find":   if (view.findOpen) view.closeFind(); else view.openFind(); break;
             case "vsplit": win.setSplit(true); break;
             case "hsplit": win.setSplit(false); break;
             }
@@ -347,6 +352,22 @@ Window {
         enabled: !win.picking && win.splitOn
         sequences: ["F6"]
         onActivated: win.focusPane = win.focusPane === 1 ? 0 : 1
+    }
+
+    // ---- Ctrl+F: find, in the FOCUSED pane (docs/DESIGN.md §11.2) ----------
+    // Window-scoped, not on one focusable item, so it fires wherever the
+    // keyboard is — in a list, in the grid, or already in the field, where a
+    // second press re-selects the query rather than doing nothing. Dead in
+    // picker mode: a file dialog's one job is its own filename box, and filer's
+    // filter would fight the file-type cycler for the same listing.
+    Shortcut {
+        enabled: !win.picking
+        // One sequence, not StandardKey.Find AND "Ctrl+F": on this platform
+        // they are the same chord, and two Shortcuts claiming it makes it
+        // AMBIGUOUS — Qt then fires NEITHER, which is a find key that does
+        // nothing (caught by tools/find-test.py, which posts a real key).
+        sequences: ["Ctrl+F"]
+        onActivated: if (win.pane) win.pane.openFind()
     }
 
     // The mouse's back/forward side buttons walk the FOCUSED pane's directory

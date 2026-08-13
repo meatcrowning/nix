@@ -116,6 +116,10 @@ def build(app, spec, start_dir):
              filermain.VideoConv(), filermain.Phone(), filermain.Remote(),
              filermain.ImgConv())
     ctx.setContextProperty("DirWatch", extra[0])
+    # Ctrl+F's backend (BrowserPane binds Connections to it, so it must exist
+    # even in a harness that never types a query).
+    _metasearch = filermain.MetaSearch(parent=engine)
+    ctx.setContextProperty("MetaSearch", _metasearch)
     _deskstyle = DeskStyle(parent=engine)
     ctx.setContextProperty("WalPalette", palette)
     # Theme.qml binds font/fontSize to DeskStyle (pylib/deskstyle.py), so the

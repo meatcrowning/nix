@@ -415,6 +415,73 @@ Rectangle {
         ];
     }
 
+    // ---- Ctrl+F: filter this directory by name AND by gen metadata ---------
+    // docs/DESIGN.md §11.2. The corpus is the PNG text chunks his generators
+    // write (ComfyUI `prompt`/`workflow`, cte's `cte_*`, painter's `painter`),
+    // read off the disk by `MetaSearch` in main.py — so "chrome ink" finds the
+    // gens whose prompt says it, in a directory whose filenames are all
+    // `ComfyUI_07291_.png`. Whole-word or field syntax is deliberately absent:
+    // one substring AND, the board precedent.
+    //
+    // Per PANE, keyed by `watchKey`: a split window is filtering two different
+    // directories and one pane's answer must never land in the other.
+    property bool findOpen: false
+    property string findText: ""
+    // The matching paths, or null for "no filter" — the two are different
+    // states and buildRows reads them as such: an empty Set is a query that
+    // matched nothing (show nothing), null is no query at all (show all).
+    property var filterSet: null
+    property bool filterBusy: false
+    readonly property bool filtering: findOpen && findText.trim() !== ""
+    readonly property int filterCount: rows.length + previews.length
+
+    function openFind() {
+        findOpen = true;
+        findBar.focusField();
+    }
+    function closeFind() {
+        findOpen = false;
+        findText = "";
+        if (filterSet !== null) { filterSet = null; rebuildKeepScroll(); }
+        filterBusy = false;
+    }
+    // Typing is debounced: the first pass over a directory of gens is disk work
+    // (~0.3s per 500 PNGs, then cached), so a per-keystroke request would queue
+    // scans nobody is waiting for any more.
+    onFindTextChanged: findDebounce.restart()
+    Timer {
+        id: findDebounce
+        interval: 120
+        onTriggered: view.requestFilter()
+    }
+    function requestFilter() {
+        if (!view.filtering) {
+            view.filterBusy = false;
+            if (view.filterSet !== null) { view.filterSet = null; view.rebuildKeepScroll(); }
+            return;
+        }
+        view.filterBusy = true;
+        MetaSearch.search(view.watchKey, view.path, view.findText, view.showHidden);
+    }
+    Connections {
+        target: MetaSearch
+        function onReady(token, paths) {
+            if (token !== view.watchKey || !view.filtering) return;
+            const s = new Set();
+            for (let i = 0; i < paths.length; i++) s.add(paths[i]);
+            view.filterSet = s;
+            view.filterBusy = false;
+            view.rebuildKeepScroll();
+        }
+    }
+    // A filter belongs to the directory it was typed in — carrying it into the
+    // next one would answer a question about a folder you have left. Navigating
+    // drops it and leaves the bar open, caret and all, ready for the new dir.
+    onPathChanged: {
+        if (view.filterSet !== null) view.filterSet = null;
+        if (view.findText !== "") view.findText = "";
+    }
+
     // tree state: the flat list of currently-visible rows, plus the set of
     // directory paths the user has expanded (persisted across refreshes so
     // an op doesn't collapse the tree).
@@ -585,8 +652,13 @@ Rectangle {
             // for. Directories always survive — they are how you navigate —
             // so `dir` mode leaves a pure folder tree. (pick.py::accepts)
             if (view.picking && !Picker.accepts(e.name, e.isDir)) continue;
+            // Ctrl+F: MetaSearch answered for THIS directory's entries, so the
+            // filter applies at depth 0 and expansion is suppressed below —
+            // a filtered listing is one flat answer to one question, not a tree
+            // with unfiltered branches hanging off it.
+            if (view.filterSet !== null && !view.filterSet.has(e.path)) continue;
             if (depth === 0 && (e.kind === "image" || e.kind === "video")) { imgOut.push(e); continue; }
-            const exp = e.isDir && view.expandedPaths.has(e.path);
+            const exp = e.isDir && view.expandedPaths.has(e.path) && view.filterSet === null;
             out.push({ name: e.name, path: e.path, isDir: e.isDir, kind: e.kind,
                        size: e.size, created: e.created, modified: e.modified,
                        depth: depth, expanded: exp });
@@ -631,7 +703,15 @@ Rectangle {
         // first pane's directories (setDirs used to replace the lot).
         DirWatch.setDirs(view.watchKey, [path].concat(Array.from(expandedPaths)));
     }
-    function refresh() { rebuildKeepScroll(); }
+    // Every external change lands here (DirWatch, a finished file op). With a
+    // filter up, the listing it re-reads may hold a file the matched set has
+    // never seen — a render that just finished — so the query is re-run against
+    // the new directory contents. Only from HERE, never from rows changing: a
+    // rebuild is what the answer causes, and re-asking on it would loop.
+    function refresh() {
+        rebuildKeepScroll();
+        if (view.filtering) view.requestFilter();
+    }
 
     // Reassigning the model resets ListView.contentY to 0, which is right for
     // a cd but jarring for expand/collapse/refresh (the view jumps to the
@@ -1257,5 +1337,18 @@ Rectangle {
               ? "permanently delete " + view.selection.length + " items?"
               : "permanently delete?\n" + view.dirNameOf(view.selected)
         onConfirmed: { FileOps.run(["rm", "-rf", "--"].concat(view.selection), ""); view.clearSelection(); }
+    }
+
+    // The Ctrl+F bar, docked to THIS pane's top-right corner. Last in the file
+    // so it stacks over the grid, the list and the right-click overlay; the key
+    // that opens it is window-scoped in Main.qml, per §11.2.
+    FindBar {
+        id: findBar
+        open: view.findOpen
+        query: view.findText
+        onQueryChanged: view.findText = query
+        count: view.filterCount
+        busy: view.filterBusy
+        onCloseRequested: view.closeFind()
     }
 }

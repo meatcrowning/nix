@@ -95,6 +95,10 @@ def build(app, start_dir):
     ctx.setContextProperty("DeskStyle", _ds)
     ctx.setContextProperty("Settings", keep[2])
     ctx.setContextProperty("DirWatch", keep[3])
+    # Ctrl+F's backend (BrowserPane binds Connections to it, so it must exist
+    # even in a harness that never types a query).
+    _metasearch = filermain.MetaSearch(parent=engine)
+    ctx.setContextProperty("MetaSearch", _metasearch)
     ctx.setContextProperty("WinCtl", keep[4])
     ctx.setContextProperty("VideoConv", keep[5])
     ctx.setContextProperty("Titlebar", keep[6])

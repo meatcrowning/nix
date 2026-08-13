@@ -26,6 +26,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import tempfile
 import time
 from pathlib import Path
@@ -47,6 +48,7 @@ from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font set
 from glyphs import Glyphs  # noqa: E402  (pylib; docs/DESIGN.md 2.3 display-site px())
 from handoff import (Listener, send as handoff_send, sock_path,  # noqa: E402  (pylib)
                      took as handoff_took)
+import pngmeta  # noqa: E402  (pylib; the PNG text chunks painter writes and MetaSearch reads)
 
 from notify import tool, toast  # noqa: E402  (next to this file; filer's one toast path)
 
@@ -860,6 +862,118 @@ class FileOps(QObject):
         return out
 
 
+class MetaSearch(QObject):
+    """Ctrl+F: which entries of one directory match a query, by NAME and by the
+    generation metadata inside them (docs/DESIGN.md §11.2).
+
+    The corpus is what his image generators write into PNG text chunks —
+    ComfyUI's `prompt`/`workflow` JSON, cte's `cte_p1`/`cte_neg`/`cte_sampler`/…
+    keys, painter's own `painter` chunk — read through `pylib/pngmeta.py`, the
+    one parser painter writes them with. A whitespace-separated query is an AND
+    of substrings, `"a phrase"` in quotes is one term, and everything is folded
+    to lower case; there is no field syntax, so a term hits a filename, a prompt
+    or a model name indifferently. Non-PNGs and directories carry their name as
+    the whole haystack — a filter must never make a folder unreachable for
+    lacking metadata it cannot have.
+
+    Off the GUI thread, because the first pass over a directory of gens is disk
+    work: ~0.3s for 500 files, and 0 after that — the haystacks are cached on
+    (path, mtime, size), so every later keystroke is a substring scan over
+    memory. A newer query retires an older one by generation count rather than
+    cancelling it; the loser's results are dropped on arrival, so a fast typist
+    never sees a stale set land.
+    """
+
+    # token, matched paths. The token is the pane's, so two panes filtering at
+    # once cannot read each other's answer.
+    ready = Signal(str, "QVariantList")
+
+    CACHE_BYTES = 128 * 1024 * 1024
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._cache = {}          # path -> (mtime, size, haystack)
+        self._bytes = 0
+        self._lock = threading.Lock()
+        self._gen = 0
+
+    @staticmethod
+    def terms(query):
+        """The query as a list of lower-case substrings; "..." keeps spaces."""
+        out, cur, quoted = [], [], False
+        for ch in str(query).lower():
+            if ch == '"':
+                quoted = not quoted
+                continue
+            if ch.isspace() and not quoted:
+                if cur:
+                    out.append("".join(cur))
+                    cur = []
+                continue
+            cur.append(ch)
+        if cur:
+            out.append("".join(cur))
+        return out
+
+    def _haystack(self, path, name, is_dir, mtime, size):
+        if is_dir or not name.lower().endswith(".png"):
+            return name.lower()
+        with self._lock:
+            hit = self._cache.get(path)
+            if hit and hit[0] == mtime and hit[1] == size:
+                return hit[2]
+        text = pngmeta.read_text_path(path)
+        hay = "\n".join([name.lower()] + [str(v).lower() for v in text.values()])
+        with self._lock:
+            if self._bytes > self.CACHE_BYTES:   # a whole gen library, browsed
+                self._cache.clear()              # in one session; start over
+                self._bytes = 0
+            old = self._cache.get(path)
+            if old:
+                self._bytes -= len(old[2])
+            self._cache[path] = (mtime, size, hay)
+            self._bytes += len(hay)
+        return hay
+
+    @Slot(str, str, str, bool)
+    def search(self, token, directory, query, show_hidden):
+        """Answer `ready(token, paths)` for the entries of `directory` matching
+        `query`. An empty query answers immediately with an empty list — the QML
+        side reads that as "no filter" and shows everything."""
+        self._gen += 1
+        gen = self._gen
+        terms = self.terms(query)
+        if not terms:
+            self.ready.emit(str(token), [])
+            return
+        threading.Thread(target=self._run, args=(gen, str(token), str(directory),
+                                                 terms, bool(show_hidden)),
+                         daemon=True).start()
+
+    def _run(self, gen, token, directory, terms, show_hidden):
+        matched = []
+        try:
+            entries = list(os.scandir(directory))
+        except OSError:
+            entries = []
+        for e in entries:
+            if gen != self._gen:
+                return                      # a newer query owns the field now
+            if not show_hidden and e.name.startswith("."):
+                continue
+            try:
+                is_dir = e.is_dir()
+                st = e.stat(follow_symlinks=False)
+                mtime, size = st.st_mtime, st.st_size
+            except OSError:
+                is_dir, mtime, size = False, 0, 0
+            hay = self._haystack(e.path, e.name, is_dir, mtime, size)
+            if all(t in hay for t in terms):
+                matched.append(e.path)
+        if gen == self._gen:
+            self.ready.emit(token, matched)
+
+
 class DirWatch(QObject):
     """Watches the directories the view is showing (the current dir plus any
     expanded subdirs) and emits `changed` when an entry is added/removed in one
@@ -1144,6 +1258,7 @@ def main():
     winctl = WinCtl()
     titlebar = Titlebar()
     dirwatch = DirWatch()
+    metasearch = MetaSearch()
     videoconv = VideoConv()
     imgconv = ImgConv()
     phone = Phone()
@@ -1153,6 +1268,7 @@ def main():
     # WalPalette first, so Theme's bindings resolve it when Theme is instantiated.
     ctx.setContextProperty("FileOps", ops)
     ctx.setContextProperty("DirWatch", dirwatch)
+    ctx.setContextProperty("MetaSearch", metasearch)
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("DeskStyle", style)
     glyphs = Glyphs()          # keep the ref: a GC'd context property nulls its bindings
