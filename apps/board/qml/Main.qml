@@ -378,6 +378,38 @@ Window {
         Settings.set("showSummoned", showSummoned);
     }
 
+    // ---- ...and whether the top section (the choosers + usage) is folded away ----
+    // [his ask] the control surface's SETTINGS — how many summoners and spirits,
+    // on what model, and what they have cost — fold behind a page-flip bar down
+    // the right of the box he types in, so the box alone can hold the top of the
+    // window when he is only issuing orders. Collapsed, the top is just the box
+    // and that bar; the arrow in its middle brings the choosers and meters back.
+    //
+    // The bar+arrow is `SetPaperGrid.qml`'s page-flip affordance (the settings
+    // Appearance page), verbatim in vocabulary: a full-height box on the edge
+    // with a 5x9 pixel triangle for its arrow — geometry, never a glyph (§2.3) —
+    // and its own hover/press honesty ladder (§10). The reveal is §6.2's one
+    // slide, through `Motion`, never a literal.
+    //
+    // PERSISTED (§14), like `allLogs` and `showSummoned`: a view preference he
+    // sets by using the app and would notice reverting, naming no process, so it
+    // means the same thing next launch. Default expanded.
+    property bool topCollapsed: false
+    function toggleTopCollapsed() {
+        topCollapsed = !topCollapsed;
+        Settings.set("topCollapsed", topCollapsed);
+    }
+    // Gate the fold's slide so a relaunch that restores a collapsed top paints it
+    // in place rather than travelling in from expanded (§6.1). The top Item is a
+    // static child of the page, not a reload delegate, so this settles once per
+    // launch and stays settled across every board.md reload.
+    property bool topReady: false
+    Timer {
+        id: topReadyTimer
+        interval: 32
+        onTriggered: win.topReady = true
+    }
+
     // Cut a string to `cells` characters, marking the cut with ASCII "...".
     // NEVER the unicode ellipsis and never `Text.ElideRight`, which draws one:
     // the font has no U+2026 and a missing glyph clips the row it is on
@@ -592,6 +624,10 @@ Window {
         drafts = (d && typeof d === "object") ? d : ({});
         allLogs = Settings.get("allLogs", false) === true;
         showSummoned = Settings.get("showSummoned", false) === true;
+        topCollapsed = Settings.get("topCollapsed", false) === true;
+        // Arm the fold's slide only after this first, restored layout has
+        // painted — see `topReady`.
+        topReadyTimer.start();
         var tf = Settings.get("todoFolded", {});
         todoFolded = (tf && typeof tf === "object") ? tf : ({});
         // The saved display order of the four sections, validated so a stale or
@@ -871,8 +907,26 @@ Window {
             // He still extends it past the resting height by typing: `minHeight`
             // is a floor, not a cap.
             Item {
+                id: topSection
                 width: page.width
-                height: Math.max(askBox.height, pickCol) + (usageCol.visible ? 4 : 0)
+                // Expanded, the box sits beside the chooser column and is as tall
+                // as it; collapsed, the choosers fold away and the box alone sets
+                // the height. The fold slides at §6.2's one duration, gated on
+                // `topReady` so a restored-collapsed launch does not travel in.
+                readonly property bool expanded: !win.topCollapsed
+                height: expanded
+                        ? Math.max(askBox.height, pickCol) + (usageCol.visible ? 4 : 0)
+                        : askBox.height
+                Behavior on height {
+                    enabled: win.topReady
+                    NumberAnimation { duration: motion.ms(motion.slideMs)
+                                      easing.type: motion.slideEasing }
+                }
+
+                // The page-flip bar's width and the breath around it — SetScroll's
+                // win31 bar width, the same 16 SetPaperGrid's page buttons use.
+                readonly property int barW: 16
+                readonly property int barGap: 6
 
                 // Top of the chooser to the bottom of the last meter. The 4s are
                 // the lead-ins below, stated once here and once at each of them.
@@ -899,8 +953,16 @@ Window {
 
                 InputBox {
                     id: askBox
-                    width: parent.width - parent.colW - 10
-                    minHeight: parent.pickCol - summonerPick.y
+                    // Fills the width left of the collapse bar; the bar tracks the
+                    // chooser column's left edge, so the box grows and shrinks with
+                    // the fold through this one anchor (§5.2 — no second driver).
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.right: collapseBar.left
+                    anchors.rightMargin: parent.barGap
+                    // Collapsed, the box is only as tall as what he has typed;
+                    // expanded, it matches the chooser column beside it.
+                    minHeight: parent.expanded ? parent.pickCol - summonerPick.y : 0
                     fgAccent: win.fgAccent
                     fgText: win.fgText
                     fgDim: win.fgDim
@@ -916,278 +978,368 @@ Window {
                     onCaretLeft: () => win.caretLeft("msg:queue")
                 }
 
-                // FOUR of these, and the ORDER IS HIS. [his, 2026-07-29] *"1.
-                // number of summoners 2. summoner model 3. number of spirits
-                // 4. spirit model"* — so the column reads count, model, count,
-                // model, and each count names the role of the model under it.
-                // That pairing is what lets the labels stay as short as they are:
-                // `fable 5` on its own is ambiguous between the two models, and
-                // `1 summoner` directly above it is not.
-                //
-                // Every one of them is a MENU, not a combo box: §7.2 says menus
-                // on this desktop are ours and are `CtxMenu`, and a chooser with a
-                // handful of entries is that menu with a resting label. They are
-                // one component (`PickBox.qml`) because they are one control —
-                // [his, 2026-07-29] the second was *"another drop down"*, in the
-                // idiom of the first — and the tick beside each live entry comes
-                // from `boardwork`, so none of them can disagree with what will
-                // actually happen.
-                PickBox {
-                    id: summonerPick
-                    padTo: parent.pickCells
-                    anchors.right: parent.right
-                    // Flush with the box's own top, not inset by the 3px the
-                    // box pads its first line by: the box is as tall as this
-                    // column, so the two are only "the same height" if they
-                    // start and end on the same rows.
-                    y: 0
-                    width: parent.colW
-                    label: Agents.summonerLabel
-                    // What it changes and WHEN, which is the whole promise: a
-                    // summoner already planning is not restarted, and a tick with
-                    // one sentence in it runs one summoner however high this is.
-                    hint: "how many summoners may plan at once - the next tick honours it"
-                    items: () => win.summonerItems()
-                    popup: menu
-                    fgDim: win.fgDim
-                    fgAccent: win.fgAccent
-                }
+                // ---- the page-flip bar: fold the choosers + meters away -------
+                // Modelled on `SetPaperGrid.qml`'s full-height PageBtn (the
+                // settings Appearance page): a bordered box down the right side of
+                // the box he types in, with a 5x9 pixel triangle for its arrow —
+                // geometry, never a glyph (§2.3) — that points the way the bar will
+                // travel. Collapsed, the arrow points LEFT (the bar slides left to
+                // let the choosers back in); expanded, it points RIGHT (they fold
+                // away to the edge). Full hover/press honesty ladder (§10); this
+                // one is always live, so there is no dead-end rung to draw.
+                Rectangle {
+                    id: collapseBar
+                    width: topSection.barW
+                    // Down the right side of the box, so it grows with it; the box
+                    // anchors its own right edge to this bar's left.
+                    anchors.top: askBox.top
+                    anchors.bottom: askBox.bottom
+                    // Rides the chooser column's left edge, so it slides left as the
+                    // choosers reveal and sits at the box's right when they fold.
+                    anchors.right: chooserClip.left
+                    anchors.rightMargin: topSection.barGap
+                    color: cbma.pressed ? Theme.bgAlt : "transparent"
+                    radius: Theme.windowRounding
+                    border.width: Theme.ctrlBorder
+                    border.color: (cbma.containsMouse || cbma.pressed)
+                                  ? Theme.accent : Theme.border
 
-                PickBox {
-                    id: modelPick
-                    padTo: parent.pickCells
-                    anchors.top: summonerPick.bottom
-                    anchors.topMargin: 4
-                    anchors.right: summonerPick.right
-                    width: parent.colW
-                    label: Agents.modelLabel
-                    // What it changes, and WHEN it takes effect. The second half
-                    // is the whole of the promise: a running orchestrator is not
-                    // restarted and not re-pointed.
-                    hint: "which model a summoner reads what you type on, and how hard it thinks - the one running now keeps its own"
-                    items: () => win.modelItems()
-                    popup: menu
-                    fgDim: win.fgDim
-                    fgAccent: win.fgAccent
-                }
-
-                // ...and under it, how many of them may run at once. [his,
-                // 2026-07-29] *"between the model selector and the indicators,
-                // add another drop down for the max number of agents
-                // available."* It is BETWEEN them, in his order, so the column
-                // reads model -> how many -> what they have cost.
-                //
-                // It writes the ONE cap store — the file `boardctl.py cap`
-                // writes and `promote()` re-reads at the top of every tick — so
-                // nothing is restarted and nothing is killed by picking one: a
-                // bigger cap starts queued work on the next tick, a smaller one
-                // stops starting more. Same 4px rung under it as the meters get
-                // (§4.1), rather than butting two 1px borders into a 2px seam.
-                PickBox {
-                    id: capPick
-                    padTo: parent.pickCells
-                    anchors.top: modelPick.bottom
-                    anchors.topMargin: 4
-                    anchors.right: modelPick.right
-                    width: parent.colW
-                    label: Agents.capLabel
-                    hint: "the most spirits allowed to work at once - the next tick honours it"
-                    items: () => win.capItems()
-                    popup: menu
-                    fgDim: win.fgDim
-                    fgAccent: win.fgAccent
-                }
-
-                // ...and under THAT, what those spirits run on. [his,
-                // 2026-07-29] *"do not allow spirits to be anything higher than
-                // opus 5 medium thinking."* So this control offers
-                // `boardwork.SPIRIT_MODELS` and nothing else, ceiling first —
-                // and the ceiling is enforced AGAIN at the spawn
-                // (`boardwork.role_flags`), because a control is not a guard
-                // against a file he or an agent edited by hand.
-                //
-                // The label carries the thinking budget as well as the family
-                // (`opus 5 medium`) — it is one choice, and a chooser that showed
-                // only half of what it set would be the §10 failure with a
-                // shorter string.
-                PickBox {
-                    id: spiritPick
-                    padTo: parent.pickCells
-                    anchors.top: capPick.bottom
-                    anchors.topMargin: 4
-                    anchors.right: capPick.right
-                    width: parent.colW
-                    label: Agents.spiritLabel
-                    hint: "what spirits run on, up to opus 5 medium - the next one dispatched gets it"
-                    items: () => win.spiritItems()
-                    popup: menu
-                    fgDim: win.fgDim
-                    fgAccent: win.fgAccent
-                }
-
-                // ======================== what is left of the usage, under it
-                // [his, 2026-07-29] *"add usage indicators directly under the
-                // orchestrator model-selection box: how much of his daily usage
-                // and how much of his weekly usage has been consumed"* — and no
-                // Fable figure, which is a real entry in the payload and is
-                // dropped in `boardusage.py` rather than here.
-                //
-                // It sits UNDER the chooser and is EXACTLY AS WIDE as it, one
-                // readout per line, because it is about the same thing: what
-                // spending that model costs him. [his, 2026-07-29] *"each usage
-                // indicator should be exactly as wide as the model selection box
-                // above it … stacked vertically"*. The width is bound to the
-                // dropdown column (`spiritPick`, its foot), not to a number,
-                // so the box and the bars stay flush when a longer model name
-                // widens it.
-                //
-                // ANCHORED TO THE CHOOSER, not to the box he types in [his,
-                // 2026-07-29] — so the two of them are one column, the box
-                // measures itself against that column, and the dependency
-                // cannot close into a loop. It is a sibling of the box for that
-                // reason and not a row below it.
-                //
-                // Two readouts of one quantity, sharing one denominator each
-                // (§10.5) — both are "% of that window's limit", the CLI's own
-                // arithmetic against the real plan, never tokens over a ceiling
-                // we guessed.
-                //
-                // The short window is FIVE HOURS and says so. There is no daily
-                // bucket on this account, and a number under the wrong word is
-                // the §10.5 failure with a nicer label. `5h` is the top line
-                // because that is the one that stops him mid-afternoon.
-                Column {
-                    id: usageCol
-                    // [his, 2026-07-29] *"there should be just a little more
-                    // space between the top of the indicators and the bottom of
-                    // the model selector"* — one rung of §4.1's in-widget scale,
-                    // and the same 4 this block leaves under itself, so the card
-                    // keeps one gap and not three. The 5h/7d rows still butt
-                    // together; only the lead-in moved.
-                    anchors.top: spiritPick.bottom
-                    anchors.topMargin: 4
-                    anchors.right: spiritPick.right
-                    width: spiritPick.width
-                    visible: (Usage.rows.length + Usage.hrows.length) > 0
-                    // Zero: each meter already carries its own line box (§4.1),
-                    // and stacked readouts butt together like every other tiled
-                    // thing here (§5.1). Nothing invents a gap.
-                    spacing: 0
-
-                    Repeater {
-                        // `Usage.rows` is in `boardusage.WINDOWS` order, which
-                        // is 5h then 7d — the stack takes its order from there
-                        // rather than restating it.
-                        model: Usage.rows
-                        delegate: UsageMeter {
-                            required property var modelData
-                            width: usageCol.width
-                            row: modelData
-                            fgDim: win.fgDim
-                            fgText: win.fgText
-                            // A click is a refresh [his, 2026-07-30]. The meter
-                            // draws the in-flight state itself; the OUTCOME is a
-                            // report, so it goes where every other report in
-                            // this window goes — the footer (§10, and `PickBox`'s
-                            // note on why a hover is not allowed there).
-                            busy: Usage.busy
-                            onRefreshRequested: {
-                                win.status = "refreshing the usage reading...";
-                                Usage.refreshNow();
+                    // 5x9 pixel triangle, five 1px columns (SetPaperGrid's PageBtn).
+                    Item {
+                        anchors.centerIn: parent
+                        width: 5; height: 9
+                        Repeater {
+                            model: 5
+                            Rectangle {
+                                required property int index
+                                // Collapsed points left, expanded points right.
+                                readonly property bool pointsLeft: win.topCollapsed
+                                width: 1
+                                height: 2 * (pointsLeft ? index : (4 - index)) + 1
+                                x: index
+                                y: Math.floor((9 - height) / 2)
+                                color: cbma.pressed ? Theme.accent
+                                     : (cbma.containsMouse ? Theme.text : Theme.textDim)
                             }
                         }
                     }
-
-                    // ===================== hermes spirit usage =====================
-                    // [his, 2026-07-31] when a spirit runs on the hermes
-                    // (deepseek) backend, keep his Anthropic bars as they are and
-                    // show the real hermes usage here. These are FIGURES — tokens
-                    // and cost Hermes recorded for `source='tool'` sessions
-                    // (`boardusage.hermes_readings`) — never a percentage, because
-                    // there is no published hermes limit to be a % of
-                    // (docs/DESIGN.md §10; `boardusage`'s docstring). Same
-                    // paired-edge row as the meters, without the bar: window name
-                    // hard left, figures hard right.
-                    Item { width: 1; height: 4 }
-                    PixelText {
-                        text: "hermes spirits"
-                        color: Theme.textDim
+                    MouseArea {
+                        id: cbma
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: win.toggleTopCollapsed()
                     }
-                    // The one hermes "how much I have left" figure [his,
-                    // 2026-07-31]: he chose to count DOWN FROM THE REAL NOUS
-                    // ACCOUNT BALANCE, so this row is `Usage.hprox` —
-                    // `boardusage.hermes_proximity()`, the balance the portal
-                    // publishes (remaining + monthly % used when the plan
-                    // defines a cap), or the honest unknown when it has not read
-                    // one here yet. Bound, never derived (§5.3, §10).
-                    //
-                    // It used to pair a "balance" label against the figure on
-                    // the same line; at the column's width the two could not
-                    // both fit and the figure's left edge ran under the label,
-                    // so the reading looked broken. §5.4 says the content
-                    // identifies itself — "13% used · $19.06 left" needs no word
-                    // in front of it — so the label came off and the figure is
-                    // the whole clean line. The two FIGURE rows that used to sit
-                    // under it (5h and 7d tokens+cost) are gone too: the
-                    // percentage is the entire readout now, and what it does not
-                    // say about itself lives in the tooltip.
-                    Item {
-                        id: hproxrow
-                        width: usageCol.width
-                        height: lineH
-                        readonly property int lineH: Theme.fontSize + 4
-                        PixelText {
-                            y: Math.round((hproxrow.lineH - height) / 2)
-                            color: Usage.hprox && Usage.hprox.known
-                                   ? Theme.text : Theme.textDim
-                            text: Usage.hprox ? (Usage.hprox.text || "unknown")
-                                              : "unknown"
-                        }
-                        // ...and when this window COMES BACK is the row's own
-                        // tooltip — `boardusage.hermes_proximity()`'s
-                        // `resets in ____` (`_left` on the nous account's
-                        // `renews`), one short line, never empty (§10), the same
-                        // wording every usage meter's tooltip uses. [his,
-                        // 2026-07-30] "the tooltip should just say `resets in
-                        // ____`".
-                        ToolTipArea {
-                            anchors.fill: parent
-                            text: (Usage.hprox && Usage.hprox.reset)
-                                  ? Usage.hprox.reset : ""
-                        }
-                    }
-                    // ...and the TOP-UP money left [his, 2026-08-02: "hermes
-                    // agent usage should also show the top up money left as
-                    // well"]. The row above counts down the monthly
-                    // subscription; this one is the purchased pay-as-you-go pool
-                    // (`boardusage.hermes_topup` -> the portal's
-                    // `purchased_credits_remaining`), the money that is actually
-                    // left when the subscription credits are spent. Same clean
-                    // self-identifying line as the row above (§5.4) — "$18.70
-                    // top-up left" needs no label — bound never derived (§5.3,
-                    // §10), and an honest "top-up unknown" until the account has
-                    // been read here.
-                    Item {
-                        id: htopuprow
-                        width: usageCol.width
-                        height: lineH
-                        readonly property int lineH: Theme.fontSize + 4
-                        PixelText {
-                            y: Math.round((htopuprow.lineH - height) / 2)
-                            color: Usage.htopup && Usage.htopup.known
-                                   ? Theme.text : Theme.textDim
-                            text: Usage.htopup ? (Usage.htopup.text || "top-up unknown")
-                                               : "top-up unknown"
-                        }
-                        // The hover carries the read age — the same §3.5 honesty
-                        // the Anthropic meters draw, so a stale figure says so.
-                        ToolTipArea {
-                            anchors.fill: parent
-                            text: (Usage.htopup && Usage.htopup.detail)
-                                  ? Usage.htopup.detail : ""
-                        }
+                    ToolTipArea {
+                        anchors.fill: parent
+                        text: win.topCollapsed ? "show the choosers and usage"
+                                               : "hide the choosers and usage"
                     }
                 }
+
+                // ---- the folding column: choosers + meters, revealed by a clip --
+                // The reveal is §6.2's canonical slide (AgentRow's drawer idiom):
+                // the content is FIXED at this wrapper's right edge and the clip
+                // width grows leftward, so nothing inside it moves and nothing
+                // fades in from nowhere. Width, not visibility — a hidden Item
+                // would jump. Gated on `topReady` so a restored fold paints in
+                // place (§6.1).
+                Item {
+                    id: chooserClip
+                    anchors.top: parent.top
+                    anchors.right: parent.right
+                    height: topSection.pickCol
+                    width: topSection.expanded ? topSection.colW : 0
+                    clip: true
+                    Behavior on width {
+                        enabled: win.topReady
+                        NumberAnimation { duration: motion.ms(motion.slideMs)
+                                          easing.type: motion.slideEasing }
+                    }
+
+                    // Fixed at the right edge at the column's full width, so the
+                    // clip above reveals it without any of it moving.
+                    Item {
+                        id: chooserStack
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                        width: topSection.colW
+                        height: topSection.pickCol
+
+                        // FOUR of these, and the ORDER IS HIS. [his, 2026-07-29] *"1.
+                        // number of summoners 2. summoner model 3. number of spirits
+                        // 4. spirit model"* — so the column reads count, model, count,
+                        // model, and each count names the role of the model under it.
+                        // That pairing is what lets the labels stay as short as they are:
+                        // `fable 5` on its own is ambiguous between the two models, and
+                        // `1 summoner` directly above it is not.
+                        //
+                        // Every one of them is a MENU, not a combo box: §7.2 says menus
+                        // on this desktop are ours and are `CtxMenu`, and a chooser with a
+                        // handful of entries is that menu with a resting label. They are
+                        // one component (`PickBox.qml`) because they are one control —
+                        // [his, 2026-07-29] the second was *"another drop down"*, in the
+                        // idiom of the first — and the tick beside each live entry comes
+                        // from `boardwork`, so none of them can disagree with what will
+                        // actually happen.
+                        PickBox {
+                            id: summonerPick
+                            padTo: topSection.pickCells
+                            anchors.right: parent.right
+                            // Flush with the box's own top, not inset by the 3px the
+                            // box pads its first line by: the box is as tall as this
+                            // column, so the two are only "the same height" if they
+                            // start and end on the same rows.
+                            y: 0
+                            width: topSection.colW
+                            label: Agents.summonerLabel
+                            // What it changes and WHEN, which is the whole promise: a
+                            // summoner already planning is not restarted, and a tick with
+                            // one sentence in it runs one summoner however high this is.
+                            hint: "how many summoners may plan at once - the next tick honours it"
+                            items: () => win.summonerItems()
+                            popup: menu
+                            fgDim: win.fgDim
+                            fgAccent: win.fgAccent
+                        }
+
+                        PickBox {
+                            id: modelPick
+                            padTo: topSection.pickCells
+                            anchors.top: summonerPick.bottom
+                            anchors.topMargin: 4
+                            anchors.right: summonerPick.right
+                            width: topSection.colW
+                            label: Agents.modelLabel
+                            // What it changes, and WHEN it takes effect. The second half
+                            // is the whole of the promise: a running orchestrator is not
+                            // restarted and not re-pointed.
+                            hint: "which model a summoner reads what you type on, and how hard it thinks - the one running now keeps its own"
+                            items: () => win.modelItems()
+                            popup: menu
+                            fgDim: win.fgDim
+                            fgAccent: win.fgAccent
+                        }
+
+                        // ...and under it, how many of them may run at once. [his,
+                        // 2026-07-29] *"between the model selector and the indicators,
+                        // add another drop down for the max number of agents
+                        // available."* It is BETWEEN them, in his order, so the column
+                        // reads model -> how many -> what they have cost.
+                        //
+                        // It writes the ONE cap store — the file `boardctl.py cap`
+                        // writes and `promote()` re-reads at the top of every tick — so
+                        // nothing is restarted and nothing is killed by picking one: a
+                        // bigger cap starts queued work on the next tick, a smaller one
+                        // stops starting more. Same 4px rung under it as the meters get
+                        // (§4.1), rather than butting two 1px borders into a 2px seam.
+                        PickBox {
+                            id: capPick
+                            padTo: topSection.pickCells
+                            anchors.top: modelPick.bottom
+                            anchors.topMargin: 4
+                            anchors.right: modelPick.right
+                            width: topSection.colW
+                            label: Agents.capLabel
+                            hint: "the most spirits allowed to work at once - the next tick honours it"
+                            items: () => win.capItems()
+                            popup: menu
+                            fgDim: win.fgDim
+                            fgAccent: win.fgAccent
+                        }
+
+                        // ...and under THAT, what those spirits run on. [his,
+                        // 2026-07-29] *"do not allow spirits to be anything higher than
+                        // opus 5 medium thinking."* So this control offers
+                        // `boardwork.SPIRIT_MODELS` and nothing else, ceiling first —
+                        // and the ceiling is enforced AGAIN at the spawn
+                        // (`boardwork.role_flags`), because a control is not a guard
+                        // against a file he or an agent edited by hand.
+                        //
+                        // The label carries the thinking budget as well as the family
+                        // (`opus 5 medium`) — it is one choice, and a chooser that showed
+                        // only half of what it set would be the §10 failure with a
+                        // shorter string.
+                        PickBox {
+                            id: spiritPick
+                            padTo: topSection.pickCells
+                            anchors.top: capPick.bottom
+                            anchors.topMargin: 4
+                            anchors.right: capPick.right
+                            width: topSection.colW
+                            label: Agents.spiritLabel
+                            hint: "what spirits run on, up to opus 5 medium - the next one dispatched gets it"
+                            items: () => win.spiritItems()
+                            popup: menu
+                            fgDim: win.fgDim
+                            fgAccent: win.fgAccent
+                        }
+
+                        // ======================== what is left of the usage, under it
+                        // [his, 2026-07-29] *"add usage indicators directly under the
+                        // orchestrator model-selection box: how much of his daily usage
+                        // and how much of his weekly usage has been consumed"* — and no
+                        // Fable figure, which is a real entry in the payload and is
+                        // dropped in `boardusage.py` rather than here.
+                        //
+                        // It sits UNDER the chooser and is EXACTLY AS WIDE as it, one
+                        // readout per line, because it is about the same thing: what
+                        // spending that model costs him. [his, 2026-07-29] *"each usage
+                        // indicator should be exactly as wide as the model selection box
+                        // above it … stacked vertically"*. The width is bound to the
+                        // dropdown column (`spiritPick`, its foot), not to a number,
+                        // so the box and the bars stay flush when a longer model name
+                        // widens it.
+                        //
+                        // ANCHORED TO THE CHOOSER, not to the box he types in [his,
+                        // 2026-07-29] — so the two of them are one column, the box
+                        // measures itself against that column, and the dependency
+                        // cannot close into a loop. It is a sibling of the box for that
+                        // reason and not a row below it.
+                        //
+                        // Two readouts of one quantity, sharing one denominator each
+                        // (§10.5) — both are "% of that window's limit", the CLI's own
+                        // arithmetic against the real plan, never tokens over a ceiling
+                        // we guessed.
+                        //
+                        // The short window is FIVE HOURS and says so. There is no daily
+                        // bucket on this account, and a number under the wrong word is
+                        // the §10.5 failure with a nicer label. `5h` is the top line
+                        // because that is the one that stops him mid-afternoon.
+                        Column {
+                            id: usageCol
+                            // [his, 2026-07-29] *"there should be just a little more
+                            // space between the top of the indicators and the bottom of
+                            // the model selector"* — one rung of §4.1's in-widget scale,
+                            // and the same 4 this block leaves under itself, so the card
+                            // keeps one gap and not three. The 5h/7d rows still butt
+                            // together; only the lead-in moved.
+                            anchors.top: spiritPick.bottom
+                            anchors.topMargin: 4
+                            anchors.right: spiritPick.right
+                            width: spiritPick.width
+                            visible: (Usage.rows.length + Usage.hrows.length) > 0
+                            // Zero: each meter already carries its own line box (§4.1),
+                            // and stacked readouts butt together like every other tiled
+                            // thing here (§5.1). Nothing invents a gap.
+                            spacing: 0
+
+                            Repeater {
+                                // `Usage.rows` is in `boardusage.WINDOWS` order, which
+                                // is 5h then 7d — the stack takes its order from there
+                                // rather than restating it.
+                                model: Usage.rows
+                                delegate: UsageMeter {
+                                    required property var modelData
+                                    width: usageCol.width
+                                    row: modelData
+                                    fgDim: win.fgDim
+                                    fgText: win.fgText
+                                    // A click is a refresh [his, 2026-07-30]. The meter
+                                    // draws the in-flight state itself; the OUTCOME is a
+                                    // report, so it goes where every other report in
+                                    // this window goes — the footer (§10, and `PickBox`'s
+                                    // note on why a hover is not allowed there).
+                                    busy: Usage.busy
+                                    onRefreshRequested: {
+                                        win.status = "refreshing the usage reading...";
+                                        Usage.refreshNow();
+                                    }
+                                }
+                            }
+
+                            // ===================== hermes spirit usage =====================
+                            // [his, 2026-07-31] when a spirit runs on the hermes
+                            // (deepseek) backend, keep his Anthropic bars as they are and
+                            // show the real hermes usage here. These are FIGURES — tokens
+                            // and cost Hermes recorded for `source='tool'` sessions
+                            // (`boardusage.hermes_readings`) — never a percentage, because
+                            // there is no published hermes limit to be a % of
+                            // (docs/DESIGN.md §10; `boardusage`'s docstring). Same
+                            // paired-edge row as the meters, without the bar: window name
+                            // hard left, figures hard right.
+                            Item { width: 1; height: 4 }
+                            PixelText {
+                                text: "hermes spirits"
+                                color: Theme.textDim
+                            }
+                            // The one hermes "how much I have left" figure [his,
+                            // 2026-07-31]: he chose to count DOWN FROM THE REAL NOUS
+                            // ACCOUNT BALANCE, so this row is `Usage.hprox` —
+                            // `boardusage.hermes_proximity()`, the balance the portal
+                            // publishes (remaining + monthly % used when the plan
+                            // defines a cap), or the honest unknown when it has not read
+                            // one here yet. Bound, never derived (§5.3, §10).
+                            //
+                            // It used to pair a "balance" label against the figure on
+                            // the same line; at the column's width the two could not
+                            // both fit and the figure's left edge ran under the label,
+                            // so the reading looked broken. §5.4 says the content
+                            // identifies itself — "13% used · $19.06 left" needs no word
+                            // in front of it — so the label came off and the figure is
+                            // the whole clean line. The two FIGURE rows that used to sit
+                            // under it (5h and 7d tokens+cost) are gone too: the
+                            // percentage is the entire readout now, and what it does not
+                            // say about itself lives in the tooltip.
+                            Item {
+                                id: hproxrow
+                                width: usageCol.width
+                                height: lineH
+                                readonly property int lineH: Theme.fontSize + 4
+                                PixelText {
+                                    y: Math.round((hproxrow.lineH - height) / 2)
+                                    color: Usage.hprox && Usage.hprox.known
+                                           ? Theme.text : Theme.textDim
+                                    text: Usage.hprox ? (Usage.hprox.text || "unknown")
+                                                      : "unknown"
+                                }
+                                // ...and when this window COMES BACK is the row's own
+                                // tooltip — `boardusage.hermes_proximity()`'s
+                                // `resets in ____` (`_left` on the nous account's
+                                // `renews`), one short line, never empty (§10), the same
+                                // wording every usage meter's tooltip uses. [his,
+                                // 2026-07-30] "the tooltip should just say `resets in
+                                // ____`".
+                                ToolTipArea {
+                                    anchors.fill: parent
+                                    text: (Usage.hprox && Usage.hprox.reset)
+                                          ? Usage.hprox.reset : ""
+                                }
+                            }
+                            // ...and the TOP-UP money left [his, 2026-08-02: "hermes
+                            // agent usage should also show the top up money left as
+                            // well"]. The row above counts down the monthly
+                            // subscription; this one is the purchased pay-as-you-go pool
+                            // (`boardusage.hermes_topup` -> the portal's
+                            // `purchased_credits_remaining`), the money that is actually
+                            // left when the subscription credits are spent. Same clean
+                            // self-identifying line as the row above (§5.4) — "$18.70
+                            // top-up left" needs no label — bound never derived (§5.3,
+                            // §10), and an honest "top-up unknown" until the account has
+                            // been read here.
+                            Item {
+                                id: htopuprow
+                                width: usageCol.width
+                                height: lineH
+                                readonly property int lineH: Theme.fontSize + 4
+                                PixelText {
+                                    y: Math.round((htopuprow.lineH - height) / 2)
+                                    color: Usage.htopup && Usage.htopup.known
+                                           ? Theme.text : Theme.textDim
+                                    text: Usage.htopup ? (Usage.htopup.text || "top-up unknown")
+                                                       : "top-up unknown"
+                                }
+                                // The hover carries the read age — the same §3.5 honesty
+                                // the Anthropic meters draw, so a stale figure says so.
+                                ToolTipArea {
+                                    anchors.fill: parent
+                                    text: (Usage.htopup && Usage.htopup.detail)
+                                          ? Usage.htopup.detail : ""
+                                }
+                            }
+                        }
+                    }   // chooserStack
+                }       // chooserClip
             }
 
             Item { width: 1; height: 14 }
