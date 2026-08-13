@@ -233,12 +233,40 @@ Column {
     // "window decorations" are the desktop-wide chrome that is NOT the bar.
     SetSection {
         title: "titlebar"
-        // Side, orientation and compact are set by direct manipulation on an
-        // interactive mock of the bar — the three GLOBAL knobs only; there is
-        // no global key for which app buttons show (they are per-app over the
-        // vtbclient socket). It writes the same store keys the old three rows
-        // did, so SettingsApply.qml's live-apply is unchanged.
+        // Side, orientation and compact are set two equivalent ways, both bound
+        // to the same three GLOBAL store keys: direct manipulation on the
+        // realistic preview above, and the plain dropdowns below it. (There is
+        // no global key for which app buttons show — they are per-app over the
+        // vtbclient socket.) Both write the store keys the old plain rows did,
+        // so SettingsApply.qml's live-apply is unchanged.
         SetTitlebarMock { }
+        SetRow {
+            label: "titlebar side"
+            SetSelect {
+                options: ["right", "left", "top", "bottom"]
+                value: page.d.titlebarEdge
+                onChanged: (v) => { page.d.titlebarEdge = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
+            label: "title orientation"
+            SetSelect {
+                options: ["vertical", "horizontal"]
+                value: page.d.titleOrientation
+                onChanged: (v) => { page.d.titleOrientation = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
+            // The bar's two columns collapsed into one, half thickness
+            // (plugin:hyprvtb:compact). A dropdown of the two states rather than
+            // a bare bool, so it reads beside the other two titlebar dropdowns.
+            label: "titlebar columns"
+            SetSelect {
+                options: ["full", "compact"]
+                value: page.d.compact ? "compact" : "full"
+                onChanged: (v) => { page.d.compact = (v === "compact"); SettingsStore.save(); }
+            }
+        }
         SetRow {
             label: "drop shadow"
             SetSlider {
