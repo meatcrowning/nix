@@ -143,12 +143,29 @@ in
         "PYTHONUNBUFFERED=1"
         "PATH=/run/current-system/sw/bin:/run/wrappers/bin"
       ];
+      # Two throughput flags, both measured on top's RTX 5070 (sm_120):
+      #
+      #   --use-sage-attention    SageAttention 2.x, INT8/FP8 attention kernels.
+      #     NOT a pip dependency of ComfyUI and NOT reinstalled by shell.nix:
+      #     it is built from source into ${comfyDir}/.venv, and a fresh venv
+      #     comes back WITHOUT it (the backend then refuses to start on this
+      #     flag). Rebuild it the way `docs/agents/comfy-sageattention.md`
+      #     records — nvcc must be CUDA 13.0 to match torch's cu130, which the
+      #     24.11 pin in shell.nix does not have, so the toolkit comes from the
+      #     system channel's `cudaPackages_13_0`.
+      #   --fast fp16_accumulation  fp16 matmuls accumulate in fp16 rather than
+      #     fp32. The other three `--fast` features are deliberately NOT on:
+      #     fp8_matrix_mult and cublas_ops trade image quality, and autotune's
+      #     cudnn.benchmark only pays off at a fixed resolution, which painter
+      #     is not.
       ExecStart = pkgs.writeShellScript "comfy-painter-start" ''
         cd ${comfyDir}
         exec nix-shell shell.nix --run '
           exec python main.py \
             --disable-api-nodes \
             --preview-method auto \
+            --use-sage-attention \
+            --fast fp16_accumulation \
             --listen 127.0.0.1 --port 8188 \
             --output-directory "$HOME/Pictures/painter/out" \
             --extra-model-paths-config ${modelsYaml}
