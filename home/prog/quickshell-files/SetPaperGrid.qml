@@ -99,10 +99,6 @@ Item {
     }
 
     function toFileUrl(p) { return "file://" + encodeURI(p); }
-    function fileName(p) {
-        const i = p.lastIndexOf("/");
-        return i >= 0 ? p.substring(i + 1) : p;
-    }
 
     function refresh() {
         listProc.running = false;
@@ -382,21 +378,6 @@ Item {
                                         sourceSize.width: 260
                                         sourceSize.height: 150
                                         source: cell.path ? root.toFileUrl(cell.thumb) : ""
-                                    }
-
-                                    Rectangle {
-                                        anchors { left: parent.left; right: parent.right; bottom: paletteStrip.top }
-                                        anchors.margins: tile.border.width + 2
-                                        height: 18
-                                        color: Qt.rgba(0, 0, 0, 0.55)
-                                        PixelText {
-                                            anchors.centerIn: parent
-                                            width: parent.width - 8
-                                            elide: Text.ElideMiddle
-                                            horizontalAlignment: Text.AlignHCenter
-                                            text: Glyphs.px(root.fileName(cell.path))
-                                            color: Theme.text
-                                        }
                                     }
 
                                     // The theme this wallpaper applies — equal
