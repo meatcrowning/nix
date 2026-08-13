@@ -393,7 +393,10 @@ Item {
                                         readonly property var palette: (root.palettes && root.palettes[cell.gIdx]) || []
                                         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
                                         anchors.margins: tile.border.width + 2
-                                        height: 16
+                                        // SQUARE cells: the strip width is fixed by the tile, so the
+                                        // height is the per-column width (width / n) — each swatch a
+                                        // square, not the tall sliver a fixed 16px height cut it into.
+                                        height: palette.length ? Math.round(width / palette.length) : 0
                                         function cutAt(i) { return Math.round(i * width / Math.max(1, palette.length)); }
                                         Repeater {
                                             model: paletteStrip.palette
