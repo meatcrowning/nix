@@ -48,7 +48,15 @@
 
   boot = {
     loader = {
-      systemd-boot = { enable = true; configurationLimit = 15; };
+      # memtest86: `top` has a marginal DRAM data line (every measured flip is
+      # bit 18 of a 32-bit word) that no ECC/EDAC on this board can report, so
+      # the loader entry is the only fast feedback loop for testing a fix.
+      # Adds a menu entry only; the default boot is unchanged.
+      systemd-boot = {
+        enable = true;
+        configurationLimit = 15;
+        memtest86.enable = true;
+      };
       efi.canTouchEfiVariables = true;
     };
     kernelPackages = pkgs.linuxPackages_latest;
