@@ -57,7 +57,10 @@ while the box measures itself off the meters is a **binding loop**, and it is
 the one thing to re-check if this arrangement is ever rearranged (`InputBox`
 derives its own `contentHeight` from the two states' `implicitHeight` for the
 same reason — never from `height`). `minHeight` is a FLOOR, not a cap: typing
-past it still extends the box downward, which is the rest of his sentence.
+past it still extends the box downward, which is the rest of his sentence. It is
+that same span whether the chooser column is shown or folded away by the
+page-flip bar — collapsing hides the choosers and lets the box widen, but never
+shrinks it — so the box is one constant height in both collapse states.
 The slack it fills was dead space (docs/DESIGN.md §5.2) — a one-line box left
 the area beside the meters empty — and the whole tall region is the hover fill
 and the click target (§5.3), in both the resting and the open state.

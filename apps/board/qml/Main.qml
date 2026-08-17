@@ -909,10 +909,11 @@ Window {
             Item {
                 id: topSection
                 width: page.width
-                // Expanded, the box sits beside the chooser column and is as tall
-                // as it; collapsed, the choosers fold away and the box alone sets
-                // the height. The fold slides at §6.2's one duration, gated on
-                // `topReady` so a restored-collapsed launch does not travel in.
+                // The box is as tall as the chooser column in BOTH states (its
+                // `minHeight` is that span always); collapsed, the choosers fold
+                // away and the box keeps that height, widening into the slack. The
+                // fold slides at §6.2's one duration, gated on `topReady` so a
+                // restored-collapsed launch does not travel in.
                 readonly property bool expanded: !win.topCollapsed
                 height: expanded
                         ? Math.max(askBox.height, pickCol) + (usageCol.visible ? 4 : 0)
@@ -960,9 +961,13 @@ Window {
                     anchors.top: parent.top
                     anchors.right: collapseBar.left
                     anchors.rightMargin: parent.barGap
-                    // Collapsed, the box is only as tall as what he has typed;
-                    // expanded, it matches the chooser column beside it.
-                    minHeight: parent.expanded ? parent.pickCol - summonerPick.y : 0
+                    // ONE resting height in BOTH states [his]: the box is always
+                    // as tall as the chooser column beside it, whether the column is
+                    // shown or folded away, so collapsing no longer shrinks the box —
+                    // only the choosers slide out and the box widens into the slack
+                    // (§5.2). `pickCol` and `summonerPick.y` are laid out at full size
+                    // in both states (the fold is a clip, §6.2), so this is constant.
+                    minHeight: parent.pickCol - summonerPick.y
                     fgAccent: win.fgAccent
                     fgText: win.fgText
                     fgDim: win.fgDim
