@@ -733,6 +733,12 @@ Window {
     onWidthChanged: if (root.restored) saveSoon.restart()
     onHeightChanged: if (root.restored) saveSoon.restart()
 
+    // A setting changed right before closing (typical of video: tweak, hit
+    // generate, close while the long job runs) must not lose the 700ms
+    // debounce window — flush immediately rather than waiting for a timer
+    // that the process may not live to see fire.
+    onClosing: if (saveSoon.running) { saveSoon.stop(); root.saveState() }
+
     function restoreState() {
         var w = Prefs.get("win.width"), h = Prefs.get("win.height")
         if (w > 0 && h > 0) { root.width = w; root.height = h }

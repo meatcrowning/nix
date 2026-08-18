@@ -519,7 +519,10 @@ sampling setting, including the video preset's — steps, sampler, `ms`'s shift
 curve — comes back too), the selected model, the LoRA chain, and each panel's
 collapsed state (`Panel.persistKey`). Three traps:
 
-- **Writes are debounced** (700ms) — `gen` changes on every keystroke.
+- **Writes are debounced** (700ms) — `gen` changes on every keystroke — but
+  `onClosing` flushes a still-pending write immediately, so a setting changed
+  right before closing (typical of video: tweak, hit generate, close while the
+  long job runs) is not lost to a timer the process does not live to see fire.
 - **`applyDefaults()` is guarded by `defaultsFor`.** The startup selection fires
   `modelChanged`, and without that guard a family's defaults would overwrite the
   session that had just been restored, every launch. It holds the name of the
