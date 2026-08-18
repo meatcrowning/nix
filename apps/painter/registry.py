@@ -560,20 +560,25 @@ class Registry:
         upscale = spec.get("upscale_method", "nearest-exact")
         res_steps = int(spec.get("resolution_steps", 1))
 
-        # OUTPUT SIZE is the dropped image's, scaled. The template sizes the
-        # primary to a megapixel budget (ImageScaleToTotalPixels); the user's
-        # choice overrides that with a plain multiplier off the original's own
-        # dimensions -- 1.0 for "no scaling", or `edit_scale` otherwise -- by
-        # swapping the primary's scale node to ImageScaleBy. GetImageSize (the
-        # latent + the scheduler) and the primary's VAEEncode both read that same
-        # node, so the reference latent and the output latent stay the same size.
-        # Only the PRIMARY is re-sized this way; the additional references keep
+        # OUTPUT SIZE is the dropped image's, scaled to a MEGAPIXEL BUDGET --
+        # the same control the video path offers (ImageScaleToTotalPixels): the
+        # user names how big the result should be and the image's own aspect is
+        # kept. `editNoScale` keeps the original's exact width and height instead,
+        # by swapping the primary's scale node to ImageScaleBy at 1.0. GetImageSize
+        # (the latent + the scheduler) and the primary's VAEEncode both read that
+        # same node, so the reference latent and the output latent stay the same
+        # size. Only the PRIMARY is sized this way; the additional references keep
         # the pixel budget below, since they never decide the output's size.
         no_scale = bool(p.get("editNoScale", True))
-        scale_by = 1.0 if no_scale else max(0.01, min(8.0, float(p.get("editScale", 2.0))))
-        g.set_class("scale_image", "ImageScaleBy",
-                    inputs={"scale_by": scale_by, "upscale_method": upscale},
-                    drop=("megapixels", "resolution_steps"))
+        edit_mp = max(0.1, min(8.0, float(p.get("editMegapixels") or spec.get("megapixels", 1.5))))
+        if no_scale:
+            g.set_class("scale_image", "ImageScaleBy",
+                        inputs={"scale_by": 1.0, "upscale_method": upscale},
+                        drop=("megapixels", "resolution_steps"))
+        else:
+            g.set_input("scale_image", "megapixels", edit_mp)
+            g.set_input("scale_image", "resolution_steps", res_steps)
+            g.set_input("scale_image", "upscale_method", upscale)
 
         # --- ADDITIONAL reference images ------------------------------------
         # Flux 2 attaches every reference latent as a CONDList (comfy's
@@ -622,7 +627,7 @@ class Registry:
         params = {**p, "positive": pos, "negative": "", "kind": "edit",
                   "megapixels": mp, "input_image": image,
                   "input_images": images, "edit": True,
-                  "editNoScale": no_scale, "editScale": scale_by}
+                  "editNoScale": no_scale, "editMegapixels": edit_mp}
         # What the recorded parameters must NOT claim: Flux2Scheduler takes a
         # step count and the image's size and nothing else, so the family's
         # image-path scheduler/denoise/add_noise would be three settings the PNG
