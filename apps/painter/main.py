@@ -1003,7 +1003,12 @@ class Painter(QObject):
                 path, why = self._usable_image(local, "paste")
                 if path:
                     return "file", path
-            return "", why
+            # The file's own suffix is outside IMAGE_SUFFIXES (clipfile.py's
+            # --image offers pixels for a wider set, e.g. .gif/.tiff/.avif) —
+            # fall through to the pixel offer rather than refusing a paste
+            # whose bytes we can actually read.
+            if not md.hasImage():
+                return "", why
         if md.hasImage():
             img = QGuiApplication.clipboard().image()
             if img is None or img.isNull():
