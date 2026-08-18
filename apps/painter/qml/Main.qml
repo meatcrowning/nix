@@ -146,10 +146,28 @@ Window {
     // happens at startup does not immediately overwrite everything remembered.
     property string defaultsFor: ""
 
+    // The sampling settings a model was last left at, keyed by model name, so a
+    // switch AWAY to another preset and back restores what was edited rather
+    // than resetting to the family default. Without it applyDefaults() reapplies
+    // the checkpoint's defaults on every return, which lost the video sampler
+    // (steps/sampler/scheduler/denoise) on a preset round-trip. In-session only:
+    // the whole `gen` is already persisted across launches under one key.
+    property var sampleByModel: ({})
+
+    // The subset applyDefaults() overwrites from the family and submit() sends as
+    // the video sampling set — the fields a round-trip must preserve.
+    function samplingOf(g) {
+        return { steps: g.steps, denoise: g.denoise,
+                 sampler_name: g.sampler_name, scheduler: g.scheduler }
+    }
+
     function applyDefaults() {
         if (App.selectedName === root.defaultsFor) return
         var d = App.modelDefaults()
         if (!d || !d.steps) return
+        // Stash the OUTGOING model's sampling edits before its defaults are
+        // replaced, so returning to it restores them (below).
+        if (root.defaultsFor) root.sampleByModel[root.defaultsFor] = samplingOf(gen)
         root.defaultsFor = App.selectedName
         var g = clone(gen)
         g.steps = d.steps
@@ -172,6 +190,16 @@ Window {
             g.ms = m
         }
         g.promptTransform = d.promptTransform
+        // Restore this model's remembered sampling edits over its family
+        // defaults, so a switch back to it lands on what he left rather than the
+        // checkpoint default.
+        var saved = root.sampleByModel[App.selectedName]
+        if (saved) {
+            if (saved.steps !== undefined) g.steps = saved.steps
+            if (saved.denoise !== undefined) g.denoise = saved.denoise
+            if (saved.sampler_name !== undefined) g.sampler_name = saved.sampler_name
+            if (saved.scheduler !== undefined) g.scheduler = saved.scheduler
+        }
         var wh = App.dims(g.aspectW + ":" + g.aspectH, g.megapixels, g.multiple)
         g.width = wh.width; g.height = wh.height
         gen = g
