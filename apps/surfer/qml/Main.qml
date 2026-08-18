@@ -1160,6 +1160,12 @@ Window {
                         // changes go through win.reinjectDark() below.
                         // click a plain content image -> open it in a new tab
                         webview.runJavaScript(imageClickJs);
+                        // stack an opened Instagram post's sidebar below the
+                        // media instead of squeezing it beside it (script is
+                        // self-reinjecting for the SPA post-open navigation
+                        // that follows) — see IG_LAYOUT_JS in main.py
+                        if (win.isInstagram("" + webview.url))
+                            webview.runJavaScript(igLayoutJs);
                         // air only (empty string on top): sample which GL
                         // driver is actually serving this renderer, to catch
                         // the mid-session fallback that wrecks text antialiasing
