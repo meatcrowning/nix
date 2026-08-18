@@ -66,6 +66,17 @@ Item {
         property alias series: plot.series
         property alias scaleMax: plot.scaleMax
         property alias autoFloor: plot.autoFloor
+        // How much history the ring buffer spans, in seconds — the poll interval
+        // times its length. Every metric but the battery is pushed every poll;
+        // the battery sub-samples (see SysInfo.battStepSec), so its card sets its
+        // own. Rendered as the chart overlay's "← N min" span label.
+        property int spanSec: SettingsStore.d.monPollSec
+                              * (root.src && root.src.chartLen ? root.src.chartLen : 90)
+        function fmtSpan(s) {
+            if (s >= 3600) return (s / 3600).toFixed(s % 3600 === 0 ? 0 : 1) + " hr";
+            if (s >= 60) return Math.round(s / 60) + " min";
+            return Math.round(s) + " s";
+        }
         // Optional wheel stepper, null on every card that has none. Same two
         // signals and the same semantics as StatusPanel's Stat, so a card and a
         // status row scroll identically: NOTCH-based via WheelNotch (a coast
@@ -123,10 +134,25 @@ Item {
                 else if (n < 0) { if (card.onWheelDown) card.onWheelDown(); }
             }
         }
-        Tooltip {
+        // Hovering the card pops a large, still-live copy of its own sparkline
+        // out to the left: the same series and axis spread across a full-size
+        // ChartCanvas, with the readouts the card had no room for, y-axis labels
+        // and the explanation the plain tooltip used to carry. Drops back to a
+        // text-only chip for a card with no chart (none today, but keep it
+        // honest). docs/DESIGN.md §8.
+        ChartTooltip {
             target: card
-            show: cardHover.hovered && card.tip !== "" && card.visible
-            text: card.tip
+            show: cardHover.hovered && card.visible
+                  && (card.tip !== "" || (card.series && card.series.length > 0))
+            title: card.label
+            series: card.series
+            scaleMax: plot.scaleMax
+            autoFloor: plot.autoFloor
+            primary: card.value
+            primaryColor: card.valueColor
+            secondary: card.sub
+            caption: card.tip
+            span: card.fmtSpan(card.spanSec)
         }
 
         ChartCanvas {
@@ -314,6 +340,9 @@ Item {
             width: root.cardW; height: root.cardH
             visible: root.noGpu
             label: "batt"
+            // One sample per SysInfo.battStepSec (40s), not per poll, so the span
+            // is an hour across rather than the three minutes the others show.
+            spanSec: (root.src && root.src.chartLen ? root.src.chartLen : 90) * 40
             tip: "battery charge, one sample per 40s (an hour across).\n+ and \"chg\" mean charging; \"ac\" is plugged in but idle"
             value: root.src.batteryPct < 0 ? "--"
                    : (root.src.batteryStatus === 2 ? "+" : "") + root.src.batteryPct + "%"
