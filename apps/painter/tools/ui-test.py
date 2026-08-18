@@ -1319,6 +1319,19 @@ def test_modes(win, ctl, tmp):
     check("every control the edit graph would ignore is gone",
           all(not it.isVisible() for it in hidden.values()),
           {k: it.isVisible() for k, it in hidden.items()})
+    # ...but the seed IS read by the edit graph, so its control survives here —
+    # the sampling panel that normally carries it is one of the hidden ones.
+    seed_panel = find(content, "SeedPanel")
+    check("the edit preset keeps a seed control", seed_panel is not None
+          and seed_panel.isVisible())
+    g = prop(win, "gen")
+    g.update({"randomSeed": False, "reuseSeed": False})
+    win.setProperty("gen", g)
+    spin(60)
+    seed_spin = seed_panel and find(seed_panel, "Spin")
+    check("...and its seed number is editable when not random/reuse",
+          seed_spin is not None and seed_spin.property("enabled") is True,
+          seed_spin and seed_spin.property("enabled"))
 
     # What submit() sends for an edit job: the prompt and the seed, and NOT the
     # numbers whose controls are off screen — the family's edit block owns those.
@@ -1360,6 +1373,8 @@ def test_modes(win, ctl, tmp):
           sent.get("edit") is True and sent.get("input_image") == "painter/to-edit.png"
           and sent.get("positive") == "make it a doll",
           {k: sent.get(k) for k in ("edit", "input_image", "positive")})
+    check("...and the seed the edit preset chose reaches the graph",
+          sent.get("seed") == 4242, sent.get("seed"))
     check("...and none of the controls it does not show",
           not any(k in sent for k in ("steps", "cfg", "width", "height",
                                       "batch_size", "negative", "toggles")),
@@ -2546,6 +2561,55 @@ def test_wiring(win, ctl):
     check("the job was actually submitted", sent.get("_submitted") is True)
 
 
+def test_seed(win, ctl):
+    """A random batch's seed is remembered, and "reuse last" re-runs at it."""
+    if ctl.reg is None or ctl.models.rowCount() == 0:
+        print("SKIP  seed reuse (no registry/models)")
+        return
+    sent = {}
+
+    class FakeJob:
+        def __init__(self):
+            self.meta = {}
+
+    orig_build, orig_submit, orig_oi = ctl.reg.build, ctl.client.submit, ctl._object_info
+    ctl.reg.build = lambda entry, params, object_info=None: (
+        sent.clear() or sent.update(params)
+        or {"prompt": {}, "params": dict(params), "pairing": {}})
+    ctl.client.submit = lambda prompt, params: FakeJob()
+    ctl._object_info = {"stub": True}
+    ctl._selected = 0
+    ctl.setMode("")
+    spin(60)
+
+    # A random batch rolls a seed AND remembers it.
+    g = prop(win, "gen")
+    g.update({"randomSeed": True, "reuseSeed": False, "count": 1, "batch_size": 1})
+    win.setProperty("gen", g)
+    spin(60)
+    win.metaObject().invokeMethod(win, "submit")
+    spin(200)
+    rolled = sent.get("seed")
+    check("a random batch submits a concrete seed",
+          isinstance(rolled, int) and rolled >= 0, rolled)
+    check("...and App.lastSeed remembers exactly it",
+          ctl.property("lastSeed") == rolled, (ctl.property("lastSeed"), rolled))
+
+    # "reuse last" re-runs at that seed, overriding random, without drifting.
+    g = prop(win, "gen")
+    g.update({"randomSeed": True, "reuseSeed": True})
+    win.setProperty("gen", g)
+    spin(60)
+    win.metaObject().invokeMethod(win, "submit")
+    spin(200)
+    check("reuse re-runs at the remembered seed, overriding random",
+          sent.get("seed") == rolled, (sent.get("seed"), rolled))
+    check("...and reusing does not drift the remembered seed",
+          ctl.property("lastSeed") == rolled, (ctl.property("lastSeed"), rolled))
+
+    ctl.reg.build, ctl.client.submit, ctl._object_info = orig_build, orig_submit, orig_oi
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="painter-ui-test-")
     os.environ["PAINTER_MODELS"] = fake_models(os.path.join(tmp, "models"))
@@ -2580,6 +2644,7 @@ def main():
     print("== restore ==");           keep2 = test_restore(tmp)
     print("== startup ==");           test_startup(ctl)
     print("== wiring ==");            test_wiring(win, ctl)
+    print("== seed reuse ==");        test_seed(win, ctl)
 
     real = [w for w in WARNINGS if "Qt Quick Layouts" not in w]
     for w in real:

@@ -72,7 +72,7 @@ Window {
         positive: "", negative: "",
         steps: 20, cfg: 1.0, denoise: 1.0,
         sampler_name: "euler", scheduler: "simple",
-        seed: 0, randomSeed: true, batch_size: 1, count: 1,
+        seed: 0, randomSeed: true, reuseSeed: false, batch_size: 1, count: 1,
         // The aspect is two integers the user types; `aspect` is the "w:h"
         // string they compose, which is what App.dims (registry.calc_dims)
         // parses. Width and height are DERIVED — never set by hand, so there is
@@ -200,7 +200,7 @@ Window {
                 edit: true,
                 positive: g.positive,
                 editNoScale: g.editNoScale, editScale: g.editScale,
-                seed: g.seed, randomSeed: g.randomSeed
+                seed: g.seed, randomSeed: g.randomSeed, reuseSeed: g.reuseSeed
             }, g.count)
             return
         }
@@ -213,7 +213,7 @@ Window {
                 positive: g.positive,
                 steps: g.steps, denoise: g.denoise,
                 sampler_name: g.sampler_name, scheduler: g.scheduler,
-                seed: g.seed, randomSeed: g.randomSeed,
+                seed: g.seed, randomSeed: g.randomSeed, reuseSeed: g.reuseSeed,
                 duration: g.duration, fps: g.fps,
                 megapixels: g.megapixels,
                 width: g.width, height: g.height,
@@ -226,7 +226,7 @@ Window {
             positive: g.positive, negative: g.negative,
             steps: g.steps, cfg: g.cfg, denoise: g.denoise,
             sampler_name: g.sampler_name, scheduler: g.scheduler,
-            seed: g.seed, randomSeed: g.randomSeed,
+            seed: g.seed, randomSeed: g.randomSeed, reuseSeed: g.reuseSeed,
             batch_size: g.batch_size,
             width: g.width, height: g.height,
             toggles: ({ negpip: g.negpip, model_sampling: g.modelSampling }),
@@ -371,6 +371,14 @@ Window {
                 EditScalePanel {
                     width: parent.width
                     persistKey: "panel.editscale"
+                    visible: App.isEdit
+                }
+                // The seed IS read by the edit graph, so the edit preset gets
+                // its own seed control — the sampling panel that normally holds
+                // it is hidden here. Same SeedField, so it behaves identically.
+                SeedPanel {
+                    width: parent.width
+                    persistKey: "panel.editseed"
                     visible: App.isEdit
                 }
                 PromptEditor {
@@ -711,6 +719,7 @@ Window {
         Prefs.set("inputImage", App.inputImage)
         Prefs.set("editExtra", JSON.stringify(App.editExtraImages))
         Prefs.set("lastImage", App.lastImage)
+        Prefs.set("lastSeed", App.lastSeed)
         Prefs.set("loras", JSON.stringify(App.lorasSnapshot()))
     }
 
@@ -772,6 +781,7 @@ Window {
         try { App.restoreEditImages(JSON.parse(Prefs.get("editExtra") || "[]")) }
         catch (e) { /* a corrupt list just leaves the extras empty */ }
         App.restoreLastImage(Prefs.get("lastImage") || "")
+        var ls = Prefs.get("lastSeed"); if (ls !== undefined && ls !== null) App.restoreLastSeed(ls)
         root.restored = true
     }
 }
