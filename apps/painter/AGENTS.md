@@ -109,18 +109,28 @@ What is genuinely different, and therefore what the left column stops offering
 — [his] *"the left side of the program when edit is selected should really just
 be a box to drop the image in and a prompt box"*:
 
-- **The image decides the size.** `ImageScaleToTotalPixels -> GetImageSize`
-  feeds both the latent (`EmptyFlux2LatentImage`) and `Flux2Scheduler`, so there
-  is no aspect, no width/height and no resolution panel.
+- **The image decides the size, and one control scales it.** The dropped
+  image's own dimensions size the output — `_build_edit` swaps the primary
+  `scale_image` node to `ImageScaleBy`, whose output `GetImageSize` reads to feed
+  both the latent (`EmptyFlux2LatentImage`) and `Flux2Scheduler`, so there is no
+  aspect and no width/height. `EditScalePanel.qml` (shown only in edit mode) is
+  the one control: a **no-scaling** toggle (`gen.editNoScale`, default on →
+  `scale_by` 1.0, output = original dimensions) and, when it is off, a **scale
+  multiplier** field (`gen.editScale`, clamped 0.01–8.0). The reference latent
+  (the primary's `VAEEncode`) reads the SAME scaled node, so it and the output
+  latent stay the same size by construction. The additional reference images
+  keep the family's pixel budget (`ImageScaleToTotalPixels`) since they never
+  size the output. `submit()` sends `editNoScale`/`editScale` for the edit path.
 - **One prompt.** The negative conditioning is the positive one zeroed out
   (`ConditioningZeroOut` -> `ReferenceLatent`), which is what CFG 1.0 wants —
   so the negative box is hidden rather than typed into nothing, exactly as for
   video. A second `CLIPTextEncode` in that template is a bug, and
   `validate-graphs.py`'s `check_edit` fails on one.
 - **The numbers come from the family**, not from `gen`: steps 15, cfg 1.0,
-  shift 6.0, 1.5MP. Their controls are off screen, so `submit()` sends only the
-  prompt and the seed — sending `gen`'s values would run the job at whatever
-  the last image family left behind. `_build_edit` also strips
+  shift 6.0 (and the reference budget, 1.5MP). Their controls are off screen, so
+  `submit()` sends only the prompt, the seed and the output-scale choice — sending
+  `gen`'s values would run the job at whatever the last image family left behind.
+  `_build_edit` also strips
   `scheduler`/`denoise`/`add_noise`/`width`/`height` from the recorded
   parameters, since Flux2Scheduler reads none of them and a PNG must not claim
   settings that were not used.

@@ -559,9 +559,21 @@ class Registry:
         mp = float(p.get("megapixels") or spec.get("megapixels", 1.5))
         upscale = spec.get("upscale_method", "nearest-exact")
         res_steps = int(spec.get("resolution_steps", 1))
-        g.set_input("scale_image", "megapixels", mp)
-        g.set_input("scale_image", "resolution_steps", res_steps)
-        g.set_input("scale_image", "upscale_method", upscale)
+
+        # OUTPUT SIZE is the dropped image's, scaled. The template sizes the
+        # primary to a megapixel budget (ImageScaleToTotalPixels); the user's
+        # choice overrides that with a plain multiplier off the original's own
+        # dimensions -- 1.0 for "no scaling", or `edit_scale` otherwise -- by
+        # swapping the primary's scale node to ImageScaleBy. GetImageSize (the
+        # latent + the scheduler) and the primary's VAEEncode both read that same
+        # node, so the reference latent and the output latent stay the same size.
+        # Only the PRIMARY is re-sized this way; the additional references keep
+        # the pixel budget below, since they never decide the output's size.
+        no_scale = bool(p.get("editNoScale", True))
+        scale_by = 1.0 if no_scale else max(0.01, min(8.0, float(p.get("editScale", 2.0))))
+        g.set_class("scale_image", "ImageScaleBy",
+                    inputs={"scale_by": scale_by, "upscale_method": upscale},
+                    drop=("megapixels", "resolution_steps"))
 
         # --- ADDITIONAL reference images ------------------------------------
         # Flux 2 attaches every reference latent as a CONDList (comfy's
@@ -609,7 +621,8 @@ class Registry:
                 raise G.ValidationError(problems)
         params = {**p, "positive": pos, "negative": "", "kind": "edit",
                   "megapixels": mp, "input_image": image,
-                  "input_images": images, "edit": True}
+                  "input_images": images, "edit": True,
+                  "editNoScale": no_scale, "editScale": scale_by}
         # What the recorded parameters must NOT claim: Flux2Scheduler takes a
         # step count and the image's size and nothing else, so the family's
         # image-path scheduler/denoise/add_noise would be three settings the PNG
