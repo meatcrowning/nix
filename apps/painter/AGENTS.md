@@ -134,6 +134,17 @@ be a box to drop the image in and a prompt box"*:
   `scheduler`/`denoise`/`add_noise`/`width`/`height` from the recorded
   parameters, since Flux2Scheduler reads none of them and a PNG must not claim
   settings that were not used.
+- **The seed IS one of them, so edit has its own seed control.** `_build_edit`
+  feeds `gen.seed` into the noise node, so an edit is as reproducible as any
+  other generation — but the sampling panel that normally carries the seed is
+  one of the ones `visible: !App.isEdit` hides. `SeedPanel.qml` (edit-only)
+  brings just that one row back, using the shared `SeedField.qml` the sampling
+  panel also uses, so the seed behaves identically in every preset.
+  `SeedField` also carries **reuse last**: `_start_jobs` remembers the base seed
+  each batch actually ran at (`App.lastSeed`, persisted as the `lastSeed` pref),
+  and `gen.reuseSeed` re-runs at exactly it — overriding a random/negative seed —
+  so a result can be reproduced without hunting for the number. The toggle is
+  dead until there IS a prior seed (§10 honesty).
 - **The PRIMARY image is the same slot as the video first frame**
   (`App.inputImage`), uploaded the same way, and required: with nothing dropped
   `generate()` refuses before uploading anything.

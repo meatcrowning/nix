@@ -717,6 +717,7 @@ class Painter(QObject):
     optionsChanged = Signal()
     inputImageChanged = Signal()
     lastImageChanged = Signal()
+    lastSeedChanged = Signal()
     editExtraChanged = Signal()
     modeChanged = Signal()
     previewChanged = Signal()
@@ -790,6 +791,9 @@ class Painter(QObject):
         self._batch_pending = 0           # downloads still in the air
         self._batch_toasted = False       # this batch has had its one toast
         self._pending_toast = None        # a clip toast waiting on its poster
+        self._last_seed = -1              # the base seed the last batch actually
+                                          # ran at, for "reuse last seed"; -1 = none
+                                          # yet (persisted across a relaunch)
 
         self.reg = None
         self.client = C.ComfyClient()
@@ -936,6 +940,10 @@ class Painter(QObject):
     lastImageUrl = Property(str, lambda self: (
         QUrl.fromLocalFile(self._last_image).toString() if self._last_image else ""),
         notify=lastImageChanged)
+    # The base seed of the most recent batch, so the UI can offer to re-run at
+    # it. -1 until the first generation of this session (or a restored one).
+    lastSeed = Property("QVariant", lambda self: self._last_seed,
+                        notify=lastSeedChanged)
 
     def _family_kind(self):
         entry = self.models.entry_at(self._selected)
@@ -1096,6 +1104,17 @@ class Painter(QObject):
             self._last_image = path
             self._uploaded_last = ("", "")
             self.lastImageChanged.emit()
+
+    @Slot("QVariant")
+    def restoreLastSeed(self, value):
+        """Put back the last-used seed a previous session remembered."""
+        try:
+            seed = int(value)
+        except (TypeError, ValueError):
+            return
+        if seed >= 0 and seed != self._last_seed:
+            self._last_seed = seed
+            self.lastSeedChanged.emit()
 
     # -- edit mode's additional reference images ---------------------------
     # The primary image (the one that sizes the output) is _input_image, shared
@@ -1699,15 +1718,29 @@ class Painter(QObject):
         base["loras"] = self.loras.active()
         seed = int(base.get("seed", 0))
         randomise = bool(base.pop("randomSeed", False))
+        # "reuse last seed": re-run at the exact base seed the previous batch
+        # used (captured below), so an image can be reproduced. It wins over a
+        # random/negative seed. `reuse_base` is read before the loop rewrites it.
+        reuse = bool(base.pop("reuseSeed", False)) and self._last_seed >= 0
+        reuse_base = self._last_seed
 
         for n in range(max(1, int(count))):
             p = dict(base)
-            if randomise or seed < 0:
+            if reuse:
+                p["seed"] = reuse_base + n
+            elif randomise or seed < 0:
                 import secrets
 
                 p["seed"] = secrets.randbelow(2**53)
             else:
                 p["seed"] = seed + n
+            # Remember the base seed this batch ran at, so the UI can offer to
+            # reproduce it. The first job's seed IS the base; the rest walk from
+            # it (or are independently random, in which case only the base is
+            # recoverable — which is what "reuse" then reproduces).
+            if n == 0 and p["seed"] != self._last_seed:
+                self._last_seed = p["seed"]
+                self.lastSeedChanged.emit()
             try:
                 built = self.reg.build(entry, p, object_info=self._object_info)
             except G.ValidationError as exc:

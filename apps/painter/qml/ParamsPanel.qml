@@ -54,25 +54,7 @@ Panel {
         }
     }
 
-    Field {
-        label: "seed"
-        Row {
-            spacing: 8
-            Spin {
-                width: 150
-                value: root.gen.seed; from: 0; to: 9007199254740992; step: 1
-                enabled: !root.gen.randomSeed
-                opacity: root.gen.randomSeed ? 0.45 : 1
-                onEdited: function (v) { root.set("seed", v) }
-            }
-            Toggle {
-                label: "random"
-                checked: root.gen.randomSeed
-                anchors.verticalCenter: parent.verticalCenter
-                onToggled: function (v) { root.set("randomSeed", v) }
-            }
-        }
-    }
+    SeedField {}
 
     Field {
         label: App.isVideo ? "count" : "batch"
