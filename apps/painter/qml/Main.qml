@@ -236,7 +236,18 @@ Window {
 
     Connections {
         target: App
-        function onModelChanged() { root.applyDefaults() }
+        function onModelChanged() {
+            root.applyDefaults()
+            // The LoRA chain the model landed with (startup restore only —
+            // `selectModel` always clears the stack, so this is what puts it
+            // back, once, for the remembered selection). A later switch in
+            // the same session clears it same as before.
+            if (!root.lorasRestored && App.selectedName === (Prefs.get("model") || "")) {
+                root.lorasRestored = true
+                try { App.restoreLoras(JSON.parse(Prefs.get("loras") || "[]")) }
+                catch (e) { /* a corrupt list just leaves the stack empty */ }
+            }
+        }
         function onToast(msg, isError) { toast.show(msg, isError) }
     }
 
@@ -683,6 +694,10 @@ Window {
     // collapsed state (Panel.qml, `persistKey`). Written on change, debounced,
     // because `gen` changes on every keystroke.
     property bool restored: false
+    // Set once the startup selection's own LoRA chain has been put back
+    // (Connections.onModelChanged, above) — guards against a later in-session
+    // model switch re-applying a stale, already-consumed restore.
+    property bool lorasRestored: false
 
     function saveState() {
         if (!restored) return          // never persist the pre-restore defaults
@@ -696,6 +711,7 @@ Window {
         Prefs.set("inputImage", App.inputImage)
         Prefs.set("editExtra", JSON.stringify(App.editExtraImages))
         Prefs.set("lastImage", App.lastImage)
+        Prefs.set("loras", JSON.stringify(App.lorasSnapshot()))
     }
 
     Timer {
@@ -707,6 +723,10 @@ Window {
         target: App
         function onInputImageChanged() { if (root.restored) saveSoon.restart() }
         function onEditExtraChanged() { if (root.restored) saveSoon.restart() }
+    }
+    Connections {
+        target: Loras
+        function onStackChanged() { if (root.restored) saveSoon.restart() }
     }
     onGenChanged: if (root.restored) saveSoon.restart()
     onViewChanged: { pushButtons(); if (root.restored) saveSoon.restart() }

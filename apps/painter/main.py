@@ -300,6 +300,9 @@ class LoraStack(QAbstractListModel):
     ClipRole = Qt.UserRole + 4
 
     countChanged = Signal()
+    # A single catch-all QML can debounce a Prefs save on, without listening
+    # to add/remove/clear/dataChanged separately (see Main.qml saveState).
+    stackChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -332,6 +335,7 @@ class LoraStack(QAbstractListModel):
                            "patches_clip": bool(patches_clip)})
         self.endInsertRows()
         self.countChanged.emit()
+        self.stackChanged.emit()
 
     @Slot(int)
     def remove(self, i):
@@ -341,6 +345,7 @@ class LoraStack(QAbstractListModel):
         self._rows.pop(i)
         self.endRemoveRows()
         self.countChanged.emit()
+        self.stackChanged.emit()
 
     @Slot()
     def clear(self):
@@ -350,6 +355,7 @@ class LoraStack(QAbstractListModel):
         self._rows = []
         self.endResetModel()
         self.countChanged.emit()
+        self.stackChanged.emit()
 
     @Slot(int, float)
     def setStrength(self, i, value):
@@ -357,6 +363,7 @@ class LoraStack(QAbstractListModel):
             self._rows[i]["strength"] = float(value)
             idx = self.index(i, 0)
             self.dataChanged.emit(idx, idx, [self.StrengthRole])
+            self.stackChanged.emit()
 
     @Slot(int, bool)
     def setEnabled(self, i, value):
@@ -364,6 +371,7 @@ class LoraStack(QAbstractListModel):
             self._rows[i]["enabled"] = bool(value)
             idx = self.index(i, 0)
             self.dataChanged.emit(idx, idx, [self.EnabledRole])
+            self.stackChanged.emit()
 
     @Slot(int, int)
     def move(self, frm, to):
@@ -373,9 +381,14 @@ class LoraStack(QAbstractListModel):
         row = self._rows.pop(frm)
         self._rows.insert(to, row)
         self.endResetModel()
+        self.stackChanged.emit()
 
     def active(self):
         return [dict(r) for r in self._rows if r["enabled"]]
+
+    def snapshot(self):
+        """Every row (enabled or not), for persisting the whole stack."""
+        return [dict(r) for r in self._rows]
 
 
 class LoraChoices(QAbstractListModel):
@@ -1363,6 +1376,32 @@ class Painter(QObject):
         self.choices.set_rows(rows)
         self.loras.clear()
         self.modelChanged.emit()
+
+    @Slot("QVariant")
+    def restoreLoras(self, rows):
+        """The remembered LoRA chain for the model `selectModel` just landed
+        on. Called once, right after startup's restored selection settles —
+        `selectModel` always clears the stack, so this is what puts it back.
+        Names no longer on disk (`choices`, just populated for this model) are
+        dropped rather than referencing a file that has since moved."""
+        known = {r["name"] for r in self.choices._rows}
+        for r in (rows or []):
+            name = r.get("name") if isinstance(r, dict) else None
+            if not name or name not in known:
+                continue
+            self.loras.add(name, bool(r.get("patchesClip", False)))
+            i = self.loras.rowCount() - 1
+            self.loras.setStrength(i, float(r.get("strength", 1.0)))
+            self.loras.setEnabled(i, bool(r.get("enabled", True)))
+
+    @Slot(result="QVariant")
+    def lorasSnapshot(self):
+        """The whole stack (enabled or not) — what `restoreLoras` needs back,
+        unlike `_start_jobs`' `loras.active()`, which is enabled-only."""
+        rows = self.loras.snapshot()
+        return [{"name": r["name"], "strength": r["strength"],
+                  "enabled": r["enabled"], "patchesClip": r["patches_clip"]}
+                 for r in rows]
 
     # -- modes -------------------------------------------------------------
 
