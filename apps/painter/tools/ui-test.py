@@ -1315,10 +1315,18 @@ def test_modes(win, ctl, tmp):
           [b.isVisible() for b in boxes] == [True, False],
           [b.isVisible() for b in boxes])
     hidden = {name: find(content, name) for name in
-              ("LoraStack", "ParamsPanel", "ResolutionPanel", "TogglePanel", "VideoPanel")}
+              ("ParamsPanel", "ResolutionPanel", "TogglePanel", "VideoPanel")}
     check("every control the edit graph would ignore is gone",
           all(not it.isVisible() for it in hidden.values()),
           {k: it.isVisible() for k, it in hidden.items()})
+    # ...but a LoRA IS applied to the edit graph (the LoraLoader chains onto the
+    # loader→ModelSampling seam exactly as the image path does), so the picker
+    # stays offered in edit mode — the one control below the prompt that changes
+    # what the edit graph produces.
+    lora_stack = find(content, "LoraStack")
+    check("the LoRA stack is offered in edit mode too",
+          lora_stack is not None and lora_stack.isVisible(),
+          lora_stack and lora_stack.isVisible())
     # ...but the seed IS read by the edit graph, so its control survives here —
     # the sampling panel that normally carries it is one of the hidden ones.
     seed_panel = find(content, "SeedPanel")
@@ -1382,6 +1390,21 @@ def test_modes(win, ctl, tmp):
     check("...a single image still submits input_images with one entry",
           sent.get("input_images") == ["painter/to-edit.png"],
           sent.get("input_images"))
+
+    # An active LoRA reaches the edit graph the same way it reaches an image one:
+    # `_start_jobs` sends `loras.active()` for every pipeline, and `_build_edit`
+    # chains a LoraLoader onto it. (The list is populated by `_start_jobs`, not
+    # submit(), so it appears in the built params rather than the submit dict.)
+    ctl.loras.add("edit-lora.safetensors", False)
+    ctl.loras.setStrength(0, 0.7)
+    sent.clear()
+    win.metaObject().invokeMethod(win, "submit")
+    spin(250)
+    check("an active LoRA reaches the edit job",
+          sent.get("loras") == [{"name": "edit-lora.safetensors", "strength": 0.7,
+                                 "enabled": True, "patches_clip": False}],
+          sent.get("loras"))
+    ctl.loras.clear()
 
     # MULTIPLE reference images: Flux 2 Klein takes N, chained as reference
     # latents. The extras are their own list; the primary still sizes the job,

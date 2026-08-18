@@ -160,6 +160,14 @@ be a box to drop the image in and a prompt box"*:
   is untouched); the UI is a stack of wells under the primary plus an empty "add
   another" well. `submit()` passes `input_images` (primary first);
   `input_image` stays as `input_images[0]` for the single-image case.
+- **LoRAs work here too.** The one panel edit mode keeps below the prompt (the
+  drop wells and prompt box aside) is the LoRA stack: an edit model takes a LoRA
+  exactly as an image one does. `_build_edit` chains the `LoraLoader` onto the
+  loader→`ModelSampling` seam with the same `insert_lora_chain` the image path
+  uses, `_start_jobs` sends `loras.active()` for all three pipelines, and the
+  picker's choices come from the same `compatible_loras` match — so the edit
+  family shows only its own compatible LoRAs (a Klein LoRA on Flux 2 Klein). No
+  new matching: the alias map is the family's `lora` block like any other.
 - A family with no `edit` block **refuses** an edit build. That refusal is what
   the mode button relies on.
 

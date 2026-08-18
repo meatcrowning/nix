@@ -414,10 +414,16 @@ Window {
                     persistKey: "panel.prompt"
                     onMenuRequested: (sx, sy, items) => ctxMenu.open(sx, sy, items)
                 }
+                // Available in EVERY mode, edit included: an edit model takes a
+                // LoRA the same way an image one does — `_build_edit` chains the
+                // LoraLoader onto the loader→ModelSampling seam exactly as the
+                // image path does, and `_start_jobs` sends `loras.active()` for
+                // all three pipelines. The picker's choices come from the same
+                // `compatible_loras` match, so the edit family shows its own
+                // (e.g. a Klein LoRA on Flux 2 Klein) and nothing else.
                 LoraStack {
                     width: parent.width
                     persistKey: "panel.lora"
-                    visible: !App.isEdit
                 }
                 // Only for a video family, and the two below it follow the same
                 // rule from the inside: no negative prompt, no CFG, no batch, and
