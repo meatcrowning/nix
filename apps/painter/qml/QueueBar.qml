@@ -55,6 +55,16 @@ Rectangle {
             }
             color: Theme.textDim
         }
+        // Throughput beside the clock: how fast the sampler is stepping. it/s
+        // while it is above one a second, s/it below (the convention samplers
+        // print), so the number in front stays readable rather than "0.4 it/s".
+        PixelText {
+            visible: App.busy && App.rate > 0
+            text: App.rate >= 1
+                  ? App.rate.toFixed(2) + " it/s"
+                  : (1 / App.rate).toFixed(2) + " s/it"
+            color: Theme.textDim
+        }
         PixelText {
             visible: App.queue > 0
             text: "queued " + App.queue
