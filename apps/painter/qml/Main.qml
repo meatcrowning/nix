@@ -148,28 +148,59 @@ Window {
     // happens at startup does not immediately overwrite everything remembered.
     property string defaultsFor: ""
 
-    // The sampling settings a model was last left at, keyed by model name, so a
-    // switch AWAY to another preset and back restores what was edited rather
-    // than resetting to the family default. Without it applyDefaults() reapplies
-    // the checkpoint's defaults on every return, which lost the video sampler
-    // (steps/sampler/scheduler/denoise) on a preset round-trip. In-session only:
-    // the whole `gen` is already persisted across launches under one key.
-    property var sampleByModel: ({})
+    // EACH PRESET KEEPS ITS OWN SETTINGS. The whole `gen` is remembered per
+    // model name, so switching AWAY to another preset and back restores exactly
+    // what was last set for it — resolution, prompts, sampler, toggles, the lot —
+    // rather than resetting to the family default or bleeding one preset's values
+    // into another. It used to be one shared `gen`: only a four-field sampling
+    // subset survived a round-trip and everything else was reset (and shared
+    // meanwhile). This map is PERSISTED (Prefs key `genByModel`, saved and
+    // restored alongside `gen`), so a preset's settings also survive a relaunch.
+    // LoRAs stay App-side (cleared per switch by selectModel) and the dropped
+    // input image is deliberately one shared slot — neither lives in `gen`.
+    property var genByModel: ({})
 
-    // The subset applyDefaults() overwrites from the family and submit() sends as
-    // the video sampling set — the fields a round-trip must preserve.
-    function samplingOf(g) {
-        return { steps: g.steps, denoise: g.denoise,
-                 sampler_name: g.sampler_name, scheduler: g.scheduler }
+    // A deep-enough copy of the live `gen` to stash: `clone` is shallow, so the
+    // nested `ms` block has to be copied too or a later setMs would reach into a
+    // stashed preset's settings.
+    function snapshotGen() {
+        var out = clone(gen)
+        out.ms = clone(gen.ms)
+        return out
+    }
+
+    // Lay a remembered preset's settings over the current shape, so a key the
+    // saved object predates (a new field) keeps its default instead of vanishing.
+    function mergeGen(base, saved) {
+        var g = clone(base)
+        for (var k in saved) if (k !== "ms" && g[k] !== undefined) g[k] = saved[k]
+        g.ms = clone(base.ms)
+        if (saved.ms) for (var mk in saved.ms) if (g.ms[mk] !== undefined) g.ms[mk] = saved.ms[mk]
+        return g
     }
 
     function applyDefaults() {
         if (App.selectedName === root.defaultsFor) return
+
+        // A preset we already have settings for: restore them wholesale. This is
+        // the round-trip case, and (via the persisted map) the relaunch case too.
+        var saved = App.selectedName !== "" ? root.genByModel[App.selectedName] : undefined
+        if (saved) {
+            if (root.defaultsFor) root.genByModel[root.defaultsFor] = snapshotGen()
+            root.defaultsFor = App.selectedName
+            gen = mergeGen(gen, saved)
+            recomputeDims()
+            if (root.restored) saveSoon.restart()
+            return
+        }
+
+        // First time on this preset: seed it from the family's defaults. The
+        // modelDefaults() gate stays BEFORE defaultsFor is touched, so the startup
+        // pass (no model loaded yet) leaves the restored session's defaultsFor
+        // alone and does not overwrite what was just restored.
         var d = App.modelDefaults()
         if (!d || !d.steps) return
-        // Stash the OUTGOING model's sampling edits before its defaults are
-        // replaced, so returning to it restores them (below).
-        if (root.defaultsFor) root.sampleByModel[root.defaultsFor] = samplingOf(gen)
+        if (root.defaultsFor) root.genByModel[root.defaultsFor] = snapshotGen()
         root.defaultsFor = App.selectedName
         var g = clone(gen)
         g.steps = d.steps
@@ -187,24 +218,15 @@ Window {
         g.negpip = d.toggles && d.toggles.negpip === true
         g.modelSampling = d.toggles && d.toggles.model_sampling === true
         if (d.model_sampling) {
-            var m = g.ms
+            var m = clone(g.ms)
             for (var k in d.model_sampling) m[k] = d.model_sampling[k]
             g.ms = m
         }
         g.promptTransform = d.promptTransform
-        // Restore this model's remembered sampling edits over its family
-        // defaults, so a switch back to it lands on what he left rather than the
-        // checkpoint default.
-        var saved = root.sampleByModel[App.selectedName]
-        if (saved) {
-            if (saved.steps !== undefined) g.steps = saved.steps
-            if (saved.denoise !== undefined) g.denoise = saved.denoise
-            if (saved.sampler_name !== undefined) g.sampler_name = saved.sampler_name
-            if (saved.scheduler !== undefined) g.scheduler = saved.scheduler
-        }
         var wh = App.dims(g.aspectW + ":" + g.aspectH, g.megapixels, g.multiple)
         g.width = wh.width; g.height = wh.height
         gen = g
+        if (root.restored) saveSoon.restart()
     }
 
     // The ONE place width/height are computed. Every control that can change
@@ -386,36 +408,63 @@ Window {
                 width: controlsFlick.width
                 spacing: 10
 
+                // ONE SECTION ORDER FOR EVERY PRESET AND MODEL. Whatever the
+                // selected model can do, the sections stack in the same order
+                // top-to-bottom: input images, resolution, prompt boxes, LoRAs,
+                // then the sampler settings. The panels are declared in that
+                // order and each is gated on the mode it belongs to; a Column
+                // skips invisible children, so the modes that hide a section
+                // leave no gap and never reshuffle the ones that remain (image
+                // mode has no input images, edit has no aspect, and so on).
                 ModelPicker { width: parent.width; persistKey: "panel.model" }
+
+                // --- input images ---
                 // EDIT MODE IS AN IMAGE AND A PROMPT, and nothing else: the
                 // graph reads the size out of the picture, has no negative to
-                // encode and carries the family's own steps/cfg/shift, so every
-                // panel below this one would be a control that changes nothing
-                // (docs/DESIGN.md §10). A Column skips invisible children, so
-                // they leave no gaps.
+                // encode and carries the family's own steps/cfg/shift, so the
+                // sampler/resolution/patch controls are hidden rather than shown
+                // doing nothing (docs/DESIGN.md §10). Its drop wells lead.
                 EditPanel {
                     width: parent.width
                     persistKey: "panel.edit"
                     visible: App.isEdit
                 }
+                // A video family's first/last frame wells are its input images,
+                // so they sit in the same place edit's do. No negative prompt,
+                // no CFG, no batch, and no aspect while a frame is deciding it —
+                // the panels below follow that from the inside.
+                VideoPanel {
+                    width: parent.width
+                    persistKey: "panel.video"
+                    visible: App.isVideo && !App.isEdit
+                }
+
+                // --- resolution ---
+                ResolutionPanel {
+                    width: parent.width
+                    persistKey: "panel.resolution"
+                    visible: !App.isEdit
+                    // In image-to-video the size comes out of the dropped image,
+                    // and MP is the only part of it left to choose — that is
+                    // handled inside the panel, which keeps its MP box.
+                }
+                // Edit's resolution is the output size relative to the dropped
+                // image (there is no aspect to type), so its own panel takes the
+                // resolution slot in that preset.
                 EditScalePanel {
                     width: parent.width
                     persistKey: "panel.editscale"
                     visible: App.isEdit
                 }
-                // The seed IS read by the edit graph, so the edit preset gets
-                // its own seed control — the sampling panel that normally holds
-                // it is hidden here. Same SeedField, so it behaves identically.
-                SeedPanel {
-                    width: parent.width
-                    persistKey: "panel.editseed"
-                    visible: App.isEdit
-                }
+
+                // --- prompt boxes ---
                 PromptEditor {
                     width: parent.width
                     persistKey: "panel.prompt"
                     onMenuRequested: (sx, sy, items) => ctxMenu.open(sx, sy, items)
                 }
+
+                // --- LoRAs ---
                 // Available in EVERY mode, edit included: an edit model takes a
                 // LoRA the same way an image one does — `_build_edit` chains the
                 // LoraLoader onto the loader→ModelSampling seam exactly as the
@@ -427,32 +476,26 @@ Window {
                     width: parent.width
                     persistKey: "panel.lora"
                 }
-                // Only for a video family, and the two below it follow the same
-                // rule from the inside: no negative prompt, no CFG, no batch, and
-                // no aspect while a first frame is deciding it. A Column skips
-                // invisible children, so these leave no gap.
-                VideoPanel {
-                    width: parent.width
-                    persistKey: "panel.video"
-                    visible: App.isVideo && !App.isEdit
-                }
+
+                // --- sampler settings ---
                 ParamsPanel {
                     width: parent.width
                     persistKey: "panel.sampling"
                     visible: !App.isEdit
                 }
-                ResolutionPanel {
-                    width: parent.width
-                    persistKey: "panel.resolution"
-                    visible: !App.isEdit
-                    // In image-to-video the size comes out of the dropped image,
-                    // and MP is the only part of it left to choose — that is
-                    // handled inside the panel, which keeps its MP box.
-                }
                 TogglePanel {
                     width: parent.width
                     persistKey: "panel.patches"
                     visible: !App.isVideo && !App.isEdit
+                }
+                // The seed IS read by the edit graph, so the edit preset gets
+                // its own seed control — the sampling panel that normally holds
+                // it is hidden here. Same SeedField, so it behaves identically,
+                // and it takes the sampler slot in the edit preset.
+                SeedPanel {
+                    width: parent.width
+                    persistKey: "panel.editseed"
+                    visible: App.isEdit
                 }
                 Item { width: 1; height: 6 }
             }
@@ -750,6 +793,11 @@ Window {
         Prefs.set("view", root.view)
         Prefs.set("splitRatio", root.splitRatio)
         Prefs.set("gen", JSON.stringify(root.gen))
+        // Keep the current preset's entry in the per-model store level with the
+        // live `gen` before persisting the whole map, so each preset's settings
+        // come back across a relaunch (see genByModel / applyDefaults above).
+        if (root.defaultsFor) root.genByModel[root.defaultsFor] = snapshotGen()
+        Prefs.set("genByModel", JSON.stringify(root.genByModel))
         Prefs.set("model", App.selectedName)
         Prefs.set("mode", App.mode)
         Prefs.set("inputImage", App.inputImage)
@@ -796,6 +844,14 @@ Window {
             root.splitRatio = Prefs.get("splitSwapped") === true ? r : (1 - r)
         }
         Prefs.set("splitSwapped", true)
+        // Each preset's remembered settings (the per-model store). Restored
+        // before `gen`, so a switch to another preset in this session lands on
+        // what it was last left at rather than a family default.
+        var gbm = Prefs.get("genByModel")
+        if (gbm) {
+            try { root.genByModel = JSON.parse(gbm) }
+            catch (e) { /* a corrupt map just leaves every preset at its default */ }
+        }
         var raw = Prefs.get("gen")
         if (raw) {
             try {

@@ -2701,6 +2701,147 @@ def test_preset_sampling(win, ctl, tmp):
     spin(120)
 
 
+def test_section_order(win, ctl, tmp):
+    """One section order for every preset AND model: input images, resolution,
+    prompt boxes, LoRAs, then the sampler settings — top to bottom. The panels
+    are gated per mode and a Column skips the invisible ones, so what stays
+    visible must never reshuffle relative to that order.
+    """
+    if ctl.reg is None:
+        print("SKIP  section order (no registry)")
+        return
+    content = win.contentItem()
+    root = os.environ["PAINTER_MODELS"]
+    staged = dict(MODE_FAKES)
+    staged.update(VIDEO_FAKES)
+    for rel, keys in staged.items():
+        write_safetensors(os.path.join(root, rel), keys)
+    import fingerprint as fp
+    fp.save_cache({})
+    ctl.setMode("")
+    ctl.rescan()
+    spin(200)
+
+    # input images -> resolution -> prompt -> LoRAs -> sampler settings
+    RANK = {"EditPanel": 1, "VideoPanel": 1, "ResolutionPanel": 2,
+            "EditScalePanel": 2, "PromptEditor": 3, "LoraStack": 4,
+            "ParamsPanel": 5, "TogglePanel": 5, "SeedPanel": 5}
+
+    def order_ok(label):
+        rows = []
+        for tp, rank in RANK.items():
+            p = find(content, tp)
+            if p is not None and p.isVisible():
+                rows.append((prop(p, "y"), rank, tp))
+        rows.sort()                                   # top to bottom
+        ranks = [r for _, r, _ in rows]
+        names = [n for _, _, n in rows]
+        check("%s: sections in one order (input,res,prompt,lora,sampler)" % label,
+              ranks == sorted(ranks), names)
+
+    ctl.selectModelByName("krea2_raw_fp8_scaled.safetensors")
+    spin(150)
+    order_ok("image")
+
+    ctl.setMode("video")
+    spin(150)
+    if ctl.property("isVideo"):
+        order_ok("video")
+
+    ctl.setMode("edit")
+    spin(150)
+    if ctl.property("isEdit"):
+        order_ok("edit")
+
+    ctl.setMode("")
+    for rel in staged:
+        try: os.remove(os.path.join(root, rel))
+        except OSError: pass
+    fp.save_cache({})
+    ctl.rescan()
+    spin(120)
+
+
+def test_preset_isolation(win, ctl, tmp):
+    """Each preset keeps its OWN settings — the whole gen, not just the sampler —
+    across a switch away and back, and the per-model store is persisted so a
+    relaunch shows each preset the way it was last left.
+    """
+    if ctl.reg is None:
+        print("SKIP  preset isolation (no registry)")
+        return
+    root = os.environ["PAINTER_MODELS"]
+    staged = {k: MODE_FAKES[k] for k in
+              ("unet/anima-base-v1.0.safetensors",
+               "unet/krea2_raw_fp8_scaled.safetensors")}
+    for rel, keys in staged.items():
+        write_safetensors(os.path.join(root, rel), keys)
+    import fingerprint as fp
+    fp.save_cache({})
+    ctl.setMode("")
+    ctl.rescan()
+    spin(200)
+
+    ctl.selectModelByName("anima-base-v1.0.safetensors")
+    spin(150)
+    if ctl.property("selectedName") != "anima-base-v1.0.safetensors":
+        for rel in staged:
+            try: os.remove(os.path.join(root, rel))
+            except OSError: pass
+        fp.save_cache({}); ctl.rescan(); spin(120)
+        print("SKIP  preset isolation (models not recognised)")
+        return
+
+    def edit(pos, aw, ah, mp, steps):
+        g = prop(win, "gen")
+        g["positive"] = pos; g["aspectW"] = aw; g["aspectH"] = ah
+        g["megapixels"] = mp; g["steps"] = steps
+        win.setProperty("gen", g)
+        win.metaObject().invokeMethod(win, "recomputeDims")
+        spin(80)
+
+    edit("ANIMA", 3, 2, 1.7, 27)
+    ctl.selectModelByName("krea2_raw_fp8_scaled.safetensors")
+    spin(150)
+    edit("KREA", 16, 9, 1.1, 33)
+
+    # Back to the first preset: its OWN values, not the other's, not the default.
+    ctl.selectModelByName("anima-base-v1.0.safetensors")
+    spin(150)
+    a = prop(win, "gen")
+    check("a preset round-trip restores the whole gen (prompt + resolution + steps)",
+          a.get("positive") == "ANIMA" and a.get("aspectW") == 3
+          and a.get("aspectH") == 2 and abs(a.get("megapixels") - 1.7) < 1e-6
+          and a.get("steps") == 27,
+          {k: a.get(k) for k in ("positive", "aspectW", "aspectH", "megapixels", "steps")})
+
+    ctl.selectModelByName("krea2_raw_fp8_scaled.safetensors")
+    spin(150)
+    k = prop(win, "gen")
+    check("the other preset kept its own settings, unshared",
+          k.get("positive") == "KREA" and k.get("aspectW") == 16
+          and k.get("steps") == 33,
+          {kk: k.get(kk) for kk in ("positive", "aspectW", "steps")})
+
+    # Persisted for a relaunch: the on-disk store holds both presets' settings.
+    win.metaObject().invokeMethod(win, "saveState")
+    spin(60)
+    prefs_path = os.path.join(os.environ["XDG_STATE_HOME"], "painter", "prefs.json")
+    gbm = json.loads(json.load(open(prefs_path)).get("genByModel") or "{}")
+    check("both presets are persisted for a relaunch",
+          gbm.get("anima-base-v1.0.safetensors", {}).get("positive") == "ANIMA"
+          and gbm.get("krea2_raw_fp8_scaled.safetensors", {}).get("positive") == "KREA",
+          sorted(gbm.keys()))
+
+    ctl.setMode("")
+    for rel in staged:
+        try: os.remove(os.path.join(root, rel))
+        except OSError: pass
+    fp.save_cache({})
+    ctl.rescan()
+    spin(120)
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="painter-ui-test-")
     os.environ["PAINTER_MODELS"] = fake_models(os.path.join(tmp, "models"))
@@ -2737,6 +2878,8 @@ def main():
     print("== wiring ==");            test_wiring(win, ctl)
     print("== seed reuse ==");        test_seed(win, ctl)
     print("== preset sampling ==");   test_preset_sampling(win, ctl, tmp)
+    print("== section order ==");      test_section_order(win, ctl, tmp)
+    print("== preset isolation ==");   test_preset_isolation(win, ctl, tmp)
 
     real = [w for w in WARNINGS if "Qt Quick Layouts" not in w]
     for w in real:
