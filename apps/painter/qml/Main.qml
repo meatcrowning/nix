@@ -87,9 +87,11 @@ Window {
         // file path and lives on App, not in here.
         duration: 5.0, fps: 24.0, useInputImage: false, useLastFrame: false,
         // Edit only. The output size is the dropped image's, scaled: `editNoScale`
-        // keeps it 1:1, otherwise `editScale` multiplies each side. See
-        // EditScalePanel.qml and registry._build_edit.
-        editNoScale: true, editScale: 2.0,
+        // keeps its exact width and height, otherwise `editMegapixels` is the
+        // pixel budget the image is scaled to (its aspect kept), the same MP
+        // control the video path offers. See EditScalePanel.qml and
+        // registry._build_edit.
+        editNoScale: true, editMegapixels: 1.5,
         negpip: false, modelSampling: false,
         ms: ({ shift_start: 3.5, shift_end: 1.2, start_percent: 0.0,
                end_percent: 0.5, curve: "ease_in", outside_window: "hold",
@@ -227,7 +229,7 @@ Window {
             App.generate({
                 edit: true,
                 positive: g.positive,
-                editNoScale: g.editNoScale, editScale: g.editScale,
+                editNoScale: g.editNoScale, editMegapixels: g.editMegapixels,
                 seed: g.seed, randomSeed: g.randomSeed, reuseSeed: g.reuseSeed
             }, g.count)
             return
