@@ -36,7 +36,12 @@ from pathlib import Path
 # spend. A running viewer that cannot do it VISIBLY says no, and we carry on and
 # open our own window; see pylib/handoff.py and `--new-window` below.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "pylib"))
-if __name__ == "__main__" and "--new-window" not in sys.argv[1:]:
+# `--compare` always opens its OWN window: a comparison is a distinct task
+# painter launches, not "show this in the viewer that happens to be open", and a
+# handoff would drop it into an unrelated running viewer's pane grid. So it skips
+# the handoff, exactly as `--new-window` does.
+if (__name__ == "__main__" and "--new-window" not in sys.argv[1:]
+        and "--compare" not in sys.argv[1:]):
     from handoff import send as _handoff_send, took as _handoff_took  # noqa: E402
 
     if _handoff_took(_handoff_send("viewer", {"argv": sys.argv[1:],
@@ -166,13 +171,18 @@ MAX_PANES = 9
 
 def split_args(argv):
     """(--order file or None, --split seen?, --select-back token or "", the
-    remaining positional paths).
+    remaining positional paths, --compare (before, after) or None).
 
     `--new-window` is consumed here and nowhere else: it is acted on at the top
     of this file, before Qt is even imported, and only has to be kept out of
     `rest` — everything left over is treated as a path to open, so a flag that
-    fell through would be opened as a file."""
-    order, split, back, rest, it = None, False, "", [], iter(argv)
+    fell through would be opened as a file.
+
+    `--compare <before> <after>` (painter's invocation) consumes its two paths
+    here so they are NOT treated as an ordinary flip list; the comparison mode
+    reads them from the returned pair. Argument order is the contract: first
+    path is the before image, second is the after."""
+    order, split, back, rest, compare, it = None, False, "", [], None, iter(argv)
     for a in it:
         if a == "--order":
             order = next(it, None)
@@ -184,11 +194,16 @@ def split_args(argv):
             back = a[len("--select-back="):]
         elif a == "--split":
             split = True
+        elif a == "--compare":
+            before = next(it, None)
+            after = next(it, None)
+            if before is not None and after is not None:
+                compare = (before, after)
         elif a == "--new-window":
             pass
         else:
             rest.append(a)
-    return order, split, back, rest
+    return order, split, back, rest, compare
 
 
 def images_for(argv):
@@ -203,7 +218,7 @@ def images_for(argv):
     case each path opens in its own pane (capped at MAX_PANES). It is a flag and
     not the default because several paths have always meant "flip through
     exactly these", and filer relies on that."""
-    order_file, split, _back, argv = split_args(argv)
+    order_file, split, _back, argv, _compare = split_args(argv)
     paths = [os.path.abspath(a) for a in argv if os.path.exists(a)]
     panes = min(len(paths), MAX_PANES) if (split and len(paths) > 1) else 1
     if order_file and len(paths) == 1 and os.path.isfile(paths[0]):
@@ -579,7 +594,17 @@ def main():
     app.setApplicationName("viewer")
     app.setDesktopFileName("viewer")
 
-    entries, index, panes = images_for(sys.argv[1:])
+    compare = split_args(sys.argv[1:])[4]
+    if compare:
+        # painter's --compare: a two-image reveal slider, not a flip list. The
+        # before/after entries also seed `images` so the footer and title have
+        # names; the window renders CompareView instead of the pane grid.
+        before_e = entry(os.path.abspath(compare[0]))
+        after_e = entry(os.path.abspath(compare[1]))
+        entries, index, panes = [before_e, after_e], 0, 1
+    else:
+        before_e = after_e = {}
+        entries, index, panes = images_for(sys.argv[1:])
 
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
@@ -602,6 +627,9 @@ def main():
     ctx.setContextProperty("startIndex", index)
     ctx.setContextProperty("startPanes", panes)
     ctx.setContextProperty("maxPanes", MAX_PANES)
+    ctx.setContextProperty("startCompare", bool(compare))
+    ctx.setContextProperty("startBefore", before_e)
+    ctx.setContextProperty("startAfter", after_e)
 
     theme_comp = QQmlComponent(engine, QUrl.fromLocalFile(str(QML / "theme" / "Theme.qml")))
     theme = theme_comp.create()
