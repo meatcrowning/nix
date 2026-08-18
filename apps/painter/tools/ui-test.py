@@ -2244,6 +2244,10 @@ def test_split_and_state(win, ctl, keep):
     win.setProperty("gen", g)
     panel = find(content, "ParamsPanel")
     panel.setProperty("collapsed", True)
+    # A model setting that lives outside `gen`: the LoRA chain, cleared by
+    # `selectModel` on every switch but supposed to survive a relaunch.
+    ctl.loras.add("remember-lora.safetensors", False)
+    ctl.loras.setStrength(0, 0.6)
     spin(200)
     win.metaObject().invokeMethod(win, "saveState")
     spin(200)
@@ -2262,6 +2266,11 @@ def test_split_and_state(win, ctl, keep):
           prefs.get("panel.sampling"))
     check("the selected model is persisted", prefs.get("model") == ctl.property("selectedName"),
           prefs.get("model"))
+    saved_loras = json.loads(prefs.get("loras") or "[]")
+    check("the lora chain is persisted",
+          saved_loras == [{"name": "remember-lora.safetensors", "strength": 0.6,
+                            "enabled": True, "patchesClip": False}],
+          saved_loras)
     # NOT un-collapsed here: the restore test reads the prefs file next, and
     # setting it back would (correctly) persist the newer value first.
     win.setProperty("view", 0)
@@ -2292,6 +2301,11 @@ def test_restore(tmp):
     check("restored: the selected model",
           ctl2.property("selectedName") == "alpha-model.safetensors",
           ctl2.property("selectedName"))
+    # The saved chain named a LoRA that is not among this fixture root's files
+    # (there are none), so `App.restoreLoras`'s on-disk guard must drop it
+    # rather than the graph later referencing a file that is not there.
+    check("restored: a lora no longer on disk is dropped, not carried over",
+          ctl2.loras.rowCount() == 0, ctl2.loras.rowCount())
     win2.setProperty("restored", False)     # this window must not re-save
     win2.close()
     return eng, win2, ctl2, keep2

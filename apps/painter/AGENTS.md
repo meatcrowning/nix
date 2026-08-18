@@ -514,14 +514,25 @@ harness here may never do.
 ## The window comes back the way it was left
 
 Persisted through `Prefs` (`~/.local/state/painter/prefs.json`): window size,
-which view, the split ratio, the prompts and every number in `gen`, the selected
-model, and each panel's collapsed state (`Panel.persistKey`). Two traps:
+which view, the split ratio, the prompts and every number in `gen` (so every
+sampling setting, including the video preset's — steps, sampler, `ms`'s shift
+curve — comes back too), the selected model, the LoRA chain, and each panel's
+collapsed state (`Panel.persistKey`). Three traps:
 
 - **Writes are debounced** (700ms) — `gen` changes on every keystroke.
 - **`applyDefaults()` is guarded by `defaultsFor`.** The startup selection fires
   `modelChanged`, and without that guard a family's defaults would overwrite the
   session that had just been restored, every launch. It holds the name of the
   model whose defaults `gen` reflects; a restore sets it to the remembered one.
+- **The LoRA chain needs the same guard, on `lorasRestored`.** `selectModel`
+  (Python) always clears the stack on every switch — a model's LoRAs are not
+  generally valid for another one — so a plain restore-on-launch would be wiped
+  the instant the startup selection lands. `Main.qml`'s `onModelChanged` applies
+  the remembered chain (`App.restoreLoras`, names not on disk anymore dropped)
+  exactly once, when `App.selectedName` first matches the remembered `model`;
+  a later in-session switch clears same as always. `App.lorasSnapshot()` is the
+  save side — the WHOLE stack, unlike `loras.active()` (enabled-only, what a
+  submit sends).
 
 The divider between the panes is dragged (`splitRatio`, saved on release,
 double-click to reset), clamped so neither side starves — the same shape as
