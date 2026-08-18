@@ -110,17 +110,21 @@ What is genuinely different, and therefore what the left column stops offering
 be a box to drop the image in and a prompt box"*:
 
 - **The image decides the size, and one control scales it.** The dropped
-  image's own dimensions size the output — `_build_edit` swaps the primary
-  `scale_image` node to `ImageScaleBy`, whose output `GetImageSize` reads to feed
-  both the latent (`EmptyFlux2LatentImage`) and `Flux2Scheduler`, so there is no
-  aspect and no width/height. `EditScalePanel.qml` (shown only in edit mode) is
-  the one control: a **no-scaling** toggle (`gen.editNoScale`, default on →
-  `scale_by` 1.0, output = original dimensions) and, when it is off, a **scale
-  multiplier** field (`gen.editScale`, clamped 0.01–8.0). The reference latent
-  (the primary's `VAEEncode`) reads the SAME scaled node, so it and the output
-  latent stay the same size by construction. The additional reference images
-  keep the family's pixel budget (`ImageScaleToTotalPixels`) since they never
-  size the output. `submit()` sends `editNoScale`/`editScale` for the edit path.
+  image's own dimensions size the output — the primary `scale_image` node's
+  output `GetImageSize` reads to feed both the latent (`EmptyFlux2LatentImage`)
+  and `Flux2Scheduler`, so there is no aspect and no width/height.
+  `EditScalePanel.qml` (shown only in edit mode) is the one control: a
+  **no-scaling** toggle (`gen.editNoScale`, default on → `_build_edit` swaps
+  `scale_image` to `ImageScaleBy` at `scale_by` 1.0, output = original
+  dimensions) and, when it is off, a **megapixel budget** field
+  (`gen.editMegapixels`, clamped 0.1–8.0) applied through the base graph's
+  `ImageScaleToTotalPixels` — the same MP control the image and video paths
+  offer, so the image is scaled to that many pixels with its own aspect kept,
+  NOT multiplied by a scale factor. The reference latent (the primary's
+  `VAEEncode`) reads the SAME scaled node, so it and the output latent stay the
+  same size by construction. The additional reference images keep the family's
+  pixel budget (`ImageScaleToTotalPixels`) since they never size the output.
+  `submit()` sends `editNoScale`/`editMegapixels` for the edit path.
 - **One prompt.** The negative conditioning is the positive one zeroed out
   (`ConditioningZeroOut` -> `ReferenceLatent`), which is what CFG 1.0 wants —
   so the negative box is hidden rather than typed into nothing, exactly as for
