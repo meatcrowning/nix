@@ -1648,9 +1648,15 @@ class Painter(QObject):
         refs = refs or []
         i = len(refs)
         if i == len(paths):
+            # `input_image_local` records the primary's LOCAL path (as opposed
+            # to `input_image`, the uploaded "subfolder/name" ref a LoadImage
+            # takes): the output PNG keeps it so opening an edit result can show
+            # the before/after in the viewer's compare mode. It never reaches
+            # the graph — no node reads it — only the recorded parameters.
             self._start_jobs(
                 entry,
-                dict(params, input_image=refs[0], input_images=list(refs)),
+                dict(params, input_image=refs[0], input_images=list(refs),
+                     input_image_local=paths[0]),
                 count)
             return
         path = paths[i]
@@ -2330,10 +2336,36 @@ class Painter(QObject):
     @Slot(str)
     def openExternally(self, path):
         p = path.replace("file://", "")
+        # An EDITING model's output (a family with an `edit` block — Flux 2
+        # Klein and its kin, identified by tensor header, never by filename)
+        # opens as a before/after: the source image fed to the edit graph
+        # against the result. The recorded parameters carry both — `edit`/`kind`
+        # marks the pipeline, `input_image_local` the primary source's local
+        # path — so the viewer is launched in compare mode when the source is
+        # still on disk. A plain text-to-image output opens as it always has.
+        before = self._compare_source(p)
         try:
-            subprocess.Popen(["viewer", p], start_new_session=True)
+            if before:
+                subprocess.Popen(["viewer", "--compare", before, p],
+                                 start_new_session=True)
+            else:
+                subprocess.Popen(["viewer", p], start_new_session=True)
         except OSError:
             subprocess.Popen(["xdg-open", p], start_new_session=True)
+
+    @staticmethod
+    def _compare_source(png_path):
+        """The local source image an edit output should be compared against, or
+        "" — an editing-model result whose input file is still on disk. Anything
+        else (a t2i output, a missing source) returns "" and opens normally."""
+        try:
+            params = pngmeta.load_params(Path(png_path).read_bytes())
+        except (OSError, ValueError):
+            return ""
+        if not params or not (params.get("edit") or params.get("kind") == "edit"):
+            return ""
+        src = params.get("input_image_local") or ""
+        return src if src and os.path.exists(src) else ""
 
 
 def _human(n):
