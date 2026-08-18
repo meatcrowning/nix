@@ -960,12 +960,36 @@ apps/surfer/tools/mem-test.py --tabs 6 --discard`.
 
 ## Profile handoff between `top` and `book` (2026-07-26)
 
-`tools/sync.py` merges the two machines' browser state; `home/prog/surfer.nix`'s
-**air** wrapper brackets the run with it (`pull` before the window opens, `push`
-after it closes; `SURFER_NO_SYNC=1` opts out, and the sync is timeout-bounded +
-`guard_reachable`-gated (a 3 s hard deadline on **connecting to** `top`:22) +
-`|| true` so an absent `top` never blocks the browser — log at
-`~/.cache/surfer-sync.log`).
+`tools/sync.py` merges the two machines' browser state. `SURFER_NO_SYNC=1` opts
+out of both halves; log at `~/.cache/surfer-sync.log`.
+
+**Nothing about a cookie merge may precede the window.** `home/prog/surfer.nix`'s
+**air** wrapper used to bracket the run — `pull` before the browser started,
+`push` after it closed — and the `pull` was paid in full on every cold launch:
+**10.02 s of measured dead startup with `top` asleep**, two ssh calls at
+`ConnectTimeout` each behind a gate that only checked DNS. That is now split:
+
+- **`pull` is gone from the wrapper**, replaced by `main.py`'s
+  `_cookie_sync_live()` — a daemon thread started from `_wire_profile`, after
+  the window exists, repeating on a 15-minute timer so a `top` that wakes up
+  later still converges **without relaunching the browser**.
+- **`push` stays in the wrapper**, where it runs after the window is gone and
+  blocks nobody.
+
+**The live path must never write the profile** — that file is Chromium's while
+surfer runs, which is what every other command's `guard_local` interlock is
+protecting. So `sync.py fetch` (the one command that deliberately omits
+`guard_local`) only READS: it takes a WAL-safe `snapshot()` of our db, applies
+the same newer-`last_update_utc`-wins rule via `winners_against_local()`, and
+prints just the rows that beat ours. **`setCookie` on Chromium's own cookie
+store does the write**, which is also exactly why the merged cookies take
+effect with no restart. An unreadable profile falls back to offering every row
+and letting `setCookie` arbitrate, rather than silently syncing nothing.
+Regression: `tools/cookie-live-test.py` (synthetic dbs; never reads the real
+profile).
+
+`guard_reachable` gates all of it with a 3 s hard deadline on **connecting to**
+`top`:22.
 
 **That gate must probe reachability, never just name resolution.** It
 originally tested `getaddrinfo` alone, because off the LAN the bare name took
