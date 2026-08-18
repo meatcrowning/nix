@@ -996,6 +996,7 @@ class Painter(QObject):
             return "", "there is nothing on the clipboard"
         if md.hasUrls():
             why = "there is no image file on the clipboard"
+            decoded = None
             for u in md.urls():
                 local = u.toLocalFile()
                 if not local:
@@ -1003,10 +1004,21 @@ class Painter(QObject):
                 path, why = self._usable_image(local, "paste")
                 if path:
                     return "file", path
-            # The file's own suffix is outside IMAGE_SUFFIXES (clipfile.py's
-            # --image offers pixels for a wider set, e.g. .gif/.tiff/.avif) —
-            # fall through to the pixel offer rather than refusing a paste
-            # whose bytes we can actually read.
+                # A file whose suffix painter cannot send to the backend (an
+                # svg, an ico, a ppm — anything viewer opens but IMAGE_SUFFIXES
+                # omits) but that Qt CAN decode from disk: read it ourselves and
+                # paste it as pixels, so everything viewer can copy pastes here.
+                # The clipboard's own image offer covers formats with a
+                # QImageIO plugin (gif/tiff/avif); this covers the rest.
+                if decoded is None and os.path.isfile(local):
+                    img = QImage(local)
+                    if not img.isNull():
+                        decoded = img
+            if decoded is not None:
+                return "pixels", decoded
+            # The file's own suffix is outside IMAGE_SUFFIXES and we could not
+            # decode it either — fall through to the clipboard's pixel offer
+            # rather than refusing a paste whose bytes we can actually read.
             if not md.hasImage():
                 return "", why
         if md.hasImage():

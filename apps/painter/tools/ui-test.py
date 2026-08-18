@@ -1099,6 +1099,29 @@ def test_paste(win, ctl, tmp):
     check("a pasted PATH is taken", ctl.property("inputImage") == src,
           ctl.property("inputImage"))
 
+    # ---- a FILE viewer opens but painter cannot SEND (svg/ico/...) ----
+    # viewer's IMAGE_EXTS is wider than painter's IMAGE_SUFFIXES, so an image
+    # copied out of viewer can be one painter would refuse to upload as a frame.
+    # Rather than error on a paste of a real picture, painter decodes the file
+    # itself and pastes it as pixels (→ a png in the cache). Regression for the
+    # viewer→painter round-trip that errored on such formats.
+    svg = os.path.join(tmp, "clip-src.svg")
+    open(svg, "w").write(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="9">'
+        '<rect width="12" height="9" fill="#3050c0"/></svg>')
+    if not QImage(svg).isNull():   # only where this Qt build can decode svg
+        md = QMimeData()
+        md.setUrls([QUrl.fromLocalFile(svg)])
+        clip.setMimeData(md)
+        ctl.clearInputImage()
+        said.clear()
+        click(win, btn)
+        got = ctl.property("inputImage")
+        check("an svg viewer opened pastes as pixels, not an error",
+              got.endswith(".png") and os.path.isfile(got)
+              and os.path.dirname(got) == str(P.CACHE / "pasted"), (got, said))
+        check("...silently — no refusal toast", said == [], said)
+
     # ---- the refusals, out loud (docs/DESIGN.md §10) ----
     for payload, why in ((("text", "just some words"), "that is not a file painter can read"),
                          (("file", os.path.join(tmp, "notes.txt")), "paste an image (png, jpg, webp)")):
