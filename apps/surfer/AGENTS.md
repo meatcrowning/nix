@@ -253,6 +253,35 @@ above, plus a drift-guard that `Main.qml` still calls the bridge with elapsed
 time and still repairs the name before `accept()`. Run it after touching either
 half.
 
+### Instagram "save original image"
+
+Right-clicking an image on `instagram.com` (any subdomain) offers **Save
+original image...** alongside the normal image items. It exists because the
+rendered `<img>` is a downscaled `srcset` candidate served from Instagram's CDN
+(`scontent*.cdninstagram.com` / `*.fbcdn.net`), and the post's own overlay
+elements (double-tap heart target, tag hotspots) sit *on top* of the image and
+swallow the right-click — so `request.mediaType` is often not `Image` and
+`mediaUrl` is the small candidate. Chromium's `DownloadImageToDisk` web action
+only ever fetches the element's own current source, so it cannot reach the
+original.
+
+The flow, on click: `Main.qml`'s `saveInstagramOriginal(view, vx, vy)` runs the
+page-side resolver `IG_RESOLVE_JS` (in `main.py`, coords substituted for
+`__X__`/`__Y__`) at the view-relative click point. The resolver walks
+`elementsFromPoint` *through the overlay* to the real `<img>`, picks the LARGEST
+`srcset` candidate (Instagram serves 320/640/750/1080; 1080 is the max public
+"original", and its `oh`/`oe` signature is valid — stripping the `stp` resize
+token 403s), resolves it to an absolute URL, and returns it. QML hands the URL
+to `ImgDownload.save(url, referer)` — the **`UrlDownloader`** bridge, which GETs
+it with the browser UA + an instagram.com `Referer` (the signed CDN URL needs no
+session cookies) and drives the **same `Downloads` bridge** for folder, filename
+repair and toasts, so the UX is identical to a normal image save. An empty
+resolution raises an honest `ImgDownload.notFound` failure toast rather than a
+silent no-op (DESIGN §10.4). Verified headlessly by
+**[`tools/instagram-image-test.py`](tools/instagram-image-test.py)** (real
+offscreen page with a downscaled `<img>` + larger `srcset` under a pointer-
+capturing overlay, plus a real loopback download through `UrlDownloader`).
+
 ## Ad blocking — the engine is only half of it
 
 `AdBlocker` + `Cosmetic` in `main.py`. The engine is Brave's adblock-rust (the
