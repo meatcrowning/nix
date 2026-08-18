@@ -255,7 +255,15 @@ let
           timeout 90 /usr/bin/python3 /home/lam/nix/apps/surfer/tools/sync.py "$1" \
             >> "$LOG" 2>&1 || echo "  (skipped: rc=$?)" >> "$LOG"
         }
-        [ -n "''${SURFER_NO_SYNC:-}" ] || vtbsync pull
+        # NO `vtbsync pull` here, deliberately. It used to run right there, and
+        # it was paid IN FULL before the window could open: a sleeping `top`
+        # cost 10s+ of dead startup on every cold launch (two ssh calls at
+        # ConnectTimeout each, behind a gate that only checked DNS — which
+        # MagicDNS answers for an offline host in 34ms). Nothing about merging
+        # cookies needs to precede the browser, so main.py's _cookie_sync_live
+        # does it on a background thread once the window is up, injecting
+        # through Chromium's own cookie store so it also needs no restart.
+        # `push` stays here: it runs after the window is gone, blocking nobody.
         # Same Botis AA carve-out as top's wrapper — see fcConf above. Fedora's
         # system config lives at /etc/fonts/fonts.conf there too.
         export FONTCONFIG_FILE="''${FONTCONFIG_FILE:-${fcConf}}"

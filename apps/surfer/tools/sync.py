@@ -513,6 +513,70 @@ def cmd_is_running(args):
     print("RUNNING" if surfer_running() else "IDLE")
 
 
+def winners_against_local(payload):
+    """Rows from `payload` that would WIN the merge against our current db.
+
+    The live-injection counterpart to merge_cookies: same newer-`last_update_utc`
+    -wins rule, but it decides ONLY — it never writes the profile, because
+    surfer owns that file while this runs. The caller hands the winners to
+    Chromium's own cookie store, which does the write itself.
+
+    Reads a `snapshot()` copy rather than the live file: our sqlite must not
+    contend with Chromium's connection. A profile we cannot read (Chromium
+    holds an exclusive lock) is not an error — return everything and let
+    setCookie be the arbiter, which at worst re-sets a cookie to a value it
+    already has.
+    """
+    rows = payload.get("rows") or []
+    if not rows:
+        return []
+    tmp = os.path.join(tempfile.mkdtemp(prefix="surfer-sync-live-"), "Cookies")
+    try:
+        try:
+            snapshot(cookies_path(), tmp)
+            con = sqlite3.connect(f"file:{tmp}?mode=ro", uri=True)
+        except (sqlite3.Error, OSError):
+            return rows
+        try:
+            con.row_factory = sqlite3.Row
+            mine = {}
+            for r in con.execute(
+                "select %s, last_update_utc from cookies" % ", ".join(KEY_COLS)
+            ):
+                mine[tuple(r[c] for c in KEY_COLS)] = r["last_update_utc"] or 0
+        finally:
+            con.close()
+    finally:
+        shutil.rmtree(os.path.dirname(tmp), ignore_errors=True)
+
+    now = now_chromium()
+    out = []
+    for row in rows:
+        if row.get("has_expires") and (row.get("expires_utc") or 0) < now:
+            continue
+        key = tuple(row.get(c) for c in KEY_COLS)
+        if (row.get("last_update_utc") or 0) <= mine.get(key, -1):
+            continue
+        out.append(row)
+    return out
+
+
+def cmd_fetch(args):
+    """Remote cookies that beat ours, as JSON on stdout. Writes NOTHING.
+
+    This is what the running browser calls in the background (main.py's
+    `_cookie_sync_live`), which is why it deliberately omits `guard_local`:
+    every other command refuses while surfer is alive because it would write
+    the profile out from under Chromium, and this one never does.
+    """
+    guard_reachable(args.host)
+    guard_remote(args.host)
+    guard_schema(args.host)
+    payload = json.loads(_remote(args.host, ["dump"]).stdout.decode())
+    rows = winners_against_local(payload)
+    json.dump({"columns": payload["columns"], "rows": rows}, sys.stdout)
+
+
 def cmd_merge(args):
     """Remote side of a push: merge the staged payload file into our db."""
     if surfer_running():
@@ -530,7 +594,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name, fn in (
         ("status", cmd_status), ("pull", cmd_pull), ("push", cmd_push),
-        ("sync", cmd_sync),
+        ("sync", cmd_sync), ("fetch", cmd_fetch),
         # remote agent entry points
         ("dump", cmd_dump), ("schema", cmd_schema),
         ("is-running", cmd_is_running), ("merge", cmd_merge),

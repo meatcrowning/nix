@@ -46,7 +46,7 @@ if __name__ == "__main__":
 
 from PySide6.QtCore import (QObject, Slot, Signal, QUrl, QFileSystemWatcher, Property,
                             QBuffer, QIODevice, QEvent, Qt, QPoint, QCoreApplication,
-                            QProcess, QTimer)
+                            QProcess, QTimer, QDateTime)
 from PySide6.QtGui import QGuiApplication, QColor, QWheelEvent
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtWebEngineQuick import QtWebEngineQuick
@@ -55,7 +55,7 @@ from PySide6.QtWebEngineCore import (QWebEngineScript, QWebEngineUrlScheme,
                                      QWebEngineUrlRequestInterceptor, QWebEngineUrlRequestInfo,
                                      QWebEngineUrlRequestJob, QWebEngineProfile)
 from PySide6.QtNetwork import (QNetworkAccessManager, QNetworkRequest,
-                               QNetworkReply, QLocalServer)
+                               QNetworkReply, QLocalServer, QNetworkCookie)
 
 HERE = Path(__file__).resolve().parent
 QML = HERE / "qml"
@@ -4914,6 +4914,94 @@ def main():
     # per-profile, and the QML WebEngineProfile is the one the views use.
     gmxhr = GmXhrHandler(app)
 
+    def _cookie_sync_live(prof):
+        """Merge top's cookies into the LIVE profile, off the critical path.
+
+        This used to be a `sync.py pull` in the air wrapper, run BEFORE the
+        process started — so every cold launch on book paid the round trip
+        before a window could appear, and a sleeping `top` cost 10s+ of dead
+        wait (see tools/sync.py's guard_reachable). Nothing about a cookie
+        merge needs to happen before the browser opens, so it happens here
+        instead: a daemon thread, after the window is up.
+
+        It never writes the profile — that file is Chromium's while we run, and
+        the interlock in sync.py exists for exactly that reason. `sync.py
+        fetch` only READS (locally and on top) and prints the rows that beat
+        ours; the write is `setCookie`, i.e. Chromium's own, which is also what
+        makes the new cookies take effect with no restart.
+
+        Repeats on a timer, so a `top` that wakes up later still converges
+        without relaunching the browser.
+        """
+        if os.environ.get("SURFER_NO_SYNC"):
+            return
+
+        class _Sink(QObject):
+            got = Signal(object)
+
+        sink = _Sink()
+
+        def _apply(rows):
+            store = prof.cookieStore()
+            if store is None:
+                return
+            n = 0
+            for row in rows:
+                try:
+                    host = (row.get("host_key") or "").lstrip(".")
+                    name, value = row.get("name"), row.get("value")
+                    if not host or name is None or isinstance(value, dict):
+                        # a dict here is a base64 blob, i.e. an ENCRYPTED value:
+                        # machine-bound, useless on this box. sync.py's header
+                        # documents the plaintext assumption this rests on.
+                        continue
+                    c = QNetworkCookie(str(name).encode(), str(value).encode())
+                    c.setDomain(row.get("host_key") or host)
+                    c.setPath(row.get("path") or "/")
+                    c.setSecure(bool(row.get("is_secure")))
+                    c.setHttpOnly(bool(row.get("is_httponly")))
+                    if row.get("has_expires") and row.get("expires_utc"):
+                        # chromium epoch (us since 1601) -> unix seconds
+                        unix = (row["expires_utc"] - 11644473600 * 1_000_000) / 1e6
+                        c.setExpirationDate(QDateTime.fromSecsSinceEpoch(int(unix)))
+                    scheme = "https" if row.get("is_secure") else "http"
+                    origin = QUrl(f"{scheme}://{host}{row.get('path') or '/'}")
+                    store.setCookie(c, origin)
+                    n += 1
+                except Exception:
+                    continue
+            if n:
+                sys.stderr.write(f"surfer cookie-sync: merged {n} cookies from top (live)\n")
+
+        sink.got.connect(_apply)   # queued: sink lives on the GUI thread
+
+        def _fetch():
+            try:
+                p = subprocess.run(
+                    [sys.executable, str(HERE / "tools" / "sync.py"), "fetch"],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
+                )
+            except (subprocess.TimeoutExpired, OSError):
+                return
+            if p.returncode != 0:
+                # top asleep/unreachable is the common case and not worth a line
+                return
+            try:
+                rows = json.loads(p.stdout.decode()).get("rows") or []
+            except (ValueError, UnicodeDecodeError):
+                return
+            if rows:
+                sink.got.emit(rows)
+
+        def _kick():
+            threading.Thread(target=_fetch, daemon=True).start()
+
+        _kick()
+        t = QTimer(sink)
+        t.timeout.connect(_kick)
+        t.start(15 * 60 * 1000)
+        prof._cookie_sync_timer = t   # keep the timer + sink alive
+
     def _wire_profile():
         for ro in engine.rootObjects():
             prof = ro.findChild(QObject, "sharedProfile")
@@ -4982,6 +5070,12 @@ def main():
                     prof.setHttpCacheMaximumSize(512 * 1024 * 1024)   # 512 MB
                 except Exception as e:
                     sys.stderr.write(f"surfer cache cap: failed ({e})\n")
+                # top's cookies, merged live and in the background — never
+                # before the window (see _cookie_sync_live).
+                try:
+                    _cookie_sync_live(prof)
+                except Exception as e:
+                    sys.stderr.write(f"surfer cookie-sync: setup failed ({e})\n")
                 return
 
     from PySide6.QtCore import QTimer
