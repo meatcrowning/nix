@@ -2610,6 +2610,74 @@ def test_seed(win, ctl):
     ctl.reg.build, ctl.client.submit, ctl._object_info = orig_build, orig_submit, orig_oi
 
 
+def test_preset_sampling(win, ctl, tmp):
+    """Editing the sampler, switching model/preset away, and back, keeps it.
+
+    applyDefaults() reapplies the checkpoint's own steps/sampler/scheduler on
+    every arrival, which used to wipe an edited video sampler on a preset
+    round-trip. The fix remembers each model's last sampling per name, so a
+    switch back lands on what was edited, not the family default. Needs two
+    models whose families actually declare sampler defaults (the alpha/beta
+    fakes do not), so it stages the video model beside a krea2 checkpoint.
+    """
+    if ctl.reg is None:
+        print("SKIP  preset sampling (no registry)")
+        return
+    root = os.environ["PAINTER_MODELS"]
+    staged = dict(VIDEO_FAKES)
+    staged["unet/krea2_raw_fp8_scaled.safetensors"] = \
+        MODE_FAKES["unet/krea2_raw_fp8_scaled.safetensors"]
+    for rel, keys in staged.items():
+        write_safetensors(os.path.join(root, rel), keys)
+    import fingerprint as fp
+    fp.save_cache({})
+    ctl.setMode("")
+    ctl.rescan()
+    spin(200)
+
+    ctl.selectModelByName("mini-video.safetensors")
+    spin(150)
+    if not (ctl.modelDefaults() or {}).get("steps") or not ctl.property("isVideo"):
+        for rel in staged:
+            try: os.remove(os.path.join(root, rel))
+            except OSError: pass
+        print("SKIP  preset sampling (video model not recognised)")
+        return
+
+    # Edit the video sampling to values that are nobody's default.
+    edited = {"steps": 41, "denoise": 0.63,
+              "sampler_name": "dpmpp_sde", "scheduler": "exponential"}
+    g = prop(win, "gen")
+    g.update(edited)
+    win.setProperty("gen", g)
+    spin(80)
+
+    # Away to another preset: its defaults land, so the edits leave `gen`.
+    ctl.selectModelByName("krea2_raw_fp8_scaled.safetensors")
+    spin(150)
+    away = prop(win, "gen")
+    check("switching preset away replaces the edited sampler",
+          away.get("sampler_name") != "dpmpp_sde" or away.get("steps") != 41,
+          (away.get("steps"), away.get("sampler_name")))
+
+    # ...and back: the edited sampler is restored, not the checkpoint default.
+    ctl.selectModelByName("mini-video.safetensors")
+    spin(150)
+    back = prop(win, "gen")
+    check("a preset round-trip restores the edited video sampler",
+          back.get("steps") == 41 and back.get("denoise") == 0.63
+          and back.get("sampler_name") == "dpmpp_sde"
+          and back.get("scheduler") == "exponential",
+          {k: back.get(k) for k in edited})
+
+    for rel in staged:
+        try: os.remove(os.path.join(root, rel))
+        except OSError: pass
+    fp.save_cache({})
+    ctl.rescan()
+    spin(120)
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="painter-ui-test-")
     os.environ["PAINTER_MODELS"] = fake_models(os.path.join(tmp, "models"))
@@ -2645,6 +2713,7 @@ def main():
     print("== startup ==");           test_startup(ctl)
     print("== wiring ==");            test_wiring(win, ctl)
     print("== seed reuse ==");        test_seed(win, ctl)
+    print("== preset sampling ==");   test_preset_sampling(win, ctl, tmp)
 
     real = [w for w in WARNINGS if "Qt Quick Layouts" not in w]
     for w in real:
