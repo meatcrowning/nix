@@ -282,6 +282,32 @@ silent no-op (DESIGN §10.4). Verified headlessly by
 offscreen page with a downscaled `<img>` + larger `srcset` under a pointer-
 capturing overlay, plus a real loopback download through `UrlDownloader`).
 
+### Instagram "stack the opened post"
+
+An opened post (feed/explore click, or a `/p/`/`/reel/` permalink) puts the
+media beside a fixed-width sidebar (username, caption, comments, actions),
+squeezing the image small on a narrow window. `IG_LAYOUT_JS` (`main.py`,
+exposed as `igLayoutJs`) restacks it: media full-width on top, sidebar below.
+Instagram ships every layout `<div>` under a fresh hashed class name per
+build, so nothing here names one — it finds the post's own media element by
+size (>=200px, same floor as `IMAGE_CLICK_JS`) and walks up from it for the
+first ancestor whose children sit **side by side** (one box's left edge at or
+past another's right edge); that geometric test *is* the two-column split,
+independent of tag or class. A normal feed post is already stacked vertically
+(image above caption), so the test never fires there and nothing is touched.
+
+Opening a post from the feed is a `pushState` navigation inside the same
+document (a dialog overlay), not a Chromium load, so a single load-finished
+run would miss every post opened after the first — `Main.qml` injects the
+script once at load-finished (`win.isInstagram(url)` gate, same pattern as
+`imageClickJs`), and the script re-runs itself on a debounced
+`MutationObserver` plus `pushState`/`replaceState`/`popstate`, the same
+triggers `COSMETIC_RUNTIME_JS` uses for SPA route changes. Verified headlessly
+by **[`tools/instagram-layout-test.py`](tools/instagram-layout-test.py)**: a
+fabricated side-by-side post (hashed classes, real image so it lays out at
+size) asserts the split is found and collapsed to a column with the media on
+top; a fabricated already-vertical feed post asserts nothing is touched.
+
 ## Ad blocking — the engine is only half of it
 
 `AdBlocker` + `Cosmetic` in `main.py`. The engine is Brave's adblock-rust (the

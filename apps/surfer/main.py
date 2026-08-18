@@ -880,6 +880,145 @@ IG_RESOLVE_JS = r"""
 """
 
 
+# Stack an opened Instagram post (feed/explore click, or a /p//reel/ permalink)
+# so the media fills the width at the top and the sidebar (username, caption,
+# comments, actions) sits BELOW it, instead of squeezing the image into a
+# narrow column beside a fixed-width sidebar — the layout that starves media
+# width on his narrow window. Instagram ships every layout div under a fresh
+# hashed class name per build, so nothing here names one: it finds the post's
+# own media element by size (same >=200px content-vs-icon floor as
+# IMAGE_CLICK_JS) and walks up from it for the first ancestor whose children
+# are laid out SIDE BY SIDE (one box's left edge at or past another's right
+# edge) — that geometric test *is* the two-column split, independent of
+# whatever class or tag renders it. A normal feed post is already stacked
+# vertically (image above caption), so the side-by-side test fails there and
+# nothing is touched — verified by tools/instagram-layout-test.py.
+#
+# Opening a post from the feed is a pushState/History navigation inside the
+# same document (the dialog overlay), not a Chromium load, so a single
+# load-finished run would miss every post opened after the first. This script
+# is therefore self-contained: it re-runs on a MutationObserver (debounced)
+# and on pushState/replaceState/popstate, the same triggers used for the
+# SPA-aware cosmetic runtime above.
+IG_LAYOUT_JS = r"""
+(function(){
+  if (window.__surfer_igLayout) return;
+  window.__surfer_igLayout = true;
+
+  var MARK = 'data-surfer-ig';
+  var STYLE_ID = '__surfer_ig_layout_style';
+  var MIN_MEDIA = 200;   // px; excludes avatars/icons/thumbnails
+
+  function ensureStyle(){
+    var s = document.getElementById(STYLE_ID);
+    if (s) return s;
+    s = document.createElement('style');
+    s.id = STYLE_ID;
+    (document.head || document.documentElement).appendChild(s);
+    s.textContent =
+      '[' + MARK + '-root]{flex-direction:column!important;height:auto!important;' +
+        'max-height:none!important;align-items:stretch!important;}' +
+      '[' + MARK + '-media]{width:100%!important;max-width:100%!important;' +
+        'flex:0 0 auto!important;}' +
+      '[' + MARK + '-media] img,[' + MARK + '-media] video{' +
+        'width:auto!important;height:auto!important;max-width:100%!important;' +
+        'max-height:85vh!important;object-fit:contain!important;margin:0 auto!important;' +
+        'display:block!important;}' +
+      '[' + MARK + '-side]{width:100%!important;max-width:100%!important;' +
+        'max-height:none!important;overflow:visible!important;flex:1 1 auto!important;}';
+    return s;
+  }
+
+  // The biggest visible <img>/<video> under `root` that isn't an avatar/icon.
+  function findMedia(root){
+    var els = root.querySelectorAll('img,video'), best = null, bestArea = 0;
+    for (var i = 0; i < els.length; i++){
+      var el = els[i];
+      var r = el.getBoundingClientRect();
+      if (r.width < MIN_MEDIA || r.height < MIN_MEDIA) continue;
+      var area = r.width * r.height;
+      if (area > bestArea){ bestArea = area; best = el; }
+    }
+    return best;
+  }
+
+  // Walk up from `media` toward `root`, looking for the first ancestor whose
+  // element children sit SIDE BY SIDE — the post/sidebar split, wherever
+  // Instagram's current build puts it in the tree.
+  function findSplit(media, root){
+    var node = media;
+    while (node && node !== root && node.parentElement){
+      var parent = node.parentElement;
+      var kids = parent.children, sideBySide = false;
+      if (kids.length >= 2){
+        var mine = node.getBoundingClientRect();
+        for (var j = 0; j < kids.length; j++){
+          var k = kids[j];
+          if (k === node) continue;
+          var kr = k.getBoundingClientRect();
+          if (kr.width < 4 || kr.height < 4) continue;   // hidden/empty sibling
+          if (kr.left >= mine.right - 2 || mine.left >= kr.right - 2){
+            sideBySide = true; break;
+          }
+        }
+      }
+      if (sideBySide) return { parent: parent, mediaBranch: node };
+      node = parent;
+    }
+    return null;
+  }
+
+  function apply(){
+    var roots = [];
+    var dialogs = document.querySelectorAll('div[role="dialog"]');
+    for (var i = 0; i < dialogs.length; i++) roots.push(dialogs[i]);
+    var main = document.querySelector('main[role="main"]') || document.body;
+    var arts = main.querySelectorAll('article');
+    for (var j = 0; j < arts.length; j++) roots.push(arts[j]);
+
+    for (var k = 0; k < roots.length; k++){
+      var root = roots[k];
+      if (root.getAttribute(MARK + '-done') === '1') continue;
+      var media = findMedia(root);
+      if (!media){ continue; }
+      var split = findSplit(media, root);
+      root.setAttribute(MARK + '-done', '1');   // one attempt per root either way
+      if (!split) continue;
+      ensureStyle();
+      split.parent.setAttribute(MARK + '-root', '');
+      split.mediaBranch.setAttribute(MARK + '-media', '');
+      for (var m = 0; m < split.parent.children.length; m++){
+        var c = split.parent.children[m];
+        if (c !== split.mediaBranch) c.setAttribute(MARK + '-side', '');
+      }
+    }
+  }
+
+  var pending = false;
+  function schedule(){
+    if (pending) return;
+    pending = true;
+    setTimeout(function(){ pending = false; apply(); }, 250);
+  }
+
+  var mo = new MutationObserver(schedule);
+  mo.observe(document.documentElement, { childList: true, subtree: true });
+
+  ['pushState', 'replaceState'].forEach(function(name){
+    var orig = history[name];
+    history[name] = function(){
+      var r = orig.apply(this, arguments);
+      schedule();
+      return r;
+    };
+  });
+  window.addEventListener('popstate', schedule);
+
+  schedule();
+})();
+"""
+
+
 # air-only diagnostic for "after a while, all page text renders badly
 # antialiased, and only a restart fixes it" (chrome text stays crisp, so the
 # fault is inside Chromium's raster path, not Qt's). The suspicion is that the
@@ -4707,6 +4846,7 @@ def main():
     ctx.setContextProperty("Downloads", downloads)
     ctx.setContextProperty("ImgDownload", imgdownload)
     ctx.setContextProperty("igResolveJs", IG_RESOLVE_JS)
+    ctx.setContextProperty("igLayoutJs", IG_LAYOUT_JS)
     ctx.setContextProperty("Prefs", prefs)
     ctx.setContextProperty("Files", files)
     ctx.setContextProperty("Zoom", zoom)
