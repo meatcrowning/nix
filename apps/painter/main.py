@@ -741,6 +741,13 @@ class Painter(QObject):
         self._job_start = 0.0             # when the running job started, for the clock
         self._last_elapsed = 0.0          # ...and how long the last one took, which
                                           # the bar keeps showing once it is over
+        # Sampling throughput, the it/s a diffusion sampler reports. Anchored at
+        # the FIRST progress callback of a run — not `_job_start`, which includes
+        # model load — so the rate reads the steps as they are counted, over the
+        # seconds spent counting them.
+        self._step = 0                    # steps reported so far this run
+        self._sample_start = 0.0          # when sampling began (first progress)
+        self._sample_start_step = 0       # the step count at that anchor
         self.preview = None               # the live-preview image provider, set in main()
         self._preview_tick = 0            # an Image reloads on a CHANGED url, so count
         self._input_image = ""            # the first frame, as a local path
@@ -860,6 +867,20 @@ class Painter(QObject):
     # survived only in a toast that fades. This is that number, and it stays.
     lastElapsed = Property(float, lambda self: self._last_elapsed,
                            notify=statusChanged)
+    # Sampling throughput in iterations per second, the same number tqdm prints
+    # beside a diffusion sampler. Steps counted since the anchor over the seconds
+    # since it; zero (nothing drawn) until a second callback gives it a span to
+    # divide. The clock timer re-emits statusChanged each second, so it ticks
+    # live even between callbacks. The QML decides it/s vs s/it.
+    def _rate(self):
+        if not self._busy or self._sample_start <= 0.0:
+            return 0.0
+        dt = time.time() - self._sample_start
+        dsteps = self._step - self._sample_start_step
+        if dt <= 0.0 or dsteps <= 0:
+            return 0.0
+        return dsteps / dt
+    rate = Property(float, _rate, notify=statusChanged)
     ready = Property(bool, lambda self: self._object_info is not None, notify=statusChanged)
     # What systemd says about comfy-painter.service, so start/stop can be lit
     # from the world instead of from intent (docs/DESIGN.md §10).
@@ -1678,6 +1699,9 @@ class Painter(QObject):
     def _on_started(self, _job):
         self._busy = True
         self._job_start = time.time()
+        self._step = 0
+        self._sample_start = 0.0
+        self._sample_start_step = 0
         self._clock.start()
         # A new job has no preview frame yet; the pane must not show the last
         # job's while this one warms up.
@@ -1687,6 +1711,13 @@ class Painter(QObject):
 
     def _on_progress(self, _job, value, maximum):
         self._progress = (value / maximum) if maximum else 0.0
+        self._step = value
+        # Anchor the rate on the first callback: its step is already done by the
+        # time we hear of it, so counting from here measures the steps AFTER it
+        # against the seconds after it, not a first step against a zero clock.
+        if self._sample_start <= 0.0:
+            self._sample_start = time.time()
+            self._sample_start_step = value
         self.statusChanged.emit()
 
     def _on_preview(self, _job, data, fmt):
