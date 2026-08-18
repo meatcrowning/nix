@@ -610,6 +610,29 @@ Window {
     // clipboard bits go through the view's own web actions; navigation + search
     // reuse our tab helpers. `c.pos` is already in WINDOW coordinates — the
     // caller adds the view's own x/y, which is zero only when the split is off.
+    // Is this an instagram.com page? (host or any subdomain.)
+    function isInstagram(url) {
+        var m = ("" + url).match(/^https?:\/\/([^\/]+)/i);
+        if (!m) return false;
+        var host = m[1].toLowerCase();
+        return host === "instagram.com" || host.endsWith(".instagram.com");
+    }
+
+    // Resolve the full-resolution Instagram image under (vx, vy) — view
+    // coordinates — via the page-side resolver, then download it through the
+    // same folder/filename/toast path as any other image save (ImgDownload
+    // reuses the Downloads bridge). Empty result -> an honest "not found" toast
+    // rather than a silent no-op (DESIGN 10.4).
+    function saveInstagramOriginal(view, vx, vy) {
+        var js = igResolveJs.replace("__X__", Math.round(vx)).replace("__Y__", Math.round(vy));
+        view.runJavaScript(js, function(url) {
+            if (url && ("" + url).indexOf("http") === 0)
+                ImgDownload.save("" + url, "" + view.url);
+            else
+                ImgDownload.notFound("" + view.url);
+        });
+    }
+
     function showContextMenu(view, c) {
         var items = [];
         function sep() { if (items.length) items.push({ separator: true }); }
@@ -637,12 +660,23 @@ Window {
             items.push({ label: "Copy link address",           trigger: function(){ Clip.copy(c.link); } });
             items.push({ label: "Save link as...",               trigger: function(){ view.triggerWebAction(WebEngineView.DownloadLinkToDisk); } });
         }
+        var ig = win.isInstagram("" + view.url);
         if (c.isImage && c.media !== "") {
             sep();
             items.push({ label: "Open image in new tab",  trigger: function(){ win.newTab(c.media); } });
             items.push({ label: "Save image...",            trigger: function(){ view.triggerWebAction(WebEngineView.DownloadImageToDisk); } });
+            // Instagram's rendered <img> is a downscaled srcset candidate served
+            // from the CDN; resolve the largest (original) candidate and save it.
+            if (ig)
+                items.push({ label: "Save original image...", trigger: function(){ win.saveInstagramOriginal(view, c.viewPos.x, c.viewPos.y); } });
             items.push({ label: "Copy image",             trigger: function(){ view.triggerWebAction(WebEngineView.CopyImageToClipboard); } });
             items.push({ label: "Copy image address",     trigger: function(){ Clip.copy(c.media); } });
+        } else if (ig) {
+            // On Instagram the post's own overlay elements sit on top of the
+            // image and swallow the right-click, so mediaType is not Image —
+            // the resolver still finds the <img> under the cursor.
+            sep();
+            items.push({ label: "Save original image...", trigger: function(){ win.saveInstagramOriginal(view, c.viewPos.x, c.viewPos.y); } });
         }
         if (c.selection !== "") {
             sep();
@@ -1169,6 +1203,9 @@ Window {
                         // view spans the window, which a split pane does not
                         pos:         Qt.point(request.position.x + webview.x,
                                               request.position.y + webview.y),
+                        // view-relative click, for elementsFromPoint on the page
+                        // (the Instagram original-image resolver)
+                        viewPos:     Qt.point(request.position.x, request.position.y),
                         link:        "" + request.linkUrl,
                         media:       "" + request.mediaUrl,
                         isImage:     request.mediaType === ContextMenuRequest.MediaTypeImage,

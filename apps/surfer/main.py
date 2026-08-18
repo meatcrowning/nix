@@ -55,7 +55,7 @@ from PySide6.QtWebEngineCore import (QWebEngineScript, QWebEngineUrlScheme,
                                      QWebEngineUrlRequestInterceptor, QWebEngineUrlRequestInfo,
                                      QWebEngineUrlRequestJob, QWebEngineProfile)
 from PySide6.QtNetwork import (QNetworkAccessManager, QNetworkRequest,
-                               QLocalServer)
+                               QNetworkReply, QLocalServer)
 
 HERE = Path(__file__).resolve().parent
 QML = HERE / "qml"
@@ -484,6 +484,118 @@ class Downloads(QObject):
         self._pct.pop(key, None)
 
 
+def _unique_path(directory, name):
+    """`~/Downloads/name`, but `name (1).ext`, `name (2).ext`, … if it exists —
+    the same collision policy Chromium's own downloads use, so a second save of
+    the same image never silently overwrites the first."""
+    path = os.path.join(directory, name)
+    if not os.path.exists(path):
+        return path
+    stem, ext = os.path.splitext(name)
+    i = 1
+    while True:
+        cand = os.path.join(directory, "%s (%d)%s" % (stem, i, ext))
+        if not os.path.exists(cand):
+            return cand
+        i += 1
+
+
+class UrlDownloader(QObject):
+    """Downloads an arbitrary resolved URL to ~/Downloads with the SAME filename
+    repair, folder and toast UX as an in-page download (the `Downloads` bridge).
+
+    It exists for one job: the Instagram "save original image" context action.
+    The rendered <img>'s `src` is a downscaled CDN candidate, and the full-res
+    asset lives at a DIFFERENT URL (the largest `srcset` candidate) — so it
+    cannot go through Chromium's `DownloadImageToDisk` web action, which only
+    ever fetches the element's own current source. Chromium's CDN image URLs are
+    self-signed (`oh`/`oe`) and public, so a plain GET with the browser UA and an
+    instagram.com Referer fetches them without the session cookies. Progress and
+    completion route through the `Downloads` bridge, so the user sees the exact
+    same toast a normal image save produces."""
+
+    def __init__(self, downloads, download_dir, parent=None):
+        super().__init__(parent)
+        self._dl = downloads
+        self._dir = download_dir
+        self._nam = QNetworkAccessManager(self)
+        self._ua = ""
+        self._seq = 0
+
+    def set_user_agent(self, ua):
+        self._ua = ua or ""
+
+    @Slot(str, str)
+    def notFound(self, referer="", _ignored=""):
+        """No <img> resolved under the cursor — say so rather than fail silently
+        (DESIGN 10.4: an offered action must not be a silent no-op)."""
+        key = "ig%d" % self._seq
+        self._seq += 1
+        self._dl.failed(key, "no full-size image found")
+
+    @Slot(str, str)
+    def save(self, url, referer=""):
+        u = QUrl(url)
+        if u.scheme().lower() not in ("http", "https"):
+            return
+        req = QNetworkRequest(u)
+        if self._ua:
+            req.setHeader(QNetworkRequest.KnownHeaders.UserAgentHeader, self._ua)
+        if referer:
+            req.setRawHeader(b"Referer", referer.encode("utf-8"))
+        req.setAttribute(QNetworkRequest.Attribute.RedirectPolicyAttribute,
+                         QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy)
+        reply = self._nam.get(req)
+        key = "ig%d" % self._seq
+        self._seq += 1
+        started = time.monotonic()
+        base = os.path.basename(u.path()) or "instagram-image"
+        st = {"file": None, "name": base, "path": None}
+
+        def ensure_open():
+            if st["file"] is not None:
+                return
+            ct = reply.header(QNetworkRequest.KnownHeaders.ContentTypeHeader) or ""
+            name = self._dl.fileName(base, str(ct))
+            st["path"] = _unique_path(self._dir, name)
+            st["name"] = os.path.basename(st["path"])
+            st["file"] = open(st["path"], "wb")
+
+        def on_ready():
+            try:
+                ensure_open()
+                st["file"].write(bytes(reply.readAll()))
+                total = reply.header(QNetworkRequest.KnownHeaders.ContentLengthHeader)
+                recv = st["file"].tell()
+                self._dl.progress(key, st["name"], float(recv),
+                                  float(total if total else -1),
+                                  (time.monotonic() - started) * 1000.0)
+            except OSError:
+                pass
+
+        def on_finished():
+            if st["file"] is not None:
+                try:
+                    st["file"].write(bytes(reply.readAll()))
+                except OSError:
+                    pass
+                st["file"].close()
+            ok = reply.error() == QNetworkReply.NetworkError.NoError
+            if ok and st["path"] and os.path.getsize(st["path"]) > 0:
+                self._dl.done(key, st["name"], st["path"])
+            else:
+                self._dl.failed(key, st["name"])
+                if st["path"]:
+                    try:
+                        os.remove(st["path"])
+                    except OSError:
+                        pass
+            reply.deleteLater()
+
+        reply.readyRead.connect(on_ready)
+        reply.finished.connect(on_finished)
+
+
 # A pragmatic GreaseMonkey API shim, prepended to every userscript so real GM
 # scripts (4chan X, OneeChan, …) run. GM values are backed by the page's
 # localStorage (per-origin, persisted in the profile). GM_xmlhttpRequest is a
@@ -705,6 +817,66 @@ IMAGE_CLICK_JS = r"""
     try { fetch('surfercmd://open/?u=' + encodeURIComponent(src)).catch(function(){}); } catch(_){}
   }, true);
 })();
+"""
+
+
+# Resolve the FULL-RESOLUTION Instagram image under a right-click. Instagram
+# lazy-loads images from its CDN (scontent*.cdninstagram.com / *.fbcdn.net) and
+# the visible <img> is a downscaled `srcset` candidate; worse, the post's own
+# overlay elements (the double-tap heart target, tag hotspots) sit ON TOP of the
+# image and swallow the right-click, so the context menu's own mediaType is not
+# even Image. So we don't trust `request.mediaUrl`: given the click point (view
+# coordinates), walk `elementsFromPoint` to the real <img> — through or under any
+# overlay — and return its LARGEST `srcset` candidate (Instagram serves the same
+# media at 320/640/750/1080; the 1080 candidate is the max public "original", and
+# its `oh`/`oe` signature is valid, whereas stripping the `stp` resize token 403s).
+# The __X__/__Y__ tokens are replaced with the click coords by the QML caller;
+# it returns the URL string, or "".
+IG_RESOLVE_JS = r"""
+(function(){
+  var X = __X__, Y = __Y__;
+  function largest(img){
+    if (!img) return "";
+    var best = img.currentSrc || img.src || "", bw = 0;
+    var ss = img.getAttribute && img.getAttribute('srcset');
+    if (ss){
+      ss.split(',').forEach(function(p){
+        var t = p.trim().split(/\s+/);
+        if (!t[0]) return;
+        var w = 0;
+        if (t[1]){
+          var m = t[1].match(/([0-9.]+)([wx])/);
+          if (m) w = (m[2] === 'w') ? parseFloat(m[1]) : parseFloat(m[1]) * 1000;
+        }
+        if (w >= bw){ bw = w; best = t[0]; }
+      });
+    }
+    return best;
+  }
+  var els = (document.elementsFromPoint
+             ? document.elementsFromPoint(X, Y)
+             : [document.elementFromPoint(X, Y)]) || [];
+  var img = null;
+  for (var i = 0; i < els.length && !img; i++){
+    var e = els[i]; if (!e) continue;
+    if (e.tagName === 'IMG'){ img = e; break; }
+    if (e.querySelector){ var q = e.querySelector('img'); if (q) img = q; }
+  }
+  if (!img){
+    for (var j = 0; j < els.length && !img; j++){
+      var e2 = els[j]; if (!e2 || !e2.closest) continue;
+      var a = e2.closest('article, div[role="button"], a');
+      if (a && a.querySelector){ var q2 = a.querySelector('img'); if (q2) img = q2; }
+    }
+  }
+  if (!img) return "";
+  var url = largest(img);
+  if (!url) return "";
+  // srcset candidates are the raw attribute text and may be relative — resolve
+  // against the document so the app always gets an absolute http(s) URL.
+  try { url = new URL(url, document.baseURI).href; } catch (_) {}
+  return (url.indexOf('http') === 0) ? url : "";
+})()
 """
 
 
@@ -4520,6 +4692,9 @@ def main():
         os.makedirs(download_dir, exist_ok=True)
     except OSError:
         pass
+    # Downloads a resolved off-page URL (the Instagram "save original image"
+    # action) with the same folder/filename/toast UX as an in-page download.
+    imgdownload = UrlDownloader(downloads, download_dir, app)
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("DeskStyle", style)
     glyphs = Glyphs()          # keep the ref: a GC'd context property nulls its bindings
@@ -4530,6 +4705,8 @@ def main():
     ctx.setContextProperty("UserScripts", userscripts)
     ctx.setContextProperty("Perm", perm)
     ctx.setContextProperty("Downloads", downloads)
+    ctx.setContextProperty("ImgDownload", imgdownload)
+    ctx.setContextProperty("igResolveJs", IG_RESOLVE_JS)
     ctx.setContextProperty("Prefs", prefs)
     ctx.setContextProperty("Files", files)
     ctx.setContextProperty("Zoom", zoom)
@@ -4613,6 +4790,7 @@ def main():
                 # aren't 429'd as non-browser traffic (see GmXhrHandler docstring)
                 try:
                     gmxhr.set_user_agent(prof.property("httpUserAgent"))
+                    imgdownload.set_user_agent(prof.property("httpUserAgent"))
                 except Exception:
                     pass
                 # route granted web notifications out to notify-send. The QML
