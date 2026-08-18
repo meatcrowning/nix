@@ -83,6 +83,40 @@ same time" is not two.
 - Only the **focused** pane's video is audible (`AudioOutput.muted`); four clips
   at once would otherwise be four soundtracks, and the titlebar can pause one.
 
+## Compare — a before/after reveal slider (`--compare`)
+
+`viewer --compare <before> <after>` opens straight into a two-image comparison
+instead of the pane grid: the two images (assumed the SAME dimensions — a
+model's input and its output) are overlaid, and a vertical reveal line **follows
+the mouse** — `before` shows to the LEFT of the line, `after` to the RIGHT, and
+the line tracks the pointer's x exactly as it moves. No clicking. This is
+painter's contract — it drives exactly this invocation, so the flag name and the
+argument order (before first, after second) are fixed.
+
+- **The reveal is a CLIP, never a rescale** (`qml/CompareView.qml`). Both images
+  draw at the full window size with `PreserveAspectFit`, so a same-size pair
+  letterboxes identically and lines up pixel-for-pixel; the `before` image sits
+  inside a clip box pinned at `x:0` whose width is the reveal point, so moving
+  the line changes only what shows of it, never how big it is drawn.
+- **The line tracks the pointer 1:1, zero easing** (docs/DESIGN.md §6.4, §6.11).
+  A hover `MouseArea` with `acceptedButtons: Qt.NoButton` writes `trackX` straight
+  from `positionChanged` — nothing is clicked, nothing is smoothed. `splitX` is a
+  pure binding (`tracked ? trackX : width/2`): centred until the pointer first
+  enters, then following it, with the centring binding never broken by an
+  imperative write.
+- **It is its own window, always.** `--compare` skips the running-viewer handoff
+  (like `--new-window`), so painter always gets a fresh comparison rather than
+  the image landing in an unrelated viewer's pane grid. `split_args` consumes the
+  two paths so they are not treated as an ordinary flip list, and Main.qml builds
+  no panes, no dividers, no focus frame and no flip/zoom/split titlebar buttons
+  when `compare` is set — a comparison is one surface, not N panes. `q`/Escape
+  still quit.
+
+Verify with `tools/compare-test.py` (offscreen): the argv contract, the two
+paths landing as before/after, the pointer-tracking, the clip geometry, the
+clamp, the empty chrome and the quit. Run it the same way `split-test.py` is
+(below) — it reuses that file's `build()`/`spin()`/`png()`.
+
 ## Right-click → "copy image"
 
 viewer's only context menu, one row, on whichever pane the click landed in

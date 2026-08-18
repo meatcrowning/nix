@@ -134,13 +134,13 @@ def run(app, tmp, stub):
     spec.loader.exec_module(mod)
 
     # ---- the flag, before any of it reaches a window ----------------------
-    o, s, b, rest = viewermain.split_args(
+    o, s, b, rest, _cmp = viewermain.split_args(
         ["--select-back", "filer-9:left", "--order", "/tmp/o", "a.png"])
     check("--select-back is consumed, not treated as a file",
           rest == ["a.png"] and b == "filer-9:left" and o == "/tmp/o" and s is False,
           (rest, b))
     check("...in its = form too",
-          viewermain.split_args(["--select-back=filer-9:right", "a.png"])[2:]
+          viewermain.split_args(["--select-back=filer-9:right", "a.png"])[2:4]
           == ("filer-9:right", ["a.png"]))
     check("a viewer nobody asked has no token",
           viewermain.split_args(["a.png"])[2] == "")

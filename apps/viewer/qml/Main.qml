@@ -32,6 +32,15 @@ Window {
     property var images: startImages    // [{ name, path }] — shared by all panes
     readonly property int paneMax: maxPanes
 
+    // ---- compare mode ----
+    // `viewer --compare <before> <after>` (painter's invocation): a two-image
+    // reveal slider instead of the pane grid. The line follows the mouse; before
+    // shows left of it, after right (see CompareView.qml). The grid, its
+    // dividers, the focus frame and the flip/zoom/split chrome are all off — a
+    // comparison is one surface, not N panes — so the pane machinery below is
+    // simply never set up when this is true.
+    readonly property bool compare: startCompare
+
     // Focus-aware foreground, in lock-step with the titlebar (filer's idiom,
     // docs/DESIGN.md §3.1.1). Derived ONCE here and handed down: a leaf never
     // reads Window.active itself, so a focus change re-evaluates these four
@@ -315,7 +324,8 @@ Window {
         onTriggered: FilerLink.echo(win.curPath)
     }
 
-    title: curName !== "" ? curName : "viewer"
+    title: win.compare ? ("compare: " + startAfter.name)
+                       : (curName !== "" ? curName : "viewer")
     width: 900
     height: 620
     minimumWidth: 320
@@ -384,6 +394,7 @@ Window {
     // function an existing glyph is the thing §12.1 forbids, not the thing it
     // asks for, so these keep their own two-letter mnemonics like `fs`/`gp`/`mu`.
     readonly property var tbButtons: {
+        if (win.compare) return [];   // no flip/zoom/split in a comparison
         const multi = images.length > 1 ? 0 : 2;
         const one = panes.count > 1 ? 0 : 2;
         const full = panes.count < paneMax ? 0 : 2;
@@ -419,6 +430,7 @@ Window {
     // stacked text every tick; the scrub bar shows position instead.)
     readonly property string footerStr: {
         if (flashMsg !== "") return flashMsg;
+        if (win.compare) return startBefore.name + " | " + startAfter.name;
         var i = paneIdx(focusPane);
         if (i < 0 || i >= images.length) return "";
         var pfx = panes.count > 1 ? ("p" + (focusPane + 1) + "/" + panes.count + "  ") : "";
@@ -457,12 +469,14 @@ Window {
     onCurrentChanged: win.pushPlaybar()
 
     Component.onCompleted: {
-        var start = Math.max(0, Math.min(startIndex, Math.max(0, images.length - 1)));
-        panes.append({ idx: images.length ? start : 0 });
-        for (var i = 1; i < startPanes; i++) addPane();
-        focusPane = 0;
-        paneRev += 1;
-        reshape();
+        if (!win.compare) {
+            var start = Math.max(0, Math.min(startIndex, Math.max(0, images.length - 1)));
+            panes.append({ idx: images.length ? start : 0 });
+            for (var i = 1; i < startPanes; i++) addPane();
+            focusPane = 0;
+            paneRev += 1;
+            reshape();
+        }
         Titlebar.setButtons(tbButtons);
         Titlebar.setFooter(footerStr);
         win.pushPlaybar();
@@ -518,8 +532,8 @@ Window {
     // on the FOCUSED pane (win.prev/next both go through setPaneIdx(focusPane)).
     // Desktop-global rule, docs/DESIGN.md §11.
     NavButtons {
-        onBack:    win.prev()
-        onForward: win.next()
+        onBack:    if (!win.compare) win.prev()
+        onForward: if (!win.compare) win.next()
     }
 
     // The one item that holds the window's focus, so the keys have exactly one
@@ -575,6 +589,20 @@ Window {
                     e.accepted = true;
                 }
                 break;
+            }
+        }
+
+        // ---- compare mode: the reveal slider, in place of the grid ----
+        Loader {
+            anchors.fill: parent
+            active: win.compare
+            sourceComponent: CompareView {
+                objectName: "compareView"   // tools/compare-test.py finds it by name
+                beforePath: startBefore.path
+                afterPath: startAfter.path
+                beforeName: startBefore.name
+                afterName: startAfter.name
+                winActive: win.act
             }
         }
 

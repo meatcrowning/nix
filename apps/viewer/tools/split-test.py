@@ -83,7 +83,7 @@ def png(path, rgb):
     return path
 
 
-def build(app, entries, index=0, panes=1):
+def build(app, entries, index=0, panes=1, compare=None):
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
     # Clip is real, and harmless until a menu row is clicked: it only ever
@@ -110,6 +110,11 @@ def build(app, entries, index=0, panes=1):
     ctx.setContextProperty("startIndex", index)
     ctx.setContextProperty("startPanes", panes)
     ctx.setContextProperty("maxPanes", viewermain.MAX_PANES)
+    # Compare mode (viewer --compare) is off unless a test asks for it; Main.qml
+    # reads all three unconditionally, so they must always be installed.
+    ctx.setContextProperty("startCompare", bool(compare))
+    ctx.setContextProperty("startBefore", compare[0] if compare else {})
+    ctx.setContextProperty("startAfter", compare[1] if compare else {})
     comp = QQmlComponent(engine, QUrl.fromLocalFile(os.path.join(VIEWER, "qml/theme/Theme.qml")))
     theme = comp.create()
     if theme is None:
