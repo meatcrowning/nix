@@ -1326,7 +1326,27 @@ class Painter(QObject):
         want_mode = self._want_mode or self._mode
         if want_mode:
             self._want_mode = ""
-            self.setMode(want_mode)
+            entry = self.models.entry_at(self._selected)
+            spec = R.mode_spec(want_mode) or {}
+            # The selection above (the `want` branch) already landed on the
+            # remembered model. If that model is already OF this mode's family,
+            # just light the button — calling setMode() would re-resolve the
+            # mode to its own CANONICAL pick (mode_model()'s exact/substring/
+            # first-of-family order, `is entry` in mode_of()) and, with more
+            # than one checkpoint in the family (two MiniMax quants, say),
+            # silently swap the restored selection for a DIFFERENT one, firing
+            # modelChanged -> applyDefaults() and overwriting the
+            # just-restored video sampling settings (steps, sampler,
+            # scheduler) with that other checkpoint's defaults.
+            in_family = (entry is not None and entry.family == spec.get("family")
+                         and (spec.get("needs") != "edit"
+                              or (self.reg.family_of(entry) or {}).get("edit")))
+            if in_family:
+                if self._mode != want_mode:
+                    self._mode = want_mode
+                    self.modeChanged.emit()
+            else:
+                self.setMode(want_mode)
         self._set_status(f"{len(rows)} models")
 
     def _retry_scan(self):
