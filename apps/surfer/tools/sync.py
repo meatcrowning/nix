@@ -285,17 +285,29 @@ def _self_source():
         return f.read()
 
 
-def _remote(host, argv, check=True):
+def _remote(host, argv, check=True, timeout=60):
     """Run THIS script on `host` via `python3 -`.
 
     Note stdin is NOT usable for data: `python3 -` reads stdin to EOF to get
     its program, so anything appended would be compiled as source. Bulk data
     goes over as a staged file — see _remote_put.
+
+    `timeout` is a HARD bound, and it is not redundant with ssh's
+    ConnectTimeout: that option covers the TCP connect only. A host reached
+    through a tailnet relay that is not actually awake ACCEPTS the connection
+    and then stalls — `Connection timed out during banner exchange` in
+    ~/.cache/surfer-sync.log — which nothing in ssh's config bounds, leaving
+    only the wrapper's `timeout 90` between a sleeping `top` and the browser
+    window. The guards pass a short one; data ops keep the generous default.
     """
     cmd = SSH + [host, "python3 - " + " ".join(shlex.quote(a) for a in argv)]
-    p = subprocess.run(
-        cmd, input=_self_source(), stdout=subprocess.PIPE, stderr=subprocess.PIPE
-    )
+    try:
+        p = subprocess.run(
+            cmd, input=_self_source(), stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        raise SystemExit(f"remote {argv} timed out after {timeout}s on {host}")
     if check and p.returncode != 0:
         sys.stderr.write(p.stderr.decode("utf-8", "replace"))
         raise SystemExit(f"remote {argv} failed on {host} (rc={p.returncode})")
@@ -362,17 +374,29 @@ def guard_local():
         raise SystemExit("surfer is running here — close it first (profile is locked)")
 
 
-def guard_reachable(host, deadline=2.0):
-    """Name resolution with a hard deadline. ssh's ConnectTimeout bounds the
-    TCP connect but NOT the DNS lookup, and off the LAN (no tailnet up)
-    resolving `top` takes ~8s to FAIL — paid before the browser window can
-    open, since the wrapper brackets the launch with `pull`. On the LAN it
-    resolves in milliseconds, so 2s is generous; unresolvable aborts fast."""
+def guard_reachable(host, deadline=3.0):
+    """CONNECT to port 22 with a hard deadline — do not merely resolve.
+
+    This gate is what stands between a sleeping `top` and the browser window,
+    since the air wrapper brackets the launch with `pull`. It used to test only
+    name resolution, on the reasoning that off the LAN the bare name took ~8s
+    to fail. **Tailscale (2026-08-09) made resolution useless as a liveness
+    signal**: MagicDNS answers for `top` in 34ms whether that machine is up,
+    asleep or gone. So the gate passed instantly and the two ssh calls behind
+    it (guard_remote, guard_schema) each paid ConnectTimeout in full —
+    measured 10.02s of dead wait before the window could open on book, plus
+    the same again on exit for `push`.
+
+    A TCP connect is the cheapest thing that actually answers "is it there",
+    and it still covers the original DNS case (getaddrinfo is inside connect).
+    3s is generous for a tailnet relay handshake and a third of what the gate
+    was letting through.
+    """
     got = []
 
     def probe():
         try:
-            socket.getaddrinfo(host, 22, type=socket.SOCK_STREAM)
+            socket.create_connection((host, 22), timeout=deadline).close()
             got.append(True)
         except OSError:
             got.append(False)
@@ -382,18 +406,19 @@ def guard_reachable(host, deadline=2.0):
     t.join(deadline)
     if not got or not got[0]:
         raise SystemExit(
-            f"{host} did not resolve within {deadline:.0f}s — off the LAN/tailnet, skipping")
+            f"{host} unreachable within {deadline:.0f}s — asleep or off the "
+            f"LAN/tailnet, skipping")
 
 
 def guard_remote(host):
-    p = _remote(host, ["is-running"], check=False)
+    p = _remote(host, ["is-running"], check=False, timeout=10)
     if p.returncode == 0 and p.stdout.strip() == b"RUNNING":
         raise SystemExit(f"surfer is running on {host} — close it there first")
 
 
 def guard_schema(host):
     local = schema_info(cookies_path())
-    remote = json.loads(_remote(host, ["schema"]).stdout.decode())
+    remote = json.loads(_remote(host, ["schema"], timeout=10).stdout.decode())
     if local["version"] != remote["version"]:
         raise SystemExit(
             f"Cookies schema mismatch: local v{local['version']} vs "

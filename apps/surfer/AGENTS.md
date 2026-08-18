@@ -963,11 +963,24 @@ apps/surfer/tools/mem-test.py --tabs 6 --discard`.
 `tools/sync.py` merges the two machines' browser state; `home/prog/surfer.nix`'s
 **air** wrapper brackets the run with it (`pull` before the window opens, `push`
 after it closes; `SURFER_NO_SYNC=1` opts out, and the sync is timeout-bounded +
-`guard_reachable`-gated (a 2 s hard deadline on resolving `top` — ssh's
-`ConnectTimeout` does not cover DNS, and off the LAN/tailnet the bare name
-takes ~8 s to *fail*, paid before the window could open) +
+`guard_reachable`-gated (a 3 s hard deadline on **connecting to** `top`:22) +
 `|| true` so an absent `top` never blocks the browser — log at
-`~/.cache/surfer-sync.log`). Only air brackets it because Fedora runs no sshd:
+`~/.cache/surfer-sync.log`).
+
+**That gate must probe reachability, never just name resolution.** It
+originally tested `getaddrinfo` alone, because off the LAN the bare name took
+~8 s to *fail* and ssh's `ConnectTimeout` does not cover DNS. Tailscale
+(2026-08-09) silently voided that: MagicDNS answers for `top` in 34 ms whether
+it is up, asleep or gone, so the gate passed instantly and the two ssh calls
+behind it (`guard_remote`, `guard_schema`) each paid `ConnectTimeout` in full
+— **measured 10.02 s of dead wait on book before the browser window could
+open**, and the same again on exit for `push`. That is the whole of "surfer
+takes ages to start on book"; the app itself is fast (adblock 0.26 s, real
+Mesa/ANGLE acceleration, no software raster fallback). `_remote` also takes a
+hard `timeout=` now, because a relay-reached host that is not awake accepts the
+connection and then stalls in *banner exchange*, which no ssh option bounds —
+`Connection timed out during banner exchange` in the sync log, otherwise capped
+only by the wrapper's `timeout 90`. Only air brackets it because Fedora runs no sshd:
 **book is the only machine that can initiate**, and it still converges both ways
 by pulling at its launch and pushing at its exit.
 
