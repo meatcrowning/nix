@@ -360,6 +360,18 @@ class DeskStyle(QObject):
         f.setHintingPreference(QFont.PreferFullHinting)
         return max(1, QFontMetrics(f).height())
 
+    @Property(bool, constant=True)
+    def plasma(self):
+        """Which session this app was started in — the same switch that moves
+        the palette (`kdetheme.is_plasma`), published so QML can read it.
+
+        The one thing QML does with it is `qmlcommon/DeskMenuBar.qml`: there is
+        no hyprvtb in a Plasma session, so the app's inner-titlebar buttons have
+        nowhere to draw and come back as a menubar instead. Constant, not
+        notified: an app is themed by the session that STARTED it, and nothing
+        moves a running window between the two."""
+        return self._plasma
+
     @Property(bool, notify=changed)
     def reduceMotion(self):
         return self._reduce

@@ -307,23 +307,28 @@ Window {
     property int tabRev: 0          // bumped on any add/remove/move/rename
     readonly property var tbButtons: {
         void tabRev;
+        // `menu:` is the Plasma session's half of this array — the menubar
+        // qmlcommon/DeskMenuBar.qml draws where there is no hyprvtb to draw
+        // this column. Inert on the wire (vtbclient.py reads id/label/state/
+        // tip/drag/bottom). The open documents become a `documents` menu, which
+        // is where Kate keeps the same list.
         var arr = [
-            { id: "new",   label: "+f", state: 0, tip: "new file (Ctrl+N)" },
-            { id: "open",  label: "op", state: 0, tip: "open a file (Ctrl+O)" },
+            { id: "new",   label: "+f", state: 0, tip: "new file (Ctrl+N)", menu: "file" },
+            { id: "open",  label: "op", state: 0, tip: "open a file (Ctrl+O)", menu: "file" },
             { id: "save",  label: "sv", state: win.dirty ? 0 : 2,
-              tip: win.dirty ? "save (Ctrl+S)" : "no unsaved changes" },
+              tip: win.dirty ? "save (Ctrl+S)" : "no unsaved changes", menu: "file" },
             { id: "saveas", label: "sa", state: win.current >= 0 ? 0 : 2,
-              tip: "save as (Ctrl+Shift+S)" },
+              tip: "save as (Ctrl+Shift+S)", menu: "file" },
             "-",
             { id: "find",  label: "fs", state: findBar.shown && !findBar.replaceMode ? 1 : 0,
-              tip: "find (Ctrl+F)" },
+              tip: "find (Ctrl+F)", menu: "edit" },
             { id: "replace", label: "rp", state: findBar.shown && findBar.replaceMode ? 1 : 0,
-              tip: "replace (Ctrl+R)" },
+              tip: "replace (Ctrl+R)", menu: "edit" },
             { id: "goto",  label: "gl", state: pathBar.shown && pathBar.mode === "goto" ? 1 : 0,
-              tip: "go to line (Ctrl+G)" },
+              tip: "go to line (Ctrl+G)", menu: "edit" },
             "-",
             { id: "nums",  label: "ln", state: win.showNumbers ? 1 : 0,
-              tip: "line numbers" },
+              tip: "line numbers", menu: "view" },
             "-",
         ];
         for (var i = 0; i < tabs.count; i++) {
@@ -337,7 +342,7 @@ Window {
                        state: i === win.current ? 1 : 0,
                        tip: (t.dirty ? "unsaved - " : "") + nm
                             + (i === win.current ? " - close" : ""),
-                       drag: true });
+                       drag: true, menu: "documents" });
         }
         return arr;
     }
@@ -352,38 +357,42 @@ Window {
     }
     onFooterStrChanged: Titlebar.setFooter(footerStr)
 
+    // ONE handler, TWO chromes: the hyprvtb titlebar column clicks it, and in a
+    // Plasma session `menuBar` does (qmlcommon/DeskMenuBar.qml). Same ids.
+    function tbAction(id) {
+        switch (id) {
+        case "new":     win.newFile(); return;
+        case "open":    pathBar.openPrompt("open", win.dirName()); return;
+        case "save":    win.saveTab(win.current, ""); return;
+        case "saveas":  win.promptSaveAs(); return;
+        case "find":
+            if (findBar.shown && !findBar.replaceMode) win.closeFind();
+            else win.openFind(false);
+            return;
+        case "replace":
+            if (findBar.shown && findBar.replaceMode) win.closeFind();
+            else win.openFind(true);
+            return;
+        case "goto":
+            if (pathBar.shown && pathBar.mode === "goto") pathBar.closePrompt();
+            else pathBar.openPrompt("goto", "");
+            return;
+        case "nums":    win.showNumbers = !win.showNumbers;
+                        Settings.set("showNumbers", win.showNumbers); return;
+        }
+        if (id.indexOf("tab:") === 0) {
+            var at = win.indexOfTid(parseInt(id.substring(4)));
+            if (at < 0) return;
+            // Re-clicking the document you are already in closes it — the
+            // same gesture surfer's tabs have.
+            if (at === win.current) win.closeTab(at);
+            else win.current = at;
+        }
+    }
+
     Connections {
         target: Titlebar
-        function onClicked(id) {
-            switch (id) {
-            case "new":     win.newFile(); return;
-            case "open":    pathBar.openPrompt("open", win.dirName()); return;
-            case "save":    win.saveTab(win.current, ""); return;
-            case "saveas":  win.promptSaveAs(); return;
-            case "find":
-                if (findBar.shown && !findBar.replaceMode) win.closeFind();
-                else win.openFind(false);
-                return;
-            case "replace":
-                if (findBar.shown && findBar.replaceMode) win.closeFind();
-                else win.openFind(true);
-                return;
-            case "goto":
-                if (pathBar.shown && pathBar.mode === "goto") pathBar.closePrompt();
-                else pathBar.openPrompt("goto", "");
-                return;
-            case "nums":    win.showNumbers = !win.showNumbers;
-                            Settings.set("showNumbers", win.showNumbers); return;
-            }
-            if (id.indexOf("tab:") === 0) {
-                var at = win.indexOfTid(parseInt(id.substring(4)));
-                if (at < 0) return;
-                // Re-clicking the document you are already in closes it — the
-                // same gesture surfer's tabs have.
-                if (at === win.current) win.closeTab(at);
-                else win.current = at;
-            }
-        }
+        function onClicked(id) { win.tbAction(id); }
         function onReordered(srcId, dstId) {
             if (srcId.indexOf("tab:") !== 0 || dstId.indexOf("tab:") !== 0) return;
             win.moveTab(win.indexOfTid(parseInt(srcId.substring(4))),
@@ -461,9 +470,20 @@ Window {
     }
 
     // ---- layout ----------------------------------------------------------
+    // The menubar the Plasma session gets in place of the titlebar column;
+    // 0-height and invisible in the Hyprland one.
+    DeskMenuBar {
+        id: menuBar
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        buttons: win.tbButtons
+        menuOrder: ["file", "edit", "view", "documents"]
+        onTriggered: (id) => win.tbAction(id)
+    }
+
     Item {
         id: stage
-        anchors.fill: parent
+        anchors { top: menuBar.bottom; left: parent.left
+                  right: parent.right; bottom: parent.bottom }
 
         Repeater {
             id: viewRep

@@ -807,26 +807,37 @@ Window {
     readonly property var tbButtons: {
         void tabRev;                    // structural-change dependency
         void dlgRev;                    // …and on a tab gaining/losing a dialog
+        // `menu:` is the Plasma session's half of this array — the menubar
+        // qmlcommon/DeskMenuBar.qml draws where there is no hyprvtb to draw
+        // this column. Inert on the wire (vtbclient.py reads id/label/state/
+        // tip/drag/bottom). The open tabs become a `tabs` menu, the one place
+        // a menubar can put a list that has no fixed length.
         var arr = [
-            { id: "back",    label: "<",  state: current && current.canGoBack ? 0 : 2,    tip: "back" },
-            { id: "fwd",     label: ">",  state: current && current.canGoForward ? 0 : 2, tip: "forward" },
+            { id: "back",    label: "<",  state: current && current.canGoBack ? 0 : 2,    tip: "back",
+              menu: "go" },
+            { id: "fwd",     label: ">",  state: current && current.canGoForward ? 0 : 2, tip: "forward",
+              menu: "go" },
             { id: "reload",  label: current && current.loading ? "x" : "r", state: 0,
-              tip: current && current.loading ? "stop loading" : "reload" },
-            { id: "copyurl", label: "cu", state: current ? 0 : 2,           tip: "copy url" },
+              tip: current && current.loading ? "stop loading" : "reload", menu: "go" },
+            { id: "copyurl", label: "cu", state: current ? 0 : 2,           tip: "copy url",
+              menu: "edit" },
             // dark mode: opens the slide-out config panel (on/off, per-site
             // whitelist, brightness/contrast). Lit (state 1) only while its
             // panel is open — like a pressed menu button — not for the whole
             // time dark mode is enabled.
-            { id: "darkmode", label: "dm", state: dmPanelOpen ? 1 : 0,  tip: "dark mode" },
+            { id: "darkmode", label: "dm", state: dmPanelOpen ? 1 : 0,  tip: "dark mode",
+              menu: "view" },
             // split view, kitty's pair: `|` = split right (side by side), `_` =
             // split down (stacked). Note `_` and not `-`: a bare "-" is the
             // SPACER token in the vtb button protocol. Whichever orientation is
             // live is lit, and the tip says what a click will do from here —
             // close it (the lit one) or re-orient into it (the other).
             { id: "vsplit", label: "|", state: splitOn && splitVertical ? 1 : 0,
-              tip: (splitOn && splitVertical) ? "close split" : "split right" },
+              tip: (splitOn && splitVertical) ? "close split" : "split right",
+              menu: "view", menuSep: true },
             { id: "hsplit", label: "_", state: splitOn && !splitVertical ? 1 : 0,
-              tip: (splitOn && !splitVertical) ? "close split" : "split down" },
+              tip: (splitOn && !splitVertical) ? "close split" : "split down",
+              menu: "view" },
             "-",
         ];
         for (var i = 0; i < tabs.count; i++) {
@@ -849,45 +860,60 @@ Window {
                 where = "close · ";
             arr.push({ id: "tab:" + tabs.get(i).tid, label: tabLabel(v, sd),
                        state: shown ? 1 : 0,
-                       tip: asks + where + ttl, drag: true });
+                       tip: asks + where + ttl, drag: true, menu: "tabs" });
         }
-        arr.push({ id: "newtab", label: "+t", state: 0, tip: "new tab" });
+        arr.push({ id: "newtab", label: "+t", state: 0, tip: "new tab", menu: "file" });
         // settings pins to the bottom of the inner column (hyprvtb bottom-anchor)
-        arr.push({ id: "settings", label: "st", state: 0, tip: "userscripts folder / settings", bottom: true });
+        arr.push({ id: "settings", label: "st", state: 0, tip: "userscripts folder / settings",
+                   bottom: true, menu: "settings" });
         return arr;
     }
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
 
+    // ONE handler, TWO chromes: the hyprvtb titlebar column clicks it, and in a
+    // Plasma session `menuBar` does (qmlcommon/DeskMenuBar.qml). Same ids.
+    function tbAction(id) {
+        if (id === "back")    { if (win.current) win.current.goBack(); return; }
+        if (id === "fwd")     { if (win.current) win.current.goForward(); return; }
+        if (id === "reload") {
+            if (!win.current) return;
+            if (win.current.loading) win.current.stop(); else win.current.reload();
+            return;
+        }
+        if (id === "copyurl") { if (win.current) Clip.copy(win.current.url.toString()); return; }
+        if (id === "darkmode") { win.dmPanelOpen = !win.dmPanelOpen; return; }
+        if (id === "newtab")  { win.newTab(win.homeUrl); return; }
+        if (id === "vsplit")  { win.toggleSplit(true); return; }
+        if (id === "hsplit")  { win.toggleSplit(false); return; }
+        if (id === "settings") { UserScripts.openFolder(); return; }
+        if (id.indexOf("tab:") === 0) {
+            var idx = win.tabIndexByTid(parseInt(id.substring(4)));
+            if (idx < 0) return;
+            // re-click the focused pane's tab = close it (unsplit muscle
+            // memory); click the OTHER pane's tab = move the chrome there
+            // rather than swapping two tabs that are both already visible;
+            // anything else = show it in the focused pane.
+            if (idx === win.focusTab) win.closeTab(idx);
+            else if (win.splitOn && idx === win.currentTab) win.focusPane = 0;
+            else if (win.splitOn && idx === win.splitTab) win.focusPane = 1;
+            else win.showInPane(win.focusPane, idx);
+            return;
+        }
+    }
+
+    // The menubar the Plasma session gets in place of the titlebar column;
+    // 0-height and invisible in the Hyprland one.
+    DeskMenuBar {
+        id: menuBar
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        buttons: win.tbButtons
+        menuOrder: ["file", "edit", "view", "go", "tabs", "settings"]
+        onTriggered: (id) => win.tbAction(id)
+    }
+
     Connections {
         target: Titlebar
-        function onClicked(id) {
-            if (id === "back")    { if (win.current) win.current.goBack(); return; }
-            if (id === "fwd")     { if (win.current) win.current.goForward(); return; }
-            if (id === "reload") {
-                if (!win.current) return;
-                if (win.current.loading) win.current.stop(); else win.current.reload();
-                return;
-            }
-            if (id === "copyurl") { if (win.current) Clip.copy(win.current.url.toString()); return; }
-            if (id === "darkmode") { win.dmPanelOpen = !win.dmPanelOpen; return; }
-            if (id === "newtab")  { win.newTab(win.homeUrl); return; }
-            if (id === "vsplit")  { win.toggleSplit(true); return; }
-            if (id === "hsplit")  { win.toggleSplit(false); return; }
-            if (id === "settings") { UserScripts.openFolder(); return; }
-            if (id.indexOf("tab:") === 0) {
-                var idx = win.tabIndexByTid(parseInt(id.substring(4)));
-                if (idx < 0) return;
-                // re-click the focused pane's tab = close it (unsplit muscle
-                // memory); click the OTHER pane's tab = move the chrome there
-                // rather than swapping two tabs that are both already visible;
-                // anything else = show it in the focused pane.
-                if (idx === win.focusTab) win.closeTab(idx);
-                else if (win.splitOn && idx === win.currentTab) win.focusPane = 0;
-                else if (win.splitOn && idx === win.splitTab) win.focusPane = 1;
-                else win.showInPane(win.focusPane, idx);
-                return;
-            }
-        }
+        function onClicked(id) { win.tbAction(id); }
         // drag-reorder: move the src tab to the dst tab's slot
         function onReordered(srcId, dstId) {
             if (srcId.indexOf("tab:") !== 0 || dstId.indexOf("tab:") !== 0) return;
@@ -1058,7 +1084,8 @@ Window {
     // out by `pane` (see the split-view block above) ----
     Item {
         id: stage
-        anchors.fill: parent
+        anchors { top: menuBar.bottom; left: parent.left
+                  right: parent.right; bottom: parent.bottom }
 
         Repeater {
             id: viewRep
@@ -1349,7 +1376,7 @@ Window {
     Rectangle {
         id: permBar
         visible: win.permCurrent !== null
-        anchors { top: parent.top; left: parent.left; right: parent.right }
+        anchors { top: menuBar.bottom; left: parent.left; right: parent.right }
         height: 36
         color: Theme.bgAlt
         border.width: Theme.ctrlBorder
@@ -1381,7 +1408,7 @@ Window {
         winActive: win.winActive
         id: findBar
         view: win.current
-        dockY: permBar.visible ? permBar.height : 0
+        dockY: menuBar.height + (permBar.visible ? permBar.height : 0)
     }
     Connections {
         target: Hotkeys
@@ -1421,7 +1448,7 @@ Window {
         width: 248
         height: dmCol.implicitHeight + 24
         x: win.width - slide * width
-        y: 8
+        y: menuBar.height + 8
         color: Theme.bgAlt
         border.width: Theme.ctrlBorder
         border.color: Theme.windowBorder

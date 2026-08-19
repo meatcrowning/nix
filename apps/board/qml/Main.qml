@@ -752,15 +752,19 @@ Window {
         return "needs";
     }
     // ...and the cells read left-to-right as the page reads top-to-bottom.
+    // `menu:` is the Plasma session's half of this array — the menubar
+    // qmlcommon/DeskMenuBar.qml draws where there is no hyprvtb to draw this
+    // column. Inert on the wire (vtbclient.py reads id/label/state/tip).
     readonly property var tbButtons: [
         { id: "needs",  label: "ny", state: section === "needs" ? 1 : 0,
-          tip: "what needs you" },
+          tip: "what needs you", menu: "go" },
         { id: "agents", label: "ag", state: section === "agents" ? 1 : 0,
-          tip: "the triangle - who is running now" },
+          tip: "the triangle - who is running now", menu: "go" },
         { id: "landed", label: "ld", state: section === "landed" ? 1 : 0,
-          tip: "what landed" },
+          tip: "what landed", menu: "go" },
         "-",
-        { id: "reader", label: "md", state: 0, tip: "open board.md in reader" },
+        { id: "reader", label: "md", state: 0, tip: "open board.md in reader",
+          menu: "file" },
         // Its own section, under `md`: a toggle is not a jump and not a launch.
         // §12.1 — a lit cell IS the state (inverted, accent-filled), so there is
         // no second glyph for "off" and no status line saying what it did; the
@@ -770,12 +774,14 @@ Window {
         // §11.2: the glyph is `fs`, the tooltip names the key. A lit cell IS
         // the open state (§12.1), so the same click that Ctrl+F does closes it.
         { id: "find", label: "fs", state: findOpen ? 1 : 0,
-          tip: "find (Ctrl+F)" },
+          tip: "find (Ctrl+F)", menu: "edit" },
         { id: "logs", label: "lg", state: allLogs ? 1 : 0,
-          tip: allLogs ? "hide every card's log" : "show every card's log" },
+          tip: allLogs ? "hide every card's log" : "show every card's log",
+          menu: "view" },
         { id: "summoned", label: "sm", state: showSummoned ? 1 : 0,
           tip: showSummoned ? "hide the summoned + commanded notes"
-                            : "show the summoned + commanded notes" },
+                            : "show the summoned + commanded notes",
+          menu: "view" },
     ]
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
 
@@ -814,33 +820,48 @@ Window {
                                                  scroller.contentHeight - scroller.height));
     }
 
+    // ONE handler, TWO chromes: the hyprvtb titlebar column clicks it, and in a
+    // Plasma session `menuBar` does (qmlcommon/DeskMenuBar.qml). Same ids.
+    function tbAction(id) {
+        switch (id) {
+        case "needs":  win.jumpSection("needs"); break;
+        // The `ag` cell jumps to the TOP of the region it names — summoner
+        // is above the triangle, so that is where the cell points, whether
+        // or not he has since moved the sections around.
+        case "agents": win.jumpSection("summoner"); break;
+        case "landed": win.jumpSection("landed"); break;
+        case "summoned": win.toggleSummoned(); break;
+        case "reader":
+            if (!Board.openInReader())
+                win.status = "could not run reader";
+            break;
+        case "logs":   win.toggleAllLogs(); break;
+        case "find":   if (win.findOpen) win.closeFind(); else win.openFind(); break;
+        }
+    }
+
     Connections {
         target: Titlebar
-        function onClicked(id) {
-            switch (id) {
-            case "needs":  win.jumpSection("needs"); break;
-            // The `ag` cell jumps to the TOP of the region it names — summoner
-            // is above the triangle, so that is where the cell points, whether
-            // or not he has since moved the sections around.
-            case "agents": win.jumpSection("summoner"); break;
-            case "landed": win.jumpSection("landed"); break;
-            case "summoned": win.toggleSummoned(); break;
-            case "reader":
-                if (!Board.openInReader())
-                    win.status = "could not run reader";
-                break;
-            case "logs":   win.toggleAllLogs(); break;
-            case "find":   if (win.findOpen) win.closeFind(); else win.openFind(); break;
-            }
-        }
+        function onClicked(id) { win.tbAction(id); }
     }
 
     // ---- the page ----
     readonly property int pad: 12
 
+    // The menubar the Plasma session gets in place of the titlebar column;
+    // 0-height and invisible in the Hyprland one.
+    DeskMenuBar {
+        id: menuBar
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        buttons: win.tbButtons
+        menuOrder: ["file", "edit", "go", "view"]
+        onTriggered: (id) => win.tbAction(id)
+    }
+
     KineticFlickable {
         id: scroller
-        anchors.fill: parent
+        anchors { top: menuBar.bottom; left: parent.left
+                  right: parent.right; bottom: parent.bottom }
         clip: true
         contentWidth: width
         contentHeight: page.implicitHeight + win.pad * 2
@@ -2872,7 +2893,7 @@ Component {
         width: findRow.implicitWidth + 12
         height: 34
         x: Math.max(0, parent.width - width - 8)
-        y: -height + slide * (height + 8)
+        y: menuBar.height - height + slide * (height + 8)
         color: Theme.bgAlt
         radius: Theme.rounding
         border.width: Theme.ctrlBorder

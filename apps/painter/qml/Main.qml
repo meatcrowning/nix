@@ -313,9 +313,10 @@ Window {
     Item {
         id: results
         x: 0
-        y: 0
+        // the Plasma menubar's height, 0 in the Hyprland session
+        y: menuBar.height
         width: root.split ? root.paneLeadW : root.width
-        height: parent.height - root.barH
+        height: parent.height - root.barH - menuBar.height
         visible: root.split || root.view === 1
 
         PreviewPane {
@@ -346,11 +347,11 @@ Window {
         visible: root.split
         z: 10
         x: root.paneLeadW
-        y: 0
+        y: menuBar.height
         width: root.splitterW
         // Stops at the status bar: a handle drawn over it also GRABS over it,
         // so the last 26px of the divider swallowed clicks meant for the bar.
-        height: parent.height - root.barH
+        height: parent.height - root.barH - menuBar.height
         color: splitDrag.pressed || splitDrag.containsMouse ? Theme.accent : Theme.border
 
         MouseArea {
@@ -383,9 +384,9 @@ Window {
     Rectangle {
         id: controls
         x: root.split ? root.paneLeadW + root.splitterW : 0
-        y: 0
+        y: menuBar.height
         width: root.split ? Math.max(1, root.width - x) : root.width
-        height: parent.height
+        height: parent.height - menuBar.height
         color: Theme.bg
         visible: root.split || root.view === 0
 
@@ -522,7 +523,8 @@ Window {
     // slide's binding.
     SettingsDrawer {
         id: settings
-        anchors.fill: parent
+        anchors { top: menuBar.bottom; left: parent.left
+                  right: parent.right; bottom: parent.bottom }
         open: root.showSettings
         onClosed: root.showSettings = false
     }
@@ -580,33 +582,58 @@ Window {
     // (docs/DESIGN.md §12.1: a function that already has a glyph keeps it in every
     // app). They were UPPERCASE, with "*" for settings, which was painter's
     // alone on this desktop.
+    // The button set, as a BINDING rather than a literal inside pushButtons():
+    // the Plasma menubar reads the same array (qmlcommon/DeskMenuBar.qml) and
+    // has to re-read it when a state flips, and `menu:` is that menubar's half
+    // of it — inert on the wire, where vtbclient.py reads id/label/state/tip/
+    // bottom and ignores the rest.
+    readonly property var tbButtons: [
+        { id: "gen",  label: "gen",  state: App.busy ? 2 : 0, tip: "Generate",
+          menu: "generate" },
+        { id: "stop", label: "x",    state: App.busy ? 0 : 2, tip: "Cancel all",
+          menu: "generate" },
+        "-",
+        { id: "p",    label: "p",    state: root.view === 0 ? 1 : 0, tip: "Parameters",
+          menu: "view" },
+        { id: "g",    label: "g",    state: root.view === 1 ? 1 : 0, tip: "Gallery",
+          menu: "view" },
+        { id: "pv",   label: "pv",   state: root.showPreview ? 1 : 0,
+          tip: "Preview viewport", menu: "view" },
+        "-",
+        { id: "set",  label: "st",   state: root.showSettings ? 1 : 0,
+          tip: "Settings", bottom: true, menu: "settings" }
+    ]
+
     function pushButtons() {
-        Titlebar.setButtons([
-            { id: "gen",  label: "gen",  state: App.busy ? 2 : 0, tip: "Generate" },
-            { id: "stop", label: "x",    state: App.busy ? 0 : 2, tip: "Cancel all" },
-            "-",
-            { id: "p",    label: "p",    state: root.view === 0 ? 1 : 0, tip: "Parameters" },
-            { id: "g",    label: "g",    state: root.view === 1 ? 1 : 0, tip: "Gallery" },
-            { id: "pv",   label: "pv",   state: root.showPreview ? 1 : 0,
-              tip: "Preview viewport" },
-            "-",
-            { id: "set",  label: "st",   state: root.showSettings ? 1 : 0,
-              tip: "Settings", bottom: true }
-        ])
+        Titlebar.setButtons(root.tbButtons)
         Titlebar.setFooter(App.queue > 0 ? ("Q" + App.queue) : "")
         Titlebar.setLoading(App.busy)
     }
 
+    // ONE handler, TWO chromes: the hyprvtb titlebar column clicks it, and in a
+    // Plasma session `menuBar` does (qmlcommon/DeskMenuBar.qml). Same ids.
+    function tbAction(id) {
+        if (id === "gen") root.submit()
+        else if (id === "stop") App.cancel()
+        else if (id === "p") root.view = 0
+        else if (id === "g") root.view = 1
+        else if (id === "pv") root.showPreview = !root.showPreview
+        else if (id === "set") root.showSettings = !root.showSettings
+    }
+
+    // The menubar the Plasma session gets in place of the titlebar column;
+    // 0-height and invisible in the Hyprland one.
+    DeskMenuBar {
+        id: menuBar
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        buttons: root.tbButtons
+        menuOrder: ["generate", "view", "settings"]
+        onTriggered: (id) => root.tbAction(id)
+    }
+
     Connections {
         target: Titlebar
-        function onClicked(id) {
-            if (id === "gen") root.submit()
-            else if (id === "stop") App.cancel()
-            else if (id === "p") root.view = 0
-            else if (id === "g") root.view = 1
-            else if (id === "pv") root.showPreview = !root.showPreview
-            else if (id === "set") root.showSettings = !root.showSettings
-        }
+        function onClicked(id) { root.tbAction(id) }
     }
 
     Connections {

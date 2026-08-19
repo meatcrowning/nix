@@ -217,30 +217,38 @@ Window {
     // `-` is the SPACER token in the vtb button-array protocol; viewer's zoom
     // pair is the same two glyphs (§12.1 — a function keeps its glyph).
     readonly property bool pdfMode: pane ? pane.isPdf : false
+    // `menu:` is the Plasma session's half of this array — the menubar
+    // qmlcommon/DeskMenuBar.qml draws where there is no hyprvtb to draw this
+    // column. Inert on the wire (vtbclient.py reads id/label/state/tip).
     readonly property var tbButtons: [
-        { id: "back",    label: "<",  state: pane && pane.canBack ? 0 : 2,    tip: "back" },
-        { id: "forward", label: ">",  state: pane && pane.canForward ? 0 : 2, tip: "forward" },
+        { id: "back",    label: "<",  state: pane && pane.canBack ? 0 : 2,    tip: "back",
+          menu: "go" },
+        { id: "forward", label: ">",  state: pane && pane.canForward ? 0 : 2, tip: "forward",
+          menu: "go" },
         "-",
         { id: "files",   label: "fl", state: sideOpen && sideMode === "files" ? 1 : 0,
-          tip: "browse documents" },
+          tip: "browse documents", menu: "view" },
         { id: "outline", label: "ol", state: sideOpen && sideMode === "outline" ? 1 : 0,
-          tip: pdfMode ? "this document's bookmarks" : "this document's headings" },
-        { id: "search",  label: "fs", state: searchOpen ? 1 : 0, tip: "find (Ctrl+F)" },
+          tip: pdfMode ? "this document's bookmarks" : "this document's headings",
+          menu: "view" },
+        { id: "search",  label: "fs", state: searchOpen ? 1 : 0, tip: "find (Ctrl+F)",
+          menu: "edit" },
     ].concat(pdfMode ? [
         "-",
-        { id: "zoomout", label: "−",  state: 0, tip: "zoom out" },
-        { id: "zoomin",  label: "+",  state: 0, tip: "zoom in" },
+        { id: "zoomout", label: "−",  state: 0, tip: "zoom out", menu: "view" },
+        { id: "zoomin",  label: "+",  state: 0, tip: "zoom in", menu: "view" },
         { id: "fitw",    label: "fw", state: pane && pane.fit === "width" ? 1 : 0,
-          tip: "fit width" },
+          tip: "fit width", menu: "view" },
         { id: "fitp",    label: "fp", state: pane && pane.fit === "page" ? 1 : 0,
-          tip: "fit page" },
-        { id: "goto",    label: "gp", state: gotoOpen ? 1 : 0, tip: "go to page (Ctrl+G)" },
+          tip: "fit page", menu: "view" },
+        { id: "goto",    label: "gp", state: gotoOpen ? 1 : 0, tip: "go to page (Ctrl+G)",
+          menu: "go", menuSep: true },
     ] : []).concat([
         "-",
         { id: "vsplit",  label: "|",  state: splitOn && splitVertical ? 1 : 0,
-          tip: "split right" },
+          tip: "split right", menu: "view" },
         { id: "hsplit",  label: "_",  state: splitOn && !splitVertical ? 1 : 0,
-          tip: "split down" },
+          tip: "split down", menu: "view" },
     ])
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
 
@@ -261,30 +269,34 @@ Window {
     }
     onFooterStrChanged: Titlebar.setFooter(footerStr)
 
+    // ONE handler, TWO chromes: the hyprvtb titlebar column clicks it, and in a
+    // Plasma session `menuBar` does (qmlcommon/DeskMenuBar.qml). Same ids.
+    function tbAction(id) {
+        switch (id) {
+        case "back":    win.pane.goBack();     break;
+        case "forward": win.pane.goForward();  break;
+        case "files":   win.setSide("files");  break;
+        case "outline": win.setSide("outline"); break;
+        case "search":
+            if (win.searchOpen) win.closeSearch();
+            else win.openSearch();
+            break;
+        case "vsplit":  win.setSplit(true);    break;
+        case "hsplit":  win.setSplit(false);   break;
+        case "zoomout": win.pane.zoomOut();    break;
+        case "zoomin":  win.pane.zoomIn();     break;
+        case "fitw":    win.pane.fitWidth();   break;
+        case "fitp":    win.pane.fitPage();    break;
+        case "goto":
+            if (win.gotoOpen) win.closeGoto();
+            else win.openGoto();
+            break;
+        }
+    }
+
     Connections {
         target: Titlebar
-        function onClicked(id) {
-            switch (id) {
-            case "back":    win.pane.goBack();     break;
-            case "forward": win.pane.goForward();  break;
-            case "files":   win.setSide("files");  break;
-            case "outline": win.setSide("outline"); break;
-            case "search":
-                if (win.searchOpen) win.closeSearch();
-                else win.openSearch();
-                break;
-            case "vsplit":  win.setSplit(true);    break;
-            case "hsplit":  win.setSplit(false);   break;
-            case "zoomout": win.pane.zoomOut();    break;
-            case "zoomin":  win.pane.zoomIn();     break;
-            case "fitw":    win.pane.fitWidth();   break;
-            case "fitp":    win.pane.fitPage();    break;
-            case "goto":
-                if (win.gotoOpen) win.closeGoto();
-                else win.openGoto();
-                break;
-            }
-        }
+        function onClicked(id) { win.tbAction(id); }
     }
 
     // A document edited underneath us reloads in place, keeping the scroll
@@ -319,9 +331,20 @@ Window {
     }
 
     // ---- layout ----
+    // The menubar the Plasma session gets in place of the titlebar column;
+    // 0-height and invisible in the Hyprland one.
+    DeskMenuBar {
+        id: menuBar
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        buttons: win.tbButtons
+        menuOrder: ["edit", "go", "view"]
+        onTriggered: (id) => win.tbAction(id)
+    }
+
     Item {
         id: stage
-        anchors.fill: parent
+        anchors { top: menuBar.bottom; left: parent.left
+                  right: parent.right; bottom: parent.bottom }
         focus: true
 
         Keys.onPressed: (e) => {

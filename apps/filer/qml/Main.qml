@@ -76,8 +76,13 @@ Window {
     // panel, whose own splitter already clamps itself to `view.height - 90`.
     readonly property int minPaneW: 220
     readonly property int minPaneH: 150
+    // In a Plasma session the menubar sits above the panes and takes real
+    // height from them; in the Hyprland one `menuBar.height` is 0 and every
+    // projection below is exactly what it always was.
+    readonly property int contentTop: menuBar.height
+    readonly property int contentH: Math.max(1, height - contentTop)
     // the split axis, as one set of numbers. Everything below is a projection.
-    readonly property int splitSpan: splitVertical ? width : height
+    readonly property int splitSpan: splitVertical ? width : contentH
     readonly property int minPane: splitVertical ? minPaneW : minPaneH
     readonly property int paneLeadSize: splitOn
         ? Math.max(minPane, Math.min(splitSpan - splitterW - minPane,
@@ -91,11 +96,11 @@ Window {
     // the two panes as actual rects (x/y/w/h), so every binding below is a
     // plain read rather than a repeat of the ternary.
     readonly property int paneLeadW: splitVertical ? paneLeadSize : width
-    readonly property int paneLeadH: splitVertical ? height : paneLeadSize
+    readonly property int paneLeadH: splitVertical ? contentH : paneLeadSize
     readonly property int paneTrailX: splitVertical ? paneTrailPos : 0
-    readonly property int paneTrailY: splitVertical ? 0 : paneTrailPos
+    readonly property int paneTrailY: contentTop + (splitVertical ? 0 : paneTrailPos)
     readonly property int paneTrailW: splitVertical ? paneTrailSize : width
-    readonly property int paneTrailH: splitVertical ? height : paneTrailSize
+    readonly property int paneTrailH: splitVertical ? contentH : paneTrailSize
     // where the trailing pane opens: where it was last time, else the same
     // directory as the leading one. Read at Loader time, so folding the split
     // and reopening it comes
@@ -185,28 +190,44 @@ Window {
         const view = win.pane;
         const sort = (f, l, tip) => ({ id: "sort-" + f,
                                        label: view.sortField === f ? l + (view.sortAsc ? "↑" : "↓") : l,
-                                       state: view.sortField === f ? 1 : 0, tip: tip });
+                                       state: view.sortField === f ? 1 : 0, tip: tip,
+                                       menu: "view" });
         // enabled when anything's selected; rename needs exactly one.
         const sel = view.selection.length > 0 ? 0 : 2;
         const selOne = view.selection.length === 1 ? 0 : 2;
         return [
             // up-a-directory, pinned above the sort/op grid (disabled at "/").
-            { id: "up", label: "^", state: view.path === "/" ? 2 : 0, tip: "up a directory" },
+            // `menu:` is the Plasma session's half of this array — the menubar
+            // qmlcommon/DeskMenuBar.qml draws where there is no hyprvtb to draw
+            // this column. Inert everywhere else: the vtb wire protocol reads
+            // id/label/state/tip and ignores the rest.
+            { id: "up", label: "^", state: view.path === "/" ? 2 : 0, tip: "up a directory",
+              menu: "go" },
             sort("name", "n", "sort by name"),
             sort("created", "c", "sort by created date"),
             sort("modified", "m", "sort by modified date"),
             sort("size", "s", "sort by size"),
-            { id: "new",    label: "+",  state: 0,                             tip: "new file or folder" },
-            { id: "rename", label: "r",  state: selOne,                        tip: "rename selected" },
-            { id: "copy",   label: "cp", state: sel,                           tip: "copy selected" },
-            { id: "cut",    label: "cx", state: sel,                           tip: "cut selected" },
-            { id: "paste",  label: "p",  state: view.clip !== null ? 0 : 2,    tip: "paste" },
-            { id: "trash",  label: "t",  state: sel,                           tip: "move to trash" },
-            { id: "hidden", label: "h",  state: view.showHidden ? 1 : 0,       tip: "toggle hidden files" },
+            { id: "new",    label: "+",  state: 0,                             tip: "new file or folder",
+              menu: "file" },
+            { id: "rename", label: "r",  state: selOne,                        tip: "rename selected",
+              menu: "file" },
+            { id: "copy",   label: "cp", state: sel,                           tip: "copy selected",
+              menu: "edit" },
+            { id: "cut",    label: "cx", state: sel,                           tip: "cut selected",
+              menu: "edit" },
+            { id: "paste",  label: "p",  state: view.clip !== null ? 0 : 2,    tip: "paste",
+              menu: "edit" },
+            // last in `file`, behind the separator the menu builds for it:
+            // §10.3 — the pointer's landing spot is never the irreversible one.
+            { id: "trash",  label: "t",  state: sel,                           tip: "move to trash",
+              menu: "file", menuSep: true },
+            { id: "hidden", label: "h",  state: view.showHidden ? 1 : 0,       tip: "toggle hidden files",
+              menu: "view" },
             // find: `fs` and "find (Ctrl+F)" are the desktop's cell for it
             // (docs/DESIGN.md §11.2, §12.1) — lit while the bar is up, so the
             // click that opened it closes it.
-            { id: "find",   label: "fs", state: view.findOpen ? 1 : 0,         tip: "find (Ctrl+F)" },
+            { id: "find",   label: "fs", state: view.findOpen ? 1 : 0,         tip: "find (Ctrl+F)",
+              menu: "edit", menuSep: true },
             // split view: two panes, one titlebar. Kitty's pair, same labels
             // and same meaning — `|` divides vertically (panes side by side),
             // `_` divides horizontally (panes stacked). The one matching the
@@ -216,11 +237,13 @@ Window {
             { id: "vsplit", label: "|",
               state: win.picking ? 2 : ((win.splitOn && win.splitVertical) ? 1 : 0),
               tip: !win.splitOn ? "split right (F3)"
-                   : win.splitVertical ? "close split view (F3)" : "split right instead" },
+                   : win.splitVertical ? "close split view (F3)" : "split right instead",
+              menu: "view", menuSep: true },
             { id: "hsplit", label: "_",
               state: win.picking ? 2 : ((win.splitOn && !win.splitVertical) ? 1 : 0),
               tip: !win.splitOn ? "split down (Shift+F3)"
-                   : !win.splitVertical ? "close split view (F3)" : "split down instead" },
+                   : !win.splitVertical ? "close split view (F3)" : "split down instead",
+              menu: "view" },
         ];
     }
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
@@ -281,24 +304,43 @@ Window {
         });
     }
 
+    // ONE handler, TWO chromes: the hyprvtb titlebar column calls it with a
+    // click, and in a Plasma session `menuBar` calls it with a menu row (see
+    // qmlcommon/DeskMenuBar.qml). Same ids either way, so the two can never
+    // drift apart.
+    function tbAction(id) {
+        const view = win.pane;
+        if (id.startsWith("sort-")) { view.setSort(id.substring(5)); return; }
+        switch (id) {
+        case "up":     view.go(view.parentOf(view.path)); break;
+        case "new":    view.openNewDialog(); break;
+        case "rename": view.openRenameDialog(); break;
+        case "copy":   if (view.selection.length) view.clip = { op: "copy", paths: view.selection.slice() }; break;
+        case "cut":    if (view.selection.length) view.clip = { op: "cut",  paths: view.selection.slice() }; break;
+        case "paste":  view.pasteInto(view.path); break;
+        case "trash":  if (view.selection.length) { FileOps.run(["gio", "trash", "--"].concat(view.selection), ""); view.clearSelection(); } break;
+        case "hidden": view.toggleHidden(); break;
+        case "find":   if (view.findOpen) view.closeFind(); else view.openFind(); break;
+        case "vsplit": win.setSplit(true); break;
+        case "hsplit": win.setSplit(false); break;
+        }
+    }
+
+    // The menubar the Plasma session gets in place of the titlebar column. Zero
+    // height and invisible in the Hyprland session, where the compositor draws
+    // these cells itself.
+    DeskMenuBar {
+        id: menuBar
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        buttons: win.tbButtons
+        menuOrder: ["file", "edit", "go", "view"]
+        onTriggered: (id) => win.tbAction(id)
+    }
+
     Connections {
         target: Titlebar
         function onClicked(id) {
-            const view = win.pane;
-            if (id.startsWith("sort-")) { view.setSort(id.substring(5)); return; }
-            switch (id) {
-            case "up":     view.go(view.parentOf(view.path)); break;
-            case "new":    view.openNewDialog(); break;
-            case "rename": view.openRenameDialog(); break;
-            case "copy":   if (view.selection.length) view.clip = { op: "copy", paths: view.selection.slice() }; break;
-            case "cut":    if (view.selection.length) view.clip = { op: "cut",  paths: view.selection.slice() }; break;
-            case "paste":  view.pasteInto(view.path); break;
-            case "trash":  if (view.selection.length) { FileOps.run(["gio", "trash", "--"].concat(view.selection), ""); view.clearSelection(); } break;
-            case "hidden": view.toggleHidden(); break;
-            case "find":   if (view.findOpen) view.closeFind(); else view.openFind(); break;
-            case "vsplit": win.setSplit(true); break;
-            case "hsplit": win.setSplit(false); break;
-            }
+            win.tbAction(id);
         }
         // the in-bar path editor was submitted: navigate if it's a directory
         // (expanding a leading ~ / ~user first).
@@ -434,7 +476,7 @@ Window {
     BrowserPane {
         id: paneL
         x: 0
-        y: 0
+        y: win.contentTop
         width: win.paneLeadW
         height: win.paneLeadH
         startPath: win.startPath
@@ -478,7 +520,7 @@ Window {
         visible: win.splitOn
         z: 9
         x: win.focusPane === 1 ? win.paneTrailX : 0
-        y: win.focusPane === 1 ? win.paneTrailY : 0
+        y: win.focusPane === 1 ? win.paneTrailY : win.contentTop
         width: win.focusPane === 1 ? win.paneTrailW : win.paneLeadW
         height: win.focusPane === 1 ? win.paneTrailH : win.paneLeadH
         color: "transparent"
@@ -495,9 +537,9 @@ Window {
         visible: win.splitOn
         z: 10
         x: win.splitVertical ? win.paneLeadSize : 0
-        y: win.splitVertical ? 0 : win.paneLeadSize
+        y: win.contentTop + (win.splitVertical ? 0 : win.paneLeadSize)
         width: win.splitVertical ? win.splitterW : win.width
-        height: win.splitVertical ? win.height : win.splitterW
+        height: win.splitVertical ? win.contentH : win.splitterW
         color: splitDrag.pressed || splitDrag.containsMouse ? Theme.accent : Theme.border
 
         MouseArea {
@@ -516,7 +558,7 @@ Window {
                 const p = mapToItem(win.contentItem, m.x, m.y);
                 win.setSplitRatio(win.splitVertical
                                   ? p.x / Math.max(1, win.width)
-                                  : p.y / Math.max(1, win.height));
+                                  : (p.y - win.contentTop) / Math.max(1, win.contentH));
             }
             onReleased: Settings.set("splitRatio", win.splitRatio)
         }
