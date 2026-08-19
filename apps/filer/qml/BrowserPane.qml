@@ -45,6 +45,11 @@ Rectangle {
     property bool primary: true
     property string watchKey: "main"
     property bool dragInFlight: false
+    // Where the last context menu opened, so a row that opens a SECOND menu (the
+    // "compress to..."/"convert to..." submenus — CtxMenu has no cascade of its
+    // own) can reopen it at the same spot.
+    property real menuX: 0
+    property real menuY: 0
     signal focusClaimed()
     signal dragStateChanged(bool active)
     // Called from every press site in here. Cheap and idempotent: the window
@@ -300,17 +305,19 @@ Rectangle {
             { label: "open", trigger: () => e.isDir ? go(e.path) : openFile(e.path, e.kind, 0) },
             { label: "open with...", trigger: () => { openWithDlg.targetPath = e.path; openWithDlg.open(); } },
         ];
-        // videos get the "squeeze it under an upload limit" action and the
-        // "same clip, no soundtrack" one. Only the clicked entry, not the
-        // selection: each job is its own long job with its own toast.
-        // No probe here to hide "copy without audio" on a silent file — the
-        // menu must not pay an ffprobe per right-click; VideoConv.stripAudio
-        // toasts that instead.
+        // "compress to..." — one row that opens a submenu holding BOTH readings
+        // of compress: the video size-squeezes (a single clicked video) and the
+        // archive formats (the whole selection, any kind). Offered whenever that
+        // submenu would have something in it, so it is never an empty popup.
+        if (compressMenuItems(e).length)
+            items.push({ label: "compress to...", trigger: () => openCompressMenu(e) });
+        // "convert to..." — the video-format transcodes (mp4/webm/mkv/gif/mp3),
+        // and "same clip, no soundtrack". Only the clicked entry, not the
+        // selection: each job is its own long job with its own toast. No probe
+        // here to hide a silent-file case — the menu must not pay an ffprobe per
+        // right-click; VideoConv toasts that when the row is clicked instead.
         if (!e.isDir && VideoConv.isVideo(e.path)) {
-            // Two ceilings, one job: 10MB is the usual chat/upload limit, 4MB
-            // the tighter one (and the same "4MB" the stills row below means).
-            items.push({ label: "compress to <10MB", trigger: () => compressVideo(e.path, 10000000) });
-            items.push({ label: "compress to <4MB", trigger: () => compressVideo(e.path, 4000000) });
+            items.push({ label: "convert to...", trigger: () => openConvertMenu(e) });
             items.push({ label: "copy without audio", trigger: () => VideoConv.stripAudio(e.path) });
         }
         // The stills equivalent, and only where it means something: an image
@@ -360,6 +367,61 @@ Rectangle {
             compressDlg.text = plan.warning;
             compressDlg.open();
         } else VideoConv.start(p, limit);
+    }
+
+    // The rows of the "compress to..." submenu. Two readings of compress, in
+    // menu order: squeeze a single clicked VIDEO under an upload ceiling (the
+    // clicked entry, and only when one thing is selected — "under 10MB" of five
+    // files means nothing), then pack the whole SELECTION into an archive. Each
+    // archive format is offered only when its tool resolves on this machine
+    // (ArchiveConv.formats, built as the menu opens) — docs/DESIGN.md 10.4, no
+    // action that silently fails. Empty means the parent row isn't shown.
+    function compressMenuItems(e) {
+        const items = [];
+        if (!e.isDir && selection.length === 1 && VideoConv.isVideo(e.path)) {
+            items.push({ label: "under 10MB", trigger: () => compressVideo(e.path, 10000000) });
+            items.push({ label: "under 4MB",  trigger: () => compressVideo(e.path, 4000000) });
+        }
+        const fmts = ArchiveConv.formats();
+        if (fmts.length) {
+            if (items.length) items.push({ separator: true });
+            // The count is in the label so a multi-item archive never looks like
+            // a one-item one, the same courtesy send-to-phone pays.
+            const n = selection.length > 1 ? " (" + selection.length + ")" : "";
+            for (const f of fmts)
+                items.push({ label: f.label + n,
+                             trigger: () => ArchiveConv.start(selection.slice(), f.id) });
+        }
+        return items;
+    }
+
+    // Reopen the one CtxMenu as the "compress to..." submenu, at the spot the
+    // first menu opened (CtxMenu has no cascade — same reopen the drop menu and
+    // the picker's filter dropdown use). A disabled header names it, and a
+    // cancel row backs out without doing anything.
+    function openCompressMenu(e) {
+        ctxMenu.open(view.menuX, view.menuY, [
+            { label: "compress to...", enabled: false },
+            { separator: true },
+        ].concat(compressMenuItems(e)).concat([
+            { separator: true },
+            { label: "cancel" },
+        ]));
+    }
+
+    // "convert to..." submenu: a plain transcode to a format the person named.
+    // VideoConv.convertFormats() lists only the targets ffmpeg can actually
+    // produce here (like the archive formats above), so nothing offered fails.
+    function openConvertMenu(e) {
+        const rows = VideoConv.convertFormats().map(
+            f => ({ label: f.label, trigger: () => VideoConv.convert(e.path, f.id) }));
+        ctxMenu.open(view.menuX, view.menuY, [
+            { label: "convert to...", enabled: false },
+            { separator: true },
+        ].concat(rows).concat([
+            { separator: true },
+            { label: "cancel" },
+        ]));
     }
 
     // "send to phone" — KDE Connect, acting on the whole selection.
@@ -1197,6 +1259,7 @@ Rectangle {
                  && !compressDlg.visible
         onPressed: (m) => {
             view.claimFocus();
+            view.menuX = m.x; view.menuY = m.y;   // where a submenu reopens
             const e = view.entryAt(m.x, m.y);
             if (e) {
                 if (!view.isSelected(e.path)) view.selectSingle(e.path, e.isDir);

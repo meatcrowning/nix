@@ -54,6 +54,7 @@ from notify import tool, toast  # noqa: E402  (next to this file; filer's one to
 
 from videoconv import VideoConv  # noqa: E402  (next to this file; see its docstring)
 from imgconv import ImgConv  # noqa: E402  (next to this file; the stills half of the same idea)
+from archive import ArchiveConv  # noqa: E402  (the "compress to <format>" archive half)
 from pick import Picker, load_spec  # noqa: E402  (picker mode — see its docstring)
 from phone import Phone  # noqa: E402  (next to this file; KDE Connect "send to phone")
 from remote import Remote  # noqa: E402  (next to this file; the `:top` address bar syntax)
@@ -1261,6 +1262,7 @@ def main():
     metasearch = MetaSearch()
     videoconv = VideoConv()
     imgconv = ImgConv()
+    archiveconv = ArchiveConv()
     phone = Phone()
     remote = Remote()
     # NB: exposed as "WalPalette", not "Palette" — "Palette" is a built-in Qt
@@ -1278,6 +1280,7 @@ def main():
     ctx.setContextProperty("Settings", settings)
     ctx.setContextProperty("VideoConv", videoconv)
     ctx.setContextProperty("ImgConv", imgconv)
+    ctx.setContextProperty("ArchiveConv", archiveconv)
     ctx.setContextProperty("Phone", phone)
     ctx.setContextProperty("Remote", remote)
     ctx.setContextProperty("Picker", picker)

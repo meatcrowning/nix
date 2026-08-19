@@ -398,6 +398,12 @@ Window {
         function onFinished(outPath) { if (outPath) win.refreshAll(outPath); }
     }
 
+    // ...and for a finished "compress to <format>" archive (archive.py).
+    Connections {
+        target: ArchiveConv
+        function onFinished(outPath) { if (outPath) win.refreshAll(outPath); }
+    }
+
     // external change in a watched dir (something added/removed by another
     // process — a finishing download, a shell mv, …): same keep-scroll refresh
     // as a file op. DirWatch debounces, so a burst of writes lands as one.

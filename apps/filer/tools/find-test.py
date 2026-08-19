@@ -155,6 +155,7 @@ def build(app, start_dir, picker=None):
     ctx.setContextProperty("Phone", keep[8])
     ctx.setContextProperty("Remote", keep[9])
     ctx.setContextProperty("ImgConv", keep[10])
+    ctx.setContextProperty("ArchiveConv", filermain.ArchiveConv(parent=engine))
     ctx.setContextProperty("MetaSearch", keep[11])
     ctx.setContextProperty("startDir", start_dir)
     ctx.setContextProperty("startSortField", "name")

@@ -132,6 +132,7 @@ def build(app, spec, start_dir):
     ctx.setContextProperty("Phone", extra[4])
     ctx.setContextProperty("Remote", extra[5])
     ctx.setContextProperty("ImgConv", extra[6])
+    ctx.setContextProperty("ArchiveConv", filermain.ArchiveConv(parent=engine))
     ctx.setContextProperty("Picker", picker)
     ctx.setContextProperty("startDir", start_dir)
     ctx.setContextProperty("startSortField", "name")
