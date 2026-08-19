@@ -130,6 +130,13 @@ in
     vista-fonts
     noto-fonts-color-emoji
     oxygenfonts
+    # Terminus — the classic monospace BITMAP face (family "Terminus"). The
+    # package ships PCF bitmaps at fixed pixel sizes (ter-x*.pcf.gz); it has
+    # NO scalable outline, so it is served from its embedded bitmaps and its
+    # fontconfig rule below turns antialiasing and autohinting off so nothing
+    # tries to smooth or grid-fit a 1-bit bitmap. Bold variants ship too, so
+    # no single-weight regular pin (unlike the hand-authored faces).
+    terminus_font
   ];
 
   # Not in nixpkgs — quickshell's Theme.qml and kitty.conf both depend on it.
@@ -157,6 +164,18 @@ in
   # comment above). Same selectable-face pattern as the pixel pair.
   home.file.".local/share/fonts/Phenex.ttf".source =
     "${phenex}/share/fonts/truetype/Phenex.ttf";
+
+  # Cozette VECTOR — the OUTLINE build of Cozette (family "CozetteVector"),
+  # not the bitmap .bdf/.otb the same package also ships. We install only the
+  # two scalable TTFs (regular + bold) so the bitmap "Cozette" family is NOT
+  # registered: the vector build is what renders on a scalable text stack (the
+  # Botis lesson — a non-scalable face is silently substituted). It is a
+  # pixel-DESIGN font in outline form, so its fontconfig rule below draws it
+  # grayscale with rgba=none per the desktop convention (§2.1).
+  home.file.".local/share/fonts/CozetteVector.ttf".source =
+    "${pkgs.cozette}/share/fonts/truetype/CozetteVector.ttf";
+  home.file.".local/share/fonts/CozetteVectorBold.ttf".source =
+    "${pkgs.cozette}/share/fonts/truetype/CozetteVectorBold.ttf";
 
   # Generated singleton the Settings "pixel font" dropdown reads its options
   # from (SetPgAppearance.qml -> FontFaces). Built from `selectableFaces` above,
@@ -318,6 +337,81 @@ in
         <edit name="hinting"   mode="assign"><bool>false</bool></edit>
         <edit name="hintstyle" mode="assign"><const>hintnone</const></edit>
         <edit name="rgba"      mode="assign"><const>none</const></edit>
+      </match>
+    </fontconfig>
+  '';
+
+  # Cozette Vector — the outline build of a pixel-design font (family
+  # "CozetteVector", installed by the home.file above). It is a normal
+  # scalable face with regular + bold, so no weight pin. Rendering: the
+  # desktop's grayscale rgba=none convention (§2.1) — antialias ON but no LCD
+  # subpixel, so no colour fringes on either host. It ships its own outline
+  # hinting; autohint is left OFF (the autohinter reshapes a pixel-derived
+  # outline) and slight hinting keeps the near-vertical/horizontal pixel stems
+  # on the grid without the heavy grid-fit a pixel-font full-hint would force.
+  # embeddedbitmap off: the TTF carries no bitmap strike, this only makes the
+  # intent explicit.
+  xdg.configFile."fontconfig/conf.d/50-cozette-vector.conf".text = ''
+    <?xml version="1.0"?>
+    <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+    <fontconfig>
+      <match target="font">
+        <test name="family"><string>CozetteVector</string></test>
+        <edit name="antialias"      mode="assign"><bool>true</bool></edit>
+        <edit name="autohint"       mode="assign"><bool>false</bool></edit>
+        <edit name="hinting"        mode="assign"><bool>true</bool></edit>
+        <edit name="hintstyle"      mode="assign"><const>hintslight</const></edit>
+        <edit name="rgba"           mode="assign"><const>none</const></edit>
+        <edit name="embeddedbitmap" mode="assign"><bool>false</bool></edit>
+      </match>
+    </fontconfig>
+  '';
+
+  # Terminus — a pure BITMAP face (family "Terminus", from terminus_font).
+  # Render it from its EMBEDDED BITMAPS and never smooth or grid-fit them:
+  # embeddedbitmap ON, antialias OFF (a 1-bit strike has nothing to
+  # antialias — grayscale AA only blurs the exact pixels), autohint/hinting
+  # OFF (there is no outline to hint; the autohinter would mangle the strike).
+  # rgba=none keeps it off the LCD-subpixel path like the rest of the desktop.
+  # Bold ships in the package, so no single-weight regular pin.
+  xdg.configFile."fontconfig/conf.d/50-terminus-bitmap.conf".text = ''
+    <?xml version="1.0"?>
+    <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+    <fontconfig>
+      <match target="font">
+        <test name="family"><string>Terminus</string></test>
+        <edit name="embeddedbitmap" mode="assign"><bool>true</bool></edit>
+        <edit name="antialias"      mode="assign"><bool>false</bool></edit>
+        <edit name="autohint"       mode="assign"><bool>false</bool></edit>
+        <edit name="hinting"        mode="assign"><bool>false</bool></edit>
+        <edit name="hintstyle"      mode="assign"><const>hintnone</const></edit>
+        <edit name="rgba"           mode="assign"><const>none</const></edit>
+      </match>
+    </fontconfig>
+  '';
+
+  # Tahoma — proprietary Microsoft TrueType. This is the RENDERING rule only;
+  # the font binary itself is NOT installed here and cannot be: ~/nix is a
+  # public repo and Tahoma is not in any free-redistributable pack (corefonts,
+  # vista-fonts). On `top` the user's own copy already sits at
+  # ~/.local/share/fonts/tahoma.ttf, so this rule takes effect there; on `book`
+  # it applies only once the file is placed by hand. Tahoma is superbly
+  # bytecode-hinted, so use its NATIVE full hinting (autohint off, hintfull)
+  # with grayscale AA and rgba=none — the classic ClearType-off look, matching
+  # the desktop convention (§2.1). No weight pin: Tahoma has a real Bold; the
+  # user may add tahomabd.ttf. See the board ask on legally sourcing it.
+  xdg.configFile."fontconfig/conf.d/50-tahoma.conf".text = ''
+    <?xml version="1.0"?>
+    <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+    <fontconfig>
+      <match target="font">
+        <test name="family"><string>Tahoma</string></test>
+        <edit name="antialias"      mode="assign"><bool>true</bool></edit>
+        <edit name="autohint"       mode="assign"><bool>false</bool></edit>
+        <edit name="hinting"        mode="assign"><bool>true</bool></edit>
+        <edit name="hintstyle"      mode="assign"><const>hintfull</const></edit>
+        <edit name="rgba"           mode="assign"><const>none</const></edit>
+        <edit name="embeddedbitmap" mode="assign"><bool>false</bool></edit>
       </match>
     </fontconfig>
   '';
