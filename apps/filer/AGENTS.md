@@ -493,14 +493,49 @@ notifications on the user's screen, and the assertions need the exact strings.
 > selection cleared and the list refreshed. `home/prog/filer.nix` now prefixes
 > `glib`'s bin dir onto the wrapper's PATH. Silence is what let it rot.
 
-- **`videoconv.py`** — the context menu's video actions: two upload-limit
-  squeezes, "compress to <10MB" and "compress to <4MB", plus "copy without
-  audio". Exposed as the
+### The `compress to...` / `convert to...` submenus
+
+The video actions live under **two submenu rows**, not a spray of top-level
+entries. Both are opened by reopening the one `CtxMenu` at the spot the parent
+opened (`view.menuX/menuY`) — the app has no menu cascade, the same reopen the
+drop menu (`askDrop`) and the picker's filter dropdown use — behind a disabled
+header and a `cancel` row. The builders are in `qml/BrowserPane.qml`:
+`compressMenuItems(e)` / `openCompressMenu(e)` and `openConvertMenu(e)`.
+
+- **`compress to...`** is *both* readings of compress in one place: the video
+  size-squeezes (`under 10MB` / `under 4MB`, only for a single clicked video —
+  "under 10MB" of five files means nothing) *and* the archive formats
+  (`ArchiveConv.formats()`, acting on the whole selection, any kind). Offered
+  whenever that submenu would be non-empty, so a plain file gets it (archives)
+  and it is never an empty popup.
+- **`convert to...`** is the format transcodes (`VideoConv.convertFormats()`),
+  video only, acting on the clicked entry.
+- **Every row is gated on it actually working** (docs/DESIGN.md 10.4): a convert
+  target only when ffmpeg has the encoder, an archive format only when its tool
+  resolves on this machine. Nothing is offered that would silently fail.
+
+Verify with `tools/action-menu-test.py` (offscreen): the real `Main.qml`'s menu
+builders on a real clip and file, plus the archive/convert backends run against
+a real clip so every offered format is proven to produce a valid file, not just
+a label.
+
+- **`videoconv.py`** — the context menu's video actions: the two upload-limit
+  squeezes behind `compress to...`, the `convert to...` transcodes, and "copy
+  without audio". Exposed as the
   `VideoConv` context property; the only part of filer
   that shells out to `ffmpeg`/`ffprobe` (PATH-resolved through `notify.tool`,
   like `kitty` — nothing was added to `filer.nix` for those, so a missing tool
   surfaces as a failure toast, not a broken build; `gio` is the one exception,
   see above).
+  - **`convert to...` is a plain transcode, not a squeeze** (`CONVERT_FORMATS`,
+    `convert_formats()`, `convert()`, `convert_argv()`). One recipe per target
+    (mp4/h264, webm/vp9, mkv remux, gif, mp3 extract); no `plan()` and no
+    dialog — the person picked a format, not a bitrate. `convert_formats()` is
+    built as the submenu opens and drops any target whose encoder `_encoders()`
+    can't find; `mkv` is a stream-copy remux (always in). `mp3` refuses a silent
+    clip at click time with a toast, the stripAudio precedent (no menu-time
+    probe). Jobs ride the same QProcess/toast/`_on_done` plumbing keyed
+    `convert-<fmt>:<src>`.
   - **The ceiling is a PARAMETER, not two code paths.** `limit` (bytes) is
     threaded through `plan(path, size, limit)`, `out_path_for(src, limit)` and
     the `plan`/`start` slots — both of which QML calls with two arguments and
@@ -547,6 +582,26 @@ notifications on the user's screen, and the assertions need the exact strings.
   - The job table is keyed **`<kind>:<src>`**, so compressing a file and
     stripping its audio are not each other's "already running".
 
+- **`archive.py`** — the OTHER reading of "compress": pack the selection into an
+  archive (`zip`, `tar.gz`, `tar.xz`, `7z`) beside it. Exposed as `ArchiveConv`,
+  it shells out through the same `notify.tool`/`notify.toast` as videoconv, so
+  there is one idea of how a filer job is reported.
+  - **`formats()` lists only what THIS machine can build** — a format whose tool
+    resolves (docs/DESIGN.md 10.4). `tar`/`gzip`/`xz` are in the base system on
+    both hosts; `zip` and `p7zip` were added to `filer.nix`'s wrapper PATH (like
+    `gio`/`sshfs` — a `.desktop`-launched app inherits no profile bin dir).
+    `book` resolves its own `/usr/bin` and simply offers whichever of these
+    Fedora has. `7z` ships under a few names (`7z`/`7zz`/`7za`); the first that
+    resolves wins.
+  - **Acts on the whole SELECTION**, named `(N)`, run with `cwd` = the shared
+    parent so the archive holds bare names not absolute paths. `out_path_for`
+    names it beside the selection, never clobbering (one file `photo.png` ->
+    `photo.zip`, several -> the parent dir's name). Async QProcess (no progress
+    %, so a plain persistent toast that morphs to the result); a failure toasts
+    the tool's own stderr and unlinks the half-written archive.
+  - Verified by `tools/action-menu-test.py` (above), which builds a real tar
+    archive and asserts the format gating.
+
 ## `copy` fills TWO clipboards
 
 `clip` (in `BrowserPane.qml`) is filer's own — it carries cut-vs-copy and is
@@ -574,7 +629,7 @@ calls `FileOps.copyToClipboard`.
 ## "send to phone" — KDE Connect, in the file context menu
 
 `phone.py` + `sendToPhoneItems()`/`sendToPhone()` in `qml/BrowserPane.qml`. It
-sits with `open` / `open with...` / `compress to <10MB` / `compress to <4MB` /
+sits with `open` / `open with...` / `compress to...` / `convert to...` /
 `copy without audio`, before the first
 separator: nothing about it is destructive and it must not be next to `trash`.
 

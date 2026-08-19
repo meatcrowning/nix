@@ -90,6 +90,7 @@ def build(app, start_dir):
     ctx.setContextProperty("FileOps", keep[0])
     ctx.setContextProperty("Remote", keep[9])
     ctx.setContextProperty("ImgConv", keep[10])
+    ctx.setContextProperty("ArchiveConv", filermain.ArchiveConv(parent=engine))
     _ds = DeskStyle(parent=engine)
     ctx.setContextProperty("WalPalette", keep[1])
     ctx.setContextProperty("DeskStyle", _ds)

@@ -77,13 +77,20 @@ let
         # that this app inherits only when it was launched from a shell.
 
 
+        # zip + p7zip are the two archive tools the "compress to..." menu
+        # (archive.py) offers beyond tar (tar/gzip/xz are in the base system on
+        # both hosts). Same reason as gio/sshfs: an app launched from a .desktop
+        # entry inherits no profile bin dir. archive.py gates each format on its
+        # tool actually resolving, so book — which resolves its own /usr/bin —
+        # simply offers whichever of these Fedora has, never a row that fails.
+
         dontWrapQtApps = true; # we wrap the python launcher ourselves
         installPhase = ''
           runHook preInstall
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/filer \
             --add-flags /home/lam/nix/apps/filer/main.py \
-            --prefix PATH : ${lib.makeBinPath [ pkgs.glib pkgs.perlPackages.FileMimeInfo pkgs.sshfs ]} \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.glib pkgs.perlPackages.FileMimeInfo pkgs.sshfs pkgs.zip pkgs.p7zip ]} \
             "''${qtWrapperArgs[@]}"
           runHook postInstall
         '';

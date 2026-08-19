@@ -1,6 +1,12 @@
 """videoconv — filer's video context-menu actions.
 
-Two of them, sharing one QProcess/toast harness:
+Four of them, sharing one QProcess/toast harness:
+
+  * **"convert to <format>"** — `convert_formats()`/`convert()`, a plain
+    transcode to a target the person named (mp4/webm/mkv/gif/mp3). No plan or
+    dialog: they picked a format, not a bitrate. Each target is gated on the
+    encoder ffmpeg actually has, so the menu never offers one that would fail.
+
 
   * **"compress to <10MB" / "compress to <4MB"** — the main job: take a video
     the user right-clicked and produce an mp4 next to it that is comfortably
@@ -176,6 +182,107 @@ def _have_nvenc():
 
 
 _have_nvenc.cached = None
+
+
+# ---- "convert to..." — a plain format transcode, the sibling of the squeeze ----
+#
+# The compressor above answers "make this fit an upload limit"; this answers
+# "give me this clip as a <format>". One recipe per target, chosen for a
+# sensible default rather than a knob-farm: the person picked a format, not a
+# bitrate. Adding a target is a row here plus (if it needs one) an encoder name
+# `_encoders()` can check, so a format ffmpeg cannot actually produce is never
+# offered (docs/DESIGN.md 10.4 — no action that silently fails).
+#
+#   enc:   the video encoder whose presence gates the row (None = stream copy,
+#          always available); mp3 gates on its audio encoder instead.
+#   audio: the target IS audio, so a source with no audio track is refused with
+#          a toast at click time (the stripAudio precedent — no menu-time probe).
+CONVERT_FORMATS = [
+    {"id": "mp4",  "label": "mp4 (h.264)", "ext": ".mp4",  "enc": "libx264"},
+    {"id": "webm", "label": "webm (vp9)",  "ext": ".webm", "enc": "libvpx-vp9"},
+    {"id": "mkv",  "label": "mkv (remux)", "ext": ".mkv",  "enc": None},
+    {"id": "gif",  "label": "gif",         "ext": ".gif",  "enc": "gif"},
+    {"id": "mp3",  "label": "mp3 (audio)", "ext": ".mp3",  "enc": "libmp3lame",
+     "audio": True},
+]
+
+
+def _encoders():
+    """The set of encoder names this ffmpeg build actually carries, parsed once
+    from `ffmpeg -encoders`. Empty if ffmpeg is missing or the probe fails — the
+    caller treats that as "can't tell" and offers everything, since a click then
+    fails out loud (a toast), never silently."""
+    if _encoders.cache is None:
+        names = set()
+        try:
+            out = subprocess.run([_tool("ffmpeg"), "-hide_banner", "-encoders"],
+                                 capture_output=True, text=True, timeout=10)
+            for line in out.stdout.splitlines():
+                m = re.match(r"^\s*[A-Z.]{6}\s+(\S+)", line)
+                if m:
+                    names.add(m.group(1))
+        except (OSError, subprocess.SubprocessError):
+            pass
+        _encoders.cache = names
+    return _encoders.cache
+
+
+_encoders.cache = None
+
+
+def convert_formats():
+    """The convert-to targets this machine can actually produce, in menu order.
+    A stream copy (mkv) is always in; an encoded target only when its encoder is
+    present — or, if the probe came back empty (ffmpeg unusable/unknown), all of
+    them, because the failure then reaches the user as a toast."""
+    enc = _encoders()
+    return [{"id": f["id"], "label": f["label"]}
+            for f in CONVERT_FORMATS
+            if f["enc"] is None or not enc or f["enc"] in enc]
+
+
+def convert_out_path(src, fmt):
+    """`clip.mkv` -> `clip.mp4`, next to the source, never clobbering. When the
+    target extension equals the source's (`clip.mp4` -> mp4) the stem is tagged
+    `-conv` so the encode never reads and writes the same file."""
+    spec = next(f for f in CONVERT_FORMATS if f["id"] == fmt)
+    stem, srcext = os.path.splitext(str(src))
+    ext = spec["ext"]
+    base = stem if srcext.lower() != ext else stem + "-conv"
+    cand = base + ext
+    n = 2
+    while os.path.lexists(cand):
+        cand = "%s-%d%s" % (base, n, ext)
+        n += 1
+    return cand
+
+
+def convert_argv(src, dst, fmt):
+    """The ffmpeg command for a convert-to target. `-progress pipe:1` drives the
+    same toast the compressor uses; `-map 0:a:0?` keeps audio when there is any
+    and does not fail when there isn't (the `?` makes the stream optional)."""
+    a = [_tool("ffmpeg"), "-hide_banner", "-nostdin", "-y", "-loglevel", "error",
+         "-progress", "pipe:1", "-nostats", "-i", src]
+    if fmt == "mp4":
+        a += ["-map", "0:v:0", "-map", "0:a:0?", "-c:v", "libx264",
+              "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
+              "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "-f", "mp4"]
+    elif fmt == "webm":
+        a += ["-map", "0:v:0", "-map", "0:a:0?", "-c:v", "libvpx-vp9",
+              "-crf", "32", "-b:v", "0", "-row-mt", "1", "-pix_fmt", "yuv420p",
+              "-c:a", "libopus", "-b:a", "128k", "-f", "webm"]
+    elif fmt == "mkv":
+        # Remux: every stream copied bit-for-bit into matroska, which holds
+        # essentially anything, so this is fast and lossless.
+        a += ["-map", "0", "-c", "copy", "-f", "matroska"]
+    elif fmt == "gif":
+        # Two-pass palette so the gif isn't a 216-colour mess; 12fps/480px is the
+        # usual "shareable clip" size rather than a faithful copy.
+        a += ["-vf", "fps=12,scale=480:-2:flags=lanczos,split[a][b];"
+                     "[a]palettegen[p];[b][p]paletteuse", "-loop", "0", "-f", "gif"]
+    elif fmt == "mp3":
+        a += ["-vn", "-map", "0:a:0", "-c:a", "libmp3lame", "-q:a", "2", "-f", "mp3"]
+    return a + [dst]
 
 
 def _fmt_dur(sec):
@@ -455,6 +562,50 @@ class VideoConv(QObject):
                     persist=True)
         self._spawn(job, build_argv(src, job["dst"], p))
 
+    @Slot(result="QVariant")
+    def convertFormats(self):
+        """The convert-to targets the menu should offer on THIS machine — built
+        as the submenu opens, like Phone.devices(), so it reflects what ffmpeg
+        can actually do here rather than a list frozen at startup."""
+        return convert_formats()
+
+    @Slot(str, str)
+    def convert(self, path, fmt):
+        """"convert to <format>": a plain transcode beside the source. Like
+        stripAudio it is direct (no plan/dialog) and reports through the same
+        toast; a refusal (not a video, unreadable, mp3 of a silent clip, already
+        running) comes back as a toast rather than a silent no-op."""
+        src = str(path)
+        spec = next((f for f in CONVERT_FORMATS if f["id"] == fmt), None)
+        if spec is None:
+            return
+        key = "convert-%s:%s" % (fmt, src)
+        if key in self._jobs:
+            return
+        if not is_video(src):
+            self._toast({}, "can't convert", "not a video file", urgency="normal")
+            return
+        info = probe(src)
+        if info is None:
+            self._toast({}, "can't convert", "no video stream ffmpeg can read",
+                        urgency="normal")
+            return
+        if spec.get("audio") and not info["audio"]:
+            self._toast({}, "can't convert",
+                        "%s has no audio track" % os.path.basename(src),
+                        urgency="normal")
+            return
+        dst = convert_out_path(src, fmt)
+        job = {"kind": "convert", "verb": "converting", "key": key,
+               "src": src, "dst": dst, "pct": -1, "attempt": 1,
+               "nid": None, "err": "",
+               "plan": {"durationSec": info["duration"],
+                        "summary": "to " + spec["label"]}}
+        self._jobs[key] = job
+        self._toast(job, "converting " + os.path.basename(src),
+                    "%s\nto %s" % (self._bar(0), spec["label"]), 0, persist=True)
+        self._spawn(job, convert_argv(src, dst, fmt))
+
     @Slot(str)
     def stripAudio(self, path):
         """"copy without audio": the same video, minus its soundtrack, beside
@@ -546,6 +697,16 @@ class VideoConv(QObject):
         if job["key"] not in self._jobs:      # already finished/failed
             return
         dst = job["dst"]
+        if job["kind"] == "convert":
+            if code == 0 and os.path.exists(dst):
+                self._toast(job, "converted: " + os.path.basename(dst),
+                            "%s\n%s" % (_human(os.path.getsize(dst)),
+                                        job["plan"]["summary"]), 100)
+                self._cleanup(job)
+                self.finished.emit(dst)
+                return
+            self._fail(job, job["err"] or "ffmpeg exited %d" % code)
+            return
         if job["kind"] == "mute":
             if code == 0 and os.path.exists(dst):
                 self._toast(job, "audio stripped: " + os.path.basename(dst),
@@ -605,7 +766,8 @@ class VideoConv(QObject):
                 os.unlink(job["dst"])       # never leave a truncated file behind
         except OSError:
             pass
-        verb = "strip failed" if job.get("kind") == "mute" else "compress failed"
+        verb = {"mute": "strip failed", "convert": "convert failed"}.get(
+            job.get("kind"), "compress failed")
         self._toast(job, verb + ": " + os.path.basename(job["src"]),
                     msg[:200], urgency="critical")
         self._cleanup(job)
