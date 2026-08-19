@@ -130,7 +130,59 @@ let
     ++ (map (t: "${t}=reader.desktop") readerTypes)
     ++ (map (t: "${t}=editor.desktop") editorTypes);
 
+  # ---- the SAME table, answered by KDE's apps, for a Plasma session ---------
+  #
+  # Plasma 6 is a real alternative session here (`sys/dsk/plasma.nix`), and in
+  # it the desktop is KDE's: its global theme, its panel, its apps. His rule,
+  # stated with the theme half: "when the user is in kde plasma [...] and when
+  # in hyprland it switches back to them being what they are now."
+  #
+  # The mechanism is the XDG spec's own, not a switcher: `$desktop-mimeapps.list`
+  # is consulted BEFORE `mimeapps.list` for each entry of XDG_CURRENT_DESKTOP,
+  # lowercased — so `kde-mimeapps.list` answers in a Plasma session and is not
+  # read at all under Hyprland, where XDG_CURRENT_DESKTOP is `Hyprland`. Nothing
+  # runs at login, nothing rewrites anything on a session change, and neither
+  # session can leave the other's defaults behind. `xdg-mime`/`xdg-open`
+  # (check_mimeapps_list), GIO and KIO all implement it.
+  #
+  # Only the types the vendored apps claim are listed: this file is the answer
+  # to "what did WE take", so a Plasma session gives back exactly those and
+  # every other association on the machine is untouched.
+  #
+  # video/* goes to haruna (KDE's own mpv front end, added in
+  # home/pkgs/desktop/kde.nix) and http/html to vivaldi, both his call
+  # 2026-08-18. There is no KDE markdown *reader*, so .md joins the source
+  # types in kate rather than going to okular's md backend.
+  kdeAssoc =
+    (map (t: "${t}=org.kde.dolphin.desktop") filerTypes)
+    ++ (map (t: "${t}=${if lib.hasPrefix "video/" t
+                        then "org.kde.haruna.desktop"
+                        else "org.kde.gwenview.desktop"}") viewerTypes)
+    ++ (map (t: "${t}=org.kde.elisa.desktop") playerTypes)
+    ++ (map (t: "${t}=vivaldi-stable.desktop") surferTypes)
+    ++ (map (t: "${t}=${if t == "application/pdf"
+                        then "org.kde.okular.desktop"
+                        else "org.kde.kate.desktop"}") readerTypes)
+    ++ (map (t: "${t}=org.kde.kate.desktop") editorTypes);
+
   setDefaults = "${pkgs.python3}/bin/python3 ${./mime-files/set-defaults.py}";
+
+  # Which browser a KDE app opens a link with — the one thing that CANNOT be
+  # done by the desktop-prefixed list above, because Plasma reads it from a key
+  # in `kdeglobals` (`[General] BrowserApplication`) rather than from the http
+  # scheme handler, and kdeglobals has no per-session variant. So it is written
+  # at session start, by whichever session started: Hyprland runs this from
+  # `hyprland.lua`'s autostart, Plasma from `~/.config/autostart`. Both are one
+  # idempotent line, and running it in the wrong session is self-correcting.
+  sessionDefaults = pkgs.writeShellScriptBin "desktop-session-defaults" ''
+    set -u
+    case ":$(printf '%s' "''${XDG_CURRENT_DESKTOP:-}" | tr '[:lower:]' '[:upper:]'):" in
+      *:KDE:*) browser=vivaldi-stable.desktop ;;
+      *)       browser=surfer.desktop ;;
+    esac
+    exec ${setDefaults} --file kdeglobals --section General --only-if-exists \
+      "BrowserApplication=$browser"
+  '';
 in
 {
   # A default is only reached if the type is DETECTED. `xdg-open` picks a
@@ -160,18 +212,36 @@ in
   # reader.nix, on both hosts, which is the half that actually reaches him.
   # (`top` gets it for free too, its per-user profile being on the session PATH,
   # so the wrapper prefix is belt-and-braces there rather than a per-host fix.)
-  home.packages = [ pkgs.perlPackages.FileMimeInfo ];
+  home.packages = [ pkgs.perlPackages.FileMimeInfo sessionDefaults ];
+
+  # Plasma's autostart. The Hyprland half is one `hl.exec_cmd` in
+  # `home/prog/hypr-files/hyprland.lua`'s autostart block — Hyprland does not
+  # read ~/.config/autostart, and Plasma does not read hyprland.lua.
+  xdg.configFile."autostart/desktop-session-defaults.desktop".text = ''
+    [Desktop Entry]
+    Type=Application
+    Name=Desktop session defaults
+    Comment=Point KDE's BrowserApplication at this session's browser
+    Exec=${sessionDefaults}/bin/desktop-session-defaults
+    NoDisplay=true
+    X-GNOME-Autostart-enabled=true
+  '';
 
   home.activation.desktopDefaults =
     lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       run ${setDefaults} ${lib.escapeShellArgs assoc}
 
-      # Plasma reads its own key for "the web browser" (kdeglobals
-      # [General] BrowserApplication) instead of the http scheme handler, so a
-      # KDE app would still have opened vivaldi. --only-if-exists keeps this a
-      # no-op on book, which has no kdeglobals of its own.
-      run ${setDefaults} --file kdeglobals --section General --only-if-exists \
-        BrowserApplication=surfer.desktop
+      # The Plasma-session answers to the same types. A separate FILE, not a
+      # separate section: XDG reads `kde-mimeapps.list` first in a KDE session
+      # and never in a Hyprland one (see kdeAssoc above).
+      run ${setDefaults} --file kde-mimeapps.list ${lib.escapeShellArgs kdeAssoc}
+
+      # BrowserApplication is deliberately NOT written here any more: it is
+      # per-session and activation has no session (it runs from a switch, in
+      # whichever one happens to be up, and would then pin the wrong one until
+      # the next login). `desktop-session-defaults` owns it; this call just
+      # makes the current session's answer true immediately after a switch.
+      run ${sessionDefaults}/bin/desktop-session-defaults || true
 
       # mimeapps.list alone is enough to pick the default, but mimeinfo.cache is
       # what populates "Open with…" menus — and nothing else regenerates it for

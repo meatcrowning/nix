@@ -160,6 +160,13 @@ hl.on("hyprland.start", function()
     -- Resolve the current wallpaper (the panel draws it) and recolour the panel,
     -- kitty and this border from it. See ~/.config/scripts/wal-set.sh.
     hl.exec_cmd("$HOME/.config/scripts/wal-set.sh")
+    -- Point KDE's own "the web browser" key (kdeglobals BrowserApplication) at
+    -- surfer for THIS session; the Plasma session's autostart points it at
+    -- vivaldi instead. Everything else that differs between the two sessions is
+    -- decided by a file each reads on its own (kde-mimeapps.list, kdeglobals) —
+    -- this one key has no per-session variant, so it is written at login.
+    -- See home/prog/mime-defaults.nix.
+    hl.exec_cmd("desktop-session-defaults")
     -- Give the systemd user manager this session's env so wal-set.service
     -- (fired by wal-set.path when wall.png changes) can talk to hyprctl,
     -- then make sure that watcher is running.
