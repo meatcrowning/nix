@@ -40,6 +40,7 @@ QML = HERE / "qml"
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402
 from deskstyle import DeskStyle  # noqa: E402
+from kdetheme import theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
 
 import slskapi  # noqa: E402  (beside this file)
 
@@ -159,7 +160,7 @@ def main():
     ctx = engine.rootContext()
 
     settings = Settings()
-    palette = Palette(PANEL_THEME)
+    palette = Palette(theme_source(PANEL_THEME))
     style = DeskStyle()
     titlebar = Titlebar()
     api = slskapi.SlskApi()

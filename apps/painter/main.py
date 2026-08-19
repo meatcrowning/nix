@@ -50,6 +50,7 @@ try:
 except Exception:  # noqa: BLE001 - the titlebar bridge is optional
     VtbClient = None
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
+from kdetheme import theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
 from spellcheck import SpellCheck  # noqa: E402  (pylib; the prompt boxes' spelling)
 # The QBuffer-safe encoder (see its docstring for the SEGV that shape avoids);
 # collage.py already pulls it in, so this costs nothing new.
@@ -2465,7 +2466,7 @@ def main():
     app.setApplicationName("painter")
     app.setOrganizationName("painter")
 
-    palette = Palette(PANEL_THEME)
+    palette = Palette(theme_source(PANEL_THEME))
     style = DeskStyle()
     prefs = Prefs()
     ctl = Painter()

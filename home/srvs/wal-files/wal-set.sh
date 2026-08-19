@@ -271,8 +271,23 @@ fi
 # poke running apps to reload. kwriteconfig6 edits keys surgically, so groups
 # owned elsewhere (KFileDialog Settings from plasma-manager, ColorEffects, etc.)
 # are left untouched.
+#
+# NOT IN A PLASMA SESSION. There kdeglobals is not this desktop's channel into
+# Qt apps, it IS the desktop: the KDE global theme picked in System Settings,
+# which the vendored apps follow too since 2026-08-18 (apps/pylib/kdetheme.py).
+# Rewriting it from the wallpaper would silently replace his colour scheme,
+# widget style and system font the first time a theme was applied — and
+# wal-set.sh is reachable from a Plasma session (apps/pylib/systheme.py, the
+# player's "create systheme"). One gate covers the fonts too:
+# apply-pixel-font.sh is called from inside this block.
 KG="$CONFIG/kdeglobals"
-if command -v kwriteconfig6 >/dev/null 2>&1; then
+PLASMA_SESSION=0
+case ":$(printf '%s' "${XDG_CURRENT_DESKTOP:-}" | tr '[:lower:]' '[:upper:]'):" in
+    *:KDE:*) PLASMA_SESSION=1 ;;
+esac
+if [ "$PLASMA_SESSION" = 1 ]; then
+    echo "wal-set: Plasma session — leaving the KDE global theme alone"
+elif command -v kwriteconfig6 >/dev/null 2>&1; then
     hx() { printf '%d,%d,%d' "0x${1:0:2}" "0x${1:2:2}" "0x${1:4:2}"; }   # "rrggbb" -> "R,G,B"
     kw() { kwriteconfig6 --file "$KG" "$@"; }
     # group, background, foreground — the remaining roles are shared across groups.

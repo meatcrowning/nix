@@ -52,6 +52,7 @@ QML = HERE / "qml"
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 from deskstyle import DeskStyle  # noqa: E402  (the desktop-wide font setting)
+from kdetheme import theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
 from spellcheck import SpellCheck  # noqa: E402  (as-you-type spelling)
 
 import textops  # noqa: E402  (beside this file)
@@ -840,7 +841,7 @@ def main():
     ctx = engine.rootContext()
 
     settings = Settings()
-    palette = Palette(PANEL_THEME)
+    palette = Palette(theme_source(PANEL_THEME))
     style = DeskStyle()
     titlebar = Titlebar()
     files = Files()

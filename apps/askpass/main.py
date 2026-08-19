@@ -56,6 +56,7 @@ try:
     from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
     # pylib; imports PySide6 itself, so it can only fail where PySide6 does.
     from deskstyle import DeskStyle
+    from kdetheme import theme_source   # pylib; the KDE theme in a Plasma session
 except Exception as exc:  # noqa: BLE001 - any import failure at all
     print(f"askpass: cannot load PySide6: {exc}", file=sys.stderr)
     sys.exit(3)
@@ -325,7 +326,7 @@ def main():
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
 
-    palette = Palette(PANEL_THEME)
+    palette = Palette(theme_source(PANEL_THEME))
     style = DeskStyle()
     sudo = Sudo()
     ctx.setContextProperty("WalPalette", palette)

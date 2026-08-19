@@ -198,6 +198,38 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
   `$DESK_SETTINGS` at another JSON file to render at a non-default size without
   touching the user's live settings — that is how the size is verified
   offscreen.
+- **`kdetheme.py`** — **THE session switch. In a Plasma session these apps draw
+  the KDE global theme, not the wallpaper palette**, his call 2026-08-18: Plasma
+  is a real alternative session here (`sys/dsk/plasma.nix`) and in it the look
+  belongs to whatever global theme System Settings holds, which every other Qt
+  app on the box already obeys through `kdeglobals`. An app still drawing the
+  wal palette there is the one window that ignores the theme.
+    - **It changes the SOURCE and nothing else.** Every app's `Palette` already
+      parses `property color <name>: "#rrggbb"` out of a file and watches it;
+      under Plasma this module derives the same twelve tokens from `kdeglobals`
+      and writes them into a generated file of exactly that shape
+      (`~/.cache/deskstyle/kde-Theme.qml`), rewritten whenever the scheme
+      changes. So the per-app change is one call —
+      `Palette(theme_source(PANEL_THEME))` — and no `Theme.qml`, binding or
+      component knows which session it is in. Do it that way for a new app.
+    - `deskstyle.py` asks it for `fontFamily`/`fontSize` (KDE's point size,
+      converted at the screen's own DPI), `smooth`, the motion factor and the
+      scrollbar in that session. The two GEOMETRY keys do not move: border
+      width and corner rounding stay the panel's, because KDE publishes no
+      equivalent and a window that changed shape between sessions would be the
+      surprise.
+    - **`accent` and the status four are contrast-guarded.** §3 makes `accent`
+      body text while KDE's `DecorationFocus` is designed to be seen as a
+      frame, and Oxygen's `ForegroundPositive` (0,109,56) is unreadable on its
+      own window background. Both polarities, since a KDE scheme may be either.
+    - `DESK_SESSION=plasma|hypr` forces the branch and `DESK_KDEGLOBALS` points
+      at another scheme file — that is how the harness renders both looks
+      without logging out. Harness: `apps/pylib/tools/kdetheme-test.py` (needs
+      an app wrapper's python; the bare `python3` here has no PySide6).
+    - The other half of the same rule is `home/prog/mime-defaults.nix`: in a
+      Plasma session the file-type defaults are KDE's apps
+      (`kde-mimeapps.list`), and `wal-set.sh` leaves `kdeglobals` alone there
+      rather than overwriting his colour scheme from the wallpaper.
 - **`glyphs.py`** — `px()`, the apps' half of docs/DESIGN.md §2.3: the characters
   More Perfect DOS VGA lacks, mapped onto ASCII, so text this desktop did not
   author cannot clip the row it is drawn in. It is the twin of the panel's
