@@ -130,6 +130,12 @@
       kdeglobals."KFileDialog Settings"."Sort by" = "Name";
       kdeglobals."KFileDialog Settings"."Sort directories first" = true;
       kwalletrc.Wallet."First Use" = false;
+      # Titlebar buttons, right-hand group: roll up, keep above, minimize,
+      # close. 'L' is the roll-up ("shade") button — the patched kwin puts that
+      # character back in both button tables and implements the roll itself
+      # (kwin-rollup-overlay in flake.nix). Reorder HERE, not in System
+      # Settings: this value is declared, so a switch would undo a drag.
+      kwinrc."org.kde.kdecoration2".ButtonsOnRight = "LFIX";
       kwinrc.Desktops.Number = 1;
       kwinrc.Desktops.Rows = 1;
       kwinrc.Tiling.padding = 4;
