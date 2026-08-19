@@ -55,6 +55,7 @@ QML = HERE / "qml"
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402
 from deskstyle import DeskStyle  # noqa: E402
+from kdetheme import theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
 
 REPO = Path(os.environ.get("NIX_UPGRADABLE_REPO", str(Path.home() / "nix")))
 
@@ -465,7 +466,7 @@ def main():
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
 
-    palette = Palette(PANEL_THEME)
+    palette = Palette(theme_source(PANEL_THEME))
     style = DeskStyle()
     titlebar = Titlebar()
     inputs = Inputs()

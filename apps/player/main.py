@@ -64,6 +64,7 @@ QML = HERE / "qml"
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
+from kdetheme import theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
 from glyphs import Glyphs  # noqa: E402  (pylib; docs/DESIGN.md 2.3 display-site px())
 
 import atomicsave  # noqa: E402  (sibling module; also used by lyrics.py)
@@ -3883,7 +3884,7 @@ def main():
     bridge = Bridge(library, player, lyrics)
     autoscan = AutoScanner(library, app)
     titlebar = Titlebar()
-    palette = Palette(PANEL_THEME)
+    palette = Palette(theme_source(PANEL_THEME))
     style = DeskStyle()
 
     engine = QQmlApplicationEngine()

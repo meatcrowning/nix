@@ -44,6 +44,15 @@ panel has no scrollbar anywhere — so it is a setting that lives in the panel's
 store and is read only by the apps. That is deliberate: settings.json is the one
 channel a Settings-window control has into `apps/`, and a second one would be a
 second thing to keep in sync for no gain.
+
+**In a PLASMA session the store is `kdeglobals` instead**, for the whole of the
+above: family, size, the two motion settings and the scrollbar. That session's
+appearance belongs to the KDE global theme he picked in System Settings, which
+every other Qt app on the box already obeys — an app still drawing the panel's
+pixel font there is the one window that ignores the theme. The switch is
+`kdetheme.is_plasma()` and it is the same switch that moves the palette
+(`kdetheme.py`, which owns the mapping and the reasoning); nothing downstream —
+no `Theme.qml`, no binding, no component — knows which session it is in.
 """
 
 import json
@@ -53,6 +62,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QFileSystemWatcher, QObject, Property, Signal
 from PySide6.QtGui import QFont, QFontMetrics
+
+from kdetheme import is_plasma, kde_font, kde_motion, kdeglobals_path, read_ini
 
 # Written by the panel's SettingsStore (Quickshell.shellDir + "/settings.json").
 SETTINGS_PATH = Path.home() / ".config" / "quickshell" / "settings.json"
@@ -65,6 +76,13 @@ DEFAULT_FONT_SIZE = 15
 MIN_FONT_SIZE = 10
 MAX_FONT_SIZE = 24
 
+# The KDE session's own bounds. A KDE font size is HIS, set in System Settings
+# against KDE's own preview, so it is not clamped to the panel slider's 10..24
+# — only to what is legible at all. (The panel's own range is unchanged; this
+# range applies only when the size came from kdeglobals.)
+KDE_MIN_FONT_SIZE = 6
+KDE_MAX_FONT_SIZE = 64
+
 # Faces that are normal smooth outlines and must be ANTIALIASED, never
 # pixel-snapped (Phenex the hand-authored cursive, and Tahoma the proportional
 # MS TrueType). Twin of the `smooth` flag in home/pkgs/desktop/font.nix
@@ -73,6 +91,14 @@ MAX_FONT_SIZE = 24
 # pixel-snapped). Everything font-rendering branches on `DeskStyle.smooth`:
 # PixelText's renderType/antialiasing, and editorFont's style strategy below.
 SMOOTH_FAMILIES = {"Phenex", "Tahoma"}
+
+# The other side of the same list, and it is needed only for the KDE branch:
+# there the family is whatever System Settings holds, so `smooth` cannot be an
+# allowlist of this desktop's own faces — a KDE font is a normal outline unless
+# it is one of the pixel designs, which stay crisp if he pins one there too.
+PIXEL_FAMILIES = {"More Perfect DOS VGA", "Perfect DOS VGA 437", "Botis 4x6",
+                  "Botis", "CozetteVector", "Cozette", "Terminus",
+                  "xos4 Terminus"}
 
 # Motion, likewise from SettingsStore.qml's inline defaults. The validation is
 # the panel's, not the slider's: `ViewMode.ms()` accepts any finite animSpeed
@@ -122,6 +148,8 @@ class DeskStyle(QObject):
         self._scrollbar = DEFAULT_SCROLLBAR_STYLE
         self._border = 2
         self._rounding = 0
+        self._smooth = self._family in SMOOTH_FAMILIES
+        self._plasma = is_plasma()
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(self._on_change)
         self._watcher.directoryChanged.connect(self._on_change)
@@ -130,6 +158,12 @@ class DeskStyle(QObject):
 
     def _rewatch(self):
         want = [str(self._path.parent), str(self._path)]
+        if self._plasma:
+            # Same file+directory pair, same reason: KDE rewrites kdeglobals by
+            # temp-file-and-rename, so a file-only watch misses every change
+            # System Settings makes.
+            kg = kdeglobals_path()
+            want += [str(kg.parent), str(kg)]
         have = set(self._watcher.files()) | set(self._watcher.directories())
         for p in want:
             if p not in have and os.path.exists(p):
@@ -140,13 +174,20 @@ class DeskStyle(QObject):
         self._load()
 
     def _load(self):
+        # Read ONCE per load, and before the panel's store: in a Plasma session
+        # every type/motion key below is overridden from it, and a half-written
+        # settings.json must not be able to skip that (`{}` there just leaves
+        # the KDE branch on its own defaults).
+        self._ini = read_ini() if self._plasma else {}
         try:
             with open(self._path, encoding="utf-8") as fh:
                 data = json.load(fh)
         except (OSError, ValueError):
-            return  # missing or half-written: keep the last good values
+            data = None
         if not isinstance(data, dict):
-            return
+            if not self._plasma or self._path.exists():
+                return  # half-written (or not our file): keep the last good values
+            data = {}   # no panel store at all, and KDE owns type/motion here
         family = data.get("fontFamily")
         if not isinstance(family, str) or not family.strip():
             family = DEFAULT_FONT_FAMILY
@@ -174,12 +215,53 @@ class DeskStyle(QObject):
         if isinstance(rounding, bool) or not isinstance(rounding, (int, float)):
             rounding = 0
         rounding = max(0, min(20, int(rounding)))
-        now = (family, size, reduce_motion, speed, bar, border, rounding)
+        smooth = family in SMOOTH_FAMILIES
+
+        if self._plasma:
+            # The KDE global theme owns type, motion and the scrollbar in this
+            # session; the two GEOMETRY keys (border width, corner rounding) do
+            # not move — they are his numbers for how this desktop's own
+            # surfaces are framed, KDE publishes no equivalent, and a window
+            # that changed shape between sessions would be the surprise.
+            family, size, smooth = self._kde_type(family, size, smooth)
+            reduce_motion, speed = kde_motion(self._ini)
+            bar = "flat"   # beveled/win31 chrome inside a Breeze window is the
+                           # one thing that would still read as "not themed"
+
+        now = (family, size, reduce_motion, speed, bar, border, rounding, smooth)
         if now != (self._family, self._size, self._reduce, self._speed,
-                   self._scrollbar, self._border, self._rounding):
+                   self._scrollbar, self._border, self._rounding, self._smooth):
             (self._family, self._size, self._reduce, self._speed,
-             self._scrollbar, self._border, self._rounding) = now
+             self._scrollbar, self._border, self._rounding, self._smooth) = now
             self.changed.emit()
+
+    def _kde_type(self, family, size, smooth):
+        """`kdeglobals [General] font=` as (family, PIXEL size, smooth).
+
+        KDE stores a point size and this desktop draws in pixels everywhere
+        (docs/DESIGN.md §2.1), so it is converted at the screen's own logical
+        DPI rather than at an assumed 96 — book is a Retina panel and the two
+        are not the same number there. With no QGuiApplication yet (a harness
+        constructing DeskStyle bare) it falls back to 96.
+        """
+        got = kde_font(self._ini)
+        if not got:
+            return (family, size, smooth)
+        fam, pt, px = got
+        if px:
+            size = px
+        else:
+            dpi = 96.0
+            try:
+                from PySide6.QtGui import QGuiApplication
+                screen = QGuiApplication.primaryScreen()
+                if screen is not None:
+                    dpi = float(screen.logicalDotsPerInch()) or 96.0
+            except Exception:
+                pass
+            size = pt * dpi / 72.0
+        size = max(KDE_MIN_FONT_SIZE, min(KDE_MAX_FONT_SIZE, int(round(size))))
+        return (fam, size, fam not in PIXEL_FAMILIES)
 
     @Property(str, notify=changed)
     def fontFamily(self):
@@ -210,8 +292,12 @@ class DeskStyle(QObject):
         rather than a pixel one. PixelText.qml branches its render path on
         this: pixel faces keep NativeRendering + antialiasing:false +
         full hinting; a smooth face gets antialiased, unhinted rendering —
-        under the pixel pipeline a cursive face is a jagged staircase."""
-        return self._family in SMOOTH_FAMILIES
+        under the pixel pipeline a cursive face is a jagged staircase.
+
+        In a Plasma session the test inverts (see `_kde_type`): the family is
+        whatever System Settings holds, so it is smooth unless it is one of the
+        known pixel designs."""
+        return self._smooth
 
     @Property(QFont, notify=changed)
     def editorFont(self):
@@ -234,7 +320,7 @@ class DeskStyle(QObject):
         hinting visibly kinks the connected joins)."""
         f = QFont(self._family)
         f.setPixelSize(self._size)
-        if self._family in SMOOTH_FAMILIES:
+        if self._smooth:
             f.setHintingPreference(QFont.PreferNoHinting)
         else:
             f.setHintingPreference(QFont.PreferFullHinting)

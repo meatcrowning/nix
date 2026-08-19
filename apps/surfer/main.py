@@ -68,6 +68,7 @@ ON_AIR = os.path.realpath(sys.executable).startswith("/usr/")
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
+from kdetheme import theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
 from glyphs import Glyphs  # noqa: E402  (pylib; docs/DESIGN.md 2.3 display-site px())
 from kinetic import (WHEEL_GAIN, QML_WHEEL_GAIN,  # noqa: E402
                      is_wheel_detent as _is_wheel_detent)
@@ -4803,7 +4804,7 @@ def main():
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
 
-    palette = Palette(PANEL_THEME)
+    palette = Palette(theme_source(PANEL_THEME))
     style = DeskStyle()
     titlebar = Titlebar()
     clip = Clip()

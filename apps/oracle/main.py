@@ -47,6 +47,7 @@ QML = HERE / "qml"
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
+from kdetheme import theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
 
 #: The local ollama daemon. Loopback-pinned like everything else that speaks to
 #: a local backend here — never a new listener (root AGENTS.md → the tailnet).
@@ -2979,7 +2980,7 @@ def main():
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
 
-    palette = Palette(PANEL_THEME)
+    palette = Palette(theme_source(PANEL_THEME))
     style = DeskStyle()
     titlebar = Titlebar()
     ollama = Ollama()

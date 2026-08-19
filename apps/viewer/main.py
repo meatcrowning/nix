@@ -61,6 +61,7 @@ sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient, close_animated  # noqa: E402  (needs the path insert above)
 from handoff import Listener, send as handoff_send  # noqa: E402  (pylib; the running-app socket)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
+from kdetheme import theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
 from glyphs import px  # noqa: E402  (pylib; docs/DESIGN.md 2.3 - map at INGEST)
 
 # Same set filer classifies as images, so anything filer shows a thumbnail for
@@ -609,7 +610,7 @@ def main():
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
 
-    palette = Palette(PANEL_THEME)
+    palette = Palette(theme_source(PANEL_THEME))
     style = DeskStyle()
     titlebar = Titlebar()
     files = Files()
