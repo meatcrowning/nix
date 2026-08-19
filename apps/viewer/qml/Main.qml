@@ -399,27 +399,33 @@ Window {
         const one = panes.count > 1 ? 0 : 2;
         const full = panes.count < paneMax ? 0 : 2;
         const split = [
-            { id: "addpane",   label: "sp", state: full, tip: "split: add a pane" },
-            { id: "closepane", label: "xp", state: one,  tip: "close this pane" },
+            // `menu:` is the Plasma session's half of this array — the
+            // menubar qmlcommon/DeskMenuBar.qml draws where there is no hyprvtb
+            // to draw this column. Inert on the wire (vtbclient.py reads
+            // id/label/state/tip and ignores the rest).
+            { id: "addpane",   label: "sp", state: full, tip: "split: add a pane",
+              menu: "view", menuSep: true },
+            { id: "closepane", label: "xp", state: one,  tip: "close this pane",
+              menu: "view" },
         ];
         if (current && current.isVideo) {
             return [
                 { id: "playpause", label: current.videoPlaying ? "||" : ">", state: 0,
-                  tip: current.videoPlaying ? "pause" : "play" },
-                { id: "prev",  label: "<<", state: multi, tip: "previous" },
-                { id: "next",  label: ">>", state: multi, tip: "next" },
+                  tip: current.videoPlaying ? "pause" : "play", menu: "media" },
+                { id: "prev",  label: "<<", state: multi, tip: "previous", menu: "go" },
+                { id: "next",  label: ">>", state: multi, tip: "next", menu: "go" },
                 // Lit means muted — an active toggle inverts (docs/DESIGN.md
                 // §12.1). Only on a video: a still has nothing to silence.
                 { id: "mute",  label: "mu", state: win.muted ? 1 : 0,
-                  tip: win.muted ? "unmute" : "mute" },
+                  tip: win.muted ? "unmute" : "mute", menu: "media" },
             ].concat(split);
         }
         return [
-            { id: "prev",    label: "<<",  state: multi, tip: "previous image" },
-            { id: "next",    label: ">>",  state: multi, tip: "next image" },
-            { id: "zoomout", label: "−",   state: 0,     tip: "zoom out" },
-            { id: "zoomin",  label: "+",   state: 0,     tip: "zoom in" },
-            { id: "fit",     label: "fp",  state: 0,     tip: "fit to pane" },
+            { id: "prev",    label: "<<",  state: multi, tip: "previous image", menu: "go" },
+            { id: "next",    label: ">>",  state: multi, tip: "next image",     menu: "go" },
+            { id: "zoomout", label: "−",   state: 0,     tip: "zoom out",       menu: "view" },
+            { id: "zoomin",  label: "+",   state: 0,     tip: "zoom in",        menu: "view" },
+            { id: "fit",     label: "fp",  state: 0,     tip: "fit to pane",    menu: "view" },
         ].concat(split);
     }
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
@@ -482,21 +488,25 @@ Window {
         win.pushPlaybar();
     }
 
+    // ONE handler, TWO chromes: the hyprvtb titlebar column clicks it, and in a
+    // Plasma session `menuBar` does (qmlcommon/DeskMenuBar.qml). Same ids.
+    function tbAction(id) {
+        switch (id) {
+        case "prev":      win.prev();                    break;
+        case "next":      win.next();                    break;
+        case "playpause": if (win.current) win.current.togglePlay();   break;
+        case "mute":      win.toggleMuted();             break;
+        case "zoomout":   if (win.current) win.current.zoomBy(0.8);    break;
+        case "zoomin":    if (win.current) win.current.zoomBy(1.25);   break;
+        case "fit":       if (win.current) win.current.fit();          break;
+        case "addpane":   win.addPane();                 break;
+        case "closepane": win.closePane(win.focusPane);  break;
+        }
+    }
+
     Connections {
         target: Titlebar
-        function onClicked(id) {
-            switch (id) {
-            case "prev":      win.prev();                    break;
-            case "next":      win.next();                    break;
-            case "playpause": if (win.current) win.current.togglePlay();   break;
-            case "mute":      win.toggleMuted();             break;
-            case "zoomout":   if (win.current) win.current.zoomBy(0.8);    break;
-            case "zoomin":    if (win.current) win.current.zoomBy(1.25);   break;
-            case "fit":       if (win.current) win.current.fit();          break;
-            case "addpane":   win.addPane();                 break;
-            case "closepane": win.closePane(win.focusPane);  break;
-            }
-        }
+        function onClicked(id) { win.tbAction(id); }
         // scrub bar dragged/scrolled in the titlebar → seek the focused pane
         function onSeek(frac) { if (win.current) win.current.seekFraction(frac); }
     }
@@ -538,9 +548,21 @@ Window {
 
     // The one item that holds the window's focus, so the keys have exactly one
     // owner however many panes there are.
+    // The menubar the Plasma session gets in place of the titlebar column;
+    // 0-height and invisible in the Hyprland one, so `stage` fills the window
+    // exactly as it always did.
+    DeskMenuBar {
+        id: menuBar
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        buttons: win.tbButtons
+        menuOrder: ["go", "media", "view"]
+        onTriggered: (id) => win.tbAction(id)
+    }
+
     Item {
         id: stage
-        anchors.fill: parent
+        anchors { top: menuBar.bottom; left: parent.left
+                  right: parent.right; bottom: parent.bottom }
         focus: true
 
         // Zoom: +/- and 0 (fit), with or without Ctrl — Ctrl+= and Ctrl+- are

@@ -226,6 +226,10 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
       at another scheme file — that is how the harness renders both looks
       without logging out. Harness: `apps/pylib/tools/kdetheme-test.py` (needs
       an app wrapper's python; the bare `python3` here has no PySide6).
+    - **`is_plasma()` is also the menubar's switch**, published to QML as
+      `DeskStyle.plasma`: with no hyprvtb in that session the apps' titlebar
+      button column is redrawn as a menubar (`qmlcommon/DeskMenuBar.qml`,
+      below).
     - The other half of the same rule is `home/prog/mime-defaults.nix`: in a
       Plasma session the file-type defaults are KDE's apps
       (`kde-mimeapps.list`), and `wal-set.sh` leaves `kdeglobals` alone there
@@ -476,12 +480,17 @@ characters anywhere**. goetia's inbox is a separate decision; see
 
 ### `CtxMenu.qml` — a menu row acts on a box that still has the keyboard
 
-Not in `qmlcommon/` (it needs `PixelText`, which a shared component cannot
-reach): filer, player, reader, editor, board, painter and viewer each hold a
-**verbatim copy**, and surfer holds the ancestor as `ContextMenu.qml`. Retune
-all eight or none. `SelectButton.qml` — the dropdown face every enum pick wears
-(docs/DESIGN.md §7.2) — is under the same rule: player and filer each hold a
-verbatim copy.
+Not in `qmlcommon/`: filer, player, reader, editor, board, painter and viewer
+each hold a **verbatim copy**, and surfer holds the ancestor as
+`ContextMenu.qml`. Retune all eight or none. `SelectButton.qml` — the dropdown
+face every enum pick wears (docs/DESIGN.md §7.2) — is under the same rule:
+player and filer each hold a verbatim copy.
+
+The reason given here for that used to be *"it needs `PixelText`, which a shared
+component cannot reach"*, and **that half is no longer true**:
+`qmlcommon/PixelText.qml` exists since `DeskMenuBar` needed the same type
+(below). Folding these eight copies into one is now a possible job, not an
+impossible one — it is simply not done, and doing it is a change of its own.
 
 **Opening the menu takes the active focus** — that is how Escape and the
 outside-click scrim reach its sink — so it remembers the item it took the focus
@@ -500,6 +509,70 @@ text drawn selected and Backspace doing nothing:
 - **`forceActiveFocus()` on the right-press**, in the same MouseArea that raises
   the menu. A right-click is how a box that was never clicked into gets a menu,
   and without this the keyboard is handed back to wherever it actually was.
+
+### `DeskMenuBar.qml` — the inner titlebar, as a menubar, under Plasma
+
+**In a Plasma session an app's titlebar button column comes back as a menubar
+across the top of its window.** There is no hyprvtb in that session, so
+`Titlebar.setButtons` reaches nothing and every verb on that column — filer's
+file operations, player's transport, surfer's tabs — is simply absent. It is the
+same call `kdetheme.py` already makes for the palette (the session owns the look
+and its conventions), carried from colour to chrome.
+
+Wiring an app is three things, and the ninth app should look exactly like the
+other eight:
+
+```qml
+DeskMenuBar {
+    id: menuBar
+    anchors { top: parent.top; left: parent.left; right: parent.right }
+    buttons: win.tbButtons                 // the SAME array the titlebar gets
+    menuOrder: ["file", "edit", "go", "view"]
+    onTriggered: (id) => win.tbAction(id)
+}
+```
+
+1. **`tbButtons` gains a `menu:` on each entry** — the top-level menu it belongs
+   to. `menuSep: true` asks for a divider above an entry *in the menu only*
+   (filer's column carries no `"-"` spacers at all, and `move to trash` still has
+   to sit behind one — §10.3). Both are **inert on the wire**: `vtbclient.py`
+   reads `id/label/state/tip/drag/bottom` and ignores everything else, so
+   annotating the array costs the titlebar nothing. An entry with no `menu:`
+   lands in `defaultMenu`; `menuOrder` names the bar's left-to-right order,
+   which is not the column's order.
+2. **The click handler becomes a function**, `win.tbAction(id)`, called both by
+   `Connections { target: Titlebar }` and by the menubar. ONE switch, two
+   chromes — the point being that the two can never drift apart, since both are
+   driven by the same ids and the same `state`.
+3. **The window's content anchors to `menuBar.bottom`** instead of to the top
+   (and anything positioned with raw `y`/`height` off the window — filer's and
+   painter's panes, board's find bar, surfer's permission bar — offsets by
+   `menuBar.height`). Outside a Plasma session that height is **0** and the bar
+   is invisible, so the Hyprland layout is byte-for-byte what it was.
+
+A row's label is the button's **tooltip** ("sort by name"), since the
+two-character cell is a titlebar affordance and a menu is where the full verb
+belongs; `state` 1 lights the row (a `*` in a reserved gutter, `accent` text) and
+`state` 2 greys it rather than dropping it. The look is §7.2's menu spec,
+unchanged.
+
+Two traps it already paid for, both measured in `pylib/tools/menubar-test.py`:
+the dropdown is **re-parented to the top of the item tree**, because an item
+outside its parent's bounds renders but never receives a click — a popup hung
+off a 23px bar is visible and dead; and the row's `onClicked` calls
+`root.choose(id)` rather than closing and emitting inline, because closing
+destroys the delegate that is mid-click and the rest of that handler is then
+abandoned **silently**.
+
+The session flag is `DeskStyle.plasma` (from `kdetheme.is_plasma()`), so
+`DESK_SESSION=plasma|hypr` moves the whole thing for a harness. **Any harness
+that asserts window-relative geometry should pin it** — `filer/tools/split-test.py`
+asserts full-window panes and needs `DESK_SESSION=hypr` when it is run from
+inside a Plasma session.
+
+`qmlcommon/PixelText.qml` exists for this component: a file component here
+cannot reach an app's own copy. It is byte-identical to the eight app copies —
+retune all of them together (docs/DESIGN.md §2.2).
 
 ### `VScroll.qml` — the one scrollbar
 

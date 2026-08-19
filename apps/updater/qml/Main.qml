@@ -66,17 +66,20 @@ Window {
     }
 
     // ---- hyprvtb titlebar: updater's whole chrome ----
+    // `menu:` is the Plasma session's half of this array — the menubar
+    // qmlcommon/DeskMenuBar.qml draws where there is no hyprvtb to draw this
+    // column. Inert on the wire (vtbclient.py reads id/label/state/tip).
     readonly property var tbButtons: [
         { id: "check",  label: "ck", state: 0,
-          tip: "check for updates (read-only, no build)" },
+          tip: "check for updates (read-only, no build)", menu: "flake" },
         { id: "checkf", label: "c+", state: 0,
-          tip: "full check: build closures and diff (slow)" },
+          tip: "full check: build closures and diff (slow)", menu: "flake" },
         "-",
         { id: "all",    label: "up", state: 0,
-          tip: "update every non-pinned input, then rebuild" },
+          tip: "update every non-pinned input, then rebuild", menu: "flake" },
         "-",
         { id: "stop",   label: "x",  state: Runner.busy ? 0 : 2,
-          tip: "stop the running job" },
+          tip: "stop the running job", menu: "flake" },
     ]
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
 
@@ -85,16 +88,20 @@ Window {
                     : (status !== "" ? status : "idle")
     onFooterStrChanged: Titlebar.setFooter(footerStr)
 
+    // ONE handler, TWO chromes: the hyprvtb titlebar column clicks it, and in a
+    // Plasma session `menuBar` does (qmlcommon/DeskMenuBar.qml). Same ids.
+    function tbAction(id) {
+        switch (id) {
+        case "check":  if (!Runner.busy) Runner.check(false); break;
+        case "checkf": if (!Runner.busy) Runner.check(true);  break;
+        case "all":    win.askUpdate(Inputs.nonPinnedNames()); break;
+        case "stop":   Runner.stop(); break;
+        }
+    }
+
     Connections {
         target: Titlebar
-        function onClicked(id) {
-            switch (id) {
-            case "check":  if (!Runner.busy) Runner.check(false); break;
-            case "checkf": if (!Runner.busy) Runner.check(true);  break;
-            case "all":    win.askUpdate(Inputs.nonPinnedNames()); break;
-            case "stop":   Runner.stop(); break;
-            }
-        }
+        function onClicked(id) { win.tbAction(id); }
     }
 
     // Per-input package deltas, cached by input name: the parsed
@@ -182,9 +189,19 @@ Window {
         }
     }
 
+    // The menubar the Plasma session gets in place of the titlebar column;
+    // 0-height and invisible in the Hyprland one.
+    DeskMenuBar {
+        id: menuBar
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        buttons: win.tbButtons
+        onTriggered: (id) => win.tbAction(id)
+    }
+
     // ---- layout: inputs | log ----
     Row {
-        anchors.fill: parent
+        anchors { top: menuBar.bottom; left: parent.left
+                  right: parent.right; bottom: parent.bottom }
         anchors.margins: Theme.gap
         spacing: Theme.gap
 

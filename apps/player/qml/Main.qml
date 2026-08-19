@@ -202,24 +202,36 @@ Window {
         const favState = (cur && cur.id !== undefined) ? (cur.favorite ? 1 : 0) : 2;
         const sortLabel = sortMode === "orig_year" ? "yr" : (sortMode === "artist" ? "ar" : "al");
         const sortTip = "sort: " + (sortMode === "orig_year" ? "year" : sortMode) + " (click to cycle)";
+        // `menu:` is the Plasma session's half of this array — the menubar
+        // qmlcommon/DeskMenuBar.qml draws where there is no hyprvtb to draw
+        // this column. Inert on the wire (vtbclient.py reads id/label/state/
+        // tip/bottom).
         return [
-            { id: "prev",      label: "<<", state: has, tip: "previous" },
+            { id: "prev",      label: "<<", state: has, tip: "previous", menu: "playback" },
             { id: "playpause", label: Player.playing ? "||" : ">", state: has,
-              tip: Player.playing ? "pause" : "play" },
-            { id: "next",      label: ">>", state: has, tip: "next" },
+              tip: Player.playing ? "pause" : "play", menu: "playback" },
+            { id: "next",      label: ">>", state: has, tip: "next", menu: "playback" },
             // shuffle sits RIGHT of repeat now; this slot is where it used to be.
-            { id: "favorite",  label: "♥",  state: favState, tip: "favourite" },
+            { id: "favorite",  label: "♥",  state: favState, tip: "favourite",
+              menu: "playback", menuSep: true },
             { id: "loop",      label: Player.loop === 1 ? "1" : "o", state: Player.loop > 0 ? 1 : 0,
-              tip: Player.loop === 1 ? "repeat track" : (Player.loop === 2 ? "repeat all" : "repeat") },
-            { id: "shuffle",   label: "*",  state: Player.shuffle ? 1 : 0, tip: "shuffle" },
+              tip: Player.loop === 1 ? "repeat track" : (Player.loop === 2 ? "repeat all" : "repeat"),
+              menu: "playback" },
+            { id: "shuffle",   label: "*",  state: Player.shuffle ? 1 : 0, tip: "shuffle",
+              menu: "playback" },
             "-",
-            { id: "albums",    label: "a", state: view === "albums" ? 1 : 0, tip: "albums" },
-            { id: "playlists", label: "p", state: view === "playlists" ? 1 : 0, tip: "playlists" },
-            { id: "now",       label: "n", state: view === "now" ? 1 : 0, tip: "now playing" },
+            { id: "albums",    label: "a", state: view === "albums" ? 1 : 0, tip: "albums",
+              menu: "view" },
+            { id: "playlists", label: "p", state: view === "playlists" ? 1 : 0, tip: "playlists",
+              menu: "view" },
+            { id: "now",       label: "n", state: view === "now" ? 1 : 0, tip: "now playing",
+              menu: "view" },
             "-",
-            { id: "sort",      label: sortLabel, state: 0, tip: sortTip },
-            { id: "search",    label: "fs", state: win.searchOpen ? 1 : 0, tip: "find (Ctrl+F)" },
-            { id: "settings",  label: "st", state: win.settingsOpen ? 1 : 0, tip: "settings", bottom: true },
+            { id: "sort",      label: sortLabel, state: 0, tip: sortTip, menu: "view" },
+            { id: "search",    label: "fs", state: win.searchOpen ? 1 : 0, tip: "find (Ctrl+F)",
+              menu: "view" },
+            { id: "settings",  label: "st", state: win.settingsOpen ? 1 : 0, tip: "settings",
+              bottom: true, menu: "settings" },
         ];
     }
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
@@ -268,33 +280,49 @@ Window {
         Titlebar.setFooter("");
     }
 
+    // ONE handler, TWO chromes: the hyprvtb titlebar column clicks it, and in a
+    // Plasma session `menuBar` does (qmlcommon/DeskMenuBar.qml). Same ids.
+    function tbAction(id) {
+        switch (id) {
+        case "prev":      Player.previous();                  break;
+        case "playpause": Player.toggle();                    break;
+        case "next":      Player.next();                      break;
+        case "shuffle":   Player.setShuffle(!Player.shuffle); break;
+        case "loop":      Player.cycleLoop();                 break;
+        case "favorite":  if (Player.current && Player.current.id !== undefined)
+                            Library.setFavorite(Player.current.id, !Player.current.favorite);
+                          break;
+        case "albums":    win.setView("albums");              break;
+        case "playlists": win.setView("playlists");           break;
+        case "now":       win.setView("now");                 break;
+        case "sort":      win.cycleSort();                    break;
+        case "search":    win.searchOpen ? win.closeSearch() : win.openSearch(); break;
+        case "settings":  win.settingsOpen = !win.settingsOpen; break;
+        }
+    }
+
     Connections {
         target: Titlebar
-        function onClicked(id) {
-            switch (id) {
-            case "prev":      Player.previous();                  break;
-            case "playpause": Player.toggle();                    break;
-            case "next":      Player.next();                      break;
-            case "shuffle":   Player.setShuffle(!Player.shuffle); break;
-            case "loop":      Player.cycleLoop();                 break;
-            case "favorite":  if (Player.current && Player.current.id !== undefined)
-                                Library.setFavorite(Player.current.id, !Player.current.favorite);
-                              break;
-            case "albums":    win.setView("albums");              break;
-            case "playlists": win.setView("playlists");           break;
-            case "now":       win.setView("now");                 break;
-            case "sort":      win.cycleSort();                    break;
-            case "search":    win.searchOpen ? win.closeSearch() : win.openSearch(); break;
-            case "settings":  win.settingsOpen = !win.settingsOpen; break;
-            }
-        }
+        function onClicked(id) { win.tbAction(id); }
         function onSeek(frac) { Player.seekFrac(frac); }
     }
 
-    // ---- content views (full window — chrome is all titlebar) ----
+    // The menubar the Plasma session gets in place of the titlebar column;
+    // 0-height and invisible in the Hyprland one, where the chrome is all
+    // titlebar.
+    DeskMenuBar {
+        id: menuBar
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        buttons: win.tbButtons
+        menuOrder: ["playback", "view", "settings"]
+        onTriggered: (id) => win.tbAction(id)
+    }
+
+    // ---- content views (the rest of the window) ----
     Item {
         id: content
-        anchors.fill: parent
+        anchors { top: menuBar.bottom; left: parent.left
+                  right: parent.right; bottom: parent.bottom }
 
         AlbumGrid {
             objectName: "albumGrid"
@@ -334,7 +362,7 @@ Window {
 
     SearchOverlay {
         anchors.fill: parent
-        anchors.topMargin: 36   // clear the slide-out bar
+        anchors.topMargin: menuBar.height + 36   // clear the menubar and the slide-out bar
         visible: win.searching
         z: 40
         query: searchInput.text
@@ -358,7 +386,7 @@ Window {
     // ---- search bar: slides in from the right (titlebar) edge ----
     Rectangle {
         id: searchBar
-        anchors.top: parent.top
+        anchors.top: menuBar.bottom
         anchors.topMargin: 8
         anchors.right: parent.right
         anchors.rightMargin: win.searchOpen ? 8 : -(width + 4)
@@ -406,7 +434,8 @@ Window {
 
     // ---- settings drawer, slid out by the bottom "st" titlebar button ----
     SettingsPanel {
-        anchors.fill: parent
+        anchors { top: menuBar.bottom; left: parent.left
+                  right: parent.right; bottom: parent.bottom }
         z: 70
         open: win.settingsOpen
         columns: win.albumCols
