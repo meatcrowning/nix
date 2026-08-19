@@ -115,10 +115,23 @@ in
       fsType = "ext4";
       options = [ "nofail" "x-systemd.device-timeout=5s" "nosuid" "nodev" ];
     };
+    # The 4.5T image-library drive (USB WD Elements; the second of the two,
+    # the near-empty one — bak is the other). Previously udisks-mounted as root
+    # at a UUID path; declared here so it is present from boot and usable by lam
+    # as the canonical cold image archive. Promoted 2026-08-18.
+    "/home/lam/drives/img" = {
+      device = "/dev/disk/by-uuid/9eff0f0c-d209-4cae-b59d-140ed3b1cf18";
+      fsType = "btrfs";
+      options = [ "nofail" "x-systemd.device-timeout=10s" "nosuid" "nodev"
+                  "subvolid=5" "discard=async" ];
+    };
   };
 
   # own the parent dir so lam can traverse into the mounts
-  systemd.tmpfiles.rules = [ "d /home/lam/drives 0755 lam users - -" ];
+  systemd.tmpfiles.rules = [
+    "d /home/lam/drives 0755 lam users - -"
+    "d /home/lam/drives/img 0755 lam users - -"
+  ];
 
   # SMART for the disk-hover popup. udisks2 could expose this over D-Bus but
   # the CLI is painful; a NOPASSWD rule is the simple path (quickshell runs as
