@@ -24,7 +24,10 @@
 // skipped rather than shrunk to nothing.
 //
 // The Hyprland session has the real thing (hyprvtb's `rollup`, the `>>`
-// titlebar button, Meta+R) — same key here on purpose.
+// titlebar button, Meta+R). Meta+R is NOT free here — it is a recording
+// hotkey — so this one is Meta+Shift+Up, and the authoritative binding is
+// written by home/plasma.nix; the default below only applies the first time
+// KWin ever sees the script.
 
 // Below this, the "titlebar" we would leave on screen is not a titlebar.
 const MIN_BAR = 4;
@@ -98,4 +101,4 @@ function watch(w) {
 workspace.windowAdded.connect(watch);
 workspace.windowList().forEach(watch);
 
-registerShortcut("RollUpWindow", "Roll Up Window (Shade)", "Meta+R", toggleRollup);
+registerShortcut("RollUpWindow", "Roll Up Window (Shade)", "Meta+Shift+Up", toggleRollup);

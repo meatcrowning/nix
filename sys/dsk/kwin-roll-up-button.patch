@@ -1,0 +1,126 @@
+diff -ur kwin-orig/src/decorations/decoratedwindow.cpp kwin-6.7.4/src/decorations/decoratedwindow.cpp
+--- a/src/decorations/decoratedwindow.cpp	2026-08-18 22:51:42.757391812 -0800
++++ b/src/decorations/decoratedwindow.cpp	2026-08-18 22:55:51.843635562 -0800
+@@ -100,7 +100,8 @@
+ 
+ bool DecoratedWindowImpl::isShadeable() const
+ {
+-    return false;
++    // Anything the user can resize can be rolled up into its titlebar.
++    return m_window->isResizable();
+ }
+ 
+ #define DELEGATE(type, name, clientName)   \
+@@ -129,7 +130,7 @@
+ 
+ bool DecoratedWindowImpl::isShaded() const
+ {
+-    return false;
++    return m_shaded;
+ }
+ 
+ #define DELEGATE(type, name, clientName)   \
+@@ -146,6 +147,32 @@
+ 
+ void DecoratedWindowImpl::requestToggleShade()
+ {
++    if (m_window->isDeleted() || !m_window->isResizable()) {
++        return;
++    }
++
++    if (!m_shaded) {
++        // Everything but the decoration's top border rolls away. A window with
++        // no top border (client-side decorations) has nothing to roll into.
++        const qreal bar = m_window->clientGeometry().y() - m_window->frameGeometry().y();
++        if (bar < 1) {
++            return;
++        }
++        m_shadeRestoreHeight = m_window->frameGeometry().height();
++        m_shaded = true;
++        // Tell the decoration first: it drops its bottom border while shaded,
++        // so the height computed below is the whole of what is left.
++        Q_EMIT decoratedWindow()->shadedChanged(true);
++        RectF geometry = m_window->frameGeometry();
++        geometry.setHeight(bar);
++        m_window->moveResize(geometry);
++    } else {
++        m_shaded = false;
++        Q_EMIT decoratedWindow()->shadedChanged(false);
++        RectF geometry = m_window->frameGeometry();
++        geometry.setHeight(m_shadeRestoreHeight);
++        m_window->moveResize(geometry);
++    }
+ }
+ 
+ #define DELEGATE(name, op)                                                \
+diff -ur kwin-orig/src/decorations/decoratedwindow.h kwin-6.7.4/src/decorations/decoratedwindow.h
+--- a/src/decorations/decoratedwindow.h	2026-08-18 22:51:42.757402102 -0800
++++ b/src/decorations/decoratedwindow.h	2026-08-18 22:52:03.132447391 -0800
+@@ -103,6 +103,12 @@
+     QTimer m_toolTipWakeUp;
+     QDeadlineTimer m_toolTipFallAsleep;
+     bool m_toolTipShowing = false;
++
++    // Roll-up ("shade") state. Upstream removed shading from Window entirely,
++    // so the decoration bridge keeps it: the frame is resized down to the
++    // titlebar and the height to restore is remembered here.
++    bool m_shaded = false;
++    qreal m_shadeRestoreHeight = 0;
+ };
+ 
+ }
+diff -ur kwin-orig/src/decorations/settings.cpp kwin-6.7.4/src/decorations/settings.cpp
+--- a/src/decorations/settings.cpp	2026-08-18 22:51:42.757455392 -0800
++++ b/src/decorations/settings.cpp	2026-08-18 22:52:03.132744883 -0800
+@@ -78,6 +78,7 @@
+     s_buttonNames[KDecoration3::DecorationButtonType::KeepAbove] = QChar('F');
+     s_buttonNames[KDecoration3::DecorationButtonType::KeepBelow] = QChar('B');
+     s_buttonNames[KDecoration3::DecorationButtonType::ExcludeFromCapture] = QChar('E');
++    s_buttonNames[KDecoration3::DecorationButtonType::Shade] = QChar('L');
+     s_buttonNames[KDecoration3::DecorationButtonType::Spacer] = QChar('_');
+ }
+ 
+diff -ur kwin-orig/src/kcms/decoration/declarative-plugin/buttonsmodel.cpp kwin-6.7.4/src/kcms/decoration/declarative-plugin/buttonsmodel.cpp
+--- a/src/kcms/decoration/declarative-plugin/buttonsmodel.cpp	2026-08-18 22:51:42.758466981 -0800
++++ b/src/kcms/decoration/declarative-plugin/buttonsmodel.cpp	2026-08-18 22:52:03.132881304 -0800
+@@ -33,6 +33,7 @@
+                        DecorationButtonType::KeepBelow,
+                        DecorationButtonType::KeepAbove,
+                        DecorationButtonType::ExcludeFromCapture,
++                       DecorationButtonType::Shade,
+                        DecorationButtonType::Spacer,
+                    }),
+                    parent)
+@@ -72,6 +73,8 @@
+         return i18n("Keep above other windows");
+     case DecorationButtonType::ExcludeFromCapture:
+         return i18n("Hide from screenshots and screen recordings");
++    case DecorationButtonType::Shade:
++        return i18n("Roll up window");
+     case DecorationButtonType::Spacer:
+         return i18n("Spacer");
+     default:
+diff -ur kwin-orig/src/kcms/decoration/declarative-plugin/previewsettings.cpp kwin-6.7.4/src/kcms/decoration/declarative-plugin/previewsettings.cpp
+--- a/src/kcms/decoration/declarative-plugin/previewsettings.cpp	2026-08-18 22:51:42.758550541 -0800
++++ b/src/kcms/decoration/declarative-plugin/previewsettings.cpp	2026-08-18 22:52:03.132912064 -0800
+@@ -76,7 +76,8 @@
+                                                                        DecorationButtonType::ContextHelp,
+                                                                        DecorationButtonType::KeepBelow,
+                                                                        DecorationButtonType::KeepAbove,
+-                                                                       DecorationButtonType::ExcludeFromCapture}),
++                                                                       DecorationButtonType::ExcludeFromCapture,
++                                                                       DecorationButtonType::Shade}),
+                                           this))
+     , m_borderSizes(new BorderSizesModel(this))
+     , m_borderSize(int(BorderSize::Normal))
+diff -ur kwin-orig/src/kcms/decoration/utils.cpp kwin-6.7.4/src/kcms/decoration/utils.cpp
+--- a/src/kcms/decoration/utils.cpp	2026-08-18 22:51:42.758679272 -0800
++++ b/src/kcms/decoration/utils.cpp	2026-08-18 22:52:03.132773723 -0800
+@@ -44,6 +44,7 @@
+     {KDecoration3::DecorationButtonType::KeepAbove, QChar('F')},
+     {KDecoration3::DecorationButtonType::KeepBelow, QChar('B')},
+     {KDecoration3::DecorationButtonType::ExcludeFromCapture, QChar('E')},
++    {KDecoration3::DecorationButtonType::Shade, QChar('L')},
+     {KDecoration3::DecorationButtonType::Spacer, QChar('_')},
+ };
+ 
