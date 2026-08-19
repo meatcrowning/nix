@@ -88,6 +88,20 @@ Item {
     readonly property int artColMin: 420
     readonly property bool sideArt: width >= height * 0.6 + artColMin
 
+    // IN A PLASMA SESSION THE COVER IS NEVER CROPPED. His call, 2026-08-18 —
+    // and it is a straight trade, not a refinement of the reasoning above: the
+    // edge-to-edge fill (docs/DESIGN.md §5.1, and the whole row-vs-column
+    // argument overhead) buys a cover with no letterbox at the price of a band
+    // through the middle of the art, and in that session he wants the art. So
+    // the picture is FITTED inside whatever region `artRow` is, centred, with
+    // the shortfall showing `artBox`'s own `bgAlt` — the same surface the row
+    // already draws behind a track with no art at all.
+    //
+    // The Hyprland session is untouched (and keeps the crop), which is why this
+    // is a property and not an edit to the fillMode line.
+    readonly property bool plasma: (typeof DeskStyle !== "undefined" && DeskStyle)
+                                   ? DeskStyle.plasma === true : false
+
     // ---- cover art: the top row, or the left column --------------------------
     Item {
         id: artRow
@@ -111,7 +125,9 @@ Item {
             // Edge to edge: the cover fills whichever region artRow is —
             // the top row, or the left column — meeting the window's own
             // outline with no letterbox margins around it. Art that does not
-            // match that region's shape is therefore cropped, not fitted.
+            // match that region's shape is therefore cropped, not fitted —
+            // EXCEPT in a Plasma session, where it is fitted whole (see
+            // `root.plasma` above).
             anchors.fill: parent
             color: Theme.bgAlt
             clip: true
@@ -119,7 +135,7 @@ Item {
             Image {
                 anchors.fill: parent
                 source: root.cur.artPath ? "file://" + root.cur.artPath : ""
-                fillMode: Image.PreserveAspectCrop
+                fillMode: root.plasma ? Image.PreserveAspectFit : Image.PreserveAspectCrop
                 asynchronous: true
                 sourceSize.width: 1024
                 sourceSize.height: 1024

@@ -61,6 +61,20 @@ whole file in memory and rewrites all of it on any `set()` (volume, sort,
 album-grid scroll, quit), and reads prefs only at startup. `tools/set-pref.py`
 sets a key from outside, backs the file up, and refuses while `main.py` is up.
 
+**IN A PLASMA SESSION THE CHROME IS A MENUBAR AND A PLAYBAR** (2026-08-18).
+There is no hyprvtb there, so everything the next paragraph describes reaches
+nothing at all. The buttons come back as the shared menubar
+(`../qmlcommon/DeskMenuBar.qml`, `../AGENTS.md`), and the `PLAYBAR`/`SEEK` half
+— which a menubar cannot carry — comes back as **`qml/PlayBar.qml`, a real
+transport strip along the bottom of the window**: prev / play-pause / next, the
+elapsed and total clock in fixed-width slots, and a scrub track that holds the
+handle through a drag and seeks on RELEASE (`Player.seekFrac`, the same call the
+titlebar's `SEEK` makes). It gates itself on `DeskStyle.plasma` and is 0 high and
+invisible outside that session, so the Hyprland window is untouched; `Main.qml`
+anchors the content and the settings drawer to `playBar.top` and pays nothing
+for it there. Harness: `tools/playbar-test.py` — offscreen, against a FAKE
+Player, because the running one is his and must never be driven.
+
 **ALL chrome is hyprvtb titlebar buttons** — transport + view switcher + sort +
 the `fs` search toggle (`Ctrl+F`; it was labelled `/`, a key nothing was ever
 bound to — docs/DESIGN.md §11.2, §12.1) + a bottom-anchored settings button
@@ -75,7 +89,12 @@ reference.** `NowPlaying.qml`'s art is a full-width top row in the ~480x826
 window this page normally lives in, and a full-height LEFT COLUMN once the
 window is wide (`sideArt`) — because a top row scales a square cover to the
 window's *width*, so maximized it kept a 1406x472 band, 30% of the art. Both
-branches bleed to the window outline; neither letterboxes (docs/DESIGN.md §5.1).
+branches bleed to the window outline; neither letterboxes (docs/DESIGN.md §5.1)
+— **except in a Plasma session, where the cover is never cropped**: his call,
+2026-08-18, so there `fillMode` is `PreserveAspectFit` and the shortfall shows
+`artBox`'s own `bgAlt`. That is a straight trade of §5.1's edge-to-edge fill for
+the whole picture, taken in that session only; the responsive row/column switch
+above is unchanged and still runs in both.
 Two constraints when touching it: the switch reads **window geometry only**,
 never `artFrac` (a layout that flipped mid-drag would rearrange the page under
 the cursor), and it must be a **strict no-op below the breakpoint** — verified
