@@ -84,6 +84,33 @@ LIBRARY_ROOT = Path(os.environ.get("PLAYER_LIBRARY_ROOT", "/run/media/lam/SSD/au
 AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".dsf", ".ogg", ".opus", ".wv",
               ".ape", ".aiff", ".aif", ".wav", ".mpc", ".tta", ".dff"}
 
+# Filesystems where a read can block for hundreds of milliseconds. book streams
+# the whole library from top over SMB, so this is its normal case.
+REMOTE_FSTYPES = frozenset({"cifs", "smb3", "nfs", "nfs4", "fuse.sshfs",
+                            "fuse.rclone", "sshfs", "afs", "9p"})
+
+
+def library_is_remote(root=None):
+    """Is LIBRARY_ROOT on a network filesystem? Longest mount-point prefix
+    wins, and the LAST matching line wins with it: the share is an
+    x-systemd.automount, so mountinfo carries both the autofs trigger and the
+    cifs mount at the same path, in that order."""
+    root = os.path.realpath(str(root or LIBRARY_ROOT))
+    best, fstype = -1, ""
+    try:
+        with open("/proc/self/mountinfo") as f:
+            for line in f:
+                parts = line.split(" - ")
+                if len(parts) < 2:
+                    continue
+                mp = parts[0].split()[4]
+                if (root == mp or root.startswith(mp.rstrip("/") + "/")) \
+                        and len(mp) >= best:
+                    best, fstype = len(mp), parts[1].split()[0]
+    except OSError:
+        return False
+    return fstype in REMOTE_FSTYPES
+
 # Formats the ReplayGain scanner (tools/replaygain.py via `rsgain`) cannot tag
 # — DSD, Musepack, TTA. They keep the player's median-gain fallback at play
 # time. Single source of truth; the scan tool imports this too, so the auto
@@ -1805,8 +1832,21 @@ class Player(QObject):
         self._idle = True
 
         import mpv as libmpv
-        self._mpv = libmpv.MPV(vid="no", audio_display="no",
-                               gapless_audio="weak", ytdl=False)
+        opts = dict(vid="no", audio_display="no",
+                    gapless_audio="weak", ytdl=False)
+        # A file on a network mount looks local to mpv, so `cache=auto` leaves
+        # the demuxer cache OFF and every decode reads straight off the wire.
+        # Measured on book 2026-08-19, streaming from top over SMB on wifi:
+        # 64 KiB reads are 0.01ms at the median but 5 in 300 exceed 50ms and
+        # one hit 223ms — past the 0.2s audio buffer, i.e. an underrun and an
+        # audible pop, ~22 a minute on mpv's PipeWire node. Forcing the cache
+        # on puts 30s of decoded-ahead audio between the network and the sink,
+        # so a stalled read is invisible.
+        if library_is_remote():
+            opts.update(cache="yes", cache_secs=30, demuxer_max_bytes="64MiB",
+                        demuxer_readahead_secs=20, stream_buffer_size="4MiB",
+                        audio_buffer=0.4)
+        self._mpv = libmpv.MPV(**opts)
         vol = self._prefs.get("volume", 100)
         try:
             self._mpv.volume = float(vol)
