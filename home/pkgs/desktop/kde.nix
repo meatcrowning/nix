@@ -27,6 +27,12 @@
     qtwebsockets
    # plasma-framework
     ]) ++ lib.optionals (host == "top") [
+    # KDE's own video player, and the Plasma session's default for video/*
+    # (home/prog/mime-defaults.nix, `kdeAssoc`). `top` only for the same reason
+    # mpv is (home/pkgs/media/consume.nix): it is an mpv front end, there is no
+    # cached aarch64 build of that stack, and book has no Plasma session for it
+    # to be the default in — Plasma is a NixOS module (sys/dsk/plasma.nix).
+    haruna
     # breeze-square-overlay patches this locally, so there's no cache hit —
     # it always compiles from source (KDE Frameworks/Qt, genuinely slow).
     # Skipped on air for now to keep first bring-up fast; corners just stay
