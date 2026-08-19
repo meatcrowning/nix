@@ -318,11 +318,24 @@ Window {
         onTriggered: (id) => win.tbAction(id)
     }
 
+    // The transport strip the Plasma session gets in place of the titlebar's
+    // scrub track and position readout — neither of which exists there, since
+    // both are hyprvtb's (PlayBar.qml). Loaded only in that session, so the
+    // Hyprland window keeps the full height it has always had.
+    PlayBar {
+        id: playBar
+        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+        z: 60      // over the content, under the settings drawer (70)
+        fgText: win.fgText
+        fgDim: win.fgDim
+        fgAccent: win.fgAccent
+    }
+
     // ---- content views (the rest of the window) ----
     Item {
         id: content
         anchors { top: menuBar.bottom; left: parent.left
-                  right: parent.right; bottom: parent.bottom }
+                  right: parent.right; bottom: playBar.top }
 
         AlbumGrid {
             objectName: "albumGrid"
@@ -363,6 +376,7 @@ Window {
     SearchOverlay {
         anchors.fill: parent
         anchors.topMargin: menuBar.height + 36   // clear the menubar and the slide-out bar
+        anchors.bottomMargin: playBar.height     // ...and the Plasma transport strip
         visible: win.searching
         z: 40
         query: searchInput.text
@@ -435,7 +449,7 @@ Window {
     // ---- settings drawer, slid out by the bottom "st" titlebar button ----
     SettingsPanel {
         anchors { top: menuBar.bottom; left: parent.left
-                  right: parent.right; bottom: parent.bottom }
+                  right: parent.right; bottom: playBar.top }
         z: 70
         open: win.settingsOpen
         columns: win.albumCols

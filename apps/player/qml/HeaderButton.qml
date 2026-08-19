@@ -27,7 +27,11 @@ Item {
         id: txt
         anchors.centerIn: parent
         text: root.label
-        color: root.lit ? root.fgAccent : (mouse.containsMouse ? root.fgText : root.fgDim)
+        // A button that cannot act says so (docs/DESIGN.md §10): `enabled` is
+        // Item's own, so setting it both kills the MouseArea and greys the
+        // label. Every call site that never disables one is unaffected.
+        color: !root.enabled ? Theme.inactive
+             : root.lit ? root.fgAccent : (mouse.containsMouse ? root.fgText : root.fgDim)
     }
     MouseArea {
         cursorShape: Qt.PointingHandCursor
