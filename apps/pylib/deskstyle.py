@@ -66,12 +66,13 @@ MIN_FONT_SIZE = 10
 MAX_FONT_SIZE = 24
 
 # Faces that are normal smooth outlines and must be ANTIALIASED, never
-# pixel-snapped (currently just Phenex, the hand-authored cursive). Twin of
-# the `smooth` flag in home/pkgs/desktop/font.nix selectableFaces / the
-# generated FontFaces.qml — keep the two in step. Everything font-rendering
-# branches on `DeskStyle.smooth`: PixelText's renderType/antialiasing, and
-# editorFont's style strategy below.
-SMOOTH_FAMILIES = {"Phenex"}
+# pixel-snapped (Phenex the hand-authored cursive, and Tahoma the proportional
+# MS TrueType). Twin of the `smooth` flag in home/pkgs/desktop/font.nix
+# selectableFaces / the generated FontFaces.qml — keep the two in step.
+# CozetteVector and Terminus are pixel/bitmap designs and stay OUT (crisp,
+# pixel-snapped). Everything font-rendering branches on `DeskStyle.smooth`:
+# PixelText's renderType/antialiasing, and editorFont's style strategy below.
+SMOOTH_FAMILIES = {"Phenex", "Tahoma"}
 
 # Motion, likewise from SettingsStore.qml's inline defaults. The validation is
 # the panel's, not the slider's: `ViewMode.ms()` accepts any finite animSpeed
