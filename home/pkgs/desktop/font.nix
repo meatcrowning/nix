@@ -104,6 +104,18 @@ let
     { family = "More Perfect DOS VGA"; label = "more perfect"; smooth = false; }
     { family = "Botis 4x6"; label = "botis 4x6"; smooth = false; }
     { family = "Phenex"; label = "phenex"; smooth = true; }
+    # The three faces added with per-type rendering tuning above. CozetteVector
+    # and Terminus are pixel/bitmap designs — crisp, pixel-snapped, so
+    # smooth=false like the other pixel faces (the fc family is "CozetteVector"
+    # / "Terminus", confirmed by fc-list). Tahoma is a normal antialiased
+    # proportional face, so smooth=true (mirror it in SMOOTH_FAMILIES in
+    # apps/pylib/deskstyle.py). Tahoma's binary is only present where the user
+    # has placed ~/.local/share/fonts/tahoma.ttf (installed on top, by-hand on
+    # book — see the fontconfig rule below and the board ask on sourcing it);
+    # the picker entry is offered regardless and falls back if the file is absent.
+    { family = "CozetteVector"; label = "cozette"; smooth = false; }
+    { family = "Terminus"; label = "terminus"; smooth = false; }
+    { family = "Tahoma"; label = "tahoma"; smooth = true; }
   ];
 
   # The Settings dropdown reads its options from a generated singleton rather
