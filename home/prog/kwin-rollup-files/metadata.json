@@ -1,0 +1,16 @@
+{
+    "KPackageStructure": "KWin/Script",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "lam"
+            }
+        ],
+        "Description": "Roll the active window up into its titlebar and back down. KWin removed native shading, so this re-implements it by resizing the frame.",
+        "Icon": "window-shade",
+        "Id": "rollupwindow",
+        "License": "GPL",
+        "Name": "Roll Up Window"
+    },
+    "X-Plasma-API": "javascript"
+}
