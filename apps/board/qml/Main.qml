@@ -1804,18 +1804,26 @@ Component {
                                                 Item {
                                                     id: bar
                                                     width: parent.width
-                                                    // FOLDED, the summary and the combined
-                                                    // meta share one line, so the row is the
-                                                    // taller of the two. OPEN, the gutter is
-                                                    // top-right and the body stack starts a
-                                                    // blank line UNDER it (`todoText.y`), so
-                                                    // the row is that offset plus the stack —
-                                                    // no longer the max of body-beside-gutter,
-                                                    // because they no longer sit side by side.
+                                                    // The head of an OPEN row — his call,
+                                                    // 2026-08-18: the by/when gutter and the
+                                                    // summary sit on the SAME lines, side by
+                                                    // side, exactly as the folded row and a
+                                                    // decision's title/meta do (§9.1's
+                                                    // trailing-edge cluster). So this is the
+                                                    // taller of the two, and the `for:`/detail
+                                                    // stack below starts under BOTH.
+                                                    readonly property real gutterH:
+                                                        gutter.visible ? gutter.implicitHeight : 0
+                                                    readonly property real headH:
+                                                        Math.max(todoText.implicitHeight, gutterH)
+                                                    // FOLDED, the summary and the combined meta
+                                                    // share one line, so the row is the taller of
+                                                    // the two. OPEN, the row is the head (summary
+                                                    // beside the gutter) plus the stack under it.
                                                     implicitHeight: todoRow.folded
                                                         ? Math.max(todoText.implicitHeight,
                                                                    todoMeta.implicitHeight)
-                                                        : todoText.y + todoText.implicitHeight
+                                                        : headH
                                                           + todoFor.height
                                                           + (todoMore.visible
                                                              ? todoMore.implicitHeight + 6 : 0)
@@ -1884,19 +1892,22 @@ Component {
                                                             ? todoRow.modelData.summary
                                                             : todoRow.modelData.text
                                                         x: todoMark.width + 8
-                                                        // Open, the body starts a blank line
-                                                        // below the gutter (by + when) and
-                                                        // runs the full width to the right
-                                                        // edge; folded, it shares the top line
-                                                        // with the combined meta and reserves
-                                                        // its width as before.
-                                                        y: (todoRow.folded || !todoRow.hasRightMeta)
-                                                           ? 0
-                                                           : gutter.implicitHeight + Theme.lineHeight
+                                                        // The summary shares the TOP line with
+                                                        // the meta on the right — folded (the
+                                                        // combined line) or open (the by/when
+                                                        // gutter), his call 2026-08-18. Either
+                                                        // way it starts at the top and reserves
+                                                        // the meta's width so the two never
+                                                        // overlap; with no meta at all it takes
+                                                        // the full width.
+                                                        y: 0
                                                         width: todoRow.folded
                                                                ? parent.width - x - 8
                                                                  - todoRow.metaCombined.length * win.cellW
-                                                               : parent.width - x
+                                                               : todoRow.hasRightMeta
+                                                                 ? parent.width - x - 8
+                                                                   - 15 * win.cellW
+                                                                 : parent.width - x
                                                         color: win.fgText
                                                         maximumLineCount: todoRow.folded ? 1 : 9999
                                                         text: todoRow.folded
@@ -1930,8 +1941,11 @@ Component {
                                                     PixelText {
                                                         id: todoFor
                                                         x: todoText.x
-                                                        y: todoText.y + todoText.height + 2
-                                                        width: todoText.width
+                                                        // Below the head — the summary and the
+                                                        // gutter, whichever is taller — and at
+                                                        // full width, clear of the gutter above.
+                                                        y: bar.headH + 2
+                                                        width: parent.width - x
                                                         visible: todoRow.modelData.order
                                                                  && !todoRow.folded
                                                         height: visible ? implicitHeight : 0
@@ -1945,9 +1959,8 @@ Component {
                                                     Para {
                                                         id: todoMore
                                                         x: todoText.x
-                                                        y: todoText.y + todoText.height
-                                                           + todoFor.height + 6
-                                                        width: todoText.width
+                                                        y: bar.headH + todoFor.height + 6
+                                                        width: parent.width - x
                                                         // Folded, the elaboration is the
                                                         // half that goes: the summary is
                                                         // what he asked to keep.
