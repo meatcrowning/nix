@@ -57,6 +57,10 @@
       kwin."Window Quick Tile Bottom" = "Meta+Down";
       kwin."Window Quick Tile Left" = "Meta+Left";
       kwin."Window Quick Tile Right" = "Meta+Right";
+      # The rollupwindow KWin script (home/prog/kwin-rollup.nix). Meta+R, which
+      # matches hyprvtb's rollup in the Hyprland session, is a recording hotkey
+      # here, so the roll goes on the key that says what it does.
+      kwin.RollUpWindow = "Meta+Shift+Up";
       kwin."Window Quick Tile Top" = "Meta+Up";
       kwin."Window to Next Screen" = "Meta+Shift+Right";
       kwin."Window to Previous Screen" = "Meta+Shift+Left";
