@@ -126,19 +126,9 @@
       };
     });
 
-    # Backport the upstream local-server per-channel IPC (wwmm/easyeffects
-    # 76a3f9a5 "Improved equalizer handling in our local server", 2026-07-17;
-    # discussion #5196). Stock 8.2.7's socket can address only the base plugin
-    # DB (`equalizer#0`), so the panel EQ cannot set per-band gains that live in
-    # the per-channel DBs (`equalizer#0#left`/`#right`). The patch lets
-    # `set_property`/`get_property` take an optional `left`/`right` field. The
-    # panel probes for this before enabling live-edit, so this overlay is what
-    # flips the panel's EQ from read-only to editable.
-    easyeffects-overlay = (final: prev: {
-      easyeffects = prev.easyeffects.overrideAttrs (old: {
-        patches = (old.patches or []) ++ [ ./home/srvs/easyeffects-perchannel.patch ];
-      });
-    });
+    # (The easyeffects per-channel IPC backport that used to live here is gone:
+    # easyeffects 8.2.8 ships wwmm/easyeffects 76a3f9a5 itself, so the patch
+    # applied in reverse and failed the build on the 2026-08-18 nixpkgs roll.)
 
     # Backport nixpkgs 7990e968cb8d (2026-07-25; our pin is 2026-07-18, so it
     # is not in the tree): setup-cuda-hook's setupCUDAToolkit_ROOT builds
@@ -162,7 +152,7 @@
       });
     });
 
-    overlays = [ vcv-rack-overlay breeze-square-overlay easyeffects-overlay ollama-cuda-overlay ];
+    overlays = [ vcv-rack-overlay breeze-square-overlay ollama-cuda-overlay ];
 
     mkPkgs = system: overlays: import nixpkgs {
       inherit system overlays;
@@ -177,7 +167,7 @@
     # by leaving the overlay out of its pkgs entirely — corners just stay
     # round there until this gets added back.
 
-    pkgsAir = mkPkgs "aarch64-linux" [ vcv-rack-overlay easyeffects-overlay ];
+    pkgsAir = mkPkgs "aarch64-linux" [ vcv-rack-overlay ];
 
   in
   {
