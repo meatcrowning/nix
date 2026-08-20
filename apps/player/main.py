@@ -111,6 +111,25 @@ def library_is_remote(root=None):
         return False
     return fstype in REMOTE_FSTYPES
 
+
+_REMOTE_LIBRARY = None
+
+
+def library_is_remote_cached():
+    """`library_is_remote()` memoised for the process. The mount type does not
+    change under a session, and the answer gates every per-track existence
+    stat off the GUI thread — on book each `os.path.exists` on the cifs mount
+    is 37ms at the median and up to 460ms cold (measured 2026-08-19), so a
+    15-track album open or a play-all used to freeze the UI for whole seconds.
+    On a network library the DB is authoritative (the whole library lives on
+    top and does not vanish mid-session, unlike the local-USB case the checks
+    were written for), and mpv skips a genuinely-missing file at play time, so
+    the stat is pure cost there and is skipped."""
+    global _REMOTE_LIBRARY
+    if _REMOTE_LIBRARY is None:
+        _REMOTE_LIBRARY = library_is_remote()
+    return _REMOTE_LIBRARY
+
 # Formats the ReplayGain scanner (tools/replaygain.py via `rsgain`) cannot tag
 # — DSD, Musepack, TTA. They keep the player's median-gain fallback at play
 # time. Single source of truth; the scan tool imports this too, so the auto
@@ -2178,7 +2197,12 @@ class Player(QObject):
         `keep_first` is only for a track the user actually clicked."""
         ids = [int(i) for i in ids]
         self._queue = self._library.tracks_by_ids(ids)
-        self._queue = [t for t in self._queue if os.path.exists(t["path"])] or self._queue
+        # Drop files whose path is gone (a local drive unplugged under a
+        # listing) — but never stat a network library on the GUI thread: that
+        # froze the UI for seconds per play-all on book. mpv skips a dead file.
+        if not library_is_remote_cached():
+            self._queue = [t for t in self._queue
+                           if os.path.exists(t["path"])] or self._queue
         self._orig_queue = None
         if self._shuffle and self._queue:
             self._queue = self._shuffled(self._queue, keep_first=start)
@@ -2226,6 +2250,8 @@ class Player(QObject):
         """Library rows for `ids`, in the order given, minus anything whose file
         is gone (the library drive can be unplugged under a listing)."""
         rows = self._library.tracks_by_ids([int(i) for i in ids])
+        if library_is_remote_cached():   # never stat a network mount on the UI thread
+            return rows
         return [r for r in rows if os.path.exists(r["path"])]
 
     @Slot("QVariantList")
@@ -2872,7 +2898,9 @@ def track_row(r, check_exists=False):
             "duration": r.get("duration") or 0.0,
             "rating": -1.0 if r.get("rating") is None else float(r["rating"]),
             "favorite": bool(r.get("favorite")), "playCount": r.get("play_count") or 0,
-            "available": os.path.exists(r["path"]) if check_exists else True}
+            "available": (os.path.exists(r["path"])
+                          if check_exists and not library_is_remote_cached()
+                          else True)}
 
 
 class Bridge(QObject):
