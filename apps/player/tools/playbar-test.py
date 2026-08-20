@@ -28,8 +28,8 @@ APP = HERE.parent
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
-from PySide6.QtCore import QObject, Property, Signal, Slot, Qt, QPoint  # noqa: E402
-from PySide6.QtGui import QGuiApplication, QColor  # noqa: E402
+from PySide6.QtCore import QObject, Property, Signal, Slot, Qt, QPoint, QPointF  # noqa: E402
+from PySide6.QtGui import QGuiApplication, QColor, QWheelEvent  # noqa: E402
 from PySide6.QtQuick import QQuickView  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 
@@ -40,6 +40,22 @@ def check(name, ok, detail=""):
     print(("  ok   " if ok else "  FAIL ") + name + (f"   [{detail}]" if detail else ""))
     if not ok:
         fails.append(name)
+
+
+def mid_of(view, item):
+    """The centre of a child item, in the root window's coordinates."""
+    root = view.rootObject()
+    p = item.mapToItem(root, item.property("width") / 2, item.property("height") / 2)
+    return QPoint(int(p.x()), int(p.y()))
+
+
+def wheel_over(view, point, angle):
+    """Post a synthetic wheel event at `point` (window coords), angleDelta.y=angle.
+    A real mouse click is 120 units per notch; pixelDelta stays 0 (a wheel, not a
+    touchpad), which is what WheelNotch reads."""
+    ev = QWheelEvent(QPointF(point), QPointF(point), QPoint(0, 0), QPoint(0, angle),
+                     Qt.NoButton, Qt.NoModifier, Qt.ScrollPhase.NoScrollPhase, False)
+    QGuiApplication.sendEvent(view, ev)
 
 
 class FakeTheme(QObject):
@@ -95,12 +111,16 @@ class FakePlayer(QObject):
     """Only the surface PlayBar.qml reads: no audio, no MPRIS, no file."""
     changed = Signal()
 
-    def __init__(self, duration=200.0, index=0, queue=3):
+    def __init__(self, duration=200.0, index=0, queue=3, track_id=7, favorite=False):
         super().__init__()
         self._pos, self._dur, self._idx, self._q = 0.0, duration, index, queue
         self._playing = True
+        self._loop = 0
+        self._shuffle = False
+        self._tid = track_id
+        self._fav = favorite
         self.seeks = []            # every seekFrac the bar asked for
-        self.calls = []            # previous/toggle/next
+        self.calls = []            # previous/toggle/next/cycleLoop/setShuffle
 
     @Property(float, notify=changed)
     def position(self):
@@ -126,9 +146,24 @@ class FakePlayer(QObject):
     def playing(self):
         return self._playing
 
+    @Property(int, notify=changed)
+    def loop(self):
+        return self._loop
+
+    @Property(bool, notify=changed)
+    def shuffle(self):
+        return self._shuffle
+
+    @Property("QVariant", notify=changed)
+    def current(self):
+        if self._idx < 0:
+            return None
+        return {"id": self._tid, "favorite": self._fav}
+
     @Slot(float)
     def seekFrac(self, frac):
-        self.seeks.append(float(frac))
+        frac = max(0.0, min(1.0, float(frac)))
+        self.seeks.append(frac)
         self.set_position(frac * self._dur)
 
     @Slot()
@@ -142,6 +177,31 @@ class FakePlayer(QObject):
     @Slot()
     def toggle(self):
         self.calls.append("toggle")
+
+    @Slot()
+    def cycleLoop(self):
+        self.calls.append("cycleLoop")
+        self._loop = (self._loop + 1) % 3
+        self.changed.emit()
+
+    @Slot(bool)
+    def setShuffle(self, on):
+        self.calls.append("setShuffle")
+        self._shuffle = bool(on)
+        self.changed.emit()
+
+
+class FakeLibrary(QObject):
+    """Only setFavorite — the one Library call the bar's heart makes."""
+    changed = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.favs = []            # (track_id, on) the bar asked for
+
+    @Slot(int, bool)
+    def setFavorite(self, tid, on):
+        self.favs.append((int(tid), bool(on)))
 
 
 QML = """
@@ -163,8 +223,9 @@ def build(plasma, player):
     tmp = Path(tempfile.mkdtemp(prefix="playbar-test-")) / "Probe.qml"
     tmp.write_text(QML)
     view = QQuickView()
-    theme, style = FakeTheme(), FakeStyle(plasma)
-    for name, obj in (("Theme", theme), ("DeskStyle", style), ("Player", player)):
+    theme, style, lib = FakeTheme(), FakeStyle(plasma), FakeLibrary()
+    for name, obj in (("Theme", theme), ("DeskStyle", style),
+                      ("Player", player), ("Library", lib)):
         view.rootContext().setContextProperty(name, obj)
     view.setSource(tmp.as_uri())
     if view.status() == QQuickView.Error:
@@ -175,7 +236,8 @@ def build(plasma, player):
     view.show()          # offscreen platform: nothing is mapped anywhere
     QTest.qWait(60)
     bar = view.rootObject().findChild(QObject, "bar")
-    view._keep = (theme, style, player, tmp)   # context properties must outlive the bindings
+    view._lib = lib
+    view._keep = (theme, style, player, lib, tmp)   # context properties must outlive the bindings
     return view, bar
 
 
@@ -229,14 +291,97 @@ check("releasing seeks to where it was let go",
 check("and the handle goes back to following playback", bar.property("dragFrac") == -1)
 view.close()
 
+print("\nthe toggles the menu carried but the bar did not")
+p = FakePlayer(duration=200.0, favorite=False)
+view, bar = build(True, p)
+
+
+def hbutton(bar, label):
+    for it in bar.findChildren(QObject):
+        if it.property("label") == label and it.property("lit") is not None:
+            return it
+    return None
+
+
+fav, loop, shuf = hbutton(bar, "♥"), hbutton(bar, "o"), hbutton(bar, "*")
+check("the favourite control is on the bar", fav is not None)
+check("the repeat control is on the bar", loop is not None)
+check("the shuffle control is on the bar", shuf is not None)
+check("favourite starts unlit (track not favourited)", fav.property("lit") is False)
+check("repeat starts unlit", loop.property("lit") is False)
+check("shuffle starts unlit", shuf.property("lit") is False)
+
+# clicking favourite asks Library to flip the current track's flag
+QTest.mouseClick(view, Qt.LeftButton, Qt.NoModifier,
+                 mid_of(view, fav))
+QTest.qWait(30)
+check("clicking favourite flips it via Library", view._lib.favs == [(7, True)],
+      str(view._lib.favs))
+
+# clicking repeat cycles the loop mode and lights when > 0
+QTest.mouseClick(view, Qt.LeftButton, Qt.NoModifier, mid_of(view, loop))
+QTest.qWait(30)
+check("clicking repeat cycles loop", "cycleLoop" in p.calls and p.loop == 1, str(p.calls))
+check("repeat lights once looping", loop.property("lit") is True)
+check("repeat-track shows '1'", loop.property("label") == "1", str(loop.property("label")))
+
+# clicking shuffle toggles it on and lights
+QTest.mouseClick(view, Qt.LeftButton, Qt.NoModifier, mid_of(view, shuf))
+QTest.qWait(30)
+check("clicking shuffle turns it on", p.shuffle is True and "setShuffle" in p.calls)
+check("shuffle lights when on", shuf.property("lit") is True)
+view.close()
+
+print("\nfavourite follows the now-playing track's flag")
+p = FakePlayer(duration=200.0, favorite=True)
+view, bar = build(True, p)
+fav = hbutton(bar, "♥")
+check("a favourited track lights the heart", fav.property("lit") is True)
+view.close()
+
 print("\nnothing playing")
 p = FakePlayer(duration=0.0, index=-1, queue=0)
 view, bar = build(True, p)
 check("no track means no scrub position", bar.property("hasTrack") is False)
+fav = hbutton(bar, "♥")
+check("favourite is disabled with nothing playing", fav.property("enabled") is False)
 QTest.mouseClick(view, Qt.LeftButton, Qt.NoModifier,
                  QPoint(300, int(view.rootObject().property("height") - 20)))
 QTest.qWait(30)
 check("clicking the dead track seeks nothing", p.seeks == [], str(p.seeks))
+view.close()
+
+print("\nwheel scrubs, one detent = 5% of the track")
+p = FakePlayer(duration=200.0)
+view, bar = build(True, p)
+p.set_position(100.0)          # start at the middle
+QTest.qWait(30)
+check("mid-track before the wheel", abs(bar.property("frac") - 0.5) < 1e-6,
+      str(bar.property("frac")))
+track = None
+for it in bar.findChildren(QObject):
+    if it.property("width") and it.property("height") == 16:
+        track = it
+        break
+tpt = track.mapToItem(view.rootObject(), int(track.property("width")) // 2, 8)
+wheel_over(view, QPoint(int(tpt.x()), int(tpt.y())), 120)   # one classic notch up
+QTest.qWait(30)
+check("one notch up seeks +5%", len(p.seeks) == 1 and abs(p.seeks[0] - 0.55) < 1e-6,
+      str(p.seeks))
+# a burst accumulates onto the shown seek rather than re-deriving from a stale pos
+wheel_over(view, QPoint(int(tpt.x()), int(tpt.y())), 120)
+wheel_over(view, QPoint(int(tpt.x()), int(tpt.y())), 120)
+QTest.qWait(30)
+check("a burst of notches accumulates (0.55->0.60->0.65)",
+      len(p.seeks) == 3 and abs(p.seeks[-1] - 0.65) < 1e-6, str(p.seeks))
+wheel_over(view, QPoint(int(tpt.x()), int(tpt.y())), -120)   # one notch down
+QTest.qWait(30)
+check("a notch down seeks -5%", abs(p.seeks[-1] - 0.60) < 1e-6, str(p.seeks))
+# a zero-delta event is a no-op, not a step-down
+before = len(p.seeks)
+wheel_over(view, QPoint(int(tpt.x()), int(tpt.y())), 0)
+QTest.qWait(30)
+check("a zero-delta wheel event does nothing", len(p.seeks) == before, str(p.seeks))
 view.close()
 
 print()
