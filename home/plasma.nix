@@ -95,12 +95,17 @@
       mediacontrol.previousmedia = "Media Previous";
       mediacontrol.stopmedia = "Media Stop";
       org_kde_powerdevil."Decrease Keyboard Brightness" = "Keyboard Brightness Down";
-      org_kde_powerdevil."Decrease Screen Brightness" = "Monitor Brightness Down";
-      org_kde_powerdevil."Decrease Screen Brightness Small" = "Shift+Monitor Brightness Down";
+      # PowerDevil has no config key for the brightness step size — the plain
+      # actions compute ~20 steps across the hardware range in C++
+      # (ScreenBrightnessLogic::calculateSteps), while "...Small" is hardcoded
+      # to exactly 1%. So the physical keys are bound to the Small action to
+      # get a 1% step, and the coarse step moves to Shift+ instead.
+      org_kde_powerdevil."Decrease Screen Brightness" = "Shift+Monitor Brightness Down";
+      org_kde_powerdevil."Decrease Screen Brightness Small" = "Monitor Brightness Down";
       org_kde_powerdevil.Hibernate = "Hibernate";
       org_kde_powerdevil."Increase Keyboard Brightness" = "Keyboard Brightness Up";
-      org_kde_powerdevil."Increase Screen Brightness" = "Monitor Brightness Up";
-      org_kde_powerdevil."Increase Screen Brightness Small" = "Shift+Monitor Brightness Up";
+      org_kde_powerdevil."Increase Screen Brightness" = "Shift+Monitor Brightness Up";
+      org_kde_powerdevil."Increase Screen Brightness Small" = "Monitor Brightness Up";
       org_kde_powerdevil.PowerDown = "Power Down";
       org_kde_powerdevil.PowerOff = "Power Off";
       org_kde_powerdevil.Sleep = "Sleep";
