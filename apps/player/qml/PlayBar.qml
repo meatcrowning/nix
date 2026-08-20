@@ -1,4 +1,5 @@
 import QtQuick
+import "../../qmlcommon"
 
 // PlayBar — the transport strip along the bottom of the window, in a PLASMA
 // session only.
@@ -20,11 +21,14 @@ import QtQuick
 // titlebar scrub bar exactly as before, and the call site needs no branch.
 //
 // Controlled, never stateful, like Slider.qml: the fill follows
-// `Player.position` and a drag only calls `Player.seekFrac`, whose result flows
-// back in through the same binding — so the handle can never disagree with the
-// audio. `dragFrac` is the ONE exception, held only while the pointer is down,
-// because a scrub that snapped back to the playing position on every mouse move
-// would be unusable.
+// `Player.position` and a drag or a wheel notch only calls `Player.seekFrac`,
+// whose result flows back in through the same binding — so the handle can never
+// disagree with the audio. Two held values are the exceptions: `dragFrac`,
+// alive only while the pointer is down (a scrub that snapped back to the
+// playing position on every mouse move would be unusable), and `wheelPending`,
+// alive until the source catches up with the last wheel seek (so a burst of
+// notches accumulates instead of each re-deriving its step from a stale
+// position). Both are bounded and both defer to `Player.position`.
 Item {
     id: root
 
@@ -39,11 +43,38 @@ Item {
     height: plasma ? 40 : 0
 
     readonly property bool hasTrack: Player.duration > 0 && Player.index >= 0
+    // The now-playing track, for the favourite toggle — lit while it is
+    // favourited, disabled when nothing is playing, exactly like the titlebar
+    // column's heart (Main.qml tbButtons) and the NowPlaying header heart.
+    readonly property var cur: Player.current
+    readonly property bool hasCur: cur && cur.id !== undefined
     // -1 while nothing is being dragged; 0..1 while it is.
     property real dragFrac: -1
+    // -1 unless a wheel notch just asked for a seek: the fill shows what we
+    // ASKED for until the source's own position catches up (or `echo` gives
+    // up), so a burst of notches accumulates instead of each re-deriving its
+    // step from a stale position. Same 5%/1500ms/0.004 as the panel seekbar
+    // (home/prog/quickshell-files/MediaContent.qml) and hyprvtb's titlebar
+    // scrub track (VTB_PLAYBAR_SCROLL), docs/DESIGN.md §9.2.
+    property real wheelPending: -1
+    readonly property real wheelStep: 0.05
+    readonly property real echoEps: 0.004
     readonly property real playFrac: hasTrack
         ? Math.max(0, Math.min(1, Player.position / Player.duration)) : 0
-    readonly property real frac: dragFrac >= 0 ? dragFrac : playFrac
+    readonly property real frac: dragFrac >= 0 ? dragFrac
+        : (wheelPending >= 0 ? wheelPending : playFrac)
+    onPlayFracChanged: if (wheelPending >= 0 && Math.abs(playFrac - wheelPending) <= echoEps) {
+        wheelPending = -1; echo.stop();
+    }
+    Timer { id: echo; interval: 1500; onTriggered: root.wheelPending = -1 }
+    function wheelSeek(n) {
+        if (!root.hasTrack || n === 0)
+            return;
+        var t = Math.max(0, Math.min(1, root.frac + n * root.wheelStep));
+        root.wheelPending = t;
+        echo.restart();
+        Player.seekFrac(t);
+    }
 
     function fmt(s) {
         s = Math.max(0, Math.round(s));
@@ -68,9 +99,14 @@ Item {
         }
 
         // ---- transport ---------------------------------------------------
-        // The same three verbs, the same two-character glyphs and the same
-        // disabled rule as the titlebar column (§12.1): a function that already
-        // has a glyph keeps it in every place it appears.
+        // The same verbs, the same two-character glyphs and the same disabled
+        // rule as the titlebar column (§12.1): a function that already has a
+        // glyph keeps it in every place it appears. The three toggles the
+        // Plasma menubar's "playback" menu carried but this bar did not —
+        // favourite, repeat and shuffle — sit after the play controls, in the
+        // titlebar column's own order, behind a small gap that stands in for
+        // the menu's separator. A LIT toggle IS its state (§12.1): `lit` draws
+        // the on ones in accent, exactly as the titlebar renders state 1.
         Row {
             id: transport
             anchors { left: parent.left; leftMargin: 8; verticalCenter: parent.verticalCenter }
@@ -93,6 +129,28 @@ Item {
                 enabled: Player.queueLength > 0
                 fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                 onClicked: Player.next()
+            }
+
+            Item { width: 8; height: 1 }   // the menu's separator, as a gap
+
+            HeaderButton {
+                label: "♥"
+                lit: root.hasCur && root.cur.favorite === true
+                enabled: root.hasCur
+                fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
+                onClicked: if (root.hasCur) Library.setFavorite(root.cur.id, !root.cur.favorite)
+            }
+            HeaderButton {
+                label: Player.loop === 1 ? "1" : "o"
+                lit: Player.loop > 0
+                fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
+                onClicked: Player.cycleLoop()
+            }
+            HeaderButton {
+                label: "*"
+                lit: Player.shuffle
+                fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
+                onClicked: Player.setShuffle(!Player.shuffle)
             }
         }
 
@@ -165,6 +223,20 @@ Item {
                     root.dragFrac = -1;
                 }
                 onCanceled: root.dragFrac = -1
+
+                // Wheel scrubs, one detent = 5% of the track, a FRACTION not a
+                // count of seconds (docs/DESIGN.md §9.2). WheelNotch, never a
+                // sign test: a touchpad is ~125Hz of sub-pixel deltas and a
+                // sign-only handler fires a full 5% per event — the bug the
+                // titlebar copy had to fix. It banks the sub-detent remainder
+                // and clamps a burst, so slow scrubbing still moves and a flick
+                // cannot throw the song by minutes.
+                WheelNotch { id: seekNotch }
+                onWheel: (wheel) => {
+                    var n = seekNotch.steps(wheel);
+                    if (n !== 0)
+                        root.wheelSeek(n);
+                }
             }
         }
     }
