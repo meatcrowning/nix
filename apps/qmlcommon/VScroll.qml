@@ -56,6 +56,20 @@ ScrollBar {
     readonly property bool isWin31: barStyle === "win31"
     readonly property bool isFlat: barStyle === "flat"
 
+    // ---- hide when there is nothing to scroll ---------------------------
+    // Opt-in, DEFAULT OFF: the desktop rule is AlwaysOn (§9.2, [his] "there
+    // should be a scrollbar wherever appropriate"), so every existing call
+    // site keeps its always-drawn bar. A caller that sets `hideWhenFull`
+    // gets the other honest reading of "appropriate" — the bar vanishes
+    // entirely while the content fits, and returns the instant it overflows.
+    // `size` is the visible fraction of the content: 1.0 means it all fits.
+    // Reserve the gutter from `barW` regardless (never conditionally) so a
+    // hidden bar leaves the layout exactly where a shown one would — the bar
+    // toggles, the content never reflows.
+    property bool hideWhenFull: false
+    readonly property bool scrollable: vb.size < 0.999
+    visible: !vb.hideWhenFull || vb.scrollable
+
     // Read this at a call site that has to reserve a gutter by hand, rather
     // than writing the old 9 (or a 12 derived from it) out again.
     readonly property int barW: isWin31 ? 16 : (barStyle === "beveled" ? 14 : 11)
