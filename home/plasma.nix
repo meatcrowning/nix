@@ -4,6 +4,27 @@
   programs.plasma = {
     enable = true;
 
+    # book only: the "new Oxygen" KDE global theme (org.kde.oxygen — the
+    # revived Oxygen look-and-feel bundled by kdePackages.oxygen, distinct
+    # from the classic pre-Plasma-5 Oxygen). `plasma-apply-lookandfeel` pulls
+    # in Oxygen's own colour scheme (OxygenDark), icons, cursor (Oxygen_Black)
+    # and kwin decoration together, matching what its packaged defaults file
+    # sets (oxygen-6.7.4/share/plasma/look-and-feel/org.kde.oxygen/contents/defaults).
+    # soundTheme is separate — lookAndFeel doesn't touch Sounds.Theme. Applies
+    # on next PLASMA login (programs.plasma.startup, overrideConfig=false
+    # means it's a one-shot autostart script, not a live rewrite) — book's
+    # live session right now is Hyprland, which this doesn't touch. Per
+    # docs/DESIGN.md §"In a PLASMA session none of this applies": the apps'
+    # colours already follow whatever KDE global theme is picked, so this is
+    # just picking Oxygen as that theme rather than adding a new mechanism.
+    # Not on top: top's Plasma session defaults to stock Breeze (or, when
+    # `my.aerotheme.enable` is set, the separate aerothemeplasma session) and
+    # nobody asked for Oxygen there.
+    workspace = lib.mkIf (host == "air") {
+      lookAndFeel = "org.kde.oxygen";
+      soundTheme = "oxygen";
+    };
+
     shortcuts = {
       "KDE Keyboard Layout Switcher"."Switch to Last-Used Keyboard Layout" = "Meta+Alt+L";
       "KDE Keyboard Layout Switcher"."Switch to Next Keyboard Layout" = "Meta+Alt+K";
