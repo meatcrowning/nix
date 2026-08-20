@@ -2,11 +2,24 @@
     kwin-momentum — input filter implementation (see momentumfilter.h).
 
     SCAFFOLD. The intercept and the injection both bind the real 6.7.4 ABI and
-    the plugin builds/links clean against libkwin.so.6. What is NOT yet proven
-    on hardware: the coast clock (a plain QTimer stands in for the render frame
-    clock), the exact re-entrancy behaviour of processAxis feeding our own
-    filter (guarded here with m_injecting), and every decay constant. Runtime
-    verification is the user's touchpad — see runbook §5.
+    the plugin builds/links clean against libkwin.so.6. Re-entrancy is handled by
+    SOURCE, not a flag: our synthetic frames carry PointerAxisSource::Continuous
+    and this filter acts only on ::Finger, so a coast frame is never re-fed to
+    the estimator (no m_injecting guard needed).
+
+    What is NOT yet proven on hardware, and stays the user's (runbook §5):
+      * the coast clock — a plain QTimer stands in for a real per-frame render
+        clock, so pacing (not distance — the engine integrates in closed form)
+        may need the compositor's frame signal instead;
+      * every decay constant / the momentum feel;
+      * CLIENT-SIDE SELF-FLING. This filter installs at InputFilterOrder::Forward
+        (last) and returns false on the finger-lift stop, i.e. it OBSERVES without
+        swallowing — so the client still receives its own axis-stop and apps that
+        self-fling on it (GTK, Chromium, kitty) will coast too, on top of ours.
+        Suppressing that means consuming the stop (return true) from a filter
+        installed BEFORE KWin's ForwardInputFilter; whether a same-order Forward
+        filter runs before or after Forward's own delivery can only be settled by
+        watching a live KWin, so it is left as an explicit open item, not guessed.
 */
 #include "momentumfilter.h"
 

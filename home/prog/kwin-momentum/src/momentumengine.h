@@ -32,15 +32,23 @@ struct Sample
     std::chrono::microseconds t{0};        // event timestamp
 };
 
-// Tunables — spec §2. Starting values; the user tunes from feel, not an agent.
+// Tunables — the verified vtbKinetic spec's defaults (momentum-engine-spec §1.4,
+// §3, §3.4). These are the spec's STARTING values; the floaty-vs-snappy feel is
+// the user's to tune from his own touchpad, not an agent's (runbook §5). What is
+// NOT a tunable is the decay MODEL: it is exponential in a friction rate `k`
+// (s⁻¹), integrated in closed form (§3.2) — the pre-e370eda `pow(0.94, dt)` form
+// was a units mistranslation that coasted a fling for ~74 s.
 struct Params
 {
-    double relevanceWindowMs = 100.0;      // velocity averaged over the last 100 ms
-    double maxVelocity = 6000.0;           // px/s clamp, direction-preserving
-    double minFlingVelocity = 120.0;       // below this, no coast at all
-    double decayPerSecond = 0.94;          // exponential factor toward zero
-    double stopBelow = 20.0;               // px/s: end the coast, emit axis-stop
-    double withheldStopMs = 300.0;         // spec/memory: withhold the 0 this long
+    double relevanceWindowMs = 100.0;      // velocity averaged over the last 100 ms (§1.4)
+    double staleMs = 100.0;                // finger rested this long before lift ⇒ no fling (§1.4)
+    double maxVelocity = 6000.0;           // px/s clamp, direction-preserving (§3.4)
+    double minStartVelocity = 200.0;       // px/s: below this, no coast at all (§3.4)
+    double friction = 3.6;                 // k, s⁻¹: v(t)=v0·e^(−k·t); coast distance = v0/k (§3.1)
+    double minVelocity = 24.0;             // px/s: end the coast, emit the single axis-stop (§3.4)
+    double maxDurationMs = 2000.0;         // hard safety cut on total coast length (§3.4)
+    double axisLockRatio = 0.25;           // |vminor| < ratio·|vmajor| ⇒ lock the minor axis to 0 (§1.4)
+    double emitEps = 0.10;                 // px: fractional-carry floor; never emit below it, never emit 0 (§3.3)
 };
 
 class MomentumEngine
@@ -60,6 +68,11 @@ public:
 
     // Feed a live touchpad axis frame during the user's drag.
     void feed(double dx, double dy, std::chrono::microseconds t);
+
+    // Record the timestamp of the last non-zero (moving) frame, so release() can
+    // apply the staleness gate (§1.4): a finger that rested motionless on the pad
+    // before lifting must not fling.
+    std::chrono::microseconds lastMoveTime() const { return m_lastMove; }
 
     // The drag ended (finger up / libinput scroll-stop): decide whether to coast.
     // Returns true if a fling was started.
@@ -90,7 +103,11 @@ private:
     bool m_coasting = false;
     double m_vx = 0.0;                          // current coast velocity px/s
     double m_vy = 0.0;
+    double m_accX = 0.0;                         // fractional-carry accumulator, px (§3.3)
+    double m_accY = 0.0;
     std::chrono::microseconds m_lastTick{0};
+    std::chrono::microseconds m_flingStart{0};  // for the max-duration safety cut
+    std::chrono::microseconds m_lastMove{0};    // timestamp of the last non-zero frame
 };
 
 } // namespace KWinMomentum
