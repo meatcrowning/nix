@@ -363,6 +363,7 @@ Item {
                         artist: artist,
                         albumId: albumId,
                         available: available,
+                        favorite: favorite,
                         playNow: function () { root.played(index); },
                         queueIndex: root.isQueue ? index : -1,
                         inAlbum: root.inAlbum,
