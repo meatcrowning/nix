@@ -236,6 +236,28 @@ Window {
     }
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
 
+    // The Plasma menubar gets the SAME array minus the "view" group: under
+    // Plasma the three views, the sort cycler and the finder are not a menu but
+    // the toolbar (ViewBar.qml, §7.6), so they come out of the menubar here.
+    // Everything else (playback, settings) is untouched, and the titlebar column
+    // above is untouched — this filter is the menubar's alone. The `-` spacers
+    // around the dropped group are deduped so the remaining menus keep clean
+    // separators.
+    readonly property var menuBarButtons: {
+        var out = [];
+        for (var i = 0; i < tbButtons.length; i++) {
+            var b = tbButtons[i];
+            if (typeof b === "object" && b !== null && b.menu === "view")
+                continue;
+            if (b === "-" && (out.length === 0 || out[out.length - 1] === "-"))
+                continue;
+            out.push(b);
+        }
+        while (out.length > 0 && out[out.length - 1] === "-")
+            out.pop();
+        return out;
+    }
+
     readonly property string footerStr: {
         var t = Player.current;
         return (t && t.title) ? ((t.artist ? t.artist + " — " : "") + t.title) : "";
@@ -313,9 +335,27 @@ Window {
     DeskMenuBar {
         id: menuBar
         anchors { top: parent.top; left: parent.left; right: parent.right }
-        buttons: win.tbButtons
-        menuOrder: ["playback", "view", "settings"]
+        buttons: win.menuBarButtons
+        menuOrder: ["playback", "settings"]
         onTriggered: (id) => win.tbAction(id)
+    }
+
+    // The view / sort / finder toolbar the Plasma session gets, directly under
+    // the menubar — where the "view" menu's contents (the three views, sort and
+    // the search field) now live. 0-height and invisible under Hyprland, where
+    // all of that is titlebar chrome, so the anchor to `viewBar.bottom` below is
+    // a no-op there.
+    ViewBar {
+        id: viewBar
+        anchors { top: menuBar.bottom; left: parent.left; right: parent.right }
+        z: 55
+        view: win.view
+        sortMode: win.sortMode
+        fgText: win.fgText
+        fgDim: win.fgDim
+        fgAccent: win.fgAccent
+        onViewRequested: (v) => win.setView(v)
+        onSortRequested: win.cycleSort()
     }
 
     // The transport strip the Plasma session gets in place of the titlebar's
@@ -334,7 +374,7 @@ Window {
     // ---- content views (the rest of the window) ----
     Item {
         id: content
-        anchors { top: menuBar.bottom; left: parent.left
+        anchors { top: viewBar.bottom; left: parent.left
                   right: parent.right; bottom: playBar.top }
 
         AlbumGrid {
@@ -375,7 +415,9 @@ Window {
 
     SearchOverlay {
         anchors.fill: parent
-        anchors.topMargin: menuBar.height + 36   // clear the menubar and the slide-out bar
+        // clear the menubar and, under it, either the Plasma finder toolbar
+        // (which carries the search field) or the Hyprland slide-out bar.
+        anchors.topMargin: menuBar.height + (viewBar.height > 0 ? viewBar.height : 36)
         anchors.bottomMargin: playBar.height     // ...and the Plasma transport strip
         visible: win.searching
         z: 40
@@ -397,13 +439,18 @@ Window {
     // The desktop's motion, from the plugin's published key (qmlcommon/Motion.qml).
     Motion { id: motion }
 
-    // ---- search bar: slides in from the right (titlebar) edge ----
+    // ---- search bar: slides in from the right (titlebar) edge under Hyprland,
+    // and docks always-open into the Plasma finder toolbar (ViewBar.qml). It is
+    // ONE field either way — the window's single source of search truth — so the
+    // Plasma branch is a re-parent, not a second input (§7.6).
     Rectangle {
         id: searchBar
         anchors.top: menuBar.bottom
         anchors.topMargin: 8
         anchors.right: parent.right
-        anchors.rightMargin: win.searchOpen ? 8 : -(width + 4)
+        // Under Plasma the field is docked (left+right anchored into the slot),
+        // so its margins are 0; under Hyprland the right margin is the slide.
+        anchors.rightMargin: viewBar.plasma ? 0 : (win.searchOpen ? 8 : -(width + 4))
         // A reveal sliding out of the edge it belongs to, so it takes the
         // desktop's slide (docs/DESIGN.md §6.2). It was 120ms with NO easing at
         // all, i.e. Linear — nothing chose that, it was just the default.
@@ -413,6 +460,23 @@ Window {
         z: 50
         color: Theme.bgAlt
         radius: Theme.rounding
+
+        // In a Plasma session the finder is not a slide-out — the titlebar edge
+        // it slides from does not exist there. It docks, always open, into the
+        // view toolbar's search slot. ParentChange + AnchorChanges relocate this
+        // one field so search stays a single source of truth.
+        states: State {
+            name: "docked"
+            when: viewBar.plasma
+            ParentChange { target: searchBar; parent: viewBar.searchSlot }
+            AnchorChanges {
+                target: searchBar
+                anchors.top: undefined
+                anchors.left: viewBar.searchSlot.left
+                anchors.right: viewBar.searchSlot.right
+                anchors.verticalCenter: viewBar.searchSlot.verticalCenter
+            }
+        }
         border.color: searchInput.activeFocus ? win.fgAccent : Theme.border
         border.width: Theme.ctrlBorder
 
@@ -448,7 +512,7 @@ Window {
 
     // ---- settings drawer, slid out by the bottom "st" titlebar button ----
     SettingsPanel {
-        anchors { top: menuBar.bottom; left: parent.left
+        anchors { top: viewBar.bottom; left: parent.left
                   right: parent.right; bottom: playBar.top }
         z: 70
         open: win.settingsOpen
