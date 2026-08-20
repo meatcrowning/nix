@@ -61,9 +61,9 @@ whole file in memory and rewrites all of it on any `set()` (volume, sort,
 album-grid scroll, quit), and reads prefs only at startup. `tools/set-pref.py`
 sets a key from outside, backs the file up, and refuses while `main.py` is up.
 
-**IN A PLASMA SESSION THE CHROME IS A MENUBAR AND A PLAYBAR** (2026-08-18).
-There is no hyprvtb there, so everything the next paragraph describes reaches
-nothing at all. The buttons come back as the shared menubar
+**IN A PLASMA SESSION THE CHROME IS A MENUBAR, A VIEW TOOLBAR AND A PLAYBAR**
+(2026-08-18). There is no hyprvtb there, so everything the next paragraph
+describes reaches nothing at all. The buttons come back as the shared menubar
 (`../qmlcommon/DeskMenuBar.qml`, `../AGENTS.md`), and the `PLAYBAR`/`SEEK` half
 — which a menubar cannot carry — comes back as **`qml/PlayBar.qml`, a real
 transport strip along the bottom of the window**: prev / play-pause / next, the
@@ -74,6 +74,20 @@ invisible outside that session, so the Hyprland window is untouched; `Main.qml`
 anchors the content and the settings drawer to `playBar.top` and pays nothing
 for it there. Harness: `tools/playbar-test.py` — offscreen, against a FAKE
 Player, because the running one is his and must never be driven.
+
+**The view verbs are NOT a menu — they are a toolbar** (`qml/ViewBar.qml`,
+docs/DESIGN.md §7.6, his call): under Plasma the three page switches (albums /
+playlists / now playing), the sort cycler and the finder come OUT of the menubar
+(`Main.qml`'s `menuBarButtons` filters the whole `view` group out of the array
+`DeskMenuBar` gets — the titlebar column above is untouched) and onto a strip
+directly under the menubar. Switches and sort are `HeaderButton`s; the finder is
+the window's ONE `searchBar`, re-parented (a `State` + `ParentChange`) from the
+Hyprland slide-out into `viewBar.searchSlot` and left always-open there, so
+there is a single search field either way. Like PlayBar it gates on
+`DeskStyle.plasma` and is 0-high under Hyprland, so `Main.qml` anchors the
+content and settings drawer to `viewBar.bottom` (== `menuBar.bottom` there) at no
+cost. It degrades to the ~480px window by giving the finder whatever width the
+switches leave. Harness: `tools/viewbar-test.py` — offscreen, fake Theme/DeskStyle.
 
 **ALL chrome is hyprvtb titlebar buttons** — transport + view switcher + sort +
 the `fs` search toggle (`Ctrl+F`; it was labelled `/`, a key nothing was ever
