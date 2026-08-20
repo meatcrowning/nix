@@ -3377,6 +3377,24 @@ class Bridge(QObject):
 # MPRIS
 # ---------------------------------------------------------------------------
 
+def _mpris_user_rating(track):
+    """The xesam:userRating (0..1 float) for a track's MPRIS Metadata, or None
+    to omit the key.
+
+    xesam:userRating is the ONLY rating/favourite field the MPRIS spec gives
+    us, and it is read-only display — no MPRIS verb writes it back, and stock
+    Plasma's media controller shows neither a rating nor a like button, so the
+    favourite cannot round-trip through Plasma. So map it to the real 0..1 star
+    rating, NOT the favourite bool (which would misreport a rated-but-unliked
+    track as 0). The favourite stays reachable through the in-app surfaces —
+    the playbar/header/row hearts, the track menu and the L shortcut — all of
+    which call Library.setFavorite and re-render off one trackChanged signal.
+    currentChanged already re-emits Metadata, so a rating flip on the current
+    track propagates a fresh userRating here."""
+    r = track.get("rating")
+    return float(r) if r is not None else None
+
+
 def start_queue_server(player, app, lyrics=None):
     """Serve the play queue to the desktop panel's media widget.
 
@@ -3630,6 +3648,9 @@ def start_mpris(player, app):
                 "xesam:artist": [t.get("artist") or ""],
                 "xesam:album": t.get("album") or "",
             }
+            ur = _mpris_user_rating(t)
+            if ur is not None:
+                meta["xesam:userRating"] = ur
             if t.get("artPath"):
                 meta["mpris:artUrl"] = "file://" + t["artPath"]
             return meta

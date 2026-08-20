@@ -585,6 +585,15 @@ Window {
     }
     Shortcut { sequence: "Ctrl+Right"; onActivated: Player.next() }
     Shortcut { sequence: "Ctrl+Left";  onActivated: Player.previous() }
+    // Like the current track — the same Library.setFavorite write every heart
+    // and the context menu call, so all surfaces flip together. Gated off the
+    // search field so typing an 'L' into a query never toggles a favourite.
+    Shortcut {
+        sequence: "L"
+        enabled: !searchInput.activeFocus && !playlists.modal
+        onActivated: if (Player.current && Player.current.id !== undefined)
+                         Library.setFavorite(Player.current.id, !Player.current.favorite)
+    }
     Shortcut {
         sequence: "Escape"
         enabled: !searchInput.activeFocus
