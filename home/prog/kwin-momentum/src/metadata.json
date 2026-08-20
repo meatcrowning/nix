@@ -1,0 +1,8 @@
+{
+    "KPlugin": {
+        "Description": "macOS-style touchpad kinetic scrolling (momentum) for KWin",
+        "EnabledByDefault": false,
+        "Id": "kwin_momentum",
+        "Name": "Momentum Scrolling"
+    }
+}
