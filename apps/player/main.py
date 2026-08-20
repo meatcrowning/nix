@@ -3961,6 +3961,9 @@ def main():
     if not engine.rootObjects():
         sys.exit(1)
 
+    from winstate import WinState
+    win_state = WinState(engine.rootObjects()[0], "player")  # keep ref: geometry
+
     bridge.refreshAlbums()
     # With files on the command line, restore the SESSION (shuffle, loop, the
     # saved queue) but not the playhead: `restore_state` re-syncs mpv and posts
