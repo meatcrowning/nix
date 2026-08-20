@@ -3865,7 +3865,16 @@ class AutoScanner(QObject):
             self._import_timer.start(500)
 
     def _watch_dirs(self):
-        for p in (str(LIBRARY_ROOT), str(SLSKD_DOWNLOADS)):
+        dirs = [str(SLSKD_DOWNLOADS)]
+        # Never stat or watch the library root when it is a network mount: this
+        # runs on the GUI thread at startup and every REWATCH_S, and a stat on
+        # book's cifs mount (//top/aud over Tailscale) blocks the whole event
+        # loop for the CIFS timeout on any tailnet blip — the random freeze.
+        # inotify does not propagate over cifs anyway, so the watch never fired
+        # there; a manual Rescan still works. Local library (top's SSD): watch.
+        if not library_is_remote_cached():
+            dirs.insert(0, str(LIBRARY_ROOT))
+        for p in dirs:
             if os.path.isdir(p) and p not in self._watcher.directories():
                 self._watcher.addPath(p)
 
