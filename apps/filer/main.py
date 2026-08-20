@@ -1325,6 +1325,9 @@ def main():
     win = engine.rootObjects()[0]
     winctl.setWindow(win)
 
+    from winstate import WinState
+    win_state = WinState(win, "filer")  # keep ref: persists window geometry
+
     # A picker is a transient errand for another app — it opens no viewer, so
     # it has nothing to be told about and takes no socket name.
     listener = None if spec else _start_select_listener(app, win)  # noqa: F841

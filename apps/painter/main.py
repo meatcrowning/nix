@@ -2464,6 +2464,7 @@ def main():
         raise SystemExit("selftest refuses to run on platform %r, not offscreen"
                          % app.platformName())
     app.setApplicationName("painter")
+    app.setDesktopFileName("painter")   # stable Wayland app_id (KWin identity)
     app.setOrganizationName("painter")
 
     palette = Palette(theme_source(PANEL_THEME))
@@ -2515,6 +2516,10 @@ def main():
     # that finishes behind a rolled-up or unfocused painter says so with a
     # desktop toast instead (Painter._onscreen).
     ctl.window = engine.rootObjects()[0]
+
+    if not selftest:
+        from winstate import WinState
+        win_state = WinState(ctl.window, "painter")  # keep ref: persists geometry
 
     if selftest:
         rc = [0]
