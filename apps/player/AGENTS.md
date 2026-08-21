@@ -539,6 +539,18 @@ absolute path**, which makes `top`'s database valid there verbatim — no path
 rewriting, no rescan (measured: mtime passes through exFAT-over-SMB3 byte-exact
 for all 11 099 tracks).
 
+**A mounted share is not a working share, and the launcher REPAIRS rather than
+reports.** The recurring "player won't open on book" is a cifs mount that is
+active per systemd and present in `/proc/mounts` while every access returns
+`ESTALE` — the SMB session died under a suspend or a network change, and the
+automount never re-fires because as far as systemd is concerned the unit is
+already up. `air-launch.sh`'s `share_ok`/`share_heal` therefore probe the path
+and, on any failure, `systemctl restart` the fstab-generated `.mount` unit
+(`systemd-escape -p --suffix=mount`; needs no root and no polkit prompt on
+book) before re-probing. Only a share still dead after that is fatal. Apply the
+same rule to any precondition added here: **if the launcher can restore it,
+restoring it is the behaviour — a `die_ui` is for what it cannot fix.**
+
 Metadata is reconciled by `tools/dbsync.py` (`pull`/`push`/`sync`/`status`),
 keyed on `tracks.path` and never on `id`, stdlib-only so it runs under Fedora's
 python, and its own remote agent — it pipes ITSELF to `python3 -` over ssh. It
