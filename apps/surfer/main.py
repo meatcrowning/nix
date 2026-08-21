@@ -4901,6 +4901,9 @@ def main():
     if not engine.rootObjects():
         sys.exit(1)
 
+    from winstate import WinState
+    win_state = WinState(engine.rootObjects()[0], "surfer")  # keep ref: geometry
+
     # Ctrl+wheel zoom: filter installed on the top-level window (the QML Window
     # root), upstream of the WebEngineView, so it drives our shared zoom and
     # suppresses Chromium's own Ctrl+wheel zoom. Parented to app so it lives.

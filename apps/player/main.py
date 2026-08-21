@@ -84,6 +84,52 @@ LIBRARY_ROOT = Path(os.environ.get("PLAYER_LIBRARY_ROOT", "/run/media/lam/SSD/au
 AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".dsf", ".ogg", ".opus", ".wv",
               ".ape", ".aiff", ".aif", ".wav", ".mpc", ".tta", ".dff"}
 
+# Filesystems where a read can block for hundreds of milliseconds. book streams
+# the whole library from top over SMB, so this is its normal case.
+REMOTE_FSTYPES = frozenset({"cifs", "smb3", "nfs", "nfs4", "fuse.sshfs",
+                            "fuse.rclone", "sshfs", "afs", "9p"})
+
+
+def library_is_remote(root=None):
+    """Is LIBRARY_ROOT on a network filesystem? Longest mount-point prefix
+    wins, and the LAST matching line wins with it: the share is an
+    x-systemd.automount, so mountinfo carries both the autofs trigger and the
+    cifs mount at the same path, in that order."""
+    root = os.path.realpath(str(root or LIBRARY_ROOT))
+    best, fstype = -1, ""
+    try:
+        with open("/proc/self/mountinfo") as f:
+            for line in f:
+                parts = line.split(" - ")
+                if len(parts) < 2:
+                    continue
+                mp = parts[0].split()[4]
+                if (root == mp or root.startswith(mp.rstrip("/") + "/")) \
+                        and len(mp) >= best:
+                    best, fstype = len(mp), parts[1].split()[0]
+    except OSError:
+        return False
+    return fstype in REMOTE_FSTYPES
+
+
+_REMOTE_LIBRARY = None
+
+
+def library_is_remote_cached():
+    """`library_is_remote()` memoised for the process. The mount type does not
+    change under a session, and the answer gates every per-track existence
+    stat off the GUI thread — on book each `os.path.exists` on the cifs mount
+    is 37ms at the median and up to 460ms cold (measured 2026-08-19), so a
+    15-track album open or a play-all used to freeze the UI for whole seconds.
+    On a network library the DB is authoritative (the whole library lives on
+    top and does not vanish mid-session, unlike the local-USB case the checks
+    were written for), and mpv skips a genuinely-missing file at play time, so
+    the stat is pure cost there and is skipped."""
+    global _REMOTE_LIBRARY
+    if _REMOTE_LIBRARY is None:
+        _REMOTE_LIBRARY = library_is_remote()
+    return _REMOTE_LIBRARY
+
 # Formats the ReplayGain scanner (tools/replaygain.py via `rsgain`) cannot tag
 # — DSD, Musepack, TTA. They keep the player's median-gain fallback at play
 # time. Single source of truth; the scan tool imports this too, so the auto
@@ -1805,8 +1851,21 @@ class Player(QObject):
         self._idle = True
 
         import mpv as libmpv
-        self._mpv = libmpv.MPV(vid="no", audio_display="no",
-                               gapless_audio="weak", ytdl=False)
+        opts = dict(vid="no", audio_display="no",
+                    gapless_audio="weak", ytdl=False)
+        # A file on a network mount looks local to mpv, so `cache=auto` leaves
+        # the demuxer cache OFF and every decode reads straight off the wire.
+        # Measured on book 2026-08-19, streaming from top over SMB on wifi:
+        # 64 KiB reads are 0.01ms at the median but 5 in 300 exceed 50ms and
+        # one hit 223ms — past the 0.2s audio buffer, i.e. an underrun and an
+        # audible pop, ~22 a minute on mpv's PipeWire node. Forcing the cache
+        # on puts 30s of decoded-ahead audio between the network and the sink,
+        # so a stalled read is invisible.
+        if library_is_remote():
+            opts.update(cache="yes", cache_secs=30, demuxer_max_bytes="64MiB",
+                        demuxer_readahead_secs=20, stream_buffer_size="4MiB",
+                        audio_buffer=0.4)
+        self._mpv = libmpv.MPV(**opts)
         vol = self._prefs.get("volume", 100)
         try:
             self._mpv.volume = float(vol)
@@ -2138,7 +2197,12 @@ class Player(QObject):
         `keep_first` is only for a track the user actually clicked."""
         ids = [int(i) for i in ids]
         self._queue = self._library.tracks_by_ids(ids)
-        self._queue = [t for t in self._queue if os.path.exists(t["path"])] or self._queue
+        # Drop files whose path is gone (a local drive unplugged under a
+        # listing) — but never stat a network library on the GUI thread: that
+        # froze the UI for seconds per play-all on book. mpv skips a dead file.
+        if not library_is_remote_cached():
+            self._queue = [t for t in self._queue
+                           if os.path.exists(t["path"])] or self._queue
         self._orig_queue = None
         if self._shuffle and self._queue:
             self._queue = self._shuffled(self._queue, keep_first=start)
@@ -2186,6 +2250,8 @@ class Player(QObject):
         """Library rows for `ids`, in the order given, minus anything whose file
         is gone (the library drive can be unplugged under a listing)."""
         rows = self._library.tracks_by_ids([int(i) for i in ids])
+        if library_is_remote_cached():   # never stat a network mount on the UI thread
+            return rows
         return [r for r in rows if os.path.exists(r["path"])]
 
     @Slot("QVariantList")
@@ -2832,7 +2898,9 @@ def track_row(r, check_exists=False):
             "duration": r.get("duration") or 0.0,
             "rating": -1.0 if r.get("rating") is None else float(r["rating"]),
             "favorite": bool(r.get("favorite")), "playCount": r.get("play_count") or 0,
-            "available": os.path.exists(r["path"]) if check_exists else True}
+            "available": (os.path.exists(r["path"])
+                          if check_exists and not library_is_remote_cached()
+                          else True)}
 
 
 class Bridge(QObject):
@@ -3309,6 +3377,24 @@ class Bridge(QObject):
 # MPRIS
 # ---------------------------------------------------------------------------
 
+def _mpris_user_rating(track):
+    """The xesam:userRating (0..1 float) for a track's MPRIS Metadata, or None
+    to omit the key.
+
+    xesam:userRating is the ONLY rating/favourite field the MPRIS spec gives
+    us, and it is read-only display — no MPRIS verb writes it back, and stock
+    Plasma's media controller shows neither a rating nor a like button, so the
+    favourite cannot round-trip through Plasma. So map it to the real 0..1 star
+    rating, NOT the favourite bool (which would misreport a rated-but-unliked
+    track as 0). The favourite stays reachable through the in-app surfaces —
+    the playbar/header/row hearts, the track menu and the L shortcut — all of
+    which call Library.setFavorite and re-render off one trackChanged signal.
+    currentChanged already re-emits Metadata, so a rating flip on the current
+    track propagates a fresh userRating here."""
+    r = track.get("rating")
+    return float(r) if r is not None else None
+
+
 def start_queue_server(player, app, lyrics=None):
     """Serve the play queue to the desktop panel's media widget.
 
@@ -3562,6 +3648,9 @@ def start_mpris(player, app):
                 "xesam:artist": [t.get("artist") or ""],
                 "xesam:album": t.get("album") or "",
             }
+            ur = _mpris_user_rating(t)
+            if ur is not None:
+                meta["xesam:userRating"] = ur
             if t.get("artPath"):
                 meta["mpris:artUrl"] = "file://" + t["artPath"]
             return meta
@@ -3776,7 +3865,16 @@ class AutoScanner(QObject):
             self._import_timer.start(500)
 
     def _watch_dirs(self):
-        for p in (str(LIBRARY_ROOT), str(SLSKD_DOWNLOADS)):
+        dirs = [str(SLSKD_DOWNLOADS)]
+        # Never stat or watch the library root when it is a network mount: this
+        # runs on the GUI thread at startup and every REWATCH_S, and a stat on
+        # book's cifs mount (//top/aud over Tailscale) blocks the whole event
+        # loop for the CIFS timeout on any tailnet blip — the random freeze.
+        # inotify does not propagate over cifs anyway, so the watch never fired
+        # there; a manual Rescan still works. Local library (top's SSD): watch.
+        if not library_is_remote_cached():
+            dirs.insert(0, str(LIBRARY_ROOT))
+        for p in dirs:
             if os.path.isdir(p) and p not in self._watcher.directories():
                 self._watcher.addPath(p)
 
@@ -3920,6 +4018,9 @@ def main():
     engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
     if not engine.rootObjects():
         sys.exit(1)
+
+    from winstate import WinState
+    win_state = WinState(engine.rootObjects()[0], "player")  # keep ref: geometry
 
     bridge.refreshAlbums()
     # With files on the command line, restore the SESSION (shuffle, loop, the

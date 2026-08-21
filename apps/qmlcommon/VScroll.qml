@@ -41,6 +41,16 @@ import QtQuick.Controls.Basic
 // No new colours: the bevel is a three-tone ladder taken straight out of the
 // wallpaper palette (bg < bgAlt < border < dim), so it recolours with everything
 // else and adds nothing to §3 to keep in sync.
+//
+// UNDER PLASMA the aero look is deliberately dropped for a Breeze-shaped bar
+// (docs/DESIGN.md §9.2 / §3's Plasma rule): a rounded pill thumb over a
+// transparent track, no bevels and no steppers, in the KDE colour scheme's own
+// tones (Theme.* already resolve to kdeglobals here via kdetheme.py). The three
+// aero variants and the `barStyle` setting are ignored in that session — an app
+// still drawing a win31 stepper inside a Breeze window is the one control that
+// reads as "not themed". Detected with `DeskStyle.plasma`, the same switch that
+// moves the palette; guarded with `typeof` so a harness with no DeskStyle keeps
+// the Hyprland look.
 ScrollBar {
     id: vb
 
@@ -56,9 +66,29 @@ ScrollBar {
     readonly property bool isWin31: barStyle === "win31"
     readonly property bool isFlat: barStyle === "flat"
 
+    // In a Plasma session the whole aero vocabulary above is set aside for a
+    // Breeze-shaped bar (see the header). This is the master switch for that.
+    readonly property bool isPlasma:
+        (typeof DeskStyle !== "undefined" && DeskStyle && DeskStyle.plasma) || false
+
+    // ---- hide when there is nothing to scroll ---------------------------
+    // Opt-in, DEFAULT OFF: the desktop rule is AlwaysOn (§9.2, [his] "there
+    // should be a scrollbar wherever appropriate"), so every existing call
+    // site keeps its always-drawn bar. A caller that sets `hideWhenFull`
+    // gets the other honest reading of "appropriate" — the bar vanishes
+    // entirely while the content fits, and returns the instant it overflows.
+    // `size` is the visible fraction of the content: 1.0 means it all fits.
+    // Reserve the gutter from `barW` regardless (never conditionally) so a
+    // hidden bar leaves the layout exactly where a shown one would — the bar
+    // toggles, the content never reflows.
+    property bool hideWhenFull: false
+    readonly property bool scrollable: vb.size < 0.999
+    visible: !vb.hideWhenFull || vb.scrollable
+
     // Read this at a call site that has to reserve a gutter by hand, rather
     // than writing the old 9 (or a 12 derived from it) out again.
-    readonly property int barW: isWin31 ? 16 : (barStyle === "beveled" ? 14 : 11)
+    readonly property int barW: isPlasma ? 14
+                              : (isWin31 ? 16 : (barStyle === "beveled" ? 14 : 11))
     readonly property int btn: isWin31 ? barW : 0        // stepper button size
 
     // The ladder, darkest to lightest. `face` has to be brighter than `trackC`
@@ -99,13 +129,15 @@ ScrollBar {
     // Confines the thumb between the steppers (ScrollBar lays contentItem out
     // inside the padding), and insets it from the track's own bevel.
     padding: 0
-    topPadding: vb.isWin31 ? vb.btn : (vb.isFlat ? 0 : 1)
+    // Plasma insets the pill from every edge (a Breeze thumb floats in the
+    // groove with a margin); the aero variants keep their own paddings.
+    topPadding: vb.isPlasma ? 3 : (vb.isWin31 ? vb.btn : (vb.isFlat ? 0 : 1))
     bottomPadding: vb.topPadding
     // win31's thumb is FULL width, flush with the stepper buttons above and
     // below it, which is what makes the trough read as a channel those three
     // parts slide in. `beveled` has no buttons to line up with, so its thumb is
     // inset by the track's own bevel instead.
-    leftPadding: vb.barStyle === "beveled" ? 1 : 0
+    leftPadding: vb.isPlasma ? 3 : (vb.barStyle === "beveled" ? 1 : 0)
     rightPadding: vb.leftPadding
 
     // ---- pieces ----------------------------------------------------------
@@ -193,6 +225,7 @@ ScrollBar {
         implicitHeight: vb.barW
 
         Bevel {
+            visible: !vb.isPlasma
             // Snap onto the pixel grid: ScrollBar puts `slot` at a fractional y,
             // and a 1px bevel on a half pixel is a blurred one.
             x: Math.round(slot.x) - slot.x
@@ -205,6 +238,20 @@ ScrollBar {
             // invert, which is how these scrollbars have always read.
             sunken: false
         }
+
+        // The Breeze pill. Rounded and ANTIALIASED, unlike everything else in
+        // this file — it is a KDE control now, not a pixel-era one, so it snaps
+        // to nothing and its ends are fully round (radius = half its width). The
+        // handle carries the whole bar (the track is transparent), so it brightens
+        // on hover — dim -> text — and goes accent while dragged, the KDE idiom.
+        Rectangle {
+            visible: vb.isPlasma
+            anchors.fill: parent
+            radius: Math.min(width, height) / 2
+            antialiasing: true
+            color: vb.pressed ? Theme.accent
+                 : (vb.hovered ? Theme.text : Theme.dim)
+        }
     }
 
     // ---- the track, and the steppers that live at its ends ----------------
@@ -213,7 +260,10 @@ ScrollBar {
         implicitWidth: vb.barW
 
         // Recessed for the two bevelled variants; a plain solid block for flat.
+        // A Plasma bar has no track at all — the transparent groove is the Breeze
+        // look, and the always-on pill is the only thing that needs to be drawn.
         Bevel {
+            visible: !vb.isPlasma
             anchors.fill: parent
             faceColor: vb.trackC
             sunken: true

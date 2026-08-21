@@ -433,6 +433,12 @@ Window {
     // needs the flickable's own position, which is not exposed to CSS at all —
     // so a win31 stepper here never dims. Everything else (idle/hover/active
     // ink and bevel direction, per §9.2) is reachable and done.
+    //
+    // UNDER PLASMA the aero variants are dropped for a Breeze pill, exactly as
+    // VScroll does (§9.2's Plasma rule): a rounded, inset thumb over a
+    // transparent track, no bevels and no stepper buttons, in the KDE scheme's
+    // own tones (Theme.* already resolve to kdeglobals). Detected with
+    // `DeskStyle.plasma`, the same switch the Qt chrome uses.
     function cssColor(c) {
         return "rgb(" + Math.round(c.r * 255) + "," + Math.round(c.g * 255) + ","
              + Math.round(c.b * 255) + ")";
@@ -457,6 +463,8 @@ Window {
                      && ["win31", "beveled", "flat"].indexOf(DeskStyle.scrollbarStyle) !== -1)
                    ? DeskStyle.scrollbarStyle : "win31";
         var isWin31 = style === "win31", isFlat = style === "flat";
+        var plasma = (typeof DeskStyle !== "undefined" && DeskStyle
+                      && DeskStyle.plasma) || false;
         // barW is the desktop VScroll width in DEVICE-independent px (§9.2).
         // A ::-webkit-scrollbar width is in CSS px, which Chromium multiplies
         // by the page zoom — so at a zoom of 0.83 a 16px bar renders ~13px on
@@ -464,7 +472,7 @@ Window {
         // zoom. Divide by the zoom so the on-screen width stays barW regardless
         // (physical = barW/z * z = barW). screenDPR cancels and is not involved.
         var z = (typeof Zoom !== "undefined" && Zoom && Zoom.level > 0) ? Zoom.level : 1;
-        var barW0 = isWin31 ? 16 : (style === "beveled" ? 14 : 11);
+        var barW0 = plasma ? 14 : (isWin31 ? 16 : (style === "beveled" ? 14 : 11));
         var barW = Math.round(barW0 / z * 100) / 100;
 
         // the same three-tone ladder VScroll reads off the wallpaper palette
@@ -476,7 +484,20 @@ Window {
         var css = "::-webkit-scrollbar{width:" + barW + "px;height:" + barW + "px;}"
                 + "::-webkit-scrollbar-corner{background:" + trackC + ";}";
 
-        if (isFlat) {
+        if (plasma) {
+            // Breeze: a rounded pill inset from the groove, transparent track,
+            // no stepper buttons — the KDE tones VScroll draws under Plasma.
+            // border:transparent + background-clip:padding-box insets the fill
+            // the same 3px VScroll's padding does; the radius rounds it to a pill.
+            var pill = cssColor(Theme.dim), pillHover = cssColor(Theme.text);
+            var rad = Math.round(barW / 2);
+            css += "::-webkit-scrollbar-track{background:transparent;border:none;}"
+                 + "::-webkit-scrollbar-thumb{background:" + pill + ";border-radius:" + rad + "px;"
+                 + "border:3px solid transparent;background-clip:padding-box;}"
+                 + "::-webkit-scrollbar-thumb:hover{background:" + pillHover + ";}"
+                 + "::-webkit-scrollbar-thumb:active{background:" + accent + ";}"
+                 + "::-webkit-scrollbar-button{display:none;}";
+        } else if (isFlat) {
             // square, hard-edged, no bevel, no arrows, solid textDim on bgAlt
             css += "::-webkit-scrollbar-track{background:" + trackC + ";border:none;}"
                  + "::-webkit-scrollbar-thumb{background:" + inkDim + ";border:none;}"

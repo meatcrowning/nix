@@ -185,6 +185,9 @@ def main():
     if not engine.rootObjects():
         sys.exit(1)
 
+    from winstate import WinState
+    win_state = WinState(engine.rootObjects()[0], "slsk")  # keep ref: geometry
+
     sys.exit(app.exec())
 
 

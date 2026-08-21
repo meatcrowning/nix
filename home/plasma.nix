@@ -4,6 +4,27 @@
   programs.plasma = {
     enable = true;
 
+    # book only: the "new Oxygen" KDE global theme (org.kde.oxygen — the
+    # revived Oxygen look-and-feel bundled by kdePackages.oxygen, distinct
+    # from the classic pre-Plasma-5 Oxygen). `plasma-apply-lookandfeel` pulls
+    # in Oxygen's own colour scheme (OxygenDark), icons, cursor (Oxygen_Black)
+    # and kwin decoration together, matching what its packaged defaults file
+    # sets (oxygen-6.7.4/share/plasma/look-and-feel/org.kde.oxygen/contents/defaults).
+    # soundTheme is separate — lookAndFeel doesn't touch Sounds.Theme. Applies
+    # on next PLASMA login (programs.plasma.startup, overrideConfig=false
+    # means it's a one-shot autostart script, not a live rewrite) — book's
+    # live session right now is Hyprland, which this doesn't touch. Per
+    # docs/DESIGN.md §"In a PLASMA session none of this applies": the apps'
+    # colours already follow whatever KDE global theme is picked, so this is
+    # just picking Oxygen as that theme rather than adding a new mechanism.
+    # Not on top: top's Plasma session defaults to stock Breeze (or, when
+    # `my.aerotheme.enable` is set, the separate aerothemeplasma session) and
+    # nobody asked for Oxygen there.
+    workspace = lib.mkIf (host == "air") {
+      lookAndFeel = "org.kde.oxygen";
+      soundTheme = "oxygen";
+    };
+
     shortcuts = {
       "KDE Keyboard Layout Switcher"."Switch to Last-Used Keyboard Layout" = "Meta+Alt+L";
       "KDE Keyboard Layout Switcher"."Switch to Next Keyboard Layout" = "Meta+Alt+K";
@@ -74,12 +95,17 @@
       mediacontrol.previousmedia = "Media Previous";
       mediacontrol.stopmedia = "Media Stop";
       org_kde_powerdevil."Decrease Keyboard Brightness" = "Keyboard Brightness Down";
-      org_kde_powerdevil."Decrease Screen Brightness" = "Monitor Brightness Down";
-      org_kde_powerdevil."Decrease Screen Brightness Small" = "Shift+Monitor Brightness Down";
+      # PowerDevil has no config key for the brightness step size — the plain
+      # actions compute ~20 steps across the hardware range in C++
+      # (ScreenBrightnessLogic::calculateSteps), while "...Small" is hardcoded
+      # to exactly 1%. So the physical keys are bound to the Small action to
+      # get a 1% step, and the coarse step moves to Shift+ instead.
+      org_kde_powerdevil."Decrease Screen Brightness" = "Shift+Monitor Brightness Down";
+      org_kde_powerdevil."Decrease Screen Brightness Small" = "Monitor Brightness Down";
       org_kde_powerdevil.Hibernate = "Hibernate";
       org_kde_powerdevil."Increase Keyboard Brightness" = "Keyboard Brightness Up";
-      org_kde_powerdevil."Increase Screen Brightness" = "Monitor Brightness Up";
-      org_kde_powerdevil."Increase Screen Brightness Small" = "Shift+Monitor Brightness Up";
+      org_kde_powerdevil."Increase Screen Brightness" = "Shift+Monitor Brightness Up";
+      org_kde_powerdevil."Increase Screen Brightness Small" = "Monitor Brightness Up";
       org_kde_powerdevil.PowerDown = "Power Down";
       org_kde_powerdevil.PowerOff = "Power Off";
       org_kde_powerdevil.Sleep = "Sleep";
