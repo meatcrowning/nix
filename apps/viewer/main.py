@@ -645,6 +645,9 @@ def main():
         sys.exit(1)
     win = engine.rootObjects()[0]
 
+    from winstate import WinState
+    win_state = WinState(win, "viewer")  # keep ref: persists window geometry
+
     # ---- be the viewer the NEXT one hands off to ---------------------------
     # The rule for taking a request is one thing and one thing only: is this
     # window on screen right now? `isExposed()` is false for a window on

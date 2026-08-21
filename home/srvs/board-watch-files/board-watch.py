@@ -339,6 +339,8 @@ def item_span(lines, item):
 # "Only while I'm at the machine." Three independent facts, none of them
 # guessed: logind says the graphical session is the foreground one, the
 # compositor answers and has a lit display, and the panel says it is not locked.
+# The last two are Hyprland's to answer; in a Plasma session `_logind_gate`
+# stands in for them.
 def _run(cmd, env=None, timeout=10):
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
@@ -348,11 +350,16 @@ def _run(cmd, env=None, timeout=10):
         return 127, "", "not runnable"
 
 
-def _graphical_session_active():
+def _logind_session():
     rc, out, _ = _run(["loginctl", "show-user", str(os.getuid()), "-p", "Display",
                        "--value"])
     sid = out.strip()
-    if rc != 0 or not sid:
+    return sid if rc == 0 and sid else None
+
+
+def _graphical_session_active():
+    sid = _logind_session()
+    if not sid:
         return False, "logind reports no graphical session"
     rc, out, _ = _run(["loginctl", "show-session", sid, "-p", "Active", "-p", "State"])
     if rc != 0:
@@ -362,6 +369,35 @@ def _graphical_session_active():
         return False, "session %s is %s/%s (another VT has the seat)" % (
             sid, d.get("Active"), d.get("State"))
     return True, ""
+
+
+def _logind_gate():
+    """Presence for a session that is NOT Hyprland — the compositor-agnostic half.
+
+    Both machines can log into Plasma as well as Hyprland, and every other fact
+    the gate reads is asked of `hyprctl`. Until 2026-08-19 a Plasma session
+    therefore read as ABSENCE: on book the watcher sat on a typed order logging
+    `no Hyprland instance is answering` and backing off, once a minute, while he
+    was sitting in front of it. A live foreground graphical session with no
+    compositor socket is a different desktop, not an empty chair.
+
+    What is left to read is logind's own LockedHint. The Hyprland path
+    deliberately does not trust it (nothing in that session sets it — see
+    `_panel_says_locked`); under Plasma kscreenlocker does, and it is the only
+    lock signal there is. Verified on book: KDE session c1 reports
+    LockedHint=no unlocked. Unreadable is not locked, for the same reason
+    `_panel_says_locked` returning None is not.
+    """
+    sid = _logind_session()
+    if not sid:
+        return False, "logind reports no graphical session"
+    _, desktop, _ = _run(["loginctl", "show-session", sid, "-p", "Desktop", "--value"])
+    desktop = desktop.strip() or "a non-Hyprland session"
+    rc, locked, _ = _run(["loginctl", "show-session", sid, "-p", "LockedHint",
+                          "--value"])
+    if rc == 0 and locked.strip() == "yes":
+        return False, "%s is locked (logind)" % desktop
+    return True, "at the machine (%s; no Hyprland, lock read from logind)" % desktop
 
 
 def hypr_env():
@@ -441,7 +477,7 @@ def gate():
         return False, why
     env = hypr_env()
     if env is None:
-        return False, "no Hyprland instance is answering"
+        return _logind_gate()
     ok, why = _display_lit(env)
     if not ok:
         return False, why

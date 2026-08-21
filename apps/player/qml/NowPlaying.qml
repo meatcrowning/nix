@@ -391,6 +391,7 @@ Item {
                         trackId: root.cur.id,
                         artist: root.cur.artist || "",
                         albumId: root.cur.albumId || 0,
+                        favorite: root.cur.favorite === true,
                         openAlbum: function(aid) { root.openAlbum(aid); },
                         browseArtist: function(a) { root.browseArtist(a); }
                     });

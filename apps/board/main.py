@@ -2293,6 +2293,9 @@ def main():
     if not engine.rootObjects():
         sys.exit(1)
 
+    from winstate import WinState
+    win_state = WinState(engine.rootObjects()[0], "board")  # keep ref: geometry
+
     # Pull first, push last. The pull races the window coming up on purpose:
     # `Board` already watches the file and reloads on an atomic replace (§6.1,
     # invisibly), so whatever the sync brings in lands in the view by itself a

@@ -24,6 +24,7 @@ import QtQuick
 //
 // ctx fields (all optional except trackId):
 //   trackId, artist, albumId, available   straight off the row
+//   favorite     current favourite flag -> "favourite"/"unfavourite" label
 //   playNow      function() — the site's own "play this row" (the same thing
 //                double-click does). Omitted entirely for the now-playing
 //                header, where the row is already playing.
@@ -54,6 +55,13 @@ CtxMenu {
                      trigger: function () { Player.playArtistShuffled(artist); } });
 
         items.push({ separator: true });
+
+        // The favourite toggle — the same Library.setFavorite write the row
+        // heart, the now-playing heart and the playbar heart all call, so every
+        // surface stays in sync off the one trackChanged signal. Label states
+        // the RESULT of clicking, like the rest of §7.2's honest vocabulary.
+        items.push({ label: c.favorite ? "unfavourite" : "favourite",
+                     trigger: function () { Library.setFavorite(id, !c.favorite); } });
 
         if (c.openAlbum && albumId !== (c.inAlbum || 0))
             items.push({ label: "go to album", enabled: albumId > 0,

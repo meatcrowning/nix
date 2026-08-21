@@ -865,7 +865,9 @@ Window {
         clip: true
         contentWidth: width
         contentHeight: page.implicitHeight + win.pad * 2
-        ScrollBar.vertical: VScroll { id: vbar }
+        // One page over one file (§9.2, DESIGN §3062): its bar hides itself
+        // when the board is short enough to fit, and returns on overflow.
+        ScrollBar.vertical: VScroll { id: vbar; hideWhenFull: true }
 
         Column {
             id: page
