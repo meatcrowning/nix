@@ -1,4 +1,4 @@
-{ ... }:
+{ pkgs, ... }:
 
 # Pulls Plasma's notification popups back up against the panel.
 #
@@ -51,12 +51,18 @@
 # timer keeps failing quietly and you get the stock 36px back — it cannot break
 # notifications.
 
+#
+# NOTE the whole package directory is deployed as ONE symlink to a store path.
+# Per-file symlinks do not work: KPackage canonicalises every file it opens and
+# rejects anything that resolves outside the package root, so home-manager's
+# usual `/nix/store/...-hm_...metadata.json` link is refused as a "path
+# traversal attempt" and the widget fails to load. With the root itself being
+# the link, the canonical root IS the store directory and the check passes.
+
 let
   pkgId = "org.kde.lam.notifgap";
-  base = "plasma/plasmoids/${pkgId}";
-in
-{
-  xdg.dataFile."${base}/metadata.json".text = builtins.toJSON {
+
+  metadata = builtins.toJSON {
     KPackageStructure = "Plasma/Applet";
     KPlugin = {
       Id = pkgId;
@@ -70,7 +76,7 @@ in
     "X-Plasma-API-Minimum-Version" = "6.0";
   };
 
-  xdg.dataFile."${base}/contents/ui/main.qml".text = ''
+  mainQml = ''
     import QtQuick
     import org.kde.plasma.plasmoid
     import org.kde.plasma.core as PlasmaCore
@@ -113,4 +119,13 @@ in
         }
     }
   '';
+
+  package = pkgs.runCommand pkgId { } ''
+    mkdir -p $out/contents/ui
+    cp ${pkgs.writeText "metadata.json" metadata} $out/metadata.json
+    cp ${pkgs.writeText "main.qml" mainQml} $out/contents/ui/main.qml
+  '';
+in
+{
+  xdg.dataFile."plasma/plasmoids/${pkgId}".source = package;
 }
