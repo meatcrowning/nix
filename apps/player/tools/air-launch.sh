@@ -123,6 +123,33 @@ except OSError: print(sys.argv[1])' "$1" 2>/dev/null; }
 
 top_up() { timeout 2 bash -c "exec 3<>/dev/tcp/$1/445" 2>/dev/null; }
 
+# ---- the share, and healing it --------------------------------------------
+# top answering on :445 is not the same as the share being usable, and
+# "usable" is not the same as "mounted". THE recurring failure here is a mount
+# that IS mounted — active per systemd, present in /proc/mounts, 25h uptime —
+# and dead: the SMB session died under a suspend or a network change, so every
+# access returns ESTALE ("Stale file handle"), instantly. The automount cannot
+# rescue that, because from systemd's side the unit is already up, so nothing
+# ever re-triggers it. Measured on book 2026-08-20.
+#
+# So don't diagnose, RECOVER. Restarting the fstab-generated .mount unit
+# unmounts and remounts it, takes ~1s, and needs no root and no polkit prompt
+# (verified on book). This is the general rule the launcher had been missing
+# and getting patched for: a precondition the launcher can restore itself is
+# not something to stop and tell him about. Only what survives the repair is.
+MOUNT_UNIT="$(systemd-escape -p --suffix=mount "$MOUNT" 2>/dev/null)"
+
+# Covers all three shapes at once: never mounted (automount fires), stale
+# (rc!=0 in milliseconds), and hung (killed by the timeout).
+share_ok() { timeout 10 ls "$MOUNT" >/dev/null 2>&1; }
+
+share_heal() {
+    [ -n "$MOUNT_UNIT" ] || return 1
+    say "share at $MOUNT is not usable — remounting $MOUNT_UNIT"
+    timeout 30 systemctl restart "$MOUNT_UNIT" >/dev/null 2>&1 || return 1
+    share_ok
+}
+
 ONLINE=0
 HOST="${CANDIDATES[0]}"
 ADDR="$HOST"
@@ -146,15 +173,15 @@ fi
 
 if [ "$ONLINE" = 1 ]; then
     # Touch the path to fire the systemd automount (fstab: noauto,
-    # x-systemd.automount). top answering on :445 is not the same as the share
-    # being usable — a mount that doesn't come up leaves every track
-    # unavailable, which is the same non-experience as top being down, so it
-    # gets the same treatment.
-    if ! timeout 10 ls "$MOUNT" >/dev/null 2>&1; then
+    # x-systemd.automount), and remount it if what is there is dead. A share
+    # that is still unusable after the repair leaves every track unavailable,
+    # which is the same non-experience as top being down, so it gets the same
+    # treatment. See share_ok/share_heal above for why the repair exists.
+    if ! share_ok && ! share_heal; then
         if [ -z "${PLAYER_OFFLINE:-}" ]; then
-            die_ui "top is up but the library share did not mount at $MOUNT — nothing would be playable. Check the mount, then try again."
+            die_ui "top is up but the library share at $MOUNT is down and would not remount — nothing would be playable. Check that top is still sharing aud, then try again."
         fi
-        say "share did not mount at $MOUNT — tracks will show unavailable"
+        say "share unusable at $MOUNT — tracks will show unavailable"
     fi
 
     # Metadata first and synchronously: it is ~17 MB, rsync-delta, and the app
