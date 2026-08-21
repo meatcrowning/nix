@@ -1683,8 +1683,47 @@ READONLY_TOOLS = [t for t in TOOLS if t not in ("Edit", "Write")]
 #: building — is advice for somebody with a human to check with. A spirit has
 #: no human, has its whole task in one prompt, and has RULES that already say
 #: what to read.
+#: The `Concise` built-in output style, on EVERY claude spawn — summoner and
+#: spirit alike. [his ask, 2026-08-20]. It is a settings key, not a flag: there
+#: is no `--output-style`, so it rides the same `--settings` JSON the spirits
+#: already carry (verified honoured under `-p`: the run quotes back
+#: `# Concise Style Active`, where an unset one says `# Auto Mode Active`).
+#: Built in only from claude-code **2.1.237**; an older CLI silently falls back
+#: to the default style, so `home/pkgs/base.nix` pulls the binary from the
+#: `llm-agents` input and this landed with that input bumped past it.
+#:
+#: The keeper is `keepCodingInstructions` — the style trims preamble and
+#: narration, not thoroughness — which is exactly the half of a headless run
+#: nobody reads: a spirit's prose is only ever seen folded into a board card.
+CONCISE_SETTINGS = {"outputStyle": "Concise"}
+
+#: What a SUMMONER's `--settings` carries: the style and nothing else. It keeps
+#: its skills and its plugin (see `context_flags`).
+ORCH_SETTINGS = json.dumps(CONCISE_SETTINGS)
+
+#: Turn the superpowers plugin OFF for a SPIRIT, and only for a spirit.
+#: [his, 2026-07-29] *"def disable superpowers for spirits but solomon should
+#: still have it enabled"*. `--settings` merges over `~/.claude/settings.json`
+#: rather than replacing it, which is what this needs: the SessionStart host-id
+#: hook and the PostToolUse inbox hook both still fire (verified — an inbox note
+#: reaching a worker mid-flight is load-bearing for rule 11).
+#:
+#: It is worth doing for a spirit and not for Solomon because of the shape of
+#: the two runs, not because the skill is worse advice. The injection is ~2k
+#: tokens and arrives TWICE (the hook's own stdout and the additionalContext it
+#: asks for), plus ~2.2k of skill listing. Solomon runs 6-12 turns, so it costs
+#: it ~50k a run; a spirit runs 150-350, so it costs one of those ~1.2M. And
+#: its first instruction — invoke a skill before answering, brainstorm before
+#: building — is advice for somebody with a human to check with. A spirit has
+#: no human, has its whole task in one prompt, and has RULES that already say
+#: what to read.
+#:
+#: ONE `--settings` per spawn, so this is the merged dict rather than a second
+#: flag: the CLI takes a single value there and a repeated flag would drop
+#: whichever half came first.
 SPIRIT_SETTINGS = json.dumps(
-    {"enabledPlugins": {"superpowers@claude-plugins-official": False}})
+    {**CONCISE_SETTINGS,
+     "enabledPlugins": {"superpowers@claude-plugins-official": False}})
 
 
 # ---------------------------------------------- which agent runtime spawns
@@ -2121,9 +2160,10 @@ def context_flags(role, read_only=False):
     git status would have broken anyway. Cache writes cost 1.25x and reads 0.1x,
     against ~200 spawns a day.
 
-    SOLOMON GETS ONLY THAT ONE. It is the only entry with no behavioural half:
-    keeping the skills and the plugin for the orchestrator is his call, and
-    passing `--tools` without `Skill` would have taken them away by the back
+    SOLOMON GETS THAT ONE AND THE `Concise` OUTPUT STYLE, nothing else. Both are
+    entries with no behavioural half; the trims that DO have one stay off it,
+    because keeping the skills and the plugin for the orchestrator is his call,
+    and passing `--tools` without `Skill` would have taken them away by the back
     door while the injected text still told it to use them — a prompt at war
     with its own tool list.
     """
@@ -2132,6 +2172,8 @@ def context_flags(role, read_only=False):
         argv += ["--tools", *(READONLY_TOOLS if read_only else TOOLS),
                  "--disable-slash-commands",
                  "--settings", SPIRIT_SETTINGS]
+    else:
+        argv += ["--settings", ORCH_SETTINGS]
     return argv
 
 
