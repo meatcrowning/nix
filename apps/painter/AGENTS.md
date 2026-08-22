@@ -65,11 +65,17 @@ here:
   and on a window too narrow to split it moves `view` with it, so the toggle
   cannot leave you looking at the wrong pane. `kdeshell.dock` stays — general,
   tested, unused here.
-- **The results pane has a drag band across its top** (`ResultsPane.qml`,
-  26px): everything above it is chrome, and a press there asks the compositor
-  to move the window (`App.startSystemMove()`, one call for both roofs). Below
-  it the pane is content. The band replaced the "output N outputs" heading; the
-  tally moved to `statusRight`.
+- **The window is dragged by its CHROME, and nothing else.** Oxygen's
+  WindowManager drags from every unclaimed pixel, including inside the QML —
+  it filters the window contentItem, which only ever sees a press nothing in
+  the scene accepted. `Root.qml` therefore keeps a full-window `MouseArea` at
+  `z: -1000` that accepts those, so a press on a panel's background or between
+  two thumbnails no longer moves the window; the menubar and toolbar still do,
+  natively. The status bar is excluded on the widget side (`_kde_no_window_grab`
+  plus a press filter, `kdeshell._ensure_status`). painter briefly had its own
+  26px drag band instead; it was a strip of nothing and it went, along with the
+  "output N outputs" heading it replaced — that tally is in `statusRight` now.
+  Both panes sit flush under the chrome.
 - **Under Plasma the results pane paints `QPalette.Base`** — `DeskStyle.viewBg`,
   the colour Dolphin paints its file list with. The window\'s own background is
   the style\'s gradient and the two are deliberately different: the band keeps

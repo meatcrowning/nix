@@ -689,6 +689,13 @@ top and wrong at the bottom. `_ensure_status` sets `_kde_no_window_grab` — the
 property that style's own blacklist reads — and installs a press-swallowing
 filter behind it; the size grip is a child widget and keeps working.
 
+**`toolbar_search`'s `align_right_to`** names a QML property holding the x of a
+pane's right edge, and keeps the field's right edge over it with a fixed spacer
+after it — painter aligns the filter with the results pane's splitter, since it
+filters the outputs and has no business over the parameter column. The
+property's own change signal covers window resizing, so nothing watches the
+window.
+
 **A dock is a second scene graph.** `QQuickWidget` cannot use the threaded
 render loop, so every one of them renders on the GUI thread each frame. Two is
 measurably more than one: painter had its parameter column in a dock for a day

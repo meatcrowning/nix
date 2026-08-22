@@ -525,6 +525,9 @@ def _build_shell_class():
             self._search = None         # the toolbar's filter field, if any
             self._search_spacer = None  # ...and the stretch that keeps it right
             self._search_action = None
+            self._search_tail = None        # the fixed spacer after the field
+            self._search_tail_action = None
+            self._search_align = ""
             self._no_drag = _build_no_drag_filter()(self.window)
             self._refresh_pending = False
             self._dock_actions = [] # their toggleViewAction()s, for the View menu
@@ -771,6 +774,9 @@ def _build_shell_class():
                 self._search_spacer = tb.addWidget(spacer)
                 self._search_action = tb.addWidget(self._search)
                 self._search.show()
+                if self._search_tail is not None:
+                    self._search_tail_action = tb.addWidget(self._search_tail)
+                    self._search_tail.show()
 
             if not self._chrome_restored:
                 tb.setVisible(bool(tb.actions()))
@@ -1128,7 +1134,8 @@ def _build_shell_class():
             return item
 
         # ------------------------------------------------------ toolbar search
-        def toolbar_search(self, on_text, placeholder="Filter", width=220):
+        def toolbar_search(self, on_text, placeholder="Filter", width=220,
+                           align_right_to=None):
             """A search field at the RIGHT-hand end of the toolbar.
 
             Where Dolphin, Gwenview and Okular all put one: after a stretch, so
@@ -1152,7 +1159,35 @@ def _build_shell_class():
             field.textChanged.connect(on_text)
             self._search_action = tb.addWidget(field)
             self._search = field
+
+            # ...and, optionally, ending where a PANE ends rather than where the
+            # window does. `align_right_to` names a QML property holding the x
+            # of that pane's right edge (painter: `paneLeadW`, the splitter), and
+            # a second fixed-width spacer after the field holds the difference.
+            # The property is bound to the window width, so its own change
+            # signal covers resizing too and nothing here watches the window.
+            if align_right_to:
+                self._search_align = str(align_right_to)
+                tail = QWidget(tb)
+                tail.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+                self._search_tail = tail
+                self._search_tail_action = tb.addWidget(tail)
+                sig = getattr(self._root, self._search_align + "Changed", None)
+                if sig is not None and hasattr(sig, "connect"):
+                    sig.connect(self._align_search)
+                self._align_search()
             return field
+
+        def _align_search(self):
+            """Keep the search field's right edge over the pane's right edge."""
+            if self._search_tail is None or self._root is None:
+                return
+            try:
+                edge = float(self._root.property(self._search_align) or 0)
+            except (TypeError, ValueError):
+                return
+            gap = self.view.width() - edge - self._toolbar.contentsMargins().right()
+            self._search_tail.setFixedWidth(max(0, int(round(gap))))
 
         # ------------------------------------------------------------ dialogs
         def dialog(self, ident, title, qml_path, size=(460, 520), props=None):

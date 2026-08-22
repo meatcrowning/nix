@@ -91,6 +91,7 @@ Item {
         anchors.top: preview.visible ? preview.bottom : parent.top
         anchors.bottom: parent.bottom
         anchors.margins: root.width < 320 ? 4 : 10
+        anchors.topMargin: preview.visible ? 8 : 0
         visible: root.inView
         source: root.inView ? root.viewPath : ""
         isVideo: root.viewIsVideo
@@ -105,7 +106,10 @@ Item {
         anchors.top: preview.visible ? preview.bottom : parent.top
         anchors.bottom: parent.bottom
         anchors.margins: root.width < 320 ? 4 : 10
-        anchors.topMargin: preview.visible ? 8 : (root.width < 320 ? 4 : 10)
+        // FLUSH WITH THE CHROME when there is no preview above it: the grid's
+        // own top gap read as a band of nothing between the toolbar and the
+        // outputs, and there is nothing for it to separate.
+        anchors.topMargin: preview.visible ? 8 : 0
         onMenuRequested: (sx, sy, items) => root.ctxMenu.open(sx, sy, items)
         onOpenRequested: (path, isVideo) => { if (root.app) root.app.enterView(path) }
     }

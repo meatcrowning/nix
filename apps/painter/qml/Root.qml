@@ -353,43 +353,35 @@ Item {
     // filer's splitter (apps/filer/qml/Main.qml), including the 4px bar with a
     // ±3px grab margin and the accent-on-hover.
     // results, and the preview above them
-    // ------------------------------------------------------------- the band
+    // THE WINDOW IS DRAGGED BY ITS CHROME, AND ONLY BY ITS CHROME.
     //
-    // WHERE THE WINDOW IS DRAGGED FROM. Everything above this line is chrome —
-    // under Plasma the menubar, the toolbar and its filter field — and a KDE
-    // window is dragged by its chrome, so the strip of background under it is a
-    // titlebar in every way that matters. Below the line, on BOTH sides of the
-    // splitter, the window is content and a press means what the content says
-    // it means. Full width on purpose: the line has to read as one line, level
-    // with the top of the results and the top of the first parameter panel.
+    // Oxygen's WindowManager drags a window from any empty part of it — the
+    // menubar and toolbar, which is right, but also every unclaimed pixel of
+    // this QML, which is not: a press on a panel's background or between two
+    // thumbnails moved the whole window. It reaches the QML by filtering the
+    // window contentItem, which only sees a press NOTHING IN HERE ACCEPTED. So
+    // this catcher sits under the entire app and accepts them, and the drag is
+    // left to the widget chrome above, where it belongs (his rule, 2026-08-22:
+    // "only ... the empty area at the top of the window, NOT anywhere else").
     //
-    // The compositor does the moving; `App.startSystemMove()` only asks, so
-    // there is no pointer tracking here and nothing to get stuck holding.
-    readonly property int bandH: 26
-
-    Item {
-        id: dragBand
-        x: 0
-        y: menuBar.height
-        width: root.width
-        height: root.bandH
-
-        MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.LeftButton
-            onPressed: App.startSystemMove()
-        }
+    // Bottom of the z-order on purpose: every real control still sees its own
+    // press first, and this only ever gets what would otherwise have fallen
+    // through to the compositor.
+    MouseArea {
+        anchors.fill: parent
+        z: -1000
+        acceptedButtons: Qt.LeftButton
+        onPressed: function (m) { m.accepted = true }
     }
 
     ResultsPane {
         id: results
         app: root
         x: 0
-        // under the band, which sits under the Plasma menubar (0 high in the
-        // Hyprland session, where this file's own menubar stands down)
-        y: menuBar.height + root.bandH
+        // the Plasma menubar's height, 0 in the Hyprland session
+        y: menuBar.height
         width: root.split ? root.paneLeadW : root.width
-        height: parent.height - root.barH - menuBar.height - root.bandH
+        height: parent.height - root.barH - menuBar.height
         visible: !root.showParams || root.split || root.view === 1
     }
 
@@ -398,11 +390,11 @@ Item {
         visible: root.split
         z: 10
         x: root.paneLeadW
-        y: menuBar.height + root.bandH
+        y: menuBar.height
         width: root.splitterW
         // Stops at the status bar: a handle drawn over it also GRABS over it,
         // so the last 26px of the divider swallowed clicks meant for the bar.
-        height: parent.height - root.barH - menuBar.height - root.bandH
+        height: parent.height - root.barH - menuBar.height
         color: splitDrag.pressed || splitDrag.containsMouse ? Theme.accent : Theme.border
 
         MouseArea {
@@ -437,9 +429,9 @@ Item {
         id: controls
         active: root.showParams
         x: root.split ? root.paneLeadW + root.splitterW : 0
-        y: menuBar.height + root.bandH
+        y: menuBar.height
         width: root.split ? Math.max(1, root.width - x) : root.width
-        height: parent.height - menuBar.height - root.bandH
+        height: parent.height - menuBar.height
         visible: root.showParams && (root.split || root.view === 0)
         sourceComponent: ParamsPane {
             app: root
@@ -501,7 +493,7 @@ Item {
     // slide's binding.
     SettingsDrawer {
         id: settings
-        anchors { top: dragBand.bottom; left: parent.left
+        anchors { top: menuBar.bottom; left: parent.left
                   right: parent.right; bottom: parent.bottom }
         open: root.showSettings
         onClosed: root.showSettings = false
