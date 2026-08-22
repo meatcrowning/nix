@@ -2547,6 +2547,12 @@ class Painter(QObject):
         except OSError:
             subprocess.Popen(["xdg-open", p], start_new_session=True)
 
+    @Slot(str, result=str)
+    def compareSource(self, path):
+        """The before-image for an output, for the single-output view's
+        compare slider — "" when there is nothing to compare it against."""
+        return self._compare_source(str(path).replace("file://", ""))
+
     @staticmethod
     def _compare_source(png_path):
         """The local source image an edit output should be compared against, or

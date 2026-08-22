@@ -542,6 +542,7 @@ def _build_shell_class():
             self._dialogs = {}      # ident -> (QDialog, view, bg, item, comp)
             self._hooks = {}        # button id -> a python answer to it
             self._about_box = None  # kept: a dialog owned by the stack crashes
+            self._bar_buttons = {}      # id -> QToolButton, for `barText` rows
             self._search = None         # the toolbar's filter field, if any
             self._search_spacer = None  # ...and the stretch that keeps it right
             self._search_action = None
@@ -802,7 +803,24 @@ def _build_shell_class():
                     continue
                 if not e.get("bar"):
                     continue
-                tb.addAction(self._action_for(e))
+                act = self._action_for(e)
+                # `barText` puts the NAME beside the icon for ONE button. The
+                # style is a toolbar-wide setting, so the only way to say it per
+                # button is to add a button rather than the action.
+                label = str(e.get("barText") or "")
+                if label:
+                    from PySide6.QtWidgets import QToolButton
+                    btn = self._bar_buttons.get(str(e.get("id", "")))
+                    if btn is None:
+                        btn = QToolButton(tb)
+                        btn.setDefaultAction(act)
+                        btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+                        self._bar_buttons[str(e.get("id", ""))] = btn
+                    btn.setText(label)
+                    tb.addWidget(btn)
+                    btn.show()
+                else:
+                    tb.addAction(act)
                 prev_sep = False
             # A trailing separator is a line under the last row with nothing
             # after it — the toolbar's `bar:` filter makes one whenever the

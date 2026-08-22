@@ -139,6 +139,21 @@ here:
       It has to be the FIRST row in its panel for the ordering above to hold.
     - **`rowOrder`** is captured once at completion; QML cannot insert a child
       at an index, so it is the only record of what the column should look like.
+- **The single-output view is an image viewer.** The wheel ZOOMS (through the
+  notch accumulator — the flickable's own wheel overlay stands down,
+  `wheelEnabled: false`), the left button PANS, and an edit output opens with
+  the before/after slider on: `qmlcommon/CompareView.qml`, the same file
+  viewer's `--compare` uses, moved there rather than copied. `App.compareSource`
+  answers what to compare against and returns "" unless the recorded
+  `input_image_local` is still on disk — an output whose source has been moved
+  or deleted shows normally, and so does anything that is not an edit. The
+  toolbar's `compare` button (icon + the word, via kdeshell's `barText`) is the
+  switch; it is remembered.
+- **Back leaves the output, Forward returns to it.** `@Back`/`@Forward` are the
+  Browse↔View pair, not the output walk — the grid keeps its place because the
+  selection never moves. Walking outputs is PgUp/PgDown (QML shortcuts, gated on
+  being in View so they do not take paging from a text box) and the Go menu's
+  two rows, which carry no shortcut of their own.
 - **Browse ↔ View.** `inView` plus `OutputView.qml` — one output filling the
   pane, entered by Return or a double-click (which no longer launches `viewer`;
   that is still File → Open in Viewer), left by Escape, walked with Alt+Left/

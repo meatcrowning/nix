@@ -52,6 +52,11 @@ Item {
     readonly property bool selIsVideo: root.selOne !== ""
         && Gallery.isVideoAt(Gallery.indexOf(root.selOne))
     readonly property bool canZoom: root.inView && !root.selIsVideo
+    // The before/after slider in the single-output view. On by default, and off
+    // is per-session-remembered like the other view toggles.
+    property bool showCompare: true
+    readonly property bool canCompare: root.inView && !root.selIsVideo
+        && root.selOne !== "" && App.compareSource(root.selOne) !== ""
     readonly property bool canStep: Gallery.count > 1
 
     function enterView(path) {
@@ -696,6 +701,10 @@ Item {
         { id: "zoom100", tip: "Actual Size", menu: "view", icon: "zoom-original",
           shortcut: "Ctrl+Shift+0", state: root.canZoom ? 0 : 2 },
         "-",
+        { id: "compare", tip: "Compare", menu: "view", icon: "view-split-left-right",
+          bar: true, barText: "compare", checkable: true,
+          state: root.showCompare ? 1 : 0,
+          menuText: "Compare before/after" },
         { id: "full", tip: "Full Screen", menu: "view", icon: "view-fullscreen",
           checkable: true, state: App.fullScreen ? 1 : 0, shortcut: "@FullScreen" },
         // --------------------------------------------------------------- go
@@ -703,10 +712,23 @@ Item {
         // shortcut on a paging key takes it away from every text box in the
         // window. The paging keys are bound in QML instead, gated on being in
         // View with nothing focused.
+        // BACK LEAVES THE OUTPUT, FORWARD RETURNS TO IT. The browse grid keeps
+        // its place — the selection never moved — so Back is "where I was" and
+        // Forward is "the one I was looking at", which is what those two keys
+        // mean everywhere else.
+        { id: "back", tip: "Back", menu: "go", icon: "go-previous-view",
+          shortcut: "@Back", state: root.inView ? 0 : 2 },
+        { id: "forward", tip: "Forward", menu: "go", icon: "go-next-view",
+          shortcut: "@Forward",
+          state: (!root.inView && (root.selOne !== "" || Gallery.count > 0)) ? 0 : 2 },
+        "-",
+        // ...and these two walk the outputs themselves. No menu shortcut: the
+        // paging keys are bound in QML, gated on being in View, because a
+        // window shortcut on PgUp takes it from every text box in the window.
         { id: "prev", tip: "Previous Output", menu: "go", icon: "go-previous",
-          shortcut: "@Back", state: root.canStep ? 0 : 2 },
+          state: root.canStep ? 0 : 2 },
         { id: "next", tip: "Next Output", menu: "go", icon: "go-next",
-          shortcut: "@Forward", state: root.canStep ? 0 : 2 },
+          state: root.canStep ? 0 : 2 },
         // ------------------------------------------------------------ tools
         { id: "rescan", tip: "Rescan Models", menu: "tools",
           icon: "view-refresh", shortcut: "Ctrl+R" },
@@ -778,6 +800,9 @@ Item {
         else if (id === "zoomfit") results.output.zoomFit()
         else if (id === "zoom100") results.output.zoomActual()
         else if (id === "full") App.toggleFullScreen()
+        else if (id === "back") root.inView = false
+        else if (id === "forward") root.enterView("")
+        else if (id === "compare") root.showCompare = !root.showCompare
         else if (id === "prev") root.stepOutput(-1)
         else if (id === "next") root.stepOutput(1)
         else if (id === "rescan") App.rescan()
@@ -830,6 +855,10 @@ Item {
     onShowSettingsChanged: pushButtons()
     onInViewChanged: pushButtons()
     onSelOneChanged: pushButtons()
+    onShowCompareChanged: {
+        pushButtons()
+        if (root.restored) Prefs.set("showCompare", root.showCompare)
+    }
     onShowParamsChanged: {
         pushButtons()
         if (root.restored) Prefs.set("showParams", root.showParams)
@@ -1150,6 +1179,7 @@ Item {
         // Default ON: a stored `false` is the only thing that puts the column
         // away, so a fresh profile gets the controls rather than a blank window.
         root.showParams = Prefs.get("showParams") !== false
+        root.showCompare = Prefs.get("showCompare") !== false
         var r = Prefs.get("splitRatio")
         if (r > 0 && r < 1) {
             // The panes swapped sides on 2026-08-05; a ratio saved before that

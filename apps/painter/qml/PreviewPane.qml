@@ -23,6 +23,10 @@ Item {
     id: pane
 
     property bool open: false
+    //: A finished result, double-clicked: open it in the single-output view.
+    //: Only when this pane is showing an OUTPUT — a live sampler frame is not
+    //: a file and there is nothing to open.
+    signal openRequested(string path)
     // The height is dragged and remembered, exactly like a prompt box.
     property int paneHeight: Prefs.get("preview.h") > 0 ? Prefs.get("preview.h") : 260
     readonly property int minHeight: 90
@@ -74,6 +78,7 @@ Item {
 
         // (2a) the finished still
         Image {
+            id: finishedStill
             anchors.fill: parent
             anchors.margins: 1
             visible: !App.hasPreview && pane.source !== "" && !pane.sourceIsVideo
@@ -81,6 +86,12 @@ Item {
             fillMode: Image.PreserveAspectFit
             cache: false
             asynchronous: true
+
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton
+                onDoubleClicked: if (pane.source !== "") pane.openRequested(pane.source)
+            }
         }
 
         // (2b) the finished clip — looped, and muted on purpose (see above)
@@ -109,6 +120,7 @@ Item {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: player.playbackState === MediaPlayer.PlayingState
                            ? player.pause() : player.play()
+                onDoubleClicked: if (pane.source !== "") pane.openRequested(pane.source)
             }
         }
 
