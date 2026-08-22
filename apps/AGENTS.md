@@ -228,6 +228,21 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
       contrast`) so that sheet can imitate an Oxygen window; it is None outside
       a Plasma session and under a flat KStyle (`GRADIENT_STYLES`), so no other
       app and neither the Hyprland look ever sees a gradient because of it.
+    - **`pylib/chantheme.py` + `pylib/tools/chan-userscript.py` — the same
+      look, in a browser that is not ours.** OneeChan themes 4chan from its own
+      baked hexes; `chantheme.css()` builds an override sheet with OneeChan's
+      selectors + `!important` that wins purely on cascade order (an adopted
+      stylesheet follows any document `<style>`), plus the KStyle relief above
+      when `kde_chrome()` gives one. surfer adopts it live over
+      `surferonee://`; **Vivaldi** has no Stylus and only Tampermonkey (where
+      OneeChan already lives), so the generator BAKES the same bytes into a
+      userscript — `chan-theme` (wrapper: `home/prog/chan-theme.nix`) writes
+      `~/.local/share/chan-theme/desktop-4chan.user.js`, and he opens that
+      `file://` URL to install. Baked means stale by design: **re-run
+      `chan-theme` after a colour-scheme or wallpaper change.** That is why
+      `chantheme` is Qt-free — the generator runs with no Qt, no browser and no
+      app. Harness `pylib/tools/chan-userscript-test.py`, whose real job is the
+      seam: the baked CSS must equal what surfer serves for the same palette.
     - `deskstyle.py` asks it for `fontFamily`/`fontSize` (KDE's point size,
       converted at the screen's own DPI), `smooth`, the motion factor and the
       scrollbar in that session. The two GEOMETRY keys do not move: border
