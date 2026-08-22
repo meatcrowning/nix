@@ -429,6 +429,24 @@ def _build_background_classes():
     return _BgProvider, _StyledBackground
 
 
+def _build_overlay_filter():
+    """Re-lay the floating toolbar and the view whenever their container
+    resizes. A plain child widget has no layout to do it for it."""
+    from PySide6.QtCore import QObject, QEvent
+
+    class _OverlayFilter(QObject):
+        def __init__(self, shell):
+            super().__init__(shell.window)
+            self._shell = shell
+
+        def eventFilter(self, obj, ev):
+            if ev.type() in (QEvent.Resize, QEvent.Show):
+                self._shell._layout_overlay()
+            return False
+
+    return _OverlayFilter
+
+
 def _build_no_drag_filter():
     """An event filter that swallows presses, so the style cannot start a window
     drag from the widget it is installed on. See `_ensure_status`."""
@@ -530,7 +548,11 @@ def _build_shell_class():
             self._search_tail = None        # the fixed spacer after the field
             self._search_tail_action = None
             self._search_align = ""
+            self._overlay = None            # the container the toolbar floats in
+            self._overlay_width_prop = None
+            self._overlay_inset_prop = None
             self._no_drag = _build_no_drag_filter()(self.window)
+            self._overlay_filter = _build_overlay_filter()(self)
             self._refresh_pending = False
             self._dock_actions = [] # their toggleViewAction()s, for the View menu
             self._menu_order = []
@@ -1171,6 +1193,57 @@ def _build_shell_class():
             if self._root is not None:      # bind_chrome may not have run yet
                 self._rebuild()
             return item
+
+        # ----------------------------------------------------- overlay toolbar
+        def use_overlay_toolbar(self, width_prop=None, inset_prop="chromeInset"):
+            """Float the toolbar OVER the content instead of giving it a band.
+
+            A `QToolBar` in a main window's toolbar area spans the whole width,
+            so everything below it starts below it — including a sidebar that
+            has nothing to do with the toolbar's buttons and looked, to him,
+            like it had a strip of nothing above it. Here the toolbar becomes an
+            ordinary child of the central widget, sized to `width_prop` (a QML
+            property holding the x of the pane it belongs over) and stacked on
+            top of the view. The QML puts its own content below it by reading
+            `inset_prop`, which this keeps up to date; anything it does NOT
+            inset — the sidebar — runs up to the menubar.
+            """
+            from PySide6.QtWidgets import QWidget
+            tb = self._ensure_toolbar()
+            self.window.removeToolBar(tb)
+            container = QWidget(self.window)
+            self.view.setParent(container)
+            tb.setParent(container)
+            tb.setVisible(True)
+            self.window.setCentralWidget(container)
+            self._overlay = container
+            self._overlay_width_prop = width_prop
+            self._overlay_inset_prop = inset_prop
+            container.installEventFilter(self._overlay_filter)
+            if width_prop and self._root is not None:
+                sig = getattr(self._root, str(width_prop) + "Changed", None)
+                if sig is not None and hasattr(sig, "connect"):
+                    sig.connect(self._layout_overlay)
+            self._layout_overlay()
+            return container
+
+        def _layout_overlay(self):
+            c = self._overlay
+            tb = self._toolbar
+            if c is None or tb is None:
+                return
+            self.view.setGeometry(0, 0, c.width(), c.height())
+            h = tb.sizeHint().height() if tb.isVisible() else 0
+            w = c.width()
+            if self._overlay_width_prop and self._root is not None:
+                try:
+                    w = int(float(self._root.property(self._overlay_width_prop) or w))
+                except (TypeError, ValueError):
+                    pass
+            tb.setGeometry(0, 0, max(0, min(w, c.width())), h)
+            tb.raise_()
+            if self._root is not None and self._overlay_inset_prop:
+                self._root.setProperty(self._overlay_inset_prop, h)
 
         # ------------------------------------------------------ toolbar search
         def toolbar_search(self, on_text, placeholder="Filter", width=220,

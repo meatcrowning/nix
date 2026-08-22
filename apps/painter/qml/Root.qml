@@ -36,6 +36,13 @@ Item {
     // thread every frame (apps/painter/main.py records his verdict).
     property bool showParams: true
 
+    // How much chrome floats OVER the top of the results pane. Under Plasma the
+    // toolbar is not a band across the window but a strip over that pane only
+    // (pylib/kdeshell.py `use_overlay_toolbar`), so the results start below it
+    // and the parameter column does not — it runs up to the menubar. 0 in the
+    // Hyprland session, where there is no toolbar at all.
+    property int chromeInset: 0
+
     // BROWSE OR VIEW — Gwenview's spine, and the one piece of this that is not
     // chrome: the grid answers "what have I made", View answers "what does THIS
     // one look like", which no thumbnail can. Return or a double-click enters,
@@ -378,10 +385,11 @@ Item {
         id: results
         app: root
         x: 0
-        // the Plasma menubar's height, 0 in the Hyprland session
-        y: menuBar.height
+        // under the Plasma menubar (0 high in the Hyprland session) and under
+        // the toolbar that floats over this pane
+        y: menuBar.height + root.chromeInset
         width: root.split ? root.paneLeadW : root.width
-        height: parent.height - root.barH - menuBar.height
+        height: parent.height - root.barH - menuBar.height - root.chromeInset
         visible: !root.showParams || root.split || root.view === 1
     }
 

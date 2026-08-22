@@ -110,12 +110,20 @@ here:
       dragged mid-drag.
   A key the saved order does not name is re-inserted at its BUILT-IN position,
   so a new panel can never be buried at the bottom or lost.
-- **Pins.** Right-click a row\'s label (`Field`, `Toggle`) to pin it: the panel
-  header keeps showing `label value` while the panel is COLLAPSED, in place of
-  the badge. `pinLabel`/`pinValue` is the protocol — `pinValue` descends into
-  whatever control the row holds, because a Field\'s content is usually a Row
-  with the Spin inside it. Stored under `<persistKey>.pins`. The chips are
-  read-only; a pinned control is not editable from the header.
+- **Pins are the ROWS THEMSELVES, moved.** Right-click a row's label (`Field`,
+  `Toggle`) to pin it; while the panel is folded that row is REPARENTED into a
+  fixed-width slot in the header, so it is still the live control — a pinned
+  Spin steps, a pinned Toggle toggles (his call, 2026-08-22). `pinLabel` names
+  it in the saved list (`<persistKey>.pins`), `pinValue` is what it reads.
+  Three things this needed, each a bug first: `rowOrder` is captured at
+  completion and expanding reparents EVERY row in that order, because QML
+  cannot put a child back at an index; the slots are a `Repeater` over `pins`
+  that appears a beat AFTER `collapsed` flips, so the move runs from its
+  `onCountChanged` as well; and a slot is a plain `Item`, which does not
+  position what it adopts — a moved row keeps the y the Column gave it and
+  draws below the panel until `x`/`y` are zeroed. The slot width is fixed
+  because the row takes its width from its parent; every attempt to size the
+  slot to the row ended in a binding loop.
 - **Browse ↔ View.** `inView` plus `OutputView.qml` — one output filling the
   pane, entered by Return or a double-click (which no longer launches `viewer`;
   that is still File → Open in Viewer), left by Escape, walked with Alt+Left/

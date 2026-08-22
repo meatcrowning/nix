@@ -146,20 +146,19 @@ Item {
             PixelText {
                 id: tag
                 anchors.centerIn: parent
-                // WHICH FRAME YOU ARE LOOKING AT — and for a clip the honest
-                // answer is always the first one. He asked for "frame X of Y"
-                // (2026-08-22) so that a still-looking preview stops being a
-                // mystery, and this is that, told straight: ComfyUI's video
-                // previewers slice the temporal axis to index 0
-                // (`Latent2RGBPreviewer` takes `x0[0, :, 0]`, `TAEHVPreviewerImpl`
-                // takes `x0[:1, :, :1]`), on the installed 0.30.0 AND on
-                // upstream master — so every step's preview is frame 1
-                // denoising. Saying "frame 1 of 158" answers the question the
-                // readout was leaving open; inventing a moving number would not.
+                // WHICH FRAME YOU ARE LOOKING AT. Stock ComfyUI slices a video
+                // latent's temporal axis to index 0 and previews frame 1 for
+                // the whole sample, on 0.30.0 and on upstream master alike; a
+                // LOCAL PATCH to `/home/lam/comfy/latent_preview.py` walks that
+                // cursor instead and sends the position in the preview's
+                // metadata (apps/painter/AGENTS.md records both halves). With
+                // an unpatched backend `previewFrames` is 0 and this says
+                // "frame 1", which is what such a backend is showing.
                 text: App.hasPreview
-                      ? (App.isVideo
-                         ? "sampling · frame 1 of " + App.videoFrames(root.gen.duration)
-                         : "sampling")
+                      ? (App.previewFrames > 1
+                         ? "sampling · frame " + App.previewFrame
+                           + " of " + App.previewFrames
+                         : (App.isVideo ? "sampling · frame 1" : "sampling"))
                       : (pane.sourceIsVideo ? "clip" : "still")
                 color: App.hasPreview ? Theme.accent : Theme.textDim
             }

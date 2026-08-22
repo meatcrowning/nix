@@ -192,11 +192,21 @@ Item {
             width: grid.cellWidth
             height: grid.cellHeight
 
-            // A clip with no poster frame yet asks for one as it comes into
-            // view. Extracting every one of them up front is a few hundred
-            // ffmpeg runs for thumbnails nobody has scrolled to (main.py
-            // `requestPoster`); the model ignores a repeat request.
-            Component.onCompleted: if (isVideo && poster === "") Gallery.requestPoster(path)
+            // A clip with no poster frame yet asks for one once it has been on
+            // screen for a moment. Extracting every one up front is a few
+            // hundred ffmpeg runs for thumbnails nobody has scrolled to
+            // (main.py `requestPoster`) — and asking the INSTANT a delegate is
+            // built is nearly as bad, because flicking through the grid builds
+            // and destroys hundreds of them, and each one queued a job that
+            // then ran, one after another, while he was still scrolling. That
+            // is what made the wheel feel heavy. A row passed in a quarter of a
+            // second was never looked at.
+            Timer {
+                id: posterDwell
+                interval: 250
+                running: isVideo && poster === ""
+                onTriggered: if (isVideo && poster === "") Gallery.requestPoster(path)
+            }
 
             // DRAG AN OUTPUT OUT OF THE WINDOW, into anything that takes a file
             // — a browser upload field, filer, a chat window. Same idiom as

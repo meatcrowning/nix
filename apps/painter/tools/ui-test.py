@@ -2089,12 +2089,35 @@ def test_panel_order_and_pins(win, ctl, tmp, keep):
           [str(it.property("text")) for it in walk(panel)
            if it.isVisible() and it.property("text")])
 
+    # THE ROW ITSELF, not a copy: it is reparented into the header strip, so it
+    # is still the live control up there (his call — pins are editable).
+    slot = row.parentItem()
+    check("...because the row itself moved into the header",
+          slot is not None and str(slot.property("pinKey") or "") == label,
+          slot.property("pinKey") if slot is not None else None)
+    check("...positioned at the slot, not where the column had it",
+          slot is not None and row.y() == 0, row.y())
+    check("...and it is still a working control", row.isEnabled())
+
+    # Expanding puts every row back IN ORDER — QML cannot re-insert a child at
+    # an index, so the panel reparents all of them, which is the only thing that
+    # keeps a returned row from landing at the bottom.
+    before_rows = [str(it.property("pinLabel")) for it in walk(panel)
+                   if it.property("pinLabel") not in (None, "")
+                   and it.metaObject().className().startswith("Field")]
+    panel.setProperty("collapsed", False)
+    spin(150)
+    after_rows = [str(it.property("pinLabel")) for it in walk(panel)
+                  if it.property("pinLabel") not in (None, "")
+                  and it.metaObject().className().startswith("Field")]
+    check("expanding restores the rows in their declared order",
+          after_rows == sorted(after_rows, key=lambda k: ["aspect", "MP"].index(k))
+          and set(after_rows) == set(before_rows), (before_rows, after_rows))
+
     panel.metaObject().invokeMethod(panel, "togglePin", Q_ARG("QVariant", row))
     spin(120)
     check("unpinning takes it back off", label not in (prop(panel, "pins") or []),
           prop(panel, "pins"))
-    panel.setProperty("collapsed", False)
-    spin(120)
 
 
 def test_filter(win, ctl, tmp):

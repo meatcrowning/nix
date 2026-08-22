@@ -680,6 +680,12 @@ class Gallery(QAbstractListModel):
             return
         if any(p == path for p, _d in self._poster_queue):
             return          # already waiting; a delegate rebuilt is not a job
+        # A BOUNDED QUEUE. Scrolling fast still enqueues faster than ffmpeg can
+        # drain, and the oldest requests are for rows long gone off screen — so
+        # the queue keeps the newest and drops the rest. Nothing is lost: a row
+        # that comes back asks again.
+        if len(self._poster_queue) > 12:
+            del self._poster_queue[:-12]
         self._poster_queue.append((path, dest))
         self._next_poster()
 
@@ -852,6 +858,8 @@ class Painter(QObject):
         self._sample_start_step = 0       # the step count at that anchor
         self.preview = None               # the live-preview image provider, set in main()
         self._preview_tick = 0            # an Image reloads on a CHANGED url, so count
+        self._preview_frame = 0           # which frame of a clip the preview is
+        self._preview_frames = 0          # ...and how many there are
         self._input_image = ""            # the first frame, as a local path
         self._last_image = ""             # the frame to end on, likewise
         self._uploaded = ("", "")         # (local path, the ref ComfyUI knows it by)
@@ -962,6 +970,10 @@ class Painter(QObject):
     # --preview-method never sends any, and the pane must not sit on a stale
     # frame from an hour ago claiming to be this job).
     previewTick = Property(int, lambda self: self._preview_tick, notify=previewChanged)
+    # Which frame of the clip the current preview IS, and how many there are.
+    # 0/0 until a preview with metadata lands (see `_on_preview`).
+    previewFrame = Property(int, lambda self: self._preview_frame, notify=previewChanged)
+    previewFrames = Property(int, lambda self: self._preview_frames, notify=previewChanged)
     hasPreview = Property(bool, lambda self: bool(self._busy and self._preview_tick),
                           notify=previewChanged)
     elapsed = Property(float, lambda self: (
@@ -1930,6 +1942,7 @@ class Painter(QObject):
         # A new job has no preview frame yet; the pane must not show the last
         # job's while this one warms up.
         self._preview_tick = 0
+        self._preview_frame = self._preview_frames = 0
         self.previewChanged.emit()
         self.busyChanged.emit()
 
@@ -1944,12 +1957,18 @@ class Painter(QObject):
             self._sample_start_step = value
         self.statusChanged.emit()
 
-    def _on_preview(self, _job, data, fmt):
+    def _on_preview(self, _job, data, fmt, meta=None):
         """A sampler preview frame off the websocket, into the image provider.
 
         Silently ignored if the backend was started without `--preview-method`
         — then none of these ever arrive and the pane simply shows the last
         output instead.
+
+        `meta` carries WHICH FRAME of a clip this is (`frame`/`frames`), which
+        exists because of a local patch to ComfyUI's `latent_preview.py`: stock
+        ComfyUI previews frame 1 of a video latent forever and says nothing
+        about it. Absent — an unpatched or older backend — the pane falls back
+        to saying frame 1, which is what such a backend is showing.
         """
         if self.preview is None:
             return
@@ -1958,6 +1977,12 @@ class Painter(QObject):
             return
         self.preview.image = img
         self._preview_tick += 1
+        m = meta or {}
+        try:
+            self._preview_frame = int(m.get("frame", 0) or 0)
+            self._preview_frames = int(m.get("frames", 0) or 0)
+        except (TypeError, ValueError):
+            self._preview_frame = self._preview_frames = 0
         self.previewChanged.emit()
 
     def _on_node(self, _job, role):
@@ -2725,8 +2750,12 @@ def main():
         # Right-aligned with the RESULTS pane rather than with the window: it
         # filters the outputs, so it belongs over them and not over the
         # parameter column. `paneLeadW` is where that pane ends (the splitter).
-        shell.toolbar_search(ctl.gallery.setFilter, placeholder="Filter outputs",
-                             align_right_to="paneLeadW")
+        shell.toolbar_search(ctl.gallery.setFilter, placeholder="Filter outputs")
+        # ...and the toolbar itself only spans the results pane, floating over
+        # it, so the parameter column runs all the way up to the menubar with
+        # no band of empty toolbar above it. The field's right edge follows for
+        # free — the toolbar ends at the splitter.
+        shell.use_overlay_toolbar(width_prop="paneLeadW")
         # The window is how the controller knows whether he is watching: a batch
         # that finishes behind a rolled-up or unfocused painter says so with a
         # desktop toast instead (Painter._onscreen).
