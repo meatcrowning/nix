@@ -67,6 +67,11 @@ from PySide6.QtGui import QAction, QIcon
 
 from kdetheme import is_plasma, read_ini
 
+
+def qt_version() -> str:
+    from PySide6.QtCore import qVersion
+    return qVersion()
+
 # The button `state` vocabulary shared with the hyprvtb titlebar and
 # DeskMenuBar.qml: 0 normal, 1 lit (a toggle that is on / the page you are on),
 # 2 disabled. docs/DESIGN.md §12.1.
@@ -119,7 +124,76 @@ def make_app(argv, name: str):
     if is_plasma():
         apply_icon_theme()
         apply_widget_style(app)
+        apply_palette(app)
     return app
+
+
+def apply_palette(app) -> None:
+    """Put the KDE colour scheme into the widget palette, if it is not there.
+
+    The two halves of this window take their colours from different places: the
+    QML content resolves ours through `kdetheme.py`, and QQC2 controls resolve
+    theirs through Kirigami — both of which read `kdeglobals` — while the
+    menubar, toolbar and statusbar are QWidgets taking `QApplication.palette()`,
+    which comes from the KDE platform theme. Where that plugin is missing the
+    widgets fall back to Qt's default light palette while everything else stays
+    on his dark scheme, and the result is not subtly wrong: it is white text on
+    white, a toolbar that looks empty. Caught by rendering it offscreen, which
+    is precisely the environment where no platform theme exists.
+
+    So: compare the live window colour with what `kdeglobals` says, and only if
+    they disagree build the palette ourselves. When the plugin IS loaded this
+    function measures one colour and returns.
+    """
+    from PySide6.QtGui import QPalette, QColor
+    ini = read_ini()
+
+    def col(group, key, fallback=None):
+        spec = (ini.get(group, {}) or {}).get(key)
+        if not isinstance(spec, str):
+            return QColor(fallback) if fallback else None
+        parts = [p.strip() for p in spec.split(",")]
+        try:
+            vals = [int(float(p)) for p in parts[:3]]
+        except ValueError:
+            return QColor(fallback) if fallback else None
+        if len(vals) < 3:
+            return QColor(fallback) if fallback else None
+        return QColor(*vals)
+
+    window = col("Colors:Window", "BackgroundNormal")
+    if window is None:
+        return
+    if app.palette().window().color() == window:
+        return   # the platform theme already did this properly
+
+    pal = QPalette(app.palette())
+    text = col("Colors:Window", "ForegroundNormal", "#000000")
+    view_bg = col("Colors:View", "BackgroundNormal", window.name())
+    view_fg = col("Colors:View", "ForegroundNormal", text.name())
+    btn_bg = col("Colors:Button", "BackgroundNormal", window.name())
+    btn_fg = col("Colors:Button", "ForegroundNormal", text.name())
+    sel_bg = col("Colors:Selection", "BackgroundNormal", "#3daee9")
+    sel_fg = col("Colors:Selection", "ForegroundNormal", "#ffffff")
+    tip_bg = col("Colors:Tooltip", "BackgroundNormal", view_bg.name())
+    tip_fg = col("Colors:Tooltip", "ForegroundNormal", view_fg.name())
+    dis_fg = col("Colors:Window", "ForegroundInactive", text.name())
+    link = col("Colors:View", "ForegroundLink", "#2980b9")
+
+    for role, colour in ((QPalette.Window, window), (QPalette.WindowText, text),
+                         (QPalette.Base, view_bg), (QPalette.Text, view_fg),
+                         (QPalette.AlternateBase, view_bg.darker(105)),
+                         (QPalette.Button, btn_bg), (QPalette.ButtonText, btn_fg),
+                         (QPalette.Highlight, sel_bg), (QPalette.HighlightedText, sel_fg),
+                         (QPalette.ToolTipBase, tip_bg), (QPalette.ToolTipText, tip_fg),
+                         (QPalette.Link, link),
+                         (QPalette.PlaceholderText, dis_fg)):
+        pal.setColor(QPalette.Active, role, colour)
+        pal.setColor(QPalette.Inactive, role, colour)
+        pal.setColor(QPalette.Disabled, role, colour)
+    for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
+        pal.setColor(QPalette.Disabled, role, dis_fg)
+    app.setPalette(pal)
 
 
 def apply_widget_style(app) -> None:
@@ -204,6 +278,26 @@ def apply_icon_theme() -> None:
         QIcon.setFallbackThemeName("breeze")
 
 
+def select_plasma_files(engine) -> None:
+    """Turn on the `+plasma` file selector for an engine.
+
+    Qt resolves `dir/+plasma/Foo.qml` in place of `dir/Foo.qml` whenever the
+    selector is active, so an app ships a second implementation of a component
+    beside the first and every call site picks the right one with no branch.
+    That is what lets painter keep one `Root.qml` while its controls are ours in
+    one session and the system style's in the other.
+    """
+    from PySide6.QtQml import QQmlFileSelector
+    # PARENTED TO THE ENGINE, deliberately: the constructor's first argument is
+    # the engine it selects for and the SECOND is the QObject parent. Leaving
+    # that out gives the selector no owner, Python collects it moments later,
+    # and every component then loads its unselected file — silently, with no
+    # error and no warning. Measured: `QQmlFileSelector.get(engine)` came back
+    # None immediately after constructing one.
+    sel = QQmlFileSelector(engine, engine)
+    sel.setExtraSelectors(["plasma"])
+
+
 class KdeShell:
     """A `QMainWindow` hosting an app's QML tree, chromed like a KDE program.
 
@@ -238,6 +332,15 @@ def _build_shell_class():
             # part of the QML that does not paint itself.
             self.view.setClearColor(Qt.transparent)
             self.view.setAttribute(Qt.WA_TranslucentBackground)
+            # AND THE QML HALF WEARS THE SAME PALETTE. Qt Quick Controls inside
+            # a QQuickWidget do not inherit QApplication's palette on their own:
+            # rendered offscreen against his dark scheme, the window came out
+            # dark with light-grey spin boxes and near-black labels on it —
+            # every control drawn from Qt's default light palette while the
+            # widgets around them were correct. Handing the view the app's
+            # palette propagates it down the QML item tree.
+            from PySide6.QtWidgets import QApplication
+            self.view.setPalette(QApplication.palette())
             self.window.setCentralWidget(self.view)
 
             self._toolbar = None
@@ -350,13 +453,28 @@ def _build_shell_class():
                 if g not in order:
                     order.append(g)
 
+            first_menu = None
             for g in order:
                 items = groups.get(g)
                 if not items:
                     continue
                 menu = bar.addMenu("&" + g.capitalize())
+                if first_menu is None:
+                    first_menu = menu
                 for e in items:
                     menu.addAction(self._action_for(e))
+
+            # THE VERBS EVERY KDE PROGRAM HAS, wherever the app's own array does
+            # not already provide them. Quit closes the leftmost menu the way it
+            # does in every other window on the desktop; About is what a program
+            # with a name in the taskbar is expected to answer for. Both use the
+            # platform's standard shortcut rather than a literal, so they are
+            # whatever this desktop says they are.
+            if first_menu is not None:
+                first_menu.addSeparator()
+                first_menu.addAction(self._quit_action())
+            help_menu = bar.addMenu("&Help")
+            help_menu.addAction(self._about_action())
 
             # The toolbar: the app's own choice, `bar: true` per entry. A KDE
             # program's toolbar is its primary verbs, not everything it can do —
@@ -392,6 +510,40 @@ def _build_shell_class():
                 self._status.addPermanentWidget(self._progress)
                 self._status.addPermanentWidget(self._status_label)
                 self.window.setStatusBar(self._status)
+
+        def _quit_action(self):
+            from PySide6.QtGui import QKeySequence
+            act = self._actions.get("__quit")
+            if act is None:
+                from PySide6.QtWidgets import QApplication
+                act = QAction(QIcon.fromTheme("application-exit"), "&Quit", self.window)
+                act.setShortcut(QKeySequence.Quit)
+                act.setShortcutContext(Qt.ApplicationShortcut)
+                act.triggered.connect(QApplication.closeAllWindows)
+                self.window.addAction(act)   # so Ctrl+Q works with no menu open
+                self._actions["__quit"] = act
+            return act
+
+        def _about_action(self):
+            act = self._actions.get("__about")
+            if act is None:
+                from PySide6.QtWidgets import QApplication, QMessageBox
+                name = QApplication.applicationName() or "this program"
+
+                def about():
+                    QMessageBox.about(
+                        self.window, f"About {name}",
+                        f"<h3>{name}</h3>"
+                        f"<p>Part of this desktop's own set of apps "
+                        f"(<code>~/nix/apps/{name}</code>), running its live "
+                        f"source.</p>"
+                        f"<p>Qt {qt_version()} · style "
+                        f"{QApplication.style().objectName()}</p>")
+
+                act = QAction(QIcon.fromTheme("help-about"), f"&About {name}", self.window)
+                act.triggered.connect(about)
+                self._actions["__about"] = act
+            return act
 
         def _action_for(self, e):
             """One QAction per button id, reused across rebuilds so a menu and a

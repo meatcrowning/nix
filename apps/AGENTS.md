@@ -657,9 +657,39 @@ with text-only toolbar rows in a session where everything else is Oxygen.
 icon theme name, and the icon search paths Qt only fills in from a platform
 theme — so a stripped or offscreen environment behaves like the session.
 
+**The content changes clothes through a FILE SELECTOR, not a branch.**
+`kdeshell.select_plasma_files(engine)` turns on the `plasma` selector, so
+`qml/+plasma/Foo.qml` transparently replaces `qml/Foo.qml` at every call site:
+painter's `Panel` is a styled `GroupBox` there, `Spin` a `SpinBox`, `Picker` a
+`ComboBox`, `Toggle` a `CheckBox`, `TextButton` a `Button`, and `CtxMenu` /
+`ToolTipArea` the style's own popups — each with the SAME API as the file it
+replaces, so `Root.qml` and every panel are untouched. Each variant carries
+`property string face: "plasma"`, which is how a harness proves the swap
+actually happened. Two traps paid for already:
+
+- **The selector must be OWNED.** `QQmlFileSelector(engine)` does not parent
+  itself to the engine; Python collects it moments later and every component
+  then loads its unselected file, silently. Pass the engine twice.
+- **A variant may not redeclare a FINAL property** (`GroupBox.title`), and it
+  must reproduce the original's *layout contract*, not just its properties —
+  painter's `Panel` puts content in a `Column`, and a variant whose content
+  item was a plain `Item` drew every row of a panel on top of the others.
+
 Verify it the only way this can be verified — by rendering:
-`DESK_SESSION=plasma QT_STYLE_OVERRIDE=oxygen PAINTER_SHOT=/tmp/x.png
-painter-qtenv python3 main.py --selftest`, then look at the PNG.
+
+```
+QT_QPA_PLATFORMTHEME=kde DESK_SESSION=plasma PAINTER_SHOT=/tmp/x.png \
+    painter-qtenv python3 main.py --selftest        # then LOOK at the PNG
+PAINTER_TREE=panel   # …and/or dump item geometry + the widget palette
+```
+
+**`QT_QPA_PLATFORMTHEME=kde` is not optional in that command.** Without it no
+KDE platform theme loads, and the two halves of the window disagree: widgets
+take Qt's default light palette while the QML takes his dark scheme, which
+renders as an empty-looking toolbar and invisible labels — a bug in the
+harness, not in the app. `kdeshell` re-asserts the style, palette and icon
+theme when it finds them wrong, so this is belt-and-braces rather than the only
+line of defence.
 
 ### `VScroll.qml` — the one scrollbar
 
