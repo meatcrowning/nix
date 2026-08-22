@@ -363,7 +363,12 @@ Item {
                     PixelText {
                         id: albumYear
                         visible: (root.cur.year || 0) > 0 && (root.cur.album || "") !== ""
-                        text: root.cur.year
+                        // `text` is evaluated even while the row is invisible,
+                        // and with nothing playing `cur.year` is undefined — a
+                        // QML warning on every launch ("Unable to assign
+                        // [undefined] to QString"), which is one more line of
+                        // noise between a real one and whoever is reading.
+                        text: root.cur.year ? String(root.cur.year) : ""
                         height: Theme.lineHeight + 2
                         color: Theme.dim
                     }
