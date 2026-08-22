@@ -335,7 +335,16 @@ Item {
                                         // action with a wide blast radius (§7.2
                                         // orders destructive/high-impact last).
                                         { label: "create systheme",
-                                          enabled: Library.canSystheme && !!Library.albumInfo(aid).fullArt,
+                                          // `=== true`, not a bare truth test:
+                                          // `canSystheme` missing makes the
+                                          // whole expression `undefined`, and
+                                          // CtxMenu reads "not false" as
+                                          // enabled — so the row was OFFERED,
+                                          // and would have done nothing
+                                          // (docs/DESIGN.md §10, never offer an
+                                          // action that can silently fail).
+                                          enabled: Library.canSystheme === true
+                                                   && !!Library.albumInfo(aid).fullArt,
                                           trigger: function() { Library.createSysthemeFromAlbum(aid); } },
                                     ]);
                                 } else {
