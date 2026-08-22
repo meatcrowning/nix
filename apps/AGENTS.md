@@ -220,6 +220,14 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
       changes. So the per-app change is one call —
       `Palette(theme_source(PANEL_THEME))` — and no `Theme.qml`, binding or
       component knows which session it is in. Do it that way for a new app.
+    - **`kde_chrome()` is the exception to "the source and nothing else"**, for
+      the one caller that cannot hand the painting back to the style: surfer's
+      OneeChan 4chan re-skin, a web page no QStyle will ever draw. It returns
+      the KStyle's gradient stops and relief tones (each `kdeglobals` group
+      background shaded either side along HLS lightness, scaled by `[KDE]
+      contrast`) so that sheet can imitate an Oxygen window; it is None outside
+      a Plasma session and under a flat KStyle (`GRADIENT_STYLES`), so no other
+      app and neither the Hyprland look ever sees a gradient because of it.
     - `deskstyle.py` asks it for `fontFamily`/`fontSize` (KDE's point size,
       converted at the screen's own DPI), `smooth`, the motion factor and the
       scrollbar in that session. The two GEOMETRY keys do not move: border
