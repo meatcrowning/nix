@@ -80,6 +80,14 @@ here:
   the colour Dolphin paints its file list with. The window\'s own background is
   the style\'s gradient and the two are deliberately different: the band keeps
   the gradient because it is chrome. Empty string outside Plasma.
+- **The grid shows EVERY output** — `load_existing` was capped at 60, a number
+  from when the results were a strip, and the history simply stopped partway
+  with nothing saying so. A `GridView` only builds what it can see, so the rest
+  costs one small dict each. Two things make that affordable: a tile's `Image`
+  is `cache: true` at `grid.thumbPx` (a 60px-bucketed 2x of the cell) rather
+  than an uncached 420px decode of a multi-megabyte PNG on every scroll past,
+  and a clip's poster frame is extracted **on demand** (`Gallery.requestPoster`,
+  asked for by the delegate) with only the first 24 queued eagerly.
 - **`Gallery` keeps `_all` and shows `_rows`.** The toolbar\'s filter field
   (`kdeshell.toolbar_search`) calls `Gallery.setFilter`, which matches every
   word against the filename AND the prompt — read out of the file once and

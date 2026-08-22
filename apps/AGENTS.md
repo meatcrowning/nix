@@ -683,11 +683,14 @@ can never disagree.
 the toolbar, behind a stretch, where Dolphin/Gwenview/Okular keep theirs. It is
 re-appended after every `_rebuild`, since that clears the toolbar.
 
-**The status bar is not a titlebar.** Oxygen's WindowManager makes every empty
-piece of a window draggable (`WD_FULL`), which is right for the chrome at the
-top and wrong at the bottom. `_ensure_status` sets `_kde_no_window_grab` — the
-property that style's own blacklist reads — and installs a press-swallowing
-filter behind it; the size grip is a child widget and keeps working.
+**The status bar is not a titlebar** — and blacklisting the BAR is not enough:
+Oxygen's WindowManager looks at the widget under the pointer, and a status bar
+is mostly covered by its own labels, so the half under the message label went on
+dragging the window. `_no_grab()` sets `_kde_no_window_grab` and installs a
+press filter, and every child that fills part of the bar gets it (not the size
+grip, which wants its press).
+
+
 
 **`toolbar_search`'s `align_right_to`** names a QML property holding the x of a
 pane's right edge, and keeps the field's right edge over it with a fixed spacer

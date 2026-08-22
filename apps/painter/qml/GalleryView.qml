@@ -173,6 +173,15 @@ Item {
         readonly property real usable: Math.max(1, width - gscroll.barW)
         cellWidth: Math.max(60, Math.floor(usable / Math.max(1, Math.round(usable / 210))))
         cellHeight: cellWidth
+        // The decode size, in 60px steps rather than tracking `cellWidth`: a
+        // sourceSize that moved with every pixel of a window resize would throw
+        // away and re-decode every thumbnail on the way. 2x the cell, capped,
+        // so a HiDPI screen still has pixels to draw with.
+        readonly property int thumbPx:
+            Math.min(560, Math.max(120, Math.ceil(cellWidth * 2 / 60) * 60))
+        // Keep a screenful of delegates alive either side of the viewport: the
+        // churn at the edges is what a scroll actually costs.
+        cacheBuffer: Math.max(600, cellHeight * 3)
         // NO ROW-SIZED WHEEL STEP. This was `wheelLines: 1, wheelStep: cellHeight`,
         // i.e. one notch = exactly one row — which reads as the grid SNAPPING
         // an output to the top on every notch instead of scrolling. The default
@@ -182,6 +191,12 @@ Item {
             id: tile
             width: grid.cellWidth
             height: grid.cellHeight
+
+            // A clip with no poster frame yet asks for one as it comes into
+            // view. Extracting every one of them up front is a few hundred
+            // ffmpeg runs for thumbnails nobody has scrolled to (main.py
+            // `requestPoster`); the model ignores a repeat request.
+            Component.onCompleted: if (isVideo && poster === "") Gallery.requestPoster(path)
 
             // DRAG AN OUTPUT OUT OF THE WINDOW, into anything that takes a file
             // — a browser upload field, filer, a chat window. Same idiom as
@@ -262,8 +277,18 @@ Item {
                     source: isVideo ? poster : url
                     fillMode: Image.PreserveAspectFit
                     asynchronous: true
-                    cache: false
-                    sourceSize.width: 420
+                    // CACHED, and decoded at the size actually drawn.
+                    //
+                    // This was `cache: false` at a fixed 420px, and it is what
+                    // made scrolling the grid feel heavy: a GridView destroys a
+                    // delegate the moment it leaves the viewport and builds it
+                    // again when it comes back, so every row that scrolled past
+                    // and back re-read a multi-megabyte PNG off disk and
+                    // re-decoded it — for a cell a third of that size. The
+                    // cache is Qt's own (QML_PIXMAP_CACHE_LIMIT) and holds the
+                    // decoded thumbnails, not the originals.
+                    cache: true
+                    sourceSize.width: grid.thumbPx
                 }
 
                 // HOVER A CLIP AND IT PLAYS, silently — the preview a video
