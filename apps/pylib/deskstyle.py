@@ -53,6 +53,17 @@ pixel font there is the one window that ignores the theme. The switch is
 `kdetheme.is_plasma()` and it is the same switch that moves the palette
 (`kdetheme.py`, which owns the mapping and the reasoning); nothing downstream —
 no `Theme.qml`, no binding, no component — knows which session it is in.
+
+**And when that session's style is Oxygen, the STYLE's own store fills in the
+rest** (`oxygenstyle.py`, `~/.config/oxygenrc`). kdeglobals carries a colour
+scheme, a font and one animation factor and stops; how wide a scrollbar is, how
+long a hover fade lasts, how big a tree expander is and whether a tooltip is
+translucent are the widget style's, and every real QWidget in one of our Plasma
+windows already draws with them. The QML inside the `QQuickWidget` is the half
+that did not, so the `ox*` properties below publish them — a hand-drawn control
+and the real widget beside it now come off the same numbers. They are all
+inert outside a Plasma-with-Oxygen session (0 / false / ""), which is the
+signal each consumer falls back on.
 """
 
 import json
@@ -64,6 +75,8 @@ from PySide6.QtCore import QFileSystemWatcher, QObject, Property, Signal
 from PySide6.QtGui import QFont, QFontMetrics
 
 from kdetheme import is_plasma, kde_font, kde_motion, kdeglobals_path, read_ini
+from oxygenstyle import is_oxygen, metrics as ox_metrics, motion as ox_motion, \
+    oxygenrc_path, read_oxygen
 
 # Written by the panel's SettingsStore (Quickshell.shellDir + "/settings.json").
 SETTINGS_PATH = Path.home() / ".config" / "quickshell" / "settings.json"
@@ -150,6 +163,11 @@ class DeskStyle(QObject):
         self._rounding = 0
         self._smooth = self._family in SMOOTH_FAMILIES
         self._plasma = is_plasma()
+        # Resolved once here and refreshed in _load; is_oxygen() also reads
+        # kdeglobals, so the style can change under us without a relaunch.
+        self._oxygen = False
+        self._ox_motion = {}
+        self._ox_metrics = {}
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(self._on_change)
         self._watcher.directoryChanged.connect(self._on_change)
@@ -164,6 +182,10 @@ class DeskStyle(QObject):
             # System Settings makes.
             kg = kdeglobals_path()
             want += [str(kg.parent), str(kg)]
+            # Oxygen's own store, same file+directory pair — its KCM
+            # (`oxygen-settings6`) writes it the same atomic way.
+            ox = oxygenrc_path()
+            want += [str(ox.parent), str(ox)]
         have = set(self._watcher.files()) | set(self._watcher.directories())
         for p in want:
             if p not in have and os.path.exists(p):
@@ -228,11 +250,29 @@ class DeskStyle(QObject):
             bar = "flat"   # beveled/win31 chrome inside a Breeze window is the
                            # one thing that would still read as "not themed"
 
-        now = (family, size, reduce_motion, speed, bar, border, rounding, smooth)
-        if now != (self._family, self._size, self._reduce, self._speed,
-                   self._scrollbar, self._border, self._rounding, self._smooth):
+        # The widget style's own store, on top of the scheme's. Read after the
+        # KDE branch because it can VETO motion: Oxygen's AnimationsEnabled is
+        # a second master switch and a window whose real widgets have stopped
+        # animating must not have QML still sliding inside it.
+        oxygen = self._plasma and is_oxygen(self._ini)
+        ox_m, ox_x = ({}, {})
+        if oxygen:
+            ox = read_oxygen()
+            ox_m, ox_x = ox_motion(ox), ox_metrics(ox)
+            if not ox_m["generic"]:
+                reduce_motion = True
+
+        now = (family, size, reduce_motion, speed, bar, border, rounding, smooth,
+               oxygen, tuple(sorted(ox_m.items())), tuple(sorted(ox_x.items())))
+        was = (self._family, self._size, self._reduce, self._speed,
+               self._scrollbar, self._border, self._rounding, self._smooth,
+               self._oxygen, tuple(sorted(self._ox_motion.items())),
+               tuple(sorted(self._ox_metrics.items())))
+        if now != was:
             (self._family, self._size, self._reduce, self._speed,
-             self._scrollbar, self._border, self._rounding, self._smooth) = now
+             self._scrollbar, self._border, self._rounding, self._smooth,
+             self._oxygen) = now[:9]
+            self._ox_motion, self._ox_metrics = ox_m, ox_x
             self.changed.emit()
 
     def _kde_type(self, family, size, smooth):
@@ -372,6 +412,26 @@ class DeskStyle(QObject):
         moves a running window between the two."""
         return self._plasma
 
+    @Property(str, constant=True)
+    def viewBg(self):
+        """The colour a KDE program paints its VIEW with — Dolphin's file list,
+        Gwenview's thumbnail grid, Okular's page area.
+
+        That is `QPalette.Base`, which the KDE platform theme fills in from
+        `[Colors:View] BackgroundNormal` in kdeglobals; the window's own
+        background is the style's gradient, and the two are deliberately
+        different. Empty string outside a Plasma session, where there is no such
+        distinction and every pane takes the wallpaper palette instead.
+        """
+        if not self._plasma:
+            return ""
+        try:
+            from PySide6.QtGui import QGuiApplication
+            app = QGuiApplication.instance()
+            return app.palette().base().color().name() if app else ""
+        except Exception:  # noqa: BLE001
+            return ""
+
     @Property(bool, notify=changed)
     def reduceMotion(self):
         return self._reduce
@@ -383,3 +443,110 @@ class DeskStyle(QObject):
     @Property(str, notify=changed)
     def scrollbarStyle(self):
         return self._scrollbar
+
+    # ----------------------------------------------------------------------- #
+    #  the widget style's own numbers (oxygenstyle.py)
+    #
+    #  All inert outside a Plasma-with-Oxygen session: 0, false or "". Every
+    #  consumer treats that as "the style has no opinion, use the desktop's own
+    #  value" — which is why none of them needs to know what session it is in.
+    #  Adding one is a row in oxygenstyle._KEYS and a Property here.
+    # ----------------------------------------------------------------------- #
+
+    @Property(bool, notify=changed)
+    def oxygen(self):
+        """True when the window is being painted by Oxygen — a Plasma session
+        AND `[KDE] widgetStyle` (or the look-and-feel default) naming it."""
+        return self._oxygen
+
+    @Property(int, notify=changed)
+    def styleMs(self):
+        """The style's OWN animation duration for a state change, ms; 0 when
+        there is no style saying (or it has animations off).
+
+        Oxygen's `GenericAnimationsDuration` — what it fades a button's hover
+        and a widget's enabled state at, 150ms by default against this
+        desktop's 260ms slide. `qmlcommon/Motion.qml` prefers it in a Plasma
+        session: a QML control fading beside a real QToolButton at a different
+        speed is the tell that it is hand-drawn."""
+        return int(self._ox_motion.get("generic", 0))
+
+    @Property(int, notify=changed)
+    def styleMenuMs(self):
+        """The style's menu fade, ms; 0 when none. Oxygen animates menu and
+        menubar item highlights separately from everything else."""
+        return int(self._ox_motion.get("menu", 0))
+
+    @Property(int, notify=changed)
+    def styleBusyMs(self):
+        """One step of the style's busy indicator, ms; 0 when none. For a QML
+        progress/activity strip that has to march in time with a QProgressBar
+        in the same status bar."""
+        return int(self._ox_motion.get("busyStep", 0))
+
+    @Property(int, notify=changed)
+    def styleScrollWidth(self):
+        """The style's scrollbar width in px; 0 when none (VScroll keeps
+        docs/DESIGN.md 9.2's own width then). Oxygen's default is 15."""
+        return int(self._ox_metrics.get("scrollWidth", 0))
+
+    @Property(int, notify=changed)
+    def styleScrollButtons(self):
+        """How many stepper buttons the style's scrollbar has at the far end
+        (`ScrollBarAddLineButtons`, 0-2); 0 when there is no style saying."""
+        return int(self._ox_metrics.get("scrollAddButtons", 0))
+
+    @Property(float, notify=changed)
+    def styleExpanderWidth(self):
+        """The drawn width of the style's tree expander triangle in px; 0 when
+        none. Oxygen's TE_SMALL is 5.0 at a 1.2 pen."""
+        return float(self._ox_metrics.get("expanderWidth", 0.0))
+
+    @Property(float, notify=changed)
+    def styleExpanderPen(self):
+        """The pen width that triangle is stroked at; 0 when none."""
+        return float(self._ox_metrics.get("expanderPen", 0.0))
+
+    @Property(bool, notify=changed)
+    def styleFocusIndicator(self):
+        """Whether the style draws a focus rectangle on view items. Oxygen
+        defaults to FALSE — it shows focus by the item's own glow — so a QML
+        list drawing one is a rectangle no other view in the session has."""
+        return bool(self._ox_metrics.get("focusIndicator", False))
+
+    @Property(bool, notify=changed)
+    def styleTreeBranchLines(self):
+        """Whether the style draws branch lines in a tree view."""
+        return bool(self._ox_metrics.get("treeBranchLines", False))
+
+    @Property(bool, notify=changed)
+    def styleToolbarSeparators(self):
+        """Whether the style draws a separator between toolbar items."""
+        return bool(self._ox_metrics.get("toolbarSeparators", False))
+
+    @Property(bool, notify=changed)
+    def styleTooltipTransparent(self):
+        """Whether the style's tooltips are translucent. Oxygen's are, by
+        default — an opaque QML tooltip beside a translucent widget one is the
+        two-tooltip-styles-in-one-window failure."""
+        return bool(self._ox_metrics.get("tooltipTransparent", False))
+
+    @Property(bool, notify=changed)
+    def styleSliderTicks(self):
+        """Whether the style draws tick marks on a slider."""
+        return bool(self._ox_metrics.get("sliderTicks", False))
+
+    @Property(str, notify=changed)
+    def styleMnemonics(self):
+        """`MN_NEVER` / `MN_AUTO` / `MN_ALWAYS`, or "" when no style says —
+        whether an accelerator's letter is underlined always, only while Alt is
+        held, or never. A QML menu row that underlines unconditionally
+        disagrees with the KDE menubar directly above it."""
+        return str(self._ox_metrics.get("mnemonics", ""))
+
+    @Property(str, notify=changed)
+    def styleMenuHighlight(self):
+        """`MM_DARK` / `MM_SUBTLE` / `MM_STRONG`, or "" — how hard the style
+        paints the highlight under the menu row the pointer is on."""
+        return str(self._ox_metrics.get("menuHighlight", ""))
+

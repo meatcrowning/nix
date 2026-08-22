@@ -75,15 +75,14 @@
   # so it is gated to x86_64 the way open-webui is and lands on `top` only
   # (`air`/book is aarch64 and misses it).
   #
-  # Patched for Python 3.14: upstream tools/daemon_pool.py still mirrors the
-  # 3.8–3.13 ThreadPoolExecutor internals (_initializer/_initargs), which 3.14
-  # removed in favour of a per-instance worker context. Reaching for those
-  # attributes raised AttributeError and silently killed every tool/agent call
-  # that ran through the pool. The override applies hermes-agent-python314.patch,
-  # which matches the 3.14 _worker(ctx) signature. Revisit on the next
-  # `nix flake update llm-agents` — drop it once upstream lands the port.
+  # It used to carry our own hermes-agent-python314.patch: upstream's
+  # tools/daemon_pool.py mirrored the 3.8–3.13 ThreadPoolExecutor internals
+  # (_initializer/_initargs), which 3.14 removed in favour of a per-instance
+  # worker context, so reaching for them raised AttributeError and silently
+  # killed every tool/agent call that ran through the pool. As of the
+  # 2026-08-20 `nix flake update llm-agents` the input applies its OWN
+  # daemon-pool-python314.patch, and ours then failed to apply on top of it —
+  # so it is gone, and this is the plain package again.
   ++ lib.optional pkgs.stdenv.hostPlatform.isx86_64
-     (inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.hermes-agent.overrideAttrs (old: {
-       patches = (old.patches or [ ]) ++ [ ./hermes-agent-python314.patch ];
-     }));
+     inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.hermes-agent;
 }

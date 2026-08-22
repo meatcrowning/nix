@@ -88,6 +88,17 @@ QtObject {
 
     // Live wallpaper palette (WalPalette in main.py — not "Palette", which is a
     // built-in Qt Quick type name that would shadow the context property).
+    // THE WINDOW'S OWN SURFACE — the one colour token that differs between the
+    // two roofs (docs/DESIGN.md §7.6). Under Hyprland the window is ours and it
+    // is `bg`. Under Plasma the background is the SYSTEM STYLE'S, painted behind
+    // this QML by the QMainWindow that hosts it (pylib/kdeshell.py) — Oxygen's
+    // gradient runs unbroken from the titlebar through the menubar and toolbar
+    // and down the sides, and that is precisely what a flat fill here would
+    // cover up. So anything that means "the window's background" binds THIS,
+    // and only insets (`bgAlt` panels, fields, list rows) keep a real colour.
+    readonly property color windowFill: (typeof DeskStyle !== "undefined" && DeskStyle
+                                         && DeskStyle.plasma === true) ? "transparent" : bg
+
     readonly property color bg:        WalPalette.bg
     readonly property color bgAlt:     WalPalette.bgAlt
     readonly property color border:    WalPalette.border

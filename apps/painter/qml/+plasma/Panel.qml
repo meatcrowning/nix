@@ -1,13 +1,32 @@
 import QtQuick
+import QtQuick.Controls
 
-// A titled, collapsible box.  The left column is a stack of these.
-Rectangle {
+// Panel, in a Plasma session: THE SECTION IS A BUTTON, and an open one is that
+// button held down.
+//
+// [his] "can we maybe try making the subsections i.e. model, resolution,
+// prompt, etc... look as if buttons? and when clicked, the expanded section has
+// the look of a pressed button?" — so the panel's background is a real `Button`
+// drawn by the KStyle, `checked` while it is open, which is exactly how Oxygen
+// and Breeze draw a sunken/held one. The button is the WHOLE section rather
+// than its header: a header that goes dark while its own rows sit on the window
+// background reads as two unrelated things.
+//
+// It replaced a `GroupBox` and keeps that file's API exactly — title,
+// persistKey, collapsed, collapsible, badge, default content,
+// sectionKey/reorderable and the pin protocol — so no call site changes, and
+// ../Panel.qml (the Hyprland look) is untouched.
+Item {
     id: panel
+    property string face: "plasma"
+
     property string title: ""
-    // Collapsed or not is remembered per panel, under this key. A panel without
-    // one still collapses; it just forgets (nothing in-tree does that).
     property string persistKey: ""
     property bool collapsed: false
+    property bool collapsible: true
+    property string badge: ""
+    default property alias content: inner.data
+
     Component.onCompleted: {
         // The declared order of the rows, captured once — see `applyPins`.
         var order = []
@@ -25,22 +44,12 @@ Rectangle {
         if (persistKey) Prefs.set(persistKey, collapsed)
         panel.applyPins()
     }
-    property bool collapsible: true
-    property string badge: ""
-    default property alias content: inner.data
 
-    // WHICH SECTION THIS IS, and whether the column lets you move it. Both are
-    // set by ParamsPane's loader; a panel used anywhere else is simply not
-    // draggable (docs/painter-kde-layout.md phase 7).
+    // Reordering and pinning, same API and same rules as ../Panel.qml — read
+    // the comments there; only the drawing differs.
     property string sectionKey: ""
     property bool reorderable: sectionKey !== "" && typeof root !== "undefined"
                                && root && root.dragSection !== undefined
-
-    // PINS. A collapsed panel normally says only its badge; a pinned row keeps
-    // its value visible there too, so folding a panel no longer costs you the
-    // one number you were watching. Right-click a row's LABEL to pin or unpin
-    // it (Field.qml, Toggle.qml). Stored beside the collapsed state, under the
-    // same key, so a panel with no `persistKey` pins for the session only.
     property var pins: []
 
     function togglePin(item) {
@@ -50,7 +59,7 @@ Rectangle {
         var i = p.indexOf(k)
         if (i >= 0) p.splice(i, 1)
         else p.push(k)
-        panel.pins = p                       // a NEW array: see Root.qml's `gen`
+        panel.pins = p
         if (persistKey) Prefs.set(persistKey + ".pins", JSON.stringify(p))
     }
 
@@ -135,116 +144,97 @@ Rectangle {
     onPinsChanged: panel.applyPins()
 
     width: parent ? parent.width : 320
-    // A PANEL FOLLOWS ITS CONTENT DOWN AS WELL AS UP. This used to size from
-    // `inner.childrenRect.height`, which only ever GREW once a child was
-    // hidden: an invisible child keeps the y a Column last positioned it at,
-    // and childrenRect still spans to it — so with the negative prompt box
-    // hidden (any video or edit family) dragging the positive box SMALLER left
-    // the panel at its old height, with a hand-sized blank under the box.
-    // Measured offscreen against the real window, his own prefs: box 392 -> 242,
-    // panel 435 -> 435. The Column's own `implicitHeight` is the honest number —
-    // it is the sum of the children it actually LAYS OUT, so it excludes the
-    // hidden ones by construction and tracks both directions.
     // The header, plus whatever is still in the column — everything when open,
     // the pinned rows when folded, nothing when folded with none pinned.
-    implicitHeight: header.height + (inner.visible ? inner.implicitHeight + 14 : 0)
+    implicitHeight: header.height + (inner.visible ? inner.implicitHeight + 12 : 0)
     height: implicitHeight
-    color: Theme.bgAlt
-    radius: Theme.rounding
-    border.color: Theme.border
-    border.width: Theme.ctrlBorder
-    clip: true
+
+    // THE WHOLE SECTION IS THE BUTTON, not just its header. Open, the style's
+    // held-down face covers the panel from the title to its last row, which is
+    // the look he asked for — a header that goes dark while the rows below it
+    // sit on the window background read as two unrelated things.
+    //
+    // It is a BACKGROUND: `blocker` above it eats every press so the button
+    // cannot be clicked through its own contents, and the header and the rows
+    // are drawn over both. Only the header toggles.
+    Button {
+        id: bg
+        anchors.fill: parent
+        checkable: true
+        checked: !panel.collapsed
+        hoverEnabled: false
+        focusPolicy: Qt.NoFocus
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.AllButtons
+        onPressed: function (m) { m.accepted = true }
+    }
 
     Item {
         id: header
         width: parent.width
-        height: 24
+        height: Math.max(titleLabel.implicitHeight + 10, 28)
 
-        PixelText {
-            id: caret
-            visible: panel.collapsible
-            x: 6
-            anchors.verticalCenter: parent.verticalCenter
-            text: panel.collapsed ? "+" : "-"
-            color: Theme.dim
-        }
-        PixelText {
-            id: titleText
-            anchors.verticalCenter: parent.verticalCenter
-            x: panel.collapsible ? 20 : 8
-            text: panel.title
-            color: root.fgAccent
-        }
-        // A BADGE IS NEVER WIDER THAN WHAT IS LEFT. The model panel's badge is a
-        // filename, which in a 300px column ran off the edge and out of the
-        // panel entirely. Elided in the middle, because the tail of a model name
-        // (the quant, the variant) is the half worth keeping.
-        PixelText {
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.right: parent.right
-            anchors.rightMargin: 8
-            anchors.left: titleText.right
+        Label {
+            id: titleLabel
+            anchors.left: parent.left
             anchors.leftMargin: 10
-            horizontalAlignment: Text.AlignRight
-            elide: Text.ElideMiddle
+            anchors.verticalCenter: parent.verticalCenter
+            text: panel.title
+            font.bold: true
+        }
+        // The badge, and the pins that replace it while folded — the same rule
+        // as ../Panel.qml: both say what the panel says when you cannot see
+        // inside it, and the pins are the half he chose. ELIDED and bounded on
+        // both sides: a model filename is longer than any panel is wide, and it
+        // used to run out through the button's edge.
+        Label {
+            anchors.left: titleLabel.right
+            anchors.leftMargin: 8
+            anchors.right: parent.right
+            anchors.rightMargin: 10
+            anchors.verticalCenter: parent.verticalCenter
             text: panel.badge
-            color: Theme.textDim
+            elide: Text.ElideMiddle
+            opacity: 0.7
+            horizontalAlignment: Text.AlignRight
         }
-
-        MouseArea {
-            id: headerDrag
-            anchors.fill: parent
-            enabled: panel.collapsible || panel.reorderable
-            hoverEnabled: true
-            acceptedButtons: Qt.LeftButton | Qt.RightButton
-            cursorShape: dragging ? Qt.ClosedHandCursor
-                       : panel.collapsible ? Qt.PointingHandCursor : Qt.ArrowCursor
-
-            property real pressY: 0
-            property bool dragging: false
-
-            onPressed: function (m) { pressY = m.y; dragging = false }
-            onPositionChanged: function (m) {
-                if (!panel.reorderable || !pressed) return
-                // 6px, the same slack every other press-then-drag on this
-                // desktop allows before it stops being a click.
-                if (!dragging && Math.abs(m.y - pressY) < 6) return
-                dragging = true
-                root.dragSection(panel.sectionKey, mapToItem(null, m.x, m.y).y)
-            }
-            onReleased: if (dragging) root.dropSection()
-            onCanceled: dragging = false
-            onClicked: function (m) {
-                if (m.button === Qt.RightButton) {
-                    if (!panel.reorderable) return
-                    var pt = mapToItem(null, m.x, m.y)
-                    root.ctxMenu.open(pt.x, pt.y, [
-                        { label: "reset panel order",
-                          trigger: () => root.resetOrder() }
-                    ])
-                    return
-                }
-                if (dragging) { dragging = false; return }
-                if (panel.collapsible) panel.collapsed = !panel.collapsed
-            }
+        // Click folds. Drag moves the section. Right-click offers the way back
+        // to the built-in order. Handlers rather than a MouseArea so the drag
+        // can take the grab off the tap past the threshold.
+        TapHandler {
+            acceptedButtons: Qt.LeftButton
+            onTapped: if (panel.collapsible) panel.collapsed = !panel.collapsed
         }
-        Rectangle {
-            anchors.bottom: parent.bottom
-            width: parent.width
-            height: 1
-            color: Theme.border
-            visible: !panel.collapsed
+        DragHandler {
+            target: null
+            enabled: panel.reorderable
+            onCentroidChanged: if (active)
+                root.dragSection(panel.sectionKey, centroid.scenePosition.y)
+            onActiveChanged: if (!active && panel.reorderable) root.dropSection()
+        }
+        TapHandler {
+            acceptedButtons: Qt.RightButton
+            enabled: panel.reorderable
+            onTapped: root.ctxMenu.open(point.scenePosition.x, point.scenePosition.y, [
+                { label: "reset panel order", trigger: () => root.resetOrder() }
+            ])
         }
     }
 
+    // A COLUMN, exactly as ../Panel.qml's inner is — every caller stacks bare
+    // Fields inside a panel and relies on it. Its own implicitHeight is also
+    // the honest one when a child is hidden (a Column excludes what it does not
+    // lay out, childrenRect does not).
     Column {
         id: inner
         anchors.top: header.bottom
-        anchors.topMargin: 7
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.leftMargin: 8
-        anchors.rightMargin: 8
+        anchors.leftMargin: 10
+        anchors.rightMargin: 10
         spacing: 5
         visible: !panel.collapsed || panel.pins.length > 0
     }

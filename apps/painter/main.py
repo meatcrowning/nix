@@ -25,6 +25,7 @@ import collections
 import hashlib
 import json
 import os
+import struct
 import subprocess
 import sys
 import threading
@@ -34,7 +35,7 @@ from pathlib import Path
 from PySide6.QtCore import (QAbstractListModel, QFileSystemWatcher, QModelIndex,
                             QObject, Property, QProcess, QSortFilterProxyModel, Qt,
                             QTimer, QUrl, Signal, Slot)
-from PySide6.QtGui import QColor, QGuiApplication, QImage
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QWindow
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtQuick import QQuickImageProvider
 
@@ -50,7 +51,8 @@ try:
 except Exception:  # noqa: BLE001 - the titlebar bridge is optional
     VtbClient = None
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
-from kdetheme import theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+from kdetheme import theme_source, is_plasma  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+import kdeshell  # noqa: E402  (pylib; the Plasma session's real QtWidgets window)
 from spellcheck import SpellCheck  # noqa: E402  (pylib; the prompt boxes' spelling)
 # The QBuffer-safe encoder (see its docstring for the SEGV that shape avoids);
 # collage.py already pulls it in, so this costs nothing new.
@@ -58,11 +60,15 @@ import imgfit  # noqa: E402
 # The PNG text-chunk reader/writer. In pylib because filer's metadata filter
 # reads the same chunks this app writes — one parser, not two.
 import pngmeta  # noqa: E402
+# The same, for the other half of the gallery: a clip carries its parameters as
+# an MP4 metadata tag beside ComfyUI's own graph.
+import mp4meta  # noqa: E402
 
 sys.path.insert(0, str(HERE))
 import collage as Collage  # noqa: E402
 import comfy as C  # noqa: E402
 import graph as G  # noqa: E402
+import outmeta  # noqa: E402  (which of the three ways an output kept its job)
 import registry as R  # noqa: E402
 
 OUT_DIR = Path(os.environ.get("PAINTER_OUT", Path.home() / "Pictures" / "painter" / "out"))
@@ -481,7 +487,12 @@ class Gallery(QAbstractListModel):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # TWO LISTS. `_all` is every output; `_rows` is what the view shows,
+        # which is `_all` unless a filter is typed in the toolbar. They hold the
+        # SAME dicts, so a poster landing in one lands in both.
+        self._all = []
         self._rows = []
+        self._filter = ""
         # Poster frames are extracted one at a time, off the GUI thread. A
         # gallery of 60 videos would otherwise fork 60 ffmpegs at once on a
         # machine that is already busy sampling.
@@ -508,7 +519,49 @@ class Gallery(QAbstractListModel):
                 self.PosterRole: r["poster"]}.get(role)
 
     def has_path(self, path):
-        return any(r["path"] == str(path) for r in self._rows)
+        return any(r["path"] == str(path) for r in self._all)
+
+    # ------------------------------------------------------------- filtering
+    @Slot(str)
+    def setFilter(self, text):
+        """Show only the outputs whose FILENAME or PROMPT contains `text`.
+
+        Case-insensitive, every word must match, and the prompt is read out of
+        the file the first time it is needed and then kept — sixty PNG chunks is
+        a few milliseconds once, and nothing at all on the next keystroke."""
+        text = str(text or "").strip().lower()
+        if text == self._filter:
+            return
+        self._filter = text
+        self._refilter()
+
+    filterText = Property(str, lambda self: self._filter, notify=countChanged)
+
+    def _haystack(self, r):
+        if "hay" not in r:
+            bits = [r["name"]]
+            try:
+                p = outmeta.params_for(r["path"]) or {}
+                for k in ("positive", "negative", "model", "family"):
+                    v = p.get(k)
+                    if v:
+                        bits.append(str(v))
+            except Exception:  # noqa: BLE001  — an unreadable file still matches its name
+                pass
+            r["hay"] = " ".join(bits).lower()
+        return r["hay"]
+
+    def _matches(self, r):
+        if not self._filter:
+            return True
+        hay = self._haystack(r)
+        return all(w in hay for w in self._filter.split())
+
+    def _refilter(self):
+        self.beginResetModel()
+        self._rows = [r for r in self._all if self._matches(r)]
+        self.endResetModel()
+        self.countChanged.emit()
 
     @staticmethod
     def _dedup_key(path):
@@ -516,10 +569,11 @@ class Gallery(QAbstractListModel):
 
         The NAME, because the backend that numbers it is top's whoever asked —
         book cannot mint a colliding `painter_00042_.png` of its own. Not the
-        size: book injects painter's parameter chunk into the PNG it downloads
-        and top's copy has none, so the identical still is ~600 bytes bigger
-        here (a clip does match to the byte, being downloaded verbatim, but half
-        a rule is no rule).
+        size: book writes painter's parameters into the copy it downloads and
+        top's has none, so the identical output is a few hundred bytes bigger
+        here — a still since always (the PNG chunk), a clip since 2026-08-21
+        (the MP4 tag), which is what makes the local-copy-wins rule below matter
+        for clips too.
         """
         return Path(path).name
 
@@ -531,12 +585,17 @@ class Gallery(QAbstractListModel):
                 "key": self._dedup_key(p)}
 
     def _drop_key(self, key):
-        for i, r in enumerate(self._rows):
-            if r["key"] == key:
-                self.beginRemoveRows(QModelIndex(), i, i)
-                self._rows.pop(i)
-                self.endRemoveRows()
-                return
+        for j, r in enumerate(self._all):
+            if r["key"] != key:
+                continue
+            self._all.pop(j)
+            for i, vr in enumerate(self._rows):
+                if vr is r:
+                    self.beginRemoveRows(QModelIndex(), i, i)
+                    self._rows.pop(i)
+                    self.endRemoveRows()
+                    break
+            return
 
     def add(self, path):
         if is_muted_copy(path) or self.has_path(path):
@@ -545,14 +604,17 @@ class Gallery(QAbstractListModel):
         # startup may already be showing it. The local one replaces it: it is
         # the copy with the parameters written into it.
         self._drop_key(self._dedup_key(path))
-        self.beginInsertRows(QModelIndex(), 0, 0)
-        self._rows.insert(0, self._row_for(path))
-        self.endInsertRows()
+        row = self._row_for(path)
+        self._all.insert(0, row)
+        if self._matches(row):
+            self.beginInsertRows(QModelIndex(), 0, 0)
+            self._rows.insert(0, row)
+            self.endInsertRows()
         self.countChanged.emit()
-        if self._rows[0]["is_video"]:
-            self._want_poster(self._rows[0]["path"])
+        if row["is_video"]:
+            self._want_poster(row["path"])
 
-    def load_existing(self, limit=60):
+    def load_existing(self, limit=0):
         # Videos land in a subdirectory of their own, because that is where
         # SaveVideo's filename_prefix puts them — a gallery that only globbed
         # *.png here would show nothing at all for a video model.
@@ -582,14 +644,24 @@ class Gallery(QAbstractListModel):
                     continue   # deleted between the glob and the stat
                 seen.add(key)
                 found.append((mtime, p))
-        files = [p for _m, p in sorted(found, key=lambda t: t[0], reverse=True)[:limit]]
-        self.beginResetModel()
-        self._rows = [self._row_for(p) for p in files]
-        self.endResetModel()
-        self.countChanged.emit()
-        for r in self._rows:
-            if r["is_video"]:
-                self._want_poster(r["path"])
+        # ALL OF THEM, newest first. This was capped at 60 — a number from when
+        # the grid was a strip — so the history simply stopped partway with
+        # nothing saying so. The view is a GridView and only builds the
+        # delegates it can see, so the cost of the rest is one small dict each;
+        # `limit` survives for a caller that wants a slice.
+        ordered = sorted(found, key=lambda t: t[0], reverse=True)
+        files = [p for _m, p in (ordered[:limit] if limit else ordered)]
+        self._all = [self._row_for(p) for p in files]
+        self._refilter()
+        # The first screenful eagerly, the rest on demand (`requestPoster`).
+        eager = 0
+        for r in self._all:
+            if not r["is_video"]:
+                continue
+            self._want_poster(r["path"])
+            eager += 1
+            if eager >= 24:
+                break
 
     # -- poster frames -----------------------------------------------------
 
@@ -606,8 +678,27 @@ class Gallery(QAbstractListModel):
         if dest.exists():
             self._poster_ready(path, dest)
             return
+        if any(p == path for p, _d in self._poster_queue):
+            return          # already waiting; a delegate rebuilt is not a job
+        # A BOUNDED QUEUE. Scrolling fast still enqueues faster than ffmpeg can
+        # drain, and the oldest requests are for rows long gone off screen — so
+        # the queue keeps the newest and drops the rest. Nothing is lost: a row
+        # that comes back asks again.
+        if len(self._poster_queue) > 12:
+            del self._poster_queue[:-12]
         self._poster_queue.append((path, dest))
         self._next_poster()
+
+    @Slot(str)
+    def requestPoster(self, path):
+        """A clip's delegate, asking for its own poster frame.
+
+        The gallery shows EVERY output now, and this library is a few hundred
+        clips — extracting a frame from all of them at startup would be a few
+        hundred ffmpeg runs for thumbnails nobody has scrolled to yet. The first
+        screenful is queued eagerly (`load_existing`) so the top of the grid is
+        never blank; everything after it asks on the way past."""
+        self._want_poster(str(path))
 
     def _next_poster(self):
         if self._poster_proc is not None or not self._poster_queue:
@@ -654,12 +745,18 @@ class Gallery(QAbstractListModel):
 
     def _poster_ready(self, path, dest):
         self.posterReady.emit(str(path), str(dest))
-        for i, r in enumerate(self._rows):
-            if r["path"] == path:
-                r["poster"] = QUrl.fromLocalFile(str(dest)).toString()
-                idx = self.index(i, 0)
-                self.dataChanged.emit(idx, idx, [self.PosterRole])
-                return
+        for r in self._all:
+            if r["path"] != path:
+                continue
+            # `_rows` holds the same dict, so this reaches both lists; only the
+            # VISIBLE list has a row index to report a change for.
+            r["poster"] = QUrl.fromLocalFile(str(dest)).toString()
+            for i, vr in enumerate(self._rows):
+                if vr is r:
+                    idx = self.index(i, 0)
+                    self.dataChanged.emit(idx, idx, [self.PosterRole])
+                    break
+            return
 
     @Slot(int, result=str)
     def pathAt(self, i):
@@ -696,14 +793,10 @@ class Gallery(QAbstractListModel):
     def paramsAt(self, i):
         if not (0 <= i < len(self._rows)):
             return None
-        # Only a PNG carries painter's parameters. A video's own metadata holds
-        # the ComfyUI graph, which is not the same thing and is not injectable.
-        if self._rows[i]["is_video"]:
-            return None
-        try:
-            return pngmeta.load_params(Path(self._rows[i]["path"]).read_bytes())
-        except OSError:
-            return None
+        # A still and a clip keep the job in different places, and a clip from
+        # before painter wrote its own tag keeps it only as ComfyUI's graph.
+        # outmeta answers all three (see its docstring).
+        return outmeta.params_for(self._rows[i]["path"])
 
 
 # ---------------------------------------------------------------------------
@@ -765,6 +858,8 @@ class Painter(QObject):
         self._sample_start_step = 0       # the step count at that anchor
         self.preview = None               # the live-preview image provider, set in main()
         self._preview_tick = 0            # an Image reloads on a CHANGED url, so count
+        self._preview_frame = 0           # which frame of a clip the preview is
+        self._preview_frames = 0          # ...and how many there are
         self._input_image = ""            # the first frame, as a local path
         self._last_image = ""             # the frame to end on, likewise
         self._uploaded = ("", "")         # (local path, the ref ComfyUI knows it by)
@@ -875,6 +970,10 @@ class Painter(QObject):
     # --preview-method never sends any, and the pane must not sit on a stale
     # frame from an hour ago claiming to be this job).
     previewTick = Property(int, lambda self: self._preview_tick, notify=previewChanged)
+    # Which frame of the clip the current preview IS, and how many there are.
+    # 0/0 until a preview with metadata lands (see `_on_preview`).
+    previewFrame = Property(int, lambda self: self._preview_frame, notify=previewChanged)
+    previewFrames = Property(int, lambda self: self._preview_frames, notify=previewChanged)
     hasPreview = Property(bool, lambda self: bool(self._busy and self._preview_tick),
                           notify=previewChanged)
     elapsed = Property(float, lambda self: (
@@ -1107,21 +1206,28 @@ class Painter(QObject):
         self.lastImageChanged.emit()
         return True
 
-    @Slot(str)
+    @Slot(str, result=bool)
     def restoreInputImage(self, path):
         """The remembered first frame, silently — a file that has since moved
-        is not something to greet him with a toast about at launch."""
+        is not something to greet him with a toast about at launch.
+
+        Returns whether it landed, which is what lets injecting a clip's
+        settings leave the first-frame toggle OFF when the picture is gone."""
         if path and os.path.isfile(path):
             self._input_image = path
             self._uploaded = ("", "")
             self.inputImageChanged.emit()
+            return True
+        return False
 
-    @Slot(str)
+    @Slot(str, result=bool)
     def restoreLastImage(self, path):
         if path and os.path.isfile(path):
             self._last_image = path
             self._uploaded_last = ("", "")
             self.lastImageChanged.emit()
+            return True
+        return False
 
     @Slot("QVariant")
     def restoreLastSeed(self, value):
@@ -1442,6 +1548,11 @@ class Painter(QObject):
         Names no longer on disk (`choices`, just populated for this model) are
         dropped rather than referencing a file that has since moved."""
         known = {r["name"] for r in self.choices._rows}
+        # QML hands an untyped Slot its array as a QJSValue, which is not
+        # iterable in Python: this loop raised TypeError on every startup and
+        # the remembered chain was silently never restored.
+        if hasattr(rows, "toVariant"):
+            rows = rows.toVariant()
         for r in (rows or []):
             name = r.get("name") if isinstance(r, dict) else None
             if not name or name not in known:
@@ -1651,6 +1762,15 @@ class Painter(QObject):
             pending.append(("input_image", self._input_image, "_uploaded", "first frame"))
         if params.get("use_last_frame"):
             pending.append(("last_image", self._last_image, "_uploaded_last", "last frame"))
+        # The LOCAL path of each frame, alongside the uploaded ref the graph
+        # takes — the same pair an edit job records. Injecting a clip's settings
+        # puts its frames back with them, and a toggle whose file has since gone
+        # comes back off rather than arming a generate that can only refuse.
+        params = dict(params)
+        if params.get("use_input_image"):
+            params["input_image_local"] = self._input_image
+        if params.get("use_last_frame"):
+            params["last_image_local"] = self._last_image
         self._upload_then_start(entry, params, count, pending)
 
     def _upload_edit_then_start(self, entry, params, count, paths, refs=None):
@@ -1822,6 +1942,7 @@ class Painter(QObject):
         # A new job has no preview frame yet; the pane must not show the last
         # job's while this one warms up.
         self._preview_tick = 0
+        self._preview_frame = self._preview_frames = 0
         self.previewChanged.emit()
         self.busyChanged.emit()
 
@@ -1836,12 +1957,18 @@ class Painter(QObject):
             self._sample_start_step = value
         self.statusChanged.emit()
 
-    def _on_preview(self, _job, data, fmt):
+    def _on_preview(self, _job, data, fmt, meta=None):
         """A sampler preview frame off the websocket, into the image provider.
 
         Silently ignored if the backend was started without `--preview-method`
         — then none of these ever arrive and the pane simply shows the last
         output instead.
+
+        `meta` carries WHICH FRAME of a clip this is (`frame`/`frames`), which
+        exists because of a local patch to ComfyUI's `latent_preview.py`: stock
+        ComfyUI previews frame 1 of a video latent forever and says nothing
+        about it. Absent — an unpatched or older backend — the pane falls back
+        to saying frame 1, which is what such a backend is showing.
         """
         if self.preview is None:
             return
@@ -1850,6 +1977,12 @@ class Painter(QObject):
             return
         self.preview.image = img
         self._preview_tick += 1
+        m = meta or {}
+        try:
+            self._preview_frame = int(m.get("frame", 0) or 0)
+            self._preview_frames = int(m.get("frames", 0) or 0)
+        except (TypeError, ValueError):
+            self._preview_frame = self._preview_frames = 0
         self.previewChanged.emit()
 
     def _on_node(self, _job, role):
@@ -1870,18 +2003,25 @@ class Painter(QObject):
                 try:
                     if not data:
                         return
-                    # Only a PNG can carry the job that made it. A video goes down
-                    # verbatim — SaveVideo has already written ComfyUI's own graph
-                    # into its container metadata — and keeps the subfolder the
-                    # backend filed it under (video/), which is where the gallery
-                    # looks for it.
-                    if str(img["filename"]).lower().endswith(".png"):
-                        try:
-                            data = pngmeta.upsert_text(
-                                data, pngmeta.describe(job.meta.get("params", {}),
-                                                       job.meta.get("pairing")))
-                        except ValueError:
-                            pass
+                    # BOTH shapes carry the job that made them, in the place
+                    # their own format keeps text: a PNG in a tEXt chunk, an MP4
+                    # as an `mdta` tag beside the graph SaveVideo already wrote
+                    # there. A clip keeps the subfolder the backend filed it
+                    # under (video/), which is where the gallery looks for it.
+                    #
+                    # A file that cannot take the tag is written VERBATIM rather
+                    # than not written: an output on disk without its parameters
+                    # beats a finished generation lost to a metadata writer.
+                    name = str(img["filename"]).lower()
+                    described = pngmeta.describe(job.meta.get("params", {}),
+                                                 job.meta.get("pairing"))
+                    try:
+                        if name.endswith(".png"):
+                            data = pngmeta.upsert_text(data, described)
+                        elif Path(name).suffix in VIDEO_SUFFIXES:
+                            data = mp4meta.upsert_tags(data, described)
+                    except (ValueError, struct.error):
+                        pass
                     dest = OUT_DIR / (img.get("subfolder") or "") / img["filename"]
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     dest.write_bytes(data)
@@ -2035,11 +2175,10 @@ class Painter(QObject):
     def copyPrompt(self, path):
         """Put this output's own prompt on the clipboard.
 
-        Read out of the PNG's `painter` chunk, not out of the boxes — so a still
-        from three sessions ago hands back what IT was asked for, whatever is
-        typed now. Nothing to offer for a clip: a video carries ComfyUI's graph
-        and not painter's parameters, which is why the menu does not put this in
-        front of one.
+        Read out of the FILE, not out of the boxes — so an output from three
+        sessions ago hands back what IT was asked for, whatever is typed now.
+        A clip answers the same way a still does (`outmeta.params_for`): its own
+        `painter` tag when it has one, ComfyUI's graph when it predates it.
 
         `wl-copy`, not Qt's clipboard, for the reason spelled out in
         `_clip_file`: a Wayland selection dies with the process that offered it,
@@ -2048,10 +2187,7 @@ class Painter(QObject):
         a newline to argv content otherwise, and a prompt pasted into a text box
         should not arrive with a blank line after it.
         """
-        try:
-            params = pngmeta.load_params(Path(path.replace("file://", "")).read_bytes())
-        except (OSError, ValueError):
-            params = None
+        params = outmeta.params_for(path)
         text = ((params or {}).get("positive") or "").strip()
         if not text:
             self.toast.emit("no prompt stored in this file", True)
@@ -2351,6 +2487,46 @@ class Painter(QObject):
 
         self._run_async([sys.executable, str(CLIPFILE), str(path)], done)
 
+    fullScreenChanged = Signal()
+
+    @Property(bool, notify=fullScreenChanged)
+    def fullScreen(self):
+        w = self.window
+        try:
+            return w is not None and w.visibility() == QWindow.FullScreen
+        except (AttributeError, RuntimeError):
+            return False
+
+    @Slot()
+    def toggleFullScreen(self):
+        """One implementation for both roofs: `self.window` is a QWindow either
+        way — the QML `Window` under Hyprland, the QMainWindow's window handle
+        under Plasma — and QWindow.setVisibility fullscreens whichever it is."""
+        w = self.window
+        if w is None:
+            return
+        try:
+            w.setVisibility(QWindow.Windowed
+                            if w.visibility() == QWindow.FullScreen
+                            else QWindow.FullScreen)
+        except (AttributeError, RuntimeError):
+            return
+        self.fullScreenChanged.emit()
+
+    @Slot()
+    def openFolder(self):
+        """The output directory, in the desktop's file manager — KDE's "Open
+        Containing Folder", which every one of those programs has.
+
+        `xdg-open` rather than `filer`, which takes no path argument: under
+        Plasma this lands in Dolphin, which is where a File menu row saying
+        this is expected to land.
+        """
+        try:
+            subprocess.Popen(["xdg-open", str(OUT_DIR)], start_new_session=True)
+        except OSError as e:
+            self.toast.emit("cannot open %s: %s" % (OUT_DIR, e), True)
+
     @Slot(str)
     def openExternally(self, path):
         p = path.replace("file://", "")
@@ -2371,15 +2547,18 @@ class Painter(QObject):
         except OSError:
             subprocess.Popen(["xdg-open", p], start_new_session=True)
 
+    @Slot(str, result=str)
+    def compareSource(self, path):
+        """The before-image for an output, for the single-output view's
+        compare slider — "" when there is nothing to compare it against."""
+        return self._compare_source(str(path).replace("file://", ""))
+
     @staticmethod
     def _compare_source(png_path):
         """The local source image an edit output should be compared against, or
         "" — an editing-model result whose input file is still on disk. Anything
         else (a t2i output, a missing source) returns "" and opens normally."""
-        try:
-            params = pngmeta.load_params(Path(png_path).read_bytes())
-        except (OSError, ValueError):
-            return ""
+        params = outmeta.params_for(png_path)
         if not params or not (params.get("edit") or params.get("kind") == "edit"):
             return ""
         src = params.get("input_image_local") or ""
@@ -2398,9 +2577,19 @@ def _human(n):
 
 
 class Titlebar(QObject):
-    """Chrome lives in the hyprvtb titlebar, like the sibling apps."""
+    """Chrome lives in the hyprvtb titlebar, like the sibling apps.
+
+    In a Plasma session the socket is dead and every method here is a no-op —
+    but the QML still calls them on every state change, so the three signals
+    below are exactly the "the chrome moved" notification the KDE shell needs
+    to keep its menubar, toolbar and statusbar in step (pylib/kdeshell.py).
+    One source, two roofs: no second push path, no polling.
+    """
 
     clicked = Signal(str)
+    buttonsChanged = Signal()
+    footerChanged = Signal(str)
+    loadingChanged = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -2413,6 +2602,7 @@ class Titlebar(QObject):
 
     @Slot("QVariantList")
     def setButtons(self, buttons):
+        self.buttonsChanged.emit()
         if not self._client:
             return
         out = []
@@ -2429,6 +2619,7 @@ class Titlebar(QObject):
 
     @Slot(str)
     def setFooter(self, text):
+        self.footerChanged.emit(str(text))
         if self._client:
             try:
                 self._client.set_footer(text)
@@ -2437,6 +2628,7 @@ class Titlebar(QObject):
 
     @Slot(bool)
     def setLoading(self, on):
+        self.loadingChanged.emit(bool(on))
         if self._client:
             try:
                 self._client.set_loading(bool(on))
@@ -2455,17 +2647,20 @@ def main():
         os.environ.pop("WAYLAND_DISPLAY", None)
         os.environ.pop("DISPLAY", None)
 
-    # Pin the Controls style: the system default resolves to KDE Breeze, whose
-    # ToolTip pulls in kirigami and fails to load outside a Plasma session.
-    os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Basic")
+    # The Controls style, and with it the whole face: `Basic` in the Hyprland
+    # session (the system default resolves to Breeze, whose ToolTip pulls in
+    # kirigami and fails to load where there is none), `org.kde.desktop` under
+    # Plasma — which is not an imitation of the KDE style but a renderer THROUGH
+    # it, so a Button here is drawn by Oxygen's own code. pylib/kdeshell.py.
+    kdeshell.pin_controls_style()
 
-    app = QGuiApplication(sys.argv)
+    # A QApplication under Plasma, the QGuiApplication we have always used
+    # otherwise: QStyle is a QtWidgets class, and without it there is no system
+    # style to paint with. See kdeshell.make_app.
+    app = kdeshell.make_app(sys.argv, "painter")
     if selftest and app.platformName() != "offscreen":
         raise SystemExit("selftest refuses to run on platform %r, not offscreen"
                          % app.platformName())
-    app.setApplicationName("painter")
-    app.setDesktopFileName("painter")   # stable Wayland app_id (KWin identity)
-    app.setOrganizationName("painter")
 
     palette = Palette(theme_source(PANEL_THEME))
     style = DeskStyle()
@@ -2474,7 +2669,22 @@ def main():
     bar = Titlebar()
     spell = SpellCheck()
 
-    engine = QQmlApplicationEngine()
+    # TWO ROOFS, ONE APP (docs/DESIGN.md §7.6). Under Hyprland the QML tree IS
+    # the window. Under Plasma it is the central widget of a real QMainWindow,
+    # so the menubar/toolbar/statusbar are KDE widgets and the window background
+    # is the system style's — the single gradient surface that runs from the
+    # titlebar down through the chrome and behind this content.
+    plasma = is_plasma()
+    shell = kdeshell.shell("painter", size=(1280, 900), min_size=(720, 560)) if plasma else None
+    engine = shell.engine() if plasma else QQmlApplicationEngine()
+    if plasma:
+        # THE SELECTOR IS HOW THE CONTENT CHANGES CLOTHES WITHOUT CHANGING CODE.
+        # With "plasma" set, `qml/+plasma/Foo.qml` transparently replaces
+        # `qml/Foo.qml` for every call site — so the panels, buttons, spinners
+        # and dropdowns in this session are QtQuick.Controls painted through the
+        # KDE style, while the Hyprland tree keeps ours, and not one caller has
+        # a branch in it. Same API, two implementations (apps/AGENTS.md).
+        kdeshell.select_plasma_files(engine)
     # The sampler's preview frames, addressed as image://livepreview/<tick>.
     # Ownership passes to the engine, so the controller keeps only a reference.
     preview = LivePreview()
@@ -2505,19 +2715,67 @@ def main():
 
     warnings = []
     engine.warnings.connect(lambda errs: warnings.extend(str(e.toString()) for e in errs))
-    engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
-    if not engine.rootObjects():
-        print("failed to load Main.qml", file=sys.stderr)
-        for w in warnings:
-            print(f"  {w}", file=sys.stderr)
-        return 2
 
-    # The window is how the controller knows whether he is watching: a batch
-    # that finishes behind a rolled-up or unfocused painter says so with a
-    # desktop toast instead (Painter._onscreen).
-    ctl.window = engine.rootObjects()[0]
+    if plasma:
+        # Root.qml, not Main.qml: the Window wrapper is the Hyprland roof, and
+        # a QQuickWidget hosts an Item.
+        if not shell.load(QML / "Root.qml"):
+            print("failed to load Root.qml", file=sys.stderr)
+            for w in shell.errors() + warnings:
+                print(f"  {w}", file=sys.stderr)
+            return 2
+        # THE PARAMETERS COLUMN IS NOT A DOCK. It was one for a day — a real
+        # QDockWidget, floatable and tabbable — and a dock is a second
+        # QQuickWidget, which is a second scene graph rendered on the GUI thread
+        # every frame (a QQuickWidget cannot use the threaded render loop). His
+        # verdict, 2026-08-22: the detaching was not wanted, the dock's header
+        # was not wanted, and the whole window felt slower for it. So the column
+        # is back inside the one scene, beside the results, behind the same
+        # draggable splitter the Hyprland roof uses, and F7 puts it away.
+        # `kdeshell.dock` stays — it is general and tested; painter just does
+        # not need it.
 
-    if not selftest:
+        # The chrome, built from the same tbButtons array the titlebar column
+        # uses and calling the same tbAction(id) — one source, two roofs.
+        # No menu_order here: the order comes from the QML root's own
+        # `menuOrder`, and kdeshell keeps File first and Settings/Help last
+        # whatever an app says (pylib/kdeshell.py MENU_ORDER).
+        shell.bind_chrome(bar)
+        shell.bind_status()      # statusLine / statusProgress / statusRight
+        # Settings → Configure painter… opens a real dialog here, not the
+        # slide-out drawer, which is shaped for a titlebar cell that this
+        # session does not have (qml/SettingsDrawer.qml `asDialog`).
+        def open_settings():
+            return shell.show_dialog(
+                "settings", "Configure painter", QML / "SettingsPage.qml",
+                size=(480, 430), props={"app": shell.root})
+
+        shell.on_action("set", open_settings)
+        # The filter field at the right-hand end of the toolbar, where every KDE
+        # program keeps one. It filters the gallery by filename and prompt.
+        # Right-aligned with the RESULTS pane rather than with the window: it
+        # filters the outputs, so it belongs over them and not over the
+        # parameter column. `paneLeadW` is where that pane ends (the splitter).
+        shell.toolbar_search(ctl.gallery.setFilter, placeholder="Filter outputs")
+        # ...and the toolbar itself only spans the results pane, floating over
+        # it, so the parameter column runs all the way up to the menubar with
+        # no band of empty toolbar above it. The field's right edge follows for
+        # free — the toolbar ends at the splitter.
+        shell.use_overlay_toolbar(width_prop="paneLeadW")
+        # The window is how the controller knows whether he is watching: a batch
+        # that finishes behind a rolled-up or unfocused painter says so with a
+        # desktop toast instead (Painter._onscreen).
+        ctl.window = shell.show()
+    else:
+        engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
+        if not engine.rootObjects():
+            print("failed to load Main.qml", file=sys.stderr)
+            for w in warnings:
+                print(f"  {w}", file=sys.stderr)
+            return 2
+        ctl.window = engine.rootObjects()[0]
+
+    if not selftest and ctl.window is not None:
         from winstate import WinState
         win_state = WinState(ctl.window, "painter")  # keep ref: persists geometry
 
@@ -2525,6 +2783,141 @@ def main():
         rc = [0]
 
         def finish():
+            # PAINTER_SHOT: write what the selftest actually rendered to a PNG.
+            # The Plasma face is chrome we do not draw — the menubar, the
+            # toolbar, the statusbar and the window background all come from the
+            # KDE style — so the only way to check it is to look at the pixels
+            # (the offscreen-render rule, apps/AGENTS.md; never his screen).
+            # PAINTER_TREE: the item tree with its real geometry, which is the
+            # only way to tell a component that is mis-sized from one that is
+            # merely drawn oddly — a rendered PNG shows the symptom, this shows
+            # which item owns it.
+            # PAINTER_MENUS: the menubar/toolbar as text. A menu is not on
+            # screen until it is opened, so no render can show what is in one —
+            # this is the only check the KDE menu structure gets.
+            # PAINTER_DIALOG: build and grab the settings dialog, which no
+            # shot of the main window can contain — it is its own window.
+            if plasma and os.environ.get("PAINTER_DIALOG"):
+                dlg = open_settings()
+                dlg.grab().save(os.environ["PAINTER_DIALOG"])
+                print(f"selftest: wrote {os.environ['PAINTER_DIALOG']}")
+            # PAINTER_ABOUT: trigger Help → About. Its own window, and the one
+            # that used to take the whole app down with it (kdeshell's
+            # `_about_action` records the crash), so it is worth a check that
+            # costs one line.
+            if plasma and os.environ.get("PAINTER_ABOUT"):
+                shell._actions["__about"].trigger()
+                app.processEvents()
+                shell._about_box.grab().save(os.environ["PAINTER_ABOUT"])
+                print(f"selftest: wrote {os.environ['PAINTER_ABOUT']}")
+                shell._about_box.hide()
+            if plasma and os.environ.get("PAINTER_MENUS"):
+                print(shell.dump_chrome())
+            if os.environ.get("PAINTER_TREE"):
+                # What the WIDGET half is wearing — the half a QML-only dump
+                # cannot see, and the half that goes wrong when the KDE platform
+                # theme is missing (kdeshell.apply_palette).
+                try:
+                    print(f"style={app.style().objectName()} "
+                          f"window={app.palette().window().color().name()} "
+                          f"text={app.palette().windowText().color().name()} "
+                          f"icons={QIcon.themeName()}")
+                except Exception:  # noqa: BLE001
+                    pass
+                root_item = shell.root if shell is not None else ctl.window
+                want = os.environ.get("PAINTER_TREE")
+
+                def walk(it, depth=0):
+                    if depth > 12 or it is None:
+                        return
+                    # VISUAL children, not QObject children. A Repeater's
+                    # delegates and anything a view reparents into its
+                    # contentItem keep their QObject parent where it was, so a
+                    # QObject walk went straight past the whole parameter
+                    # column — the tree said it was not there while the render
+                    # showed it plainly.
+                    kids = (it.childItems() if hasattr(it, "childItems")
+                            else it.children())
+                    for ch in kids:
+                        try:
+                            cls = ch.metaObject().className()
+                            # QML-DEFINED TYPES ARE THE ONES WORTH SEEING, and
+                            # their className is `Panel_QMLTYPE_42`, not
+                            # `QQuick…` — filtering on that prefix hid exactly
+                            # the components being debugged.
+                            if ch.property("height") is None:
+                                walk(ch, depth)
+                                continue
+                            name = ch.property("title") or ch.property("label") or ""
+                            if want == "1" or want.lower() in (cls + " " + str(name)).lower():
+                                pad = ch.property("topPadding")
+                                print("  " * depth + f"{cls} {name!r} "
+                                      f"x={ch.property('x')} w={ch.property('width')} "
+                                      f"y={ch.property('y')} h={ch.property('height')} "
+                                      f"ih={ch.property('implicitHeight')} "
+                                      f"vis={ch.property('visible')}"
+                                      + (f" topPad={pad} botPad={ch.property('bottomPadding')}"
+                                         f" collapsed={ch.property('collapsed')}" if pad is not None else ""))
+                        except Exception:  # noqa: BLE001
+                            pass
+                        walk(ch, depth + 1)
+
+                walk(root_item)
+                # ...and the docks, which are scenes of their own and therefore
+                # invisible to a walk from the central widget's root.
+                for ident, (_dw, _v, _bg, item, _c) in getattr(
+                        shell, "_docks", {}).items():
+                    print(f"[dock {ident}]")
+                    walk(item)
+
+            # PAINTER_OVERLAY_CHECK: prove the floating toolbar survives a
+            # window-state restore. `restoreState()` re-docks a toolbar by
+            # objectName, which is what broke it on his first relaunch; this
+            # forces exactly that (re-adding it to a toolbar area) and then asks
+            # the shell to re-assert itself.
+            if plasma and os.environ.get("PAINTER_OVERLAY_CHECK"):
+                shell.window.addToolBar(shell._toolbar)      # what a restore does
+                app.processEvents()
+                print("overlay after re-dock: parent=%s geo=%s"
+                      % (shell._toolbar.parent() is shell._overlay,
+                         shell._toolbar.geometry()))
+                shell._reassert_overlay()
+                app.processEvents()
+                print("overlay reasserted:   parent=%s geo=%s inset=%s"
+                      % (shell._toolbar.parent() is shell._overlay,
+                         shell._toolbar.geometry(),
+                         shell.root.property("chromeInset")))
+            # PAINTER_FAKE_PROGRESS: drive the status bar's progress widget to a
+            # value without a backend, so the shot shows the running state.
+            # There is no other way to see it offscreen — the real one needs a
+            # job on the GPU.
+            if plasma and os.environ.get("PAINTER_FAKE_PROGRESS"):
+                app.processEvents()      # let the real (idle) state settle first
+                # ...then stop it being re-pulled: the app is genuinely idle and
+                # its own bindings would put the label straight back.
+                shell._root = None
+                shell.set_progress(float(os.environ["PAINTER_FAKE_PROGRESS"]))
+                shell._progress.setFormat("42%   ·   3.21 it/s   ·   0:42")
+                # WIDGET STATE, NOT PIXELS. An offscreen `grab()` does not
+                # reflect a QStackedWidget page switched after the last real
+                # event-loop turn — measured — so what this hook proves is the
+                # geometry: the bar takes the whole left of the bar (x=2,
+                # ~1017px of a 1280 window) and the label is the one hidden.
+                print("progress: idx=%d bar=%s label_visible=%s"
+                      % (shell._status_stack.currentIndex(),
+                         shell._progress.geometry(),
+                         shell._status_label.isVisible()))
+                app.processEvents()
+            shot = os.environ.get("PAINTER_SHOT")
+            if shot:
+                try:
+                    if shell is not None:
+                        shell.window.grab().save(shot)
+                    elif ctl.window is not None:
+                        ctl.window.grabWindow().save(shot)
+                    print(f"selftest: wrote {shot}")
+                except Exception as exc:  # noqa: BLE001
+                    print(f"selftest: shot failed: {exc}", file=sys.stderr)
             for w in warnings:
                 print(f"QML WARNING: {w}", file=sys.stderr)
             if warnings:

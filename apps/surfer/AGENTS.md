@@ -673,6 +673,13 @@ orders AFTER any document `<style>`, so with the SAME selectors + `!important` i
 beats `ch4SS` on ties. No OneeChan internals are touched; **his tabs are never
 reloaded.**
 
+**The sheet itself is NOT in this app.** It lives in `pylib/chantheme.py`,
+Qt-free and pure, because Vivaldi wears it too — `apps/pylib/tools/chan-userscript.py`
+bakes the same bytes into a Tampermonkey userscript (`chan-theme` regenerates
+it; see `apps/AGENTS.md`). Edit the rules there, not here, or the two browsers
+drift; `chan-userscript-test.py` asserts they are byte-identical for one
+palette. What stays in surfer is the courier:
+
 Exactly the dark-mode courier's shape, on a parallel scheme:
 
 - `ONEE_THEME_RUNTIME_JS` in `main.py` + `OneeTheme.scripts` (a
@@ -707,6 +714,30 @@ greentext + names=`ok`, tripcodes=`warn`,
 subjects/board titles/quotelinks=`accent`, backlinks=`info`, post
 highlight=`highlight`. Every rule is `!important`, because `ch4SS`'s are.
 
+**And in a Plasma session it also imitates the KStyle's relief** — the purple
+gradients [his, 2026-08-22] *"windows are sort of tinted purple and include
+gradients... make it so the theme of 4chan emulates that"*. `OneeTheme._chrome_css`
+appends a second block whose selectors are repeated VERBATIM from the flat one,
+so the two tie on specificity and source order decides: window gradient (pinned
+to the viewport with `background-attachment:fixed`, because Oxygen paints it on
+the WINDOW and it must not run the height of a 300-post thread), posts /
+dialogs / catalog cells / menus as raised slabs (panel gradient + 1px light
+bevel + foot shadow + 3px corner), `#header-bar` and each post's `.postInfo`
+strip as toolbars, text fields as sunken holes (inset top shadow, no
+highlight), and real `button`/`input[type=submit]` as the button gradient —
+that rule sits AFTER the field rule and ties it on specificity, so a submit
+input lands on the slab and not in the hole.
+
+The stops come from `kdetheme.kde_chrome()` (`apps/pylib/kdetheme.py`): each
+surface's own `kdeglobals` group background shaded either side along HLS
+lightness, scaled by the scheme's `[KDE] contrast`, so it follows a scheme
+change with no new keys. It returns **None outside a Plasma session and under a
+flat KStyle** (`GRADIENT_STYLES` is `oxygen` only — Breeze and Fusion are flat),
+so the Hyprland look is untouched: DESIGN.md §2's "no gradients" is a rule about
+*this* desktop, and this layer only ever runs in the other one. It is the one
+place §7.6's "we do not imitate the system theme, we let the system theme
+paint" is inverted, because no QStyle will ever paint a web page.
+
 Verified headlessly by
 **[`tools/oneechan-theme-test.py`](tools/oneechan-theme-test.py)** — a real
 offscreen profile carrying the exact `concat` line, `boards.4chan.org` mapped to
@@ -715,9 +746,13 @@ ch4SS-style baseline the palette colours win on body/reply/links/quotelinks
 (proving adopted-after-`<style>` + `!important` beats ch4SS on ties), a
 `WalPalette` change (the watched `Theme.qml` rewritten) live-re-skins the open
 page, and a page WITHOUT `html.oneechan` keeps its baked baseline untouched (the
-self-gate). Run it after touching `main.py`'s `ONEE_THEME_RUNTIME_JS`,
-`OneeTheme`/`OneeThemeHandler`, the `surferonee://` registration, or the
-`Main.qml` `reinjectOnee`/courier wiring.
+self-gate); plus the relief layer — a synthetic `oxygen` scheme
+(`DESK_KDEGLOBALS`) gains the gradients and puts them after the flat rules,
+a `breeze` one and the Hyprland session get none. The harness pins
+`DESK_SESSION=hypr` for its flat body, since it may itself be started from a
+Plasma session. Run it after touching `main.py`'s `ONEE_THEME_RUNTIME_JS`,
+`OneeTheme`/`OneeThemeHandler`/`_chrome_css`, `kdetheme.kde_chrome`, the
+`surferonee://` registration, or the `Main.qml` `reinjectOnee`/courier wiring.
 
 ## Split view — two tabs in one window, kitty's two buttons
 

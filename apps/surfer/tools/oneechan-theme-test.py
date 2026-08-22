@@ -34,7 +34,12 @@ gate passes, and asserts:
      reload;
   4. SELF-GATE: a 4chan page WITHOUT html.oneechan is NOT themed — the baked
      ch4SS baseline survives untouched.
-  5. RENDERED light-palette collapse: on a light palette, every OneeChan inset
+  5. the KStyle RELIEF layer (Plasma sessions): under a gradient KStyle
+     (Oxygen) the sheet gains window/panel/header/button gradients that come
+     AFTER the flat rules on the same selectors, so they win on source order;
+     under a flat KStyle (Breeze) and in the Hyprland session it is absent
+     entirely, so this desktop's own flat look is untouched;
+  6. RENDERED light-palette collapse: on a light palette, every OneeChan inset
      surface — post header, reply chain, catalog cells (`Show Background`),
      inline-expanded quotes, text fields — computes to the plain page `bg`,
      asserted by getComputedStyle after a real load (not a string match), so a
@@ -55,6 +60,12 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"   # hard, never setdefault
+# The KStyle relief layer is Plasma-session-only, and this harness may well be
+# started FROM a Plasma session (XDG_CURRENT_DESKTOP=KDE), which would give
+# every flat assertion below a gradient it is not expecting. Pin the session
+# for the flat body of the run; the Plasma block flips it deliberately and puts
+# it back.
+os.environ["DESK_SESSION"] = "hypr"
 os.environ.pop("WAYLAND_DISPLAY", None)  # no way back to his session: with no
 os.environ.pop("DISPLAY", None)          # display Qt aborts, it cannot fall back
 # OneeChan's courier is host-gated to 4chan; point that name at our loopback
@@ -65,7 +76,7 @@ os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
     + ' --host-resolver-rules="MAP boards.4chan.org 127.0.0.1"')
 
 from PySide6.QtCore import QObject, QTimer, QUrl, Slot                # noqa: E402
-from PySide6.QtGui import QColor, QGuiApplication                     # noqa: E402
+from PySide6.QtGui import QGuiApplication                            # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine                       # noqa: E402
 from PySide6.QtWebEngineCore import QWebEngineUrlScheme               # noqa: E402
 from PySide6.QtWebEngineQuick import QtWebEngineQuick                 # noqa: E402
@@ -267,6 +278,7 @@ def main():
     write_theme(theme, PAL_A)
 
     import main as surfer                                            # noqa: E402
+    import chantheme          # noqa: E402  (pylib; main.py puts it on the path)
 
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Page)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -322,18 +334,18 @@ def main():
     # PAL_A's bg is dark and its dim link sits close to it; the helper lifts the
     # link until it clears the contrast floor, capped under the hover accent. A
     # light palette must leave OneeChan's dim link untouched.
-    dark_bg, dim, acc = QColor(PAL_A["bg"]), QColor(PAL_A["dim"]), QColor(PAL_A["accent"])
-    lifted = QColor(surfer._legible_link(PAL_A["dim"], PAL_A["bg"], PAL_A["accent"]))
+    dark_bg, dim, acc = PAL_A["bg"], PAL_A["dim"], PAL_A["accent"]
+    lifted = chantheme._legible_link(dim, dark_bg, acc)
     check("dark palette lifts the dim link's contrast against bg",
-          surfer._contrast(lifted, dark_bg) > surfer._contrast(dim, dark_bg))
+          chantheme._contrast(lifted, dark_bg) > chantheme._contrast(dim, dark_bg))
     check("lifted link clears the legibility floor (or hits the accent cap)",
-          surfer._contrast(lifted, dark_bg) >= 4.0 - 1e-6
-          or surfer._rel_lum(lifted) >= surfer._rel_lum(acc) - 1e-9)
+          chantheme._contrast(lifted, dark_bg) >= 4.0 - 1e-6
+          or chantheme._rel_lum(lifted) >= chantheme._rel_lum(acc) - 1e-9)
     check("lifted link stays no brighter than the hover accent",
-          surfer._rel_lum(lifted) <= surfer._rel_lum(acc) + 1e-9)
+          chantheme._rel_lum(lifted) <= chantheme._rel_lum(acc) + 1e-9)
     light = dict(PAL_A, bg="#f4f4f4")
     check("a light palette leaves OneeChan's dim link untouched",
-          surfer._legible_link(light["dim"], light["bg"], light["accent"]) == light["dim"])
+          chantheme._legible_link(light["dim"], light["bg"], light["accent"]) == light["dim"])
 
     # --- pure-python: the LIGHT-palette background collapse ---
     # On a light palette, OneeChan's inset surfaces (open reply chains, post
@@ -373,6 +385,43 @@ def main():
     check("dark palette: text input background keeps highlight (inset untouched)",
           bg_rule(dcss, ".captcha-root", "#123456"))
 
+    # --- pure-python: the KStyle relief layer (Plasma sessions only) ---
+    # kdetheme.kde_chrome() gates on the session AND on the style drawing a
+    # window gradient. Point DESK_KDEGLOBALS at synthetic schemes so nothing
+    # reads (or depends on) his live one.
+    def scheme(style):
+        f = scratch / ("kdeglobals-" + style)
+        f.write_text(
+            "[Colors:Window]\nBackgroundNormal=40,34,42\n"
+            "[Colors:View]\nBackgroundNormal=32,27,36\n"
+            "[Colors:Button]\nBackgroundNormal=58,51,58\n"
+            "[KDE]\nwidgetStyle=%s\ncontrast=7\n" % style, encoding="utf-8")
+        return str(f)
+
+    check("hyprland session: no relief layer (this desktop stays flat)",
+          "linear-gradient(to bottom" not in dcss)
+
+    os.environ["DESK_SESSION"] = "plasma"
+    try:
+        os.environ["DESK_KDEGLOBALS"] = scheme("oxygen")
+        ox = onee_css(dark_pal)
+        check("plasma + oxygen: the window gets a gradient",
+              "background-image:linear-gradient(to bottom" in ox)
+        check("plasma + oxygen: posts get the panel gradient and a bevel",
+              "box-shadow:inset 0 1px 0 rgba(255,255,255" in ox)
+        check("plasma + oxygen: real buttons get the button gradient",
+              "button,input[type=submit]" in ox)
+        check("plasma + oxygen: the gradient rule comes AFTER the flat one "
+              "(same selector, source order decides)",
+              ox.rindex(".dd-menu ul{background:linear-gradient")
+              > ox.index(".dd-menu ul{background:%s!important" % dark_pal["bgAlt"]))
+        os.environ["DESK_KDEGLOBALS"] = scheme("breeze")
+        check("plasma + breeze: a flat KStyle gets no relief layer",
+              "linear-gradient(to bottom" not in onee_css(dark_pal))
+    finally:
+        os.environ["DESK_SESSION"] = "hypr"
+        os.environ.pop("DESK_KDEGLOBALS", None)
+
     def read_title():
         t = view.property("title")
         if isinstance(t, str) and t:
@@ -399,7 +448,7 @@ def main():
               out.get("replyBg") == rgb(PAL_A["bgAlt"]))
         check("plain link takes the legibility-lifted palette dim (beats ch4SS #0000ee)",
               out.get("aColor")
-              == rgb(surfer._legible_link(PAL_A["dim"], PAL_A["bg"], PAL_A["accent"])))
+              == rgb(chantheme._legible_link(PAL_A["dim"], PAL_A["bg"], PAL_A["accent"])))
         check("quotelink takes the palette accent (beats ch4SS #dd0000)",
               out.get("qlColor") == rgb(PAL_A["accent"]))
         check("live refresh hook installed", out.get("hasRefresh") is True)

@@ -53,10 +53,11 @@ Rectangle {
             height: parent.height - 22
             clip: true
             model: LoraChoices
-            ScrollBar.vertical: VScroll {}
+            ScrollBar.vertical: VScroll { id: lbar }
 
             delegate: Item {
-                width: list.width
+                // clear of the scrollbar's gutter, never under it
+                width: list.width - lbar.barW
                 height: (compatible || picker.showAll) ? 20 : 0
                 visible: height > 0
 

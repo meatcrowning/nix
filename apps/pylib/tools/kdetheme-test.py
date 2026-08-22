@@ -2,9 +2,11 @@
 """Harness for the Plasma-session theme switch (pylib/kdetheme.py + deskstyle.py).
 
 Offscreen, and it never reads or writes the live `~/.config/kdeglobals`,
-`~/.config/quickshell/settings.json` or `~/.cache` — every case points
-`DESK_KDEGLOBALS`, `DESK_SETTINGS` and `XDG_CACHE_HOME` at a temp dir, which is
-the whole reason those three overrides exist.
+`~/.config/oxygenrc`, `~/.config/quickshell/settings.json` or `~/.cache` —
+every case points `DESK_KDEGLOBALS`, `DESK_OXYGENRC`, `DESK_SETTINGS` and
+`XDG_CACHE_HOME` at a temp dir, which is the whole reason those overrides
+exist. (The widget style's own settings have a harness of their own,
+`oxygen-test.py`; they are pinned here only so DeskStyle cannot read HIS.)
 
     <an app python> apps/pylib/tools/kdetheme-test.py
 
@@ -33,6 +35,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 TMP = Path(tempfile.mkdtemp(prefix="kdetheme-test-"))
 os.environ["XDG_CACHE_HOME"] = str(TMP / "cache")
+# DeskStyle reads the widget style's store too now (oxygenstyle.py). Point it at
+# a file that does not exist, so every case here resolves to Oxygen's own
+# compiled-in defaults instead of to whatever he has set.
+os.environ["DESK_OXYGENRC"] = str(TMP / "absent-oxygenrc")
 
 import kdetheme as K  # noqa: E402
 

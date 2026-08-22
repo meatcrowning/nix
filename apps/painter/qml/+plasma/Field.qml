@@ -1,20 +1,19 @@
 import QtQuick
+import QtQuick.Controls
 
-// One labelled control row.  Everything in the left pane is built from these so
-// the columns line up without each panel re-deciding its own metrics.
+// Field, in a Plasma session: the same labelled row, with the label drawn as a
+// styled Label (system font, the scheme's text colour) and the hint as the
+// style's own ToolTip rather than our flyout chip. Layout metrics are shared
+// with ../Field.qml on purpose — a KDE form still lines its labels up.
 Item {
     id: row
+    property string face: "plasma"
     property string label: ""
     property string hint: ""
     property int labelWidth: 96
     default property alias content: holder.data
 
-    // PINNING (docs/painter-kde-layout.md phase 7). Right-click a row's label to
-    // pin it: the value then keeps showing in the panel's header while the
-    // panel is COLLAPSED, so a folded panel can still say the one number you
-    // care about. `pinLabel` is the row's identity in the panel's saved pin
-    // list; `pinValue` is read off whatever control the row holds, so a row
-    // does not have to be told how to summarise itself.
+    // Same pin protocol as ../Field.qml — see the comment there.
     // THE PANEL THIS ROW IS IN, found by walking up rather than by the id
     // `panel` alone: `ParamsPanel.qml` had no such id and every row in the
     // sampling section was quietly unpinnable for it. The id is still the fast
@@ -47,32 +46,21 @@ Item {
         row.pinValueOf(holder.children.length > 0 ? holder.children[0] : null, 0)
 
     width: parent ? parent.width : 240
-    height: Math.max(22, holder.childrenRect.height)
+    height: Math.max(24, holder.childrenRect.height)
 
-    PixelText {
+    Label {
         id: lbl
         text: row.label
-        color: Theme.textDim
         width: row.labelWidth
         elide: Text.ElideRight
         anchors.verticalCenter: parent.verticalCenter
+
+        ToolTip.visible: row.hint !== "" && lblHover.hovered
+        ToolTip.text: row.hint
+        ToolTip.delay: 600
+        HoverHandler { id: lblHover }
     }
 
-    Item {
-        id: holder
-        anchors.left: lbl.right
-        anchors.leftMargin: 6
-        anchors.right: parent.right
-        anchors.verticalCenter: parent.verticalCenter
-        height: childrenRect.height
-    }
-
-    ToolTipArea { text: row.hint; anchors.fill: lbl; enabled: row.hint !== "" }
-
-    // Right button only, so the tooltip's hover and any left-click inside the
-    // control are untouched. `panel` is the enclosing Panel's id, which QML
-    // resolves up the creation-context chain — the same way every row in here
-    // already reaches `root`.
     MouseArea {
         anchors.fill: lbl
         acceptedButtons: Qt.RightButton
@@ -86,5 +74,14 @@ Item {
             var pt = mapToItem(null, m.x, m.y)
             host.pinMenu(row, pt.x, pt.y)
         }
+    }
+
+    Item {
+        id: holder
+        anchors.left: lbl.right
+        anchors.leftMargin: 6
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        height: childrenRect.height
     }
 }

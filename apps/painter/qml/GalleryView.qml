@@ -13,6 +13,9 @@ Item {
     //: which owns the one menu, in SCENE coordinates. Same arrangement as
     //: PromptBox's spelling menu.
     signal menuRequested(real sx, real sy, var items)
+    //: "Show me this one" — a double-click. The pane above decides what that
+    //: means; this view only reports it.
+    signal openRequested(string path, bool isVideo)
 
     // ------------------------------------------------------------ selection
     //
@@ -91,15 +94,15 @@ Item {
         }
     }
 
-    // An output's PNG carries the whole job that made it, so the useful question
+    // An output carries the whole job that made it — a still in its PNG chunk, a
+    // clip in its MP4 tag — so the useful question
     // is WHICH PART to take: its words, its numbers, or both. That is a choice,
     // and a choice is a menu — it used to be an unlabelled right-click that took
     // everything, with no way to ask for less.
     function menuFor(index, path, isVideo) {
         var p = Gallery.paramsAt(index)
         if (!p) {
-            return [{ label: isVideo ? "a video carries its ComfyUI graph, not these settings"
-                                     : "no parameters stored in this file", enabled: false },
+            return [{ label: "no parameters stored in this file", enabled: false },
                     { separator: true }].concat(view.commonItems(index, path, isVideo, p))
         }
         return [
@@ -112,9 +115,10 @@ Item {
 
     // The items every output gets, parameters or not. The last two are offered
     // only when there is something to offer: the prompt when the file kept one
-    // (a clip never does — its metadata is ComfyUI's graph), the muted copy on a
-    // video, there being nothing to strip off a still. An action with nothing
-    // to act on is not offered greyed, it is not offered (docs/DESIGN.md §10).
+    // (a clip does too now — its own tag, or the graph SaveVideo wrote), the
+    // muted copy on a video, there being nothing to strip off a still. An action
+    // with nothing to act on is not offered greyed, it is not offered
+    // (docs/DESIGN.md §10).
     function commonItems(index, path, isVideo, params) {
         var items = [{ label: "open in viewer", trigger: () => App.openExternally(path) }]
         if (params && params.positive) {
@@ -128,24 +132,15 @@ Item {
         return items
     }
 
-    Row {
-        id: head
-        spacing: 10
-        width: parent.width
-        PixelText { text: "output"; color: root.fgAccent }
-        // Dropped rather than squeezed when the pane is narrow: the count is
-        // the least of the three things this pane owes you (docs/DESIGN.md §5.4).
-        PixelText {
-            // "outputs", not "images": a video family's results are clips.
-            // A selection says so here rather than in a bar of its own — it is
-            // one number and it belongs beside the other one.
-            text: view.selection.length > 1
-                  ? (view.selection.length + " of " + Gallery.count + " selected")
-                  : (Gallery.count + " outputs")
-            color: view.selection.length > 1 ? Theme.text : Theme.textDim
-            visible: view.width > 190
-        }
-    }
+    // THE HEADING IS GONE, and with it the only thing between the chrome and
+    // the grid. It said "output" and a tally; the tally now lives in the status
+    // bar with the other standing facts (Root.qml `statusRight`), and the strip
+    // it occupied is what you DRAG THE WINDOW BY (ResultsPane.qml). A word over
+    // a grid of pictures was labelling the obvious.
+    //
+    // A multiple selection still has to report itself, and it does so where the
+    // count it qualifies already is — beside it, in the status bar.
+    Item { id: head; width: parent.width; height: 0 }
 
     // Empty space clears the selection, the way it does in a file manager. It
     // sits UNDER the grid, so a click only reaches it where there is no tile.
@@ -161,7 +156,8 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 28
+        // The room the hint line below needs, and no more.
+        anchors.bottomMargin: 22
         clip: true
         model: Gallery
         // The results are the unbounded side, so this is where the desktop's
@@ -178,13 +174,40 @@ Item {
         readonly property real usable: Math.max(1, width - gscroll.barW)
         cellWidth: Math.max(60, Math.floor(usable / Math.max(1, Math.round(usable / 210))))
         cellHeight: cellWidth
-        wheelLines: 1
-        wheelStep: cellHeight
+        // The decode size, in 60px steps rather than tracking `cellWidth`: a
+        // sourceSize that moved with every pixel of a window resize would throw
+        // away and re-decode every thumbnail on the way. 2x the cell, capped,
+        // so a HiDPI screen still has pixels to draw with.
+        readonly property int thumbPx:
+            Math.min(560, Math.max(120, Math.ceil(cellWidth * 2 / 60) * 60))
+        // Keep a screenful of delegates alive either side of the viewport: the
+        // churn at the edges is what a scroll actually costs.
+        cacheBuffer: Math.max(600, cellHeight * 3)
+        // NO ROW-SIZED WHEEL STEP. This was `wheelLines: 1, wheelStep: cellHeight`,
+        // i.e. one notch = exactly one row — which reads as the grid SNAPPING
+        // an output to the top on every notch instead of scrolling. The default
+        // line step is the same one every other view on this desktop uses.
 
         delegate: Item {
             id: tile
             width: grid.cellWidth
             height: grid.cellHeight
+
+            // A clip with no poster frame yet asks for one once it has been on
+            // screen for a moment. Extracting every one up front is a few
+            // hundred ffmpeg runs for thumbnails nobody has scrolled to
+            // (main.py `requestPoster`) — and asking the INSTANT a delegate is
+            // built is nearly as bad, because flicking through the grid builds
+            // and destroys hundreds of them, and each one queued a job that
+            // then ran, one after another, while he was still scrolling. That
+            // is what made the wheel feel heavy. A row passed in a quarter of a
+            // second was never looked at.
+            Timer {
+                id: posterDwell
+                interval: 250
+                running: isVideo && poster === ""
+                onTriggered: if (isVideo && poster === "") Gallery.requestPoster(path)
+            }
 
             // DRAG AN OUTPUT OUT OF THE WINDOW, into anything that takes a file
             // — a browser upload field, filer, a chat window. Same idiom as
@@ -265,8 +288,18 @@ Item {
                     source: isVideo ? poster : url
                     fillMode: Image.PreserveAspectFit
                     asynchronous: true
-                    cache: false
-                    sourceSize.width: 420
+                    // CACHED, and decoded at the size actually drawn.
+                    //
+                    // This was `cache: false` at a fixed 420px, and it is what
+                    // made scrolling the grid feel heavy: a GridView destroys a
+                    // delegate the moment it leaves the viewport and builds it
+                    // again when it comes back, so every row that scrolled past
+                    // and back re-read a multi-megabyte PNG off disk and
+                    // re-decoded it — for a cell a third of that size. The
+                    // cache is Qt's own (QML_PIXMAP_CACHE_LIMIT) and holds the
+                    // decoded thumbnails, not the originals.
+                    cache: true
+                    sourceSize.width: grid.thumbPx
                 }
 
                 // HOVER A CLIP AND IT PLAYS, silently — the preview a video
@@ -444,7 +477,15 @@ Item {
                         view.menuRequested(pt.x, pt.y, view.menuFor(index, path, isVideo))
                     }
                     onDoubleClicked: function (m) {
-                        if (m.button === Qt.LeftButton) App.openExternally(path)
+                        // IN-APP NOW, not the external viewer. A double-click
+                        // in a thumbnail grid means "look at this one", and
+                        // since the pane grew a View mode that is a thing this
+                        // window can do (docs/DESIGN.md §7.6, ResultsPane).
+                        // `viewer` is still one row up the right-click menu and
+                        // in the File menu, for the times you want the real
+                        // image tool.
+                        if (m.button === Qt.LeftButton)
+                            view.openRequested(path, isVideo)
                     }
                 }
             }
@@ -465,7 +506,7 @@ Item {
 
     PixelText {
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 6
+        anchors.bottomMargin: 3
         width: parent.width
         elide: Text.ElideRight
         // Dragging one out is the only affordance here with no visible handle,

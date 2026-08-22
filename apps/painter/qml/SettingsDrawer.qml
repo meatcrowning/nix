@@ -25,12 +25,22 @@ Item {
     property bool open: false
     signal closed()
 
+    // AS A DIALOG, under Plasma. A KDE program's settings are a window with a
+    // title bar and a Close button (Settings → Configure painter…), not a panel
+    // that slides out of a titlebar cell that is not there — so in that session
+    // the same content fills a QDialog instead (pylib/kdeshell.py `dialog`,
+    // qml/SettingsPage.qml). What changes is only the packaging: no slide, no
+    // scrim, no card inset and no title row, because the dialog supplies all
+    // four.
+    property bool asDialog: false
+
     // Nothing to hit-test while it is fully retracted.
-    visible: card.slide > 0.001
+    visible: drawer.asDialog || card.slide > 0.001
 
     MouseArea {
         id: scrim
         anchors.fill: parent
+        visible: !drawer.asDialog
         onClicked: drawer.closed()
     }
 
@@ -40,13 +50,15 @@ Item {
         property real slide: drawer.open ? 1 : 0
         Behavior on slide { NumberAnimation { duration: motion.ms(motion.slideMs); easing.type: motion.slideEasing } }
 
-        width: Math.min(420, drawer.width - 16)
-        height: Math.min(col.implicitHeight + 24, drawer.height - 16)
-        x: drawer.width - slide * width
-        y: Math.max(8, drawer.height - height - 8)   // bottom-right, by the "st" cell
-        color: Theme.bgAlt
+        width: drawer.asDialog ? drawer.width : Math.min(420, drawer.width - 16)
+        height: drawer.asDialog ? drawer.height
+                                : Math.min(col.implicitHeight + 24, drawer.height - 16)
+        x: drawer.asDialog ? 0 : drawer.width - slide * width
+        // bottom-right, by the "st" cell
+        y: drawer.asDialog ? 0 : Math.max(8, drawer.height - height - 8)
+        color: drawer.asDialog ? "transparent" : Theme.bgAlt
         border.color: Theme.windowBorder
-        border.width: Theme.ctrlBorder
+        border.width: drawer.asDialog ? 0 : Theme.ctrlBorder
 
         MouseArea { anchors.fill: parent }   // swallow clicks inside
 
@@ -57,7 +69,8 @@ Item {
 
             Item {
                 width: parent.width
-                height: title.implicitHeight
+                visible: !drawer.asDialog
+                height: visible ? title.implicitHeight : 0
                 PixelText {
                     id: title
                     anchors.left: parent.left
@@ -74,7 +87,12 @@ Item {
                 }
             }
 
-            Rectangle { width: parent.width; height: 1; color: Theme.border }
+            Rectangle {
+                width: parent.width
+                visible: !drawer.asDialog
+                height: visible ? 1 : 0
+                color: Theme.border
+            }
 
             PixelText {
                 text: "backend: " + App.status
