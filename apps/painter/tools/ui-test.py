@@ -2155,8 +2155,9 @@ def test_copy_prompt(win, ctl, tmp):
     check("...and a file with no prompt copies nothing",
           not [r for r in RAN if os.path.basename(r[0]) == "wl-copy"], RAN)
 
-    # ...which is also why the menu never puts it in front of a clip: a video
-    # carries ComfyUI's graph, not painter's parameters.
+    # ...and the same for a clip that carries no metadata at all: a video with
+    # its own tag IS offered the prompt (test_clip_params), one with nothing in
+    # it is not.
     vid = os.path.join(tmp, "out", "video", "noprompt_00001_.mp4")
     os.makedirs(os.path.dirname(vid), exist_ok=True)
     with open(vid, "wb") as fh:
@@ -2165,10 +2166,157 @@ def test_copy_prompt(win, ctl, tmp):
     spin(200)
     labels = row0_menu()
     if labels is not None:
-        check("a clip is not offered a prompt to copy",
+        check("a clip with no metadata is not offered a prompt to copy",
               "copy prompt" not in labels, labels)
     os.unlink(vid)
     os.unlink(plain)
+
+
+def test_clip_params(win, ctl, tmp):
+    """A CLIP hands back its job exactly as a still does.
+
+    Three sources, one entry point (`outmeta.params_for`): painter's own MP4
+    tag, ComfyUI's graph for a clip that predates it, and nothing at all. The
+    tag is written by the same `mp4meta.upsert_tags` the download path uses, so
+    this also pins that a real ffmpeg-written file survives it — the metadata
+    grows `moov` ahead of the media, and every chunk offset in the file has to
+    move with it or the clip decodes to nothing.
+    """
+    import json as J
+    import subprocess as sp
+    import mp4meta
+    import main as P
+
+    vid_dir = os.path.join(tmp, "out", "video")
+    os.makedirs(vid_dir, exist_ok=True)
+    src = os.path.join(vid_dir, "src_00001_.mp4")
+    try:
+        sp.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
+                "-i", "testsrc=size=160x120:rate=12:duration=1",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+                "-pix_fmt", "yuv420p", "-shortest", src], check=True, timeout=60)
+        before = sp.run(["ffmpeg", "-v", "error", "-i", src, "-map", "0:v", "-f", "md5", "-"],
+                        capture_output=True, text=True, timeout=60).stdout
+    except (OSError, sp.SubprocessError):
+        check("ffmpeg is there to make a test clip", False, "skipped")
+        return
+
+    params = {"kind": "video", "positive": "a clip of the sea", "negative": "",
+              "steps": 31, "denoise": 0.9, "sampler_name": "res_multistep",
+              "scheduler": "simple", "seed": 4242, "duration": 6.6, "fps": 24.0,
+              "megapixels": 0.6, "use_input_image": True, "use_last_frame": False,
+              "input_image_local": os.path.join(tmp, "gone.png")}
+    raw = open(src, "rb").read()
+    tagged = os.path.join(vid_dir, "tagged_00001_.mp4")
+    with open(tagged, "wb") as fh:
+        fh.write(mp4meta.upsert_tags(raw, {"painter": J.dumps(params)}))
+    after = sp.run(["ffmpeg", "-v", "error", "-i", tagged, "-map", "0:v", "-f", "md5", "-"],
+                   capture_output=True, text=True, timeout=60).stdout
+    check("writing the tag leaves the pictures byte-identical",
+          bool(before) and before == after, (before.strip(), after.strip()))
+    check("...and the tag reads back off the file",
+          (mp4meta.read_tags_path(tagged).get("painter") or "").startswith("{"),
+          sorted(mp4meta.read_tags_path(tagged)))
+    # Twice is once: a second write replaces the key rather than adding a second.
+    twice = mp4meta.upsert_tags(open(tagged, "rb").read(), {"painter": J.dumps(params)})
+    check("...and a second write leaves one painter key",
+          list(mp4meta.read_tags(twice)).count("painter") == 1,
+          sorted(mp4meta.read_tags(twice)))
+
+    ctl.gallery.add(tagged)
+    spin(150)
+    got = ctl.gallery.paramsAt(ctl.gallery.indexOf(tagged))
+    check("a clip's own tag reaches paramsAt",
+          bool(got) and got.get("positive") == params["positive"] and got.get("steps") == 31,
+          got and sorted(got))
+
+    # The menu offers a clip everything it offers a still, plus the muted copy.
+    from PySide6.QtCore import Qt
+    gal = find(win.contentItem(), "GalleryView")
+    menu = find(win.contentItem(), "CtxMenu")
+    grid = find(gal, "KineticGridView")
+    grid.setProperty("contentY", 0)
+    spin(80)
+    cells = [c for c in walk(grid)
+             if c.metaObject().className().startswith("QQuickItem")
+             and c.width() == grid.property("cellWidth")]
+    if cells:
+        cell = min(cells, key=lambda c: (round(c.y()), round(c.x())))
+        click(win, cell, dx=cell.width() / 2, dy=cell.height() / 2, button=Qt.RightButton)
+        spin(150)
+        labels = [i.get("label") for i in (prop(menu, "items") or []) if i.get("label")]
+        menu.metaObject().invokeMethod(menu, "close")
+        spin(60)
+        check("a clip is offered inject all / prompt / params",
+              labels[:3] == ["inject all", "inject prompt", "inject params"], labels)
+        check("...and its own prompt to copy, beside the muted copy",
+              "copy prompt" in labels and "copy muted copy" in labels, labels)
+
+    RAN.clear()
+    ctl.copyPrompt(tagged)
+    spin(150)
+    copied = [r for r in RAN if os.path.basename(r[0]) == "wl-copy"]
+    check("copy prompt takes the words out of the CLIP",
+          copied and copied[-1][-1] == params["positive"], RAN)
+
+    # Injecting a clip's settings: the video controls, not the image ones.
+    base = prop(win, "gen")
+    base["duration"] = 5.0; base["fps"] = 16.0; base["megapixels"] = 1.0
+    base["useInputImage"] = True; base["useLastFrame"] = True
+    win.setProperty("gen", base)
+    spin(60)
+    win.metaObject().invokeMethod(win, "injectParams", Q_ARG("QVariant", got))
+    spin(150)
+    g = prop(win, "gen")
+    check("inject params takes a clip's seconds, frame rate and budget",
+          (g["duration"], g["fps"], g["megapixels"]) == (6.6, 24.0, 0.6),
+          (g["duration"], g["fps"], g["megapixels"]))
+    check("...and a frame whose picture has gone comes back OFF",
+          g["useInputImage"] is False and g["useLastFrame"] is False,
+          (g["useInputImage"], g["useLastFrame"]))
+
+    # ...and comes back ON, with the picture, when the file is still there.
+    here = noisy_png(os.path.join(tmp, "first-frame.png"), 8, 8)
+    got["input_image_local"] = here
+    win.metaObject().invokeMethod(win, "injectParams", Q_ARG("QVariant", got))
+    spin(150)
+    g = prop(win, "gen")
+    check("a first frame that is still on disk comes back with the settings",
+          g["useInputImage"] is True and ctl.inputImage == here,
+          (g["useInputImage"], ctl.inputImage))
+
+    # A clip from before painter wrote its own tag: ComfyUI's graph is read.
+    graph = {"1": {"class_type": "UNETLoader", "inputs": {"unet_name": "mini-video.safetensors"}},
+             "20": {"class_type": "MiniMaxH3ImageToVideo",
+                    "inputs": {"prompt": "the old way", "length": 158,
+                               "first_frame": ["10", 0]}},
+             "21": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
+             "22": {"class_type": "BasicScheduler",
+                    "inputs": {"scheduler": "beta", "steps": 17, "denoise": 1.0}},
+             "23": {"class_type": "RandomNoise", "inputs": {"noise_seed": 777}},
+             "11": {"class_type": "ImageScaleToTotalPixels",
+                    "inputs": {"megapixels": 0.6, "resolution_steps": 32}},
+             "32": {"class_type": "CreateVideo", "inputs": {"fps": 24.0}}}
+    legacy = os.path.join(vid_dir, "legacy_00001_.mp4")
+    with open(legacy, "wb") as fh:
+        fh.write(mp4meta.upsert_tags(raw, {"prompt": J.dumps(graph)}))
+    old = P.outmeta.params_for(legacy)
+    check("a clip with only ComfyUI's graph still gives up its prompt",
+          bool(old) and old.get("positive") == "the old way", old and sorted(old))
+    check("...and its sampling numbers, seed and duration",
+          old and (old.get("steps"), old.get("sampler_name"), old.get("scheduler"),
+                   old.get("seed"), old.get("duration"), old.get("megapixels"))
+          == (17, "euler", "beta", 777, 6.6, 0.6),
+          old and {k: old.get(k) for k in
+                   ("steps", "sampler_name", "scheduler", "seed", "duration")})
+    check("...but claims no first frame it cannot put back",
+          old and old.get("use_input_image") is True and not old.get("input_image_local"),
+          old and old.get("input_image_local"))
+
+    for p in (src, tagged, legacy):
+        os.unlink(p)
+    ctl.gallery.load_existing()
+    spin(150)
 
 
 def test_muted(win, ctl, tmp):
@@ -2892,6 +3040,7 @@ def main():
     print("== escape ==");            test_escape(win, ctl)
     print("== inject ==");            test_inject(win, ctl, tmp)
     print("== copy prompt ==");       test_copy_prompt(win, ctl, tmp)
+    print("== clip params ==");       test_clip_params(win, ctl, tmp)
     print("== peer history ==");      test_peer_history(win, ctl, tmp)
     print("== muted copies ==");      test_muted(win, ctl, tmp)
     print("== done toast ==");        test_done_toast(win, ctl, tmp)

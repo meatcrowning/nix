@@ -754,8 +754,9 @@ Window {
 
     // ------------------------------------------------------- injecting params
 
-    // What "inject" means, in one place, for the gallery's menu. An image's PNG
-    // carries the whole job, and these are the three useful subsets of it:
+    // What "inject" means, in one place, for the gallery's menu. An output
+    // carries the whole job (a still in its PNG chunk, a clip in its MP4 tag —
+    // `outmeta.params_for`), and these are the three useful subsets of it:
     // its words, its numbers, or both. Each hands back a NEW gen object (see
     // `set` above) — mutating in place would change nothing on screen.
     function injectPrompt(p) {
@@ -794,6 +795,23 @@ Window {
         if (p.model_sampling) {
             g.ms = clone(g.ms)
             for (var k in p.model_sampling) g.ms[k] = p.model_sampling[k]
+        }
+        // A CLIP's settings are a different set, not a subset: seconds and a
+        // frame rate instead of a batch, a pixel budget instead of a size, and
+        // the two frame slots. `megapixels` is taken from the job rather than
+        // backed out of width/height above — an image-to-video clip has no
+        // width and height of its own, the dropped frame's budget IS the size.
+        if (p.kind === "video") {
+            if (p.duration !== undefined) g.duration = p.duration
+            if (p.fps !== undefined) g.fps = p.fps
+            if (p.megapixels > 0) g.megapixels = p.megapixels
+            // The frames are part of the job, so they come back with it — and a
+            // toggle whose picture has since moved comes back OFF rather than
+            // arming a generate that could only refuse (docs/DESIGN.md §10).
+            g.useInputImage = p.use_input_image === true
+                              && App.restoreInputImage(p.input_image_local || "")
+            g.useLastFrame = p.use_last_frame === true
+                             && App.restoreLastImage(p.last_image_local || "")
         }
         gen = g
         recomputeDims()
