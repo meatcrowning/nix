@@ -33,7 +33,18 @@ Item {
                 required property int index
                 text: modelData.separator === true ? "" : String(modelData.label || "")
                 enabled: modelData.separator !== true && modelData.enabled !== false
-                height: modelData.separator === true ? 8 : implicitHeight
+                // A separator is a THIN row, and it has to be thin in
+                // `implicitHeight` too. A popup sizes itself from its delegates'
+                // IMPLICIT heights, so overriding only `height` left a whole
+                // row's worth of dead space per separator hanging off the BOTTOM
+                // of the menu — 47px under painter's prompt-box menu, which
+                // carries two. The non-separator branch is Control's own default
+                // binding, restated because assigning implicitHeight replaces it.
+                implicitHeight: modelData.separator === true ? 8
+                    : Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                               implicitContentHeight + topPadding + bottomPadding,
+                               implicitIndicatorHeight + topPadding + bottomPadding)
+                height: implicitHeight
                 onTriggered: {
                     if (modelData.separator !== true
                             && typeof modelData.trigger === "function")
