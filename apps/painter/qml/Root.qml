@@ -340,6 +340,7 @@ Item {
         // Margins shrink with the pane: 10px either side of a 220px column is
         // 9% of it spent on nothing (docs/DESIGN.md §5.2).
         GalleryView {
+            id: gallery
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: preview.visible ? preview.bottom : parent.top
@@ -604,37 +605,114 @@ Item {
 
     // -------------------------------------------------------------- chrome
 
+    // ONE TABLE OF VERBS, TWO CHROMES THAT READ DIFFERENT COLUMNS OF IT.
+    //
+    // `actions` is everything painter can be told to do. What each consumer
+    // takes from a row:
+    //
+    //   hyprvtb titlebar   id, label, state, tip, bottom   — and ONLY the rows
+    //                      marked `tb:`, because a titlebar column has six
+    //                      cells, not a menubar's worth. `tbButtons` below is
+    //                      that filter, and it is what `pushButtons()` sends.
+    //   KDE menubar/       menu, menuText, icon, bar, shortcut, checkable,
+    //   toolbar            group  (pylib/kdeshell.py) — every row, since a menu
+    //                      IS the complete set.
+    //
+    // Everything the other side does not read is inert, which is what lets one
+    // array serve both: vtbclient.py ignores unknown keys, and kdeshell never
+    // sees `label`.
+    //
     // Labels are lowercase ASCII, one or two characters, and the settings cell
     // is "st" — the same label player and surfer use for the same button
     // (docs/DESIGN.md §12.1: a function that already has a glyph keeps it in every
-    // app). They were UPPERCASE, with "*" for settings, which was painter's
-    // alone on this desktop.
-    // The button set, as a BINDING rather than a literal inside pushButtons():
-    // the Plasma menubar reads the same array (qmlcommon/DeskMenuBar.qml) and
-    // has to re-read it when a state flips, and `menu:` is that menubar's half
-    // of it — inert on the wire, where vtbclient.py reads id/label/state/tip/
-    // bottom and ignores the rest.
-    // `icon:` and `bar:` are the KDE shell's half (pylib/kdeshell.py): the
-    // freedesktop icon name a real toolbar/menu row draws — the two-character
-    // label is a titlebar affordance and has no place on one — and whether the
-    // entry earns a toolbar slot. Both are inert on the vtb wire, where
-    // vtbclient.py reads id/label/state/tip/bottom and ignores the rest.
-    readonly property var tbButtons: [
-        { id: "gen",  label: "gen",  state: App.busy ? 2 : 0, tip: "Generate",
-          menu: "generate", icon: "media-playback-start", bar: true },
-        { id: "stop", label: "x",    state: App.busy ? 0 : 2, tip: "Cancel all",
-          menu: "generate", icon: "process-stop", bar: true },
+    // app). A menu row instead shows `menuText` or `tip`, in sentence case with
+    // the desktop's own capitalisation, because it is a row of words.
+    //
+    // `state`: 0 normal, 1 lit/checked, 2 disabled. A row whose target does not
+    // exist is DISABLED rather than absent, since a menu whose contents move
+    // around is a menu you cannot learn (docs/DESIGN.md §10.1).
+    //
+    // `shortcut` is the KDE face's alone: the QML `Shortcut`s at the bottom of
+    // this file stand down under Plasma so exactly one thing owns each key.
+    // "@Name" takes the platform's standard sequence rather than a literal.
+    readonly property var actions: [
+        // ------------------------------------------------------------- file
+        { id: "gen",  label: "gen",  tb: true, state: App.busy ? 2 : 0,
+          tip: "Generate", menu: "file", icon: "media-playback-start",
+          bar: true, shortcut: "Ctrl+Return" },
+        { id: "stop", label: "x",    tb: true, state: App.busy ? 0 : 2,
+          tip: "Cancel all", menu: "file", icon: "process-stop",
+          bar: true, shortcut: "Ctrl+." },
         "-",
-        { id: "p",    label: "p",    state: root.view === 0 ? 1 : 0, tip: "Parameters",
-          menu: "view", icon: "view-list-details", bar: true },
-        { id: "g",    label: "g",    state: root.view === 1 ? 1 : 0, tip: "Gallery",
-          menu: "view", icon: "view-list-icons", bar: true },
-        { id: "pv",   label: "pv",   state: root.showPreview ? 1 : 0,
-          tip: "Preview viewport", menu: "view", icon: "document-preview", bar: true },
+        { id: "open", tip: "Open in Viewer", menu: "file",
+          icon: "document-open", state: root.selOne === "" ? 2 : 0 },
+        { id: "folder", tip: "Open Output Folder", menu: "file",
+          icon: "folder-open" },
+        // ------------------------------------------------------------- edit
+        // The gallery's right-click verbs, hoisted: the same three subsets of a
+        // finished job (its words, its numbers, both) plus its prompt on the
+        // clipboard. They act on the selected output, and there being no
+        // selection is what greys them.
+        { id: "injall",    tip: "Reuse All Settings", menu: "edit",
+          icon: "edit-paste", state: root.selParams ? 0 : 2 },
+        { id: "injprompt", tip: "Reuse Prompt", menu: "edit",
+          state: root.selParams ? 0 : 2 },
+        { id: "injparams", tip: "Reuse Parameters", menu: "edit",
+          state: root.selParams ? 0 : 2 },
         "-",
-        { id: "set",  label: "st",   state: root.showSettings ? 1 : 0,
-          tip: "Settings", bottom: true, menu: "settings", icon: "configure" }
+        { id: "copyprompt", tip: "Copy Prompt", menu: "edit", icon: "edit-copy",
+          state: root.selOne === "" ? 2 : 0 },
+        { id: "clearprompt", tip: "Clear Prompt", menu: "edit",
+          icon: "edit-clear", state: root.gen.positive === "" ? 2 : 0 },
+        // ------------------------------------------------------------- view
+        // Parameters and Gallery are a RADIO PAIR — Gwenview's Browse/View —
+        // so `group` makes them exclusive in the menu and the toolbar instead
+        // of two checkboxes that can both be off.
+        { id: "p",    label: "p",    tb: true, state: root.view === 0 ? 1 : 0,
+          tip: "Parameters", menu: "view", icon: "view-list-details",
+          bar: true, checkable: true, group: "pane", shortcut: "Ctrl+1" },
+        { id: "g",    label: "g",    tb: true, state: root.view === 1 ? 1 : 0,
+          tip: "Gallery", menu: "view", icon: "view-list-icons",
+          bar: true, checkable: true, group: "pane", shortcut: "Ctrl+2" },
+        { id: "pv",   label: "pv",   tb: true, state: root.showPreview ? 1 : 0,
+          tip: "Preview viewport", menu: "view", icon: "document-preview",
+          bar: true, checkable: true, shortcut: "F7" },
+        // ------------------------------------------------------------ tools
+        { id: "rescan", tip: "Rescan Models", menu: "tools",
+          icon: "view-refresh", shortcut: "Ctrl+R" },
+        "-",
+        { id: "backendstart", tip: "Start Backend", menu: "tools",
+          icon: "system-run", state: App.backendRunning ? 2 : 0 },
+        { id: "backendstop", tip: "Stop Backend", menu: "tools",
+          icon: "process-stop", state: App.backendRunning ? 0 : 2 },
+        { id: "unload", tip: "Unload Models", menu: "tools",
+          icon: "edit-clear-history", state: App.backendRunning ? 0 : 2 },
+        // --------------------------------------------------------- settings
+        { id: "set",  label: "st",   tb: true, state: root.showSettings ? 1 : 0,
+          tip: "Settings", bottom: true, menu: "settings",
+          menuText: "Configure painter…", icon: "configure",
+          shortcut: "@Preferences" }
     ]
+
+    // The KDE menubar's menu order. `help` is appended by kdeshell, after
+    // whatever an app names here (pylib/kdeshell.py MENU_ORDER).
+    readonly property var menuOrder: ["file", "edit", "view", "tools", "settings"]
+
+    // What the hyprvtb titlebar column gets: the six cells it had before this
+    // table grew a menubar's worth of rows around them. Nothing about the
+    // Hyprland face changed.
+    readonly property var tbButtons: root.actions.filter(
+        (a) => a === "-" || a.tb === true)
+
+    // The selected output, for the rows above that act on one. A multi-select
+    // has no single answer, so it counts as none (the gallery's own right-click
+    // still handles the set).
+    readonly property string selOne: gallery.selection.length === 1
+                                     ? gallery.selection[0] : ""
+    // ...and the parameters stored in it, which is what "reuse" needs and what
+    // a file written by something else does not have.
+    readonly property var selParams: root.selOne === "" ? null
+        : Gallery.paramsAt(Gallery.indexOf(root.selOne))
 
     function pushButtons() {
         Titlebar.setButtons(root.tbButtons)
@@ -651,6 +729,25 @@ Item {
         else if (id === "g") root.view = 1
         else if (id === "pv") root.showPreview = !root.showPreview
         else if (id === "set") root.showSettings = !root.showSettings
+        else if (id === "open") { if (root.selOne !== "") App.openExternally(root.selOne) }
+        else if (id === "folder") App.openFolder()
+        else if (id === "copyprompt") { if (root.selOne !== "") App.copyPrompt(root.selOne) }
+        else if (id === "clearprompt") root.set("positive", "")
+        else if (id === "rescan") App.rescan()
+        else if (id === "backendstart") App.startBackend()
+        else if (id === "backendstop") App.stopBackend()
+        else if (id === "unload") App.unloadModels()
+        // The three reuse verbs are the gallery menu's, on the selected output.
+        // `view = 0` after, because injecting settings you cannot see happen is
+        // the same as not reporting it (docs/DESIGN.md §10).
+        else if (id === "injall" || id === "injprompt" || id === "injparams") {
+            var p = root.selParams
+            if (!p) return
+            if (id === "injall") root.injectAll(p)
+            else if (id === "injprompt") root.injectPrompt(p)
+            else root.injectParams(p)
+            root.view = 0
+        }
     }
 
     // The menubar the Plasma session gets in place of the titlebar column;
@@ -662,8 +759,11 @@ Item {
         // kept only for its 0-height contribution to the layout above.
         systemBar: true
         anchors { top: parent.top; left: parent.left; right: parent.right }
-        buttons: root.tbButtons
-        menuOrder: ["generate", "view", "settings"]
+        // The FULL table, not the titlebar's six: this is a menubar, and it
+        // draws nothing here anyway (`systemBar`) — painter's Plasma menubar is
+        // a real QMenuBar.
+        buttons: root.actions
+        menuOrder: root.menuOrder
         onTriggered: (id) => root.tbAction(id)
     }
 
@@ -733,7 +833,16 @@ Item {
     Item { id: focusSink; focus: false; activeFocusOnTab: false }
     function releaseFocus() { focusSink.forceActiveFocus() }
 
-    Shortcut { sequences: ["Ctrl+Return", "Ctrl+Enter"]; onActivated: root.submit() }
+    // ONE OWNER PER KEY. Under Plasma these sequences are on the QActions the
+    // menubar builds (`shortcut:` in `actions` above) — two things claiming
+    // Ctrl+Return in one window is an ambiguous shortcut, and Qt answers an
+    // ambiguous shortcut by firing NEITHER. So the QML side stands down there,
+    // exactly as the QML menubar and the queue strip do.
+    Shortcut {
+        sequences: ["Ctrl+Return", "Ctrl+Enter"]
+        enabled: !root.plasma
+        onActivated: root.submit()
+    }
     // A window-level Shortcut sees a key BEFORE any focused item's Keys handler,
     // so this one has to say what Escape means for the whole window — adding it
     // for the text boxes alone silently took Escape away from the dropdown and
@@ -748,7 +857,7 @@ Item {
             else root.releaseFocus()
         }
     }
-    Shortcut { sequence: "Ctrl+R"; onActivated: App.rescan() }
+    Shortcut { sequence: "Ctrl+R"; enabled: !root.plasma; onActivated: App.rescan() }
 
     // Ctrl+V INTO A FRAME WELL.
     //
