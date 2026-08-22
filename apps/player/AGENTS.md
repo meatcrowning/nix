@@ -61,33 +61,78 @@ whole file in memory and rewrites all of it on any `set()` (volume, sort,
 album-grid scroll, quit), and reads prefs only at startup. `tools/set-pref.py`
 sets a key from outside, backs the file up, and refuses while `main.py` is up.
 
-**IN A PLASMA SESSION THE CHROME IS A MENUBAR, A VIEW TOOLBAR AND A PLAYBAR**
-(2026-08-18). There is no hyprvtb there, so everything the next paragraph
-describes reaches nothing at all. The buttons come back as the shared menubar
-(`../qmlcommon/DeskMenuBar.qml`, `../AGENTS.md`), and the `PLAYBAR`/`SEEK` half
-— which a menubar cannot carry — comes back as **`qml/PlayBar.qml`, a real
-transport strip along the bottom of the window**: prev / play-pause / next, the
-elapsed and total clock in fixed-width slots, and a scrub track that holds the
-handle through a drag and seeks on RELEASE (`Player.seekFrac`, the same call the
-titlebar's `SEEK` makes). It gates itself on `DeskStyle.plasma` and is 0 high and
-invisible outside that session, so the Hyprland window is untouched; `Main.qml`
-anchors the content and the settings drawer to `playBar.top` and pays nothing
-for it there. Harness: `tools/playbar-test.py` — offscreen, against a FAKE
-Player, because the running one is his and must never be driven.
+**IN A PLASMA SESSION PLAYER IS A REAL KDE WINDOW** (2026-08-22). Not a window
+imitating one: a `QMainWindow` with a real `QMenuBar`, a real view `QToolBar`, a
+real transport `QToolBar` along the bottom, a real `QStatusBar` and the KDE
+style's own window background, with `qml/Root.qml` as the central widget's QML.
+All of that is `pylib/kdeshell.py` — read `../AGENTS.md` → *pylib/kdeshell.py*
+before touching any of it; only what is player-specific is here.
 
-**The view verbs are NOT a menu — they are a toolbar** (`qml/ViewBar.qml`,
-docs/DESIGN.md §7.6, his call): under Plasma the three page switches (albums /
-playlists / now playing), the sort cycler and the finder come OUT of the menubar
-(`Main.qml`'s `menuBarButtons` filters the whole `view` group out of the array
-`DeskMenuBar` gets — the titlebar column above is untouched) and onto a strip
-directly under the menubar. Switches and sort are `HeaderButton`s; the finder is
-the window's ONE `searchBar`, re-parented (a `State` + `ParentChange`) from the
-Hyprland slide-out into `viewBar.searchSlot` and left always-open there, so
-there is a single search field either way. Like PlayBar it gates on
-`DeskStyle.plasma` and is 0-high under Hyprland, so `Main.qml` anchors the
-content and settings drawer to `viewBar.bottom` (== `menuBar.bottom` there) at no
-cost. It degrades to the ~480px window by giving the finder whatever width the
-switches leave. Harness: `tools/viewbar-test.py` — offscreen, fake Theme/DeskStyle.
+- **`Main.qml` is now a 25-line `Window` around `Root.qml`**, and is loaded in
+  the Hyprland session only. `Root.qml` is an `Item` and holds the whole app.
+  Nothing Window-only lives in it: the title goes out as `windowTitle` (bound by
+  `Main.qml`, and put on the QMainWindow by `kdeshell.bind_title`).
+- **ONE TABLE, EVERY CHROME.** `Root.qml`'s `tbButtons` is the hyprvtb titlebar
+  column *and* the menubar *and* both toolbars *and* their shortcuts, annotated
+  with `menu`/`menuText`/`icon`/`bar`/`group`/`shortcut` — all inert on the vtb
+  wire. `bar: true` is the top toolbar, `bar: "transport"` the bottom one.
+- **`qml/ViewBar.qml` and `qml/PlayBar.qml` are GONE** (they were the 2026-08-18
+  first pass: QML strips imitating a view toolbar and a transport bar, gated on
+  `DeskStyle.plasma`). The three page switches are a radio group of real toolbar
+  rows, the sort cycler is one with `barText` so it carries the full word, and
+  the finder is a real `QLineEdit` at the right-hand end
+  (`kdeshell.toolbar_search`), where Dolphin and Gwenview keep theirs. The
+  transport is six `QAction`s on the bottom bar plus `transport.py`.
+- **The menus are the COMPLETE set, the toolbar the primary verbs** — so the
+  three views and the sort row are in the View menu *as well as* on the bar.
+  The old `menuBarButtons` filter that took the whole `view` group out of the
+  menubar is gone with the strip it existed for.
+- **`transport.py` is the seek bar**, the one thing on the bottom toolbar that
+  cannot be a `QAction`: a `QSlider` between two fixed-width clocks, drawn by
+  the KStyle. Controlled, never stateful — the handle follows `Player.position`,
+  a drag or a wheel notch only calls `Player.seekFrac` — with the same two held
+  values `PlayBar.qml` had, and for the same reasons: `_drag` while the pointer
+  is down, `_pending` until the source catches up with a wheel seek. A press on
+  the groove seeks to the CLICK, not one page towards it, and the wheel banks a
+  touchpad's sub-detent remainder (`qmlcommon/WheelNotch.qml`'s algorithm, in
+  Python, because this control is not QML). Harness: `tools/transport-test.py`
+  — offscreen, against a FAKE Player, because the running one is his and must
+  never be driven.
+- **Settings are a dialog, not a drawer.** There is no titlebar edge for a
+  drawer to slide out of, so the rows moved into `qml/SettingsPage.qml` and
+  `qml/SettingsPanel.qml` is now only the Hyprland roof over them — the same
+  page is the content of "Configure player…" (`kdeshell.dialog`, opened through
+  `kdeshell.on_action("settings", …)`). The dialog is a separate scene, so its
+  `columns`/`scanStatus`/`scanning` are pushed rather than bound; `pad` is how
+  the roof says how much room the rows get from the edge.
+- **`qml/+plasma/` swaps the controls**, through the file selector, with no
+  branch at any call site: `HeaderButton` is a flat `Button`, `SelectButton` a
+  `Button` with the style's indicator, `Slider` a QQC2 `Slider` (re-applied
+  through a `Binding`, since a QQC2 Slider owns its value and a plain binding
+  would break on the first drag), and `CtxMenu` the style's own `Menu`. Each
+  carries `property string face: "plasma"`, which is the only way to prove the
+  selector took — an unowned `QQmlFileSelector` is collected moments after it is
+  made and every component then loads its unselected file, silently.
+- **The QML `Shortcut`s all stand down under Plasma** (`enabled: !win.plasma`),
+  except Escape: the sequences are on the QActions there, and two owners of one
+  sequence in one window is an ambiguous shortcut, which Qt answers by firing
+  NEITHER. Space and `L` are bare keys, so `kdeshell.guard_typing` suspends them
+  while the toolbar finder has the keyboard.
+- **The finder is still ONE field.** `Root.qml`'s `searchInput` remains the
+  window's single source of search truth in both sessions — filter vs full
+  results, Escape, the click-out unfocus are all decided there — and under
+  Plasma `main.py` mirrors it onto the `QLineEdit` and back, guarded against the
+  loop a two-way mirror otherwise makes. The box itself is `visible: !plasma`.
+- **`main.py --selftest`** builds the whole thing OFFSCREEN and quits: no MPRIS
+  name, no queue socket, no library scan, no `save_state` — all four are
+  singletons or state a running player already owns. `PLAYER_MENUS` dumps the
+  chrome as text (a menu is not on screen until it is opened, so no render can
+  show what is in one), `PLAYER_FACES` proves the selector took, `PLAYER_SHOT`
+  writes a PNG, `PLAYER_DIALOG` grabs Configure player…, `PLAYER_TREE` dumps
+  item geometry, `PLAYER_VIEW` picks the page without persisting it. Harness:
+  `tools/plasma-chrome-test.py`. **`QT_QPA_PLATFORMTHEME=kde` is not optional**
+  in any of those commands — without it the widgets take Qt's default light
+  palette while the QML takes his dark scheme.
 
 **ALL chrome is hyprvtb titlebar buttons** — transport + view switcher + sort +
 the `fs` search toggle (`Ctrl+F`; it was labelled `/`, a key nothing was ever

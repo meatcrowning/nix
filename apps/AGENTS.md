@@ -648,10 +648,10 @@ retune all of them together (docs/DESIGN.md §2.2).
 
 **An app with the KDE shell below stands this bar down** — `systemBar: true`,
 and `shown` goes false while `plasma` stays true. Two menubars, one of them
-ours and wrong, is what that flag prevents. painter is the first; the other apps
-still use this bar and are unaffected.
+ours and wrong, is what that flag prevents. painter and player both do; the
+other apps still use this bar and are unaffected.
 
-### `pylib/kdeshell.py` — under Plasma, a REAL KDE window `[painter]`
+### `pylib/kdeshell.py` — under Plasma, a REAL KDE window `[painter, player]`
 
 **In that session we do not imitate the system theme; we let the system theme
 paint.** `kdetheme.py` moves the palette, the font and the motion to
@@ -814,6 +814,38 @@ the app — core 127749, 2026-08-22, `~QMessageBox` →
 Build a `QMessageBox` with `DontUseNativeDialog`, `show()` it modelessly, and
 keep a reference on the shell; `_about_action` is the pattern.
 
+**`shell.toolbar(ident, title, area)` is a SECOND toolbar**, and `bar:` on a
+row names which one it goes to — `true` for the main bar, `"transport"` for
+player's. KDE's music players keep their transport along the bottom rather than
+in the top toolbar, and that is a bar, not a strip an app draws for itself: the
+rows on it are the app's own `QAction`s, so the bottom bar, the Playback menu
+and the hyprvtb titlebar column cannot disagree. `shell.toolbar_widget(ident,
+w, stretch=True)` puts a widget on it — player's seek slider is the one thing
+there that cannot be an action. Placement and visibility ride the saved window
+state like the main bar's, and each extra bar gets its own Show row in Settings.
+
+**`_clear_bar`, not `QToolBar.clear()`** — and this one was silent and total.
+`clear()` deletes a toolbar's actions, and a `QWidgetAction` OWNS the widget it
+carries, so every rebuild deleted the search field, the `barText` button and
+player's whole seek bar out from under the Python objects still holding them.
+Re-adding them afterwards LOOKED like it worked — the actions were back in
+`tb.actions()` and `dump_chrome` printed them — but their `actionGeometry`
+stayed `(0, 0, 100, 30)`, i.e. never laid out, and nothing was on the bar. It
+went unnoticed in painter because a rebuild is rare there; player's
+`toolbar()` call triggers one immediately after `toolbar_search()`. A persistent
+widget now keeps its ORIGINAL `QWidgetAction` (`_append_widget`) and is put back
+with `addAction`, never re-wrapped.
+
+**`shell.bind_title(prop)`** tracks a QML property onto the window title, so the
+taskbar entry says what player is playing from the same expression `Main.qml`
+binds under Hyprland.
+
+**`shell.guard_typing(widget)`** suspends the bare-key action shortcuts while
+that widget has the keyboard. A QAction shortcut is matched BEFORE the key
+reaches the focused widget, so player giving Space to play/pause — which it has
+done since long before this face existed — made its own search field impossible
+to type a space into. Ctrl/Alt sequences are untouched.
+
 **`shell.dock(ident, title, qml, …)`** puts a QML file in a real `QDockWidget`:
 float, tab, drag to another edge, a View-menu toggle that is the dock's own
 action, and placement saved with the window. Three things it has to get right,
@@ -830,7 +862,9 @@ the offscreen platform saves nothing, because a test's window size is not his.
 `qml/+plasma/Foo.qml` transparently replaces `qml/Foo.qml` at every call site:
 painter's `Panel` is a styled `GroupBox` there, `Spin` a `SpinBox`, `Picker` a
 `ComboBox`, `Toggle` a `CheckBox`, `TextButton` a `Button`, and `CtxMenu` /
-`ToolTipArea` the style's own popups — each with the SAME API as the file it
+`ToolTipArea` the style's own popups; player's `HeaderButton` is a flat
+`Button`, `SelectButton` a `Button` with the style's indicator, `Slider` a QQC2
+`Slider` and `CtxMenu` the style's `Menu` — each with the SAME API as the file it
 replaces, so `Root.qml` and every panel are untouched. Each variant carries
 `property string face: "plasma"`, which is how a harness proves the swap
 actually happened. Two traps paid for already:
@@ -842,6 +876,12 @@ actually happened. Two traps paid for already:
   must reproduce the original's *layout contract*, not just its properties —
   painter's `Panel` puts content in a `Column`, and a variant whose content
   item was a plain `Item` drew every row of a panel on top of the others.
+- **A QQC2 control that owns its value breaks the CONTROLLED contract.** Our
+  sliders and fields are controlled — the parent holds the value and the control
+  only emits — but a QQC2 `Slider` writes its own `value` on a drag, which
+  destroys a plain binding onto the source. After that the parent writing the
+  value back never reaches the handle. player's variant re-applies it through a
+  `Binding` object instead, which survives the write.
 
 Verify it the only way this can be verified — by rendering:
 
@@ -850,6 +890,11 @@ QT_QPA_PLATFORMTHEME=kde DESK_SESSION=plasma PAINTER_SHOT=/tmp/x.png \
     painter-qtenv python3 main.py --selftest        # then LOOK at the PNG
 PAINTER_TREE=panel   # …and/or dump item geometry + the widget palette
 ```
+
+player's is the same shape (`player-qtenv`, `PLAYER_SHOT`/`PLAYER_TREE`/
+`PLAYER_MENUS`/`PLAYER_DIALOG`/`PLAYER_VIEW`), plus **`PLAYER_FACES=1`**, which
+walks the item tree and prints every component's `face` — the direct check that
+the selector took, rather than inferring it from a render.
 
 **`QT_QPA_PLATFORMTHEME=kde` is not optional in that command.** Without it no
 KDE platform theme loads, and the two halves of the window disagree: widgets
