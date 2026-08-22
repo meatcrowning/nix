@@ -6,6 +6,12 @@ import "../../qmlcommon"
 // bottom-anchored in it, so the drawer docks bottom-right and slides in from
 // that edge. A transparent scrim behind it closes it on an outside click.
 //
+// THE HYPRLAND ROOF ONLY. The rows themselves are `SettingsPage.qml`, which in
+// a Plasma session is put in a real "Configure player…" dialog instead — there
+// is no titlebar edge for a drawer to slide out of there, and a KDE program's
+// settings are a dialog. This file is the frame, the slide and the scrim; it
+// adds no setting of its own.
+//
 // Controlled, not stateful: it owns no setting. `columns` is a binding onto
 // Main's value and the controls only emit requests; Main writes them back
 // (and persists them), which flows in through the bindings.
@@ -88,159 +94,19 @@ Item {
 
             Rectangle { width: parent.width; height: 1; color: Theme.border }
 
-            // ---- album grid columns: live, in place ----
-            Column {
+            SettingsPage {
                 width: parent.width
-                spacing: 4
-
-                Item {
-                    width: parent.width
-                    height: 20
-                    PixelText {
-                        id: colLabel
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "cover columns"
-                        color: root.fgText
-                    }
-                    Row {
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: 2
-                        HeaderButton {
-                            label: "-"
-                            fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
-                            onClicked: root.columnsRequested(root.columns - 1)
-                        }
-                        PixelText {
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: 20
-                            horizontalAlignment: Text.AlignHCenter
-                            text: root.columns
-                            color: root.fgDim
-                        }
-                        HeaderButton {
-                            label: "+"
-                            fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
-                            onClicked: root.columnsRequested(root.columns + 1)
-                        }
-                    }
-                }
-                Slider {
-                    width: parent.width
-                    from: root.minColumns
-                    to: root.maxColumns
-                    step: 1
-                    fgAccent: root.fgAccent
-                    value: root.columns
-                    onMoved: function(v) { root.columnsRequested(v); }
-                }
-            }
-
-            Rectangle { width: parent.width; height: 1; color: Theme.border }
-
-            // ---- replay gain: library-wide volume levelling ----
-            // The mode button cycles; "auto" is album gain within an album and
-            // track gain for anything mixed, which is what you actually want
-            // without having to think about it.
-            Column {
-                width: parent.width
-                spacing: 4
-
-                Item {
-                    width: parent.width
-                    height: 24
-                    PixelText {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "volume levelling"
-                        color: root.fgText
-                    }
-                    // A dropdown, not a cycler — every pick-one-of-N enum on
-                    // the desktop opens its menu now (docs/DESIGN.md §7.2).
-                    SelectButton {
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 90
-                        label: Player.replayGain
-                        fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
-                        onPicked: function (x, y) {
-                            var items = [];
-                            ["auto", "track", "album", "off"].forEach(function (m) {
-                                items.push({ label: m, trigger: function () { root.replayGainRequested(m); } });
-                            });
-                            var p = root.mapFromItem(null, x, y);
-                            rgMenu.open(p.x, p.y, items);
-                        }
-                    }
-                }
-
-                PixelText {
-                    width: parent.width
-                    text: Player.rgStatus
-                    wrapMode: Text.Wrap
-                    color: root.fgDim
-                }
-
-                Item {
-                    width: parent.width
-                    height: 20
-                    visible: Player.replayGain !== "off"
-                    PixelText {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "preamp"
-                        color: root.fgText
-                    }
-                    PixelText {
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: (Player.rgPreamp >= 0 ? "+" : "") + Player.rgPreamp.toFixed(1) + " dB"
-                        color: root.fgDim
-                    }
-                }
-                Slider {
-                    width: parent.width
-                    visible: Player.replayGain !== "off"
-                    from: -15
-                    to: 15
-                    step: 0.5
-                    fgAccent: root.fgAccent
-                    value: Player.rgPreamp
-                    onMoved: function(v) { root.rgPreampRequested(v); }
-                }
-            }
-
-            Rectangle { width: parent.width; height: 1; color: Theme.border }
-
-            // ---- library ----
-            Item {
-                width: parent.width
-                height: 20
-                PixelText {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "library"
-                    color: root.fgText
-                }
-                HeaderButton {
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    label: root.scanning ? "scanning" : "rescan"
-                    fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
-                    lit: root.scanning
-                    onClicked: if (!root.scanning) root.rescanRequested()
-                }
-            }
-            PixelText {
-                width: parent.width
-                visible: root.scanStatus !== ""
-                text: root.scanStatus
-                clip: true
-                height: Theme.lineHeight + 2  // descender room: one cell + 1px each side
-                color: root.fgDim
+                columns: root.columns
+                minColumns: root.minColumns
+                maxColumns: root.maxColumns
+                scanStatus: root.scanStatus
+                scanning: root.scanning
+                fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
+                onColumnsRequested: (n) => root.columnsRequested(n)
+                onRescanRequested: root.rescanRequested()
+                onReplayGainRequested: (m) => root.replayGainRequested(m)
+                onRgPreampRequested: (db) => root.rgPreampRequested(db)
             }
         }
     }
-
-    // One menu for the drawer's pickers (§7.3). It fills the panel root —
-    // which fills the window — so the dropdown clamps against the whole
-    // window, not the drawer it slides in from.
-    CtxMenu { id: rgMenu; anchors.fill: parent }
 }
