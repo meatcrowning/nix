@@ -269,14 +269,23 @@ def build_window(engine_only=False):
     engine.warnings.connect(lambda ws: WARNINGS.extend(w.toString() for w in ws))
     engine.load(QUrl.fromLocalFile(os.path.join(PAINTER, "qml/Main.qml")))
     win = engine.rootObjects()[0]
+    # THE APP IS NOT THE WINDOW ANY MORE. `Main.qml` is a twenty-line `Window`
+    # wrapper and `Root.qml` — an Item inside it — is the app, because a Plasma
+    # session hosts that same Item in a QQuickWidget instead (apps/AGENTS.md,
+    # pylib/kdeshell.py). So every property and every invokable this harness
+    # reaches for is on `APP`, and only geometry and hit-testing are on `win`.
+    app_root = find(win.contentItem(), "Root")
+    if app_root is None:
+        raise SystemExit("ui-test: no Root item under the window")
     ctl.rescan()
     spin(400)
-    return engine, win, ctl, keep
+    return engine, win, app_root, ctl, keep
 
 
 _DESKSTYLE = None
 _STUBBAR = None
 _THEME = [None]
+APP = None      # the Root item — see build()
 
 
 def build(tmp):
@@ -407,6 +416,12 @@ def build(tmp):
             print("  " + w)
         raise SystemExit("Main.qml failed to load")
     win = roots[0]
+    # The app is the Root ITEM inside that window, not the window — see
+    # build_window() for why, and `APP` for what the tests reach through.
+    global APP
+    APP = find(win.contentItem(), "Root")
+    if APP is None:
+        raise SystemExit("ui-test: no Root item under the window")
     win.setWidth(1280)
     win.setHeight(900)
     spin(400)
@@ -442,8 +457,8 @@ def test_text_boxes(win, ctl):
           edit.property("activeFocus") is True)
 
     # ...and with text in it, the caret lands at the end rather than nowhere.
-    gen = prop(win, "gen"); gen["positive"] = "one two three"
-    win.setProperty("gen", gen)
+    gen = prop(APP, "gen"); gen["positive"] = "one two three"
+    APP.setProperty("gen", gen)
     spin(120)
     check("the model's text reaches the editor", edit.property("text") == "one two three",
           edit.property("text"))
@@ -468,12 +483,12 @@ def test_text_boxes(win, ctl):
     check("...and Backspace deletes the selection",
           edit.property("text") == "", edit.property("text"))
     check("...and the model hears about it",
-          prop(win, "gen").get("positive") == "", prop(win, "gen").get("positive"))
+          prop(APP, "gen").get("positive") == "", prop(APP, "gen").get("positive"))
     key(win, Qt.Key_X, Qt.NoModifier, "x")
     key(win, Qt.Key_Y, Qt.NoModifier, "y")
     check("typing after that still reaches the model",
-          edit.property("text") == "xy" and prop(win, "gen").get("positive") == "xy",
-          (edit.property("text"), prop(win, "gen").get("positive")))
+          edit.property("text") == "xy" and prop(APP, "gen").get("positive") == "xy",
+          (edit.property("text"), prop(APP, "gen").get("positive")))
     key(win, Qt.Key_Backspace)
     check("a plain Backspace deletes one character",
           edit.property("text") == "x", edit.property("text"))
@@ -536,8 +551,8 @@ def test_text_boxes(win, ctl):
     key(win, Qt.Key_A, Qt.ControlModifier, "a")
     key(win, Qt.Key_Backspace)
     check("the negative box takes the same two keys",
-          nedit.property("text") == "" and prop(win, "gen").get("negative") == "",
-          (nedit.property("text"), prop(win, "gen").get("negative")))
+          nedit.property("text") == "" and prop(APP, "gen").get("negative") == "",
+          (nedit.property("text"), prop(APP, "gen").get("negative")))
     edit.forceActiveFocus()
     spin(60)
 
@@ -606,7 +621,7 @@ def test_chrome(win, ctl):
     # The splitter is a drag target; the status bar is under it and must not be.
     bar = find(content, "QueueBar")
     split = [it for it in walk(content)
-             if it.property("width") == win.property("splitterW")
+             if it.property("width") == APP.property("splitterW")
              and it.height() > 100]
     check("the splitter stops above the status bar",
           bool(split) and split[0].height() <= win.height() - bar.height() + 0.5,
@@ -655,7 +670,7 @@ def test_chrome(win, ctl):
     # taller, and sitting ABOVE the grid rather than over it.
     pv = find(content, "PreviewPane")
     check("the preview viewport starts closed", not pv.isVisible())
-    win.setProperty("showPreview", True)
+    APP.setProperty("showPreview", True)
     spin(150)
     check("...opens above the history",
           pv.isVisible() and scene_rect(pv)[1] + pv.height() <= scene_rect(grid)[1] + 1.5,
@@ -666,7 +681,7 @@ def test_chrome(win, ctl):
     check("...and takes a dragged height", abs(pv.height() - (h + 60)) < 1.5,
           (h, pv.height()))
     pv.setProperty("paneHeight", int(h))
-    win.setProperty("showPreview", False)
+    APP.setProperty("showPreview", False)
     spin(120)
     check("...and folds away to nothing", not pv.isVisible() and pv.height() == 0,
           pv.height())
@@ -720,7 +735,7 @@ def test_panes(win):
 
     for w in (1280, 1000, 900, 800, 720, 640, 560):
         win.setWidth(w)
-        win.setProperty("view", 0)
+        APP.setProperty("view", 0)
         spin(120)
         check("w=%d: the output pane is visible in the params view" % w,
               gal.isVisible() and gal.width() > 0, (gal.isVisible(), gal.width()))
@@ -734,15 +749,15 @@ def test_panes(win):
     # Below the floor it is one pane at a time, and the g button must reach the
     # gallery rather than leave it hidden for good.
     win.setWidth(480)
-    win.setProperty("view", 0)
+    APP.setProperty("view", 0)
     spin(120)
     narrow_params = gal.isVisible()
-    win.setProperty("view", 1)
+    APP.setProperty("view", 1)
     spin(120)
     check("below the split floor the gallery is one button away",
           (not narrow_params) and gal.isVisible(), (narrow_params, gal.isVisible()))
     win.setWidth(1280)
-    win.setProperty("view", 0)
+    APP.setProperty("view", 0)
     spin(120)
 
 
@@ -750,20 +765,20 @@ def test_resolution(win, ctl):
     """aspect + MP -> one size, in the header, in the readout, in the job."""
     import registry as R
 
-    gen = prop(win, "gen")
+    gen = prop(APP, "gen")
     for aw, ah, mp in ((3, 2, 1.0), (21, 9, 2.0), (5, 3, 0.5), (1, 1, 4.0)):
-        gen = prop(win, "gen")
+        gen = prop(APP, "gen")
         gen["aspectW"], gen["aspectH"], gen["megapixels"] = aw, ah, mp
-        win.setProperty("gen", gen)
-        win.metaObject().invokeMethod(win, "recomputeDims")
+        APP.setProperty("gen", gen)
+        APP.metaObject().invokeMethod(APP, "recomputeDims")
         spin(60)
-        g = prop(win, "gen")
+        g = prop(APP, "gen")
         want = R.calc_dims("%d:%d" % (aw, ah), mp, g["multiple"])
         check("%d:%d @ %sMP -> %dx%d" % (aw, ah, mp, want[0], want[1]),
               (g["width"], g["height"]) == want, (g["width"], g["height"]))
 
     panel = find(win.contentItem(), "ResolutionPanel")
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     check("the header badge is the real size",
           panel.property("badge") == "%dx%d" % (g["width"], g["height"]),
           panel.property("badge"))
@@ -839,18 +854,18 @@ def test_video(win, ctl, tmp):
 
     res = find(content, "ResolutionPanel")
     aspect = find(res, "Field", pred=lambda it: it.property("label") == "aspect")
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     g["useInputImage"] = True
-    win.setProperty("gen", g)
+    APP.setProperty("gen", g)
     spin(120)
     check("with a first frame the aspect is the image's, so the box goes",
           not aspect.isVisible() and res.property("badge") == "from the image",
           res.property("badge"))
     # ...and a LAST frame on its own does the same: the two toggles are
     # independent, and either dropped image is what the size is measured off.
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     g.update({"useInputImage": False, "useLastFrame": True})
-    win.setProperty("gen", g)
+    APP.setProperty("gen", g)
     spin(120)
     check("a last frame alone also decides the aspect",
           not aspect.isVisible() and res.property("badge") == "from the image",
@@ -859,18 +874,18 @@ def test_video(win, ctl, tmp):
                 pred=lambda it: it.property("emptyText").endswith("to end on here"))
     check("...and its well stands on its own, with no first frame",
           well is not None and well.isVisible(), well and well.property("active"))
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     g.update({"useInputImage": False, "useLastFrame": False})
-    win.setProperty("gen", g)
+    APP.setProperty("gen", g)
     spin(120)
     check("...and text-to-video gets it back", aspect.isVisible())
 
     # Seconds -> frames, the same arithmetic the graph uses.
     import registry as R
     panel = find(content, "VideoPanel")
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     g["duration"] = 5.0
-    win.setProperty("gen", g)
+    APP.setProperty("gen", g)
     spin(120)
     check("the panel says how many frames that is",
           panel.property("badge") == "%df" % R.video_frames(5.0, 24.0),
@@ -888,13 +903,13 @@ def test_video(win, ctl, tmp):
         sent.update(params) or {"prompt": {}, "params": dict(params), "pairing": {}})
     ctl.client.submit = lambda prompt, params: (sent.update(_submitted=True) or FakeJob())
     ctl._object_info = {"stub": True}
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     g.update({"positive": "a clip", "negative": "ignored", "duration": 3.0,
               "steps": 12, "seed": 99, "randomSeed": False, "count": 1,
               "useInputImage": False})
-    win.setProperty("gen", g)
+    APP.setProperty("gen", g)
     spin(60)
-    win.metaObject().invokeMethod(win, "submit")
+    APP.metaObject().invokeMethod(APP, "submit")
     spin(200)
     check("a video job is submitted", sent.get("_submitted") is True)
     check("...with the duration, not a batch",
@@ -913,11 +928,11 @@ def test_video(win, ctl, tmp):
     open(ctl._last_image, "wb").write(b"not really a png either")
     ctl._uploaded = (ctl._input_image, "painter/first.png")
     ctl._uploaded_last = (ctl._last_image, "painter/last.png")
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     g.update({"useInputImage": True, "useLastFrame": True})
-    win.setProperty("gen", g)
+    APP.setProperty("gen", g)
     spin(60)
-    win.metaObject().invokeMethod(win, "submit")
+    APP.metaObject().invokeMethod(APP, "submit")
     spin(200)
     check("a last frame is sent alongside the first",
           sent.get("use_last_frame") is True and sent.get("last_image") == "painter/last.png"
@@ -926,11 +941,11 @@ def test_video(win, ctl, tmp):
 
     # A last frame ON ITS OWN is a job, not an error: the node takes either end.
     sent.clear()
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     g.update({"useInputImage": False, "useLastFrame": True})
-    win.setProperty("gen", g)
+    APP.setProperty("gen", g)
     spin(60)
-    win.metaObject().invokeMethod(win, "submit")
+    APP.metaObject().invokeMethod(APP, "submit")
     spin(200)
     check("a last frame alone is submitted, with no first frame",
           sent.get("_submitted") is True and sent.get("use_last_frame") is True
@@ -942,13 +957,13 @@ def test_video(win, ctl, tmp):
     # frame does (docs/DESIGN.md §10).
     sent.clear()
     ctl.clearLastImage()
-    win.metaObject().invokeMethod(win, "submit")
+    APP.metaObject().invokeMethod(APP, "submit")
     spin(200)
     check("a last frame with no image refuses rather than guessing",
           sent.get("_submitted") is None, sent)
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     g["useLastFrame"] = False
-    win.setProperty("gen", g)
+    APP.setProperty("gen", g)
     spin(60)
     ctl.clearInputImage()
 
@@ -956,20 +971,20 @@ def test_video(win, ctl, tmp):
     # text-to-video: it says so and submits nothing (docs/DESIGN.md §10).
     sent.clear()
     ctl.clearInputImage()
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     g["useInputImage"] = True
-    win.setProperty("gen", g)
+    APP.setProperty("gen", g)
     spin(60)
-    win.metaObject().invokeMethod(win, "submit")
+    APP.metaObject().invokeMethod(APP, "submit")
     spin(200)
     check("image-to-video with no image refuses rather than guessing",
           sent.get("_submitted") is None, sent)
 
     ctl.reg.build, ctl.client.submit = orig_build, orig_submit
     ctl._object_info = None
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     g["useInputImage"] = False
-    win.setProperty("gen", g)
+    APP.setProperty("gen", g)
     for rel in VIDEO_FAKES:
         os.remove(os.path.join(root, rel))
     fp.save_cache({})
@@ -1046,9 +1061,9 @@ def test_paste(win, ctl, tmp):
     spin(200)
     ctl.selectModelByName("mini-video.safetensors")
     spin(200)
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     g.update({"useInputImage": True, "useLastFrame": True})
-    win.setProperty("gen", g)
+    APP.setProperty("gen", g)
     spin(150)
 
     well = find(find(content, "VideoPanel"), "FrameWell",
@@ -1145,13 +1160,13 @@ def test_paste(win, ctl, tmp):
     md.setUrls([QUrl.fromLocalFile(src)])
     clip.setMimeData(md)
     ctl.clearInputImage()
-    win.metaObject().invokeMethod(win, "releaseFocus")
+    APP.metaObject().invokeMethod(APP, "releaseFocus")
     spin(60)
 
     # No hover needed. Requiring one is what made this do nothing at all for
     # anyone pressing Ctrl+V the ordinary way, silently, since a disabled
     # shortcut has no failure to report.
-    win.setProperty("hoveredWell", "")
+    APP.setProperty("hoveredWell", "")
     paste_key()
     check("Ctrl+V with the pointer nowhere near still pastes",
           ctl.property("inputImage") == src, ctl.property("inputImage"))
@@ -1167,18 +1182,18 @@ def test_paste(win, ctl, tmp):
     # The pointer still wins when it is on a well — that is the unambiguous case.
     ctl.clearInputImage()
     ctl.clearLastImage()
-    win.setProperty("hoveredWell", "last")
+    APP.setProperty("hoveredWell", "last")
     paste_key()
     check("the hovered well wins",
           ctl.property("lastImage") == src and ctl.property("inputImage") == "",
           (ctl.property("inputImage"), ctl.property("lastImage")))
-    win.setProperty("hoveredWell", "")
+    APP.setProperty("hoveredWell", "")
     ctl.clearLastImage()
 
     # A last frame alone: one well on screen, so Ctrl+V can only mean that one.
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     g.update({"useInputImage": False, "useLastFrame": True})
-    win.setProperty("gen", g)
+    APP.setProperty("gen", g)
     spin(120)
     paste_key()
     check("with only the last-frame well up, Ctrl+V means it",
@@ -1188,17 +1203,17 @@ def test_paste(win, ctl, tmp):
 
     # Text-to-video has no well at all, and a shortcut with no target must not
     # invent one.
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     g.update({"useInputImage": False, "useLastFrame": False})
-    win.setProperty("gen", g)
+    APP.setProperty("gen", g)
     spin(120)
     paste_key()
     check("with no well on screen, Ctrl+V does nothing",
           ctl.property("inputImage") == "" and ctl.property("lastImage") == "",
           (ctl.property("inputImage"), ctl.property("lastImage")))
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     g.update({"useInputImage": True, "useLastFrame": True})
-    win.setProperty("gen", g)
+    APP.setProperty("gen", g)
     spin(120)
 
     # THE REGRESSION THIS GUARDS: a window Shortcut sees a key before the
@@ -1208,7 +1223,7 @@ def test_paste(win, ctl, tmp):
     ed.forceActiveFocus()
     ed.setProperty("text", "")
     spin(60)
-    check("a focused prompt box is seen as one", win.property("textFocused") is True)
+    check("a focused prompt box is seen as one", APP.property("textFocused") is True)
     clip.setText("pasted into the prompt")
     paste_key()
     check("Ctrl+V still pastes TEXT into a focused prompt box",
@@ -1220,23 +1235,23 @@ def test_paste(win, ctl, tmp):
     md = QMimeData()
     md.setUrls([QUrl.fromLocalFile(src)])
     clip.setMimeData(md)
-    win.setProperty("hoveredWell", "input")
+    APP.setProperty("hoveredWell", "input")
     paste_key()
     check("a focused text box wins Ctrl+V over a hovered well",
           ctl.property("inputImage") == "", ctl.property("inputImage"))
-    win.setProperty("hoveredWell", "")
+    APP.setProperty("hoveredWell", "")
     ed.setProperty("text", "")
-    win.metaObject().invokeMethod(win, "releaseFocus")
+    APP.metaObject().invokeMethod(APP, "releaseFocus")
     spin(60)
     check("...and letting go of the box gives Ctrl+V back",
-          win.property("textFocused") is False)
+          APP.property("textFocused") is False)
 
     # Put the column back the way test_video expects to find it.
     ctl.clearInputImage()
     ctl.clearLastImage()
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     g.update({"useInputImage": False, "useLastFrame": False})
-    win.setProperty("gen", g)
+    APP.setProperty("gen", g)
     for rel in VIDEO_FAKES:
         os.remove(os.path.join(root, rel))
     fp.save_cache({})
@@ -1355,9 +1370,9 @@ def test_modes(win, ctl, tmp):
     seed_panel = find(content, "SeedPanel")
     check("the edit preset keeps a seed control", seed_panel is not None
           and seed_panel.isVisible())
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     g.update({"randomSeed": False, "reuseSeed": False})
-    win.setProperty("gen", g)
+    APP.setProperty("gen", g)
     spin(60)
     seed_spin = seed_panel and find(seed_panel, "Spin")
     check("...and its seed number is editable when not random/reuse",
@@ -1381,12 +1396,12 @@ def test_modes(win, ctl, tmp):
     # ...and with nothing dropped it refuses rather than submitting a graph with
     # an empty filename in it.
     ctl.clearInputImage()
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     g.update({"positive": "make it a doll", "negative": "ignored",
               "seed": 4242, "randomSeed": False, "count": 1})
-    win.setProperty("gen", g)
+    APP.setProperty("gen", g)
     spin(60)
-    win.metaObject().invokeMethod(win, "submit")
+    APP.metaObject().invokeMethod(APP, "submit")
     spin(200)
     check("edit with no image refuses rather than guessing",
           sent.get("_submitted") is None, sent)
@@ -1397,7 +1412,7 @@ def test_modes(win, ctl, tmp):
     ctl._input_image = src
     ctl._uploaded = (src, "painter/to-edit.png")   # already uploaded: no network
     sent.clear()
-    win.metaObject().invokeMethod(win, "submit")
+    APP.metaObject().invokeMethod(APP, "submit")
     spin(250)
     check("an edit job is submitted", sent.get("_submitted") is True, sent)
     check("...as an edit, with the image and the prompt",
@@ -1421,7 +1436,7 @@ def test_modes(win, ctl, tmp):
     ctl.loras.add("edit-lora.safetensors", False)
     ctl.loras.setStrength(0, 0.7)
     sent.clear()
-    win.metaObject().invokeMethod(win, "submit")
+    APP.metaObject().invokeMethod(APP, "submit")
     spin(250)
     check("an active LoRA reaches the edit job",
           sent.get("loras") == [{"name": "edit-lora.safetensors", "strength": 0.7,
@@ -1442,7 +1457,7 @@ def test_modes(win, ctl, tmp):
           list(ctl.property("editExtraImages")) == ctl._edit_extra,
           ctl.property("editExtraImages"))
     sent.clear()
-    win.metaObject().invokeMethod(win, "submit")
+    APP.metaObject().invokeMethod(APP, "submit")
     spin(300)
     check("an edit job carries every reference image, primary first",
           sent.get("input_images") == ["painter/to-edit.png",
@@ -1699,7 +1714,7 @@ def test_hover_play(win, ctl, tmp):
     spin(300)
 
     grid = find(content, "KineticGridView")
-    win.setProperty("view", 1)
+    APP.setProperty("view", 1)
     spin(150)
     tile = None
     for it in walk(grid):
@@ -1735,7 +1750,7 @@ def test_hover_play(win, ctl, tmp):
     spin(400)
     check("leaving the tile destroys the player", not players(), len(players()))
 
-    win.setProperty("view", 0)
+    APP.setProperty("view", 0)
     os.remove(clip)
     ctl.gallery.load_existing()
     spin(150)
@@ -1756,7 +1771,7 @@ def test_live_bindings(win, ctl):
     for sp, v in ((spins[0], 16.0), (spins[1], 9.0), (spins[2], 2.0)):
         sp.metaObject().invokeMethod(sp, "commit", Q_ARG("QVariant", v))
     spin(150)
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     check("editing the aspect boxes reaches the model",
           (g["aspectW"], g["aspectH"], g["megapixels"]) == (16, 9, 2.0),
           (g["aspectW"], g["aspectH"], g["megapixels"]))
@@ -1766,7 +1781,7 @@ def test_live_bindings(win, ctl):
 
     # A Spin must still follow the MODEL after it has been edited once: the old
     # commit() assigned its own bound `value`, which destroys the binding.
-    win.metaObject().invokeMethod(win, "set", Q_ARG("QVariant", "megapixels"),
+    APP.metaObject().invokeMethod(APP, "set", Q_ARG("QVariant", "megapixels"),
                                   Q_ARG("QVariant", 1.5))
     spin(120)
     check("a Spin still follows the model after being edited",
@@ -1775,11 +1790,11 @@ def test_live_bindings(win, ctl):
     # The ModelSampling block is bound to gen.modelSampling — with in-place
     # mutation it never appeared when the toggle was flipped.
     tog = find(content, "TogglePanel")
-    win.metaObject().invokeMethod(win, "set", Q_ARG("QVariant", "modelSampling"),
+    APP.metaObject().invokeMethod(APP, "set", Q_ARG("QVariant", "modelSampling"),
                                   Q_ARG("QVariant", False))
     spin(120)
     short = tog.height()
-    win.metaObject().invokeMethod(win, "set", Q_ARG("QVariant", "modelSampling"),
+    APP.metaObject().invokeMethod(APP, "set", Q_ARG("QVariant", "modelSampling"),
                                   Q_ARG("QVariant", True))
     spin(120)
     check("toggling ModelSampling reveals its parameters", tog.height() > short + 40,
@@ -1790,8 +1805,8 @@ def test_live_bindings(win, ctl):
     edit = find(box, "QQuickTextEdit")
     edit.setProperty("text", "typed by hand")
     spin(120)
-    check("typing reaches the model", prop(win, "gen")["positive"] == "typed by hand",
-          prop(win, "gen")["positive"])
+    check("typing reaches the model", prop(APP, "gen")["positive"] == "typed by hand",
+          prop(APP, "gen")["positive"])
 
 
 def test_dropdown(win, ctl):
@@ -1845,11 +1860,11 @@ def test_dropdown(win, ctl):
             # The MODEL is what must change: the control follows it back through
             # its binding, which is why accept() must not write `value` itself.
             check("picking sets the model, and the control follows it",
-                  prop(win, "gen")["sampler_name"] == opts[1]
+                  prop(APP, "gen")["sampler_name"] == opts[1]
                   and picker.property("value") == opts[1],
-                  (prop(win, "gen")["sampler_name"], picker.property("value"), opts[1]))
+                  (prop(APP, "gen")["sampler_name"], picker.property("value"), opts[1]))
             # ...and the binding must SURVIVE the pick.
-            win.metaObject().invokeMethod(win, "set", Q_ARG("QVariant", "sampler_name"),
+            APP.metaObject().invokeMethod(APP, "set", Q_ARG("QVariant", "sampler_name"),
                                           Q_ARG("QVariant", opts[2]))
             spin(120)
             check("the picker still follows the model after a pick",
@@ -1922,11 +1937,11 @@ def test_escape(win, ctl):
     else:
         check("Escape test: the menu opened", False, "did not open")
 
-    win.setProperty("showSettings", True)
+    APP.setProperty("showSettings", True)
     spin(150)
     QTest.keyClick(win, Qt.Key_Escape)
     spin(150)
-    check("Escape closes the settings drawer", win.property("showSettings") is False)
+    check("Escape closes the settings drawer", APP.property("showSettings") is False)
 
 
 def test_inject(win, ctl, tmp):
@@ -1977,21 +1992,21 @@ def test_inject(win, ctl, tmp):
         spin(60)
 
     # The three actions, called the way the menu calls them.
-    base = prop(win, "gen")
+    base = prop(APP, "gen")
     base["positive"] = "before"; base["steps"] = 7; base["aspectW"] = 1; base["aspectH"] = 1
-    win.setProperty("gen", base)
+    APP.setProperty("gen", base)
     spin(60)
 
-    win.metaObject().invokeMethod(win, "injectPrompt", Q_ARG("QVariant", params))
+    APP.metaObject().invokeMethod(APP, "injectPrompt", Q_ARG("QVariant", params))
     spin(120)
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     check("inject prompt takes the words", g["positive"] == "injected positive"
           and g["negative"] == "injected negative", (g["positive"], g["negative"]))
     check("...and leaves the numbers alone", g["steps"] == 7, g["steps"])
 
-    win.metaObject().invokeMethod(win, "injectParams", Q_ARG("QVariant", params))
+    APP.metaObject().invokeMethod(APP, "injectParams", Q_ARG("QVariant", params))
     spin(120)
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     check("inject params takes the numbers",
           (g["steps"], g["cfg"], g["sampler_name"], g["seed"], g["randomSeed"])
           == (44, 3.5, "heun", 99, False),
@@ -2000,11 +2015,11 @@ def test_inject(win, ctl, tmp):
           (g["aspectW"], g["aspectH"]) == (19, 13) and (g["width"], g["height"]) == (1216, 832),
           (g["aspectW"], g["aspectH"], g["width"], g["height"]))
 
-    base = prop(win, "gen"); base["positive"] = "before"; base["steps"] = 7
-    win.setProperty("gen", base); spin(60)
-    win.metaObject().invokeMethod(win, "injectAll", Q_ARG("QVariant", params))
+    base = prop(APP, "gen"); base["positive"] = "before"; base["steps"] = 7
+    APP.setProperty("gen", base); spin(60)
+    APP.metaObject().invokeMethod(APP, "injectAll", Q_ARG("QVariant", params))
     spin(120)
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     check("inject all takes both", g["positive"] == "injected positive" and g["steps"] == 44,
           (g["positive"], g["steps"]))
 
@@ -2260,14 +2275,14 @@ def test_clip_params(win, ctl, tmp):
           copied and copied[-1][-1] == params["positive"], RAN)
 
     # Injecting a clip's settings: the video controls, not the image ones.
-    base = prop(win, "gen")
+    base = prop(APP, "gen")
     base["duration"] = 5.0; base["fps"] = 16.0; base["megapixels"] = 1.0
     base["useInputImage"] = True; base["useLastFrame"] = True
-    win.setProperty("gen", base)
+    APP.setProperty("gen", base)
     spin(60)
-    win.metaObject().invokeMethod(win, "injectParams", Q_ARG("QVariant", got))
+    APP.metaObject().invokeMethod(APP, "injectParams", Q_ARG("QVariant", got))
     spin(150)
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     check("inject params takes a clip's seconds, frame rate and budget",
           (g["duration"], g["fps"], g["megapixels"]) == (6.6, 24.0, 0.6),
           (g["duration"], g["fps"], g["megapixels"]))
@@ -2278,9 +2293,9 @@ def test_clip_params(win, ctl, tmp):
     # ...and comes back ON, with the picture, when the file is still there.
     here = noisy_png(os.path.join(tmp, "first-frame.png"), 8, 8)
     got["input_image_local"] = here
-    win.metaObject().invokeMethod(win, "injectParams", Q_ARG("QVariant", got))
+    APP.metaObject().invokeMethod(APP, "injectParams", Q_ARG("QVariant", got))
     spin(150)
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     check("a first frame that is still on disk comes back with the settings",
           g["useInputImage"] is True and ctl.inputImage == here,
           (g["useInputImage"], ctl.inputImage))
@@ -2419,38 +2434,38 @@ def test_split_and_state(win, ctl, keep):
     win.setWidth(1200)
     spin(120)
     left = find(content, "GalleryView").parentItem()
-    before = win.property("paneLeadW")
+    before = APP.property("paneLeadW")
 
-    win.setProperty("splitRatio", 0.3)
+    APP.setProperty("splitRatio", 0.3)
     spin(120)
-    before = win.property("paneLeadW")
-    win.setProperty("splitRatio", 0.7)
+    before = APP.property("paneLeadW")
+    APP.setProperty("splitRatio", 0.7)
     spin(120)
-    after = win.property("paneLeadW")
+    after = APP.property("paneLeadW")
     check("the divider moves the panes", after > before + 100, (before, after))
     trail = find(content, "KineticFlickable",
                  pred=lambda it: find(it, "ModelPicker") is not None).parentItem()
     check("...and the trailing pane gives up exactly what the leading one took",
-          abs((win.width() - after - win.property("splitterW")) - trail.width()) < 1.5,
+          abs((win.width() - after - APP.property("splitterW")) - trail.width()) < 1.5,
           (win.width(), after, trail.width()))
 
     # Clamps: neither side can be starved.
-    win.setProperty("splitRatio", 0.99)
+    APP.setProperty("splitRatio", 0.99)
     spin(120)
     check("the handle cannot starve the controls",
-          win.width() - win.property("paneLeadW") >= win.property("minTrail"),
-          win.width() - win.property("paneLeadW"))
-    win.setProperty("splitRatio", 0.01)
+          win.width() - APP.property("paneLeadW") >= APP.property("minTrail"),
+          win.width() - APP.property("paneLeadW"))
+    APP.setProperty("splitRatio", 0.01)
     spin(120)
-    check("...nor the results", win.property("paneLeadW") >= win.property("minLead"),
-          win.property("paneLeadW"))
+    check("...nor the results", APP.property("paneLeadW") >= APP.property("minLead"),
+          APP.property("paneLeadW"))
 
     # State: everything the window is asked to remember.
-    win.setProperty("splitRatio", 0.55)
-    win.setProperty("view", 1)
+    APP.setProperty("splitRatio", 0.55)
+    APP.setProperty("view", 1)
     win.setWidth(1100); win.setHeight(800)
-    g = prop(win, "gen"); g["positive"] = "remember me"; g["steps"] = 23
-    win.setProperty("gen", g)
+    g = prop(APP, "gen"); g["positive"] = "remember me"; g["steps"] = 23
+    APP.setProperty("gen", g)
     panel = find(content, "ParamsPanel")
     panel.setProperty("collapsed", True)
     # A model setting that lives outside `gen`: the LoRA chain, cleared by
@@ -2458,7 +2473,7 @@ def test_split_and_state(win, ctl, keep):
     ctl.loras.add("remember-lora.safetensors", False)
     ctl.loras.setStrength(0, 0.6)
     spin(200)
-    win.metaObject().invokeMethod(win, "saveState")
+    APP.metaObject().invokeMethod(APP, "saveState")
     spin(200)
 
     check("the split is persisted", abs(prefs.get("splitRatio") - 0.55) < 1e-6,
@@ -2482,7 +2497,7 @@ def test_split_and_state(win, ctl, keep):
           saved_loras)
     # NOT un-collapsed here: the restore test reads the prefs file next, and
     # setting it back would (correctly) persist the newer value first.
-    win.setProperty("view", 0)
+    APP.setProperty("view", 0)
     win.setWidth(1280)
     spin(120)
 
@@ -2495,13 +2510,13 @@ def test_restore(tmp):
 
     # Same context objects, a fresh engine — as close to a relaunch as one
     # process can get.
-    eng, win2, ctl2, keep2 = build_window()
+    eng, win2, app2, ctl2, keep2 = build_window()
     check("restored: window size", (win2.width(), win2.height()) == (1100, 800),
           (win2.width(), win2.height()))
-    check("restored: view", win2.property("view") == 1, win2.property("view"))
-    check("restored: split ratio", abs(win2.property("splitRatio") - 0.55) < 1e-6,
-          win2.property("splitRatio"))
-    g = prop(win2, "gen")
+    check("restored: view", app2.property("view") == 1, app2.property("view"))
+    check("restored: split ratio", abs(app2.property("splitRatio") - 0.55) < 1e-6,
+          app2.property("splitRatio"))
+    g = prop(app2, "gen")
     check("restored: the prompt", g["positive"] == "remember me", g["positive"])
     check("restored: the numbers survive the model's defaults landing",
           g["steps"] == 23, g["steps"])
@@ -2515,7 +2530,7 @@ def test_restore(tmp):
     # rather than the graph later referencing a file that is not there.
     check("restored: a lora no longer on disk is dropped, not carried over",
           ctl2.loras.rowCount() == 0, ctl2.loras.rowCount())
-    win2.setProperty("restored", False)     # this window must not re-save
+    app2.setProperty("restored", False)     # this window must not re-save
     win2.close()
     return eng, win2, ctl2, keep2
 
@@ -2721,7 +2736,7 @@ def test_wiring(win, ctl):
         return
     ctl._selected = 0
 
-    gen = prop(win, "gen")
+    gen = prop(APP, "gen")
     gen.update({
         "positive": "a prompt", "negative": "not this",
         "steps": 37, "cfg": 6.25, "denoise": 0.77,
@@ -2730,13 +2745,13 @@ def test_wiring(win, ctl):
         "aspectW": 3, "aspectH": 2, "megapixels": 1.0,
         "negpip": True, "modelSampling": True,
     })
-    win.setProperty("gen", gen)
-    win.metaObject().invokeMethod(win, "recomputeDims")
+    APP.setProperty("gen", gen)
+    APP.metaObject().invokeMethod(APP, "recomputeDims")
     spin(60)
-    win.metaObject().invokeMethod(win, "submit")
+    APP.metaObject().invokeMethod(APP, "submit")
     spin(200)
 
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     want = {
         "positive": "a prompt", "negative": "not this", "steps": 37,
         "cfg": 6.25, "denoise": 0.77, "sampler_name": "euler_ancestral",
@@ -2777,11 +2792,11 @@ def test_seed(win, ctl):
     spin(60)
 
     # A random batch rolls a seed AND remembers it.
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     g.update({"randomSeed": True, "reuseSeed": False, "count": 1, "batch_size": 1})
-    win.setProperty("gen", g)
+    APP.setProperty("gen", g)
     spin(60)
-    win.metaObject().invokeMethod(win, "submit")
+    APP.metaObject().invokeMethod(APP, "submit")
     spin(200)
     rolled = sent.get("seed")
     check("a random batch submits a concrete seed",
@@ -2790,11 +2805,11 @@ def test_seed(win, ctl):
           ctl.property("lastSeed") == rolled, (ctl.property("lastSeed"), rolled))
 
     # "reuse last" re-runs at that seed, overriding random, without drifting.
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     g.update({"randomSeed": True, "reuseSeed": True})
-    win.setProperty("gen", g)
+    APP.setProperty("gen", g)
     spin(60)
-    win.metaObject().invokeMethod(win, "submit")
+    APP.metaObject().invokeMethod(APP, "submit")
     spin(200)
     check("reuse re-runs at the remembered seed, overriding random",
           sent.get("seed") == rolled, (sent.get("seed"), rolled))
@@ -2841,15 +2856,15 @@ def test_preset_sampling(win, ctl, tmp):
     # Edit the video sampling to values that are nobody's default.
     edited = {"steps": 41, "denoise": 0.63,
               "sampler_name": "dpmpp_sde", "scheduler": "exponential"}
-    g = prop(win, "gen")
+    g = prop(APP, "gen")
     g.update(edited)
-    win.setProperty("gen", g)
+    APP.setProperty("gen", g)
     spin(80)
 
     # Away to another preset: its defaults land, so the edits leave `gen`.
     ctl.selectModelByName("krea2_raw_fp8_scaled.safetensors")
     spin(150)
-    away = prop(win, "gen")
+    away = prop(APP, "gen")
     check("switching preset away replaces the edited sampler",
           away.get("sampler_name") != "dpmpp_sde" or away.get("steps") != 41,
           (away.get("steps"), away.get("sampler_name")))
@@ -2857,7 +2872,7 @@ def test_preset_sampling(win, ctl, tmp):
     # ...and back: the edited sampler is restored, not the checkpoint default.
     ctl.selectModelByName("mini-video.safetensors")
     spin(150)
-    back = prop(win, "gen")
+    back = prop(APP, "gen")
     check("a preset round-trip restores the edited video sampler",
           back.get("steps") == 41 and back.get("denoise") == 0.63
           and back.get("sampler_name") == "dpmpp_sde"
@@ -2964,11 +2979,11 @@ def test_preset_isolation(win, ctl, tmp):
         return
 
     def edit(pos, aw, ah, mp, steps):
-        g = prop(win, "gen")
+        g = prop(APP, "gen")
         g["positive"] = pos; g["aspectW"] = aw; g["aspectH"] = ah
         g["megapixels"] = mp; g["steps"] = steps
-        win.setProperty("gen", g)
-        win.metaObject().invokeMethod(win, "recomputeDims")
+        APP.setProperty("gen", g)
+        APP.metaObject().invokeMethod(APP, "recomputeDims")
         spin(80)
 
     edit("ANIMA", 3, 2, 1.7, 27)
@@ -2979,7 +2994,7 @@ def test_preset_isolation(win, ctl, tmp):
     # Back to the first preset: its OWN values, not the other's, not the default.
     ctl.selectModelByName("anima-base-v1.0.safetensors")
     spin(150)
-    a = prop(win, "gen")
+    a = prop(APP, "gen")
     check("a preset round-trip restores the whole gen (prompt + resolution + steps)",
           a.get("positive") == "ANIMA" and a.get("aspectW") == 3
           and a.get("aspectH") == 2 and abs(a.get("megapixels") - 1.7) < 1e-6
@@ -2988,14 +3003,14 @@ def test_preset_isolation(win, ctl, tmp):
 
     ctl.selectModelByName("krea2_raw_fp8_scaled.safetensors")
     spin(150)
-    k = prop(win, "gen")
+    k = prop(APP, "gen")
     check("the other preset kept its own settings, unshared",
           k.get("positive") == "KREA" and k.get("aspectW") == 16
           and k.get("steps") == 33,
           {kk: k.get(kk) for kk in ("positive", "aspectW", "steps")})
 
     # Persisted for a relaunch: the on-disk store holds both presets' settings.
-    win.metaObject().invokeMethod(win, "saveState")
+    APP.metaObject().invokeMethod(APP, "saveState")
     spin(60)
     prefs_path = os.path.join(os.environ["XDG_STATE_HOME"], "painter", "prefs.json")
     gbm = json.loads(json.load(open(prefs_path)).get("genByModel") or "{}")
