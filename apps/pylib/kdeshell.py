@@ -330,8 +330,23 @@ def _build_shell_class():
             # rectangle — the exact "one odd window" this face exists to avoid.
             # Transparent, and the Oxygen gradient shows through behind every
             # part of the QML that does not paint itself.
+            # …AND NOT `WA_TranslucentBackground` WITH IT. That attribute also
+            # sets WA_NoSystemBackground (measured: setting it flips
+            # nosysbg False -> True), which tells Qt not to fill this widget's
+            # area before compositing the scene over it. The backing store then
+            # keeps whatever was there last frame and the transparent scene is
+            # blended INTO it: text and graphics smear as they move, and where
+            # nothing paints the pixels keep alpha 0, so the window has a real
+            # hole in it — the compositor shows through, and a screenshot of
+            # that region comes back black. All three symptoms, one attribute.
+            #
+            # With just the transparent clear colour the widget is non-opaque
+            # and Qt paints the PARENT underneath it every frame, which is the
+            # styled window background we wanted showing through in the first
+            # place. Verified offscreen: the pixel behind the scene is a
+            # gradient sample (39,32,27), not the flat window colour (43,35,29),
+            # and its alpha is 255.
             self.view.setClearColor(Qt.transparent)
-            self.view.setAttribute(Qt.WA_TranslucentBackground)
             # AND THE QML HALF WEARS THE SAME PALETTE. Qt Quick Controls inside
             # a QQuickWidget do not inherit QApplication's palette on their own:
             # rendered offscreen against his dark scheme, the window came out
