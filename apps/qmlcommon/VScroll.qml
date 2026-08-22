@@ -50,7 +50,9 @@ import QtQuick.Controls.Basic
 // still drawing a win31 stepper inside a Breeze window is the one control that
 // reads as "not themed". Detected with `DeskStyle.plasma`, the same switch that
 // moves the palette; guarded with `typeof` so a harness with no DeskStyle keeps
-// the Hyprland look.
+// the Hyprland look. Its WIDTH, though, is the live style's own number
+// (`DeskStyle.styleScrollWidth`, Oxygen's `ScrollBarWidth`) rather than a
+// literal — see `barW`.
 ScrollBar {
     id: vb
 
@@ -87,7 +89,16 @@ ScrollBar {
 
     // Read this at a call site that has to reserve a gutter by hand, rather
     // than writing the old 9 (or a 12 derived from it) out again.
-    readonly property int barW: isPlasma ? 14
+    //
+    // In a Plasma session the width is the STYLE's own, not a number of ours:
+    // `DeskStyle.styleScrollWidth` is Oxygen's `ScrollBarWidth` (15 by default,
+    // and a KCM slider he can move), 0 when no style is saying — under Breeze,
+    // or outside Plasma. A gutter one pixel off the session's real scrollbars
+    // is the tell that this bar is hand-drawn.
+    readonly property int styleW:
+        (typeof DeskStyle !== "undefined" && DeskStyle && DeskStyle.styleScrollWidth > 0)
+            ? DeskStyle.styleScrollWidth : 0
+    readonly property int barW: isPlasma ? (styleW > 0 ? styleW : 14)
                               : (isWin31 ? 16 : (barStyle === "beveled" ? 14 : 11))
     readonly property int btn: isWin31 ? barW : 0        // stepper button size
 
