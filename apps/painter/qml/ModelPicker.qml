@@ -41,10 +41,11 @@ Panel {
             model: Models
             currentIndex: App.selectedIndex
             highlightMoveDuration: 0
-            ScrollBar.vertical: VScroll {}
+            ScrollBar.vertical: VScroll { id: mbar }
 
             delegate: Rectangle {
-                width: list.width
+                // clear of the scrollbar's gutter, never under it
+                width: list.width - mbar.barW
                 height: known ? 34 : 52
                 color: index === App.selectedIndex ? Theme.highlight
                      : (hover.containsMouse ? Qt.darker(Theme.highlight, 1.4) : "transparent")

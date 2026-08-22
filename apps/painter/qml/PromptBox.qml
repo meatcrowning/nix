@@ -62,14 +62,20 @@ Rectangle {
         anchors.fill: parent
         anchors.margins: 5
         anchors.bottomMargin: 7          // clear of the grab strip
-        contentWidth: width
+        contentWidth: width - vbar.barW
         contentHeight: input.height
         clip: true
-        ScrollBar.vertical: VScroll {}
+        ScrollBar.vertical: VScroll { id: vbar }
 
         TextEdit {
             id: input
-            width: flick.width
+            // NOT the full viewport: an attached ScrollBar OVERLAYS the
+            // flickable, so text laid out to `flick.width` runs underneath
+            // the bar and the tail of every wrapped line sits behind it. The
+            // gutter is reserved unconditionally, as the gallery grid does,
+            // so the wrap does not reflow the moment the box starts to
+            // scroll.
+            width: flick.width - vbar.barW
             // THE WHOLE BOX IS THE TEXT BOX. A TextEdit is only as tall as its
             // content, so in a 130px prompt box holding one line, every click
             // below that first line hit nothing: the box looked like a text
