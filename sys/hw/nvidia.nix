@@ -19,6 +19,35 @@
 
   services.xserver.videoDrivers = [ "nvidia" ];
 
+  # Cap the GPU power budget at boot.
+  #
+  # Why: on 2026-08-22 the RTX 5070 threw Xid 79 ("GPU has fallen off the bus")
+  # mid-ComfyUI video generation at its stock 250 W limit. The card dropped off
+  # the PCIe link, took the display with it (blackout + sleeping monitor), and
+  # the driver flagged "Node Reboot Required" — only a power-cycle revived it.
+  # A lone Xid 79 under a worst-case compute load is the signature of a
+  # power-delivery/PCIe-link transient at peak draw, not a dying card (the
+  # journal shows no NVIDIA fault in any other boot). Capping the limit keeps
+  # the card below that worst-case ceiling where the transient lives.
+  #
+  # 200 W vs stock 250 W costs near-zero perceptible throughput on real
+  # generations but keeps ~20% headroom. Raise/lower in this one line; undo
+  # entirely by deleting the service. This is a power cap, NOT an undervolt —
+  # it does not touch the V/F curve.
+  #
+  # `After=display-manager.service` guarantees the driver and card are up so
+  # nvidia-smi can see it; a failed or skipped run is harmless (the card just
+  # keeps its default limit).
+  systemd.services.nvidia-power-cap = {
+    description = "Cap NVIDIA GPU power limit";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "display-manager.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${pkgs.linuxPackages.nvidia_x11.bin}/bin/nvidia-smi -pl 200";
+    };
+  };
+
   # Build CUDA kernels for the ONE GPU that runs them, not for nine.
   #
   # nixpkgs' default `cudaCapabilities` is a fat-binary list — 7.5, 8.0, 8.6,
