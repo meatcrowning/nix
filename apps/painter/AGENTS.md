@@ -414,11 +414,22 @@ not installed. **Anything more would be a local patch to
 `/home/lam/comfy/latent_preview.py`**, i.e. a fourth local commit on a checkout
 that is maintained by rebasing onto upstream tags.
 
-**He has ruled that out** — [his] *"just remove that stuff for previewing, i
-think doing it how i want would kill inference speeds"* — so the pane's tag is
-back to the single word `sampling`, and a frame count that briefly sat beside it
-(to prove the stream was alive) is gone with it. **Do not re-add either to the
-chrome**; this paragraph is where that answer lives now.
+**He ruled that out once** — [his] *"just remove that stuff for previewing, i
+think doing it how i want would kill inference speeds"* — and the tag went back
+to the single word `sampling`.
+
+**Then he asked the other half of it (2026-08-22):** *"the 'sampling' text
+should also include 'frame X of Y'"*, plus *"im pretty sure a recent upstream
+commit made it so the actual individual frames (past the first frame) can be
+previewed"*. Checked against upstream, not from memory: `git fetch` on
+`/home/lam/comfy` and the only commit newer than 0.30.0 touching
+`latent_preview.py` is `8e869efc` "Add support for taeh3", which adds one name
+to `VIDEO_TAES`. **On upstream master both previewers still slice the temporal
+axis to index 0** — `Latent2RGBPreviewer` `x0[0, :, 0]`, `TAEHVPreviewerImpl`
+`x0[:1, :, :1]` — and there is no animated-preview path anywhere in the tree. So
+the tag now reads `sampling · frame 1 of N`: the number is a constant because
+the frame is, and saying which frame you are looking at is the question he was
+actually asking. A *moving* X would still be the local patch he ruled out.
 
 If previews ever appear to stop rather than merely repeat a frame, the place to
 look is `comfy.py`'s `_on_binary`: it keeps only `BinaryEventTypes.PREVIEW_IMAGE`

@@ -511,7 +511,9 @@ def _build_shell_class():
             self._status = None
             self._status_label = None
             self._status_right = None
+            self._status_stack = None
             self._right_prop = "statusRight"
+            self._progress_text_prop = "statusProgressText"
             self._progress = None
             self._status_timer = None
             self._line_prop = "statusLine"
@@ -647,7 +649,13 @@ def _build_shell_class():
                     if sig == "buttonsChanged":
                         s.connect(lambda *_: self._refresh())
                     elif sig == "footerChanged":
-                        s.connect(self.set_status)
+                        # NOT into the status line. The footer is the hyprvtb
+                        # titlebar's little badge (painter's is "Q3", the queue
+                        # depth) and wiring it here let it overwrite whatever
+                        # `bind_status` had just put there — the status line
+                        # read "Q1" instead of the app's own sentence. That
+                        # count is in the status bar's right-hand end already.
+                        pass
                     else:
                         s.connect(self.set_busy)
 
@@ -844,20 +852,35 @@ def _build_shell_class():
                 # ours (the size grip is a CHILD widget, so it is untouched by
                 # a filter installed on the bar itself).
                 self._no_grab(self._status)
+                # THE BAR AND THE MESSAGE SHARE THE LEFT, one at a time. A
+                # progress bar pinned to 160px at the right-hand end left the
+                # whole left half of the status bar empty while a job ran, and
+                # the two things it could say — how fast, how long — had nowhere
+                # to go. So the bar stretches across the message area while it
+                # is running and carries that text inside itself; the label
+                # takes the room back the moment it is over.
+                # ONE SLOT, TWO FACES, in a QStackedWidget. Two widgets with a
+                # stretch each and one of them hidden did NOT hand the room
+                # over — the bar came up in the right-hand half with the empty
+                # label holding the left — and this cannot: a stack is one
+                # widget in the layout, and the whole slot is whichever page is
+                # showing.
+                from PySide6.QtWidgets import QStackedWidget
                 self._status_label = QLabel("")
                 self._no_grab(self._status_label)
+                self._progress = QProgressBar()
+                self._progress.setTextVisible(True)
+                self._no_grab(self._progress)
+                self._status_stack = QStackedWidget()
+                self._status_stack.addWidget(self._status_label)   # 0: idle
+                self._status_stack.addWidget(self._progress)       # 1: running
+                self._no_grab(self._status_stack)
                 # addWidget, not addPermanentWidget: this is the message area,
                 # and it gives way to a transient showMessage() the way every
                 # other KDE status bar's does.
-                self._status.addWidget(self._status_label, 1)
-                self._progress = QProgressBar()
-                self._progress.setMaximumWidth(160)
-                self._progress.setTextVisible(False)
-                self._progress.setVisible(False)
+                self._status.addWidget(self._status_stack, 1)
                 self._status_right = QLabel("")
                 self._no_grab(self._status_right)
-                self._no_grab(self._progress)
-                self._status.addPermanentWidget(self._progress)
                 self._status.addPermanentWidget(self._status_right)
                 self.window.setStatusBar(self._status)
             return self._status
@@ -1314,7 +1337,7 @@ def _build_shell_class():
 
         # --------------------------------------------------------- statusbar
         def bind_status(self, line_prop="statusLine", progress_prop="statusProgress",
-                        right_prop="statusRight"):
+                        right_prop="statusRight", progress_text_prop="statusProgressText"):
             """Drive the status bar from two properties on the QML root.
 
             The app already computes what its state SAYS — this face just needs
@@ -1327,10 +1350,15 @@ def _build_shell_class():
             self._line_prop = line_prop
             self._progress_prop = progress_prop
             self._right_prop = right_prop
+            self._progress_text_prop = progress_text_prop
             root = self._root
             if root is None:
                 return
             props = [line_prop, progress_prop]
+            if root.property(progress_text_prop) is not None:
+                props.append(progress_text_prop)
+            else:
+                self._progress_text_prop = None
             # The right-hand channel is optional: an app that publishes no
             # `statusRight` gets an empty permanent label and no poll for it.
             if root.property(right_prop) is not None:
@@ -1359,6 +1387,11 @@ def _build_shell_class():
             self.set_progress(root.property(self._progress_prop))
             if self._right_prop and self._status_right is not None:
                 self._status_right.setText(str(root.property(self._right_prop) or ""))
+            if self._progress_text_prop and self._progress is not None:
+                text = str(root.property(self._progress_text_prop) or "")
+                # "%p%" is QProgressBar's own placeholder and the app is already
+                # saying the percentage its own way; a literal has to escape it.
+                self._progress.setFormat(text.replace("%", "%%"))
 
         def set_status(self, text):
             if self._status_label is not None:
@@ -1374,9 +1407,11 @@ def _build_shell_class():
             except (TypeError, ValueError):
                 v = -1.0
             if v < 0:
-                self._progress.setVisible(False)
+                if self._status_stack is not None:
+                    self._status_stack.setCurrentIndex(0)
                 return
-            self._progress.setVisible(True)
+            if self._status_stack is not None:
+                self._status_stack.setCurrentIndex(1)
             self._progress.setRange(0, 100)
             self._progress.setValue(int(round(max(0.0, min(1.0, v)) * 100)))
 

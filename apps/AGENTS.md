@@ -683,6 +683,18 @@ can never disagree.
 the toolbar, behind a stretch, where Dolphin/Gwenview/Okular keep theirs. It is
 re-appended after every `_rebuild`, since that clears the toolbar.
 
+**The status bar's left slot is a `QStackedWidget`** — the message label on
+page 0, the progress bar on page 1 — because two widgets with a stretch each and
+one of them hidden do NOT hand the room over: the bar came up in the right-hand
+half with the empty label holding the left. A stack is one widget in the layout,
+so the whole slot is whichever page is showing. The bar carries its own text
+(`statusProgressText`), and a literal `%` in it must be escaped to `%%` or
+QProgressBar reads it as its own placeholder.
+
+**Never wire `footerChanged` into `set_status`.** The footer is the hyprvtb
+titlebar's badge (painter's is the queue depth, "Q3") and it overwrote whatever
+`bind_status` had just put in the status line.
+
 **The status bar is not a titlebar** — and blacklisting the BAR is not enough:
 Oxygen's WindowManager looks at the widget under the pointer, and a status bar
 is mostly covered by its own labels, so the half under the message label went on
