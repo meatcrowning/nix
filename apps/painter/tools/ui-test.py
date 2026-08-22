@@ -2293,6 +2293,26 @@ def test_browse_view(win, ctl, tmp):
     spin(120)
     check("a different output starts fitted", out.property("fitting") is True)
 
+    # BACK AND FORWARD, the two keys that mean this everywhere else: Back leaves
+    # the output for the grid he was on, Forward returns to it.
+    seen = APP.property("selOne")
+    APP.metaObject().invokeMethod(APP, "tbAction", Q_ARG("QVariant", "back"))
+    spin(150)
+    check("Back leaves View, keeping the place in the grid",
+          APP.property("inView") is False and APP.property("selOne") == seen,
+          (APP.property("inView"), APP.property("selOne")))
+    APP.metaObject().invokeMethod(APP, "tbAction", Q_ARG("QVariant", "forward"))
+    spin(150)
+    check("...and Forward goes back to that same output",
+          APP.property("inView") is True and APP.property("selOne") == seen,
+          (APP.property("inView"), APP.property("selOne")))
+
+    # An output with no recorded source has nothing to compare against, so the
+    # slider stays out of the way whatever the toggle says.
+    check("a plain output does not show the compare slider",
+          out.property("beforePath") == "" and out.property("comparing") is False,
+          (out.property("beforePath"), out.property("comparing")))
+
     QTest.keyClick(win, Qt.Key_Escape)
     spin(150)
     check("Escape leaves View for the grid",

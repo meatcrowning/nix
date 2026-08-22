@@ -80,6 +80,8 @@ Item {
         // already one output, and a second smaller copy of a different one
         // above it is noise.
         open: root.showPreview && !root.inView
+        // Double-click a finished result to open it properly.
+        onOpenRequested: (path) => { if (root.app) root.app.enterView(path) }
     }
 
     // Margins shrink with the pane: 10px either side of a 220px column is
@@ -95,6 +97,7 @@ Item {
         visible: root.inView
         source: root.inView ? root.viewPath : ""
         isVideo: root.viewIsVideo
+        compare: root.app ? root.app.showCompare : true
         onMenuRequested: (sx, sy, items) => root.ctxMenu.open(sx, sy, items)
     }
 

@@ -784,6 +784,10 @@ after restoring; a saved state cannot outvote what the app asked for.
 `PAINTER_OVERLAY_CHECK=1` on painter's selftest forces the re-dock and proves
 the recovery.
 
+**`barText` on an action row** puts the name beside the icon for ONE toolbar
+button — the button style is a toolbar-wide setting, so that row is added as a
+`QToolButton` with its own style rather than as an action.
+
 **A dock is a second scene graph.** `QQuickWidget` cannot use the threaded
 render loop, so every one of them renders on the GUI thread each frame. Two is
 measurably more than one: painter had its parameter column in a dock for a day

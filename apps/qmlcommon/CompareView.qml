@@ -1,8 +1,10 @@
 import QtQuick
-import "../../qmlcommon"
 
-// Image-comparison slider (`viewer --compare <before> <after>`, driven by
-// painter). Two images of the SAME dimensions — a model's input and its output
+// Image-comparison slider — viewer's `--compare <before> <after>` window, and
+// painter's edit outputs in its single-output view. SHARED, not copied: it
+// lived in `apps/viewer/qml/` until painter wanted the same thing, and two
+// copies of a direct-manipulation idiom drift (WheelScroll.qml records the same
+// rule from the other side). Two images of the SAME dimensions — a model's input and its output
 // — overlaid on top of each other, with a vertical reveal line that FOLLOWS THE
 // MOUSE: `before` shows to the LEFT of the line, `after` to the RIGHT, and the
 // line tracks the pointer's x exactly as it moves. No clicking.

@@ -36,6 +36,16 @@ Item {
 
     signal menuRequested(real sx, real sy, var items)
 
+    // BEFORE AND AFTER, for an edit output. The same slider viewer opens on a
+    // double-click (qmlcommon/CompareView.qml, shared with it), on by default
+    // and switched from the toolbar's `compare` button. An output with no
+    // recorded source — anything that is not an edit — has nothing to compare
+    // and shows normally.
+    property bool compare: true
+    readonly property string beforePath:
+        (view.source === "" || view.isVideo) ? "" : App.compareSource(view.source)
+    readonly property bool comparing: view.compare && view.beforePath !== ""
+
     function setZoom(z) { view.zoom = Math.max(0.05, Math.min(16, z)) }
     function zoomIn() { view.setZoom((view.fitting ? view.fitScale : view.zoom) * 1.25) }
     function zoomOut() { view.setZoom((view.fitting ? view.fitScale : view.zoom) / 1.25) }
@@ -46,10 +56,22 @@ Item {
     // output lands you somewhere in its top-left corner with no idea why.
     onSourceChanged: view.zoom = 0
 
+    CompareView {
+        anchors.fill: parent
+        visible: view.comparing
+        beforePath: view.beforePath
+        afterPath: view.source
+    }
+
     KineticFlickable {
         id: flick
         anchors.fill: parent
+        visible: !view.comparing
         clip: true
+        // THE WHEEL ZOOMS HERE, it does not scroll: this is an image viewer,
+        // and that is what a wheel means in one. The flickable's own wheel
+        // overlay stands down and the handler below takes every notch.
+        wheelEnabled: false
         contentWidth: Math.max(flick.width, view.imgW)
         contentHeight: Math.max(flick.height, view.imgH)
 
@@ -98,24 +120,42 @@ Item {
                 }
             }
 
-            // Ctrl+wheel zooms; a plain wheel is DECLINED and falls through to
-            // the flickable's own scroll overlay behind the content
-            // (qmlcommon/KineticFlickable.qml explains the z: -1 that makes
-            // that ordering work). Zoom is a discrete step, so it goes through
-            // the notch accumulator and not the pixel path — docs/DESIGN.md §9.2.
+            // WHEEL ZOOMS, LEFT BUTTON PANS. Zoom is a discrete step, so it
+            // goes through the notch accumulator and not the pixel path
+            // (docs/DESIGN.md §9.2); the pan writes contentX/contentY straight
+            // from the pointer, 1:1, because it is direct manipulation (§6.4).
             MouseArea {
                 anchors.fill: parent
-                acceptedButtons: Qt.RightButton
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                cursorShape: panning ? Qt.ClosedHandCursor
+                           : (flick.contentWidth > flick.width
+                              || flick.contentHeight > flick.height)
+                             ? Qt.OpenHandCursor : Qt.ArrowCursor
+                property bool panning: false
+                property real lastX: 0
+                property real lastY: 0
                 WheelNotch { id: notch }
                 onWheel: function (w) {
-                    if (!(w.modifiers & Qt.ControlModifier) || !view.canZoom) {
-                        w.accepted = false
-                        return
-                    }
+                    if (!view.canZoom) { w.accepted = false; return }
                     var n = notch.steps(w)
                     for (var i = 0; i < Math.abs(n); i++) {
                         if (n > 0) view.zoomIn(); else view.zoomOut()
                     }
+                }
+                onPressed: function (m) {
+                    if (m.button !== Qt.LeftButton) return
+                    panning = true
+                    lastX = m.x
+                    lastY = m.y
+                }
+                onReleased: panning = false
+                onCanceled: panning = false
+                onPositionChanged: function (m) {
+                    if (!panning) return
+                    flick.contentX = Math.max(0, Math.min(
+                        flick.contentWidth - flick.width, flick.contentX - (m.x - lastX)))
+                    flick.contentY = Math.max(0, Math.min(
+                        flick.contentHeight - flick.height, flick.contentY - (m.y - lastY)))
                 }
                 onClicked: function (m) {
                     if (m.button !== Qt.RightButton) return
