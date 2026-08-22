@@ -22,6 +22,11 @@ Item {
     // The desktop's one slide duration + curve (docs/DESIGN.md 6.2).
     Motion { id: motion }
 
+    // In a Plasma session, the KDE style's own window background, drawn behind
+    // everything here so this content sits on the same surface the menubar and
+    // toolbar do. Invisible and inert in the Hyprland session.
+    StyledBackground { anchors.fill: parent }
+
     property int view: 0            // 0 = params, 1 = gallery
     property bool showSettings: false
     // The preview viewport above the history — off by default, remembered.

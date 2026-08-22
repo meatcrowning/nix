@@ -612,9 +612,21 @@ Two facts from Oxygen 6.7.4 decide the shape of the answer:
 
 So the Plasma face is shaped like Dolphin: a `QMainWindow` with a real
 `QMenuBar`/`QToolBar`/`QStatusBar`, the app's QML in a `QQuickWidget` central
-widget with a **transparent clear colour** so the styled background shows
-through, and `QT_QUICK_CONTROLS_STYLE=org.kde.desktop` so QQC2 controls inside
+widget, and `QT_QUICK_CONTROLS_STYLE=org.kde.desktop` so QQC2 controls inside
 the QML are rendered *through* the live `QStyle` rather than imitated.
+
+**Never make that QQuickWidget transparent.** Letting the parent show through is
+the obvious way to continue the one surface behind the content, and it punches a
+hole in the window here — the region stops being repainted, windows dragged over
+it leave trails *inside* it, and it is absent from screenshots. Both
+`WA_TranslucentBackground` and a bare transparent `clearColor` do it, and
+**no offscreen render can catch either**: `grab()` re-renders through a fresh
+backing store, the fault is in the live one, and both shipped looking correct.
+The view is opaque; `qmlcommon/StyledBackground.qml` draws the style's own
+window background inside the QML instead, from an image the style renders into a
+proxy `WA_StyledBackground` window and crops to the view's rectangle
+(pixel-exact against a real window, 0.76 ms). Put it at the back of the app's
+root item; it is invisible in the Hyprland session.
 
 Adopting it in an app's `main.py`:
 

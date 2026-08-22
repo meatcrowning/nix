@@ -39,11 +39,25 @@ architecture:
 
 So the Plasma face of an app is shaped exactly like Dolphin: a `QMainWindow`
 with a real `QMenuBar`, `QToolBar` and `QStatusBar`, and the app's existing QML
-tree hosted in a `QQuickWidget` as the central widget with a **transparent
-clear colour**, so the styled window background shows through behind it and the
-whole window is one continuous surface. Every pixel of chrome is drawn by
-whatever KStyle is configured — Oxygen today, Breeze or anything else tomorrow,
-correctly, with no work here.
+tree hosted in a `QQuickWidget` as the central widget. Every pixel of chrome is
+drawn by whatever KStyle is configured — Oxygen today, Breeze or anything else
+tomorrow, correctly, with no work here.
+
+**The view is OPAQUE and draws the styled background itself.** Making the
+QQuickWidget transparent so the parent shows through is the obvious way to
+continue that one surface behind the content, and on this stack it punches a
+hole in the window: the region stops being repainted, so windows dragged over
+it leave trails inside it and it is missing from screenshots altogether. Both
+spellings fail (`WA_TranslucentBackground`, and the transparent clearColor on
+its own), and **no offscreen harness can catch it** — `QWidget.grab()`
+re-renders through a fresh backing store while the fault is in the live one.
+So the QML paints the background instead, from an image the style renders
+(`_build_background_classes` → the `kdebg` provider, `qmlcommon/StyledBackground.qml`):
+a proxy top-level QWidget with `WA_StyledBackground`, rendered into a QImage
+and cropped to the view's rectangle in the window. Verified pixel-exact against
+a real window's own background, 0 differing samples, and continuous across the
+toolbar seam. 0.76 ms a render, re-requested only when the geometry, the
+palette or the style changes.
 
 **One source, two roofs** (docs/DESIGN.md §7.6) is unchanged and is why this
 module reads the app rather than the app reconfiguring itself: the menubar, the
@@ -310,6 +324,96 @@ class KdeShell:
     """
 
 
+def _build_background_classes():
+    """The style's window background, as something QML can draw.
+
+    Two objects: a `QQuickImageProvider` that renders it, and a small QObject
+    the QML binds to for the current image URL. Split that way because the URL
+    has to CHANGE for QML to re-request the image — the size, the view's offset
+    inside the window and a serial are all in the path, so a resize or a palette
+    change produces a new URL and the old one is never served from cache.
+    """
+    from PySide6.QtCore import QObject, QPoint, QRect, Property, Signal, QEvent
+    from PySide6.QtGui import QImage, QRegion
+    from PySide6.QtQuick import QQuickImageProvider
+    from PySide6.QtWidgets import QWidget
+
+    class _BgProvider(QQuickImageProvider):
+        def __init__(self):
+            super().__init__(QQuickImageProvider.Image)
+
+        def requestImage(self, path, size, requested):
+            # "winW,winH,offX,offY,viewW,viewH,dpr#serial"
+            try:
+                head = str(path).split("#")[0]
+                win_w, win_h, off_x, off_y, vw, vh, dpr = (
+                    float(p) for p in head.split(",")[:7])
+            except (ValueError, IndexError):
+                return QImage()
+            win_w, win_h = max(1, int(win_w)), max(1, int(win_h))
+            vw, vh = max(1, int(vw)), max(1, int(vh))
+            dpr = dpr if dpr > 0 else 1.0
+
+            # A top-level widget, never shown: Oxygen paints the window
+            # background only for a real window (isWindow(), WA_StyledBackground,
+            # Qt::Window) — which this is, whether or not it is on screen.
+            proxy = QWidget()
+            proxy.setAttribute(Qt.WA_StyledBackground, True)
+            proxy.resize(win_w, win_h)
+
+            img = QImage(int(win_w * dpr), int(win_h * dpr),
+                         QImage.Format_ARGB32_Premultiplied)
+            img.setDevicePixelRatio(dpr)
+            img.fill(0)
+            proxy.render(img, QPoint(), QRegion(0, 0, win_w, win_h),
+                         QWidget.DrawWindowBackground)
+
+            crop = img.copy(QRect(int(off_x * dpr), int(off_y * dpr),
+                                  int(vw * dpr), int(vh * dpr)))
+            crop.setDevicePixelRatio(dpr)
+            if size is not None:
+                size.setWidth(crop.width())
+                size.setHeight(crop.height())
+            return crop
+
+    class _StyledBackground(QObject):
+        """`KdeBackground.source` — the URL of the styled background for the
+        view's current geometry. Re-emitted on resize and on a palette or style
+        change, which is every reason the image could go stale."""
+
+        changed = Signal()
+
+        def __init__(self, view, window, parent=None):
+            super().__init__(parent)
+            self._view = view
+            self._window = window
+            self._serial = 0
+            view.installEventFilter(self)
+            window.installEventFilter(self)
+
+        def eventFilter(self, obj, ev):
+            if ev.type() in (QEvent.Resize, QEvent.Move, QEvent.PaletteChange,
+                             QEvent.ApplicationPaletteChange, QEvent.StyleChange):
+                self.refresh()
+            return False
+
+        def refresh(self):
+            self._serial += 1
+            self.changed.emit()
+
+        @Property(str, notify=changed)
+        def source(self):
+            win = self._window
+            view = self._view
+            off = view.mapTo(win, QPoint(0, 0))
+            dpr = view.devicePixelRatioF() or 1.0
+            return (f"image://kdebg/{win.width()},{win.height()},"
+                    f"{off.x()},{off.y()},{view.width()},{view.height()},{dpr}"
+                    f"#{self._serial}")
+
+    return _BgProvider, _StyledBackground
+
+
 def _build_shell_class():
     from PySide6.QtWidgets import QMainWindow, QToolBar, QStatusBar, QLabel
     from PySide6.QtQuickWidgets import QQuickWidget
@@ -325,28 +429,34 @@ def _build_shell_class():
 
             self.view = QQuickWidget()
             self.view.setResizeMode(QQuickWidget.SizeRootObjectToView)
-            # THE POINT OF THE WHOLE FILE. A QQuickWidget clears to white by
-            # default and would cover the styled window background with a flat
-            # rectangle — the exact "one odd window" this face exists to avoid.
-            # Transparent, and the Oxygen gradient shows through behind every
-            # part of the QML that does not paint itself.
-            # …AND NOT `WA_TranslucentBackground` WITH IT. That attribute also
-            # sets WA_NoSystemBackground (measured: setting it flips
-            # nosysbg False -> True), which tells Qt not to fill this widget's
-            # area before compositing the scene over it. The backing store then
-            # keeps whatever was there last frame and the transparent scene is
-            # blended INTO it: text and graphics smear as they move, and where
-            # nothing paints the pixels keep alpha 0, so the window has a real
-            # hole in it — the compositor shows through, and a screenshot of
-            # that region comes back black. All three symptoms, one attribute.
+
+            # THE VIEW IS OPAQUE, AND THE STYLE'S BACKGROUND IS DRAWN INSIDE IT.
             #
-            # With just the transparent clear colour the widget is non-opaque
-            # and Qt paints the PARENT underneath it every frame, which is the
-            # styled window background we wanted showing through in the first
-            # place. Verified offscreen: the pixel behind the scene is a
-            # gradient sample (39,32,27), not the flat window colour (43,35,29),
-            # and its alpha is 255.
-            self.view.setClearColor(Qt.transparent)
+            # The obvious way to get the window's styled background — Oxygen's
+            # gradient — behind this QML is to make the widget transparent and
+            # let the parent show through. That does not work on this stack, and
+            # it fails in a way no offscreen render can catch, because
+            # `QWidget.grab()` re-renders through a fresh backing store while
+            # the bug lives in the live one. Two rounds of it on his session:
+            #
+            #   * `WA_TranslucentBackground` + transparent clearColor — the
+            #     attribute also flips WA_NoSystemBackground on (measured), so
+            #     the area is never filled: content smears frame to frame and
+            #     the pixels keep alpha 0.
+            #   * transparent clearColor ALONE — same hole. The region is not
+            #     repainted at all: other windows dragged over it leave trails
+            #     *inside* it, and it is absent from screenshots entirely.
+            #
+            # So we stop asking for transparency. The widget stays opaque, and
+            # the QML paints the real styled background itself, from an image
+            # the STYLE renders (`_StyledBackground` below): a proxy top-level
+            # QWidget with WA_StyledBackground, rendered into a QImage, cropped
+            # to this view's rectangle within the window. Verified pixel-exact
+            # against a real QMainWindow's own painted background — 0 differing
+            # samples across the window. It is still Oxygen's own code drawing
+            # its own gradient, and it still lines up seamlessly with the
+            # menubar and toolbar above it, because it is a crop of the same
+            # window-sized rendering.
             # AND THE QML HALF WEARS THE SAME PALETTE. Qt Quick Controls inside
             # a QQuickWidget do not inherit QApplication's palette on their own:
             # rendered offscreen against his dark scheme, the window came out
@@ -356,7 +466,19 @@ def _build_shell_class():
             # palette propagates it down the QML item tree.
             from PySide6.QtWidgets import QApplication
             self.view.setPalette(QApplication.palette())
+            # Not transparent (see above) — but not Qt's default WHITE either:
+            # anything the styled background image does not cover for a frame
+            # should read as the window, not as a flash.
+            self.view.setClearColor(QApplication.palette().window().color())
             self.window.setCentralWidget(self.view)
+
+            # The styled background, as an image provider plus the object QML
+            # binds to for its URL. Installed here, before any QML loads, so the
+            # app's own `engine()`/`context()` calls see them already there.
+            provider_cls, bg_cls = _build_background_classes()
+            self.view.engine().addImageProvider("kdebg", provider_cls())
+            self.background = bg_cls(self.view, self.window)
+            self.view.rootContext().setContextProperty("KdeBackground", self.background)
 
             self._toolbar = None
             self._status = None
