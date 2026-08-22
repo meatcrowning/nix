@@ -543,6 +543,12 @@ def _build_shell_class():
             self._hooks = {}        # button id -> a python answer to it
             self._about_box = None  # kept: a dialog owned by the stack crashes
             self._bar_buttons = {}      # id -> QToolButton, for `barText` rows
+            self._widget_actions = {}   # id(widget) -> its QWidgetAction, kept
+            self._spacer_w = None       # the stretch before the search field
+            self._toolbars = {}         # ident -> QToolBar, the EXTRA bars
+            self._toolbar_widgets = {}  # ident -> [QWidget], re-added each rebuild
+            self._toolbar_titles = {}   # ident -> the Settings menu's label for it
+            self._title_prop = None     # the QML property the window title tracks
             self._search = None         # the toolbar's filter field, if any
             self._search_spacer = None  # ...and the stretch that keeps it right
             self._search_action = None
@@ -789,6 +795,8 @@ def _build_shell_class():
                     if not prev_sep:
                         menu.addSeparator()
                     menu.addAction(self._toggle_action("toolbar"))
+                    for ident in self._toolbars:
+                        menu.addAction(self._toggle_action("tb:" + ident))
                     menu.addAction(self._toggle_action("statusbar"))
                 elif g == "help":
                     menu.addAction(self._about_action())
@@ -798,7 +806,7 @@ def _build_shell_class():
             # program's toolbar is its primary verbs, not everything it can do —
             # the menus are the complete set.
             tb = self._toolbar
-            tb.clear()
+            self._clear_bar(tb)
             prev_sep = True
             for e in entries:
                 if e is None:
@@ -806,7 +814,7 @@ def _build_shell_class():
                         tb.addSeparator()
                         prev_sep = True
                     continue
-                if not e.get("bar"):
+                if self._bar_of(e) != "main":
                     continue
                 act = self._action_for(e)
                 # `barText` puts the NAME beside the icon for ONE button. The
@@ -822,8 +830,7 @@ def _build_shell_class():
                         btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
                         self._bar_buttons[str(e.get("id", ""))] = btn
                     btn.setText(label)
-                    tb.addWidget(btn)
-                    btn.show()
+                    self._append_widget(tb, btn)
                 else:
                     tb.addAction(act)
                 prev_sep = False
@@ -831,37 +838,73 @@ def _build_shell_class():
             # after it — the toolbar's `bar:` filter makes one whenever the
             # table's last group is menu-only, as painter's Settings row is.
             # A `barText` button is a WIDGET, cached across rebuilds so its
-            # action stays the same object. `tb.clear()` drops the action that
-            # carried it but leaves the widget parented to the toolbar, so a row
-            # that is no longer offered has to be hidden explicitly or it stays
-            # on screen with nothing behind it.
+            # action stays the same object. `_clear_bar` above parks it off the
+            # layout rather than deleting it, so a row that is no longer offered
+            # has to be hidden explicitly or it comes back with nothing behind it.
             live = {str(e.get("id", "")) for e in entries
-                    if e is not None and e.get("bar")}
+                    if e is not None and self._bar_of(e) == "main"}
             for bid, btn in self._bar_buttons.items():
                 if bid not in live:
                     btn.hide()
             acts = tb.actions()
             while acts and acts[-1].isSeparator():
                 tb.removeAction(acts.pop())
-            # THE SEARCH FIELD SURVIVES A REBUILD. `tb.clear()` above removes the
-            # actions that carry it, so it is re-appended here — after the
+            # THE SEARCH FIELD SURVIVES A REBUILD. `_clear_bar` above takes it off
+            # the layout, so it is re-appended here — after the
             # buttons, behind its stretch, which is what keeps it right-aligned
             # whatever the app's toolbar row does.
             if self._search is not None:
-                from PySide6.QtWidgets import QWidget, QSizePolicy
-                spacer = QWidget(tb)
-                spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-                self._search_spacer = tb.addWidget(spacer)
-                self._search_action = tb.addWidget(self._search)
-                self._search.show()
+                self._search_spacer = self._append_widget(tb, self._spacer_w)
+                self._search_action = self._append_widget(tb, self._search)
                 if self._search_tail is not None:
-                    self._search_tail_action = tb.addWidget(self._search_tail)
-                    self._search_tail.show()
+                    self._search_tail_action = self._append_widget(
+                        tb, self._search_tail)
+
+            # THE EXTRA TOOLBARS, same table, same QActions. player's transport
+            # strip is one of these: `bar: "transport"` on the playback rows, so
+            # the bottom bar's buttons and the Playback menu's rows can no more
+            # disagree than the main toolbar's and the menus' can.
+            for ident, tb2 in self._toolbars.items():
+                self._clear_bar(tb2)
+                prev_sep = True
+                for e in entries:
+                    if e is None:
+                        if not prev_sep:
+                            tb2.addSeparator()
+                            prev_sep = True
+                        continue
+                    if self._bar_of(e) != ident:
+                        continue
+                    tb2.addAction(self._action_for(e))
+                    prev_sep = False
+                acts2 = tb2.actions()
+                while acts2 and acts2[-1].isSeparator():
+                    tb2.removeAction(acts2.pop())
+                # ...and the widgets it was given (a seek bar, a clock). Like
+                # the search field they are re-appended after every rebuild,
+                # because `_clear_bar` above takes them off the layout.
+                for w in self._toolbar_widgets.get(ident, ()):
+                    self._append_widget(tb2, w)
 
             if not self._chrome_restored:
                 tb.setVisible(bool(tb.actions()))
+                for tb2 in self._toolbars.values():
+                    tb2.setVisible(bool(tb2.actions()))
                 self._chrome_restored = True
             self._sync_toggles()
+
+        @staticmethod
+        def _bar_of(e):
+            """Which toolbar this row asked for, or None.
+
+            `bar: true` is the main one; `bar: "transport"` names an extra bar
+            made by `toolbar()`. One table, every chrome — the same rule that
+            keeps a menu row and a toolbar row the same QAction.
+            """
+            v = e.get("bar")
+            if v is None or v is False or v == "":
+                return None
+            return "main" if v is True else str(v)
 
         @staticmethod
         def _trim(items):
@@ -896,6 +939,48 @@ def _build_shell_class():
             return out + extra
 
         # ------------------------------------------------------------ widgets
+        def _clear_bar(self, tb):
+            """Empty a toolbar WITHOUT destroying what is standing on it.
+
+            `QToolBar.clear()` deletes its actions, and a `QWidgetAction` OWNS
+            the widget it carries — so a rebuild deleted the search field, the
+            `barText` button and (in player) the whole seek bar out from under
+            the Python objects still holding them. Re-adding them afterwards
+            LOOKED like it worked — the actions were back in the list and
+            `dump_chrome` printed them — but their `actionGeometry` stayed
+            (0, 0, 100, 30), i.e. never laid out, and nothing was on the bar.
+            That stayed invisible until a second `_rebuild` ran early enough to
+            be noticed; `toolbar()` triggers one, right after `toolbar_search()`.
+
+            So a persistent widget keeps its ORIGINAL `QWidgetAction` (see
+            `_append_widget`) and is put back with `addAction`, never re-wrapped.
+            Only rows this bar owns outright — separators, and widget actions
+            nothing is keeping — are destroyed.
+            """
+            from PySide6.QtWidgets import QWidgetAction
+            kept = set(id(a) for a in self._widget_actions.values())
+            for a in list(tb.actions()):
+                tb.removeAction(a)
+                if id(a) in kept:
+                    continue
+                # The app's own QActions are reused across rebuilds and live in
+                # `_actions`; separators and one-off widget actions belong to
+                # the bar and would otherwise pile up one per rebuild.
+                if isinstance(a, QWidgetAction) or a.isSeparator():
+                    a.setParent(None)
+                    a.deleteLater()
+
+        def _append_widget(self, tb, widget):
+            """Put a persistent widget at the end of `tb`, keeping its action."""
+            act = self._widget_actions.get(id(widget))
+            if act is None:
+                act = tb.addWidget(widget)
+                self._widget_actions[id(widget)] = act
+            else:
+                tb.addAction(act)
+            widget.show()
+            return act
+
         def _ensure_toolbar(self):
             from PySide6.QtWidgets import QToolBar
             if self._toolbar is None:
@@ -905,6 +990,128 @@ def _build_shell_class():
                 self.window.addToolBar(tb)
                 self._toolbar = tb
             return self._toolbar
+
+        def toolbar(self, ident, title, area=None, movable=False):
+            """A SECOND toolbar, in an area of its own.
+
+            KDE's music players keep their transport along the bottom of the
+            window rather than in the top toolbar, and that is a bar, not a
+            strip an app draws for itself — so it is a real `QToolBar` in
+            `Qt.BottomToolBarArea` and every row on it is one of the app's own
+            `QAction`s, routed here by `bar: "<ident>"` on the table.
+
+            Its placement and its visibility ride the saved window state like
+            the main one's, keyed on `objectName`, and it gets its own
+            Show/Hide row in the Settings menu.
+            """
+            from PySide6.QtWidgets import QToolBar
+            tb = self._toolbars.get(ident)
+            if tb is not None:
+                return tb
+            if area is None:
+                area = Qt.BottomToolBarArea
+            tb = QToolBar(title, self.window)
+            tb.setMovable(movable)
+            tb.setObjectName("toolbar_" + ident)
+            self.window.addToolBar(area, tb)
+            self._toolbars[ident] = tb
+            self._toolbar_titles[ident] = title
+            self._toolbar_widgets.setdefault(ident, [])
+            if self._root is not None:      # bind_chrome may not have run yet
+                self._rebuild()
+                # `_chrome_restored` is already true by then, so the first-build
+                # visibility rule never runs for this bar — apply it here.
+                tb.setVisible(bool(tb.actions()) or bool(self._toolbar_widgets[ident]))
+            return tb
+
+        def toolbar_widget(self, ident, widget, stretch=False):
+            """Put a widget on one of the extra toolbars, permanently.
+
+            `stretch` gives it the room the buttons leave — a seek bar wants
+            every pixel of it, and a `QToolBar` hands that over only to a widget
+            whose size policy asks.
+            """
+            from PySide6.QtWidgets import QSizePolicy
+            tb = self._toolbars.get(ident)
+            if tb is None:
+                raise KeyError("no such toolbar: %r" % ident)
+            if stretch:
+                widget.setSizePolicy(QSizePolicy.Expanding,
+                                     widget.sizePolicy().verticalPolicy())
+            self._toolbar_widgets.setdefault(ident, []).append(widget)
+            self._append_widget(tb, widget)
+            tb.setVisible(True)
+            return widget
+
+        # ------------------------------------------------------------- title
+        def bind_title(self, prop="windowTitle"):
+            """Track a QML property onto the window title.
+
+            Under Hyprland `Main.qml` binds the same property to the `Window`'s
+            `title`; here the QMainWindow gets it, so the taskbar entry says
+            what is playing in both sessions from one expression.
+            """
+            self._title_prop = str(prop)
+            root = self._root
+            if root is None:
+                return
+            sig = getattr(root, self._title_prop + "Changed", None)
+            if sig is not None and hasattr(sig, "connect"):
+                sig.connect(self._pull_title)
+            self._pull_title()
+
+        def _pull_title(self):
+            if self._root is None or not self._title_prop:
+                return
+            text = str(self._root.property(self._title_prop) or "")
+            if text and text != self.window.windowTitle():
+                self.window.setWindowTitle(text)
+
+        # ----------------------------------------------------- typing guard
+        def guard_typing(self, widget):
+            """While `widget` has the keyboard, single-key shortcuts stand down.
+
+            A QAction shortcut is matched BEFORE the key reaches the focused
+            widget, so an app that gives Space to play/pause — player does, and
+            has since long before this face existed — makes its own search field
+            impossible to type a space into. Ctrl/Alt sequences are unaffected;
+            only the bare-key ones are suspended, and only while this widget is
+            focused.
+            """
+            from PySide6.QtCore import QObject, QEvent
+            from PySide6.QtGui import QKeySequence
+
+            shell = self
+
+            def single_key_actions():
+                out = []
+                for act in shell._actions.values():
+                    sc = act.shortcut()
+                    if sc.isEmpty() or sc.count() != 1:
+                        continue
+                    # Modifier-free means the key is otherwise typeable.
+                    if int(sc[0].keyboardModifiers().value) == 0:
+                        out.append(act)
+                return out
+
+            class _Guard(QObject):
+                def eventFilter(self, obj, ev):
+                    if ev.type() == QEvent.FocusIn:
+                        for a in single_key_actions():
+                            a.setProperty("_sc_held", a.shortcut())
+                            a.setShortcut(QKeySequence())
+                    elif ev.type() == QEvent.FocusOut:
+                        for a in shell._actions.values():
+                            held = a.property("_sc_held")
+                            if held is not None and not QKeySequence(held).isEmpty():
+                                a.setShortcut(QKeySequence(held))
+                                a.setProperty("_sc_held", None)
+                    return False
+
+            guard = _Guard(self.window)
+            widget.installEventFilter(guard)
+            self._typing_guard = guard
+            return guard
 
         def _ensure_status(self):
             """Dolphin's shape: what is happening on the LEFT, standing facts on
@@ -971,6 +1178,17 @@ def _build_shell_class():
             widget.setProperty("_kde_no_window_grab", True)
             widget.installEventFilter(self._no_drag)
 
+        def _bar_widget(self, which):
+            """The widget a Show/Hide row toggles. `tb:<ident>` is an extra
+            toolbar; the two bare names are the main one and the status bar."""
+            if which == "toolbar":
+                return self._toolbar
+            if which == "statusbar":
+                return self._status
+            if which.startswith("tb:"):
+                return self._toolbars.get(which[3:])
+            return None
+
         def _toggle_action(self, which):
             """Show Toolbar / Show Statusbar — checkable, and checked FROM the
             widget rather than from a variable, so the menu cannot claim a bar
@@ -978,12 +1196,17 @@ def _build_shell_class():
             key = "__show_" + which
             act = self._actions.get(key)
             if act is None:
-                label = "Show &Toolbar" if which == "toolbar" else "Show Status&bar"
+                if which == "toolbar":
+                    label = "Show &Toolbar"
+                elif which == "statusbar":
+                    label = "Show Status&bar"
+                else:
+                    label = "Show " + self._toolbar_titles.get(which[3:], which[3:])
                 act = QAction(label, self.window)
                 act.setCheckable(True)
 
                 def toggled(on, w=which):
-                    widget = self._toolbar if w == "toolbar" else self._status
+                    widget = self._bar_widget(w)
                     if widget is not None:
                         widget.setVisible(on)
 
@@ -992,9 +1215,10 @@ def _build_shell_class():
             return act
 
         def _sync_toggles(self):
-            for which in ("toolbar", "statusbar"):
+            for which in (["toolbar", "statusbar"]
+                          + ["tb:" + i for i in self._toolbars]):
                 act = self._actions.get("__show_" + which)
-                widget = self._toolbar if which == "toolbar" else self._status
+                widget = self._bar_widget(which)
                 if act is None or widget is None:
                     continue
                 # isHidden(), not isVisible(): `bind_chrome` runs before
@@ -1327,17 +1551,17 @@ def _build_shell_class():
             tb = self._ensure_toolbar()
             if self._search is not None:
                 return self._search
-            spacer = QWidget(tb)
-            spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-            self._search_spacer = tb.addWidget(spacer)
+            self._spacer_w = QWidget(tb)
+            self._spacer_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            self._search_spacer = self._append_widget(tb, self._spacer_w)
             field = QLineEdit(tb)
             field.setPlaceholderText(placeholder)
             field.setClearButtonEnabled(True)
             field.setMaximumWidth(width)
             field.addAction(QIcon.fromTheme("edit-find"), QLineEdit.LeadingPosition)
             field.textChanged.connect(on_text)
-            self._search_action = tb.addWidget(field)
             self._search = field
+            self._search_action = self._append_widget(tb, field)
 
             # ...and, optionally, ending where a PANE ends rather than where the
             # window does. `align_right_to` names a QML property holding the x
@@ -1350,7 +1574,7 @@ def _build_shell_class():
                 tail = QWidget(tb)
                 tail.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
                 self._search_tail = tail
-                self._search_tail_action = tb.addWidget(tail)
+                self._search_tail_action = self._append_widget(tb, tail)
                 sig = getattr(self._root, self._search_align + "Changed", None)
                 if sig is not None and hasattr(sig, "connect"):
                     sig.connect(self._align_search)
@@ -1466,14 +1690,35 @@ def _build_shell_class():
             tb = self._toolbar
             out.append("toolbar%s" % ("" if tb is not None and tb.isVisible() else " (hidden)"))
             for a in (tb.actions() if tb is not None else []):
-                out.append("    ---" if a.isSeparator() else "    %s%s" % (
-                    a.text(), "" if a.isEnabled() else "  (disabled)"))
+                out.append(self._row_text(tb, a))
+            for ident, tb2 in self._toolbars.items():
+                out.append("toolbar[%s]%s" % (
+                    ident, "" if tb2.isVisible() else " (hidden)"))
+                for a in tb2.actions():
+                    out.append(self._row_text(tb2, a))
             st = self._status
             out.append("statusbar: %r | %r%s" % (
                 self._status_label.text() if self._status_label is not None else "",
                 self._status_right.text() if self._status_right is not None else "",
                 "" if st is not None and st.isVisible() else " (hidden)"))
             return "\n".join(out)
+
+        @staticmethod
+        def _row_text(tb, act):
+            """One toolbar row, for `dump_chrome`. A WIDGET on the bar carries
+            no action text — the seek bar, the search field, a `barText` button
+            — so it is named by its class instead of printed as a blank line."""
+            if act.isSeparator():
+                return "    ---"
+            if act.text():
+                return "    %s%s" % (act.text(),
+                                     "" if act.isEnabled() else "  (disabled)")
+            w = tb.widgetForAction(act) if tb is not None else None
+            if w is None:
+                return "    <blank>"
+            name = w.metaObject().className()
+            text = w.property("text") or ""
+            return "    <%s%s>" % (name, (" " + repr(str(text))) if text else "")
 
         # --------------------------------------------------------- statusbar
         def bind_status(self, line_prop="statusLine", progress_prop="statusProgress",
