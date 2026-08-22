@@ -14,7 +14,7 @@ running player; he listens on it live").
 
 Every favourite surface must call the SAME Library.setFavorite(id, on) write so
 they stay in sync off the one trackChanged signal. This covers the two the last
-spirit's playbar-test.py does not:
+spirit's transport-test.py does not:
 
   * the track context menu (qml/TrackMenu.qml) — the right-click entry labels
     itself by the current flag and flips it through Library.setFavorite; and
@@ -22,7 +22,7 @@ spirit's playbar-test.py does not:
     carries the real 0..1 STAR rating, not the favourite bool, and omits the
     key when the track is unrated.
 
-The in-app hearts (playbar/now-playing/row) and the L shortcut all issue the
+The in-app hearts (transport bar/now-playing/row) and the L shortcut all issue the
 identical Library.setFavorite call by inspection; the menu is the one with
 branching logic worth exercising.
 """

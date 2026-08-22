@@ -28,17 +28,23 @@ Item {
     property color fgDim: Theme.textDim
     property color fgAccent: Theme.accent
 
+    // The drawer already insets this page by 12; a dialog does not, so the roof
+    // says how much room the rows get from the edge rather than the page
+    // guessing which one it is under.
+    property int pad: 0
+
     signal columnsRequested(int n)
     signal rescanRequested()
     signal replayGainRequested(string mode)
     signal rgPreampRequested(real db)
 
-    implicitHeight: col.implicitHeight
-    implicitWidth: 248
+    implicitHeight: col.implicitHeight + 2 * pad
+    implicitWidth: 248 + 2 * pad
 
     Column {
         id: col
-        anchors { left: parent.left; right: parent.right; top: parent.top }
+        anchors { left: parent.left; right: parent.right; top: parent.top
+                  leftMargin: root.pad; rightMargin: root.pad; topMargin: root.pad }
         spacing: 8
 
         // ---- album grid columns: live, in place ----

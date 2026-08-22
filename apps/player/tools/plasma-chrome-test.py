@@ -49,6 +49,10 @@ def run(session):
     env["DESK_SESSION"] = session
     env["QT_QPA_PLATFORMTHEME"] = "kde"
     env["PLAYER_MENUS"] = "1"
+    env["PLAYER_FACES"] = "1"
+    # A page with one of every swapped control on it, so the face check below
+    # has something to look at.
+    env["PLAYER_VIEW"] = "playlists"
     # QT_QPA_PLATFORMTHEME=kde is NOT optional: without a KDE platform theme the
     # widgets take Qt's default light palette while the QML takes his dark
     # scheme, and the window renders as an empty-looking toolbar with invisible
@@ -64,7 +68,13 @@ hypr = run("hypr")
 print("player's Plasma chrome")
 
 # ---- the menubar --------------------------------------------------------
-menus = [ln for ln in plasma.splitlines() if ln and not ln.startswith((" ", "toolbar", "statusbar", "selftest"))]
+# The menubar headings: the un-indented lines from the first menu up to the
+# toolbar heading. Anchored rather than filtered, because the child prints its
+# own lines too (the library's scan summary, the `face` dump).
+lines = plasma.splitlines()
+head = next(i for i, ln in enumerate(lines) if ln.startswith("&File"))
+tail = next(i for i, ln in enumerate(lines) if ln == "toolbar")
+menus = [ln for ln in lines[head:tail] if ln and not ln.startswith(" ")]
 check("File first, Help last", menus[:1] == ["&File"] and menus[-1:] == ["&Help"],
       str(menus))
 check("the KDE vocabulary, with the app's own group before Settings",
@@ -146,6 +156,20 @@ check("Configure player… is in Settings",
 for row in ("Show &Toolbar", "Show Transport Bar", "Show Status&bar"):
     check(f"Settings can hide {row!r}",
           any(row in r for r in settings), str(settings))
+
+# ---- the +plasma file selector actually took --------------------------
+# A `QQmlFileSelector` with no owner is collected moments after it is made, and
+# every component then loads its UNSELECTED file — silently, with no error and
+# no warning. Each variant carries `property string face: "plasma"` so that
+# failure is detectable at all (kdeshell.select_plasma_files).
+faces = dict(ln[5:].split(" = ", 1) for ln in plasma.splitlines()
+             if ln.startswith("face ") and " = " in ln)
+for comp in ("HeaderButton", "SelectButton", "Slider", "CtxMenu"):
+    check(f"{comp} is the KDE variant under Plasma",
+          faces.get(comp) == "plasma", str(faces))
+check("...and nothing is swapped under Hyprland",
+      "face: none found" in hypr,
+      "\n".join(ln for ln in hypr.splitlines() if ln.startswith("face")))
 
 # ---- and NONE of it exists under Hyprland -------------------------------
 check("a Hyprland session builds no KDE chrome at all",

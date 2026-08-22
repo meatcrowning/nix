@@ -97,7 +97,7 @@ let
             "''${qtWrapperArgs[@]}"
 
           # Same Qt environment, none of player's body:
-          #     player-qtenv python3 apps/player/tools/playbar-test.py
+          #     player-qtenv python3 apps/player/tools/transport-test.py
           # air needs no equivalent — there the interpreter IS /usr/bin/python3.
           makeWrapper ${qtenvBody} $out/bin/player-qtenv \
             --prefix PATH : ${pyEnv}/bin \
