@@ -2846,6 +2846,7 @@ def main():
                             if want == "1" or want.lower() in (cls + " " + str(name)).lower():
                                 pad = ch.property("topPadding")
                                 print("  " * depth + f"{cls} {name!r} "
+                                      f"x={ch.property('x')} w={ch.property('width')} "
                                       f"y={ch.property('y')} h={ch.property('height')} "
                                       f"ih={ch.property('implicitHeight')} "
                                       f"vis={ch.property('visible')}"

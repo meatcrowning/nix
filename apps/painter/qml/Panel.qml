@@ -71,45 +71,66 @@ Rectangle {
         ])
     }
 
-    // PINS ARE THE ROWS THEMSELVES, moved. A pinned row is REPARENTED into the
-    // header strip while the panel is folded, so it is the live control — a
-    // pinned Spin still steps, a pinned Toggle still toggles — rather than a
-    // copy of its value. His call, 2026-08-22: "keeping the pins per-header and
-    // making them editable".
+    // COLLAPSING HIDES WHAT IS NOT PINNED, and nothing else. A folded panel is
+    // its header plus the rows he pinned, laid out where they always were and
+    // still live — a pinned Spin steps, a pinned Toggle toggles. His call,
+    // 2026-08-22: "when collapsed it should just be as if everything not pinned
+    // became hidden and the section shrinks accordingly". With nothing pinned
+    // that is the old behaviour: header only.
     //
-    // The order problem that made a read-only chip look tempting: QML has no
-    // way to put a child BACK at an index, so a returned row would land at the
-    // end of the column. `rowOrder` is the answer — expanding reparents EVERY
-    // row in the panel's declared order, which rebuilds the Column exactly as
-    // it was however many rows were away.
+    // The unpinned rows are PARKED in `stash`, not hidden, because their own
+    // `visible` is often bound by the caller (`visible: !panel.fromImage`) and
+    // assigning it would destroy that binding for good. A Column lays out the
+    // children it has, so parking one is the honest way to take it out.
+    //
+    // The order problem: QML has no way to put a child BACK at an index, so a
+    // row returning from the stash would land at the end. `rowOrder` is the
+    // answer — every row that belongs in the column is reparented in the
+    // panel's declared order, which rebuilds it exactly as it was.
     property var rowOrder: []
 
     function applyPins() {
         if (panel.rowOrder.length === 0) return
+        // The FIRST row whose home changes. Everything before it is already in
+        // the right place and in the right order, and is left alone — which
+        // matters: reparenting a row twice in one tick orphaned the delegates
+        // of a Repeater inside it (the preset buttons vanished, laid out and
+        // measured but with no visual parent). Everything from there on is
+        // re-seated in declared order, which is what puts the column back
+        // together, since QML cannot insert a child at an index.
+        var first = -1
         for (var i = 0; i < panel.rowOrder.length; i++) {
             var r = panel.rowOrder[i]
             if (!r) continue
-            var pinned = panel.collapsed
-                         && r.pinLabel !== undefined
-                         && panel.pins.indexOf("" + r.pinLabel) >= 0
-            if (pinned) {
-                var slot = null
-                for (var k = 0; k < pinSlots.count; k++) {
-                    var it = pinSlots.itemAt(k)
-                    if (it && it.pinKey === "" + r.pinLabel) { slot = it; break }
-                }
-                if (slot) {
-                    r.parent = slot
-                    // A plain Item does not position what it adopts, and the
-                    // Column had already put this row at its column y — so
-                    // without these it draws below the panel entirely.
-                    r.x = 0
-                    r.y = 0
-                }
-            } else if (!panel.collapsed) {
-                r.parent = inner
-            }
+            if (r.parent !== panel.homeFor(r)) { first = i; break }
         }
+        if (first < 0) return
+        for (var j = first; j < panel.rowOrder.length; j++) {
+            var q = panel.rowOrder[j]
+            // A row that hides itself is never moved — see `homeFor`. It also
+            // never needs to be: it is the first row in the panels that have
+            // one, so the rows re-seated after it still land in order.
+            if (!q || q.selfHides === true) continue
+            // OUT AND BACK IN. Assigning the parent a row already has does
+            // nothing, so a row returning from the stash would land after the
+            // ones that never left; the bounce is what re-appends them all in
+            // declared order. Through the STASH, not through null: half the
+            // rows in here are `width: parent.width`, and a null parent makes
+            // that a TypeError for the frame it lasts.
+            q.parent = stash
+            q.parent = panel.homeFor(q)
+        }
+    }
+
+    // Where a row belongs right now: the column, or the stash it waits out a
+    // collapse in.
+    function homeFor(r) {
+        // A row that hides itself is never parked (`selfHides` — ModeSwitcher,
+        // whose Repeater cannot survive a reparent).
+        if (r.selfHides === true) return inner
+        var pinned = r.pinLabel !== undefined
+                     && panel.pins.indexOf("" + r.pinLabel) >= 0
+        return (panel.collapsed && !pinned) ? stash : inner
     }
     onPinsChanged: panel.applyPins()
 
@@ -124,7 +145,9 @@ Rectangle {
     // panel 435 -> 435. The Column's own `implicitHeight` is the honest number —
     // it is the sum of the children it actually LAYS OUT, so it excludes the
     // hidden ones by construction and tracks both directions.
-    implicitHeight: header.height + (collapsed ? 0 : inner.implicitHeight + 14)
+    // The header, plus whatever is still in the column — everything when open,
+    // the pinned rows when folded, nothing when folded with none pinned.
+    implicitHeight: header.height + (inner.visible ? inner.implicitHeight + 14 : 0)
     height: implicitHeight
     color: Theme.bgAlt
     radius: Theme.rounding
@@ -164,53 +187,10 @@ Rectangle {
             anchors.leftMargin: 10
             horizontalAlignment: Text.AlignRight
             elide: Text.ElideMiddle
-            // The pin strip takes this space when there is one, because both
-            // are the same thing — what the panel says while it is folded — and
-            // the pins are the half he chose.
-            visible: panel.pins.length === 0 || !panel.collapsed
             text: panel.badge
             color: Theme.textDim
         }
 
-        // WHERE A PINNED ROW LIVES while the panel is folded — the row itself,
-        // moved here and moved back (`applyPins`), not a copy of its value.
-        Item {
-            anchors.left: titleText.right
-            anchors.leftMargin: 12
-            anchors.right: parent.right
-            anchors.rightMargin: 8
-            anchors.verticalCenter: parent.verticalCenter
-            height: 24
-            clip: true
-            Row {
-                id: pinBar
-                spacing: 12
-                clip: true
-                Repeater {
-                    id: pinSlots
-                    // One slot per pin, only while folded. A FIXED width, because
-                    // the row inside takes its width from its parent — a slot sized
-                    // to its contents would be the binding loop the other way
-                    // round, and every attempt to make the row size itself instead
-                    // ended in one (measured, twice).
-                    model: panel.collapsed ? panel.pins : []
-                    // The slots appear a beat after `collapsed` flips, so the
-                    // move has to wait for them — running it on the flip alone
-                    // found no slot and left the row where it was.
-                    onCountChanged: panel.applyPins()
-                    delegate: Item {
-                        property string pinKey: modelData
-                        width: 190
-                        height: 24
-                    }
-                }
-            }
-        }
-        // ONE HEADER, THREE GESTURES. A click folds. A drag past the threshold
-        // moves the whole section in the column, live, with the others sliding
-        // out of the way (ParamsPane's `move` transition) — the file-manager
-        // idiom, docs/DESIGN.md §13. A right-click offers the way back to the
-        // built-in order, which is otherwise a thing you cannot undo.
         MouseArea {
             id: headerDrag
             anchors.fill: parent
@@ -266,6 +246,9 @@ Rectangle {
         anchors.leftMargin: 8
         anchors.rightMargin: 8
         spacing: 5
-        visible: !panel.collapsed
+        visible: !panel.collapsed || panel.pins.length > 0
     }
+
+    // Where an unpinned row waits out a collapse. Never drawn.
+    Item { id: stash; visible: false }
 }
