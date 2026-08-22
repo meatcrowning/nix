@@ -162,6 +162,11 @@ class FakeLibrary(QObject):
     @Property(bool, constant=True)
     def canReveal(self): return True
 
+    # The real Bridge publishes this; a fake that does not exercises the
+    # `=== true` coercion in AlbumGrid rather than the row it guards.
+    @Property(bool, constant=True)
+    def canSystheme(self): return True
+
     @Slot(str)
     def setSort(self, _s): pass
     @Slot(str)
@@ -467,7 +472,11 @@ def main():
     check("menu has the whole album vocabulary, play next in place",
           rows == [("play", True), ("play shuffled", True),
                    ("play next", True), ("add to queue", True),
-                   ("open album", True), ("search artist", True)],
+                   ("open album", True), ("search artist", True),
+                   # An album with no full-size art cannot become a systheme, so
+                   # the row is DISABLED rather than absent (docs/DESIGN.md
+                   # §10.1) — this fake's `albumInfo` returns `fullArt: ""`.
+                   ("create systheme", False)],
           rows)
     labels = [r[0] for r in rows]
     check("'play next' is present", "play next" in labels, labels)
