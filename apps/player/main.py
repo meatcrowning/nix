@@ -53,10 +53,17 @@ import urllib.parse
 from pathlib import Path
 
 from PySide6.QtCore import (QObject, QProcess, Qt, QThread, QTimer, QUrl, Signal,
-                            Slot, Property, QFileSystemWatcher)
+                            Slot, Property, QFileSystemWatcher, QMetaObject,
+                            Q_ARG)
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QProcessEnvironment
 from PySide6.QtGui import QColor, QGuiApplication, QImage
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
+# Imported for its side effect as much as for the name: without QtQuick
+# loaded, PySide has no binding for the `Window` QML root and wraps it as a
+# bare QWindow — which has no `grabWindow`, so `--selftest`'s Hyprland shot
+# failed, and re-wrapping the pointer could not fix it (shiboken caches one
+# wrapper per pointer and the first one wins).
+from PySide6.QtQuick import QQuickWindow  # noqa: F401
 
 HERE = Path(__file__).resolve().parent
 QML = HERE / "qml"
@@ -64,7 +71,8 @@ QML = HERE / "qml"
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
-from kdetheme import theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+from kdetheme import theme_source, is_plasma  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+import kdeshell  # noqa: E402  (pylib; the Plasma session's real QtWidgets window)
 from glyphs import Glyphs  # noqa: E402  (pylib; docs/DESIGN.md 2.3 display-site px())
 
 import atomicsave  # noqa: E402  (sibling module; also used by lyrics.py)
@@ -3966,11 +3974,38 @@ def _has_audio(d):
 # ---------------------------------------------------------------------------
 
 def main():
+    # --selftest: build the whole app OFFSCREEN, look at it, and quit. It is the
+    # only way to check the Plasma face, which is chrome we do not draw — the
+    # menubar, the two toolbars, the status bar and the window background all
+    # come from the KDE style — and the offscreen-render rule (apps/AGENTS.md)
+    # forbids putting a test window on his screen to find out.
+    selftest = "--selftest" in sys.argv
+    if selftest:
+        # Hard, never setdefault, and with no display left to fall back to: an
+        # exported QT_QPA_PLATFORM (his session's, or the wrapper's) would
+        # otherwise win and the selftest would open a real player window on his
+        # screen. With no display Qt aborts instead.
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
+        os.environ.pop("WAYLAND_DISPLAY", None)
+        os.environ.pop("DISPLAY", None)
+
     open_paths = paths_from_argv(sys.argv[1:])
     if handoff_paths(open_paths):
         return
 
-    app = QGuiApplication(sys.argv)
+    # The Controls style, and with it the whole face: `Basic` in the Hyprland
+    # session, `org.kde.desktop` under Plasma — which is not an imitation of the
+    # KDE style but a renderer THROUGH it, so a Slider here is drawn by Oxygen's
+    # own code. pylib/kdeshell.py.
+    kdeshell.pin_controls_style()
+
+    # A QApplication under Plasma, the QGuiApplication we have always used
+    # otherwise: QStyle is a QtWidgets class, and without it there is no system
+    # style to paint with. See kdeshell.make_app.
+    app = kdeshell.make_app(sys.argv, "player")
+    if selftest and app.platformName() != "offscreen":
+        raise SystemExit("selftest refuses to run on platform %r, not offscreen"
+                         % app.platformName())
     app.setApplicationName("player")
     app.setDesktopFileName("player")
 
@@ -3985,7 +4020,25 @@ def main():
     palette = Palette(theme_source(PANEL_THEME))
     style = DeskStyle()
 
-    engine = QQmlApplicationEngine()
+    # TWO ROOFS, ONE APP (docs/DESIGN.md §7.6). Under Hyprland the QML tree IS
+    # the window and all the chrome is the hyprvtb titlebar. Under Plasma the
+    # same `Root.qml` is the central widget of a real QMainWindow, so the
+    # menubar, the view toolbar, the transport toolbar along the bottom and the
+    # status bar are KDE widgets and the window background is the system style's
+    # — the single gradient surface that runs from the titlebar down through the
+    # chrome and behind this content.
+    plasma = is_plasma()
+    shell = kdeshell.shell("player", size=(1080, 720),
+                           min_size=(480, 320)) if plasma else None
+    engine = shell.engine() if plasma else QQmlApplicationEngine()
+    if plasma:
+        # THE SELECTOR IS HOW THE CONTENT CHANGES CLOTHES WITHOUT CHANGING CODE.
+        # With "plasma" set, `qml/+plasma/Foo.qml` transparently replaces
+        # `qml/Foo.qml` for every call site — so the buttons, sliders and menus
+        # in this session are QtQuick.Controls painted through the KDE style,
+        # while the Hyprland tree keeps ours, and not one caller has a branch in
+        # it. Same API, two implementations (apps/AGENTS.md).
+        kdeshell.select_plasma_files(engine)
     ctx = engine.rootContext()
     # air (the MacBook, OS hostname "book") has a much smaller screen than
     # top: the QML lowers the window minimums and caps the now-playing cover
@@ -4007,6 +4060,10 @@ def main():
     ctx.setContextProperty("SearchModel", bridge.searchModel)
     ctx.setContextProperty("QueueModel", bridge.queueModel)
 
+    warnings = []
+    engine.warnings.connect(
+        lambda errs: warnings.extend(e.toString() for e in errs))
+
     theme_comp = QQmlComponent(engine, QUrl.fromLocalFile(str(QML / "theme" / "Theme.qml")))
     theme = theme_comp.create()
     if theme is None:
@@ -4015,12 +4072,123 @@ def main():
     theme.setParent(app)
     ctx.setContextProperty("Theme", theme)
 
-    engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
-    if not engine.rootObjects():
-        sys.exit(1)
+    win = None
+    if plasma:
+        # Root.qml, not Main.qml: the Window wrapper is the Hyprland roof, and
+        # a QQuickWidget hosts an Item.
+        if not shell.load(QML / "Root.qml"):
+            print("failed to load Root.qml", file=sys.stderr)
+            for w in shell.errors() + warnings:
+                print(f"  {w}", file=sys.stderr)
+            sys.exit(1)
+        root = shell.root
+        # The menubar, the view toolbar and their shortcuts, out of `tbButtons`.
+        # `titlebar` is the vtb bridge: its socket is dead in this session, but
+        # every state change still runs `pushButtons()` through it, so its
+        # signals are exactly the "the chrome changed" notification this face
+        # needs — no second source and no polling.
+        shell.bind_chrome(titlebar)
+        shell.bind_status()      # statusLine / statusProgress / statusRight
+        shell.bind_title("windowTitle")   # "artist — title", as under Hyprland
 
-    from winstate import WinState
-    win_state = WinState(engine.rootObjects()[0], "player")  # keep ref: geometry
+        # ---- the finder, where KDE keeps it -----------------------------
+        # A real QLineEdit at the right-hand end of the toolbar. The QML
+        # `searchInput` stays the window's ONE source of search truth (filter vs
+        # full results, Escape, the click-out unfocus are all decided there), so
+        # this is a view onto it in both directions — guarded against the loop
+        # a two-way mirror would otherwise make.
+        mirroring = []
+
+        def on_typed(text):
+            if mirroring:
+                return
+            mirroring.append(1)
+            try:
+                QMetaObject.invokeMethod(root, "setSearchText",
+                                         Q_ARG("QVariant", text))
+            finally:
+                mirroring.pop()
+
+        field = shell.toolbar_search(on_typed, placeholder="Search the library")
+
+        def on_qml_text():
+            if mirroring:
+                return
+            mirroring.append(1)
+            try:
+                text = str(root.property("searchText") or "")
+                if field.text() != text:
+                    field.setText(text)
+            finally:
+                mirroring.pop()
+
+        sig = getattr(root, "searchTextChanged", None)
+        if sig is not None and hasattr(sig, "connect"):
+            sig.connect(on_qml_text)
+        field.returnPressed.connect(
+            lambda: QMetaObject.invokeMethod(root, "submitSearch"))
+        # SPACE AND L ARE PLAY/PAUSE AND FAVOURITE in this session, on QActions
+        # — and a QAction shortcut is matched before the key reaches the focused
+        # widget, so without this the search field could not be typed a space
+        # into. They stand down while it has the keyboard.
+        shell.guard_typing(field)
+        shell.on_action("search", field.setFocus)
+
+        # ---- the transport, along the bottom ----------------------------
+        # A real QToolBar in the bottom area, filled from the same table by
+        # `bar: "transport"`, with the seek slider and its two clocks as the one
+        # widget that takes the room the buttons leave.
+        shell.toolbar("transport", "Transport Bar", area=Qt.BottomToolBarArea)
+        from transport import TransportSeek
+        seek = TransportSeek(player)
+        shell.toolbar_widget("transport", seek, stretch=True)
+
+        # ---- settings: a dialog, not a drawer ---------------------------
+        # There is no titlebar edge for a drawer to slide out of here, and a KDE
+        # program's settings are a dialog. Same `SettingsPage.qml` either way.
+        page_holder = []
+
+        def build_settings():
+            dlg = shell.dialog("settings", "Configure player",
+                               QML / "SettingsPage.qml", size=(420, 420))
+            if not page_holder:
+                page = shell._dialogs["settings"][3]
+                page.setProperty("columns", int(root.property("albumCols") or 7))
+                page.columnsRequested.connect(
+                    lambda n: QMetaObject.invokeMethod(
+                        root, "setAlbumCols", Q_ARG("QVariant", int(n))))
+                page.rescanRequested.connect(bridge.rescan)
+                page.replayGainRequested.connect(player.setReplayGain)
+                page.rgPreampRequested.connect(player.setRgPreamp)
+                page_holder.append(page)
+            # `columns` and the scan line are bindings onto the window's values
+            # under Hyprland; the dialog is a separate scene, so they are pushed.
+            page_holder[0].setProperty("columns", int(root.property("albumCols") or 7))
+            page_holder[0].setProperty("scanStatus", str(root.property("scanStatus") or ""))
+            page_holder[0].setProperty("scanning", bool(root.property("scanning")))
+            return dlg
+
+        def show_settings():
+            build_settings()
+            return shell.show_dialog("settings")
+
+        shell.on_action("settings", show_settings)
+
+        win = shell.show()
+    else:
+        engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
+        if not engine.rootObjects():
+            for w in warnings:
+                print(f"  {w}", file=sys.stderr)
+            sys.exit(1)
+        win = engine.rootObjects()[0]
+
+    if not selftest:
+        from winstate import WinState
+        win_state = WinState(win, "player")  # keep ref: geometry
+
+    if selftest:
+        return _selftest(app, shell, win, plasma, warnings)
 
     bridge.refreshAlbums()
     # With files on the command line, restore the SESSION (shuffle, loop, the
@@ -4036,6 +4204,92 @@ def main():
 
     app.aboutToQuit.connect(player.save_state)
     sys.exit(app.exec())
+
+
+def _selftest(app, shell, win, plasma, warnings):
+    """Look at the window without opening one, and quit.
+
+    Deliberately NOT reached by the normal path: no MPRIS name, no queue socket
+    (both are singletons a running player already holds), no library rescan and
+    no `save_state` on the way out — a harness must not hand him back a queue or
+    a window the size of a test (~/nix/AGENTS.md).
+    """
+    rc = [0]
+
+    def finish():
+        # PLAYER_MENUS: the menubar and both toolbars as text. A menu is not on
+        # screen until it is opened, so no render can show what is in one —
+        # this is the only check the KDE menu structure gets.
+        if plasma and os.environ.get("PLAYER_MENUS"):
+            print(shell.dump_chrome())
+        # PLAYER_DIALOG: build and grab Configure player…, which no shot of the
+        # main window can contain — it is its own window.
+        if plasma and os.environ.get("PLAYER_DIALOG"):
+            shell._actions["settings"].trigger()
+            app.processEvents()
+            shell._dialogs["settings"][0].grab().save(os.environ["PLAYER_DIALOG"])
+            print(f"selftest: wrote {os.environ['PLAYER_DIALOG']}")
+            shell._dialogs["settings"][0].hide()
+        if os.environ.get("PLAYER_TREE"):
+            # What the WIDGET half is wearing — the half a QML-only dump cannot
+            # see, and the half that goes wrong when the KDE platform theme is
+            # missing (kdeshell.apply_palette).
+            try:
+                from PySide6.QtGui import QIcon
+                print(f"style={app.style().objectName()} "
+                      f"window={app.palette().window().color().name()} "
+                      f"text={app.palette().windowText().color().name()} "
+                      f"icons={QIcon.themeName()}")
+            except Exception:  # noqa: BLE001
+                pass
+            root_item = shell.root if shell is not None else win
+            want = os.environ.get("PLAYER_TREE")
+
+            def walk(it, depth=0):
+                if depth > 12 or it is None:
+                    return
+                # VISUAL children, not QObject children: a Repeater's delegates
+                # and anything a view reparents into its contentItem keep their
+                # QObject parent where it was.
+                kids = (it.childItems() if hasattr(it, "childItems")
+                        else it.children())
+                for ch in kids:
+                    try:
+                        cls = ch.metaObject().className()
+                        if ch.property("height") is None:
+                            walk(ch, depth)
+                            continue
+                        name = ch.property("label") or ch.property("text") or ""
+                        if want == "1" or want.lower() in (cls + " " + str(name)).lower():
+                            print("  " * depth + f"{cls} {name!r} "
+                                  f"x={ch.property('x')} w={ch.property('width')} "
+                                  f"y={ch.property('y')} h={ch.property('height')} "
+                                  f"vis={ch.property('visible')}")
+                    except Exception:  # noqa: BLE001
+                        pass
+                    walk(ch, depth + 1)
+
+            walk(root_item)
+        shot = os.environ.get("PLAYER_SHOT")
+        if shot:
+            try:
+                if shell is not None:
+                    shell.window.grab().save(shot)
+                elif win is not None:
+                    win.grabWindow().save(shot)
+                print(f"selftest: wrote {shot}")
+            except Exception as exc:  # noqa: BLE001
+                print(f"selftest: shot failed: {exc}", file=sys.stderr)
+        for w in warnings:
+            print(f"QML WARNING: {w}", file=sys.stderr)
+        if warnings:
+            rc[0] = 1
+        print(f"selftest: root loaded, {len(warnings)} QML warning(s)")
+        app.quit()
+
+    QTimer.singleShot(1500, finish)
+    app.exec()
+    sys.exit(rc[0])
 
 
 if __name__ == "__main__":
