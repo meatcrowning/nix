@@ -436,38 +436,38 @@ anything"*. Two states, no controls:
    Playback is viewer, on a double-click in the grid. A single click in the grid
    does nothing at all, deliberately.
 
-**A video job previews as ONE frame, and that is the backend, not this pane.**
-[his] *"why will sampling previews only show the first frame from the
-generation"* — measured 2026-08-06: painter's side is fine. Three synthetic
-frames pushed through `_on_preview` (red, green, blue) were each grabbed off the
-real pane offscreen, so the `image://livepreview/<tick>` URL does reload per
-frame and the newest one is what is drawn. What arrives is the same picture:
-`latent_preview.Latent2RGBPreviewer.decode_latent_to_preview` does
-`x0 = x0[0, :, 0]` for a 5-D latent — the clip's first frame — and the previewer
-API hands back exactly ONE image per step, so no client can be shown more (its
-own web UI included). `--preview-method auto` resolves to Latent2RGB, and the
-`taesd`/`taehv` route is not a way out: `TAEHVPreviewerImpl` slices
-`x0[:1, :, :1]`, one frame again, and needs a `models/vae_approx/taehv*` that is
-not installed. **Anything more would be a local patch to
-`/home/lam/comfy/latent_preview.py`**, i.e. a fourth local commit on a checkout
-that is maintained by rebasing onto upstream tags.
+**A video job WALKS the clip, and that walk is a local backend patch.** [his]
+*"why will sampling previews only show the first frame from the generation"* —
+measured 2026-08-06: painter's side was never the problem. Three synthetic
+frames pushed through `_on_preview` were each grabbed off the real pane
+offscreen, so the `image://livepreview/<tick>` URL does reload per frame.
+Upstream ComfyUI slices the temporal axis to index 0 in every video previewer
+(`Latent2RGBPreviewer` `x0[0, :, 0]`, `TAEHVPreviewerImpl` `x0[:1, :, :1]`) and
+hands back exactly ONE image per sampler step, so no client — its own web UI
+included — can be shown more. He ruled a patch out once (*"just remove that
+stuff for previewing, i think doing it how i want would kill inference
+speeds"*), then asked for *"frame X of Y"* in the tag, which is what made the
+slice index worth moving: the cost is nil, because the slice happens either way
+and only the index changes.
 
-**He ruled that out once** — [his] *"just remove that stuff for previewing, i
-think doing it how i want would kill inference speeds"* — and the tag went back
-to the single word `sampling`.
+So `/home/lam/comfy/latent_preview.py` carries a local commit (a fourth, on a
+checkout maintained by rebasing onto upstream tags) that makes the slice a
+cursor and carries the position out with the image as a fourth element of the
+preview tuple, merged into the event-4 metadata by a matching patch to
+`comfy_execution/progress.py`. `comfy.py`'s `_on_binary` handles BOTH shapes and
+`_on_connected` announces `supports_preview_metadata`, because that is the only
+channel that can say which frame a preview is; `PreviewPane`'s tag reads
+`sampling · frame X of Y`.
 
-**Then he asked the other half of it (2026-08-22):** *"the 'sampling' text
-should also include 'frame X of Y'"*, plus *"im pretty sure a recent upstream
-commit made it so the actual individual frames (past the first frame) can be
-previewed"*. Checked against upstream, not from memory: `git fetch` on
-`/home/lam/comfy` and the only commit newer than 0.30.0 touching
-`latent_preview.py` is `8e869efc` "Add support for taeh3", which adds one name
-to `VIDEO_TAES`. **On upstream master both previewers still slice the temporal
-axis to index 0** — `Latent2RGBPreviewer` `x0[0, :, 0]`, `TAEHVPreviewerImpl`
-`x0[:1, :, :1]` — and there is no animated-preview path anywhere in the tree. So
-the tag now reads `sampling · frame 1 of N`: the number is a constant because
-the frame is, and saying which frame you are looking at is the question he was
-actually asking. A *moving* X would still be the local patch he ruled out.
+**The cursor is paced by the STEP COUNT, not incremented by one.** [his] *"itll
+only show like half the frames preview and then the gen will be finished"*
+(2026-08-22) — one preview arrives per sampler step, so a one-frame-per-preview
+cursor walks exactly `steps` frames and a 20-step job over a 41-frame clip ends
+at frame 20. `prepare_callback` now hands the previewer its `steps` and
+`_pick_frame` maps the cursor onto the whole clip: frame 1 on the first preview,
+the last frame on the last, evenly spaced in between, whatever the ratio. Fewer
+steps than frames means a sparser sweep — one image per step is the API's
+ceiling, not something painter can raise.
 
 If previews ever appear to stop rather than merely repeat a frame, the place to
 look is `comfy.py`'s `_on_binary`: it keeps only `BinaryEventTypes.PREVIEW_IMAGE`
@@ -483,12 +483,11 @@ Two things about the backend, both worth knowing before debugging an empty pane:
   `X-RestartIfChanged=false`, so a backend that was already up keeps running
   without it until it is restarted. That is why the pane says so once a job has
   been going 45s with no frame, rather than "waiting" forever.
-- **A video preview is a STILL FRAME PER STEP, not a moving clip.**
-  `Latent2RGBPreviewer` takes `x0[0, :, 0]` out of a 5-D latent — the first
-  frame — and Comfy's own web UI shows the same thing. `MiniMaxH3AV` carries the
-  RGB factors, so `auto` works with no extra files; the `taehv` route (a real
-  decode rather than the RGB approximation) needs `models/vae_approx/taehv*`,
-  which is not installed, and is still one frame at a time.
+- **A video preview is one still frame per step, not a moving clip.** The local
+  patch chooses WHICH frame each step shows (above); it cannot make the backend
+  send two. `MiniMaxH3AV` carries the RGB factors, so `auto` works with no extra
+  files; the `taehv` route (a real decode rather than the RGB approximation)
+  needs `models/vae_approx/taehv*`, which is not installed.
 
 That pane is why `painter.nix` carries `qtmultimedia` — and with it viewer's
 NVDEC pin, for the reason measured there.
