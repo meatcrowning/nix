@@ -136,6 +136,50 @@ check("kwin rule updated in place",
 check("no duplicate rule listing",
       listed2.count("winstate-app-kw2") == 1 and gen2.get("count") == "2")
 
+# 6c. the rule is kept off dialogs: normal window types only.
+check("kwin rule is normal-windows-only", dict(g2["winstate-app-kw2"]).get("types") == "1")
+
+# 7. WAYLAND: no rule may exist, and the one an older version wrote is deleted.
+#    The platform here is offscreen, so stand in for the check itself; and stub
+#    the reconfigure call, which would otherwise reach the REAL KWin.
+import winstate                                             # noqa: E402
+winstate._is_wayland = lambda: True
+reconfigures = []
+winstate._kwin_reconfigure = lambda: reconfigures.append(1)
+os.environ["XDG_CURRENT_DESKTOP"] = "KDE"
+
+w9 = make_win(0, 0, 700, 500)
+ws9 = WinState(w9, "app-kw2")          # same app: its stale rule is sitting there
+g3 = kwin_groups()
+check("wayland drops the stale rule", "winstate-app-kw2" not in g3)
+check("wayland delists it too",
+      "winstate-app-kw2" not in dict(g3.get("General", [])).get("rules", ""))
+check("wayland leaves his own rule alone", "mine" in g3)
+check("kwin asked to reconfigure", len(reconfigures) == 1)
+
+ws9._save()
+check("wayland writes no rule back", "winstate-app-kw2" not in kwin_groups())
+
+# A second app start finds nothing to drop, so KWin is not poked again.
+WinState(make_win(0, 0, 700, 500), "app-kw2")
+check("no reconfigure when nothing changed", len(reconfigures) == 1)
+
+# 7b. a Wayland client reads x/y as 0 forever — that must not overwrite a
+#     position an X11 session recorded.
+import json                                                 # noqa: E402
+_state_path("app-wl").parent.mkdir(parents=True, exist_ok=True)
+_state_path("app-wl").write_text(json.dumps(
+    {"x": 640, "y": 400, "width": 800, "height": 600,
+     "maximized": False, "fullscreen": False}))
+wA = make_win(0, 0, 800, 600)
+wsA = WinState(wA, "app-wl")
+wA.resize(900, 700)                    # he resizes it; position he cannot change
+wsA._save()
+saved = json.loads(_state_path("app-wl").read_text())
+check("wayland keeps the recorded position", saved["x"] == 640 and saved["y"] == 400)
+check("wayland still records size", saved["width"] == 900 and saved["height"] == 700)
+
+winstate._is_wayland = lambda: False
 os.environ.pop("XDG_CURRENT_DESKTOP", None)
 
 print()

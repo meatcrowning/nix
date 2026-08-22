@@ -24,16 +24,35 @@ when the app next starts. Maximized / fullscreen survives too.
   Either way the position is *recorded* here, so nothing is lost and a
   compositor that does honour it gets the right value.
 
-**KWin window rules (Plasma only).** When we detect a KDE Plasma session we
-also write a per-app rule into `~/.config/kwinrulesrc` carrying the recorded
-resting position (`positionrule` = *Apply Initially*, keyed on `wmclass` =
-`app_id`). That is the only client-side way to make KWin restore a window's
-position, since it will not honour a client `setPosition`. We only ever touch
-groups we own — named `winstate-<app>` — so a hand-made rule of yours is never
-disturbed, and the read-modify-write is locked and atomic so two apps writing
-at once cannot corrupt the file. A written or changed rule becomes live at the
-next KWin start (login) or `kwin reconfigure`; it never moves an already-open
-window (Apply Initially fires only when a window is mapped).
+**KWin window rules: X11 only, and NEVER under Wayland.** On an X11 session we
+write a per-app rule into `~/.config/kwinrulesrc` carrying the recorded resting
+position (`positionrule` = *Apply Initially*, keyed on `wmclass` = `app_id`,
+`types` = normal windows only). We only ever touch groups we own — named
+`winstate-<app>` — so a hand-made rule of yours is never disturbed, and the
+read-modify-write is locked and atomic so two apps writing at once cannot
+corrupt the file.
+
+**Under KWin's Wayland session that rule is a trap, and writing one is a bug we
+already shipped.** Two independent halves, both fatal:
+
+- A Wayland client is never told where it is, so `QWindow.x()/y()` read 0 for
+  the whole life of the window. The rule we wrote therefore carried
+  `position=0,0` — and *Apply Initially* faithfully forced every window of the
+  app into the top-left corner at every launch. Recording a position we cannot
+  know and then feeding it back is worse than not remembering at all.
+- A KWin rule matches on `wmclass`, and every toplevel of one app shares its
+  `app_id` — main window, About box, any dialog. `types` cannot separate them
+  here either: KWin gives every xdg-shell toplevel `WindowType::Normal`
+  (`XdgToplevelWindow`; the NET types are an X11 notion), so a dialog is a
+  normal window as far as the rule is concerned. That is why the About box
+  spawned in the corner too.
+
+So on Wayland we write no rule, and on first run we DELETE the `winstate-<app>`
+group we left behind, then ask KWin to reconfigure so the removal takes effect
+without a relog. The cost is stated plainly: on KWin/Wayland a window's
+position is not restored at all, because no client-side mechanism exists to do
+it honestly. Size still is (client-controlled), and the position is still
+recorded, so X11 and Hyprland lose nothing.
 
 Guards, because a restore that lands off-screen or at zero size is worse than
 none: a saved rect with a non-positive width/height is dropped, and a position
@@ -61,6 +80,9 @@ _SAVE_DEBOUNCE_MS = 500
 _KWIN_APPLY = 3
 # KWin match type for wmclass: 1 == exact match.
 _KWIN_EXACT = 1
+# NET::NormalMask — the `types` mask that keeps the rule off dialogs and
+# utility windows. Meaningful on X11 only; see the docstring.
+_KWIN_NORMAL_ONLY = 1
 
 
 def _state_path(app_name):
@@ -74,6 +96,15 @@ def _is_kwin_session():
     desk = (os.environ.get("XDG_CURRENT_DESKTOP", "")
             + ":" + os.environ.get("XDG_SESSION_DESKTOP", "")).upper()
     return "KDE" in desk or "PLASMA" in desk or bool(os.environ.get("KDE_FULL_SESSION"))
+
+
+def _is_wayland():
+    """True when the app is a Wayland client — i.e. when it can never learn its
+    own position, so anything we record for it is a fiction."""
+    try:
+        return (QGuiApplication.platformName() or "").startswith("wayland")
+    except Exception:
+        return False
 
 
 def _kwinrules_path():
@@ -118,14 +149,15 @@ def _kv_set(kvs, key, value):
     kvs.append((key, value))
 
 
-def _write_kwin_rule(app_name, x, y):
-    """Ensure a KWin rule ``winstate-<app>`` that applies ``x,y`` to the window
-    whose ``wmclass`` (Wayland ``app_id``) is ``app_name``. Locked, atomic, and
-    scoped to our own group + the ``[General]`` rule list — never a rule of his."""
+def _rules_rmw(mutate):
+    """Read `kwinrulesrc`, hand the parsed group list to `mutate`, and write it
+    back atomically under a lock — never a partial file, and never two apps
+    interleaving. `mutate` returns True if it changed anything; if it did not,
+    nothing is written at all (so a no-op start-up check cannot churn the file
+    KWin itself owns). Returns what `mutate` returned."""
     import fcntl
 
     path = _kwinrules_path()
-    group = "winstate-" + app_name
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         lock = path.with_name(path.name + ".winstate.lock")
@@ -139,34 +171,95 @@ def _write_kwin_rule(app_name, x, y):
             except OSError:
                 text = ""
             groups = _parse_kconfig(text)
-
-            names = {n for n, _ in groups}
-            gen = next((kvs for n, kvs in groups if n == "General"), None)
-            if gen is None:
-                gen = []
-                groups.insert(0, ("General", gen))
-            rules = dict(gen).get("rules", "")
-            listed = [r for r in rules.split(",") if r]
-            if group not in listed:
-                listed.append(group)
-            _kv_set(gen, "rules", ",".join(listed))
-            _kv_set(gen, "count", str(len(listed)))
-
-            kvs = next((kv for n, kv in groups if n == group), None)
-            if kvs is None:
-                kvs = []
-                groups.append((group, kvs))
-            _kv_set(kvs, "Description", "winstate: %s position" % app_name)
-            _kv_set(kvs, "wmclass", app_name)
-            _kv_set(kvs, "wmclasscomplete", "false")
-            _kv_set(kvs, "wmclassmatch", str(_KWIN_EXACT))
-            _kv_set(kvs, "position", "%d,%d" % (int(x), int(y)))
-            _kv_set(kvs, "positionrule", str(_KWIN_APPLY))
-
+            if not mutate(groups):
+                return False
             tmp = path.with_suffix(".winstate.tmp")
             tmp.write_text(_emit_kconfig(groups))
             tmp.replace(path)
+            return True
     except OSError:
+        return False
+
+
+def _general(groups):
+    """The `[General]` group's key/value list, created if the file has none."""
+    gen = next((kvs for n, kvs in groups if n == "General"), None)
+    if gen is None:
+        gen = []
+        groups.insert(0, ("General", gen))
+    return gen
+
+
+def _listed(gen):
+    return [r for r in dict(gen).get("rules", "").split(",") if r]
+
+
+def _write_kwin_rule(app_name, x, y):
+    """Ensure a KWin rule ``winstate-<app>`` that applies ``x,y`` to the window
+    whose ``wmclass`` (X11 resource name) is ``app_name``. X11 ONLY — see the
+    module docstring for why this must never run on Wayland."""
+    group = "winstate-" + app_name
+
+    def mutate(groups):
+        gen = _general(groups)
+        listed = _listed(gen)
+        if group not in listed:
+            listed.append(group)
+        _kv_set(gen, "rules", ",".join(listed))
+        _kv_set(gen, "count", str(len(listed)))
+
+        kvs = next((kv for n, kv in groups if n == group), None)
+        if kvs is None:
+            kvs = []
+            groups.append((group, kvs))
+        _kv_set(kvs, "Description", "winstate: %s position" % app_name)
+        _kv_set(kvs, "wmclass", app_name)
+        _kv_set(kvs, "wmclasscomplete", "false")
+        _kv_set(kvs, "wmclassmatch", str(_KWIN_EXACT))
+        # Normal windows only: a rule keyed on the app's class otherwise moves
+        # its dialogs too, and an About box does not want the main window's
+        # resting place.
+        _kv_set(kvs, "types", str(_KWIN_NORMAL_ONLY))
+        _kv_set(kvs, "position", "%d,%d" % (int(x), int(y)))
+        _kv_set(kvs, "positionrule", str(_KWIN_APPLY))
+        return True
+
+    _rules_rmw(mutate)
+
+
+def _drop_kwin_rule(app_name):
+    """Delete the ``winstate-<app>`` group and delist it. Returns True if the
+    file actually changed — the caller only reconfigures KWin then."""
+    group = "winstate-" + app_name
+
+    def mutate(groups):
+        gen = _general(groups)
+        listed = _listed(gen)
+        present = any(n == group for n, _ in groups)
+        if group not in listed and not present:
+            return False
+        groups[:] = [(n, kv) for n, kv in groups if n != group]
+        listed = [r for r in listed if r != group]
+        _kv_set(gen, "rules", ",".join(listed))
+        _kv_set(gen, "count", str(len(listed)))
+        return True
+
+    return _rules_rmw(mutate)
+
+
+def _kwin_reconfigure():
+    """Ask the running KWin to re-read its rules. Without this a removed rule
+    keeps applying until the next login — and the whole point of removing it is
+    that windows stop landing in the corner NOW."""
+    try:
+        from PySide6.QtDBus import QDBusConnection, QDBusMessage
+        bus = QDBusConnection.sessionBus()
+        if not bus.isConnected():
+            return
+        bus.call(QDBusMessage.createMethodCall(
+            "org.kde.KWin", "/KWin", "org.kde.KWin", "reconfigure"),
+            timeout=2000)
+    except Exception:
         pass
 
 
@@ -183,6 +276,12 @@ class WinState(QObject):
         self._timer.timeout.connect(self._save)
 
         self._restore()
+
+        # One-time repair: a Wayland session must have no winstate rule of ours
+        # (it could only ever carry position=0,0 — see the module docstring), so
+        # delete the one older versions wrote and make KWin forget it now.
+        if _is_wayland() and _is_kwin_session() and _drop_kwin_rule(app_name):
+            _kwin_reconfigure()
 
         for sig in (window.xChanged, window.yChanged,
                     window.widthChanged, window.heightChanged,
@@ -216,11 +315,17 @@ class WinState(QObject):
             "fullscreen": fullscreen,
         }
         # When maximized/fullscreen, x/y/width/height are the screen's, not the
-        # window's own resting geometry — don't let them overwrite it.
+        # window's own resting geometry — don't let them overwrite it. On
+        # Wayland x/y are not the window's either: the client is never told
+        # where it is and reads 0 forever, so keeping whatever an X11 (or
+        # earlier) session recorded is strictly better than writing that 0 down.
+        stale = ["x", "y"] if _is_wayland() else []
         if maximized or fullscreen:
+            stale = ["x", "y", "width", "height"]
+        if stale:
             prev = self._load()
             if prev:
-                for k in ("x", "y", "width", "height"):
+                for k in stale:
                     if isinstance(prev.get(k), int):
                         data[k] = prev[k]
         if data["width"] < _MIN_DIM or data["height"] < _MIN_DIM:
@@ -233,10 +338,12 @@ class WinState(QObject):
             tmp.replace(self._path)
         except OSError:
             pass
-        # On a KWin session, mirror the resting position into a window rule —
-        # the only client-side way to get position restored there. Skip while
-        # maximized/fullscreen (x/y are the screen's, not the resting rect).
-        if not (maximized or fullscreen) and _is_kwin_session():
+        # On an X11 KWin session, mirror the resting position into a window
+        # rule — the only client-side way to get position restored there. Skip
+        # while maximized/fullscreen (x/y are the screen's, not the resting
+        # rect), and NEVER on Wayland, where the position we hold is a fiction
+        # and the rule would pin every window of this app to the corner.
+        if not (maximized or fullscreen) and _is_kwin_session() and not _is_wayland():
             _write_kwin_rule(self._app_name, data["x"], data["y"])
 
     # --- restoring --------------------------------------------------------
