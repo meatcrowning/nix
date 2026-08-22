@@ -1944,6 +1944,131 @@ def test_escape(win, ctl):
     check("Escape closes the settings drawer", APP.property("showSettings") is False)
 
 
+def _section_order(pane):
+    """The section keys in the order they are LAID OUT, which is the thing the
+    user sees — not the order of a list somewhere."""
+    rows = []
+    for it in walk(pane):
+        try:
+            key = it.property("sectionKey")
+        except RuntimeError:
+            continue
+        if not key:
+            continue
+        ld = it.parentItem()
+        if ld is None or not ld.isVisible():
+            continue
+        rows.append((ld.y(), str(key)))
+    rows.sort()
+    return [k for _, k in rows]
+
+
+def _loader_for(pane, key):
+    for it in walk(pane):
+        if it.property("sectionKey") == key:
+            return it.parentItem(), it
+    return None, None
+
+
+def test_panel_order_and_pins(win, ctl, tmp, keep):
+    """The column he arranges, and the values a folded panel still shows."""
+    from PySide6.QtCore import QPointF
+
+    pane = find(win.contentItem(), "ParamsPane")
+    check("the params pane is there", pane is not None)
+    if pane is None:
+        return
+
+    pane.metaObject().invokeMethod(pane, "resetOrder")
+    spin(150)
+    before = _section_order(pane)
+    check("the built-in order is the one it starts in",
+          before[:3] == ["model", "resolution", "prompt"], before)
+
+    # Drag `prompt`'s header up past `resolution`'s middle: it takes that slot
+    # and everything between shifts down, exactly as a release would leave it.
+    src_ld, _ = _loader_for(pane, "prompt")
+    dst_ld, _ = _loader_for(pane, "resolution")
+    if src_ld is None or dst_ld is None:
+        check("both sections are on screen to drag between", False,
+              (src_ld, dst_ld))
+        return
+    # A hair above the target's midpoint: at exactly the midpoint the drag has
+    # not passed it yet, which is the point of using midpoints.
+    mid = dst_ld.mapToItem(None, QPointF(0, dst_ld.height() / 2)).y() - 2
+    pane.metaObject().invokeMethod(pane, "dragSection",
+                                   Q_ARG("QVariant", "prompt"),
+                                   Q_ARG("QVariant", float(mid)))
+    spin(250)
+    after = _section_order(pane)
+    check("dragging a header moves that section",
+          after.index("prompt") < after.index("resolution"),
+          after)
+    check("...and moves nothing else",
+          [k for k in after if k != "prompt"] == [k for k in before if k != "prompt"],
+          after)
+
+    # Persisted on RELEASE, not during the drag.
+    prefs_path = os.path.join(os.environ["XDG_STATE_HOME"], "painter", "prefs.json")
+    pane.metaObject().invokeMethod(pane, "dropSection")
+    spin(120)
+    APP.metaObject().invokeMethod(APP, "saveState")
+    spin(80)
+    saved = json.loads(json.load(open(prefs_path)).get("sections") or "[]")
+    check("the order is persisted for a relaunch",
+          saved.index("prompt") < saved.index("resolution"), saved)
+
+    # A saved order that has never heard of a section must not lose it: it comes
+    # back at its BUILT-IN position, not appended at the bottom.
+    prefs = keep[2]
+    prefs.set("sections", json.dumps(["prompt", "model"]))
+    pane.metaObject().invokeMethod(pane, "buildSections")
+    spin(200)
+    rebuilt = _section_order(pane)
+    check("a section missing from the saved order returns in place, not last",
+          rebuilt[:2] == ["prompt", "lora"]
+          and rebuilt.index("resolution") == rebuilt.index("model") + 1,
+          rebuilt)
+
+    pane.metaObject().invokeMethod(pane, "resetOrder")
+    spin(150)
+    check("reset puts the built-in order back", _section_order(pane) == before,
+          _section_order(pane))
+
+    # ---- pins
+    _, panel = _loader_for(pane, "resolution")
+    rows = [it for it in walk(panel)
+            if it.property("pinLabel") not in (None, "")
+            and it.metaObject().className().startswith("Field")]
+    check("the resolution panel has pinnable rows", bool(rows), len(rows))
+    if not rows:
+        return
+    row = rows[-1]                      # "MP", whose value is a number
+    label = str(row.property("pinLabel"))
+    panel.metaObject().invokeMethod(panel, "togglePin", Q_ARG("QVariant", row))
+    spin(120)
+    pins = prop(panel, "pins") or []
+    check("right-clicking a row pins it", label in pins, (label, pins))
+    check("...and the pin reports the row's live value",
+          str(row.property("pinValue")) != "", row.property("pinValue"))
+
+    panel.setProperty("collapsed", True)
+    spin(150)
+    strip = [it for it in walk(panel)
+             if it.metaObject().className().startswith(("PixelText", "Label"))
+             and it.isVisible() and label in str(it.property("text") or "")]
+    check("a collapsed panel still shows its pins", bool(strip),
+          [str(it.property("text")) for it in walk(panel)
+           if it.isVisible() and it.property("text")])
+
+    panel.metaObject().invokeMethod(panel, "togglePin", Q_ARG("QVariant", row))
+    spin(120)
+    check("unpinning takes it back off", label not in (prop(panel, "pins") or []),
+          prop(panel, "pins"))
+    panel.setProperty("collapsed", False)
+    spin(120)
+
+
 def test_browse_view(win, ctl, tmp):
     """Browse <-> View: enter, walk, zoom, leave.
 
@@ -3145,6 +3270,7 @@ def main():
     print("== resolution ==");        test_resolution(win, ctl)
     print("== dropdowns ==");         test_dropdown(win, ctl)
     print("== escape ==");            test_escape(win, ctl)
+    print("== panel order + pins =="); test_panel_order_and_pins(win, ctl, tmp, keep)
     print("== browse/view ==");      test_browse_view(win, ctl, tmp)
     print("== inject ==");            test_inject(win, ctl, tmp)
     print("== copy prompt ==");       test_copy_prompt(win, ctl, tmp)

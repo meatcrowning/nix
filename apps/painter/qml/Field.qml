@@ -9,6 +9,29 @@ Item {
     property int labelWidth: 96
     default property alias content: holder.data
 
+    // PINNING (docs/painter-kde-layout.md phase 7). Right-click a row's label to
+    // pin it: the value then keeps showing in the panel's header while the
+    // panel is COLLAPSED, so a folded panel can still say the one number you
+    // care about. `pinLabel` is the row's identity in the panel's saved pin
+    // list; `pinValue` is read off whatever control the row holds, so a row
+    // does not have to be told how to summarise itself.
+    property string pinLabel: row.label
+    // The row's value, found by descending into whatever control it holds — a
+    // Field's content is usually a Row with a Spin (and a readout) inside it,
+    // not the Spin itself, so the first child is rarely the answer.
+    function pinValueOf(it, depth) {
+        if (!it || depth > 3) return ""
+        if (it.value !== undefined) return "" + it.value
+        if (it.checked !== undefined) return it.checked ? "on" : "off"
+        for (var i = 0; i < it.children.length; i++) {
+            var v = row.pinValueOf(it.children[i], depth + 1)
+            if (v !== "") return v
+        }
+        return ""
+    }
+    readonly property string pinValue:
+        row.pinValueOf(holder.children.length > 0 ? holder.children[0] : null, 0)
+
     width: parent ? parent.width : 240
     height: Math.max(22, holder.childrenRect.height)
 
@@ -31,4 +54,15 @@ Item {
     }
 
     ToolTipArea { text: row.hint; anchors.fill: lbl; enabled: row.hint !== "" }
+
+    // Right button only, so the tooltip's hover and any left-click inside the
+    // control are untouched. `panel` is the enclosing Panel's id, which QML
+    // resolves up the creation-context chain — the same way every row in here
+    // already reaches `root`.
+    MouseArea {
+        anchors.fill: lbl
+        acceptedButtons: Qt.RightButton
+        onClicked: if (typeof panel !== "undefined" && panel && panel.togglePin)
+                       panel.togglePin(row)
+    }
 }

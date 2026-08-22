@@ -19,11 +19,45 @@ GroupBox {
     // straight through.
     property string persistKey: ""
     property bool collapsed: false
-    Component.onCompleted: if (persistKey) collapsed = Prefs.get(persistKey) === true
+    Component.onCompleted: {
+        if (!persistKey) return
+        collapsed = Prefs.get(persistKey) === true
+        try { panel.pins = JSON.parse(Prefs.get(persistKey + ".pins") || "[]") }
+        catch (e) { panel.pins = [] }
+    }
     onCollapsedChanged: if (persistKey) Prefs.set(persistKey, collapsed)
     property bool collapsible: true
     property string badge: ""
     default property alias content: inner.data
+
+    // Reordering and pinning, same API and same rules as ../Panel.qml — read
+    // the comments there; only the drawing differs.
+    property string sectionKey: ""
+    property bool reorderable: sectionKey !== "" && typeof root !== "undefined"
+                               && root && root.dragSection !== undefined
+    property var pins: []
+
+    function togglePin(item) {
+        var k = item && item.pinLabel ? "" + item.pinLabel : ""
+        if (k === "") return
+        var p = panel.pins.slice()
+        var i = p.indexOf(k)
+        if (i >= 0) p.splice(i, 1)
+        else p.push(k)
+        panel.pins = p
+        if (persistKey) Prefs.set(persistKey + ".pins", JSON.stringify(p))
+    }
+
+    readonly property var pinnedRows: {
+        var out = []
+        if (panel.pins.length === 0) return out
+        for (var i = 0; i < inner.children.length; i++) {
+            var c = inner.children[i]
+            if (c && c.pinLabel !== undefined
+                && panel.pins.indexOf("" + c.pinLabel) >= 0) out.push(c)
+        }
+        return out
+    }
 
     width: parent ? parent.width : 320
     clip: true
@@ -68,12 +102,73 @@ GroupBox {
             anchors.left: row.right
             anchors.leftMargin: 8
             anchors.verticalCenter: parent.verticalCenter
+            // The pin strip takes this space when there is one — same rule as
+            // ../Panel.qml.
+            visible: !pinStrip.visible
             text: panel.badge
             elide: Text.ElideMiddle
             opacity: 0.7
             width: Math.max(0, panel.width - row.implicitWidth - panel.leftPadding
                                - panel.rightPadding - 12)
             horizontalAlignment: Text.AlignRight
+        }
+
+        Item {
+            anchors.left: row.right
+            anchors.leftMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            height: pinStrip.height
+            width: Math.max(0, panel.width - row.implicitWidth - panel.leftPadding
+                               - panel.rightPadding - 12)
+            clip: true
+            Row {
+                id: pinStrip
+                anchors.right: parent.right
+                visible: panel.collapsed && panel.pinnedRows.length > 0
+                spacing: 10
+                Repeater {
+                    model: panel.pinnedRows
+                    delegate: Label {
+                        text: modelData.pinLabel + " " + modelData.pinValue
+                    }
+                }
+            }
+        }
+
+        // Drag to move the section, right-click for the way back to the
+        // built-in order. Left-click is NOT taken: the expander button and the
+        // whole-panel TapHandler below already own it.
+        MouseArea {
+            anchors.fill: parent
+            enabled: panel.reorderable
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            propagateComposedEvents: true
+            cursorShape: dragging ? Qt.ClosedHandCursor : Qt.ArrowCursor
+
+            property real pressY: 0
+            property bool dragging: false
+
+            onPressed: function (m) { pressY = m.y; dragging = false; m.accepted = true }
+            onPositionChanged: function (m) {
+                if (!pressed) return
+                if (!dragging && Math.abs(m.y - pressY) < 6) return
+                dragging = true
+                root.dragSection(panel.sectionKey, mapToItem(null, m.x, m.y).y)
+            }
+            onReleased: if (dragging) root.dropSection()
+            onCanceled: dragging = false
+            onClicked: function (m) {
+                if (m.button === Qt.RightButton) {
+                    var pt = mapToItem(null, m.x, m.y)
+                    root.ctxMenu.open(pt.x, pt.y, [
+                        { label: "reset panel order",
+                          trigger: () => root.resetOrder() }
+                    ])
+                    return
+                }
+                if (dragging) { dragging = false; return }
+                if (panel.collapsible) panel.collapsed = !panel.collapsed
+            }
         }
     }
 

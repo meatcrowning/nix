@@ -59,6 +59,29 @@ here:
 - **`paramsDocked`** tells `Root.qml` the column is elsewhere: no splitter, the
   results fill the window, and the parameters/gallery radio pair leaves the menu
   because both are visible at once.
+- **The parameter column is a `Repeater` over an ORDER, not a declared stack.**
+  `ParamsPane.builtinOrder` is the old declaration order and one saved list
+  (`Prefs["sections"]`) reorders it — dragging any panel header moves that
+  section, live, and a right-click on a header offers the way back. Three rules
+  it is built on:
+    - **One order serves all three modes.** A section a mode does not have is
+      hidden, and a `Column` skips an invisible child — which is exactly what
+      produced the per-mode orders before, so nothing had to be per-mode.
+    - **`sectionVisible(key)` on the pane owns the gate, not a `visible:` on the
+      panel.** An item\'s `visible` reads back its EFFECTIVE visibility, so
+      `Loader.visible: item.visible` latches false the moment it is false once
+      and empties the whole column. Measured exactly that way.
+    - **A `ListModel`, not a JS array.** `move()` moves a delegate; reassigning
+      an array rebuilds every one of them, which would destroy the header being
+      dragged mid-drag.
+  A key the saved order does not name is re-inserted at its BUILT-IN position,
+  so a new panel can never be buried at the bottom or lost.
+- **Pins.** Right-click a row\'s label (`Field`, `Toggle`) to pin it: the panel
+  header keeps showing `label value` while the panel is COLLAPSED, in place of
+  the badge. `pinLabel`/`pinValue` is the protocol — `pinValue` descends into
+  whatever control the row holds, because a Field\'s content is usually a Row
+  with the Spin inside it. Stored under `<persistKey>.pins`. The chips are
+  read-only; a pinned control is not editable from the header.
 - **Browse ↔ View.** `inView` plus `OutputView.qml` — one output filling the
   pane, entered by Return or a double-click (which no longer launches `viewer`;
   that is still File → Open in Viewer), left by Escape, walked with Alt+Left/
