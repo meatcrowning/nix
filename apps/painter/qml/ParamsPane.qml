@@ -282,6 +282,9 @@ Item {
             id: controlsFlick
             anchors.fill: parent
             anchors.margins: 10
+            // Flush with the chrome, like the results side — the first panel's
+            // own frame is the separation.
+            anchors.topMargin: 0
             anchors.bottomMargin: root.bottomInset
             contentHeight: controlsCol.implicitHeight
             clip: true

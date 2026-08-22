@@ -2448,23 +2448,6 @@ class Painter(QObject):
             return False
 
     @Slot()
-    def startSystemMove(self):
-        """Drag the WINDOW from a piece of its own background.
-
-        The compositor moves the window; the app only asks. `self.window` is a
-        QWindow under both roofs — the QML `Window` under Hyprland, the
-        QMainWindow's handle under Plasma — so one call serves both, and neither
-        needs the app to track the pointer.
-        """
-        w = self.window
-        if w is None:
-            return
-        try:
-            w.startSystemMove()
-        except (AttributeError, RuntimeError):
-            pass
-
-    @Slot()
     def toggleFullScreen(self):
         """One implementation for both roofs: `self.window` is a QWindow either
         way — the QML `Window` under Hyprland, the QMainWindow's window handle
@@ -2714,7 +2697,11 @@ def main():
         shell.on_action("set", open_settings)
         # The filter field at the right-hand end of the toolbar, where every KDE
         # program keeps one. It filters the gallery by filename and prompt.
-        shell.toolbar_search(ctl.gallery.setFilter, placeholder="Filter outputs")
+        # Right-aligned with the RESULTS pane rather than with the window: it
+        # filters the outputs, so it belongs over them and not over the
+        # parameter column. `paneLeadW` is where that pane ends (the splitter).
+        shell.toolbar_search(ctl.gallery.setFilter, placeholder="Filter outputs",
+                             align_right_to="paneLeadW")
         # The window is how the controller knows whether he is watching: a batch
         # that finishes behind a rolled-up or unfocused painter says so with a
         # desktop toast instead (Painter._onscreen).
