@@ -498,6 +498,8 @@ def _build_shell_class():
             self._toolbar = None
             self._status = None
             self._status_label = None
+            self._status_right = None
+            self._right_prop = "statusRight"
             self._progress = None
             self._status_timer = None
             self._line_prop = "statusLine"
@@ -505,6 +507,8 @@ def _build_shell_class():
             self._actions = {}      # id -> QAction
             self._groups = {}       # group name -> QActionGroup (radio sets)
             self._docks = {}        # ident -> (QDockWidget, view, bg, item, comp)
+            self._dialogs = {}      # ident -> (QDialog, view, bg, item, comp)
+            self._hooks = {}        # button id -> a python answer to it
             self._dock_actions = [] # their toggleViewAction()s, for the View menu
             self._menu_order = []
             # First build decides whether the toolbar shows at all; after that
@@ -787,16 +791,25 @@ def _build_shell_class():
             return self._toolbar
 
         def _ensure_status(self):
+            """Dolphin's shape: what is happening on the LEFT, standing facts on
+            the RIGHT. A status bar that packs both into one string is a status
+            bar you have to read rather than glance at."""
             from PySide6.QtWidgets import QStatusBar, QLabel, QProgressBar
             if self._status is None:
                 self._status = QStatusBar(self.window)
+                self._status.setSizeGripEnabled(True)
                 self._status_label = QLabel("")
+                # addWidget, not addPermanentWidget: this is the message area,
+                # and it gives way to a transient showMessage() the way every
+                # other KDE status bar's does.
+                self._status.addWidget(self._status_label, 1)
                 self._progress = QProgressBar()
                 self._progress.setMaximumWidth(160)
                 self._progress.setTextVisible(False)
                 self._progress.setVisible(False)
+                self._status_right = QLabel("")
                 self._status.addPermanentWidget(self._progress)
-                self._status.addPermanentWidget(self._status_label)
+                self._status.addPermanentWidget(self._status_right)
                 self.window.setStatusBar(self._status)
             return self._status
 
@@ -944,6 +957,10 @@ def _build_shell_class():
                     self._action_for(e)
 
         def _invoke(self, bid):
+            fn = self._hooks.get(bid)
+            if fn is not None:
+                fn()
+                return
             QMetaObject.invokeMethod(self._root, "tbAction", Q_ARG("QVariant", bid))
 
         # -------------------------------------------------------------- docks
@@ -1025,6 +1042,78 @@ def _build_shell_class():
                 self._rebuild()
             return item
 
+        # ------------------------------------------------------------ dialogs
+        def dialog(self, ident, title, qml_path, size=(460, 520), props=None):
+            """A modeless QDialog hosting a QML file — "Configure <app>…".
+
+            Built and kept, not rebuilt: reopening returns the same window with
+            whatever was scrolled or typed in it still there. Same three rules
+            as `dock` (shared engine, own `KdeBackground`, initial properties),
+            plus a Close button, because a dialog with no way out but the
+            titlebar is not one.
+            """
+            from PySide6.QtCore import QUrl
+            from PySide6.QtQml import QQmlContext, QQmlComponent
+            from PySide6.QtWidgets import (QApplication, QDialog, QVBoxLayout,
+                                           QDialogButtonBox)
+            from PySide6.QtQuickWidgets import QQuickWidget
+
+            got = self._dialogs.get(ident)
+            if got is not None:
+                return got[0]
+
+            dlg = QDialog(self.window)
+            dlg.setWindowTitle(title)
+            dlg.resize(*size)
+
+            view = QQuickWidget(self.view.engine(), dlg)
+            view.setResizeMode(QQuickWidget.SizeRootObjectToView)
+            view.setPalette(QApplication.palette())
+            view.setClearColor(QApplication.palette().window().color())
+
+            ctx = QQmlContext(self.view.engine().rootContext(), view)
+            _, bg_cls = _build_background_classes()
+            bg = bg_cls(view, dlg)
+            ctx.setContextProperty("KdeBackground", bg)
+
+            url = QUrl.fromLocalFile(str(qml_path))
+            comp = QQmlComponent(self.view.engine(), url)
+            item = comp.createWithInitialProperties(dict(props or {}), ctx)
+            if item is None:
+                raise RuntimeError("dialog %r failed to load %s:\n%s"
+                                   % (ident, qml_path, comp.errorString()))
+            view.setContent(url, comp, item)
+
+            box = QDialogButtonBox(QDialogButtonBox.Close, dlg)
+            box.rejected.connect(dlg.hide)
+            lay = QVBoxLayout(dlg)
+            lay.setContentsMargins(0, 0, 6, 6)
+            lay.addWidget(view, 1)
+            lay.addWidget(box)
+
+            self._dialogs[ident] = (dlg, view, bg, item, comp)
+            return dlg
+
+        def show_dialog(self, ident, *args, **kw):
+            dlg = self.dialog(ident, *args, **kw) if args or kw \
+                else self._dialogs[ident][0]
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
+            return dlg
+
+        # ------------------------------------------------------- action hooks
+        def on_action(self, bid, fn):
+            """Answer a button id HERE instead of in the QML.
+
+            One caller so far and one reason: `set` means "slide the settings
+            drawer out" under Hyprland and "open Configure painter…" under
+            Plasma, and that is a difference in the SHELL, not in the app — so
+            it is answered by the shell rather than by a session branch in
+            `tbAction`.
+            """
+            self._hooks[bid] = fn
+
         # ------------------------------------------------------------- probe
         def dump_chrome(self):
             """The menubar, the toolbar and the statusbar as text.
@@ -1054,13 +1143,15 @@ def _build_shell_class():
                 out.append("    ---" if a.isSeparator() else "    %s%s" % (
                     a.text(), "" if a.isEnabled() else "  (disabled)"))
             st = self._status
-            out.append("statusbar: %r%s" % (
+            out.append("statusbar: %r | %r%s" % (
                 self._status_label.text() if self._status_label is not None else "",
+                self._status_right.text() if self._status_right is not None else "",
                 "" if st is not None and st.isVisible() else " (hidden)"))
             return "\n".join(out)
 
         # --------------------------------------------------------- statusbar
-        def bind_status(self, line_prop="statusLine", progress_prop="statusProgress"):
+        def bind_status(self, line_prop="statusLine", progress_prop="statusProgress",
+                        right_prop="statusRight"):
             """Drive the status bar from two properties on the QML root.
 
             The app already computes what its state SAYS — this face just needs
@@ -1072,16 +1163,24 @@ def _build_shell_class():
             """
             self._line_prop = line_prop
             self._progress_prop = progress_prop
+            self._right_prop = right_prop
             root = self._root
             if root is None:
                 return
+            props = [line_prop, progress_prop]
+            # The right-hand channel is optional: an app that publishes no
+            # `statusRight` gets an empty permanent label and no poll for it.
+            if root.property(right_prop) is not None:
+                props.append(right_prop)
+            else:
+                self._right_prop = None
             bound = 0
-            for prop in (line_prop, progress_prop):
+            for prop in props:
                 sig = getattr(root, prop + "Changed", None)
                 if sig is not None and hasattr(sig, "connect"):
                     sig.connect(self._pull_status)
                     bound += 1
-            if bound < 2:
+            if bound < len(props):
                 from PySide6.QtCore import QTimer
                 self._status_timer = QTimer(self.window)
                 self._status_timer.setInterval(400)
@@ -1095,6 +1194,8 @@ def _build_shell_class():
                 return
             self.set_status(root.property(self._line_prop))
             self.set_progress(root.property(self._progress_prop))
+            if self._right_prop and self._status_right is not None:
+                self._status_right.setText(str(root.property(self._right_prop) or ""))
 
         def set_status(self, text):
             if self._status_label is not None:
@@ -1117,14 +1218,13 @@ def _build_shell_class():
             self._progress.setValue(int(round(max(0.0, min(1.0, v)) * 100)))
 
         def set_busy(self, on):
-            # The statusbar's own transient message; the progress bar above is
-            # the measured half.
-            if self._status is None:
-                return
-            if on:
-                self._status.showMessage("Working…")
-            else:
-                self._status.clearMessage()
+            """Nothing to say here any more, deliberately.
+
+            This used to `showMessage("Working…")`, which COVERS the message
+            area — so the moment a job started, the status line the app had
+            carefully composed was replaced by a word that says less. The
+            progress bar is the busy indicator; the line stays the app's."""
+            return
 
     return _KdeShell
 
