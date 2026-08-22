@@ -395,7 +395,15 @@ Item {
         // Stops at the status bar: a handle drawn over it also GRABS over it,
         // so the last 26px of the divider swallowed clicks meant for the bar.
         height: parent.height - root.barH - menuBar.height
-        color: splitDrag.pressed || splitDrag.containsMouse ? Theme.accent : Theme.border
+        // NO LINE UNDER PLASMA. A KDE sidebar's splitter is invisible until you
+        // are on it — Dolphin, Kate and Okular all draw nothing there — so the
+        // handle keeps its width, its ±3px grab margin and its resize cursor,
+        // and gives up only the rule down the middle of the window. The
+        // Hyprland look keeps its divider (docs/DESIGN.md §5.6).
+        color: root.plasma
+               ? "transparent"
+               : (splitDrag.pressed || splitDrag.containsMouse ? Theme.accent
+                                                               : Theme.border)
 
         MouseArea {
             id: splitDrag
@@ -457,7 +465,35 @@ Item {
     // What that native status bar says. QueueBar is the Hyprland roof's richer
     // strip (node, rate, ETA, queue) and a KDE status bar is one line, so this
     // is the SUMMARY of the same state, not a second source of it.
-    readonly property string statusLine: App.ready ? App.status : (App.status + " …")
+    // A CLOCK, the way the queue strip writes one.
+    function clockText(seconds) {
+        var t = Math.max(0, Math.floor(seconds))
+        var r = t % 60
+        return Math.floor(t / 60) + ":" + (r < 10 ? "0" : "") + r
+    }
+
+    // The left of the status bar. While a job runs the PROGRESS BAR takes this
+    // room (see `statusProgressText`); the moment it is over, the one number
+    // the run produced takes its place and nothing else — his rule, 2026-08-22:
+    // "when a generation is finished, that section of text should only read how
+    // long it took the gen to complete".
+    readonly property string statusLine: {
+        if (!App.busy && App.lastElapsed > 0) return "took " + root.clockText(App.lastElapsed)
+        return App.ready ? App.status : (App.status + " …")
+    }
+
+    // ...and what the bar itself says while it is running: how far, how fast,
+    // how long. it/s above one a second and s/it below, the convention samplers
+    // print, so the number in front stays readable (QueueBar says the same).
+    readonly property string statusProgressText: {
+        if (!App.busy) return ""
+        var bits = [Math.round(Math.max(0, App.progress) * 100) + "%"]
+        if (App.rate > 0)
+            bits.push(App.rate >= 1 ? App.rate.toFixed(2) + " it/s"
+                                    : (1 / App.rate).toFixed(2) + " s/it")
+        bits.push(root.clockText(App.elapsed))
+        return bits.join("   ·   ")
+    }
     // ...and the RIGHT-hand end of it: the standing facts, which is where a KDE
     // status bar keeps them (Dolphin's free space, Okular's page count). The
     // left is what is happening; putting both in one string made it a sentence

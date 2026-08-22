@@ -2834,6 +2834,27 @@ def main():
                     print(f"[dock {ident}]")
                     walk(item)
 
+            # PAINTER_FAKE_PROGRESS: drive the status bar's progress widget to a
+            # value without a backend, so the shot shows the running state.
+            # There is no other way to see it offscreen — the real one needs a
+            # job on the GPU.
+            if plasma and os.environ.get("PAINTER_FAKE_PROGRESS"):
+                app.processEvents()      # let the real (idle) state settle first
+                # ...then stop it being re-pulled: the app is genuinely idle and
+                # its own bindings would put the label straight back.
+                shell._root = None
+                shell.set_progress(float(os.environ["PAINTER_FAKE_PROGRESS"]))
+                shell._progress.setFormat("42%   ·   3.21 it/s   ·   0:42")
+                # WIDGET STATE, NOT PIXELS. An offscreen `grab()` does not
+                # reflect a QStackedWidget page switched after the last real
+                # event-loop turn — measured — so what this hook proves is the
+                # geometry: the bar takes the whole left of the bar (x=2,
+                # ~1017px of a 1280 window) and the label is the one hidden.
+                print("progress: idx=%d bar=%s label_visible=%s"
+                      % (shell._status_stack.currentIndex(),
+                         shell._progress.geometry(),
+                         shell._status_label.isVisible()))
+                app.processEvents()
             shot = os.environ.get("PAINTER_SHOT")
             if shot:
                 try:

@@ -100,6 +100,16 @@ Item {
             anchors.margins: 1
             visible: !App.hasPreview && pane.source !== "" && pane.sourceIsVideo
             fillMode: VideoOutput.PreserveAspectFit
+
+            // CLICK IT TO STOP IT. A looping clip is the right default for a
+            // thing that reports what just finished, and the wrong one when you
+            // want to look at a single frame of it.
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: player.playbackState === MediaPlayer.PlayingState
+                           ? player.pause() : player.play()
+            }
         }
 
         // Nothing to show is a STATE, not a blank box: it says which of the two
@@ -136,17 +146,21 @@ Item {
             PixelText {
                 id: tag
                 anchors.centerIn: parent
-                // ONE WORD. A frame count and a "frame 1 of the clip" note both
-                // lived here for an afternoon, to settle whether the stream was
-                // alive during a video job (it is — ComfyUI slices `x0[0, :, 0]`
-                // out of a 5-D latent, so every step's preview is the first
-                // frame denoising, and painter draws each one as it lands). He
-                // dropped the question rather than pay for a better preview in
-                // inference time, so the readout goes back to what it says
-                // rather than what it had to prove. The finding is in
-                // apps/painter/AGENTS.md; do not re-add it to the chrome.
-                text: App.hasPreview ? "sampling"
-                                     : (pane.sourceIsVideo ? "clip" : "still")
+                // WHICH FRAME YOU ARE LOOKING AT — and for a clip the honest
+                // answer is always the first one. He asked for "frame X of Y"
+                // (2026-08-22) so that a still-looking preview stops being a
+                // mystery, and this is that, told straight: ComfyUI's video
+                // previewers slice the temporal axis to index 0
+                // (`Latent2RGBPreviewer` takes `x0[0, :, 0]`, `TAEHVPreviewerImpl`
+                // takes `x0[:1, :, :1]`), on the installed 0.30.0 AND on
+                // upstream master — so every step's preview is frame 1
+                // denoising. Saying "frame 1 of 158" answers the question the
+                // readout was leaving open; inventing a moving number would not.
+                text: App.hasPreview
+                      ? (App.isVideo
+                         ? "sampling · frame 1 of " + App.videoFrames(root.gen.duration)
+                         : "sampling")
+                      : (pane.sourceIsVideo ? "clip" : "still")
                 color: App.hasPreview ? Theme.accent : Theme.textDim
             }
         }

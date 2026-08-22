@@ -88,6 +88,14 @@ Item {
                 anchors.fill: parent
                 visible: view.isVideo && view.source !== ""
                 fillMode: VideoOutput.PreserveAspectFit
+
+                // Click to pause and play, the same as the preview pane's.
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: player.playbackState === MediaPlayer.PlayingState
+                               ? player.pause() : player.play()
+                }
             }
 
             // Ctrl+wheel zooms; a plain wheel is DECLINED and falls through to
