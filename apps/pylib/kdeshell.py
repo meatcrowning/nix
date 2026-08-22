@@ -509,6 +509,10 @@ def _build_shell_class():
             self._docks = {}        # ident -> (QDockWidget, view, bg, item, comp)
             self._dialogs = {}      # ident -> (QDialog, view, bg, item, comp)
             self._hooks = {}        # button id -> a python answer to it
+            self._about_box = None  # kept: a dialog owned by the stack crashes
+            self._search = None         # the toolbar's filter field, if any
+            self._search_spacer = None  # ...and the stretch that keeps it right
+            self._search_action = None
             self._dock_actions = [] # their toggleViewAction()s, for the View menu
             self._menu_order = []
             # First build decides whether the toolbar shows at all; after that
@@ -742,6 +746,18 @@ def _build_shell_class():
             acts = tb.actions()
             while acts and acts[-1].isSeparator():
                 tb.removeAction(acts.pop())
+            # THE SEARCH FIELD SURVIVES A REBUILD. `tb.clear()` above removes the
+            # actions that carry it, so it is re-appended here — after the
+            # buttons, behind its stretch, which is what keeps it right-aligned
+            # whatever the app's toolbar row does.
+            if self._search is not None:
+                from PySide6.QtWidgets import QWidget, QSizePolicy
+                spacer = QWidget(tb)
+                spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+                self._search_spacer = tb.addWidget(spacer)
+                self._search_action = tb.addWidget(self._search)
+                self._search.show()
+
             if not self._chrome_restored:
                 tb.setVisible(bool(tb.actions()))
                 self._chrome_restored = True
@@ -867,14 +883,34 @@ def _build_shell_class():
                 name = QApplication.applicationName() or "this program"
 
                 def about():
-                    QMessageBox.about(
-                        self.window, f"About {name}",
-                        f"<h3>{name}</h3>"
-                        f"<p>Part of this desktop's own set of apps "
-                        f"(<code>~/nix/apps/{name}</code>), running its live "
-                        f"source.</p>"
-                        f"<p>Qt {qt_version()} · style "
-                        f"{QApplication.style().objectName()}</p>")
+                    # NOT `QMessageBox.about()`. That helper runs its own nested
+                    # `exec()` and, with the KDE platform theme loaded, hands the
+                    # box to a NATIVE dialog helper — and tearing that down
+                    # segfaulted the app every time (core 127749, 2026-08-22:
+                    # QMessageBox::about -> QDialog::exec -> ~QMessageBox ->
+                    # QDialogPrivate::setNativeDialogVisible -> QWidget::hide on
+                    # freed memory). Ours is an ordinary widget dialog, shown
+                    # modelessly with no nested event loop, and kept alive by
+                    # this shell rather than by the stack.
+                    box = self._about_box
+                    if box is None:
+                        box = QMessageBox(self.window)
+                        box.setOption(QMessageBox.Option.DontUseNativeDialog, True)
+                        box.setIcon(QMessageBox.Information)
+                        box.setWindowTitle(f"About {name}")
+                        box.setTextFormat(Qt.RichText)
+                        box.setText(
+                            f"<h3>{name}</h3>"
+                            f"<p>Part of this desktop's own set of apps "
+                            f"(<code>~/nix/apps/{name}</code>), running its live "
+                            f"source.</p>"
+                            f"<p>Qt {qt_version()} · style "
+                            f"{QApplication.style().objectName()}</p>")
+                        box.setStandardButtons(QMessageBox.Close)
+                        self._about_box = box
+                    box.show()
+                    box.raise_()
+                    box.activateWindow()
 
                 act = QAction(QIcon.fromTheme("help-about"), f"&About {name}", self.window)
                 act.triggered.connect(about)
@@ -1041,6 +1077,33 @@ def _build_shell_class():
             if self._root is not None:      # bind_chrome may not have run yet
                 self._rebuild()
             return item
+
+        # ------------------------------------------------------ toolbar search
+        def toolbar_search(self, on_text, placeholder="Filter", width=220):
+            """A search field at the RIGHT-hand end of the toolbar.
+
+            Where Dolphin, Gwenview and Okular all put one: after a stretch, so
+            it stays against the right edge however many buttons the toolbar
+            gains. `on_text` is called with the field's text on every keystroke;
+            Escape in the field clears it, which is the shortcut every KDE
+            search field answers to.
+            """
+            from PySide6.QtWidgets import QLineEdit, QWidget, QSizePolicy
+            tb = self._ensure_toolbar()
+            if self._search is not None:
+                return self._search
+            spacer = QWidget(tb)
+            spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            self._search_spacer = tb.addWidget(spacer)
+            field = QLineEdit(tb)
+            field.setPlaceholderText(placeholder)
+            field.setClearButtonEnabled(True)
+            field.setMaximumWidth(width)
+            field.addAction(QIcon.fromTheme("edit-find"), QLineEdit.LeadingPosition)
+            field.textChanged.connect(on_text)
+            self._search_action = tb.addWidget(field)
+            self._search = field
+            return field
 
         # ------------------------------------------------------------ dialogs
         def dialog(self, ident, title, qml_path, size=(460, 520), props=None):

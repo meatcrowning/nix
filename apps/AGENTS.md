@@ -679,6 +679,18 @@ names take the platform's standard sequence), `group:` makes a radio set, and
 one `QAction` per id is reused across rebuilds so a menu row and a toolbar row
 can never disagree.
 
+**`shell.toolbar_search(on_text)`** puts a filter field at the right-hand end of
+the toolbar, behind a stretch, where Dolphin/Gwenview/Okular keep theirs. It is
+re-appended after every `_rebuild`, since that clears the toolbar.
+
+**Never `QMessageBox.about()`** (nor any of the other static `QMessageBox`
+helpers) in this session. They run a nested `exec()` and, with the KDE platform
+theme loaded, hand the box to a NATIVE dialog helper whose teardown segfaults
+the app — core 127749, 2026-08-22, `~QMessageBox` →
+`QDialogPrivate::setNativeDialogVisible` → `QWidget::hide()` on freed memory.
+Build a `QMessageBox` with `DontUseNativeDialog`, `show()` it modelessly, and
+keep a reference on the shell; `_about_action` is the pattern.
+
 **`shell.dock(ident, title, qml, …)`** puts a QML file in a real `QDockWidget`:
 float, tab, drag to another edge, a View-menu toggle that is the dock's own
 action, and placement saved with the window. Three things it has to get right,
