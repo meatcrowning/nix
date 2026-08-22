@@ -318,37 +318,15 @@ Item {
     // filer's splitter (apps/filer/qml/Main.qml), including the 4px bar with a
     // ±3px grab margin and the accent-on-hover.
     // results, and the preview above them
-    Item {
+    ResultsPane {
         id: results
+        app: root
         x: 0
         // the Plasma menubar's height, 0 in the Hyprland session
         y: menuBar.height
         width: root.split ? root.paneLeadW : root.width
         height: parent.height - root.barH - menuBar.height
         visible: root.split || root.view === 1
-
-        PreviewPane {
-            id: preview
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.margins: results.width < 320 ? 4 : 10
-            anchors.bottomMargin: 0
-            open: root.showPreview
-        }
-
-        // Margins shrink with the pane: 10px either side of a 220px column is
-        // 9% of it spent on nothing (docs/DESIGN.md §5.2).
-        GalleryView {
-            id: gallery
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: preview.visible ? preview.bottom : parent.top
-            anchors.bottom: parent.bottom
-            anchors.margins: results.width < 320 ? 4 : 10
-            anchors.topMargin: preview.visible ? 8 : (results.width < 320 ? 4 : 10)
-            onMenuRequested: (sx, sy, items) => ctxMenu.open(sx, sy, items)
-        }
     }
 
     Rectangle {
@@ -390,126 +368,18 @@ Item {
     }
 
     // controls, on the right
-    Rectangle {
+    ParamsPane {
         id: controls
+        app: root
         x: root.split ? root.paneLeadW + root.splitterW : 0
         y: menuBar.height
         width: root.split ? Math.max(1, root.width - x) : root.width
         height: parent.height - menuBar.height
-        color: Theme.windowFill
         visible: root.split || root.view === 0
-
-        KineticFlickable {
-            id: controlsFlick
-            anchors.fill: parent
-            anchors.margins: 10
-            anchors.bottomMargin: root.barH
-            contentHeight: controlsCol.implicitHeight
-            clip: true
-            // NO BAR ON THIS SIDE. The parameter column is a stack of panels
-            // that collapse — its length is something he sets, not something he
-            // has to navigate — and the gutter cost every control 11-16px of a
-            // 300px column. The scrollbar that §9.2 asks for is on the results
-            // side, where the content really is unbounded. The wheel and the
-            // compositor's kinetic scroll are untouched.
-
-            Column {
-                id: controlsCol
-                width: controlsFlick.width
-                spacing: 10
-
-                // ONE SECTION ORDER FOR EVERY PRESET AND MODEL. Whatever the
-                // selected model can do, the sections stack in the same order
-                // top-to-bottom: input images, resolution, prompt boxes, LoRAs,
-                // then the sampler settings. The panels are declared in that
-                // order and each is gated on the mode it belongs to; a Column
-                // skips invisible children, so the modes that hide a section
-                // leave no gap and never reshuffle the ones that remain (image
-                // mode has no input images, edit has no aspect, and so on).
-                ModelPicker { width: parent.width; persistKey: "panel.model" }
-
-                // --- input images ---
-                // EDIT MODE IS AN IMAGE AND A PROMPT, and nothing else: the
-                // graph reads the size out of the picture, has no negative to
-                // encode and carries the family's own steps/cfg/shift, so the
-                // sampler/resolution/patch controls are hidden rather than shown
-                // doing nothing (docs/DESIGN.md §10). Its drop wells lead.
-                EditPanel {
-                    width: parent.width
-                    persistKey: "panel.edit"
-                    visible: App.isEdit
-                }
-                // A video family's first/last frame wells are its input images,
-                // so they sit in the same place edit's do. No negative prompt,
-                // no CFG, no batch, and no aspect while a frame is deciding it —
-                // the panels below follow that from the inside.
-                VideoPanel {
-                    width: parent.width
-                    persistKey: "panel.video"
-                    visible: App.isVideo && !App.isEdit
-                }
-
-                // --- resolution ---
-                ResolutionPanel {
-                    width: parent.width
-                    persistKey: "panel.resolution"
-                    visible: !App.isEdit
-                    // In image-to-video the size comes out of the dropped image,
-                    // and MP is the only part of it left to choose — that is
-                    // handled inside the panel, which keeps its MP box.
-                }
-                // Edit's resolution is the output size relative to the dropped
-                // image (there is no aspect to type), so its own panel takes the
-                // resolution slot in that preset.
-                EditScalePanel {
-                    width: parent.width
-                    persistKey: "panel.editscale"
-                    visible: App.isEdit
-                }
-
-                // --- prompt boxes ---
-                PromptEditor {
-                    width: parent.width
-                    persistKey: "panel.prompt"
-                    onMenuRequested: (sx, sy, items) => ctxMenu.open(sx, sy, items)
-                }
-
-                // --- LoRAs ---
-                // Available in EVERY mode, edit included: an edit model takes a
-                // LoRA the same way an image one does — `_build_edit` chains the
-                // LoraLoader onto the loader→ModelSampling seam exactly as the
-                // image path does, and `_start_jobs` sends `loras.active()` for
-                // all three pipelines. The picker's choices come from the same
-                // `compatible_loras` match, so the edit family shows its own
-                // (e.g. a Klein LoRA on Flux 2 Klein) and nothing else.
-                LoraStack {
-                    width: parent.width
-                    persistKey: "panel.lora"
-                }
-
-                // --- sampler settings ---
-                ParamsPanel {
-                    width: parent.width
-                    persistKey: "panel.sampling"
-                    visible: !App.isEdit
-                }
-                TogglePanel {
-                    width: parent.width
-                    persistKey: "panel.patches"
-                    visible: !App.isVideo && !App.isEdit
-                }
-                // The seed IS read by the edit graph, so the edit preset gets
-                // its own seed control — the sampling panel that normally holds
-                // it is hidden here. Same SeedField, so it behaves identically,
-                // and it takes the sampler slot in the edit preset.
-                SeedPanel {
-                    width: parent.width
-                    persistKey: "panel.editseed"
-                    visible: App.isEdit
-                }
-                Item { width: 1; height: 6 }
-            }
-        }
+        // The QueueBar is drawn over the bottom of this column in the Hyprland
+        // roof; under Plasma the status bar is the window's own and takes no
+        // room from the content.
+        bottomInset: root.barH
     }
 
     // ------------------------------------------------------------- overlays
@@ -707,8 +577,8 @@ Item {
     // The selected output, for the rows above that act on one. A multi-select
     // has no single answer, so it counts as none (the gallery's own right-click
     // still handles the set).
-    readonly property string selOne: gallery.selection.length === 1
-                                     ? gallery.selection[0] : ""
+    readonly property string selOne: results.gallery.selection.length === 1
+                                     ? results.gallery.selection[0] : ""
     // ...and the parameters stored in it, which is what "reuse" needs and what
     // a file written by something else does not have.
     readonly property var selParams: root.selOne === "" ? null
@@ -806,8 +676,9 @@ Item {
     // `CtxMenu` clamps into its own root, so a menu parented inside one would be
     // trimmed to a couple of rows. Its coordinates are the scene's, which is
     // what `mapToItem(null, ...)` at the call site hands it.
+    readonly property Item ctxMenu: sceneMenu
     CtxMenu {
-        id: ctxMenu
+        id: sceneMenu
         anchors.fill: parent
     }
 
@@ -816,8 +687,9 @@ Item {
     // column's Flickable and drawn under the panels that follow it. Below
     // CtxMenu in z, since a right-click menu is raised on top of whatever is
     // already open.
+    readonly property Item pickerOverlay: sceneOverlay
     PickerOverlay {
-        id: pickerOverlay
+        id: sceneOverlay
         anchors.fill: parent
     }
 
@@ -851,8 +723,8 @@ Item {
     Shortcut {
         sequence: "Escape"
         onActivated: {
-            if (pickerOverlay.visible) pickerOverlay.close()
-            else if (ctxMenu.visible) ctxMenu.close()
+            if (sceneOverlay.visible) sceneOverlay.close()
+            else if (sceneMenu.visible) sceneMenu.close()
             else if (root.showSettings) root.showSettings = false
             else root.releaseFocus()
         }
