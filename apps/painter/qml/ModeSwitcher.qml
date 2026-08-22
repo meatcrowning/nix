@@ -36,7 +36,12 @@ Column {
         function onModelChanged() { sw.refresh() }
     }
 
-    Row {
+    // A FLOW, NOT A ROW. Four buttons drawn by the KDE style are wider than a
+    // 300px column, so a Row simply ran `video` off the edge and out of the
+    // panel — the column is a fixed width and the button set is fixed too, so
+    // the only thing left to give is a second line.
+    Flow {
+        width: sw.width
         spacing: 4
 
         Repeater {

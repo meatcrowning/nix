@@ -16,6 +16,8 @@ Item {
     readonly property color fgAccent: app ? app.fgAccent : Theme.accent
     readonly property bool winActive: app ? app.winActive : true
     readonly property bool showPreview: app ? app.showPreview : false
+    readonly property string viewBg:
+        (typeof DeskStyle !== "undefined" && DeskStyle) ? DeskStyle.viewBg : ""
 
     // The gallery's inject rows switch to the parameters view after injecting,
     // so this one travels in both directions. Guarded on both sides: an echo
@@ -55,11 +57,50 @@ Item {
     readonly property string viewPath: app ? app.selOne : ""
     readonly property bool viewIsVideo: app ? app.selIsVideo : false
 
+    // ------------------------------------------------------------- the band
+    //
+    // WHERE THE WINDOW IS DRAGGED FROM. Everything above this line is chrome —
+    // the menubar, the toolbar and its filter field — and a KDE window is
+    // dragged by its chrome, so the strip of background under it is a titlebar
+    // in every way that matters. Below the line the pane is content and a press
+    // means what the content says it means (select, clear, open).
+    //
+    // The compositor does the moving; `App.startSystemMove()` only asks for it,
+    // so there is no pointer tracking here and nothing to get stuck holding.
+    Item {
+        id: dragBand
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: 26
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            onPressed: App.startSystemMove()
+        }
+    }
+
+    // The view's own background — `QPalette.Base`, which is the colour Dolphin
+    // paints its file list with, Gwenview its thumbnail grid and Okular its
+    // page area. The WINDOW's background is the style's gradient and the two
+    // are deliberately not the same; the band above keeps the gradient, because
+    // it is chrome. Empty (and so invisible) outside a Plasma session, where
+    // every pane takes the wallpaper palette instead.
+    Rectangle {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: dragBand.bottom
+        anchors.bottom: parent.bottom
+        visible: root.viewBg !== ""
+        color: root.viewBg === "" ? "transparent" : root.viewBg
+    }
+
     PreviewPane {
         id: preview
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: parent.top
+        anchors.top: dragBand.bottom
         anchors.margins: root.width < 320 ? 4 : 10
         anchors.bottomMargin: 0
         // The live viewport is a browsing affordance: in View the whole pane is
@@ -74,7 +115,7 @@ Item {
         id: outputView
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: preview.visible ? preview.bottom : parent.top
+        anchors.top: preview.visible ? preview.bottom : dragBand.bottom
         anchors.bottom: parent.bottom
         anchors.margins: root.width < 320 ? 4 : 10
         visible: root.inView
@@ -88,7 +129,7 @@ Item {
         visible: !root.inView
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: preview.visible ? preview.bottom : parent.top
+        anchors.top: preview.visible ? preview.bottom : dragBand.bottom
         anchors.bottom: parent.bottom
         anchors.margins: root.width < 320 ? 4 : 10
         anchors.topMargin: preview.visible ? 8 : (root.width < 320 ? 4 : 10)

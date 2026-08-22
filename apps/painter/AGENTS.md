@@ -59,6 +59,20 @@ here:
 - **`paramsDocked`** tells `Root.qml` the column is elsewhere: no splitter, the
   results fill the window, and the parameters/gallery radio pair leaves the menu
   because both are visible at once.
+- **The results pane has a drag band across its top** (`ResultsPane.qml`,
+  26px): everything above it is chrome, and a press there asks the compositor
+  to move the window (`App.startSystemMove()`, one call for both roofs). Below
+  it the pane is content. The band replaced the "output N outputs" heading; the
+  tally moved to `statusRight`.
+- **Under Plasma the results pane paints `QPalette.Base`** — `DeskStyle.viewBg`,
+  the colour Dolphin paints its file list with. The window\'s own background is
+  the style\'s gradient and the two are deliberately different: the band keeps
+  the gradient because it is chrome. Empty string outside Plasma.
+- **`Gallery` keeps `_all` and shows `_rows`.** The toolbar\'s filter field
+  (`kdeshell.toolbar_search`) calls `Gallery.setFilter`, which matches every
+  word against the filename AND the prompt — read out of the file once and
+  cached on the row. Both lists hold the SAME dicts, so a poster landing
+  reaches both; every index QML asks about is a VISIBLE index.
 - **The parameter column is a `Repeater` over an ORDER, not a declared stack.**
   `ParamsPane.builtinOrder` is the old declaration order and one saved list
   (`Prefs["sections"]`) reorders it — dragging any panel header moves that

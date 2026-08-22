@@ -444,6 +444,12 @@ Item {
     // to read rather than something to glance at.
     readonly property string statusRight: {
         var bits = []
+        // The output tally used to be a line of text over the grid; it is one
+        // number about what is on screen, which is what a status bar is for.
+        var sel = results.gallery.selection.length
+        bits.push(sel > 1 ? (sel + " of " + Gallery.count + " selected")
+                          : (Gallery.count + (Gallery.count === 1 ? " output"
+                                                                  : " outputs")))
         if (App.selectedName) bits.push(App.selectedName)
         if (App.queue > 0) bits.push("queued " + App.queue)
         return bits.join("  ·  ")

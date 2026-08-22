@@ -132,24 +132,15 @@ Item {
         return items
     }
 
-    Row {
-        id: head
-        spacing: 10
-        width: parent.width
-        PixelText { text: "output"; color: root.fgAccent }
-        // Dropped rather than squeezed when the pane is narrow: the count is
-        // the least of the three things this pane owes you (docs/DESIGN.md §5.4).
-        PixelText {
-            // "outputs", not "images": a video family's results are clips.
-            // A selection says so here rather than in a bar of its own — it is
-            // one number and it belongs beside the other one.
-            text: view.selection.length > 1
-                  ? (view.selection.length + " of " + Gallery.count + " selected")
-                  : (Gallery.count + " outputs")
-            color: view.selection.length > 1 ? Theme.text : Theme.textDim
-            visible: view.width > 190
-        }
-    }
+    // THE HEADING IS GONE, and with it the only thing between the chrome and
+    // the grid. It said "output" and a tally; the tally now lives in the status
+    // bar with the other standing facts (Root.qml `statusRight`), and the strip
+    // it occupied is what you DRAG THE WINDOW BY (ResultsPane.qml). A word over
+    // a grid of pictures was labelling the obvious.
+    //
+    // A multiple selection still has to report itself, and it does so where the
+    // count it qualifies already is — beside it, in the status bar.
+    Item { id: head; width: parent.width; height: 0 }
 
     // Empty space clears the selection, the way it does in a file manager. It
     // sits UNDER the grid, so a click only reaches it where there is no tile.
@@ -182,8 +173,10 @@ Item {
         readonly property real usable: Math.max(1, width - gscroll.barW)
         cellWidth: Math.max(60, Math.floor(usable / Math.max(1, Math.round(usable / 210))))
         cellHeight: cellWidth
-        wheelLines: 1
-        wheelStep: cellHeight
+        // NO ROW-SIZED WHEEL STEP. This was `wheelLines: 1, wheelStep: cellHeight`,
+        // i.e. one notch = exactly one row — which reads as the grid SNAPPING
+        // an output to the top on every notch instead of scrolling. The default
+        // line step is the same one every other view on this desktop uses.
 
         delegate: Item {
             id: tile

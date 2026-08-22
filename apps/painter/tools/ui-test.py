@@ -2069,6 +2069,65 @@ def test_panel_order_and_pins(win, ctl, tmp, keep):
     spin(120)
 
 
+def test_filter(win, ctl, tmp):
+    """The toolbar's filter field, from the model's side.
+
+    The field itself is a QLineEdit in the KDE toolbar (pylib/kdeshell.py
+    `toolbar_search`) and only exists in that session; what it drives is this,
+    and this runs in both.
+    """
+    staged = [
+        fake_png(os.path.join(tmp, "out", "kitten.png"),
+                 {"positive": "a small cat on a roof", "steps": 10}),
+        fake_png(os.path.join(tmp, "out", "cityscape.png"),
+                 {"positive": "a rainy city at night", "steps": 11}),
+    ]
+    for pth in staged:
+        ctl.gallery.add(pth)
+    spin(200)
+    total = ctl.gallery.property("count")
+    check("both fixtures are in the gallery", total >= 2, total)
+
+    # By FILENAME.
+    ctl.gallery.setFilter("kitten")
+    spin(150)
+    check("filtering by name shows only the match",
+          ctl.gallery.property("count") == 1
+          and ctl.gallery.pathAt(0).endswith("kitten.png"),
+          (ctl.gallery.property("count"), ctl.gallery.pathAt(0)))
+
+    # By PROMPT, which is read out of the file rather than out of a name.
+    ctl.gallery.setFilter("rainy city")
+    spin(150)
+    check("...and by prompt, every word of it",
+          ctl.gallery.property("count") == 1
+          and ctl.gallery.pathAt(0).endswith("cityscape.png"),
+          (ctl.gallery.property("count"), ctl.gallery.pathAt(0)))
+
+    # Indices are the VISIBLE ones, or every path the selection holds would
+    # point at the wrong row while a filter is on.
+    check("indexOf answers in the filtered list",
+          ctl.gallery.indexOf(ctl.gallery.pathAt(0)) == 0,
+          ctl.gallery.indexOf(ctl.gallery.pathAt(0)))
+
+    ctl.gallery.setFilter("no such thing anywhere")
+    spin(150)
+    check("a filter that matches nothing empties the grid rather than erroring",
+          ctl.gallery.property("count") == 0, ctl.gallery.property("count"))
+
+    ctl.gallery.setFilter("")
+    spin(150)
+    check("clearing it brings everything back",
+          ctl.gallery.property("count") == total,
+          (ctl.gallery.property("count"), total))
+
+    for pth in staged:
+        try: os.remove(pth)
+        except OSError: pass
+    ctl.gallery.load_existing()
+    spin(120)
+
+
 def test_browse_view(win, ctl, tmp):
     """Browse <-> View: enter, walk, zoom, leave.
 
@@ -3271,6 +3330,7 @@ def main():
     print("== dropdowns ==");         test_dropdown(win, ctl)
     print("== escape ==");            test_escape(win, ctl)
     print("== panel order + pins =="); test_panel_order_and_pins(win, ctl, tmp, keep)
+    print("== filter ==");           test_filter(win, ctl, tmp)
     print("== browse/view ==");      test_browse_view(win, ctl, tmp)
     print("== inject ==");            test_inject(win, ctl, tmp)
     print("== copy prompt ==");       test_copy_prompt(win, ctl, tmp)
