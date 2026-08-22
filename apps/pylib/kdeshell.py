@@ -510,6 +510,7 @@ def _build_shell_class():
             # First build decides whether the toolbar shows at all; after that
             # its visibility belongs to the user (Settings -> Show Toolbar).
             self._chrome_restored = False
+            self._state_restored = False
             self._root = None
 
         # ---------------------------------------------------------- engine
@@ -541,8 +542,53 @@ def _build_shell_class():
             return self.window.windowHandle()
 
         def show(self):
+            self._restore_state()
             self.window.show()
             return self.window.windowHandle()
+
+        # ------------------------------------------------------- window state
+        # A KDE program comes back the way it was left, and with docks that is
+        # not optional: a panel dragged to the other edge, floated or closed has
+        # to still be there next launch or the arranging was for nothing.
+        # `saveState()` covers dock placement, float state, dock tabbing, the
+        # splitter between dock and central widget, and toolbar visibility in
+        # one blob — keyed on each widget's objectName, which is why `dock()`
+        # and `_ensure_toolbar()` set one.
+        def _settings(self):
+            from PySide6.QtCore import QSettings
+            from PySide6.QtWidgets import QApplication
+            return QSettings("nixdesk", QApplication.applicationName() or "app")
+
+        def _restore_state(self):
+            if self._state_restored:
+                return
+            self._state_restored = True
+            from PySide6.QtWidgets import QApplication
+            # A HARNESS MUST NOT WRITE HIS WINDOW STATE. Every selftest runs
+            # offscreen at a fixed size, and saving that on the way out would
+            # hand him back a window the size of a test the next time he opened
+            # the app — the same rule as everything else under
+            # "Testing without interfering with the user".
+            if QApplication.instance().platformName() == "offscreen":
+                return
+            st = self._settings()
+            geom = st.value("window/geometry")
+            state = st.value("window/state")
+            if geom is not None:
+                self.window.restoreGeometry(geom)
+            if state is not None:
+                # Version 1: bumped only if the chrome is renamed out from under
+                # a saved blob, which Qt then ignores rather than misapplying.
+                self.window.restoreState(state, 1)
+            app = QApplication.instance()
+            if app is not None:
+                app.aboutToQuit.connect(self._save_state)
+
+        def _save_state(self):
+            st = self._settings()
+            st.setValue("window/geometry", self.window.saveGeometry())
+            st.setValue("window/state", self.window.saveState(1))
+            st.sync()
 
         # ---------------------------------------------------------- chrome
         def bind_chrome(self, titlebar=None, menu_order=None):
