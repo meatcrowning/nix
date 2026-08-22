@@ -582,6 +582,85 @@ inside a Plasma session.
 cannot reach an app's own copy. It is byte-identical to the eight app copies —
 retune all of them together (docs/DESIGN.md §2.2).
 
+**An app with the KDE shell below stands this bar down** — `systemBar: true`,
+and `shown` goes false while `plasma` stays true. Two menubars, one of them
+ours and wrong, is what that flag prevents. painter is the first; the other apps
+still use this bar and are unaffected.
+
+### `pylib/kdeshell.py` — under Plasma, a REAL KDE window `[painter]`
+
+**In that session we do not imitate the system theme; we let the system theme
+paint.** `kdetheme.py` moves the palette, the font and the motion to
+`kdeglobals`, and that is as far as colour tokens can go — the thing that makes
+a KDE program read as one object is Oxygen's window background: a vertical
+gradient plus a radial splash, drawn by the *decoration* over the titlebar and
+by the *style* over the client area with a matching 23px y-shift, so the
+titlebar, the menubar, the toolbar and the sides are one continuous surface.
+That is `Helper::renderWindowBackground()`, and copying it into QML would be a
+copy that drifts.
+
+Two facts from Oxygen 6.7.4 decide the shape of the answer:
+
+- `kstyle/oxygenstyle.cpp:4595` — that background is painted **only for a real
+  QWidget window** (`WA_StyledBackground`, `isWindow()`). No QStyle entry point
+  will give it to a `QQuickWindow`, whatever style is set.
+- `kstyle/oxygenstyle.cpp:8274` — the style registers any `QQuickItem` it is
+  asked to draw for with Oxygen's own `WindowManager`, which is
+  drag-the-window-from-any-empty-area (`WD_FULL`, ending in
+  `QWindow::startSystemMove()`). So that behaviour comes with the real style
+  too, inside the QML, and is not ours to reimplement either.
+
+So the Plasma face is shaped like Dolphin: a `QMainWindow` with a real
+`QMenuBar`/`QToolBar`/`QStatusBar`, the app's QML in a `QQuickWidget` central
+widget with a **transparent clear colour** so the styled background shows
+through, and `QT_QUICK_CONTROLS_STYLE=org.kde.desktop` so QQC2 controls inside
+the QML are rendered *through* the live `QStyle` rather than imitated.
+
+Adopting it in an app's `main.py`:
+
+```python
+kdeshell.pin_controls_style()                     # before the app object
+app = kdeshell.make_app(sys.argv, "painter")      # QApplication under Plasma
+plasma = is_plasma()
+shell = kdeshell.shell("painter", size=(1280, 900)) if plasma else None
+engine = shell.engine() if plasma else QQmlApplicationEngine()
+...
+if plasma:
+    shell.load(QML / "Root.qml")                  # an Item, not a Window
+    shell.bind_chrome(bar, menu_order=[...])      # the same tbButtons array
+    shell.bind_status()                           # statusLine/statusProgress
+    ctl.window = shell.show()                     # a QWindow, as before
+```
+
+and in the QML:
+
+- **the root is split in two** — `Root.qml` is an `Item` with the whole app in
+  it, `Main.qml` is the Hyprland session's `Window` wrapper around it. A
+  `QQuickWidget` hosts an Item, so anything Window-only (`onClosing`,
+  `contentItem`, `activeFocusItem`, assigning `width`) moves out or goes
+  through `root.Window.*`.
+- **`tbButtons` gains `icon:`** (a freedesktop icon name — a two-character cell
+  is a titlebar affordance and has no place on a real toolbar) **and `bar:`**
+  (this entry earns a toolbar slot; the menus stay the complete set). Both are
+  inert on the vtb wire like `menu:`.
+- **`Theme.windowFill`** is `bg` under Hyprland and `transparent` under Plasma:
+  anything meaning "the window's background" binds it, or a flat fill covers the
+  styled gradient. Insets (`bgAlt` panels, fields, rows) keep real colours.
+- **the QML status strip stands down** (`barH: 0`) and the app publishes
+  `statusLine` / `statusProgress` (-1 = idle) for the real status bar.
+
+Packaging is half the job and fails **silently** when it is missing: the style,
+the QPA theme, qqc2-desktop-style, kirigami and the icon set must be in the
+app's own wrapper (`home/prog/painter.nix`), or the window comes up in Fusion
+with text-only toolbar rows in a session where everything else is Oxygen.
+`kdeshell` re-asserts what it can — `[KDE] widgetStyle` from `kdeglobals`, the
+icon theme name, and the icon search paths Qt only fills in from a platform
+theme — so a stripped or offscreen environment behaves like the session.
+
+Verify it the only way this can be verified — by rendering:
+`DESK_SESSION=plasma QT_STYLE_OVERRIDE=oxygen PAINTER_SHOT=/tmp/x.png
+painter-qtenv python3 main.py --selftest`, then look at the PNG.
+
 ### `VScroll.qml` — the one scrollbar
 
 `ScrollBar.vertical: VScroll {}` on every scrollable view, and **the call site

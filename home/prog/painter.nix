@@ -95,6 +95,22 @@ let
           pkgs.qt6.qtwebsockets   # ComfyUI progress/event socket
           pkgs.qt6.qtimageformats # webp/tiff alongside qtbase's png/jpg
           pkgs.qt6.qtmultimedia   # the preview viewport's video surface
+
+          # THE PLASMA FACE (apps/pylib/kdeshell.py). In a Plasma session
+          # painter is a real QMainWindow whose chrome and background are drawn
+          # by the KDE style itself — which means the style has to be IN this
+          # wrapper's plugin path. It is not enough that the session has it:
+          # a missing plugin here does not fail, it silently leaves the window
+          # in Fusion, which is exactly the odd-window-out that face exists to
+          # prevent. None of it is loaded in the Hyprland session.
+          pkgs.kdePackages.plasma-integration  # the KDE QPA theme: palette,
+                                               # fonts, icon theme, widgetStyle
+          pkgs.kdePackages.oxygen              # the style + its decoration
+          pkgs.kdePackages.breeze              # the default style, as fallback
+          pkgs.kdePackages.qqc2-desktop-style  # QQC2 rendered THROUGH QStyle
+          pkgs.kdePackages.kirigami            # which qqc2-desktop-style needs
+          pkgs.kdePackages.kiconthemes
+          pkgs.kdePackages.oxygen-icons        # the icon set the toolbar draws
         ];
 
         dontWrapQtApps = true; # we wrap the python launcher ourselves
@@ -104,6 +120,10 @@ let
           makeWrapper ${pyEnv}/bin/python3 $out/bin/painter \
             --add-flags /home/lam/nix/apps/painter/main.py \
             --prefix PATH : ${lib.makeBinPath [ pkgs.ffmpeg pkgs.libnotify ]} \
+            --prefix XDG_DATA_DIRS : ${lib.concatStringsSep ":" [
+              "${pkgs.kdePackages.oxygen-icons}/share"
+              "${pkgs.kdePackages.breeze-icons}/share"
+            ]} \
             --set-default QT_FFMPEG_DECODING_HW_DEVICE_TYPES cuda \
             --set-default SPELL_HUNSPELL ${pkgs.hunspell}/bin/hunspell \
             --set-default SPELL_DICPATH ${pkgs.hunspellDicts.en_US}/share/hunspell \
