@@ -75,6 +75,7 @@ and an app that never calls this module behaves exactly as it did.
 from __future__ import annotations
 
 import os
+import sys
 
 from PySide6.QtCore import Qt, QUrl, QMetaObject, Q_ARG
 from PySide6.QtGui import QAction, QIcon
@@ -691,6 +692,7 @@ def _build_shell_class():
             self._menu_order = [str(m) for m in (menu_order or [])]
             self._rebuild()
 
+            bound = False
             if titlebar is not None:
                 for sig in ("buttonsChanged", "footerChanged", "loadingChanged"):
                     s = getattr(titlebar, sig, None)
@@ -698,6 +700,7 @@ def _build_shell_class():
                         continue
                     if sig == "buttonsChanged":
                         s.connect(lambda *_: self._refresh())
+                        bound = True
                     elif sig == "footerChanged":
                         # NOT into the status line. The footer is the hyprvtb
                         # titlebar's little badge (painter's is "Q3", the queue
@@ -708,6 +711,23 @@ def _build_shell_class():
                         pass
                     else:
                         s.connect(self.set_busy)
+            if not bound:
+                # NO NOTIFICATION IS A SILENT DEAD CHROME, so it degrades to
+                # late rather than to nothing — the same rule `bind_status`
+                # already follows. player's `Titlebar` had no `buttonsChanged`
+                # for a day and its menubar and both toolbars were built once
+                # and then never updated again: play never became pause and the
+                # transport stayed greyed from the empty queue it started with.
+                # Nothing failed, nothing warned. A poll cannot be as good as
+                # the signal, so it also says so.
+                print("kdeshell: %r publishes no buttonsChanged — polling the "
+                      "chrome instead. Add the signal." % type(titlebar).__name__,
+                      file=sys.stderr)
+                from PySide6.QtCore import QTimer
+                self._chrome_timer = QTimer(self.window)
+                self._chrome_timer.setInterval(300)
+                self._chrome_timer.timeout.connect(self._refresh)
+                self._chrome_timer.start()
 
         def _entries(self):
             # A QML `property var` arrives as a QJSValue, which is not iterable

@@ -836,6 +836,15 @@ went unnoticed in painter because a rebuild is rare there; player's
 widget now keeps its ORIGINAL `QWidgetAction` (`_append_widget`) and is put back
 with `addAction`, never re-wrapped.
 
+**An app's vtb bridge MUST publish `buttonsChanged`.** `bind_chrome` hangs its
+entire refresh on it — the socket is dead in this session, but the app still
+pushes its whole table through `setButtons` on every state change, so that is
+the only notification this face gets. player's `Titlebar` had none for a day and
+its menubar and both toolbars were built once and then never updated again: play
+never became pause and the transport stayed greyed by the empty queue it started
+with, with nothing failing and nothing warning. It now degrades to a 300ms poll
+and prints why, the same way `bind_status` degrades — but a poll is not the fix.
+
 **`shell.bind_title(prop)`** tracks a QML property onto the window title, so the
 taskbar entry says what player is playing from the same expression `Main.qml`
 binds under Hyprland.

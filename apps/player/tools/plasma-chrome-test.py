@@ -44,9 +44,10 @@ def check(name, ok, detail=""):
         fails.append(name)
 
 
-def run(session):
+def run(session, **extra):
     env = dict(os.environ)
     env["DESK_SESSION"] = session
+    env.update(extra)
     env["QT_QPA_PLATFORMTHEME"] = "kde"
     env["PLAYER_MENUS"] = "1"
     env["PLAYER_FACES"] = "1"
@@ -59,11 +60,16 @@ def run(session):
     # labels — a bug in the harness, not in the app (apps/AGENTS.md).
     out = subprocess.run([sys.executable, str(APP / "main.py"), "--selftest"],
                          env=env, capture_output=True, text=True, timeout=120)
-    return out.stdout
+    # stderr too: kdeshell's "publishes no buttonsChanged" warning is the only
+    # sign of a chrome that builds correctly and then never updates again.
+    return out.stdout + out.stderr
 
 
 plasma = run("plasma")
 hypr = run("hypr")
+# ...and the same window with a queue under it and the transport running, which
+# is the ONLY way to see the chrome follow the app's state.
+busy = run("plasma", PLAYER_STATEPOKE="1,2,3", PLAYER_STATEPOKE_PLAYING="1")
 
 print("player's Plasma chrome")
 
@@ -96,17 +102,24 @@ def section(text, head):
     return out
 
 
+def verb(row):
+    """A row's verb, with the checkbox gutter off the front. A checkable row
+    reads `[x] Playlists`, and which one is checked depends on the page the
+    harness happens to be on."""
+    return row[4:] if row[:1] == "[" else row
+
+
 view = section(plasma, "&View")
 playback = section(plasma, "&Playback")
 top = section(plasma, "toolbar")
 transport = section(plasma, "toolbar[transport]")
 
 # ---- the menus are the COMPLETE set, the toolbar the primary verbs -------
-for verb in ("Albums", "Playlists"):
-    check(f"{verb} is in the View menu", any(r.startswith(verb) for r in view),
-          str(view))
-    check(f"{verb} is on the toolbar", any(r.startswith(verb) for r in top),
-          str(top))
+for name in ("Albums", "Playlists"):
+    check(f"{name} is in the View menu",
+          any(verb(r).startswith(name) for r in view), str(view))
+    check(f"{name} is on the toolbar",
+          any(verb(r).startswith(name) for r in top), str(top))
 check("Now Playing is a radio row (checked, not just present)",
       any(r.startswith("[x] Now Playing") or r.startswith("[ ] Now Playing")
           for r in view), str(view))
@@ -132,9 +145,9 @@ check("Find… is still in the View menu", any(r.startswith("Find…") for r in 
       str(view))
 
 # ---- the transport bar --------------------------------------------------
-for verb in ("Previous Track", "Play", "Next Track", "Favourite", "Repeat", "Shuffle"):
-    check(f"{verb} is on the transport bar",
-          any(r.startswith(verb) for r in transport), str(transport))
+for name in ("Previous Track", "Play", "Next Track", "Favourite", "Repeat", "Shuffle"):
+    check(f"{name} is on the transport bar",
+          any(verb(r).startswith(name) for r in transport), str(transport))
 check("the seek widget is on the transport bar",
       any(r.startswith("<TransportSeek") for r in transport), str(transport))
 check("every playback verb is also in the Playback menu",
@@ -148,6 +161,29 @@ check("with an empty queue the transport is disabled, not missing",
       all(r.endswith("(disabled)")
           for r in transport if r.startswith(("Previous Track", "Play", "Next Track"))),
       str(transport))
+
+# ---- THE CHROME FOLLOWS THE APP'S STATE ---------------------------------
+# The case that was silently broken: `bind_chrome` hangs its refresh on the vtb
+# bridge's `buttonsChanged`, and player's `Titlebar` published no such signal —
+# so the menubar and both toolbars were built once at startup and then FROZE.
+# Play never became Pause and the transport stayed greyed by the empty queue it
+# had started with, with nothing failing and nothing warning.
+busy_transport = section(busy, "toolbar[transport]")
+busy_playback = section(busy, "&Playback")
+check("a queue enables the transport rows",
+      busy_transport and not any(r.endswith("(disabled)") for r in busy_transport
+                                 if r.startswith(("Previous Track", "Next Track"))),
+      str(busy_transport))
+check("playing turns Play into Pause on the bar",
+      any(r.startswith("Pause") for r in busy_transport)
+      and not any(r.startswith("Play") for r in busy_transport),
+      str(busy_transport))
+check("...and in the Playback menu, off the same QAction",
+      any(r.startswith("Pause") for r in busy_playback), str(busy_playback))
+check("the status bar's right slot carries the queue position",
+      "'1 / 3'" in busy, [ln for ln in busy.splitlines() if ln.startswith("statusbar")])
+check("kdeshell did not have to fall back to polling the chrome",
+      "publishes no buttonsChanged" not in plasma, "see stderr")
 
 # ---- the Settings menu owns the bars ------------------------------------
 settings = section(plasma, "Se&ttings")
