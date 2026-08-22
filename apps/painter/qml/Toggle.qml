@@ -7,6 +7,10 @@ Item {
     property string label: ""
     signal toggled(bool value)
 
+    // Pinnable like a Field row is (see ../Field.qml).
+    property string pinLabel: sw.label
+    readonly property string pinValue: sw.checked ? "on" : "off"
+
     width: box.width + (label ? txt.implicitWidth + 6 : 0)
     height: 18
 
@@ -29,6 +33,15 @@ Item {
         anchors.fill: parent
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
-        onClicked: { sw.checked = !sw.checked; sw.toggled(sw.checked) }
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        onClicked: function (m) {
+            if (m.button === Qt.RightButton) {
+                if (typeof panel !== "undefined" && panel && panel.togglePin)
+                    panel.togglePin(sw)
+                return
+            }
+            sw.checked = !sw.checked
+            sw.toggled(sw.checked)
+        }
     }
 }

@@ -13,9 +13,20 @@ Item {
     property string label: ""
     signal toggled(bool value)
 
+    // Pinnable like a Field row is (see ../Field.qml).
+    property string pinLabel: root.label
+    readonly property string pinValue: root.checked ? "on" : "off"
+
     implicitWidth: box.implicitWidth
     implicitHeight: box.implicitHeight
     height: implicitHeight
+
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.RightButton
+        onClicked: if (typeof panel !== "undefined" && panel && panel.togglePin)
+                       panel.togglePin(root)
+    }
 
     CheckBox {
         id: box
