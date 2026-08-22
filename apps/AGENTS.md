@@ -683,6 +683,18 @@ can never disagree.
 the toolbar, behind a stretch, where Dolphin/Gwenview/Okular keep theirs. It is
 re-appended after every `_rebuild`, since that clears the toolbar.
 
+**The status bar is not a titlebar.** Oxygen's WindowManager makes every empty
+piece of a window draggable (`WD_FULL`), which is right for the chrome at the
+top and wrong at the bottom. `_ensure_status` sets `_kde_no_window_grab` — the
+property that style's own blacklist reads — and installs a press-swallowing
+filter behind it; the size grip is a child widget and keeps working.
+
+**A dock is a second scene graph.** `QQuickWidget` cannot use the threaded
+render loop, so every one of them renders on the GUI thread each frame. Two is
+measurably more than one: painter had its parameter column in a dock for a day
+and the window felt slower. Reach for `dock()` when the panel genuinely wants
+to float or tab, not to get a sidebar.
+
 **Never `QMessageBox.about()`** (nor any of the other static `QMessageBox`
 helpers) in this session. They run a nested `exec()` and, with the KDE platform
 theme loaded, hand the box to a NATIVE dialog helper whose teardown segfaults

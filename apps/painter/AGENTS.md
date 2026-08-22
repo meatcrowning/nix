@@ -56,9 +56,15 @@ here:
   nothing to resolve against when a pane is the root of its own view. Add a
   property to `Root.qml` that a panel reads, and it must be added to the pane\'s
   forwarding block too.
-- **`paramsDocked`** tells `Root.qml` the column is elsewhere: no splitter, the
-  results fill the window, and the parameters/gallery radio pair leaves the menu
-  because both are visible at once.
+- **The parameter column is NOT a `QDockWidget`.** It was one for a day. A dock
+  is a second `QQuickWidget`, which is a second scene graph rendered on the GUI
+  thread every frame — a QQuickWidget cannot use the threaded render loop — and
+  his verdict (2026-08-22) was that the detaching was not wanted, its header was
+  not wanted, and the window felt slower for it. The column lives in the one
+  scene, behind the splitter, in both sessions; `showParams` (F7) puts it away
+  and on a window too narrow to split it moves `view` with it, so the toggle
+  cannot leave you looking at the wrong pane. `kdeshell.dock` stays — general,
+  tested, unused here.
 - **The results pane has a drag band across its top** (`ResultsPane.qml`,
   26px): everything above it is chrome, and a press there asks the compositor
   to move the window (`App.startSystemMove()`, one call for both roofs). Below

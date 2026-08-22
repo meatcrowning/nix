@@ -429,6 +429,18 @@ def _build_background_classes():
     return _BgProvider, _StyledBackground
 
 
+def _build_no_drag_filter():
+    """An event filter that swallows presses, so the style cannot start a window
+    drag from the widget it is installed on. See `_ensure_status`."""
+    from PySide6.QtCore import QObject, QEvent
+
+    class _NoDrag(QObject):
+        def eventFilter(self, obj, ev):
+            return ev.type() in (QEvent.MouseButtonPress, QEvent.MouseMove)
+
+    return _NoDrag
+
+
 def _build_shell_class():
     from PySide6.QtWidgets import QMainWindow, QToolBar, QStatusBar, QLabel
     from PySide6.QtQuickWidgets import QQuickWidget
@@ -513,6 +525,8 @@ def _build_shell_class():
             self._search = None         # the toolbar's filter field, if any
             self._search_spacer = None  # ...and the stretch that keeps it right
             self._search_action = None
+            self._no_drag = _build_no_drag_filter()(self.window)
+            self._refresh_pending = False
             self._dock_actions = [] # their toggleViewAction()s, for the View menu
             self._menu_order = []
             # First build decides whether the toolbar shows at all; after that
@@ -814,6 +828,17 @@ def _build_shell_class():
             if self._status is None:
                 self._status = QStatusBar(self.window)
                 self._status.setSizeGripEnabled(True)
+                # THE STATUS BAR IS NOT A TITLEBAR. Oxygen's WindowManager makes
+                # every empty piece of a window draggable (its "window drag
+                # mode", WD_FULL), which is right for the chrome at the top and
+                # wrong at the bottom — the bar reports, it is not somewhere you
+                # grab. `_kde_no_window_grab` is the property that style's own
+                # blacklist reads; the event filter below is the belt to its
+                # braces, since the property is the style's promise rather than
+                # ours (the size grip is a CHILD widget, so it is untouched by
+                # a filter installed on the bar itself).
+                self._status.setProperty("_kde_no_window_grab", True)
+                self._status.installEventFilter(self._no_drag)
                 self._status_label = QLabel("")
                 # addWidget, not addPermanentWidget: this is the message area,
                 # and it gives way to a transient showMessage() the way every
@@ -942,11 +967,19 @@ def _build_shell_class():
                 self._actions[bid] = act
             # A row's label is the button's `menuText` if it has one, else its
             # TOOLTIP — never its two-character titlebar glyph (docs/DESIGN.md §7.6).
-            act.setText(str(e.get("menuText") or e.get("tip") or e.get("label") or bid))
-            act.setToolTip(str(e.get("tip") or ""))
+            # ONLY WHAT CHANGED. `_refresh` runs on every state flip — during a
+            # generation that is every progress tick — and this used to re-do a
+            # `QIcon.fromTheme` lookup for all twenty actions each time.
+            text = str(e.get("menuText") or e.get("tip") or e.get("label") or bid)
+            if act.text() != text:
+                act.setText(text)
+            tip = str(e.get("tip") or "")
+            if act.toolTip() != tip:
+                act.setToolTip(tip)
             icon = str(e.get("icon") or "")
-            if icon:
+            if icon and act.property("_iconName") != icon:
                 act.setIcon(QIcon.fromTheme(icon))
+                act.setProperty("_iconName", icon)
 
             # THE SHORTCUT IS THIS FACE'S ALONE. The app's QML `Shortcut`s stand
             # down under Plasma (two owners of one sequence in one window is an
@@ -985,7 +1018,23 @@ def _build_shell_class():
 
         def _refresh(self):
             """A state flip: update the actions in place. Rebuilding the
-            menubar here instead would close a menu the user has open."""
+            menubar here instead would close a menu the user has open.
+
+            COALESCED to one pass per event-loop turn. The app pushes its whole
+            button table on every state change, and during a generation that is
+            every progress message — several a second, each one converting a
+            twenty-row array out of QML and walking every QAction. A zero timer
+            collapses a burst into a single update, and there is no frame in
+            which the menus could have been read in between anyway.
+            """
+            if self._root is None or self._refresh_pending:
+                return
+            self._refresh_pending = True
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, self._refresh_now)
+
+        def _refresh_now(self):
+            self._refresh_pending = False
             if self._root is None:
                 return
             for e in self._entries():
