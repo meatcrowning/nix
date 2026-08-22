@@ -2378,6 +2378,20 @@ class Painter(QObject):
 
         self._run_async([sys.executable, str(CLIPFILE), str(path)], done)
 
+    @Slot()
+    def openFolder(self):
+        """The output directory, in the desktop's file manager — KDE's "Open
+        Containing Folder", which every one of those programs has.
+
+        `xdg-open` rather than `filer`, which takes no path argument: under
+        Plasma this lands in Dolphin, which is where a File menu row saying
+        this is expected to land.
+        """
+        try:
+            subprocess.Popen(["xdg-open", str(OUT_DIR)], start_new_session=True)
+        except OSError as e:
+            self.toast.emit("cannot open %s: %s" % (OUT_DIR, e), True)
+
     @Slot(str)
     def openExternally(self, path):
         p = path.replace("file://", "")
@@ -2571,7 +2585,10 @@ def main():
             return 2
         # The chrome, built from the same tbButtons array the titlebar column
         # uses and calling the same tbAction(id) — one source, two roofs.
-        shell.bind_chrome(bar, menu_order=["generate", "view", "settings"])
+        # No menu_order here: the order comes from the QML root's own
+        # `menuOrder`, and kdeshell keeps File first and Settings/Help last
+        # whatever an app says (pylib/kdeshell.py MENU_ORDER).
+        shell.bind_chrome(bar)
         shell.bind_status()      # the QML root's statusLine/statusProgress
         # The window is how the controller knows whether he is watching: a batch
         # that finishes behind a rolled-up or unfocused painter says so with a
@@ -2603,6 +2620,11 @@ def main():
             # only way to tell a component that is mis-sized from one that is
             # merely drawn oddly — a rendered PNG shows the symptom, this shows
             # which item owns it.
+            # PAINTER_MENUS: the menubar/toolbar as text. A menu is not on
+            # screen until it is opened, so no render can show what is in one —
+            # this is the only check the KDE menu structure gets.
+            if plasma and os.environ.get("PAINTER_MENUS"):
+                print(shell.dump_chrome())
             if os.environ.get("PAINTER_TREE"):
                 # What the WIDGET half is wearing — the half a QML-only dump
                 # cannot see, and the half that goes wrong when the KDE platform
