@@ -35,7 +35,7 @@ from pathlib import Path
 from PySide6.QtCore import (QAbstractListModel, QFileSystemWatcher, QModelIndex,
                             QObject, Property, QProcess, QSortFilterProxyModel, Qt,
                             QTimer, QUrl, Signal, Slot)
-from PySide6.QtGui import QColor, QGuiApplication, QImage
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtQuick import QQuickImageProvider
 
@@ -2522,6 +2522,14 @@ def main():
     plasma = is_plasma()
     shell = kdeshell.shell("painter", size=(1280, 900), min_size=(720, 560)) if plasma else None
     engine = shell.engine() if plasma else QQmlApplicationEngine()
+    if plasma:
+        # THE SELECTOR IS HOW THE CONTENT CHANGES CLOTHES WITHOUT CHANGING CODE.
+        # With "plasma" set, `qml/+plasma/Foo.qml` transparently replaces
+        # `qml/Foo.qml` for every call site — so the panels, buttons, spinners
+        # and dropdowns in this session are QtQuick.Controls painted through the
+        # KDE style, while the Hyprland tree keeps ours, and not one caller has
+        # a branch in it. Same API, two implementations (apps/AGENTS.md).
+        kdeshell.select_plasma_files(engine)
     # The sampler's preview frames, addressed as image://livepreview/<tick>.
     # Ownership passes to the engine, so the controller keeps only a reference.
     preview = LivePreview()
@@ -2591,6 +2599,52 @@ def main():
             # toolbar, the statusbar and the window background all come from the
             # KDE style — so the only way to check it is to look at the pixels
             # (the offscreen-render rule, apps/AGENTS.md; never his screen).
+            # PAINTER_TREE: the item tree with its real geometry, which is the
+            # only way to tell a component that is mis-sized from one that is
+            # merely drawn oddly — a rendered PNG shows the symptom, this shows
+            # which item owns it.
+            if os.environ.get("PAINTER_TREE"):
+                # What the WIDGET half is wearing — the half a QML-only dump
+                # cannot see, and the half that goes wrong when the KDE platform
+                # theme is missing (kdeshell.apply_palette).
+                try:
+                    print(f"style={app.style().objectName()} "
+                          f"window={app.palette().window().color().name()} "
+                          f"text={app.palette().windowText().color().name()} "
+                          f"icons={QIcon.themeName()}")
+                except Exception:  # noqa: BLE001
+                    pass
+                root_item = shell.root if shell is not None else ctl.window
+                want = os.environ.get("PAINTER_TREE")
+
+                def walk(it, depth=0):
+                    if depth > 12 or it is None:
+                        return
+                    for ch in it.children():
+                        try:
+                            cls = ch.metaObject().className()
+                            # QML-DEFINED TYPES ARE THE ONES WORTH SEEING, and
+                            # their className is `Panel_QMLTYPE_42`, not
+                            # `QQuick…` — filtering on that prefix hid exactly
+                            # the components being debugged.
+                            if ch.property("height") is None:
+                                walk(ch, depth)
+                                continue
+                            name = ch.property("title") or ch.property("label") or ""
+                            if want == "1" or want.lower() in (cls + " " + str(name)).lower():
+                                pad = ch.property("topPadding")
+                                print("  " * depth + f"{cls} {name!r} "
+                                      f"y={ch.property('y')} h={ch.property('height')} "
+                                      f"ih={ch.property('implicitHeight')} "
+                                      f"vis={ch.property('visible')}"
+                                      + (f" topPad={pad} botPad={ch.property('bottomPadding')}"
+                                         f" collapsed={ch.property('collapsed')}" if pad is not None else ""))
+                        except Exception:  # noqa: BLE001
+                            pass
+                        walk(ch, depth + 1)
+
+                walk(root_item)
+
             shot = os.environ.get("PAINTER_SHOT")
             if shot:
                 try:
