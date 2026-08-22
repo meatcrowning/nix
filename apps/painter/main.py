@@ -2863,6 +2863,23 @@ def main():
                     print(f"[dock {ident}]")
                     walk(item)
 
+            # PAINTER_OVERLAY_CHECK: prove the floating toolbar survives a
+            # window-state restore. `restoreState()` re-docks a toolbar by
+            # objectName, which is what broke it on his first relaunch; this
+            # forces exactly that (re-adding it to a toolbar area) and then asks
+            # the shell to re-assert itself.
+            if plasma and os.environ.get("PAINTER_OVERLAY_CHECK"):
+                shell.window.addToolBar(shell._toolbar)      # what a restore does
+                app.processEvents()
+                print("overlay after re-dock: parent=%s geo=%s"
+                      % (shell._toolbar.parent() is shell._overlay,
+                         shell._toolbar.geometry()))
+                shell._reassert_overlay()
+                app.processEvents()
+                print("overlay reasserted:   parent=%s geo=%s inset=%s"
+                      % (shell._toolbar.parent() is shell._overlay,
+                         shell._toolbar.geometry(),
+                         shell.root.property("chromeInset")))
             # PAINTER_FAKE_PROGRESS: drive the status bar's progress widget to a
             # value without a backend, so the shot shows the running state.
             # There is no other way to see it offscreen — the real one needs a

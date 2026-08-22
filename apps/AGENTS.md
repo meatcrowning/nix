@@ -711,6 +711,15 @@ filters the outputs and has no business over the parameter column. The
 property's own change signal covers window resizing, so nothing watches the
 window.
 
+**`use_overlay_toolbar` must be re-asserted after `restoreState()`.** A saved
+window state records every toolbar by objectName and re-docks it on restore —
+so an overlay toolbar came back full width, over-tall and with its buttons
+pushed to the bottom of the band the main window had claimed for it, on the
+first relaunch after the state was saved. `show()` re-parents and re-lays it
+after restoring; a saved state cannot outvote what the app asked for.
+`PAINTER_OVERLAY_CHECK=1` on painter's selftest forces the re-dock and proves
+the recovery.
+
 **A dock is a second scene graph.** `QQuickWidget` cannot use the threaded
 render loop, so every one of them renders on the GUI thread each frame. Two is
 measurably more than one: painter had its parameter column in a dock for a day

@@ -592,8 +592,25 @@ def _build_shell_class():
 
         def show(self):
             self._restore_state()
+            # RESTORE PUTS THE TOOLBAR BACK IN A TOOLBAR AREA. `saveState()`
+            # records where every toolbar lived, by objectName, and
+            # `restoreState()` re-docks it — which for an overlay toolbar means
+            # the main window claims a band for it again while our container
+            # still holds it, and it comes up full width, over-tall and with its
+            # buttons pushed to the bottom of that band. He had exactly that
+            # after the first relaunch. Re-assert the overlay afterwards, every
+            # time; a saved state cannot outvote what the app asked for.
+            self._reassert_overlay()
             self.window.show()
             return self.window.windowHandle()
+
+        def _reassert_overlay(self):
+            if self._overlay is None or self._toolbar is None:
+                return
+            self.window.removeToolBar(self._toolbar)
+            self._toolbar.setParent(self._overlay)
+            self._toolbar.setVisible(True)
+            self._layout_overlay()
 
         # ------------------------------------------------------- window state
         # A KDE program comes back the way it was left, and with docks that is
@@ -1233,6 +1250,8 @@ def _build_shell_class():
             if c is None or tb is None:
                 return
             self.view.setGeometry(0, 0, c.width(), c.height())
+            # sizeHint, never the current height: a toolbar that a restore has
+            # just re-docked reports whatever band the main window gave it.
             h = tb.sizeHint().height() if tb.isVisible() else 0
             w = c.width()
             if self._overlay_width_prop and self._root is not None:
