@@ -35,7 +35,7 @@ from pathlib import Path
 from PySide6.QtCore import (QAbstractListModel, QFileSystemWatcher, QModelIndex,
                             QObject, Property, QProcess, QSortFilterProxyModel, Qt,
                             QTimer, QUrl, Signal, Slot)
-from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QWindow
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtQuick import QQuickImageProvider
 
@@ -2377,6 +2377,32 @@ class Painter(QObject):
             self.toast.emit(f"{name} copied — paste it as a file", False)
 
         self._run_async([sys.executable, str(CLIPFILE), str(path)], done)
+
+    fullScreenChanged = Signal()
+
+    @Property(bool, notify=fullScreenChanged)
+    def fullScreen(self):
+        w = self.window
+        try:
+            return w is not None and w.visibility() == QWindow.FullScreen
+        except (AttributeError, RuntimeError):
+            return False
+
+    @Slot()
+    def toggleFullScreen(self):
+        """One implementation for both roofs: `self.window` is a QWindow either
+        way — the QML `Window` under Hyprland, the QMainWindow's window handle
+        under Plasma — and QWindow.setVisibility fullscreens whichever it is."""
+        w = self.window
+        if w is None:
+            return
+        try:
+            w.setVisibility(QWindow.Windowed
+                            if w.visibility() == QWindow.FullScreen
+                            else QWindow.FullScreen)
+        except (AttributeError, RuntimeError):
+            return
+        self.fullScreenChanged.emit()
 
     @Slot()
     def openFolder(self):

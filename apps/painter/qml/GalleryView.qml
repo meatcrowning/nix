@@ -13,6 +13,9 @@ Item {
     //: which owns the one menu, in SCENE coordinates. Same arrangement as
     //: PromptBox's spelling menu.
     signal menuRequested(real sx, real sy, var items)
+    //: "Show me this one" — a double-click. The pane above decides what that
+    //: means; this view only reports it.
+    signal openRequested(string path, bool isVideo)
 
     // ------------------------------------------------------------ selection
     //
@@ -445,7 +448,15 @@ Item {
                         view.menuRequested(pt.x, pt.y, view.menuFor(index, path, isVideo))
                     }
                     onDoubleClicked: function (m) {
-                        if (m.button === Qt.LeftButton) App.openExternally(path)
+                        // IN-APP NOW, not the external viewer. A double-click
+                        // in a thumbnail grid means "look at this one", and
+                        // since the pane grew a View mode that is a thing this
+                        // window can do (docs/DESIGN.md §7.6, ResultsPane).
+                        // `viewer` is still one row up the right-click menu and
+                        // in the File menu, for the times you want the real
+                        // image tool.
+                        if (m.button === Qt.LeftButton)
+                            view.openRequested(path, isVideo)
                     }
                 }
             }

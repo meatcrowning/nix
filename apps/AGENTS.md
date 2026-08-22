@@ -669,6 +669,27 @@ with text-only toolbar rows in a session where everything else is Oxygen.
 icon theme name, and the icon search paths Qt only fills in from a platform
 theme — so a stripped or offscreen environment behaves like the session.
 
+**The menus are KDE's, not the app's.** `MENU_ORDER`/`MENU_TITLE` fix the
+vocabulary — File, Edit, View, Go, Bookmarks, Tools, Settings, Help — with File
+first and Settings/Help last whatever an app's own `menuOrder` says; a group an
+app invents is inserted before Settings. `kdeshell` supplies what the app did
+not: Quit at the end of File, Show Toolbar/Show Statusbar in Settings, About and
+About Qt in Help. A row's shortcut comes from the action table (`"@Quit"`-style
+names take the platform's standard sequence), `group:` makes a radio set, and
+one `QAction` per id is reused across rebuilds so a menu row and a toolbar row
+can never disagree.
+
+**`shell.dock(ident, title, qml, …)`** puts a QML file in a real `QDockWidget`:
+float, tab, drag to another edge, a View-menu toggle that is the dock's own
+action, and placement saved with the window. Three things it has to get right,
+all silent when wrong — the view must share the app's engine
+(`QQuickWidget(engine, …)`, or it sees none of the context properties and comes
+up blank), it needs its own `KdeBackground` in its own child context (or it
+draws the central widget's crop and the gradient steps at the seam), and it is
+created with `createWithInitialProperties` so its bindings never run once
+against an empty model. `show()` restores geometry + `saveState()`; a harness on
+the offscreen platform saves nothing, because a test's window size is not his.
+
 **The content changes clothes through a FILE SELECTOR, not a branch.**
 `kdeshell.select_plasma_files(engine)` turns on the `plasma` selector, so
 `qml/+plasma/Foo.qml` transparently replaces `qml/Foo.qml` at every call site:

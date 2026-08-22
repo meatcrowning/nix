@@ -37,6 +37,34 @@ here:
   real QMenuBar and must not draw a second one.
 - **`statusLine` / `statusProgress`** are what the KDE status bar shows;
   `QueueBar` is the Hyprland strip and is hidden (and `barH` 0) there.
+- **`actions` is the whole table of verbs; `tbButtons` is a filter over it.**
+  The titlebar column has six cells and a menubar has thirty rows, so the rows
+  the titlebar gets are the ones marked `tb:`. Everything else on a row is inert
+  on the other side: `vtbclient.py` reads id/label/state/tip/bottom and ignores
+  the rest, `kdeshell` never sees `label`. `menu:`/`menuText:`/`icon:`/`bar:`/
+  `shortcut:`/`checkable:`/`group:` are the KDE half; `menuOrder` names the
+  menus. A row whose target is missing is **disabled, not removed**.
+- **A `shortcut:` in that table is the Plasma face\'s alone.** Two owners of one
+  sequence in a window is an ambiguous shortcut and Qt fires NEITHER, so the QML
+  `Shortcut`s that duplicate one carry `enabled: !root.plasma`.
+- **The panes are their own files.** `ResultsPane.qml` (preview + gallery +
+  `OutputView`) and `ParamsPane.qml` (the parameter column), because under
+  Plasma the parameters are a real `QDockWidget` — a second scene — while
+  `Root.qml` stays the app. Each pane declares `id: root` and FORWARDS to an
+  `app` property rather than relying on QML resolving `root` up the
+  creation-context chain, which is what every panel in here does and which has
+  nothing to resolve against when a pane is the root of its own view. Add a
+  property to `Root.qml` that a panel reads, and it must be added to the pane\'s
+  forwarding block too.
+- **`paramsDocked`** tells `Root.qml` the column is elsewhere: no splitter, the
+  results fill the window, and the parameters/gallery radio pair leaves the menu
+  because both are visible at once.
+- **Browse ↔ View.** `inView` plus `OutputView.qml` — one output filling the
+  pane, entered by Return or a double-click (which no longer launches `viewer`;
+  that is still File → Open in Viewer), left by Escape, walked with Alt+Left/
+  Right and PgUp/PgDown. **The selection is the cursor**: View shows `selOne`,
+  so there are never two places that disagree about which output is current.
+  Zoom belongs to a still; a clip\'s zoom rows are disabled.
 
 ## The look is the desktop's, and painter is where it was worst
 
