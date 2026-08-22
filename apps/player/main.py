@@ -4150,7 +4150,8 @@ def main():
 
         def build_settings():
             dlg = shell.dialog("settings", "Configure player",
-                               QML / "SettingsPage.qml", size=(420, 420))
+                               QML / "SettingsPage.qml", size=(420, 420),
+                               props={"pad": 12})
             if not page_holder:
                 page = shell._dialogs["settings"][3]
                 page.setProperty("columns", int(root.property("albumCols") or 7))
@@ -4188,6 +4189,10 @@ def main():
         win_state = WinState(win, "player")  # keep ref: geometry
 
     if selftest:
+        # The album models, so a shot shows a library rather than "no albums —
+        # is the library drive mounted?". A read of the DB and nothing else: no
+        # scan, no writes.
+        bridge.refreshAlbums()
         return _selftest(app, shell, win, plasma, warnings)
 
     bridge.refreshAlbums()
@@ -4215,6 +4220,14 @@ def _selftest(app, shell, win, plasma, warnings):
     a window the size of a test (~/nix/AGENTS.md).
     """
     rc = [0]
+    # PLAYER_VIEW: which page the shot shows. Written straight onto the property
+    # rather than through `setView`, so it persists nothing — a harness must not
+    # hand him back a different page than the one he left the app on.
+    want_view = os.environ.get("PLAYER_VIEW")
+    if want_view and shell is not None:
+        shell.root.setProperty("view", want_view)
+    elif want_view and win is not None:
+        win.setProperty("view", want_view)
 
     def finish():
         # PLAYER_MENUS: the menubar and both toolbars as text. A menu is not on
@@ -4270,6 +4283,33 @@ def _selftest(app, shell, win, plasma, warnings):
                     walk(ch, depth + 1)
 
             walk(root_item)
+        # PLAYER_FACES: which components the file selector actually swapped.
+        # Each `+plasma` variant carries `property string face: "plasma"`, and
+        # this is the only way to prove the swap happened — a selector that
+        # failed to take (an unowned QQmlFileSelector is collected moments after
+        # it is made) loads the unselected file SILENTLY, with no error and no
+        # warning (kdeshell.select_plasma_files).
+        if os.environ.get("PLAYER_FACES"):
+            seen = {}
+
+            def faces(it, depth=0):
+                if depth > 14 or it is None:
+                    return
+                for ch in (it.childItems() if hasattr(it, "childItems") else []):
+                    f = ch.property("face")
+                    # A STRING, specifically: `qmlcommon/VScroll.qml` has a
+                    # `color face` of its own (the bevel's lit edge) and would
+                    # otherwise report itself as swapped in both sessions.
+                    if isinstance(f, str) and f:
+                        cls = ch.metaObject().className().split("_QMLTYPE")[0]
+                        seen[cls] = str(f)
+                    faces(ch, depth + 1)
+
+            faces(shell.root if shell is not None else win)
+            for cls in sorted(seen):
+                print(f"face {cls} = {seen[cls]}")
+            if not seen:
+                print("face: none found")
         shot = os.environ.get("PLAYER_SHOT")
         if shot:
             try:

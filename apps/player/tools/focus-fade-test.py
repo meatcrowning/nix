@@ -61,6 +61,9 @@ from PySide6.QtCore import (QAbstractListModel, QModelIndex, QObject, QUrl, Qt,
                             Property, Signal, Slot)
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QWindow
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
+# Imported so PySide has the QQuickItem converter the contentItem read
+# below needs, and so the QML `Window` root is wrapped as a QQuickWindow.
+from PySide6.QtQuick import QQuickItem, QQuickWindow  # noqa: F401
 
 FAILS = []
 KEEP = []          # setContextProperty does NOT take ownership — anything handed
@@ -466,6 +469,12 @@ def main():
     win.setHeight(826)
     spin(app, 400)
 
+    # THE DERIVATION LIVES IN `Root.qml`, NOT IN THE WINDOW. `Main.qml` is a
+    # 25-line `Window` around it since player got its Plasma face
+    # (apps/pylib/kdeshell.py hosts that same Item in a QQuickWidget instead),
+    # so the fg tones are read off the child. Focus is still the WINDOW's.
+    content = win.property("contentItem").childItems()[0]
+
     lit = {"Theme.text": theme.property("text"),
            "Theme.textDim": theme.property("textDim"),
            "Theme.accent": theme.property("accent")}
@@ -489,11 +498,11 @@ def main():
     check("the window reports itself ACTIVE offscreen (the harness can drive focus)",
           win.property("active") is True)
     check("a focused window draws its foregrounds in the live tones",
-          win.property("fgText") == lit["Theme.text"]
-          and win.property("fgDim") == lit["Theme.textDim"]
-          and win.property("fgAccent") == lit["Theme.accent"])
+          content.property("fgText") == lit["Theme.text"]
+          and content.property("fgDim") == lit["Theme.textDim"]
+          and content.property("fgAccent") == lit["Theme.accent"])
     check("a focused window draws its ARTWORK at full opacity",
-          win.property("fgArt") == 1.0, win.property("fgArt"))
+          content.property("fgArt") == 1.0, content.property("fgArt"))
     focus(False)
     check("the window reports itself INACTIVE once another window takes focus",
           win.property("active") is False)
@@ -502,12 +511,12 @@ def main():
     # unfocused window must stay on its focused tones — artwork included, which
     # the scrim dims as part of the surface.
     check("an UNFOCUSED window KEEPS all three foreground tones (the app-side fade is retired)",
-          win.property("fgText") == lit["Theme.text"]
-          and win.property("fgDim") == lit["Theme.textDim"]
-          and win.property("fgAccent") == lit["Theme.accent"],
-          (win.property("fgText"), win.property("fgDim"), win.property("fgAccent")))
+          content.property("fgText") == lit["Theme.text"]
+          and content.property("fgDim") == lit["Theme.textDim"]
+          and content.property("fgAccent") == lit["Theme.accent"],
+          (content.property("fgText"), content.property("fgDim"), content.property("fgAccent")))
     check("an UNFOCUSED window keeps the ARTWORK at full opacity",
-          win.property("fgArt") == 1.0, win.property("fgArt"))
+          content.property("fgArt") == 1.0, content.property("fgArt"))
 
     # ------------------------------------------------ 2. the pixels
     # Focus must change NOTHING on screen: the app draws no inactive state of
