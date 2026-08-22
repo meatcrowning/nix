@@ -1944,6 +1944,91 @@ def test_escape(win, ctl):
     check("Escape closes the settings drawer", APP.property("showSettings") is False)
 
 
+def test_browse_view(win, ctl, tmp):
+    """Browse <-> View: enter, walk, zoom, leave.
+
+    The Gwenview spine, on BOTH faces — so it is tested here, against the
+    Hyprland roof, and not only in the KDE shell's menus.
+    """
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    paths = [fake_png(os.path.join(tmp, "out", "bv%d.png" % i),
+                      {"positive": "bv%d" % i, "steps": 10 + i})
+             for i in range(3)]
+    for pth in paths:
+        ctl.gallery.add(pth)
+    spin(200)
+
+    gal = find(win.contentItem(), "GalleryView")
+    out = find(win.contentItem(), "OutputView")
+    check("the output view exists", out is not None)
+    if out is None:
+        return
+
+    # Newest first, so the last one added is row 0.
+    newest = ctl.gallery.pathAt(0)
+    APP.metaObject().invokeMethod(APP, "enterView", Q_ARG("QVariant", ""))
+    spin(150)
+    check("entering View shows one output and hides the grid",
+          APP.property("inView") is True and out.isVisible() and not gal.isVisible(),
+          (APP.property("inView"), out.isVisible(), gal.isVisible()))
+    check("...the newest one, and it is the selection too",
+          out.property("source") == newest and APP.property("selOne") == newest,
+          (out.property("source"), APP.property("selOne")))
+
+    # The walk moves the SELECTION, which is what View is showing — one cursor.
+    APP.metaObject().invokeMethod(APP, "stepOutput", Q_ARG("QVariant", 1))
+    spin(120)
+    check("the walk keys move to the next output",
+          APP.property("selOne") == ctl.gallery.pathAt(1)
+          and out.property("source") == ctl.gallery.pathAt(1),
+          (APP.property("selOne"), out.property("source")))
+    # ...and clamps rather than wrapping: an end you can fall off loses your place.
+    for _ in range(6):
+        APP.metaObject().invokeMethod(APP, "stepOutput", Q_ARG("QVariant", -1))
+    spin(120)
+    check("...and clamps at the top instead of wrapping",
+          APP.property("selOne") == ctl.gallery.pathAt(0), APP.property("selOne"))
+
+    # Zoom. Fit never upscales, so a small fixture sits below 1.0 and Actual
+    # Size is a real change rather than a no-op.
+    out.metaObject().invokeMethod(out, "zoomFit")
+    spin(80)
+    check("fit is the default and reports itself", out.property("fitting") is True)
+    out.metaObject().invokeMethod(out, "zoomActual")
+    spin(80)
+    check("actual size is 1:1", abs(out.property("scaleNow") - 1.0) < 1e-6,
+          out.property("scaleNow"))
+    before = out.property("scaleNow")
+    out.metaObject().invokeMethod(out, "zoomIn")
+    spin(80)
+    check("zoom in enlarges", out.property("scaleNow") > before,
+          (before, out.property("scaleNow")))
+    out.metaObject().invokeMethod(out, "zoomOut")
+    spin(80)
+    check("...and zoom out puts it back",
+          abs(out.property("scaleNow") - before) < 1e-6, out.property("scaleNow"))
+
+    # A different output starts fitted again rather than carrying a 4x zoom.
+    out.metaObject().invokeMethod(out, "zoomActual")
+    APP.metaObject().invokeMethod(APP, "stepOutput", Q_ARG("QVariant", 1))
+    spin(120)
+    check("a different output starts fitted", out.property("fitting") is True)
+
+    QTest.keyClick(win, Qt.Key_Escape)
+    spin(150)
+    check("Escape leaves View for the grid",
+          APP.property("inView") is False and gal.isVisible() and not out.isVisible(),
+          (APP.property("inView"), gal.isVisible(), out.isVisible()))
+
+    for pth in paths:
+        try: os.remove(pth)
+        except OSError: pass
+    ctl.gallery.load_existing()
+    spin(120)
+
+
 def test_inject(win, ctl, tmp):
     """Left-click an output -> inject all / prompt / params."""
     params = {"positive": "injected positive", "negative": "injected negative",
@@ -1980,8 +2065,15 @@ def test_inject(win, ctl, tmp):
               not menu.isVisible() and not OPENED, (menu.isVisible(), OPENED))
         doubleclick(win, cell)
         spin(200)
-        check("double-clicking it opens it in viewer",
-              bool(OPENED) and OPENED[-1][-1] == path, OPENED)
+        # IN-APP NOW: a double-click enters View on that output rather than
+        # launching `viewer`. The external tool is still one row down the
+        # right-click menu and in the File menu.
+        check("double-clicking it enters View on that output",
+              APP.property("inView") is True and APP.property("selOne") == path,
+              (APP.property("inView"), APP.property("selOne")))
+        check("...without launching the external viewer", not OPENED, OPENED)
+        APP.setProperty("inView", False)
+        spin(120)
         click(win, cell, dx=cell.width() / 2, dy=cell.height() / 2, button=Qt.RightButton)
         spin(150)
         labels = [i.get("label") for i in (prop(menu, "items") or []) if i.get("label")]
@@ -3053,6 +3145,7 @@ def main():
     print("== resolution ==");        test_resolution(win, ctl)
     print("== dropdowns ==");         test_dropdown(win, ctl)
     print("== escape ==");            test_escape(win, ctl)
+    print("== browse/view ==");      test_browse_view(win, ctl, tmp)
     print("== inject ==");            test_inject(win, ctl, tmp)
     print("== copy prompt ==");       test_copy_prompt(win, ctl, tmp)
     print("== clip params ==");       test_clip_params(win, ctl, tmp)

@@ -44,8 +44,16 @@ Item {
         sourceComponent: CtxMenu { }
     }
 
-    // The gallery item, so the app can read what is selected.
+    // The gallery item, so the app can read what is selected, and the output
+    // view, so the app's zoom rows have something to call.
     property alias gallery: galleryView
+    property alias output: outputView
+
+    // Browse or View — Gwenview's two states, decided by the app because the
+    // menus, the shortcuts and Escape all reach it there.
+    readonly property bool inView: app ? app.inView : false
+    readonly property string viewPath: app ? app.selOne : ""
+    readonly property bool viewIsVideo: app ? app.selIsVideo : false
 
     PreviewPane {
         id: preview
@@ -54,13 +62,30 @@ Item {
         anchors.top: parent.top
         anchors.margins: root.width < 320 ? 4 : 10
         anchors.bottomMargin: 0
-        open: root.showPreview
+        // The live viewport is a browsing affordance: in View the whole pane is
+        // already one output, and a second smaller copy of a different one
+        // above it is noise.
+        open: root.showPreview && !root.inView
     }
 
     // Margins shrink with the pane: 10px either side of a 220px column is
     // 9% of it spent on nothing (docs/DESIGN.md §5.2).
+    OutputView {
+        id: outputView
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: preview.visible ? preview.bottom : parent.top
+        anchors.bottom: parent.bottom
+        anchors.margins: root.width < 320 ? 4 : 10
+        visible: root.inView
+        source: root.inView ? root.viewPath : ""
+        isVideo: root.viewIsVideo
+        onMenuRequested: (sx, sy, items) => root.ctxMenu.open(sx, sy, items)
+    }
+
     GalleryView {
         id: galleryView
+        visible: !root.inView
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: preview.visible ? preview.bottom : parent.top
@@ -68,5 +93,6 @@ Item {
         anchors.margins: root.width < 320 ? 4 : 10
         anchors.topMargin: preview.visible ? 8 : (root.width < 320 ? 4 : 10)
         onMenuRequested: (sx, sy, items) => root.ctxMenu.open(sx, sy, items)
+        onOpenRequested: (path, isVideo) => { if (root.app) root.app.enterView(path) }
     }
 }

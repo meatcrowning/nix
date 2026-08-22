@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Window
 import QtQuick.Controls.Basic
+import QtQuick.Dialogs
 import "../../qmlcommon"
 
 // Painter's whole surface, as an ITEM rather than a Window — because it has two
@@ -35,6 +36,34 @@ Item {
     // parameters/gallery pane switch is meaningless because both are visible.
     // Set from main.py, false everywhere else.
     property bool paramsDocked: false
+
+    // BROWSE OR VIEW — Gwenview's spine, and the one piece of this that is not
+    // chrome: the grid answers "what have I made", View answers "what does THIS
+    // one look like", which no thumbnail can. Return or a double-click enters,
+    // Escape leaves, and the walk keys move the SELECTION, which is what View
+    // is showing — so there is one cursor, not two that can disagree.
+    property bool inView: false
+    readonly property bool selIsVideo: root.selOne !== ""
+        && Gallery.isVideoAt(Gallery.indexOf(root.selOne))
+    readonly property bool canZoom: root.inView && !root.selIsVideo
+    readonly property bool canStep: Gallery.count > 1
+
+    function enterView(path) {
+        var p = path || root.selOne
+        if (p === "" && Gallery.count > 0) p = Gallery.pathAt(0)
+        if (p === "") return
+        results.gallery.selectSingle(p)
+        root.inView = true
+    }
+
+    // Walk the gallery, clamped rather than wrapped: an end you can fall off is
+    // how you lose your place in a list of sixty.
+    function stepOutput(d) {
+        if (Gallery.count === 0) return
+        var i = root.selOne === "" ? -1 : Gallery.indexOf(root.selOne)
+        var n = i < 0 ? 0 : Math.max(0, Math.min(Gallery.count - 1, i + d))
+        results.gallery.selectSingle(Gallery.pathAt(n))
+    }
     property bool showSettings: false
     // The preview viewport above the history — off by default, remembered.
     property bool showPreview: false
@@ -533,6 +562,11 @@ Item {
           icon: "document-open", state: root.selOne === "" ? 2 : 0 },
         { id: "folder", tip: "Open Output Folder", menu: "file",
           icon: "folder-open" },
+        // The input well, from a file dialog rather than only a drop or a
+        // paste. Offered only where there IS a well to fill (docs/DESIGN.md §10).
+        { id: "import", tip: "Import Image…", menu: "file",
+          icon: "document-import", shortcut: "Ctrl+O",
+          state: (App.isEdit || App.isVideo) ? 0 : 2 },
         // ------------------------------------------------------------- edit
         // The gallery's right-click verbs, hoisted: the same three subsets of a
         // finished job (its words, its numbers, both) plus its prompt on the
@@ -561,7 +595,38 @@ Item {
           bar: true, checkable: true, group: "pane", shortcut: "Ctrl+2" },
         { id: "pv",   label: "pv",   tb: true, state: root.showPreview ? 1 : 0,
           tip: "Preview viewport", menu: "view", icon: "document-preview",
-          bar: true, checkable: true, shortcut: "F7" },
+          bar: true, checkable: true, shortcut: "F8" },
+        "-",
+        // Browse and View are the second radio pair, and the one that decides
+        // what the results pane IS.
+        { id: "browse", tip: "Browse", menu: "view", icon: "view-list-icons",
+          checkable: true, group: "mode", state: root.inView ? 0 : 1,
+          bar: true },
+        { id: "viewone", tip: "View", menu: "view", icon: "view-preview",
+          checkable: true, group: "mode", bar: true,
+          state: root.inView ? 1 : (root.selOne === "" && Gallery.count === 0 ? 2 : 0) },
+        "-",
+        // Zoom is the View mode's, and a clip has none (OutputView.qml).
+        { id: "zoomin", tip: "Zoom In", menu: "view", icon: "zoom-in",
+          shortcut: "@ZoomIn", state: root.canZoom ? 0 : 2 },
+        { id: "zoomout", tip: "Zoom Out", menu: "view", icon: "zoom-out",
+          shortcut: "@ZoomOut", state: root.canZoom ? 0 : 2 },
+        { id: "zoomfit", tip: "Fit to Window", menu: "view", icon: "zoom-fit-best",
+          shortcut: "Ctrl+0", state: root.canZoom ? 0 : 2 },
+        { id: "zoom100", tip: "Actual Size", menu: "view", icon: "zoom-original",
+          shortcut: "Ctrl+Shift+0", state: root.canZoom ? 0 : 2 },
+        "-",
+        { id: "full", tip: "Full Screen", menu: "view", icon: "view-fullscreen",
+          checkable: true, state: App.fullScreen ? 1 : 0, shortcut: "@FullScreen" },
+        // --------------------------------------------------------------- go
+        // Alt+Left/Right rather than PgUp/PgDown for the MENU rows: a window
+        // shortcut on a paging key takes it away from every text box in the
+        // window. The paging keys are bound in QML instead, gated on being in
+        // View with nothing focused.
+        { id: "prev", tip: "Previous Output", menu: "go", icon: "go-previous",
+          shortcut: "@Back", state: root.canStep ? 0 : 2 },
+        { id: "next", tip: "Next Output", menu: "go", icon: "go-next",
+          shortcut: "@Forward", state: root.canStep ? 0 : 2 },
         // ------------------------------------------------------------ tools
         { id: "rescan", tip: "Rescan Models", menu: "tools",
           icon: "view-refresh", shortcut: "Ctrl+R" },
@@ -581,7 +646,7 @@ Item {
 
     // The KDE menubar's menu order. `help` is appended by kdeshell, after
     // whatever an app names here (pylib/kdeshell.py MENU_ORDER).
-    readonly property var menuOrder: ["file", "edit", "view", "tools", "settings"]
+    readonly property var menuOrder: ["file", "edit", "view", "go", "tools", "settings"]
 
     // What the hyprvtb titlebar column gets: the six cells it had before this
     // table grew a menubar's worth of rows around them. Nothing about the
@@ -618,6 +683,16 @@ Item {
         else if (id === "folder") App.openFolder()
         else if (id === "copyprompt") { if (root.selOne !== "") App.copyPrompt(root.selOne) }
         else if (id === "clearprompt") root.set("positive", "")
+        else if (id === "import") importDialog.open()
+        else if (id === "browse") root.inView = false
+        else if (id === "viewone") root.enterView("")
+        else if (id === "zoomin") results.output.zoomIn()
+        else if (id === "zoomout") results.output.zoomOut()
+        else if (id === "zoomfit") results.output.zoomFit()
+        else if (id === "zoom100") results.output.zoomActual()
+        else if (id === "full") App.toggleFullScreen()
+        else if (id === "prev") root.stepOutput(-1)
+        else if (id === "next") root.stepOutput(1)
         else if (id === "rescan") App.rescan()
         else if (id === "backendstart") App.startBackend()
         else if (id === "backendstop") App.stopBackend()
@@ -661,9 +736,13 @@ Item {
         target: App
         function onBusyChanged() { root.pushButtons() }
         function onStatusChanged() { root.pushButtons() }
+        function onFullScreenChanged() { root.pushButtons() }
+        function onModeChanged() { root.pushButtons() }
     }
 
     onShowSettingsChanged: pushButtons()
+    onInViewChanged: pushButtons()
+    onSelOneChanged: pushButtons()
     onShowPreviewChanged: {
         pushButtons()
         if (root.restored) Prefs.set("showPreview", root.showPreview)
@@ -692,6 +771,13 @@ Item {
     // trimmed to a couple of rows. Its coordinates are the scene's, which is
     // what `mapToItem(null, ...)` at the call site hands it.
     readonly property Item ctxMenu: sceneMenu
+    // A gallery that gains or loses its first row changes what View and the
+    // walk keys can do.
+    Connections {
+        target: Gallery
+        function onCountChanged() { root.pushButtons() }
+    }
+
     CtxMenu {
         id: sceneMenu
         anchors.fill: parent
@@ -717,6 +803,20 @@ Item {
     // The sink is a plain focusable Item. Focus has to LAND somewhere; clearing
     // it without a destination leaves the window with no focus item and the next
     // keystroke going nowhere.
+    // Import Image… — the platform's own file dialog, which is Plasma's under
+    // Plasma and the portal's under Hyprland. QML's, not QFileDialog's: that
+    // one is QtWidgets and the Hyprland roof runs a QGuiApplication.
+    FileDialog {
+        id: importDialog
+        title: "Import image"
+        nameFilters: ["Images (*.png *.jpg *.jpeg *.webp *.bmp)", "All files (*)"]
+        onAccepted: {
+            var u = "" + importDialog.selectedFile
+            if (App.isEdit) App.addEditImage(u)
+            else if (App.isVideo) App.setInputImage(u)
+        }
+    }
+
     Item { id: focusSink; focus: false; activeFocusOnTab: false }
     function releaseFocus() { focusSink.forceActiveFocus() }
 
@@ -741,10 +841,33 @@ Item {
             if (sceneOverlay.visible) sceneOverlay.close()
             else if (sceneMenu.visible) sceneMenu.close()
             else if (root.showSettings) root.showSettings = false
+            else if (root.inView) root.inView = false
             else root.releaseFocus()
         }
     }
     Shortcut { sequence: "Ctrl+R"; enabled: !root.plasma; onActivated: App.rescan() }
+
+    // Return opens the selected output, the way it does in a file manager —
+    // and only when nothing else has a claim on the key: not while typing, not
+    // with a dropdown or a context menu open, and not when already in View.
+    Shortcut {
+        sequence: "Return"
+        enabled: !root.textFocused && !root.inView && !sceneOverlay.visible
+                 && !sceneMenu.visible && root.selOne !== ""
+        onActivated: root.enterView("")
+    }
+    // The paging keys walk outputs only in View, where there is nothing else
+    // they could mean. In Browse they still page the grid.
+    Shortcut {
+        sequence: "PgDown"
+        enabled: root.inView && !root.textFocused
+        onActivated: root.stepOutput(1)
+    }
+    Shortcut {
+        sequence: "PgUp"
+        enabled: root.inView && !root.textFocused
+        onActivated: root.stepOutput(-1)
+    }
 
     // Ctrl+V INTO A FRAME WELL.
     //
