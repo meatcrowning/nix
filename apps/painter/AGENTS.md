@@ -144,11 +144,49 @@ here:
   `wheelEnabled: false`), the left button PANS, and an edit output opens with
   the before/after slider on: `qmlcommon/CompareView.qml`, the same file
   viewer's `--compare` uses, moved there rather than copied. `App.compareSource`
-  answers what to compare against and returns "" unless the recorded
-  `input_image_local` is still on disk — an output whose source has been moved
-  or deleted shows normally, and so does anything that is not an edit. The
-  toolbar's `compare` button (icon + the word, via kdeshell's `barText`) is the
-  switch; it is remembered.
+  answers what to compare against; anything that is not an edit gets "" and
+  shows normally. The toolbar's `compare` button (icon + the word, via
+  kdeshell's `barText`) is the switch; it is remembered — and it is **offered
+  only where it can do something**, i.e. in View, on an edit, with a before that
+  this machine can find ([his] *"the compare button should only show when the
+  output viewed is an edit"*). That is `hidden:` on the row plus the `actions`
+  filter in `Root.qml`; kdeshell rebuilds its chrome when the SET of rows
+  changes, since a state flip alone cannot remove a button (apps/AGENTS.md).
+- **The before-image is filed beside the output, because a recorded path was
+  not enough.** [his] *"the compare mode just doesnt work in general"* —
+  measured 2026-08-22: the slider itself is fine (the harness drives it end to
+  end), what failed was finding the BEFORE. `input_image_local` names a path on
+  the machine that ran the edit, and painter reads two histories: its own
+  outputs, and — on book — top's over the sshfs peer mount, where a path like
+  `/run/media/lam/bak/…` means nothing. A source that has since been moved or
+  deleted is the same failure locally. So `_keep_before` copies the source into
+  `<out root>/.before/<output stem>.<ext>` as the output lands (hidden, and
+  outside the two globs the gallery scans, so it is never itself an output), and
+  `_compare_source` looks there FIRST, then at the recorded path, then for the
+  same file NAME in any output root — an edit of an earlier generation, which is
+  the common case. Outputs made before this exists still resolve through the
+  last two.
+- **The status bar's right-hand end names what you are looking at.** In View it
+  leads with the output's pixels — and a clip's running time after them — then
+  the tally of outputs, the selection and the queue depth ([his] *"in individual
+  output view it should display the resolution of the output and, if video, the
+  duration - to the left of the number of outputs"*). `OutputView.infoText`
+  measures it off the decode that is already happening (the `Image`'s implicit
+  size, the `MediaPlayer`'s metadata), so there is one answer and it costs
+  nothing; it is empty until something has decoded rather than saying `0x0`.
+- **The grid's column count is a choice, defaulting to automatic.** View →
+  Columns (a `group:` radio set, `cols0`..`cols6`, remembered as `gridColumns`).
+  0 keeps the width-driven layout — whole columns of a cell near 210px — and a
+  chosen count is still clamped by the 60px cell floor, because honouring a
+  number the pane cannot fit is how the grid goes empty (the note in
+  `GalleryView.qml`).
+- **Generate stays live while a job runs, so a second one can be QUEUED** ([his]
+  *"allow the user to queue generations, currently they are unable to"*).
+  ComfyUI has a queue and `_start_jobs` adds to it; what stopped him was the
+  chrome — the row greyed out on `App.busy`, which also swallowed Ctrl+Return,
+  since a disabled `QAction` eats its own shortcut. The word changes instead
+  (`Queue another generation`, `[ queue ]` in the Hyprland strip) and `queued N`
+  beside it is where the extra job shows up.
 - **Back leaves the output, Forward returns to it.** `@Back`/`@Forward` are the
   Browse↔View pair, not the output walk — the grid keeps its place because the
   selection never moves. Walking outputs is PgUp/PgDown (QML shortcuts, gated on

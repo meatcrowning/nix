@@ -25,6 +25,7 @@ import collections
 import hashlib
 import json
 import os
+import shutil
 import struct
 import subprocess
 import sys
@@ -2025,6 +2026,9 @@ class Painter(QObject):
                     dest = OUT_DIR / (img.get("subfolder") or "") / img["filename"]
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     dest.write_bytes(data)
+                    # An edit keeps a copy of what it was an edit OF, beside the
+                    # result, so the before/after survives the source moving.
+                    self._keep_before(dest, job.meta.get("params", {}))
                     self.gallery.add(str(dest))
                     self._batch_saved.append(str(dest))
                 finally:
@@ -2556,13 +2560,78 @@ class Painter(QObject):
     @staticmethod
     def _compare_source(png_path):
         """The local source image an edit output should be compared against, or
-        "" — an editing-model result whose input file is still on disk. Anything
-        else (a t2i output, a missing source) returns "" and opens normally."""
+        "" — anything that is not an edit, or an edit whose source cannot be
+        found on THIS machine, returns "" and opens normally.
+
+        Three places are tried, in order, because the recorded path alone was
+        not enough to make the slider work in general:
+
+        1. **The before-copy filed beside the output** (`.before/<stem>.<ext>`,
+           written by `_keep_before` when the output lands). It travels WITH the
+           output, which is what makes an edit generated on top comparable from
+           book: top's `input_image_local` names a path — often on a drive book
+           has never seen — that means nothing over the sshfs peer mount, and a
+           source that has since been moved or deleted means nothing anywhere.
+        2. **The recorded local path**, for every output made before that copy
+           existed and for anything filed by hand.
+        3. **The same FILE NAME in an output root**, local or peer — an edit of
+           an earlier generation is the common case, and then the before-image
+           is itself an output sitting in a directory this machine can read.
+        """
         params = outmeta.params_for(png_path)
         if not params or not (params.get("edit") or params.get("kind") == "edit"):
             return ""
+        out = Path(png_path)
+        for cand in sorted(Painter._before_dir(out).glob(out.stem + ".*")):
+            if cand.is_file():
+                return str(cand)
         src = params.get("input_image_local") or ""
-        return src if src and os.path.exists(src) else ""
+        if src and os.path.exists(src):
+            return src
+        name = os.path.basename(src or str(params.get("input_image") or ""))
+        if name:
+            for root in [OUT_DIR, *PEER_OUTS]:
+                for cand in (root / name, root / "video" / name):
+                    try:
+                        if cand.is_file():
+                            return str(cand)
+                    except OSError:
+                        continue
+        return ""
+
+    @staticmethod
+    def _before_dir(out_path):
+        """Where an output's before-copy lives: `.before/` in the ROOT of the
+        output tree it belongs to, so a clip filed under `video/` and a still
+        beside it share one directory. Hidden, and outside the two globs the
+        gallery scans with, so it is never itself an output."""
+        parent = Path(out_path).parent
+        if parent.name == "video":
+            parent = parent.parent
+        return parent / ".before"
+
+    @staticmethod
+    def _keep_before(dest, params):
+        """Copy an edit job's source image in beside the output it produced.
+
+        A few hundred KB per edit buys a before/after that still works when the
+        source has been moved, deleted, or was never on this machine at all (see
+        `_compare_source`). Best effort: an output on disk without its before is
+        the old behaviour, and worth more than a failed save.
+        """
+        if not (params.get("edit") or params.get("kind") == "edit"):
+            return
+        src = params.get("input_image_local") or ""
+        if not src or not os.path.isfile(src):
+            return
+        try:
+            keep = Painter._before_dir(dest) / (Path(dest).stem + Path(src).suffix.lower())
+            if keep.exists():
+                return
+            keep.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, keep)
+        except OSError:
+            pass
 
 
 def _human(n):

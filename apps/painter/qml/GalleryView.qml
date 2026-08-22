@@ -17,6 +17,11 @@ Item {
     //: means; this view only reports it.
     signal openRequested(string path, bool isVideo)
 
+    // HOW MANY COLUMNS TO LAY OUT: 0 asks for the automatic width-driven count
+    // below, 1..6 fixes it. Set from the View menu's `Columns` radio set and
+    // remembered there (Root.qml `gridColumns`).
+    property int columns: 0
+
     // ------------------------------------------------------------ selection
     //
     // Click, ctrl-click, shift-click — a file manager's three, because that is
@@ -172,7 +177,15 @@ Item {
         // Whole columns in what is left AFTER the bar's gutter — a cell sized to
         // the full width would run under it.
         readonly property real usable: Math.max(1, width - gscroll.barW)
-        cellWidth: Math.max(60, Math.floor(usable / Math.max(1, Math.round(usable / 210))))
+        // A CHOSEN column count is still clamped by what fits: a 220px pane
+        // cannot lay out six 60px-floor cells, and honouring the number over
+        // the pane is how the grid goes empty again (the bug in the note
+        // above). So the floor wins and the count falls back to what fits.
+        readonly property int autoCols: Math.max(1, Math.round(usable / 210))
+        readonly property int cols: view.columns > 0
+            ? Math.max(1, Math.min(view.columns, Math.floor(usable / 60)))
+            : autoCols
+        cellWidth: Math.max(60, Math.floor(usable / Math.max(1, cols)))
         cellHeight: cellWidth
         // The decode size, in 60px steps rather than tracking `cellWidth`: a
         // sourceSize that moved with every pixel of a window resize would throw

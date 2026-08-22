@@ -104,6 +104,8 @@ Item {
     GalleryView {
         id: galleryView
         visible: !root.inView
+        // 0 = automatic, the width-driven default; see Root's `gridColumns`.
+        columns: root.app ? root.app.gridColumns : 0
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: preview.visible ? preview.bottom : parent.top

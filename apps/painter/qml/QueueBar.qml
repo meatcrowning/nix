@@ -78,9 +78,12 @@ Rectangle {
         anchors.rightMargin: 8
         spacing: 10
 
+        // Live while a job runs: pressing it again QUEUES another (ComfyUI has
+        // a queue, and `queued N` to the left is where it shows up). The word
+        // says which of the two the press will do.
         TextButton {
             anchors.verticalCenter: parent.verticalCenter
-            label: "[ generate ]"
+            label: App.busy ? "[ queue ]" : "[ generate ]"
             enabled: App.ready
             winActive: root.winActive
             onClicked: root.submit()
