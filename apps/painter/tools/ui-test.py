@@ -2107,28 +2107,27 @@ def test_panel_order_and_pins(win, ctl, tmp, keep):
 
     # THE ROW ITSELF, not a copy: it is reparented into the header strip, so it
     # is still the live control up there (his call — pins are editable).
-    slot = row.parentItem()
-    check("...because the row itself moved into the header",
-          slot is not None and str(slot.property("pinKey") or "") == label,
-          slot.property("pinKey") if slot is not None else None)
-    check("...positioned at the slot, not where the column had it",
-          slot is not None and row.y() == 0, row.y())
+    # COLLAPSING NOW HIDES WHAT IS NOT PINNED, rather than everything: the
+    # pinned row stays where it was, live, and the panel shrinks to it.
+    others = [it for it in rows if it is not row]
+    check("...while an unpinned row is parked out of the column",
+          all(not it.isVisible() for it in others),
+          [(str(it.property("pinLabel")), it.isVisible()) for it in others])
+    check("...and the panel is header + that one row, not just the header",
+          panel.height() > 30, panel.height())
     check("...and it is still a working control", row.isEnabled())
 
     # Expanding puts every row back IN ORDER — QML cannot re-insert a child at
     # an index, so the panel reparents all of them, which is the only thing that
     # keeps a returned row from landing at the bottom.
-    before_rows = [str(it.property("pinLabel")) for it in walk(panel)
-                   if it.property("pinLabel") not in (None, "")
-                   and it.metaObject().className().startswith("Field")]
     panel.setProperty("collapsed", False)
-    spin(150)
-    after_rows = [str(it.property("pinLabel")) for it in walk(panel)
-                  if it.property("pinLabel") not in (None, "")
-                  and it.metaObject().className().startswith("Field")]
+    spin(200)
+    # BY POSITION, not by walk order: what matters is where they are laid out.
+    laid = sorted(((it.y(), str(it.property("pinLabel"))) for it in walk(panel)
+                   if it.property("pinLabel") not in (None, "")
+                   and it.metaObject().className().startswith("Field")))
     check("expanding restores the rows in their declared order",
-          after_rows == sorted(after_rows, key=lambda k: ["aspect", "MP"].index(k))
-          and set(after_rows) == set(before_rows), (before_rows, after_rows))
+          [k for _y, k in laid] == ["aspect", "MP"], laid)
 
     panel.metaObject().invokeMethod(panel, "togglePin", Q_ARG("QVariant", row))
     spin(120)

@@ -114,22 +114,31 @@ here:
       dragged mid-drag.
   A key the saved order does not name is re-inserted at its BUILT-IN position,
   so a new panel can never be buried at the bottom or lost.
-- **Pins are the ROWS THEMSELVES, moved.** Right-click a row's label (`Field`,
-  `Toggle`) and take `pin <name> to the header` — a MENU, because a bare
-  right-click that pins outright is an action with no name and no way to find
-  out it exists (docs/DESIGN.md §10). While the panel is folded that row is REPARENTED into a
-  fixed-width slot in the header, so it is still the live control — a pinned
-  Spin steps, a pinned Toggle toggles (his call, 2026-08-22). `pinLabel` names
-  it in the saved list (`<persistKey>.pins`), `pinValue` is what it reads.
-  Three things this needed, each a bug first: `rowOrder` is captured at
-  completion and expanding reparents EVERY row in that order, because QML
-  cannot put a child back at an index; the slots are a `Repeater` over `pins`
-  that appears a beat AFTER `collapsed` flips, so the move runs from its
-  `onCountChanged` as well; and a slot is a plain `Item`, which does not
-  position what it adopts — a moved row keeps the y the Column gave it and
-  draws below the panel until `x`/`y` are zeroed. The slot width is fixed
-  because the row takes its width from its parent; every attempt to size the
-  slot to the row ended in a binding loop.
+- **Pins are the ROWS THEMSELVES, and collapsing hides what is not pinned.** A
+  folded panel is its header plus the rows he pinned, laid out where they always
+  were and still live — a pinned Spin steps, a pinned Toggle toggles, the pinned
+  preset row still switches presets (his call, 2026-08-22). Nothing pinned means
+  header only, as before. Right-click a row's label and take
+  `pin <name> to the header` — a MENU, because a bare right-click that pins
+  outright is an action with no name and no way to find out it exists
+  (docs/DESIGN.md §10). Four things this needed, each a bug first:
+    - **Unpinned rows are PARKED in `stash`, not hidden.** Their `visible` is
+      often bound by the caller (`visible: !panel.fromImage`) and assigning it
+      would destroy that binding for good.
+    - **Order comes back by re-seating, and re-seating needs a bounce.**
+      Assigning a row the parent it already has does not move it, so a row
+      returning from the stash landed after the ones that never left; from the
+      first row whose home changed, every row is bounced through `stash` and
+      back in declared order. Through the stash, never through `null` — half
+      these rows are `width: parent.width`, and a null parent makes that a
+      TypeError for the frame it lasts.
+    - **A row with a `Repeater` in it cannot be reparented at all.** The preset
+      switcher's four buttons stayed measured, laid out and counted by QML while
+      nothing drew them. Such a row sets `selfHides: true`, is never parked, and
+      binds its own `visible` to the panel's state instead (`ModeSwitcher.qml`).
+      It has to be the FIRST row in its panel for the ordering above to hold.
+    - **`rowOrder`** is captured once at completion; QML cannot insert a child
+      at an index, so it is the only record of what the column should look like.
 - **Browse ↔ View.** `inView` plus `OutputView.qml` — one output filling the
   pane, entered by Return or a double-click (which no longer launches `viewer`;
   that is still File → Open in Viewer), left by Escape, walked with Alt+Left/

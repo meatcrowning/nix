@@ -29,6 +29,33 @@ Column {
             if (!items[i].available) return true
         return false
     }
+    // PINNABLE, like a Field row: the preset is the one thing in the model panel
+    // worth keeping in sight with the panel folded ([his] "i should be able to
+    // pin the preset button row"). Same protocol — a label to know it by and a
+    // value to show — and the row that gets pinned is this whole switcher, so
+    // the buttons stay clickable up there.
+    property string pinLabel: "preset"
+    // THIS ROW HIDES ITSELF; the panel must not park it. A parked row is
+    // reparented, and a Repeater whose ancestor is reparented loses its
+    // delegates — the four buttons stayed measured and laid out with nothing
+    // drawn, in both faces. Nothing else here owns this `visible`, so binding
+    // it to the panel's state is available where it is not for a Field (whose
+    // caller often binds its own).
+    property bool selfHides: true
+    visible: typeof panel === "undefined" || !panel || !panel.collapsed
+             || panel.pins.indexOf(sw.pinLabel) >= 0
+    readonly property string pinValue: App.mode === "" ? "none" : App.mode
+
+    // Right-click anywhere in the row for its pin menu, the same as a labelled
+    // row's label. A HANDLER, not a MouseArea: a positioner (this Column, the
+    // Flow below) refuses to lay out an anchored child and stops laying out
+    // anything at all — "Flow will not function", 44 times a load.
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        onTapped: if (typeof panel !== "undefined" && panel && panel.pinMenu)
+                      panel.pinMenu(sw, point.scenePosition.x, point.scenePosition.y)
+    }
+
     function refresh() { sw.items = App.modes() }
     Component.onCompleted: refresh()
     Connections {
@@ -41,6 +68,7 @@ Column {
     // panel — the column is a fixed width and the button set is fixed too, so
     // the only thing left to give is a second line.
     Flow {
+        id: flow
         width: sw.width
         spacing: 4
 
