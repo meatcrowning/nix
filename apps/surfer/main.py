@@ -68,7 +68,7 @@ ON_AIR = os.path.realpath(sys.executable).startswith("/usr/")
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
-from kdetheme import theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+from kdetheme import kde_chrome, theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
 from glyphs import Glyphs  # noqa: E402  (pylib; docs/DESIGN.md 2.3 display-site px())
 from kinetic import (WHEEL_GAIN, QML_WHEEL_GAIN,  # noqa: E402
                      is_wheel_detent as _is_wheel_detent)
@@ -2094,7 +2094,12 @@ class OneeTheme(QObject):
     §3.8's whole-palette spread): 4chan post bodies read as the primary label
     (`text`), reply surfaces on the inset background (`bgAlt`), greentext and
     names on the status greens (`ok`), links dim with an accent hover, subjects/
-    board titles/quotelinks on the accent."""
+    board titles/quotelinks on the accent.
+
+    In a Plasma session a second block follows, `_chrome_css` — the running
+    KStyle's relief (gradients, bevels, sunken fields), because that session's
+    look is the KDE theme's and a web page is the one surface no QStyle can
+    paint. Absent under a flat KStyle and in the Hyprland session."""
 
     def __init__(self, palette, parent=None):
         super().__init__(parent)
@@ -2213,7 +2218,80 @@ class OneeTheme(QObject):
             # every palette above, not here.)
             parts.append(
                 ".postInfo{background:%s%s}" % (bg, i))
+        parts.extend(self._chrome_css(i))
         return "".join(parts)
+
+    def _chrome_css(self, i):
+        """The KStyle relief layer: 4chan drawn as a window of the running KDE
+        style, gradients and all.
+
+        In a Plasma session the desktop's look is not this design language's —
+        it is whatever Global Theme is picked in System Settings, and
+        DESIGN.md 7.6's answer to that is "we do not imitate the system theme;
+        we let the system theme paint". A web page is the one surface where
+        that is impossible: no QStyle will ever paint 4chan. So this is the
+        deliberate exception — imitation, because the alternative is the one
+        flat window in a session of gradient ones.
+
+        `kdetheme.kde_chrome()` returns None outside a Plasma session and under
+        a flat KStyle (Breeze, Fusion), so the HYPRLAND look is untouched and
+        stays flat: DESIGN.md 2's "no gradients" is a rule about THIS desktop,
+        and this layer only ever runs in the other one.
+
+        Every selector here is repeated VERBATIM from the flat layer above, so
+        the two tie on specificity and source order decides — this one is later,
+        so it wins, and nothing has to be out-specified.
+        """
+        ch = kde_chrome()
+        if not ch:
+            return []
+        def grad(a, b):
+            return "linear-gradient(to bottom,%s,%s)" % (ch[a], ch[b])
+        bevel, shade, r = ch["bevel"], ch["shade"], ch["radius"]
+        panel = grad("panelTop", "panelBottom")
+        return [
+            # The window gradient. Oxygen paints it on the WINDOW — light at the
+            # top, settling into the base a few hundred px down — so it is
+            # pinned to the viewport (`fixed`) and the page scrolls under it,
+            # rather than running the height of a 300-post thread.
+            "body{background-color:%s%s;background-image:linear-gradient("
+            "to bottom,%s,%s 320px)%s;background-repeat:no-repeat%s;"
+            "background-attachment:fixed%s}"
+            % (ch["windowBottom"], i, ch["windowTop"], ch["windowBottom"], i, i, i),
+            # Posts, dialogs, catalog cells and menus as the style's slabs:
+            # the panel gradient, a 1px light bevel along the top, a soft foot
+            # shadow and Oxygen's small corner radius.
+            ".reply,body.is_catalog .panel,:root.catalog-mode .panel,.dialog,"
+            ".tab-label,#post-preview,#tegaki,.boxbar,.inline,"
+            ":root.catalog-background #threads div.thread,"
+            ":root.catalog-background .catalog-thread,"
+            ":root.op-background .postContainer.opContainer,"
+            ".dd-menu ul{background:%s%s;border-radius:%dpx%s;"
+            "box-shadow:inset 0 1px 0 %s,0 1px 2px %s%s}"
+            % (panel, i, r, i, bevel, shade, i),
+            # The board header reads as the style's toolbar.
+            ":root:not(.header-gradient) #header-bar,"
+            ":root.header-gradient #header-bar{background:%s%s;"
+            "box-shadow:inset 0 1px 0 %s,0 1px 3px %s%s}"
+            % (grad("headerTop", "headerBottom"), i, bevel, shade, i),
+            # And each post's own header strip as that post's title bar — the
+            # separating border-bottom stays dropped by the flat layer, so the
+            # strip and the body still read as one slab.
+            ".postInfo{background:%s%s}" % (grad("headerTop", "headerBottom"), i),
+            # Text fields are the style's HOLE: sunken, not raised — the bevel
+            # goes to a shadow at the top and there is no foot highlight.
+            "input:not(.jsColor),textarea,.riceCheck,#qr-filename-container,select,"
+            ".captcha-root{background:%s%s;border-radius:%dpx%s;"
+            "box-shadow:inset 0 1px 2px %s%s}"
+            % (ch["panelBottom"], i, r, i, shade, i),
+            # Real buttons (the post form's, not 4chan-X's text "buttons") take
+            # the button gradient. AFTER the field rule and equal to it on
+            # specificity, so a submit input lands here and not in the hole.
+            "button,input[type=submit],input[type=button],input[type=reset]{"
+            "background:%s%s;border-radius:%dpx%s;"
+            "box-shadow:inset 0 1px 0 %s,0 1px 2px %s%s}"
+            % (grad("buttonTop", "buttonBottom"), i, r, i, bevel, shade, i),
+        ]
 
     @Slot(str, result=str)
     def css(self, url):
