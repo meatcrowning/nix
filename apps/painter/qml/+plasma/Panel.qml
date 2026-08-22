@@ -89,10 +89,15 @@ GroupBox {
     // Its own implicitHeight is also the honest one when a child is hidden
     // (a Column excludes what it does not lay out, childrenRect does not), which
     // is the sizing trap ../Panel.qml records at length.
+    // ...AND `contentHeight` IS WHAT COLLAPSES IT, not the content item's
+    // implicit height. A GroupBox is a Pane, and a Pane whose content item has
+    // implicitHeight 0 does NOT read that as "no content" — it falls back to
+    // measuring the item's children, which are still there, merely invisible.
+    // So a collapsed panel kept a 52px empty box under its header. Stating the
+    // content height leaves nothing to fall back to.
+    contentHeight: panel.collapsed ? 0 : inner.implicitHeight
+
     contentItem: Item {
-        // The GroupBox sizes itself from THIS item's implicitHeight, so
-        // collapsing has to happen here — hiding the Column alone left the
-        // frame at its open height with nothing in it.
         implicitHeight: panel.collapsed ? 0 : inner.implicitHeight
         implicitWidth: inner.implicitWidth
 
@@ -103,15 +108,13 @@ GroupBox {
             visible: !panel.collapsed
         }
     }
-    // COLLAPSED GIVES BACK THE PADDING, OPEN LEAVES THE STYLE'S ALONE. The
-    // style's topPadding is not decoration: it is the room the label sits in,
-    // so assigning a flat `padding` to it unconditionally drew every panel's
-    // title on top of its first row. These override only while collapsed and
-    // restore the style's own binding after (RestoreBindingOrValue).
-    Binding {
-        target: panel; property: "topPadding"; value: 0
-        when: panel.collapsed; restoreMode: Binding.RestoreBindingOrValue
-    }
+    // COLLAPSED GIVES BACK THE PADDING BELOW, AND ONLY THAT. The style's
+    // topPadding is not decoration: it is the room the LABEL sits in. Zeroing
+    // it too made a collapsed panel `implicitHeight` 0 — no content, no
+    // padding, and therefore no header either — so the panel vanished and
+    // there was no longer anything to click to get it back. That cost the
+    // Plasma face its model selector and its sampling panel, both of which
+    // start collapsed. Only the bottom padding is the panel's to give back.
     Binding {
         target: panel; property: "bottomPadding"; value: 0
         when: panel.collapsed; restoreMode: Binding.RestoreBindingOrValue
