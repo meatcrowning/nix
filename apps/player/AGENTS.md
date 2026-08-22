@@ -123,13 +123,28 @@ before touching any of it; only what is player-specific is here.
   results, Escape, the click-out unfocus are all decided there — and under
   Plasma `main.py` mirrors it onto the `QLineEdit` and back, guarded against the
   loop a two-way mirror otherwise makes. The box itself is `visible: !plasma`.
+- **`Titlebar` must publish `buttonsChanged`, and that is not optional.**
+  `kdeshell.bind_chrome` hangs its whole refresh on that signal: the vtb socket
+  is dead in a Plasma session, but `Root.qml` still pushes its entire button
+  table through `setButtons` on every state change, so it is the one "the chrome
+  changed" notification this face gets. player's class had no such signal for a
+  day, and the menubar and both toolbars were built once and then FROZE — play
+  never became pause, the favourite never lit, and prev/play/next stayed greyed
+  by the empty queue they had started with. Nothing failed and nothing warned.
+  `bind_chrome` now falls back to a 300ms poll and says so on stderr, but the
+  signal is the fix.
 - **`main.py --selftest`** builds the whole thing OFFSCREEN and quits: no MPRIS
   name, no queue socket, no library scan, no `save_state` — all four are
   singletons or state a running player already owns. `PLAYER_MENUS` dumps the
   chrome as text (a menu is not on screen until it is opened, so no render can
   show what is in one), `PLAYER_FACES` proves the selector took, `PLAYER_SHOT`
   writes a PNG, `PLAYER_DIALOG` grabs Configure player…, `PLAYER_TREE` dumps
-  item geometry, `PLAYER_VIEW` picks the page without persisting it. Harness:
+  item geometry, `PLAYER_VIEW` picks the page without persisting it, and
+  `PLAYER_STATEPOKE=1,2,3` (+ `PLAYER_STATEPOKE_PLAYING=1`) puts a queue under
+  the app with nothing decoding a byte — mpv is his audio device — so a harness
+  can watch the chrome follow the app's state. That poke happens LAST, just
+  before the dump: mpv's own idle and pause observers fire during the wait and
+  would put `_playing` back under it. Harness:
   `tools/plasma-chrome-test.py`. **`QT_QPA_PLATFORMTHEME=kde` is not optional**
   in any of those commands — without it the widgets take Qt's default light
   palette while the QML takes his dark scheme.

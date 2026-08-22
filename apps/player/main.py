@@ -248,6 +248,15 @@ class Titlebar(QObject):
 
     clicked = Signal(str)
     seek = Signal(float)
+    # THE PLASMA FACE'S ONLY NOTIFICATION THAT THE CHROME CHANGED. In that
+    # session the vtb socket below is dead, but `Root.qml` still pushes its
+    # whole button table through `setButtons` on every state change — so this
+    # signal is what tells `kdeshell.bind_chrome` to re-read it. Without it the
+    # menubar and both toolbars were built once and then FROZE: play never
+    # became pause, the favourite never lit, and prev/play/next stayed greyed
+    # for the whole session because they had been disabled by an empty queue at
+    # startup. Nothing failed and nothing warned; the chrome was simply inert.
+    buttonsChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -265,6 +274,7 @@ class Titlebar(QObject):
                             str(b.get("tip", "")), bool(b.get("drag", False)),
                             bool(b.get("bottom", False))))
         self._client.set_buttons(out)
+        self.buttonsChanged.emit()
 
     @Slot(str)
     def setFooter(self, text):
@@ -4193,7 +4203,7 @@ def main():
         # is the library drive mounted?". A read of the DB and nothing else: no
         # scan, no writes.
         bridge.refreshAlbums()
-        return _selftest(app, shell, win, plasma, warnings)
+        return _selftest(app, shell, win, plasma, warnings, player, library)
 
     bridge.refreshAlbums()
     # With files on the command line, restore the SESSION (shuffle, loop, the
@@ -4211,7 +4221,7 @@ def main():
     sys.exit(app.exec())
 
 
-def _selftest(app, shell, win, plasma, warnings):
+def _selftest(app, shell, win, plasma, warnings, player=None, library=None):
     """Look at the window without opening one, and quit.
 
     Deliberately NOT reached by the normal path: no MPRIS name, no queue socket
@@ -4229,7 +4239,35 @@ def _selftest(app, shell, win, plasma, warnings):
     elif want_view and win is not None:
         win.setProperty("view", want_view)
 
+    # PLAYER_STATEPOKE: put a queue under the app WITHOUT playing anything, so
+    # a harness can see the chrome follow the app's state. This is the case that
+    # was silently broken for a day — the menubar and both toolbars were built
+    # once and then froze, because `Titlebar` published no `buttonsChanged` for
+    # `kdeshell.bind_chrome` to hear (see that class). Nothing decodes a byte:
+    # the queue is set directly and the change signals are emitted by hand,
+    # because mpv is his audio device and a harness does not get to touch it.
+    def poke():
+        if not os.environ.get("PLAYER_STATEPOKE") or player is None:
+            return
+        ids = [int(i) for i in os.environ["PLAYER_STATEPOKE"].split(",")
+               if i.strip().isdigit()]
+        player._queue = library.tracks_by_ids(ids or [1, 2, 3])
+        player._index = 0
+        player.queueChanged.emit()
+        player.indexChanged.emit()
+        player.currentChanged.emit()
+        if os.environ.get("PLAYER_STATEPOKE_PLAYING"):
+            player._playing = True
+            player.playingChanged.emit()
+        for _ in range(4):
+            app.processEvents()
+
     def finish():
+        # LAST, not before `app.exec()`: mpv's own idle/pause observers fire
+        # during the wait and would put `_playing` back to False under us — the
+        # queue survives (nothing else writes `_queue`), the playing flag does
+        # not.
+        poke()
         # PLAYER_MENUS: the menubar and both toolbars as text. A menu is not on
         # screen until it is opened, so no render can show what is in one —
         # this is the only check the KDE menu structure gets.
