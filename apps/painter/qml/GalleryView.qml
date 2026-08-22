@@ -156,7 +156,8 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 28
+        // The room the hint line below needs, and no more.
+        anchors.bottomMargin: 22
         clip: true
         model: Gallery
         // The results are the unbounded side, so this is where the desktop's
@@ -505,7 +506,7 @@ Item {
 
     PixelText {
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 6
+        anchors.bottomMargin: 3
         width: parent.width
         elide: Text.ElideRight
         // Dragging one out is the only affordance here with no visible handle,

@@ -110,6 +110,10 @@ Item {
         // own top gap read as a band of nothing between the toolbar and the
         // outputs, and there is nothing for it to separate.
         anchors.topMargin: preview.visible ? 8 : 0
+        // ...and flush with the status bar at the other end. The hint line sits
+        // at the bottom of this view (GalleryView), so a margin under it is a
+        // band of view background with nothing in it.
+        anchors.bottomMargin: 0
         onMenuRequested: (sx, sy, items) => root.ctxMenu.open(sx, sy, items)
         onOpenRequested: (path, isVideo) => { if (root.app) root.app.enterView(path) }
     }
