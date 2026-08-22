@@ -50,8 +50,15 @@ Item {
     MouseArea {
         anchors.fill: lbl
         acceptedButtons: Qt.RightButton
-        onClicked: if (typeof panel !== "undefined" && panel && panel.togglePin)
-                       panel.togglePin(row)
+        // A MENU, not a silent toggle. Right-clicking a label used to pin it
+        // outright, which is an action with no name, no undo you could see and
+        // nothing anywhere saying it existed — docs/DESIGN.md §10. The menu is
+        // how you find out the row can be pinned at all.
+        onClicked: function (m) {
+            if (typeof panel === "undefined" || !panel || !panel.pinMenu) return
+            var pt = mapToItem(null, m.x, m.y)
+            panel.pinMenu(row, pt.x, pt.y)
+        }
     }
 
     Item {

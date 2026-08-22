@@ -36,8 +36,10 @@ Item {
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         onClicked: function (m) {
             if (m.button === Qt.RightButton) {
-                if (typeof panel !== "undefined" && panel && panel.togglePin)
-                    panel.togglePin(sw)
+                if (typeof panel !== "undefined" && panel && panel.pinMenu) {
+                    var pt = mapToItem(null, m.x, m.y)
+                    panel.pinMenu(sw, pt.x, pt.y)
+                }
                 return
             }
             sw.checked = !sw.checked

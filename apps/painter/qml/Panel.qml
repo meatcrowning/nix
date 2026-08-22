@@ -55,6 +55,22 @@ Rectangle {
     }
 
 
+    // The row's own menu: what can be done with it, said out loud. `root` is
+    // the pane (ParamsPane), which owns the one scene-level menu.
+    function pinMenu(item, sceneX, sceneY) {
+        var k = item && item.pinLabel ? "" + item.pinLabel : ""
+        if (k === "" || typeof root === "undefined" || !root || !root.ctxMenu) return
+        var on = panel.pins.indexOf(k) >= 0
+        root.ctxMenu.open(sceneX, sceneY, [
+            { label: on ? "unpin " + k + " from the header"
+                        : "pin " + k + " to the header",
+              trigger: () => panel.togglePin(item) },
+            { separator: true },
+            { label: panel.collapsed ? "expand this panel" : "collapse this panel",
+              trigger: () => { panel.collapsed = !panel.collapsed } }
+        ])
+    }
+
     // PINS ARE THE ROWS THEMSELVES, moved. A pinned row is REPARENTED into the
     // header strip while the panel is folded, so it is the live control — a
     // pinned Spin still steps, a pinned Toggle still toggles — rather than a

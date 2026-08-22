@@ -111,7 +111,9 @@ here:
   A key the saved order does not name is re-inserted at its BUILT-IN position,
   so a new panel can never be buried at the bottom or lost.
 - **Pins are the ROWS THEMSELVES, moved.** Right-click a row's label (`Field`,
-  `Toggle`) to pin it; while the panel is folded that row is REPARENTED into a
+  `Toggle`) and take `pin <name> to the header` — a MENU, because a bare
+  right-click that pins outright is an action with no name and no way to find
+  out it exists (docs/DESIGN.md §10). While the panel is folded that row is REPARENTED into a
   fixed-width slot in the header, so it is still the live control — a pinned
   Spin steps, a pinned Toggle toggles (his call, 2026-08-22). `pinLabel` names
   it in the saved list (`<persistKey>.pins`), `pinValue` is what it reads.
