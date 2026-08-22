@@ -70,4 +70,42 @@
   # /nix/store by hash because this was not installed. It is the only way to
   # read SMBIOS type 17.
   environment.systemPackages = [ pkgs.dmidecode ];
+
+  # Bad-RAM reservation. 2026-08-21: a memtest86+ v8 run (8h28m, 10 passes) on
+  # the two 16 GiB DDR5 sticks (DIMMA2/DIMMB2, GD2.4631WT.004) failed with 13
+  # errors at reproducible physical addresses.  The recurring 0x20->0x24 and
+  # 0x31e->0x31a diffs (bit 2 stuck high, and an address-line aliasing pair)
+  # are hard stuck-bit faults, not EXPO instability — the box runs JEDEC
+  # 4800/1.1V.  On non-ECC DDR5 (see the header above) these are silent to
+  # EDAC, which is why they surfaced only as repeated
+  #   `zram: Decompression failed! err=-22` -> SIGBUS
+  # crashes of the process writing an output video, leaving 48-byte .mp4
+  # stubs (moov atom never written).  The zram SIGBUS crashes of 2026-08-13,
+  # 08-17 and 08-21 are the same fault.
+  #
+  # Fix: reserve the exact bad regions with memmap=nnK$ssK (kernel will not
+  # allocate them), instead of losing a whole 16 GiB stick.  ~8 MB of 32 GB,
+  # negligible, and it removes the faulting cells from every allocation path
+  # so zram and ComfyUI can never land on them again.
+  #
+  # Each address was rounded down a 4K page, 1 MB of margin added each side,
+  # page-aligned again.  Cluster C's second fault and the whole 20.5 GiB run
+  # fall inside the same windows as their siblings, hence 4 entries for 13
+  # errors.
+  #
+  # Physical addresses (memtest86+ v8, errno table):
+  #   0x450da6a8                                   ~1.08 GiB
+  #   0x43fd08880 0x43fd088a0                      ~16.997 GiB  (addr-line pair)
+  #   0x453c15698 0x453c596b8                      ~17.31 GiB
+  #   0x520703838 0x520707800 0x520707808
+  #   0x52076f880 0x52076f888 0x52076f890
+  #   0x52076f898                                  ~20.51 GiB
+  #
+  # NixOS-only; `book` (no memtest, Fedora Asahi) gets none of this.
+  boot.kernelParams = [
+    "memmap=2052K\$1130344K"
+    "memmap=2052K\$17821728K"
+    "memmap=2052K\$18148436K"
+    "memmap=2052K\$21501964K"
+  ];
 }
