@@ -68,7 +68,8 @@ ON_AIR = os.path.realpath(sys.executable).startswith("/usr/")
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
-from kdetheme import theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+import chantheme  # noqa: E402  (pylib; the OneeChan override sheet, shared with the userscript)
+from kdetheme import kde_chrome, theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
 from glyphs import Glyphs  # noqa: E402  (pylib; docs/DESIGN.md 2.3 display-site px())
 from kinetic import (WHEEL_GAIN, QML_WHEEL_GAIN,  # noqa: E402
                      is_wheel_detent as _is_wheel_detent)
@@ -2035,66 +2036,22 @@ class PageStyle(QObject):
         return [s]
 
 
-def _rel_lum(qc):
-    """WCAG relative luminance of a QColor (0..1)."""
-    def lin(c):
-        c = c / 255.0
-        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
-    return 0.2126 * lin(qc.red()) + 0.7152 * lin(qc.green()) + 0.0722 * lin(qc.blue())
-
-
-def _contrast(a, b):
-    """WCAG contrast ratio between two QColors (1..21)."""
-    la, lb = _rel_lum(a), _rel_lum(b)
-    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
-
-
-def _legible_link(link_hex, bg_hex, cap_hex, target=4.0):
-    """The non-hovered link colour, lifted for legibility on a DARK palette.
-
-    OneeChan's link slot is `dim`, which on a dark wallpaper sits too close to
-    the page background to read comfortably (DESIGN.md §3.2 'contrast is
-    measured, not judged'). On a dark palette, raise the link's HSL lightness —
-    hue and saturation kept, so it stays palette-derived — until it clears a
-    contrast floor against the background, capped just under the hover accent's
-    luminance so the hover state still reads as brighter. A light palette (and
-    the hover colour, which is `accent`) is left untouched."""
-    bg = QColor(bg_hex)
-    if _rel_lum(bg) > 0.2:              # light-ish background: dark mode only
-        return link_hex
-    link = QColor(link_hex)
-    if _contrast(link, bg) >= target:  # already legible: leave it alone
-        return link_hex
-    cap = _rel_lum(QColor(cap_hex))
-    for _ in range(40):
-        if _contrast(link, bg) >= target or _rel_lum(link) >= cap:
-            break
-        h, s, l, a = link.getHslF()
-        if h < 0:                      # achromatic: HSL hue is undefined
-            h = 0.0
-        nl = min(1.0, l + 0.03)
-        if nl <= l:
-            break
-        link = QColor.fromHslF(h, s, nl, a)
-    return link.name()
-
-
 class OneeTheme(QObject):
-    """Builds the palette-derived override CSS that re-skins OneeChan's 4chan
-    theme to the live wallpaper palette, and carries ONEE_THEME_RUNTIME_JS as a
-    profile-level QWebEngineScript (the same route CosmeticInject/PageStyle
-    take, since PySide6 6.11 does not bind QQuickWebEngineScriptCollection).
+    """Carries `chantheme.css` — the OneeChan override sheet — as a
+    profile-level QWebEngineScript courier (the same route
+    CosmeticInject/PageStyle take, since PySide6 6.11 does not bind
+    QQuickWebEngineScriptCollection).
 
-    Selectors mirror OneeChan's own `ch4SS` colour rules verbatim (userscript
-    `insertCSS`), so specificity matches and our adopted sheet wins purely on
-    cascade order (adopted sheets follow document <style>) — nothing here has
-    to out-specify OneeChan. Every rule is `!important`, because ch4SS's are.
+    The sheet itself lives in `pylib/chantheme.py`, shared verbatim with the
+    Vivaldi userscript that `apps/pylib/tools/chan-userscript.py` generates —
+    surfer is one of two browsers wearing it, and neither is allowed to drift
+    from the other. What stays here is only the plumbing: the live palette this
+    bridge reads, and the `surferonee://` script it hands the profile.
 
-    The role->palette map (values from `docs/DESIGN.md` §3.1's twelve tokens;
-    §3.8's whole-palette spread): 4chan post bodies read as the primary label
-    (`text`), reply surfaces on the inset background (`bgAlt`), greentext and
-    names on the status greens (`ok`), links dim with an accent hover, subjects/
-    board titles/quotelinks on the accent."""
+    In a Plasma session the sheet also carries the running KStyle's relief,
+    from `kdetheme.kde_chrome()` — that call is made HERE rather than inside
+    chantheme so the generator can pass a chrome dict of its own (or none)
+    without the module reaching for the live session."""
 
     def __init__(self, palette, parent=None):
         super().__init__(parent)
@@ -2102,118 +2059,7 @@ class OneeTheme(QObject):
         self._scripts = None
 
     def _css(self):
-        p = self._pal.hex
-        bg = p("bg")
-        reply = p("bgAlt")           # OneeChan mainColor (reply/dialog bg)
-        header_bg = p("bgAlt")       # headerBGColor
-        border = p("border")         # brderColor + inputbColor
-        inp = p("highlight")         # inputColor (field bg)
-        header_text = p("text")      # headerColor
-        board = p("accent")          # boardColor
-        text = p("text")             # textColor (post message body)
-        # linkColor: OneeChan's `dim`, lifted for legibility on a dark palette
-        # (DESIGN.md §3.2). Hover stays `accent`; a light palette is untouched.
-        link = _legible_link(p("dim"), bg, p("accent"))          # linkColor
-        link_h = p("accent")         # linkHColor
-        header_link = _legible_link(p("dim"), header_bg, p("accent"))  # headerLColor
-        ql = p("accent")             # qlColor (quotelinks)
-        blink = p("info")            # blinkColor (backlinks)
-        name = p("ok")               # nameColor
-        trip = p("warn")             # tripColor
-        title = p("accent")          # titleColor (subject)
-        quote = p("ok")              # quoteColor (greentext)
-        unread = p("warn")           # unreadColor
-        post_hl = p("highlight")     # postHLColor
-        replyslct = p("accent")      # replyslctColor
-        # On a LIGHT palette, OneeChan's inset surfaces should read as the plain
-        # PAGE background, not the `bgAlt`/`highlight` shades: those are tuned as
-        # insets against a DARK page (DESIGN.md §3.1's value ladder), so on a
-        # light wallpaper they land as dark/near-black patches behind post
-        # headers, open reply chains, catalog panels, post bodies and text
-        # fields. Collapse reply/header/field backgrounds to `bg` there; a dark
-        # palette keeps the inset treatment. Same light-ness test as
-        # _legible_link (which conversely leaves the light-palette link alone).
-        light = _rel_lum(QColor(bg)) > 0.2
-        if light:
-            reply = header_bg = inp = bg
-        i = "!important"
-        parts = [
-            # --- text colours ---
-            "html,body,div.boardBanner,#menu,input:not(.jsColor),textarea,"
-            "#qr-filename-container,#post-preview,.post-last,.pln,select,"
-            ".captcha-root,.tegaki-label,.dd-menu ul,.boxbar{color:%s%s}" % (text, i),
-            ".nameBlock:not(.capcodeMod)>.name,.com,.post-author{color:%s%s}" % (name, i),
-            ".nameBlock>.postertrip,.post-tripcode,.tag{color:%s%s}" % (trip, i),
-            "a,.typ,.atn,body.is_catalog .button,:root.catalog-mode .button,"
-            ".options-button,.tegaki-tb-btn{color:%s%s}" % (link, i),
-            "a:hover,body.is_catalog .button:hover,:root.catalog-mode .button:hover,"
-            ".lit,.tegaki-tb-btn:hover{color:%s%s}" % (link_h, i),
-            "#header-bar,a.current{color:%s%s}" % (header_text, i),
-            "#header-bar a:not(.current){color:%s%s}" % (header_link, i),
-            ".postMessage>.quote,s:hover .quote,.str,.atv,.new,"
-            ".catalog-thread>.comment>.quote{color:%s%s}" % (quote, i),
-            ".subject,.replytitle,.teaser b,.post-subject,"
-            ".option.header .option-title,.kwd{color:%s%s}" % (title, i),
-            ".boardTitle{color:%s%s}" % (board, i),
-            "#boardNavDesktop,#boardNavDesktopFoot{color:%s%s}" % (header_text, i),
-            ".backlink{color:%s%s}" % (blink, i),
-            ".quotelink{color:%s%s}" % (ql, i),
-            # --- backgrounds ---
-            "body{background:%s%s}" % (bg, i),
-            # `.inline` and the catalog cells (`Show Background` mode) are
-            # reply-type insets OneeChan also paints from `mainColor`, but they
-            # were never mapped here — so on a dark palette they kept OneeChan's
-            # baked colour un-themed, and on a light one they rendered as the raw
-            # dark inset (near-black on his cream page). Fold them in so they
-            # follow `reply` too: `bgAlt` on dark, collapsed to `bg` on light.
-            # Selectors are verbatim (catalog's is `:root.catalog-background …`),
-            # since a bare `.catalog-thread` loses on specificity to OneeChan's.
-            ".reply,body.is_catalog .panel,:root.catalog-mode .panel,.dialog,"
-            ".tab-label,#post-preview,#tegaki,.boxbar,.inline,"
-            ":root.catalog-background #threads div.thread,"
-            ":root.catalog-background .catalog-thread,"
-            ":root.op-background .postContainer.opContainer,"
-            ".dd-menu ul{background:%s%s}" % (reply, i),
-            ":root:not(.header-gradient) #header-bar,"
-            ":root.header-gradient #header-bar{background:%s%s}" % (header_bg, i),
-            "input:not(.jsColor),textarea,.riceCheck,#qr-filename-container,select,"
-            ".captcha-root{background:%s%s}" % (inp, i),
-            # --- borders ---
-            ".reply,:root.op-background .postContainer.opContainer,.dialog,.entry,"
-            ".inline,fieldset,#post-preview,select{border-color:%s%s}" % (border, i),
-            "input,textarea,.riceCheck,#qr-filename-container,#search-box,"
-            "#index-search,select,#post-preview,.captcha-root,"
-            ".dd-menu ul{border-color:%s%s}" % (border, i),
-            "input:focus,textarea:focus,#qr-filename-container:focus,select:focus,"
-            ".captcha-root:focus{border-color:%s%s}" % (link, i),
-            # The per-post header strip carries a `border-bottom` (near-black in
-            # OneeChan's ch4SS) that reads as a rule down the middle of every
-            # post, splitting the `.postInfo` header from the post body. Drop it
-            # on every palette so header and body read as one block — this is the
-            # separating line only; the dark-palette header-vs-body inset (the
-            # `.postInfo` tint) is untouched, and the light collapse below still
-            # folds that tint into the page bg.
-            ".postInfo{border-bottom:none%s}" % i,
-            # --- highlights ---
-            ".highlight{outline-color:%s%s}" % (replyslct, i),
-            ":root.hl-border .post.reply,"
-            ":root.op-background.hl-border .postContainer.opContainer{"
-            "border-left-color:%s%s}" % (post_hl, i),
-            "#unread-line{background-image:linear-gradient(to left,"
-            "transparent,%s,transparent)%s}" % (unread, i),
-        ]
-        if light:
-            # The per-post header strip. OneeChan paints `.postInfo` from
-            # `mainColor` too — `background:rgba(mainColor,.2)` — and the
-            # `.reply` collapse above only reaches the post body, so on a light
-            # page the strip stays a grey tint over cream: "post headers still
-            # darker than the background". Collapse the tint to the page `bg`;
-            # light-palette only, so a dark palette keeps OneeChan's
-            # header-vs-body inset. (The separating border-bottom is dropped for
-            # every palette above, not here.)
-            parts.append(
-                ".postInfo{background:%s%s}" % (bg, i))
-        return "".join(parts)
+        return chantheme.css(self._pal.hex, kde_chrome())
 
     @Slot(str, result=str)
     def css(self, url):

@@ -14,6 +14,153 @@ per-family reason string rather than a silent failure). Chrome is hyprvtb
 titlebar buttons (generate/cancel/view switch + bottom-anchored settings
 drawer).
 
+## Two roofs: `Main.qml` is the Hyprland one, the KDE shell is the other
+
+`Root.qml` is the app — an `Item`, not a `Window`. `Main.qml` is a twenty-line
+`Window` around it for the Hyprland session; in a Plasma session `main.py` puts
+the same `Root.qml` in a `QQuickWidget` inside a real `QMainWindow`
+(`pylib/kdeshell.py`), so the menubar, toolbar and statusbar are genuine KDE
+widgets and the window background is Oxygen's own gradient, painted behind this
+QML. The full argument, and what an app has to do to adopt it, is in
+[`../AGENTS.md`](../AGENTS.md) → `pylib/kdeshell.py`. What it means when editing
+here:
+
+- **Nothing Window-only in `Root.qml`.** `onClosing`, `contentItem`,
+  `activeFocusItem` and assigning `root.width` all belong to a Window; they go
+  through `root.Window.*`, a `Connections` on `root.Window.window`, or a signal
+  the Window wrapper handles (`requestResize`).
+- **`Theme.windowFill`, not `Theme.bg`, for a pane's background** — it is
+  `transparent` under Plasma so the styled gradient shows through. `bgAlt`
+  panels and fields are insets and keep their colour.
+- **`tbButtons` carries `icon:` and `bar:`** alongside `menu:`, for the real
+  toolbar. The DeskMenuBar in this file is `systemBar: true` — painter has a
+  real QMenuBar and must not draw a second one.
+- **`statusLine` / `statusProgress`** are what the KDE status bar shows;
+  `QueueBar` is the Hyprland strip and is hidden (and `barH` 0) there.
+- **`actions` is the whole table of verbs; `tbButtons` is a filter over it.**
+  The titlebar column has six cells and a menubar has thirty rows, so the rows
+  the titlebar gets are the ones marked `tb:`. Everything else on a row is inert
+  on the other side: `vtbclient.py` reads id/label/state/tip/bottom and ignores
+  the rest, `kdeshell` never sees `label`. `menu:`/`menuText:`/`icon:`/`bar:`/
+  `shortcut:`/`checkable:`/`group:` are the KDE half; `menuOrder` names the
+  menus. A row whose target is missing is **disabled, not removed**.
+- **A `shortcut:` in that table is the Plasma face\'s alone.** Two owners of one
+  sequence in a window is an ambiguous shortcut and Qt fires NEITHER, so the QML
+  `Shortcut`s that duplicate one carry `enabled: !root.plasma`.
+- **The panes are their own files.** `ResultsPane.qml` (preview + gallery +
+  `OutputView`) and `ParamsPane.qml` (the parameter column), because under
+  Plasma the parameters are a real `QDockWidget` — a second scene — while
+  `Root.qml` stays the app. Each pane declares `id: root` and FORWARDS to an
+  `app` property rather than relying on QML resolving `root` up the
+  creation-context chain, which is what every panel in here does and which has
+  nothing to resolve against when a pane is the root of its own view. Add a
+  property to `Root.qml` that a panel reads, and it must be added to the pane\'s
+  forwarding block too.
+- **The parameter column is NOT a `QDockWidget`.** It was one for a day. A dock
+  is a second `QQuickWidget`, which is a second scene graph rendered on the GUI
+  thread every frame — a QQuickWidget cannot use the threaded render loop — and
+  his verdict (2026-08-22) was that the detaching was not wanted, its header was
+  not wanted, and the window felt slower for it. The column lives in the one
+  scene, behind the splitter, in both sessions; `showParams` (F7) puts it away
+  and on a window too narrow to split it moves `view` with it, so the toggle
+  cannot leave you looking at the wrong pane. `kdeshell.dock` stays — general,
+  tested, unused here.
+- **The window is dragged by its CHROME, and nothing else.** Oxygen's
+  WindowManager drags from every unclaimed pixel, including inside the QML —
+  it filters the window contentItem, which only ever sees a press nothing in
+  the scene accepted. `Root.qml` therefore keeps a full-window `MouseArea` at
+  `z: -1000` that accepts those, so a press on a panel's background or between
+  two thumbnails no longer moves the window; the menubar and toolbar still do,
+  natively. The status bar is excluded on the widget side (`_kde_no_window_grab`
+  plus a press filter, `kdeshell._ensure_status`). painter briefly had its own
+  26px drag band instead; it was a strip of nothing and it went, along with the
+  "output N outputs" heading it replaced — that tally is in `statusRight` now.
+  Both panes sit flush under the chrome. Since 2026-08-22 the style is *also*
+  narrowed at its own end — `home/prog/oxygen.nix` sets Oxygen's
+  `WindowDragMode=WD_MINIMAL`, upstream's supported "chrome only" — but the
+  MouseArea stays: it is session-independent and it is the only guard on a
+  machine where that rc has not been applied.
+- **Under Plasma the results pane paints `QPalette.Base`** — `DeskStyle.viewBg`,
+  the colour Dolphin paints its file list with. The window\'s own background is
+  the style\'s gradient and the two are deliberately different: the band keeps
+  the gradient because it is chrome. Empty string outside Plasma.
+- **The grid shows EVERY output** — `load_existing` was capped at 60, a number
+  from when the results were a strip, and the history simply stopped partway
+  with nothing saying so. A `GridView` only builds what it can see, so the rest
+  costs one small dict each. Two things make that affordable: a tile's `Image`
+  is `cache: true` at `grid.thumbPx` (a 60px-bucketed 2x of the cell) rather
+  than an uncached 420px decode of a multi-megabyte PNG on every scroll past,
+  and a clip's poster frame is extracted **on demand** (`Gallery.requestPoster`,
+  asked for by the delegate) with only the first 24 queued eagerly.
+- **`Gallery` keeps `_all` and shows `_rows`.** The toolbar\'s filter field
+  (`kdeshell.toolbar_search`) calls `Gallery.setFilter`, which matches every
+  word against the filename AND the prompt — read out of the file once and
+  cached on the row. Both lists hold the SAME dicts, so a poster landing
+  reaches both; every index QML asks about is a VISIBLE index.
+- **The parameter column is a `Repeater` over an ORDER, not a declared stack.**
+  `ParamsPane.builtinOrder` is the old declaration order and one saved list
+  (`Prefs["sections"]`) reorders it — dragging any panel header moves that
+  section, live, and a right-click on a header offers the way back. Three rules
+  it is built on:
+    - **One order serves all three modes.** A section a mode does not have is
+      hidden, and a `Column` skips an invisible child — which is exactly what
+      produced the per-mode orders before, so nothing had to be per-mode.
+    - **`sectionVisible(key)` on the pane owns the gate, not a `visible:` on the
+      panel.** An item\'s `visible` reads back its EFFECTIVE visibility, so
+      `Loader.visible: item.visible` latches false the moment it is false once
+      and empties the whole column. Measured exactly that way.
+    - **A `ListModel`, not a JS array.** `move()` moves a delegate; reassigning
+      an array rebuilds every one of them, which would destroy the header being
+      dragged mid-drag.
+  A key the saved order does not name is re-inserted at its BUILT-IN position,
+  so a new panel can never be buried at the bottom or lost.
+- **Pins are the ROWS THEMSELVES, and collapsing hides what is not pinned.** A
+  folded panel is its header plus the rows he pinned, laid out where they always
+  were and still live — a pinned Spin steps, a pinned Toggle toggles, the pinned
+  preset row still switches presets (his call, 2026-08-22). Nothing pinned means
+  header only, as before. Right-click a row's label and take
+  `pin <name> to the header` — a MENU, because a bare right-click that pins
+  outright is an action with no name and no way to find out it exists
+  (docs/DESIGN.md §10). Four things this needed, each a bug first:
+    - **Unpinned rows are PARKED in `stash`, not hidden.** Their `visible` is
+      often bound by the caller (`visible: !panel.fromImage`) and assigning it
+      would destroy that binding for good.
+    - **Order comes back by re-seating, and re-seating needs a bounce.**
+      Assigning a row the parent it already has does not move it, so a row
+      returning from the stash landed after the ones that never left; from the
+      first row whose home changed, every row is bounced through `stash` and
+      back in declared order. Through the stash, never through `null` — half
+      these rows are `width: parent.width`, and a null parent makes that a
+      TypeError for the frame it lasts.
+    - **A row with a `Repeater` in it cannot be reparented at all.** The preset
+      switcher's four buttons stayed measured, laid out and counted by QML while
+      nothing drew them. Such a row sets `selfHides: true`, is never parked, and
+      binds its own `visible` to the panel's state instead (`ModeSwitcher.qml`).
+      It has to be the FIRST row in its panel for the ordering above to hold.
+    - **`rowOrder`** is captured once at completion; QML cannot insert a child
+      at an index, so it is the only record of what the column should look like.
+- **The single-output view is an image viewer.** The wheel ZOOMS (through the
+  notch accumulator — the flickable's own wheel overlay stands down,
+  `wheelEnabled: false`), the left button PANS, and an edit output opens with
+  the before/after slider on: `qmlcommon/CompareView.qml`, the same file
+  viewer's `--compare` uses, moved there rather than copied. `App.compareSource`
+  answers what to compare against and returns "" unless the recorded
+  `input_image_local` is still on disk — an output whose source has been moved
+  or deleted shows normally, and so does anything that is not an edit. The
+  toolbar's `compare` button (icon + the word, via kdeshell's `barText`) is the
+  switch; it is remembered.
+- **Back leaves the output, Forward returns to it.** `@Back`/`@Forward` are the
+  Browse↔View pair, not the output walk — the grid keeps its place because the
+  selection never moves. Walking outputs is PgUp/PgDown (QML shortcuts, gated on
+  being in View so they do not take paging from a text box) and the Go menu's
+  two rows, which carry no shortcut of their own.
+- **Browse ↔ View.** `inView` plus `OutputView.qml` — one output filling the
+  pane, entered by Return or a double-click (which no longer launches `viewer`;
+  that is still File → Open in Viewer), left by Escape, walked with Alt+Left/
+  Right and PgUp/PgDown. **The selection is the cursor**: View shows `selOne`,
+  so there are never two places that disagree about which output is current.
+  Zoom belongs to a still; a clip\'s zoom rows are disabled.
+
 ## The look is the desktop's, and painter is where it was worst
 
 painter used to break eight of `~/nix/docs/DESIGN.md`'s rules at once; §19.1 there
@@ -305,11 +452,22 @@ not installed. **Anything more would be a local patch to
 `/home/lam/comfy/latent_preview.py`**, i.e. a fourth local commit on a checkout
 that is maintained by rebasing onto upstream tags.
 
-**He has ruled that out** — [his] *"just remove that stuff for previewing, i
-think doing it how i want would kill inference speeds"* — so the pane's tag is
-back to the single word `sampling`, and a frame count that briefly sat beside it
-(to prove the stream was alive) is gone with it. **Do not re-add either to the
-chrome**; this paragraph is where that answer lives now.
+**He ruled that out once** — [his] *"just remove that stuff for previewing, i
+think doing it how i want would kill inference speeds"* — and the tag went back
+to the single word `sampling`.
+
+**Then he asked the other half of it (2026-08-22):** *"the 'sampling' text
+should also include 'frame X of Y'"*, plus *"im pretty sure a recent upstream
+commit made it so the actual individual frames (past the first frame) can be
+previewed"*. Checked against upstream, not from memory: `git fetch` on
+`/home/lam/comfy` and the only commit newer than 0.30.0 touching
+`latent_preview.py` is `8e869efc` "Add support for taeh3", which adds one name
+to `VIDEO_TAES`. **On upstream master both previewers still slice the temporal
+axis to index 0** — `Latent2RGBPreviewer` `x0[0, :, 0]`, `TAEHVPreviewerImpl`
+`x0[:1, :, :1]` — and there is no animated-preview path anywhere in the tree. So
+the tag now reads `sampling · frame 1 of N`: the number is a constant because
+the frame is, and saying which frame you are looking at is the question he was
+actually asking. A *moving* X would still be the local patch he ruled out.
 
 If previews ever appear to stop rather than merely repeat a frame, the place to
 look is `comfy.py`'s `_on_binary`: it keeps only `BinaryEventTypes.PREVIEW_IMAGE`
@@ -366,12 +524,58 @@ headless-sway harness that proves it, is in `apps/AGENTS.md` → `pylib/`.
 and not clipfile** — one mime type is all a string needs, and `-n` because
 wl-copy appends a newline to argv content otherwise. Same Wayland rule though:
 the holder wl-copy forks is what makes the prompt still pasteable after painter
-closes. It reads the words out of the FILE's `painter` chunk, not out of the
-boxes, so an output from three sessions ago hands back what IT was asked for;
-and a clip is never offered it, its metadata being ComfyUI's graph rather than
-painter's parameters (`GalleryView.commonItems`, gated on the params the menu
-already read — docs/DESIGN.md §10, an action with nothing to act on is not
-offered greyed, it is not offered).
+closes. It reads the words out of the FILE, not out of the boxes, so an output
+from three sessions ago hands back what IT was asked for — a clip included
+(see "A clip carries its job too"). It is still offered only where there is a
+prompt to take (`GalleryView.commonItems`, gated on the params the menu already
+read — docs/DESIGN.md §10, an action with nothing to act on is not offered
+greyed, it is not offered).
+
+## A clip carries its job too
+
+[his] *"give the user the ability to copy and inject prompts / settings of
+videos like they can images"* (2026-08-21). A still has always carried the
+generation that made it in its PNG `painter` chunk; the gallery's inject menu
+and `copy prompt` read it. A clip carried only ComfyUI's graph, so both were
+refused in front of one.
+
+**`outmeta.params_for(path)` is now the ONE way anything here asks a file what
+made it**, and it answers from three places so nothing else has to know which:
+
+1. a still — the PNG chunk (`pylib/pngmeta.py`), unchanged;
+2. a clip painter saved from 2026-08-21 — the same JSON as an `mdta` tag in the
+   MP4's own metadata box (`pylib/mp4meta.py`), written in the download
+   callback beside the graph `SaveVideo` already put there;
+3. **an older clip — read back out of that graph** (`params_from_graph`).
+   Without it the feature would do nothing for the 288 clips already on top and
+   only start working on the next generation. Measured over them: 245 hand back
+   their prompt and numbers, the rest are muted derivatives, a truncated file,
+   or jobs whose prompt really was empty.
+
+Three things worth knowing before touching it:
+
+- **No ffmpeg.** The tag is written in pure Python because that code runs in the
+  download callback, on the GUI thread, for every finished clip; a subprocess
+  there would be a second way for a finished generation not to reach the disk.
+  A file that cannot take the tag is written VERBATIM and still lands.
+- **Writing it MOVES the media data.** ComfyUI emits faststart files, so `moov`
+  sits ahead of `mdat` and growing it slides every byte after it down the file;
+  `upsert_tags` patches each `stco`/`co64` entry by the same delta. The harness
+  pins it the only way that means anything — an ffmpeg-written clip, tagged,
+  and the decoded video hashed before and after.
+- **The graph reading recovers only what the graph holds.** The prompt, the
+  sampling numbers, the seed, the frame count (as seconds) and the pixel budget
+  — not the frames' local paths, which is why an old clip's first-frame toggle
+  injects as OFF. A clip painter tagged itself DOES carry
+  `input_image_local` / `last_image_local`, and `injectParams` puts the picture
+  back with the toggle — or leaves the toggle off when that file has since
+  moved, rather than arming a generate that could only refuse (§10 again).
+
+`injectParams` branches on `kind === "video"` for the controls a clip has and an
+image does not: seconds and a frame rate instead of a batch, and the megapixel
+budget taken from the job rather than backed out of a width and height an
+image-to-video clip never had.
+
 
 ## A frame well takes a PASTE as well as a drop
 
@@ -523,8 +727,8 @@ by the harness, not by looking.
 Left-click hands the file to `viewer`; right-click opens the shared `CtxMenu`
 with **inject all / inject prompt / inject params**, plus `open in viewer`. Both
 buttons used to raise the menu, which put a question between him and the thing
-he had just made. A PNG carries the whole job that made it, and which part you
-want is a decision (§7.1: everything is still right-clickable). The three
+he had just made. An output carries the whole job that made it — a still and a
+clip alike — and which part you want is a decision (§7.1: everything is still right-clickable). The three
 actions live on the window (`injectPrompt` / `injectParams` / `injectAll`), so
 the menu has no logic of its own; `injectParams` restores size as **aspect +
 MP**, never raw pixels (see above).
@@ -667,8 +871,12 @@ pick), the live-binding regressions above, Escape (releases the box, cancels
 NOTHING), the inject menu and its three subsets, the draggable divider and its
 clamps, the furniture (an elided panel badge, the splitter stopping above the
 status bar, the one scrollbar being on the results side, a prompt box taking a
-dragged height), `copy prompt` (offered on a still with words and not on a clip,
-and what reaches `wl-copy`), the merged history (`PAINTER_PEER_OUT` globbed
+dragged height), `copy prompt` (offered wherever there are words — a still, a
+tagged clip — and not on a file with none, and what reaches `wl-copy`), a
+clip's parameters (its own tag written without disturbing a byte of the
+pictures, read back through `paramsAt`, injected as seconds/fps/budget, the
+first frame restored only when it is still on disk, and an untagged clip read
+out of ComfyUI's graph), the merged history (`PAINTER_PEER_OUT` globbed
 beside the local root, the file both machines hold shown once and shown as the
 LOCAL copy, an unmountable peer root costing the local scan nothing), the video
 column (a synthetic video family written into the scratch

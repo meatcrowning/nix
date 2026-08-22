@@ -180,6 +180,14 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
   `painter/` until 2026-08-12; a second parser for the same bytes is the thing
   to avoid. `read_text_path()` is the cheap route — it never touches the pixels;
   see `filer/AGENTS.md` for what that costs and why the tail fallback exists.
+- **`mp4meta.py`** — the same job for the other half of painter's gallery: the
+  `mdta` metadata tags in an MP4's `moov/udta/meta`, where ComfyUI's `SaveVideo`
+  already writes its `prompt` graph and where painter now writes its own
+  `painter` key beside it, so a CLIP carries the job that made it exactly as a
+  still does. Stdlib only, and no ffmpeg: it runs in the download callback on
+  the GUI thread. **Growing `moov` moves the media data**, so `upsert_tags`
+  patches every `stco`/`co64` chunk offset past it — a writer that skips that
+  step leaves a file whose pictures decode to nothing.
 - **`deskstyle.py`** — **THE channel for every desktop-wide appearance setting
   that has to reach the apps. Add a key here; never build a second pipe.**
   Today: `fontFamily` / `fontSize`, the two motion settings `reduceMotion` /
@@ -212,6 +220,29 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
       changes. So the per-app change is one call —
       `Palette(theme_source(PANEL_THEME))` — and no `Theme.qml`, binding or
       component knows which session it is in. Do it that way for a new app.
+    - **`kde_chrome()` is the exception to "the source and nothing else"**, for
+      the one caller that cannot hand the painting back to the style: surfer's
+      OneeChan 4chan re-skin, a web page no QStyle will ever draw. It returns
+      the KStyle's gradient stops and relief tones (each `kdeglobals` group
+      background shaded either side along HLS lightness, scaled by `[KDE]
+      contrast`) so that sheet can imitate an Oxygen window; it is None outside
+      a Plasma session and under a flat KStyle (`GRADIENT_STYLES`), so no other
+      app and neither the Hyprland look ever sees a gradient because of it.
+    - **`pylib/chantheme.py` + `pylib/tools/chan-userscript.py` — the same
+      look, in a browser that is not ours.** OneeChan themes 4chan from its own
+      baked hexes; `chantheme.css()` builds an override sheet with OneeChan's
+      selectors + `!important` that wins purely on cascade order (an adopted
+      stylesheet follows any document `<style>`), plus the KStyle relief above
+      when `kde_chrome()` gives one. surfer adopts it live over
+      `surferonee://`; **Vivaldi** has no Stylus and only Tampermonkey (where
+      OneeChan already lives), so the generator BAKES the same bytes into a
+      userscript — `chan-theme` (wrapper: `home/prog/chan-theme.nix`) writes
+      `~/.local/share/chan-theme/desktop-4chan.user.js`, and he opens that
+      `file://` URL to install. Baked means stale by design: **re-run
+      `chan-theme` after a colour-scheme or wallpaper change.** That is why
+      `chantheme` is Qt-free — the generator runs with no Qt, no browser and no
+      app. Harness `pylib/tools/chan-userscript-test.py`, whose real job is the
+      seam: the baked CSS must equal what surfer serves for the same palette.
     - `deskstyle.py` asks it for `fontFamily`/`fontSize` (KDE's point size,
       converted at the screen's own DPI), `smooth`, the motion factor and the
       scrollbar in that session. The two GEOMETRY keys do not move: border
@@ -234,6 +265,47 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
       Plasma session the file-type defaults are KDE's apps
       (`kde-mimeapps.list`), and `wal-set.sh` leaves `kdeglobals` alone there
       rather than overwriting his colour scheme from the wallpaper.
+- **`oxygenstyle.py`** — **the WIDGET STYLE's own store, `~/.config/oxygenrc`,
+  for the numbers `kdeglobals` does not carry.** A colour scheme says nothing
+  about how wide a scrollbar is, how long a hover fade lasts, how big a tree
+  expander's triangle is or whether a tooltip is translucent — the style does,
+  and under Oxygen it keeps them in a file of its own. Every real QWidget in one
+  of our Plasma windows already obeys it; the QML inside the `QQuickWidget`
+  (`apps/*/qml/+plasma/*.qml`) is the half that did not, and a hand-drawn
+  control fading at 260ms beside a QToolButton fading at 150 is the same "one
+  odd window" failure `kdeshell.py` exists to prevent, one level down.
+    - **The defaults table is upstream's, verbatim** (`kstyle/oxygen.kcfg` in
+      `github.com/KDE/oxygen`, 6.7.4). A key absent from the rc is not unset, it
+      is the compiled-in default — and on a machine that never opened the KCM
+      that is nearly all of them, so reading the file alone would have answered
+      "nothing" to almost every question. Two numbers are DERIVED the way
+      Oxygen's own source derives them (the scrollbar button height
+      `qMax(w*7/10, 14)`, the expander triangle's drawn width and pen), because
+      they are not in the rc at all.
+    - **The gate is Plasma AND Oxygen** (`is_oxygen()`): outside Plasma none of
+      it applies, and inside it under Breeze the Oxygen rc still exists on disk
+      and would dress our QML in the metrics of a style the window is not
+      wearing.
+    - **`DeskStyle` is what publishes it** — the `style*` properties, on the
+      same watch as everything else, all inert (0 / false / "") whenever no
+      style is saying. Every consumer treats that as "use the desktop's own
+      value", so none of them knows what session it is in. Two consume it so
+      far: `qmlcommon/Motion.qml` takes `styleMs` (Oxygen's
+      `GenericAnimationsDuration`, 150) over hyprvtb's 260 slide in a Plasma
+      session — there is no window roll there to match — and `qmlcommon/VScroll.qml`
+      takes `styleScrollWidth` for its gutter. **Adding one is a row in
+      `oxygenstyle._KEYS` and a Property in `deskstyle.py`**, nothing more.
+    - Oxygen's `AnimationsEnabled=false` arrives as `reduceMotion`, not as a
+      silent ignore: a window whose real widgets have stopped animating must
+      not have QML still sliding inside it.
+    - **`home/prog/oxygen.nix` declares the half of that file this desktop
+      pins** — and deliberately not the durations or the metrics, which are the
+      numbers the apps READ. `oxygen-settings6` (already on PATH, from
+      `kdePackages.oxygen`) is the GUI that writes the rest; `oxygen-demo6`
+      beside it is upstream's gallery of every Oxygen widget in every state,
+      which is the reference to diff a `+plasma` component against.
+    - `DESK_OXYGENRC` points at another rc. Harness:
+      `apps/pylib/tools/oxygen-test.py`.
 - **`glyphs.py`** — `px()`, the apps' half of docs/DESIGN.md §2.3: the characters
   More Perfect DOS VGA lacks, mapped onto ASCII, so text this desktop did not
   author cannot clip the row it is drawn in. It is the twin of the panel's
@@ -573,6 +645,207 @@ inside a Plasma session.
 `qmlcommon/PixelText.qml` exists for this component: a file component here
 cannot reach an app's own copy. It is byte-identical to the eight app copies —
 retune all of them together (docs/DESIGN.md §2.2).
+
+**An app with the KDE shell below stands this bar down** — `systemBar: true`,
+and `shown` goes false while `plasma` stays true. Two menubars, one of them
+ours and wrong, is what that flag prevents. painter is the first; the other apps
+still use this bar and are unaffected.
+
+### `pylib/kdeshell.py` — under Plasma, a REAL KDE window `[painter]`
+
+**In that session we do not imitate the system theme; we let the system theme
+paint.** `kdetheme.py` moves the palette, the font and the motion to
+`kdeglobals`, and that is as far as colour tokens can go — the thing that makes
+a KDE program read as one object is Oxygen's window background: a vertical
+gradient plus a radial splash, drawn by the *decoration* over the titlebar and
+by the *style* over the client area with a matching 23px y-shift, so the
+titlebar, the menubar, the toolbar and the sides are one continuous surface.
+That is `Helper::renderWindowBackground()`, and copying it into QML would be a
+copy that drifts.
+
+Two facts from Oxygen 6.7.4 decide the shape of the answer:
+
+- `kstyle/oxygenstyle.cpp:4595` — that background is painted **only for a real
+  QWidget window** (`WA_StyledBackground`, `isWindow()`). No QStyle entry point
+  will give it to a `QQuickWindow`, whatever style is set.
+- `kstyle/oxygenstyle.cpp:8274` — the style registers any `QQuickItem` it is
+  asked to draw for with Oxygen's own `WindowManager`, which is
+  drag-the-window-from-any-empty-area (`WD_FULL`, ending in
+  `QWindow::startSystemMove()`). So that behaviour comes with the real style
+  too, inside the QML, and is not ours to reimplement either.
+
+So the Plasma face is shaped like Dolphin: a `QMainWindow` with a real
+`QMenuBar`/`QToolBar`/`QStatusBar`, the app's QML in a `QQuickWidget` central
+widget, and `QT_QUICK_CONTROLS_STYLE=org.kde.desktop` so QQC2 controls inside
+the QML are rendered *through* the live `QStyle` rather than imitated.
+
+**Never make that QQuickWidget transparent.** Letting the parent show through is
+the obvious way to continue the one surface behind the content, and it punches a
+hole in the window here — the region stops being repainted, windows dragged over
+it leave trails *inside* it, and it is absent from screenshots. Both
+`WA_TranslucentBackground` and a bare transparent `clearColor` do it, and
+**no offscreen render can catch either**: `grab()` re-renders through a fresh
+backing store, the fault is in the live one, and both shipped looking correct.
+The view is opaque; `qmlcommon/StyledBackground.qml` draws the style's own
+window background inside the QML instead, from an image the style renders into a
+proxy `WA_StyledBackground` window and crops to the view's rectangle
+(pixel-exact against a real window, 0.76 ms). Put it at the back of the app's
+root item; it is invisible in the Hyprland session.
+
+Adopting it in an app's `main.py`:
+
+```python
+kdeshell.pin_controls_style()                     # before the app object
+app = kdeshell.make_app(sys.argv, "painter")      # QApplication under Plasma
+plasma = is_plasma()
+shell = kdeshell.shell("painter", size=(1280, 900)) if plasma else None
+engine = shell.engine() if plasma else QQmlApplicationEngine()
+...
+if plasma:
+    shell.load(QML / "Root.qml")                  # an Item, not a Window
+    shell.bind_chrome(bar, menu_order=[...])      # the same tbButtons array
+    shell.bind_status()                           # statusLine/statusProgress
+    ctl.window = shell.show()                     # a QWindow, as before
+```
+
+and in the QML:
+
+- **the root is split in two** — `Root.qml` is an `Item` with the whole app in
+  it, `Main.qml` is the Hyprland session's `Window` wrapper around it. A
+  `QQuickWidget` hosts an Item, so anything Window-only (`onClosing`,
+  `contentItem`, `activeFocusItem`, assigning `width`) moves out or goes
+  through `root.Window.*`.
+- **`tbButtons` gains `icon:`** (a freedesktop icon name — a two-character cell
+  is a titlebar affordance and has no place on a real toolbar) **and `bar:`**
+  (this entry earns a toolbar slot; the menus stay the complete set). Both are
+  inert on the vtb wire like `menu:`.
+- **`Theme.windowFill`** is `bg` under Hyprland and `transparent` under Plasma:
+  anything meaning "the window's background" binds it, or a flat fill covers the
+  styled gradient. Insets (`bgAlt` panels, fields, rows) keep real colours.
+- **the QML status strip stands down** (`barH: 0`) and the app publishes
+  `statusLine` / `statusProgress` (-1 = idle) for the real status bar.
+
+Packaging is half the job and fails **silently** when it is missing: the style,
+the QPA theme, qqc2-desktop-style, kirigami and the icon set must be in the
+app's own wrapper (`home/prog/painter.nix`), or the window comes up in Fusion
+with text-only toolbar rows in a session where everything else is Oxygen.
+`kdeshell` re-asserts what it can — `[KDE] widgetStyle` from `kdeglobals`, the
+icon theme name, and the icon search paths Qt only fills in from a platform
+theme — so a stripped or offscreen environment behaves like the session.
+
+**The menus are KDE's, not the app's.** `MENU_ORDER`/`MENU_TITLE` fix the
+vocabulary — File, Edit, View, Go, Bookmarks, Tools, Settings, Help — with File
+first and Settings/Help last whatever an app's own `menuOrder` says; a group an
+app invents is inserted before Settings. `kdeshell` supplies what the app did
+not: Quit at the end of File, Show Toolbar/Show Statusbar in Settings, About and
+About Qt in Help. A row's shortcut comes from the action table (`"@Quit"`-style
+names take the platform's standard sequence), `group:` makes a radio set, and
+one `QAction` per id is reused across rebuilds so a menu row and a toolbar row
+can never disagree.
+
+**`shell.toolbar_search(on_text)`** puts a filter field at the right-hand end of
+the toolbar, behind a stretch, where Dolphin/Gwenview/Okular keep theirs. It is
+re-appended after every `_rebuild`, since that clears the toolbar.
+
+**The status bar's left slot is a `QStackedWidget`** — the message label on
+page 0, the progress bar on page 1 — because two widgets with a stretch each and
+one of them hidden do NOT hand the room over: the bar came up in the right-hand
+half with the empty label holding the left. A stack is one widget in the layout,
+so the whole slot is whichever page is showing. The bar carries its own text
+(`statusProgressText`), and a literal `%` in it must be escaped to `%%` or
+QProgressBar reads it as its own placeholder.
+
+**Never wire `footerChanged` into `set_status`.** The footer is the hyprvtb
+titlebar's badge (painter's is the queue depth, "Q3") and it overwrote whatever
+`bind_status` had just put in the status line.
+
+**The status bar is not a titlebar** — and blacklisting the BAR is not enough:
+Oxygen's WindowManager looks at the widget under the pointer, and a status bar
+is mostly covered by its own labels, so the half under the message label went on
+dragging the window. `_no_grab()` sets `_kde_no_window_grab` and installs a
+press filter, and every child that fills part of the bar gets it (not the size
+grip, which wants its press).
+
+
+
+**`toolbar_search`'s `align_right_to`** names a QML property holding the x of a
+pane's right edge, and keeps the field's right edge over it with a fixed spacer
+after it — painter aligns the filter with the results pane's splitter, since it
+filters the outputs and has no business over the parameter column. The
+property's own change signal covers window resizing, so nothing watches the
+window.
+
+**`use_overlay_toolbar` must be re-asserted after `restoreState()`.** A saved
+window state records every toolbar by objectName and re-docks it on restore —
+so an overlay toolbar came back full width, over-tall and with its buttons
+pushed to the bottom of the band the main window had claimed for it, on the
+first relaunch after the state was saved. `show()` re-parents and re-lays it
+after restoring; a saved state cannot outvote what the app asked for.
+`PAINTER_OVERLAY_CHECK=1` on painter's selftest forces the re-dock and proves
+the recovery.
+
+**`barText` on an action row** puts the name beside the icon for ONE toolbar
+button — the button style is a toolbar-wide setting, so that row is added as a
+`QToolButton` with its own style rather than as an action.
+
+**A dock is a second scene graph.** `QQuickWidget` cannot use the threaded
+render loop, so every one of them renders on the GUI thread each frame. Two is
+measurably more than one: painter had its parameter column in a dock for a day
+and the window felt slower. Reach for `dock()` when the panel genuinely wants
+to float or tab, not to get a sidebar.
+
+**Never `QMessageBox.about()`** (nor any of the other static `QMessageBox`
+helpers) in this session. They run a nested `exec()` and, with the KDE platform
+theme loaded, hand the box to a NATIVE dialog helper whose teardown segfaults
+the app — core 127749, 2026-08-22, `~QMessageBox` →
+`QDialogPrivate::setNativeDialogVisible` → `QWidget::hide()` on freed memory.
+Build a `QMessageBox` with `DontUseNativeDialog`, `show()` it modelessly, and
+keep a reference on the shell; `_about_action` is the pattern.
+
+**`shell.dock(ident, title, qml, …)`** puts a QML file in a real `QDockWidget`:
+float, tab, drag to another edge, a View-menu toggle that is the dock's own
+action, and placement saved with the window. Three things it has to get right,
+all silent when wrong — the view must share the app's engine
+(`QQuickWidget(engine, …)`, or it sees none of the context properties and comes
+up blank), it needs its own `KdeBackground` in its own child context (or it
+draws the central widget's crop and the gradient steps at the seam), and it is
+created with `createWithInitialProperties` so its bindings never run once
+against an empty model. `show()` restores geometry + `saveState()`; a harness on
+the offscreen platform saves nothing, because a test's window size is not his.
+
+**The content changes clothes through a FILE SELECTOR, not a branch.**
+`kdeshell.select_plasma_files(engine)` turns on the `plasma` selector, so
+`qml/+plasma/Foo.qml` transparently replaces `qml/Foo.qml` at every call site:
+painter's `Panel` is a styled `GroupBox` there, `Spin` a `SpinBox`, `Picker` a
+`ComboBox`, `Toggle` a `CheckBox`, `TextButton` a `Button`, and `CtxMenu` /
+`ToolTipArea` the style's own popups — each with the SAME API as the file it
+replaces, so `Root.qml` and every panel are untouched. Each variant carries
+`property string face: "plasma"`, which is how a harness proves the swap
+actually happened. Two traps paid for already:
+
+- **The selector must be OWNED.** `QQmlFileSelector(engine)` does not parent
+  itself to the engine; Python collects it moments later and every component
+  then loads its unselected file, silently. Pass the engine twice.
+- **A variant may not redeclare a FINAL property** (`GroupBox.title`), and it
+  must reproduce the original's *layout contract*, not just its properties —
+  painter's `Panel` puts content in a `Column`, and a variant whose content
+  item was a plain `Item` drew every row of a panel on top of the others.
+
+Verify it the only way this can be verified — by rendering:
+
+```
+QT_QPA_PLATFORMTHEME=kde DESK_SESSION=plasma PAINTER_SHOT=/tmp/x.png \
+    painter-qtenv python3 main.py --selftest        # then LOOK at the PNG
+PAINTER_TREE=panel   # …and/or dump item geometry + the widget palette
+```
+
+**`QT_QPA_PLATFORMTHEME=kde` is not optional in that command.** Without it no
+KDE platform theme loads, and the two halves of the window disagree: widgets
+take Qt's default light palette while the QML takes his dark scheme, which
+renders as an empty-looking toolbar and invisible labels — a bug in the
+harness, not in the app. `kdeshell` re-asserts the style, palette and icon
+theme when it finds them wrong, so this is belt-and-braces rather than the only
+line of defence.
 
 ### `VScroll.qml` — the one scrollbar
 

@@ -73,7 +73,9 @@ class ComfyClient(QtCore.QObject):
     jobStarted = QtCore.Signal(object)                 # Job
     jobProgress = QtCore.Signal(object, int, int)      # Job, value, max
     jobNode = QtCore.Signal(object, str)               # Job, role
-    jobPreview = QtCore.Signal(object, bytes, str)     # Job, image bytes, format
+    # Job, image bytes, format, metadata ({"frame": n, "frames": total} for a
+    # video latent — see `_on_binary` and the local ComfyUI patch it reads).
+    jobPreview = QtCore.Signal(object, bytes, str, dict)
     jobFinished = QtCore.Signal(object)                # Job
     jobFailed = QtCore.Signal(object, str)             # Job, message
     logged = QtCore.Signal(str)
@@ -116,6 +118,15 @@ class ComfyClient(QtCore.QObject):
 
     def _on_connected(self):
         self._backoff = 500
+        # THE FIRST MESSAGE IS THE FEATURE HANDSHAKE, and it has to be first:
+        # ComfyUI only reads feature flags from a client's opening frame
+        # (server.py, `first_message`). Announcing this one moves previews from
+        # the old event-1 shape to event 4, which carries a metadata blob — the
+        # only channel that can say WHICH frame of a clip a preview is.
+        self.ws.sendTextMessage(json.dumps({
+            "type": "feature_flags",
+            "data": {"supports_preview_metadata": True},
+        }))
         self.logged.emit("websocket connected")
         self.connected.emit()
 
@@ -385,18 +396,37 @@ class ComfyClient(QtCore.QObject):
             return
 
     def _on_binary(self, payload: QtCore.QByteArray):
-        """Live previews arrive as event(u32) + format(u32) + image bytes."""
+        """Live previews, in either of ComfyUI's two shapes.
+
+        Event 1 (UNENCODED_PREVIEW_IMAGE): event(u32) + format(u32) + image.
+        Event 4 (PREVIEW_IMAGE_WITH_METADATA): event(u32) + len(u32) + JSON +
+        image — sent instead of event 1 to a client that announced
+        `supports_preview_metadata`, which we do in `_on_connected`. Both are
+        handled because the flag is the server's choice, not ours: an older
+        backend, or one whose handshake we missed, keeps sending event 1.
+        """
         raw = bytes(payload)
         if len(raw) < 8:
             return
         event = int.from_bytes(raw[0:4], "big")
-        fmt = int.from_bytes(raw[4:8], "big")
-        if event != 1:
-            return
         job = self._active
         if job is None:
             return
-        self.jobPreview.emit(job, raw[8:], "jpeg" if fmt == 1 else "png")
+        if event == 1:
+            fmt = int.from_bytes(raw[4:8], "big")
+            self.jobPreview.emit(job, raw[8:], "jpeg" if fmt == 1 else "png", {})
+            return
+        if event != 4:
+            return
+        mlen = int.from_bytes(raw[4:8], "big")
+        if len(raw) < 8 + mlen:
+            return
+        try:
+            meta = json.loads(raw[8:8 + mlen].decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            meta = {}
+        fmt = "png" if str(meta.get("image_type", "")).endswith("png") else "jpeg"
+        self.jobPreview.emit(job, raw[8 + mlen:], fmt, meta)
 
     def _complete(self, job: Job):
         job.finished_at = time.time()

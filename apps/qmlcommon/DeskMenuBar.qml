@@ -91,8 +91,17 @@ Item {
     readonly property bool plasma: (typeof DeskStyle !== "undefined" && DeskStyle)
                                    ? DeskStyle.plasma === true : false
 
-    visible: plasma
-    height: plasma ? Math.max(20, Theme.lineHeight + 8) : 0
+    // AN APP WITH A REAL KDE MENUBAR STANDS THIS ONE DOWN. Where the app's
+    // Plasma face is a QMainWindow hosting this QML in a QQuickWidget
+    // (pylib/kdeshell.py), the menubar is a genuine QMenuBar painted by the
+    // system style from the same `buttons` array — two menubars would be drawn,
+    // one of them ours and wrong. Apps still on the QML-only Plasma face leave
+    // this false and get the bar below, unchanged.
+    property bool systemBar: false
+    readonly property bool shown: plasma && !systemBar
+
+    visible: shown
+    height: shown ? Math.max(20, Theme.lineHeight + 8) : 0
     // above the window's content, below the apps' own overlays (CtxMenu is at
     // 3000): the bar and its dropdown are chrome, not a modal.
     z: 500
@@ -180,7 +189,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        visible: root.plasma
+        visible: root.shown
         color: Theme.bg
 
         // The seam under the bar, the one line that says the chrome ends here.
@@ -270,7 +279,7 @@ Item {
     Item {
         id: popup
         anchors.fill: parent
-        visible: root.plasma && root.openAt >= 0
+        visible: root.shown && root.openAt >= 0
         z: 2900
 
         readonly property var items: (root.openAt >= 0 && root.openAt < root.menus.length)

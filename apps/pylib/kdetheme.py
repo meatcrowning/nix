@@ -37,6 +37,12 @@ one means here; `kdeglobals` groups for what each one means there):
     highlight Colors:Selection/BackgroundNormal
     ok/warn/crit/info   Foreground Positive/Neutral/Negative/Link
 
+`kde_chrome()` goes one step further for the one caller that cannot hand the
+painting back to the style at all — surfer's 4chan re-skin, a web page — and
+returns the KStyle's gradient stops and relief tones so it can imitate one.
+It is None outside a Plasma session and under a flat KStyle, so nothing else
+on this desktop ever sees a gradient because of it.
+
 **The accent and the status four are contrast-guarded, and that guard is not
 optional.** §3 of the design language makes `accent` body text, and several
 apps draw label text in it — while KDE's `DecorationFocus` is designed to be
@@ -267,6 +273,98 @@ def kde_font(ini=None):
     if px > 0:
         return (family, None, px)
     return (family, 10.0, None)
+
+
+# --------------------------------------------------------------------------- #
+#  the KStyle's chrome: does it gradient, and with what stops
+# --------------------------------------------------------------------------- #
+# KStyles that paint a vertical window/button gradient rather than flat fills.
+# Breeze and Fusion are flat and must stay out of this list — a flat session
+# getting gradients is the same bug as a gradient session not getting them.
+GRADIENT_STYLES = ("oxygen",)
+
+
+def kde_widget_style(ini=None) -> str:
+    """The active KStyle, lowercased (`""` if unknown).
+
+    `[KDE] widgetStyle` in `kdeglobals`, falling back to
+    `kdedefaults/kdeglobals` — a Global Theme (Look and Feel package) records
+    the style THERE and leaves the user file's key absent, which is exactly the
+    state a stock Oxygen or Breeze session is in.
+    """
+    ini = read_ini() if ini is None else ini
+    style = (ini.get("KDE") or {}).get("widgetStyle")
+    if not style:
+        d = kdeglobals_path().parent / "kdedefaults" / "kdeglobals"
+        style = (read_ini(d).get("KDE") or {}).get("widgetStyle")
+    return (style or "").strip().lower()
+
+
+def _shade_l(rgb, d):
+    """`rgb` moved `d` along HLS lightness (hue and saturation kept)."""
+    h, l, s = colorsys.rgb_to_hls(*(c / 255.0 for c in rgb))
+    l = max(0.0, min(1.0, l + d))
+    return tuple(round(c * 255) for c in colorsys.hls_to_rgb(h, l, s))
+
+
+# How far each surface's two stops sit either side of its base colour, before
+# the scheme's own contrast scaling. Oxygen's real stops come out of
+# KColorUtils' HCY shade() against the style's slab ratios, which is not
+# reproducible outside the style; these are a deliberate APPROXIMATION of the
+# look — light at the top, darker at the foot, strongest on the controls and
+# faintest on the window — and the only thing that reads them (surfer's
+# OneeChan re-skin) is a web page, where nothing else can draw the real one.
+_STOPS = {
+    "window": (0.045, -0.022),
+    "panel":  (0.030, -0.014),
+    "header": (0.060, -0.026),
+    "button": (0.080, -0.038),
+}
+
+
+def kde_chrome(ini=None) -> dict | None:
+    """Gradient stops and bevel tones for the active KStyle, or None when the
+    style draws flat (or this is not a Plasma session at all).
+
+    The caller gets hex stop pairs per surface plus the two 1px relief tones,
+    so it can imitate a KDE window in a medium the style itself cannot paint.
+    Everything is derived from the live scheme's own group backgrounds and its
+    `[KDE] contrast` (0-10), so it follows a scheme change with no new keys.
+    """
+    if not is_plasma():
+        return None
+    ini = read_ini() if ini is None else ini
+    if kde_widget_style(ini) not in GRADIENT_STYLES:
+        return None
+    win = ini.get("Colors:Window")
+    if not win:
+        return None
+    view = ini.get("Colors:View", win)
+    button = ini.get("Colors:Button", win)
+    try:
+        c = max(0.0, min(1.0, float((ini.get("KDE") or {}).get("contrast", 7)) / 10.0))
+    except (TypeError, ValueError):
+        c = 0.7
+    k = 0.55 + 0.65 * c            # contrast=7 -> ~1.0, the stops as written
+    bases = {
+        "window": _rgb(win.get("BackgroundNormal"), (40, 34, 42)),
+        "panel":  _rgb(view.get("BackgroundNormal"), (32, 27, 36)),
+        "header": _rgb(win.get("BackgroundNormal"), (40, 34, 42)),
+        "button": _rgb(button.get("BackgroundNormal"), (58, 51, 58)),
+    }
+    out = {}
+    for name, base in bases.items():
+        up, down = _STOPS[name]
+        out[name + "Top"] = _hex(_shade_l(base, up * k))
+        out[name + "Bottom"] = _hex(_shade_l(base, down * k))
+    # The two relief tones: Oxygen's 1px light bevel along the top of every
+    # slab and the shadow under its foot. Alpha, not colour, so they sit over
+    # whatever stop they land on.
+    out["bevel"] = "rgba(255,255,255,%.2f)" % (0.05 + 0.05 * c)
+    out["shade"] = "rgba(0,0,0,%.2f)" % (0.18 + 0.14 * c)
+    out["radius"] = 3               # Oxygen's slab/hole corner, in px
+    out["style"] = kde_widget_style(ini)
+    return out
 
 
 def kde_motion(ini=None):

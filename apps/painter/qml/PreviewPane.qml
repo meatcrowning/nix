@@ -23,6 +23,10 @@ Item {
     id: pane
 
     property bool open: false
+    //: A finished result, double-clicked: open it in the single-output view.
+    //: Only when this pane is showing an OUTPUT — a live sampler frame is not
+    //: a file and there is nothing to open.
+    signal openRequested(string path)
     // The height is dragged and remembered, exactly like a prompt box.
     property int paneHeight: Prefs.get("preview.h") > 0 ? Prefs.get("preview.h") : 260
     readonly property int minHeight: 90
@@ -74,6 +78,7 @@ Item {
 
         // (2a) the finished still
         Image {
+            id: finishedStill
             anchors.fill: parent
             anchors.margins: 1
             visible: !App.hasPreview && pane.source !== "" && !pane.sourceIsVideo
@@ -81,6 +86,12 @@ Item {
             fillMode: Image.PreserveAspectFit
             cache: false
             asynchronous: true
+
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton
+                onDoubleClicked: if (pane.source !== "") pane.openRequested(pane.source)
+            }
         }
 
         // (2b) the finished clip — looped, and muted on purpose (see above)
@@ -100,6 +111,17 @@ Item {
             anchors.margins: 1
             visible: !App.hasPreview && pane.source !== "" && pane.sourceIsVideo
             fillMode: VideoOutput.PreserveAspectFit
+
+            // CLICK IT TO STOP IT. A looping clip is the right default for a
+            // thing that reports what just finished, and the wrong one when you
+            // want to look at a single frame of it.
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: player.playbackState === MediaPlayer.PlayingState
+                           ? player.pause() : player.play()
+                onDoubleClicked: if (pane.source !== "") pane.openRequested(pane.source)
+            }
         }
 
         // Nothing to show is a STATE, not a blank box: it says which of the two
@@ -136,17 +158,20 @@ Item {
             PixelText {
                 id: tag
                 anchors.centerIn: parent
-                // ONE WORD. A frame count and a "frame 1 of the clip" note both
-                // lived here for an afternoon, to settle whether the stream was
-                // alive during a video job (it is — ComfyUI slices `x0[0, :, 0]`
-                // out of a 5-D latent, so every step's preview is the first
-                // frame denoising, and painter draws each one as it lands). He
-                // dropped the question rather than pay for a better preview in
-                // inference time, so the readout goes back to what it says
-                // rather than what it had to prove. The finding is in
-                // apps/painter/AGENTS.md; do not re-add it to the chrome.
-                text: App.hasPreview ? "sampling"
-                                     : (pane.sourceIsVideo ? "clip" : "still")
+                // WHICH FRAME YOU ARE LOOKING AT. Stock ComfyUI slices a video
+                // latent's temporal axis to index 0 and previews frame 1 for
+                // the whole sample, on 0.30.0 and on upstream master alike; a
+                // LOCAL PATCH to `/home/lam/comfy/latent_preview.py` walks that
+                // cursor instead and sends the position in the preview's
+                // metadata (apps/painter/AGENTS.md records both halves). With
+                // an unpatched backend `previewFrames` is 0 and this says
+                // "frame 1", which is what such a backend is showing.
+                text: App.hasPreview
+                      ? (App.previewFrames > 1
+                         ? "sampling · frame " + App.previewFrame
+                           + " of " + App.previewFrames
+                         : (App.isVideo ? "sampling · frame 1" : "sampling"))
+                      : (pane.sourceIsVideo ? "clip" : "still")
                 color: App.hasPreview ? Theme.accent : Theme.textDim
             }
         }

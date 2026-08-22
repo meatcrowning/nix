@@ -53,8 +53,29 @@ QtObject {
     // The literals are the FALLBACK, for a machine where the plugin is disabled,
     // was quarantined after a crash, or has not published yet. They must stay
     // equal to the key's default in hyprvtb/main.cpp.
-    property int slideMs: 260
+    property int slideMs: styleMs > 0 ? styleMs : 260
     readonly property int slideEasing: Easing.OutCubic
+
+    // IN A PLASMA SESSION THE WIDGET STYLE OWNS THIS INSTEAD, and it is not a
+    // second opinion about the same thing — it is the only one that applies
+    // there. The reference above is hyprvtb's window roll, and in a Plasma
+    // session there is no hyprvtb and no roll; what the eye compares an app's
+    // motion against is the real QWidget chrome around the QML, which fades at
+    // the style's own duration (Oxygen: `GenericAnimationsDuration`, 150ms
+    // against this desktop's 260). `DeskStyle.styleMs` is that number, 0
+    // whenever no style is saying — outside Plasma, under a style other than
+    // Oxygen, or with Oxygen's animations switched off (which arrives as
+    // reduceMotion instead, so it is not silently ignored).
+    //
+    // It also has to WIN over the Loader below, not merely be preferred by it:
+    // hyprvtb's published file stays on disk from the last Hyprland session, so
+    // in a Plasma session that Loader loads successfully and would otherwise
+    // overwrite this with a number from the other session's compositor.
+    readonly property int styleMs: {
+        if (typeof DeskStyle === "undefined" || !DeskStyle) return 0;
+        const v = Number(DeskStyle.styleMs);
+        return (isFinite(v) && v > 0) ? Math.round(v) : 0;
+    }
 
     // The user-facing motion settings. `reduceMotion` and `animSpeed` are the
     // panel's (Settings > Appearance), and they existed for a long time driving
@@ -91,6 +112,10 @@ QtObject {
         source: "file:///home/lam/.local/state/hyprvtb/DeskMotion.qml"
         asynchronous: false
         onLoaded: {
+            // The style's number is authoritative where there is one; see
+            // `styleMs`. Leaving the binding intact also keeps it live, so a
+            // change in System Settings reaches a running app.
+            if (root.styleMs > 0) return;
             // Guard the range the plugin itself clamps to. A 0 would make every
             // animation instant and read as the app being broken, and this file
             // is on disk where anything can edit it.
