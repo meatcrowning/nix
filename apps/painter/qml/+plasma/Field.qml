@@ -14,6 +14,20 @@ Item {
     default property alias content: holder.data
 
     // Same pin protocol as ../Field.qml — see the comment there.
+    // THE PANEL THIS ROW IS IN, found by walking up rather than by the id
+    // `panel` alone: `ParamsPanel.qml` had no such id and every row in the
+    // sampling section was quietly unpinnable for it. The id is still the fast
+    // path; this is the one that cannot be forgotten.
+    function pinHost() {
+        if (typeof panel !== "undefined" && panel && panel.pinMenu) return panel
+        var p = row.parent
+        for (var i = 0; i < 8 && p; i++) {
+            if (p.pinMenu !== undefined) return p
+            p = p.parent
+        }
+        return null
+    }
+
     property string pinLabel: row.label
     // The row's value, found by descending into whatever control it holds — a
     // Field's content is usually a Row with a Spin (and a readout) inside it,
@@ -55,9 +69,10 @@ Item {
         // nothing anywhere saying it existed — docs/DESIGN.md §10. The menu is
         // how you find out the row can be pinned at all.
         onClicked: function (m) {
-            if (typeof panel === "undefined" || !panel || !panel.pinMenu) return
+            var host = row.pinHost()
+            if (!host) return
             var pt = mapToItem(null, m.x, m.y)
-            panel.pinMenu(row, pt.x, pt.y)
+            host.pinMenu(row, pt.x, pt.y)
         }
     }
 

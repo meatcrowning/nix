@@ -3,6 +3,10 @@ import QtQuick
 // Sampling controls.  The sampler and scheduler lists are whatever the running
 // ComfyUI reports, not a fixed list, so they follow backend updates.
 Panel {
+    // `id: panel` is not decoration: every row in here reaches its panel by
+    // that id (Field.qml, Toggle.qml), so without it nothing in the sampling
+    // section could be pinned — silently, since the lookup is guarded.
+    id: panel
     title: "sampling"
     badge: App.samplers.length + " samplers"
 
