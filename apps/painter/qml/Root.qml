@@ -29,13 +29,12 @@ Item {
     StyledBackground { anchors.fill: parent }
 
     property int view: 0            // 0 = params, 1 = gallery
-    // THE PARAMETERS COLUMN MAY NOT BE IN THIS WINDOW'S CONTENT AT ALL. Under
-    // Plasma it is a real QDockWidget beside the central widget
-    // (pylib/kdeshell.py `dock`), which is a second scene: this file must then
-    // not build one of its own, the splitter has nothing to split, and the
-    // parameters/gallery pane switch is meaningless because both are visible.
-    // Set from main.py, false everywhere else.
-    property bool paramsDocked: false
+    // THE PARAMETER COLUMN IS A TOOL VIEW: it can be put away. F7 hides it and
+    // gives the whole window to the results — Okular's key for the same thing —
+    // and it is remembered. It is NOT a dock: it was one for a day and a dock
+    // is a second QQuickWidget, i.e. a second scene graph rendered on the GUI
+    // thread every frame (apps/painter/main.py records his verdict).
+    property bool showParams: true
 
     // BROWSE OR VIEW — Gwenview's spine, and the one piece of this that is not
     // chrome: the grid answers "what have I made", View answers "what does THIS
@@ -77,7 +76,7 @@ Item {
     // Only below `splitFloor`, where neither pane could be read, does it fall
     // back to one-at-a-time on the p/g buttons (docs/DESIGN.md §5.6).
     readonly property int splitFloor: 560
-    readonly property bool split: !root.paramsDocked && root.width >= root.splitFloor
+    readonly property bool split: root.showParams && root.width >= root.splitFloor
 
     // ...and WHERE the divider sits is yours, dragged and remembered. The
     // clamps are the same two minimums as before, so the handle cannot starve
@@ -354,15 +353,44 @@ Item {
     // filer's splitter (apps/filer/qml/Main.qml), including the 4px bar with a
     // ±3px grab margin and the accent-on-hover.
     // results, and the preview above them
+    // ------------------------------------------------------------- the band
+    //
+    // WHERE THE WINDOW IS DRAGGED FROM. Everything above this line is chrome —
+    // under Plasma the menubar, the toolbar and its filter field — and a KDE
+    // window is dragged by its chrome, so the strip of background under it is a
+    // titlebar in every way that matters. Below the line, on BOTH sides of the
+    // splitter, the window is content and a press means what the content says
+    // it means. Full width on purpose: the line has to read as one line, level
+    // with the top of the results and the top of the first parameter panel.
+    //
+    // The compositor does the moving; `App.startSystemMove()` only asks, so
+    // there is no pointer tracking here and nothing to get stuck holding.
+    readonly property int bandH: 26
+
+    Item {
+        id: dragBand
+        x: 0
+        y: menuBar.height
+        width: root.width
+        height: root.bandH
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            onPressed: App.startSystemMove()
+        }
+    }
+
     ResultsPane {
         id: results
         app: root
         x: 0
-        // the Plasma menubar's height, 0 in the Hyprland session
-        y: menuBar.height
+        // under the band, which sits under the Plasma menubar (0 high in the
+        // Hyprland session, where this file's own menubar stands down)
+        y: menuBar.height + root.bandH
         width: root.split ? root.paneLeadW : root.width
-        height: parent.height - root.barH - menuBar.height
-        visible: root.paramsDocked || root.split || root.view === 1
+        height: parent.height - root.barH - menuBar.height - root.bandH
+        visible: !root.showParams || root.split || root.view === 1
     }
 
     Rectangle {
@@ -370,11 +398,11 @@ Item {
         visible: root.split
         z: 10
         x: root.paneLeadW
-        y: menuBar.height
+        y: menuBar.height + root.bandH
         width: root.splitterW
         // Stops at the status bar: a handle drawn over it also GRABS over it,
         // so the last 26px of the divider swallowed clicks meant for the bar.
-        height: parent.height - root.barH - menuBar.height
+        height: parent.height - root.barH - menuBar.height - root.bandH
         color: splitDrag.pressed || splitDrag.containsMouse ? Theme.accent : Theme.border
 
         MouseArea {
@@ -407,12 +435,12 @@ Item {
     // window has none and the Loader builds nothing.
     Loader {
         id: controls
-        active: !root.paramsDocked
+        active: root.showParams
         x: root.split ? root.paneLeadW + root.splitterW : 0
-        y: menuBar.height
+        y: menuBar.height + root.bandH
         width: root.split ? Math.max(1, root.width - x) : root.width
-        height: parent.height - menuBar.height
-        visible: root.split || root.view === 0
+        height: parent.height - menuBar.height - root.bandH
+        visible: root.showParams && (root.split || root.view === 0)
         sourceComponent: ParamsPane {
             app: root
             // The QueueBar is drawn over the bottom of this column in the
@@ -473,7 +501,7 @@ Item {
     // slide's binding.
     SettingsDrawer {
         id: settings
-        anchors { top: menuBar.bottom; left: parent.left
+        anchors { top: dragBand.bottom; left: parent.left
                   right: parent.right; bottom: parent.bottom }
         open: root.showSettings
         onClosed: root.showSettings = false
@@ -557,9 +585,7 @@ Item {
     // `shortcut` is the KDE face's alone: the QML `Shortcut`s at the bottom of
     // this file stand down under Plasma so exactly one thing owns each key.
     // "@Name" takes the platform's standard sequence rather than a literal.
-    readonly property var actions: root.paramsDocked
-        ? root.allActions.filter((a) => a === "-" || (a.id !== "p" && a.id !== "g"))
-        : root.allActions
+    readonly property var actions: root.allActions
 
     readonly property var allActions: [
         // ------------------------------------------------------------- file
@@ -599,15 +625,21 @@ Item {
         // Parameters and Gallery are a RADIO PAIR — Gwenview's Browse/View —
         // so `group` makes them exclusive in the menu and the toolbar instead
         // of two checkboxes that can both be off.
+        // THE TITLEBAR'S PANE SWITCH, and only the titlebar's. These two cells
+        // are how the Hyprland roof alternates the panes on a window too narrow
+        // to split (docs/DESIGN.md §5.6); the KDE face says the same thing once,
+        // as the `params` tool-view toggle below, and two menu rows called
+        // "Parameters" would have been one too many. No `menu:`, no `bar:`.
         { id: "p",    label: "p",    tb: true, state: root.view === 0 ? 1 : 0,
-          tip: "Parameters", menu: "view", icon: "view-list-details",
-          bar: true, checkable: true, group: "pane", shortcut: "Ctrl+1" },
+          tip: "Parameters" },
         { id: "g",    label: "g",    tb: true, state: root.view === 1 ? 1 : 0,
-          tip: "Gallery", menu: "view", icon: "view-list-icons",
-          bar: true, checkable: true, group: "pane", shortcut: "Ctrl+2" },
+          tip: "Gallery" },
         { id: "pv",   label: "pv",   tb: true, state: root.showPreview ? 1 : 0,
           tip: "Preview viewport", menu: "view", icon: "document-preview",
           bar: true, checkable: true, shortcut: "F8" },
+        { id: "params", tip: "Parameters", menu: "view",
+          icon: "view-split-left-right", checkable: true,
+          state: root.showParams ? 1 : 0, shortcut: "F7" },
         "-",
         // Browse and View are the second radio pair, and the one that decides
         // what the results pane IS.
@@ -690,6 +722,13 @@ Item {
         else if (id === "p") root.view = 0
         else if (id === "g") root.view = 1
         else if (id === "pv") root.showPreview = !root.showPreview
+        else if (id === "params") {
+            root.showParams = !root.showParams
+            // On a window too narrow to split, the panes alternate — so the
+            // toggle has to say which one is on screen as well, or turning the
+            // parameters on would leave the gallery there and nothing to do.
+            root.view = root.showParams ? 0 : 1
+        }
         else if (id === "set") root.showSettings = !root.showSettings
         else if (id === "open") { if (root.selOne !== "") App.openExternally(root.selOne) }
         else if (id === "folder") App.openFolder()
@@ -755,6 +794,10 @@ Item {
     onShowSettingsChanged: pushButtons()
     onInViewChanged: pushButtons()
     onSelOneChanged: pushButtons()
+    onShowParamsChanged: {
+        pushButtons()
+        if (root.restored) Prefs.set("showParams", root.showParams)
+    }
     onShowPreviewChanged: {
         pushButtons()
         if (root.restored) Prefs.set("showPreview", root.showPreview)
@@ -1068,6 +1111,9 @@ Item {
         if (w > 0 && h > 0) root.requestResize(w, h)
         var v = Prefs.get("view"); if (v === 0 || v === 1) root.view = v
         root.showPreview = Prefs.get("showPreview") === true
+        // Default ON: a stored `false` is the only thing that puts the column
+        // away, so a fresh profile gets the controls rather than a blank window.
+        root.showParams = Prefs.get("showParams") !== false
         var r = Prefs.get("splitRatio")
         if (r > 0 && r < 1) {
             // The panes swapped sides on 2026-08-05; a ratio saved before that

@@ -2685,15 +2685,16 @@ def main():
             for w in shell.errors() + warnings:
                 print(f"  {w}", file=sys.stderr)
             return 2
-        # THE PARAMETERS COLUMN IS A DOCK HERE, not a pane inside the content:
-        # a real QDockWidget that floats, tabs, drags to the other edge and is
-        # remembered with the window, which is what Dolphin's Places and
-        # Okular's navigation panel are. `paramsDocked` tells Root.qml to build
-        # neither the column nor the splitter, and `app` is what the pane
-        # forwards through (apps/painter/qml/ParamsPane.qml).
-        shell.root.setProperty("paramsDocked", True)
-        shell.dock("params", "Parameters", QML / "ParamsPane.qml",
-                   shortcut="F7", sizes=(320,), props={"app": shell.root, "standalone": True})
+        # THE PARAMETERS COLUMN IS NOT A DOCK. It was one for a day — a real
+        # QDockWidget, floatable and tabbable — and a dock is a second
+        # QQuickWidget, which is a second scene graph rendered on the GUI thread
+        # every frame (a QQuickWidget cannot use the threaded render loop). His
+        # verdict, 2026-08-22: the detaching was not wanted, the dock's header
+        # was not wanted, and the whole window felt slower for it. So the column
+        # is back inside the one scene, beside the results, behind the same
+        # draggable splitter the Hyprland roof uses, and F7 puts it away.
+        # `kdeshell.dock` stays — it is general and tested; painter just does
+        # not need it.
 
         # The chrome, built from the same tbButtons array the titlebar column
         # uses and calling the same tbAction(id) — one source, two roofs.

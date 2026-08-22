@@ -1831,6 +1831,7 @@ def test_dropdown(win, ctl):
           len(find_all(picker, "KineticListView")) == 0)
 
     box = find(picker, "QQuickRectangle")
+    scroll_to(box)
     click(win, box)
     spin(120)
     check("clicking a picker opens the overlay list", overlay.isVisible())
@@ -1916,7 +1917,9 @@ def test_escape(win, ctl):
     params = find(content, "ParamsPanel")
     picker = find(params, "Picker")
     overlay = find(content, "PickerOverlay")
-    click(win, find(picker, "QQuickRectangle"))
+    pbox = find(picker, "QQuickRectangle")
+    scroll_to(pbox)
+    click(win, pbox)
     spin(120)
     if overlay.isVisible():
         QTest.keyClick(win, Qt.Key_Escape)
@@ -1942,6 +1945,31 @@ def test_escape(win, ctl):
     QTest.keyClick(win, Qt.Key_Escape)
     spin(150)
     check("Escape closes the settings drawer", APP.property("showSettings") is False)
+
+
+def scroll_to(item):
+    """Bring `item` to the top of whatever Kinetic view it is inside.
+
+    A click is delivered at a WINDOW coordinate, so a control that has scrolled
+    past the bottom edge simply is not clicked — and the parameter column is
+    long enough that a 26px change anywhere above it (the drag band did exactly
+    that) moves the last panel out of the window. Scrolling first makes these
+    checks about the control rather than about where it happened to sit.
+    """
+    from PySide6.QtCore import QPointF
+    flick = item.parentItem()
+    while flick is not None and not flick.metaObject().className().startswith(
+            ("KineticFlickable", "QQuickFlickable")):
+        flick = flick.parentItem()
+    if flick is None:
+        return
+    content = flick.property("contentItem")
+    if content is None:
+        return
+    y = item.mapToItem(content, QPointF(0, 0)).y()
+    span = max(0.0, flick.property("contentHeight") - flick.height())
+    flick.setProperty("contentY", max(0.0, min(span, y - 8)))
+    spin(80)
 
 
 def _section_order(pane):
