@@ -51,7 +51,8 @@ try:
 except Exception:  # noqa: BLE001 - the titlebar bridge is optional
     VtbClient = None
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
-from kdetheme import theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+from kdetheme import theme_source, is_plasma  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+import kdeshell  # noqa: E402  (pylib; the Plasma session's real QtWidgets window)
 from spellcheck import SpellCheck  # noqa: E402  (pylib; the prompt boxes' spelling)
 # The QBuffer-safe encoder (see its docstring for the SEGV that shape avoids);
 # collage.py already pulls it in, so this costs nothing new.
@@ -1451,6 +1452,11 @@ class Painter(QObject):
         Names no longer on disk (`choices`, just populated for this model) are
         dropped rather than referencing a file that has since moved."""
         known = {r["name"] for r in self.choices._rows}
+        # QML hands an untyped Slot its array as a QJSValue, which is not
+        # iterable in Python: this loop raised TypeError on every startup and
+        # the remembered chain was silently never restored.
+        if hasattr(rows, "toVariant"):
+            rows = rows.toVariant()
         for r in (rows or []):
             name = r.get("name") if isinstance(r, dict) else None
             if not name or name not in known:
@@ -2416,9 +2422,19 @@ def _human(n):
 
 
 class Titlebar(QObject):
-    """Chrome lives in the hyprvtb titlebar, like the sibling apps."""
+    """Chrome lives in the hyprvtb titlebar, like the sibling apps.
+
+    In a Plasma session the socket is dead and every method here is a no-op —
+    but the QML still calls them on every state change, so the three signals
+    below are exactly the "the chrome moved" notification the KDE shell needs
+    to keep its menubar, toolbar and statusbar in step (pylib/kdeshell.py).
+    One source, two roofs: no second push path, no polling.
+    """
 
     clicked = Signal(str)
+    buttonsChanged = Signal()
+    footerChanged = Signal(str)
+    loadingChanged = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -2431,6 +2447,7 @@ class Titlebar(QObject):
 
     @Slot("QVariantList")
     def setButtons(self, buttons):
+        self.buttonsChanged.emit()
         if not self._client:
             return
         out = []
@@ -2447,6 +2464,7 @@ class Titlebar(QObject):
 
     @Slot(str)
     def setFooter(self, text):
+        self.footerChanged.emit(str(text))
         if self._client:
             try:
                 self._client.set_footer(text)
@@ -2455,6 +2473,7 @@ class Titlebar(QObject):
 
     @Slot(bool)
     def setLoading(self, on):
+        self.loadingChanged.emit(bool(on))
         if self._client:
             try:
                 self._client.set_loading(bool(on))
@@ -2473,17 +2492,20 @@ def main():
         os.environ.pop("WAYLAND_DISPLAY", None)
         os.environ.pop("DISPLAY", None)
 
-    # Pin the Controls style: the system default resolves to KDE Breeze, whose
-    # ToolTip pulls in kirigami and fails to load outside a Plasma session.
-    os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Basic")
+    # The Controls style, and with it the whole face: `Basic` in the Hyprland
+    # session (the system default resolves to Breeze, whose ToolTip pulls in
+    # kirigami and fails to load where there is none), `org.kde.desktop` under
+    # Plasma — which is not an imitation of the KDE style but a renderer THROUGH
+    # it, so a Button here is drawn by Oxygen's own code. pylib/kdeshell.py.
+    kdeshell.pin_controls_style()
 
-    app = QGuiApplication(sys.argv)
+    # A QApplication under Plasma, the QGuiApplication we have always used
+    # otherwise: QStyle is a QtWidgets class, and without it there is no system
+    # style to paint with. See kdeshell.make_app.
+    app = kdeshell.make_app(sys.argv, "painter")
     if selftest and app.platformName() != "offscreen":
         raise SystemExit("selftest refuses to run on platform %r, not offscreen"
                          % app.platformName())
-    app.setApplicationName("painter")
-    app.setDesktopFileName("painter")   # stable Wayland app_id (KWin identity)
-    app.setOrganizationName("painter")
 
     palette = Palette(theme_source(PANEL_THEME))
     style = DeskStyle()
@@ -2492,7 +2514,14 @@ def main():
     bar = Titlebar()
     spell = SpellCheck()
 
-    engine = QQmlApplicationEngine()
+    # TWO ROOFS, ONE APP (docs/DESIGN.md §7.6). Under Hyprland the QML tree IS
+    # the window. Under Plasma it is the central widget of a real QMainWindow,
+    # so the menubar/toolbar/statusbar are KDE widgets and the window background
+    # is the system style's — the single gradient surface that runs from the
+    # titlebar down through the chrome and behind this content.
+    plasma = is_plasma()
+    shell = kdeshell.shell("painter", size=(1280, 900), min_size=(720, 560)) if plasma else None
+    engine = shell.engine() if plasma else QQmlApplicationEngine()
     # The sampler's preview frames, addressed as image://livepreview/<tick>.
     # Ownership passes to the engine, so the controller keeps only a reference.
     preview = LivePreview()
@@ -2523,19 +2552,33 @@ def main():
 
     warnings = []
     engine.warnings.connect(lambda errs: warnings.extend(str(e.toString()) for e in errs))
-    engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
-    if not engine.rootObjects():
-        print("failed to load Main.qml", file=sys.stderr)
-        for w in warnings:
-            print(f"  {w}", file=sys.stderr)
-        return 2
 
-    # The window is how the controller knows whether he is watching: a batch
-    # that finishes behind a rolled-up or unfocused painter says so with a
-    # desktop toast instead (Painter._onscreen).
-    ctl.window = engine.rootObjects()[0]
+    if plasma:
+        # Root.qml, not Main.qml: the Window wrapper is the Hyprland roof, and
+        # a QQuickWidget hosts an Item.
+        if not shell.load(QML / "Root.qml"):
+            print("failed to load Root.qml", file=sys.stderr)
+            for w in shell.errors() + warnings:
+                print(f"  {w}", file=sys.stderr)
+            return 2
+        # The chrome, built from the same tbButtons array the titlebar column
+        # uses and calling the same tbAction(id) — one source, two roofs.
+        shell.bind_chrome(bar, menu_order=["generate", "view", "settings"])
+        shell.bind_status()      # the QML root's statusLine/statusProgress
+        # The window is how the controller knows whether he is watching: a batch
+        # that finishes behind a rolled-up or unfocused painter says so with a
+        # desktop toast instead (Painter._onscreen).
+        ctl.window = shell.show()
+    else:
+        engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
+        if not engine.rootObjects():
+            print("failed to load Main.qml", file=sys.stderr)
+            for w in warnings:
+                print(f"  {w}", file=sys.stderr)
+            return 2
+        ctl.window = engine.rootObjects()[0]
 
-    if not selftest:
+    if not selftest and ctl.window is not None:
         from winstate import WinState
         win_state = WinState(ctl.window, "painter")  # keep ref: persists geometry
 
@@ -2543,6 +2586,21 @@ def main():
         rc = [0]
 
         def finish():
+            # PAINTER_SHOT: write what the selftest actually rendered to a PNG.
+            # The Plasma face is chrome we do not draw — the menubar, the
+            # toolbar, the statusbar and the window background all come from the
+            # KDE style — so the only way to check it is to look at the pixels
+            # (the offscreen-render rule, apps/AGENTS.md; never his screen).
+            shot = os.environ.get("PAINTER_SHOT")
+            if shot:
+                try:
+                    if shell is not None:
+                        shell.window.grab().save(shot)
+                    elif ctl.window is not None:
+                        ctl.window.grabWindow().save(shot)
+                    print(f"selftest: wrote {shot}")
+                except Exception as exc:  # noqa: BLE001
+                    print(f"selftest: shot failed: {exc}", file=sys.stderr)
             for w in warnings:
                 print(f"QML WARNING: {w}", file=sys.stderr)
             if warnings:

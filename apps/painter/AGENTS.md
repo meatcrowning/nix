@@ -14,6 +14,30 @@ per-family reason string rather than a silent failure). Chrome is hyprvtb
 titlebar buttons (generate/cancel/view switch + bottom-anchored settings
 drawer).
 
+## Two roofs: `Main.qml` is the Hyprland one, the KDE shell is the other
+
+`Root.qml` is the app — an `Item`, not a `Window`. `Main.qml` is a twenty-line
+`Window` around it for the Hyprland session; in a Plasma session `main.py` puts
+the same `Root.qml` in a `QQuickWidget` inside a real `QMainWindow`
+(`pylib/kdeshell.py`), so the menubar, toolbar and statusbar are genuine KDE
+widgets and the window background is Oxygen's own gradient, painted behind this
+QML. The full argument, and what an app has to do to adopt it, is in
+[`../AGENTS.md`](../AGENTS.md) → `pylib/kdeshell.py`. What it means when editing
+here:
+
+- **Nothing Window-only in `Root.qml`.** `onClosing`, `contentItem`,
+  `activeFocusItem` and assigning `root.width` all belong to a Window; they go
+  through `root.Window.*`, a `Connections` on `root.Window.window`, or a signal
+  the Window wrapper handles (`requestResize`).
+- **`Theme.windowFill`, not `Theme.bg`, for a pane's background** — it is
+  `transparent` under Plasma so the styled gradient shows through. `bgAlt`
+  panels and fields are insets and keep their colour.
+- **`tbButtons` carries `icon:` and `bar:`** alongside `menu:`, for the real
+  toolbar. The DeskMenuBar in this file is `systemBar: true` — painter has a
+  real QMenuBar and must not draw a second one.
+- **`statusLine` / `statusProgress`** are what the KDE status bar shows;
+  `QueueBar` is the Hyprland strip and is hidden (and `barH` 0) there.
+
 ## The look is the desktop's, and painter is where it was worst
 
 painter used to break eight of `~/nix/docs/DESIGN.md`'s rules at once; §19.1 there
