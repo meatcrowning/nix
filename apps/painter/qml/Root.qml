@@ -28,6 +28,13 @@ Item {
     StyledBackground { anchors.fill: parent }
 
     property int view: 0            // 0 = params, 1 = gallery
+    // THE PARAMETERS COLUMN MAY NOT BE IN THIS WINDOW'S CONTENT AT ALL. Under
+    // Plasma it is a real QDockWidget beside the central widget
+    // (pylib/kdeshell.py `dock`), which is a second scene: this file must then
+    // not build one of its own, the splitter has nothing to split, and the
+    // parameters/gallery pane switch is meaningless because both are visible.
+    // Set from main.py, false everywhere else.
+    property bool paramsDocked: false
     property bool showSettings: false
     // The preview viewport above the history — off by default, remembered.
     property bool showPreview: false
@@ -41,7 +48,7 @@ Item {
     // Only below `splitFloor`, where neither pane could be read, does it fall
     // back to one-at-a-time on the p/g buttons (docs/DESIGN.md §5.6).
     readonly property int splitFloor: 560
-    readonly property bool split: root.width >= root.splitFloor
+    readonly property bool split: !root.paramsDocked && root.width >= root.splitFloor
 
     // ...and WHERE the divider sits is yours, dragged and remembered. The
     // clamps are the same two minimums as before, so the handle cannot starve
@@ -326,7 +333,7 @@ Item {
         y: menuBar.height
         width: root.split ? root.paneLeadW : root.width
         height: parent.height - root.barH - menuBar.height
-        visible: root.split || root.view === 1
+        visible: root.paramsDocked || root.split || root.view === 1
     }
 
     Rectangle {
@@ -367,19 +374,23 @@ Item {
         }
     }
 
-    // controls, on the right
-    ParamsPane {
+    // controls, on the right — unless they are in a dock, in which case this
+    // window has none and the Loader builds nothing.
+    Loader {
         id: controls
-        app: root
+        active: !root.paramsDocked
         x: root.split ? root.paneLeadW + root.splitterW : 0
         y: menuBar.height
         width: root.split ? Math.max(1, root.width - x) : root.width
         height: parent.height - menuBar.height
         visible: root.split || root.view === 0
-        // The QueueBar is drawn over the bottom of this column in the Hyprland
-        // roof; under Plasma the status bar is the window's own and takes no
-        // room from the content.
-        bottomInset: root.barH
+        sourceComponent: ParamsPane {
+            app: root
+            // The QueueBar is drawn over the bottom of this column in the
+            // Hyprland roof; under Plasma the status bar is the window's own
+            // and takes no room from the content.
+            bottomInset: root.barH
+        }
     }
 
     // ------------------------------------------------------------- overlays
@@ -505,7 +516,11 @@ Item {
     // `shortcut` is the KDE face's alone: the QML `Shortcut`s at the bottom of
     // this file stand down under Plasma so exactly one thing owns each key.
     // "@Name" takes the platform's standard sequence rather than a literal.
-    readonly property var actions: [
+    readonly property var actions: root.paramsDocked
+        ? root.allActions.filter((a) => a === "-" || (a.id !== "p" && a.id !== "g"))
+        : root.allActions
+
+    readonly property var allActions: [
         // ------------------------------------------------------------- file
         { id: "gen",  label: "gen",  tb: true, state: App.busy ? 2 : 0,
           tip: "Generate", menu: "file", icon: "media-playback-start",

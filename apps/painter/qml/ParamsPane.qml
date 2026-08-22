@@ -68,6 +68,15 @@ Item {
         sourceComponent: CtxMenu { }
     }
 
+    // True when this pane is the root of its own scene — the Plasma dock. The
+    // styled background is a crop of the WINDOW aligned to the VIEW's origin
+    // (qmlcommon/StyledBackground.qml), so it lines up only for the item that
+    // fills its view; drawn inside a pane offset within a bigger scene it would
+    // be the right gradient in the wrong place. Embedded, Root.qml's own copy
+    // is already behind this.
+    property bool standalone: false
+    StyledBackground { anchors.fill: parent; visible: root.standalone }
+
     // How much room the column gives up at the bottom to a status strip drawn
     // over it. The Hyprland roof has one (QueueBar); a dock does not.
     property int bottomInset: 0
