@@ -504,6 +504,8 @@ def _build_shell_class():
             self._progress_prop = "statusProgress"
             self._actions = {}      # id -> QAction
             self._groups = {}       # group name -> QActionGroup (radio sets)
+            self._docks = {}        # ident -> (QDockWidget, view, bg, item, comp)
+            self._dock_actions = [] # their toggleViewAction()s, for the View menu
             self._menu_order = []
             # First build decides whether the toolbar shows at all; after that
             # its visibility belongs to the user (Settings -> Show Toolbar).
@@ -654,6 +656,11 @@ def _build_shell_class():
                     if not prev_sep:
                         menu.addSeparator()
                     menu.addAction(self._quit_action())
+                elif g == "view" and self._dock_actions:
+                    if not prev_sep:
+                        menu.addSeparator()
+                    for a in self._dock_actions:
+                        menu.addAction(a)
                 elif g == "settings":
                     if not prev_sep:
                         menu.addSeparator()
@@ -892,6 +899,85 @@ def _build_shell_class():
 
         def _invoke(self, bid):
             QMetaObject.invokeMethod(self._root, "tbAction", Q_ARG("QVariant", bid))
+
+        # -------------------------------------------------------------- docks
+        def dock(self, ident, title, qml_path, area=None, shortcut=None,
+                 sizes=None, props=None):
+            """Put a QML file in a real `QDockWidget` beside the central widget.
+
+            This is the half of the Plasma face that makes an app of ours behave
+            like Dolphin or Okular rather than merely look like one: the panel
+            floats, tabs with another dock, drags to a different edge, and its
+            placement is saved with the window. Returns the loaded root ITEM, so
+            the caller can hand it whatever it needs (`app`, usually).
+
+            Three things this has to get right, all of them silent when wrong:
+
+            * **One engine, two views.** `QQuickWidget(engine, ...)` shares the
+              app's engine, so the dock sees the same `App`, `Theme`, `Prefs`
+              and `Gallery` context properties. A QQuickWidget left to make its
+              own engine sees none of them and comes up blank, with no error.
+            * **Its own styled background.** `KdeBackground` publishes a crop of
+              the window's styled rendering for ONE view's rectangle. The dock
+              gets its own object in its own child context, or it would draw the
+              central widget's crop and the gradient would step at the seam.
+            * **The view is opaque**, for the reason in this module's header —
+              a transparent QQuickWidget punches a hole in the window.
+            """
+            from PySide6.QtCore import QUrl
+            from PySide6.QtQml import QQmlContext, QQmlComponent
+            from PySide6.QtWidgets import QApplication, QDockWidget
+            from PySide6.QtQuickWidgets import QQuickWidget
+
+            if area is None:
+                area = Qt.RightDockWidgetArea
+
+            view = QQuickWidget(self.view.engine(), None)
+            view.setResizeMode(QQuickWidget.SizeRootObjectToView)
+            view.setPalette(QApplication.palette())
+            view.setClearColor(QApplication.palette().window().color())
+
+            ctx = QQmlContext(self.view.engine().rootContext(), view)
+            _, bg_cls = _build_background_classes()
+            bg = bg_cls(view, self.window)
+            ctx.setContextProperty("KdeBackground", bg)
+
+            url = QUrl.fromLocalFile(str(qml_path))
+            comp = QQmlComponent(self.view.engine(), url)
+            # createWithInitialProperties, not create-then-setProperty: the
+            # pane's bindings are evaluated once at creation, and a pane created
+            # with no `app` spends that first pass reading an empty model —
+            # which reached painter's registry as a NaN frame count before the
+            # assignment landed a tick later.
+            item = comp.createWithInitialProperties(dict(props or {}), ctx)
+            if item is None:
+                raise RuntimeError("dock %r failed to load %s:\n%s"
+                                   % (ident, qml_path, comp.errorString()))
+            view.setContent(url, comp, item)
+
+            dw = QDockWidget(title, self.window)
+            dw.setObjectName("dock_" + ident)   # saveState() keys on this
+            dw.setWidget(view)
+            dw.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+            self.window.addDockWidget(area, dw)
+            if sizes:
+                view.setMinimumWidth(int(sizes[0]))
+            self._docks[ident] = (dw, view, bg, item, comp)
+
+            # The View menu's "Show <panel>" row is the dock's OWN action, so it
+            # cannot disagree with whether the dock is up — including when it is
+            # closed with its titlebar [x] rather than from the menu.
+            act = dw.toggleViewAction()
+            act.setText(title)
+            if shortcut:
+                from PySide6.QtGui import QKeySequence
+                act.setShortcut(QKeySequence(shortcut))
+                act.setShortcutContext(Qt.WindowShortcut)
+                self.window.addAction(act)
+            self._dock_actions.append(act)
+            if self._root is not None:      # bind_chrome may not have run yet
+                self._rebuild()
+            return item
 
         # ------------------------------------------------------------- probe
         def dump_chrome(self):

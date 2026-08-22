@@ -2583,6 +2583,16 @@ def main():
             for w in shell.errors() + warnings:
                 print(f"  {w}", file=sys.stderr)
             return 2
+        # THE PARAMETERS COLUMN IS A DOCK HERE, not a pane inside the content:
+        # a real QDockWidget that floats, tabs, drags to the other edge and is
+        # remembered with the window, which is what Dolphin's Places and
+        # Okular's navigation panel are. `paramsDocked` tells Root.qml to build
+        # neither the column nor the splitter, and `app` is what the pane
+        # forwards through (apps/painter/qml/ParamsPane.qml).
+        shell.root.setProperty("paramsDocked", True)
+        shell.dock("params", "Parameters", QML / "ParamsPane.qml",
+                   shortcut="F7", sizes=(320,), props={"app": shell.root, "standalone": True})
+
         # The chrome, built from the same tbButtons array the titlebar column
         # uses and calling the same tbAction(id) — one source, two roofs.
         # No menu_order here: the order comes from the QML root's own
@@ -2666,6 +2676,12 @@ def main():
                         walk(ch, depth + 1)
 
                 walk(root_item)
+                # ...and the docks, which are scenes of their own and therefore
+                # invisible to a walk from the central widget's root.
+                for ident, (_dw, _v, _bg, item, _c) in getattr(
+                        shell, "_docks", {}).items():
+                    print(f"[dock {ident}]")
+                    walk(item)
 
             shot = os.environ.get("PAINTER_SHOT")
             if shot:
