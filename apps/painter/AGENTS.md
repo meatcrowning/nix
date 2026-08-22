@@ -366,12 +366,58 @@ headless-sway harness that proves it, is in `apps/AGENTS.md` → `pylib/`.
 and not clipfile** — one mime type is all a string needs, and `-n` because
 wl-copy appends a newline to argv content otherwise. Same Wayland rule though:
 the holder wl-copy forks is what makes the prompt still pasteable after painter
-closes. It reads the words out of the FILE's `painter` chunk, not out of the
-boxes, so an output from three sessions ago hands back what IT was asked for;
-and a clip is never offered it, its metadata being ComfyUI's graph rather than
-painter's parameters (`GalleryView.commonItems`, gated on the params the menu
-already read — docs/DESIGN.md §10, an action with nothing to act on is not
-offered greyed, it is not offered).
+closes. It reads the words out of the FILE, not out of the boxes, so an output
+from three sessions ago hands back what IT was asked for — a clip included
+(see "A clip carries its job too"). It is still offered only where there is a
+prompt to take (`GalleryView.commonItems`, gated on the params the menu already
+read — docs/DESIGN.md §10, an action with nothing to act on is not offered
+greyed, it is not offered).
+
+## A clip carries its job too
+
+[his] *"give the user the ability to copy and inject prompts / settings of
+videos like they can images"* (2026-08-21). A still has always carried the
+generation that made it in its PNG `painter` chunk; the gallery's inject menu
+and `copy prompt` read it. A clip carried only ComfyUI's graph, so both were
+refused in front of one.
+
+**`outmeta.params_for(path)` is now the ONE way anything here asks a file what
+made it**, and it answers from three places so nothing else has to know which:
+
+1. a still — the PNG chunk (`pylib/pngmeta.py`), unchanged;
+2. a clip painter saved from 2026-08-21 — the same JSON as an `mdta` tag in the
+   MP4's own metadata box (`pylib/mp4meta.py`), written in the download
+   callback beside the graph `SaveVideo` already put there;
+3. **an older clip — read back out of that graph** (`params_from_graph`).
+   Without it the feature would do nothing for the 288 clips already on top and
+   only start working on the next generation. Measured over them: 245 hand back
+   their prompt and numbers, the rest are muted derivatives, a truncated file,
+   or jobs whose prompt really was empty.
+
+Three things worth knowing before touching it:
+
+- **No ffmpeg.** The tag is written in pure Python because that code runs in the
+  download callback, on the GUI thread, for every finished clip; a subprocess
+  there would be a second way for a finished generation not to reach the disk.
+  A file that cannot take the tag is written VERBATIM and still lands.
+- **Writing it MOVES the media data.** ComfyUI emits faststart files, so `moov`
+  sits ahead of `mdat` and growing it slides every byte after it down the file;
+  `upsert_tags` patches each `stco`/`co64` entry by the same delta. The harness
+  pins it the only way that means anything — an ffmpeg-written clip, tagged,
+  and the decoded video hashed before and after.
+- **The graph reading recovers only what the graph holds.** The prompt, the
+  sampling numbers, the seed, the frame count (as seconds) and the pixel budget
+  — not the frames' local paths, which is why an old clip's first-frame toggle
+  injects as OFF. A clip painter tagged itself DOES carry
+  `input_image_local` / `last_image_local`, and `injectParams` puts the picture
+  back with the toggle — or leaves the toggle off when that file has since
+  moved, rather than arming a generate that could only refuse (§10 again).
+
+`injectParams` branches on `kind === "video"` for the controls a clip has and an
+image does not: seconds and a frame rate instead of a batch, and the megapixel
+budget taken from the job rather than backed out of a width and height an
+image-to-video clip never had.
+
 
 ## A frame well takes a PASTE as well as a drop
 
@@ -523,8 +569,8 @@ by the harness, not by looking.
 Left-click hands the file to `viewer`; right-click opens the shared `CtxMenu`
 with **inject all / inject prompt / inject params**, plus `open in viewer`. Both
 buttons used to raise the menu, which put a question between him and the thing
-he had just made. A PNG carries the whole job that made it, and which part you
-want is a decision (§7.1: everything is still right-clickable). The three
+he had just made. An output carries the whole job that made it — a still and a
+clip alike — and which part you want is a decision (§7.1: everything is still right-clickable). The three
 actions live on the window (`injectPrompt` / `injectParams` / `injectAll`), so
 the menu has no logic of its own; `injectParams` restores size as **aspect +
 MP**, never raw pixels (see above).
@@ -667,8 +713,12 @@ pick), the live-binding regressions above, Escape (releases the box, cancels
 NOTHING), the inject menu and its three subsets, the draggable divider and its
 clamps, the furniture (an elided panel badge, the splitter stopping above the
 status bar, the one scrollbar being on the results side, a prompt box taking a
-dragged height), `copy prompt` (offered on a still with words and not on a clip,
-and what reaches `wl-copy`), the merged history (`PAINTER_PEER_OUT` globbed
+dragged height), `copy prompt` (offered wherever there are words — a still, a
+tagged clip — and not on a file with none, and what reaches `wl-copy`), a
+clip's parameters (its own tag written without disturbing a byte of the
+pictures, read back through `paramsAt`, injected as seconds/fps/budget, the
+first frame restored only when it is still on disk, and an untagged clip read
+out of ComfyUI's graph), the merged history (`PAINTER_PEER_OUT` globbed
 beside the local root, the file both machines hold shown once and shown as the
 LOCAL copy, an unmountable peer root costing the local scan nothing), the video
 column (a synthetic video family written into the scratch

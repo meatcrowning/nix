@@ -25,6 +25,7 @@ import collections
 import hashlib
 import json
 import os
+import struct
 import subprocess
 import sys
 import threading
@@ -58,11 +59,15 @@ import imgfit  # noqa: E402
 # The PNG text-chunk reader/writer. In pylib because filer's metadata filter
 # reads the same chunks this app writes — one parser, not two.
 import pngmeta  # noqa: E402
+# The same, for the other half of the gallery: a clip carries its parameters as
+# an MP4 metadata tag beside ComfyUI's own graph.
+import mp4meta  # noqa: E402
 
 sys.path.insert(0, str(HERE))
 import collage as Collage  # noqa: E402
 import comfy as C  # noqa: E402
 import graph as G  # noqa: E402
+import outmeta  # noqa: E402  (which of the three ways an output kept its job)
 import registry as R  # noqa: E402
 
 OUT_DIR = Path(os.environ.get("PAINTER_OUT", Path.home() / "Pictures" / "painter" / "out"))
@@ -516,10 +521,11 @@ class Gallery(QAbstractListModel):
 
         The NAME, because the backend that numbers it is top's whoever asked —
         book cannot mint a colliding `painter_00042_.png` of its own. Not the
-        size: book injects painter's parameter chunk into the PNG it downloads
-        and top's copy has none, so the identical still is ~600 bytes bigger
-        here (a clip does match to the byte, being downloaded verbatim, but half
-        a rule is no rule).
+        size: book writes painter's parameters into the copy it downloads and
+        top's has none, so the identical output is a few hundred bytes bigger
+        here — a still since always (the PNG chunk), a clip since 2026-08-21
+        (the MP4 tag), which is what makes the local-copy-wins rule below matter
+        for clips too.
         """
         return Path(path).name
 
@@ -696,14 +702,10 @@ class Gallery(QAbstractListModel):
     def paramsAt(self, i):
         if not (0 <= i < len(self._rows)):
             return None
-        # Only a PNG carries painter's parameters. A video's own metadata holds
-        # the ComfyUI graph, which is not the same thing and is not injectable.
-        if self._rows[i]["is_video"]:
-            return None
-        try:
-            return pngmeta.load_params(Path(self._rows[i]["path"]).read_bytes())
-        except OSError:
-            return None
+        # A still and a clip keep the job in different places, and a clip from
+        # before painter wrote its own tag keeps it only as ComfyUI's graph.
+        # outmeta answers all three (see its docstring).
+        return outmeta.params_for(self._rows[i]["path"])
 
 
 # ---------------------------------------------------------------------------
@@ -1107,21 +1109,28 @@ class Painter(QObject):
         self.lastImageChanged.emit()
         return True
 
-    @Slot(str)
+    @Slot(str, result=bool)
     def restoreInputImage(self, path):
         """The remembered first frame, silently — a file that has since moved
-        is not something to greet him with a toast about at launch."""
+        is not something to greet him with a toast about at launch.
+
+        Returns whether it landed, which is what lets injecting a clip's
+        settings leave the first-frame toggle OFF when the picture is gone."""
         if path and os.path.isfile(path):
             self._input_image = path
             self._uploaded = ("", "")
             self.inputImageChanged.emit()
+            return True
+        return False
 
-    @Slot(str)
+    @Slot(str, result=bool)
     def restoreLastImage(self, path):
         if path and os.path.isfile(path):
             self._last_image = path
             self._uploaded_last = ("", "")
             self.lastImageChanged.emit()
+            return True
+        return False
 
     @Slot("QVariant")
     def restoreLastSeed(self, value):
@@ -1651,6 +1660,15 @@ class Painter(QObject):
             pending.append(("input_image", self._input_image, "_uploaded", "first frame"))
         if params.get("use_last_frame"):
             pending.append(("last_image", self._last_image, "_uploaded_last", "last frame"))
+        # The LOCAL path of each frame, alongside the uploaded ref the graph
+        # takes — the same pair an edit job records. Injecting a clip's settings
+        # puts its frames back with them, and a toggle whose file has since gone
+        # comes back off rather than arming a generate that can only refuse.
+        params = dict(params)
+        if params.get("use_input_image"):
+            params["input_image_local"] = self._input_image
+        if params.get("use_last_frame"):
+            params["last_image_local"] = self._last_image
         self._upload_then_start(entry, params, count, pending)
 
     def _upload_edit_then_start(self, entry, params, count, paths, refs=None):
@@ -1870,18 +1888,25 @@ class Painter(QObject):
                 try:
                     if not data:
                         return
-                    # Only a PNG can carry the job that made it. A video goes down
-                    # verbatim — SaveVideo has already written ComfyUI's own graph
-                    # into its container metadata — and keeps the subfolder the
-                    # backend filed it under (video/), which is where the gallery
-                    # looks for it.
-                    if str(img["filename"]).lower().endswith(".png"):
-                        try:
-                            data = pngmeta.upsert_text(
-                                data, pngmeta.describe(job.meta.get("params", {}),
-                                                       job.meta.get("pairing")))
-                        except ValueError:
-                            pass
+                    # BOTH shapes carry the job that made them, in the place
+                    # their own format keeps text: a PNG in a tEXt chunk, an MP4
+                    # as an `mdta` tag beside the graph SaveVideo already wrote
+                    # there. A clip keeps the subfolder the backend filed it
+                    # under (video/), which is where the gallery looks for it.
+                    #
+                    # A file that cannot take the tag is written VERBATIM rather
+                    # than not written: an output on disk without its parameters
+                    # beats a finished generation lost to a metadata writer.
+                    name = str(img["filename"]).lower()
+                    described = pngmeta.describe(job.meta.get("params", {}),
+                                                 job.meta.get("pairing"))
+                    try:
+                        if name.endswith(".png"):
+                            data = pngmeta.upsert_text(data, described)
+                        elif Path(name).suffix in VIDEO_SUFFIXES:
+                            data = mp4meta.upsert_tags(data, described)
+                    except (ValueError, struct.error):
+                        pass
                     dest = OUT_DIR / (img.get("subfolder") or "") / img["filename"]
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     dest.write_bytes(data)
@@ -2035,11 +2060,10 @@ class Painter(QObject):
     def copyPrompt(self, path):
         """Put this output's own prompt on the clipboard.
 
-        Read out of the PNG's `painter` chunk, not out of the boxes — so a still
-        from three sessions ago hands back what IT was asked for, whatever is
-        typed now. Nothing to offer for a clip: a video carries ComfyUI's graph
-        and not painter's parameters, which is why the menu does not put this in
-        front of one.
+        Read out of the FILE, not out of the boxes — so an output from three
+        sessions ago hands back what IT was asked for, whatever is typed now.
+        A clip answers the same way a still does (`outmeta.params_for`): its own
+        `painter` tag when it has one, ComfyUI's graph when it predates it.
 
         `wl-copy`, not Qt's clipboard, for the reason spelled out in
         `_clip_file`: a Wayland selection dies with the process that offered it,
@@ -2048,10 +2072,7 @@ class Painter(QObject):
         a newline to argv content otherwise, and a prompt pasted into a text box
         should not arrive with a blank line after it.
         """
-        try:
-            params = pngmeta.load_params(Path(path.replace("file://", "")).read_bytes())
-        except (OSError, ValueError):
-            params = None
+        params = outmeta.params_for(path)
         text = ((params or {}).get("positive") or "").strip()
         if not text:
             self.toast.emit("no prompt stored in this file", True)
@@ -2376,10 +2397,7 @@ class Painter(QObject):
         """The local source image an edit output should be compared against, or
         "" — an editing-model result whose input file is still on disk. Anything
         else (a t2i output, a missing source) returns "" and opens normally."""
-        try:
-            params = pngmeta.load_params(Path(png_path).read_bytes())
-        except (OSError, ValueError):
-            return ""
+        params = outmeta.params_for(png_path)
         if not params or not (params.get("edit") or params.get("kind") == "edit"):
             return ""
         src = params.get("input_image_local") or ""

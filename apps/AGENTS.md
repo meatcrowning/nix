@@ -180,6 +180,14 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
   `painter/` until 2026-08-12; a second parser for the same bytes is the thing
   to avoid. `read_text_path()` is the cheap route — it never touches the pixels;
   see `filer/AGENTS.md` for what that costs and why the tail fallback exists.
+- **`mp4meta.py`** — the same job for the other half of painter's gallery: the
+  `mdta` metadata tags in an MP4's `moov/udta/meta`, where ComfyUI's `SaveVideo`
+  already writes its `prompt` graph and where painter now writes its own
+  `painter` key beside it, so a CLIP carries the job that made it exactly as a
+  still does. Stdlib only, and no ffmpeg: it runs in the download callback on
+  the GUI thread. **Growing `moov` moves the media data**, so `upsert_tags`
+  patches every `stco`/`co64` chunk offset past it — a writer that skips that
+  step leaves a file whose pictures decode to nothing.
 - **`deskstyle.py`** — **THE channel for every desktop-wide appearance setting
   that has to reach the apps. Add a key here; never build a second pipe.**
   Today: `fontFamily` / `fontSize`, the two motion settings `reduceMotion` /

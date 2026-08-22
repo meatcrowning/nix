@@ -91,15 +91,15 @@ Item {
         }
     }
 
-    // An output's PNG carries the whole job that made it, so the useful question
+    // An output carries the whole job that made it — a still in its PNG chunk, a
+    // clip in its MP4 tag — so the useful question
     // is WHICH PART to take: its words, its numbers, or both. That is a choice,
     // and a choice is a menu — it used to be an unlabelled right-click that took
     // everything, with no way to ask for less.
     function menuFor(index, path, isVideo) {
         var p = Gallery.paramsAt(index)
         if (!p) {
-            return [{ label: isVideo ? "a video carries its ComfyUI graph, not these settings"
-                                     : "no parameters stored in this file", enabled: false },
+            return [{ label: "no parameters stored in this file", enabled: false },
                     { separator: true }].concat(view.commonItems(index, path, isVideo, p))
         }
         return [
@@ -112,9 +112,10 @@ Item {
 
     // The items every output gets, parameters or not. The last two are offered
     // only when there is something to offer: the prompt when the file kept one
-    // (a clip never does — its metadata is ComfyUI's graph), the muted copy on a
-    // video, there being nothing to strip off a still. An action with nothing
-    // to act on is not offered greyed, it is not offered (docs/DESIGN.md §10).
+    // (a clip does too now — its own tag, or the graph SaveVideo wrote), the
+    // muted copy on a video, there being nothing to strip off a still. An action
+    // with nothing to act on is not offered greyed, it is not offered
+    // (docs/DESIGN.md §10).
     function commonItems(index, path, isVideo, params) {
         var items = [{ label: "open in viewer", trigger: () => App.openExternally(path) }]
         if (params && params.positive) {
