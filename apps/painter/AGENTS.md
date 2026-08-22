@@ -75,7 +75,11 @@ here:
   plus a press filter, `kdeshell._ensure_status`). painter briefly had its own
   26px drag band instead; it was a strip of nothing and it went, along with the
   "output N outputs" heading it replaced — that tally is in `statusRight` now.
-  Both panes sit flush under the chrome.
+  Both panes sit flush under the chrome. Since 2026-08-22 the style is *also*
+  narrowed at its own end — `home/prog/oxygen.nix` sets Oxygen's
+  `WindowDragMode=WD_MINIMAL`, upstream's supported "chrome only" — but the
+  MouseArea stays: it is session-independent and it is the only guard on a
+  machine where that rc has not been applied.
 - **Under Plasma the results pane paints `QPalette.Base`** — `DeskStyle.viewBg`,
   the colour Dolphin paints its file list with. The window\'s own background is
   the style\'s gradient and the two are deliberately different: the band keeps

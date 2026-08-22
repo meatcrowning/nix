@@ -265,6 +265,47 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
       Plasma session the file-type defaults are KDE's apps
       (`kde-mimeapps.list`), and `wal-set.sh` leaves `kdeglobals` alone there
       rather than overwriting his colour scheme from the wallpaper.
+- **`oxygenstyle.py`** — **the WIDGET STYLE's own store, `~/.config/oxygenrc`,
+  for the numbers `kdeglobals` does not carry.** A colour scheme says nothing
+  about how wide a scrollbar is, how long a hover fade lasts, how big a tree
+  expander's triangle is or whether a tooltip is translucent — the style does,
+  and under Oxygen it keeps them in a file of its own. Every real QWidget in one
+  of our Plasma windows already obeys it; the QML inside the `QQuickWidget`
+  (`apps/*/qml/+plasma/*.qml`) is the half that did not, and a hand-drawn
+  control fading at 260ms beside a QToolButton fading at 150 is the same "one
+  odd window" failure `kdeshell.py` exists to prevent, one level down.
+    - **The defaults table is upstream's, verbatim** (`kstyle/oxygen.kcfg` in
+      `github.com/KDE/oxygen`, 6.7.4). A key absent from the rc is not unset, it
+      is the compiled-in default — and on a machine that never opened the KCM
+      that is nearly all of them, so reading the file alone would have answered
+      "nothing" to almost every question. Two numbers are DERIVED the way
+      Oxygen's own source derives them (the scrollbar button height
+      `qMax(w*7/10, 14)`, the expander triangle's drawn width and pen), because
+      they are not in the rc at all.
+    - **The gate is Plasma AND Oxygen** (`is_oxygen()`): outside Plasma none of
+      it applies, and inside it under Breeze the Oxygen rc still exists on disk
+      and would dress our QML in the metrics of a style the window is not
+      wearing.
+    - **`DeskStyle` is what publishes it** — the `style*` properties, on the
+      same watch as everything else, all inert (0 / false / "") whenever no
+      style is saying. Every consumer treats that as "use the desktop's own
+      value", so none of them knows what session it is in. Two consume it so
+      far: `qmlcommon/Motion.qml` takes `styleMs` (Oxygen's
+      `GenericAnimationsDuration`, 150) over hyprvtb's 260 slide in a Plasma
+      session — there is no window roll there to match — and `qmlcommon/VScroll.qml`
+      takes `styleScrollWidth` for its gutter. **Adding one is a row in
+      `oxygenstyle._KEYS` and a Property in `deskstyle.py`**, nothing more.
+    - Oxygen's `AnimationsEnabled=false` arrives as `reduceMotion`, not as a
+      silent ignore: a window whose real widgets have stopped animating must
+      not have QML still sliding inside it.
+    - **`home/prog/oxygen.nix` declares the half of that file this desktop
+      pins** — and deliberately not the durations or the metrics, which are the
+      numbers the apps READ. `oxygen-settings6` (already on PATH, from
+      `kdePackages.oxygen`) is the GUI that writes the rest; `oxygen-demo6`
+      beside it is upstream's gallery of every Oxygen widget in every state,
+      which is the reference to diff a `+plasma` component against.
+    - `DESK_OXYGENRC` points at another rc. Harness:
+      `apps/pylib/tools/oxygen-test.py`.
 - **`glyphs.py`** — `px()`, the apps' half of docs/DESIGN.md §2.3: the characters
   More Perfect DOS VGA lacks, mapped onto ASCII, so text this desktop did not
   author cannot clip the row it is drawn in. It is the twin of the panel's
