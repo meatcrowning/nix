@@ -76,7 +76,7 @@ os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
     + ' --host-resolver-rules="MAP boards.4chan.org 127.0.0.1"')
 
 from PySide6.QtCore import QObject, QTimer, QUrl, Slot                # noqa: E402
-from PySide6.QtGui import QColor, QGuiApplication                     # noqa: E402
+from PySide6.QtGui import QGuiApplication                            # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine                       # noqa: E402
 from PySide6.QtWebEngineCore import QWebEngineUrlScheme               # noqa: E402
 from PySide6.QtWebEngineQuick import QtWebEngineQuick                 # noqa: E402
@@ -278,6 +278,7 @@ def main():
     write_theme(theme, PAL_A)
 
     import main as surfer                                            # noqa: E402
+    import chantheme          # noqa: E402  (pylib; main.py puts it on the path)
 
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Page)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -333,18 +334,18 @@ def main():
     # PAL_A's bg is dark and its dim link sits close to it; the helper lifts the
     # link until it clears the contrast floor, capped under the hover accent. A
     # light palette must leave OneeChan's dim link untouched.
-    dark_bg, dim, acc = QColor(PAL_A["bg"]), QColor(PAL_A["dim"]), QColor(PAL_A["accent"])
-    lifted = QColor(surfer._legible_link(PAL_A["dim"], PAL_A["bg"], PAL_A["accent"]))
+    dark_bg, dim, acc = PAL_A["bg"], PAL_A["dim"], PAL_A["accent"]
+    lifted = chantheme._legible_link(dim, dark_bg, acc)
     check("dark palette lifts the dim link's contrast against bg",
-          surfer._contrast(lifted, dark_bg) > surfer._contrast(dim, dark_bg))
+          chantheme._contrast(lifted, dark_bg) > chantheme._contrast(dim, dark_bg))
     check("lifted link clears the legibility floor (or hits the accent cap)",
-          surfer._contrast(lifted, dark_bg) >= 4.0 - 1e-6
-          or surfer._rel_lum(lifted) >= surfer._rel_lum(acc) - 1e-9)
+          chantheme._contrast(lifted, dark_bg) >= 4.0 - 1e-6
+          or chantheme._rel_lum(lifted) >= chantheme._rel_lum(acc) - 1e-9)
     check("lifted link stays no brighter than the hover accent",
-          surfer._rel_lum(lifted) <= surfer._rel_lum(acc) + 1e-9)
+          chantheme._rel_lum(lifted) <= chantheme._rel_lum(acc) + 1e-9)
     light = dict(PAL_A, bg="#f4f4f4")
     check("a light palette leaves OneeChan's dim link untouched",
-          surfer._legible_link(light["dim"], light["bg"], light["accent"]) == light["dim"])
+          chantheme._legible_link(light["dim"], light["bg"], light["accent"]) == light["dim"])
 
     # --- pure-python: the LIGHT-palette background collapse ---
     # On a light palette, OneeChan's inset surfaces (open reply chains, post
@@ -447,7 +448,7 @@ def main():
               out.get("replyBg") == rgb(PAL_A["bgAlt"]))
         check("plain link takes the legibility-lifted palette dim (beats ch4SS #0000ee)",
               out.get("aColor")
-              == rgb(surfer._legible_link(PAL_A["dim"], PAL_A["bg"], PAL_A["accent"])))
+              == rgb(chantheme._legible_link(PAL_A["dim"], PAL_A["bg"], PAL_A["accent"])))
         check("quotelink takes the palette accent (beats ch4SS #dd0000)",
               out.get("qlColor") == rgb(PAL_A["accent"]))
         check("live refresh hook installed", out.get("hasRefresh") is True)
