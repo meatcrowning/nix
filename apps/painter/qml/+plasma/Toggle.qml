@@ -24,8 +24,11 @@ Item {
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.RightButton
-        onClicked: if (typeof panel !== "undefined" && panel && panel.togglePin)
-                       panel.togglePin(root)
+        onClicked: function (m) {
+            if (typeof panel === "undefined" || !panel || !panel.pinMenu) return
+            var pt = mapToItem(null, m.x, m.y)
+            panel.pinMenu(root, pt.x, pt.y)
+        }
     }
 
     CheckBox {

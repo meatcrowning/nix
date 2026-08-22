@@ -2073,10 +2073,26 @@ def test_panel_order_and_pins(win, ctl, tmp, keep):
         return
     row = rows[-1]                      # "MP", whose value is a number
     label = str(row.property("pinLabel"))
+
+    # THE WAY HE DOES IT: right-click the row's label. It opens the pane's one
+    # menu and NAMES the action — pinning used to happen silently on that click,
+    # which is an action with no name and no way to discover it.
+    from PySide6.QtCore import Qt as _Qt
+    lbl = find(row, "PixelText")
+    menu = find(win.contentItem(), "CtxMenu")
+    scroll_to(row)
+    click(win, lbl, button=_Qt.RightButton)
+    spin(150)
+    labels = [i.get("label") for i in (prop(menu, "items") or []) if i.get("label")]
+    check("right-clicking a row's label offers to pin it",
+          any(l.startswith("pin " + label) for l in labels), labels)
+    menu.metaObject().invokeMethod(menu, "close")
+    spin(60)
+
     panel.metaObject().invokeMethod(panel, "togglePin", Q_ARG("QVariant", row))
     spin(120)
     pins = prop(panel, "pins") or []
-    check("right-clicking a row pins it", label in pins, (label, pins))
+    check("...and taking it pins the row", label in pins, (label, pins))
     check("...and the pin reports the row's live value",
           str(row.property("pinValue")) != "", row.property("pinValue"))
 
