@@ -437,10 +437,16 @@ Item {
     // What that native status bar says. QueueBar is the Hyprland roof's richer
     // strip (node, rate, ETA, queue) and a KDE status bar is one line, so this
     // is the SUMMARY of the same state, not a second source of it.
-    readonly property string statusLine: {
-        var s = App.ready ? App.status : (App.status + " …")
-        if (App.queue > 0) s += "  ·  queued " + App.queue
-        return s
+    readonly property string statusLine: App.ready ? App.status : (App.status + " …")
+    // ...and the RIGHT-hand end of it: the standing facts, which is where a KDE
+    // status bar keeps them (Dolphin's free space, Okular's page count). The
+    // left is what is happening; putting both in one string made it a sentence
+    // to read rather than something to glance at.
+    readonly property string statusRight: {
+        var bits = []
+        if (App.selectedName) bits.push(App.selectedName)
+        if (App.queue > 0) bits.push("queued " + App.queue)
+        return bits.join("  ·  ")
     }
     // -1 when nothing is running: a KDE status bar shows no progress bar at all
     // rather than an empty one (docs/DESIGN.md §10 — never draw a control that

@@ -2625,7 +2625,16 @@ def main():
         # `menuOrder`, and kdeshell keeps File first and Settings/Help last
         # whatever an app says (pylib/kdeshell.py MENU_ORDER).
         shell.bind_chrome(bar)
-        shell.bind_status()      # the QML root's statusLine/statusProgress
+        shell.bind_status()      # statusLine / statusProgress / statusRight
+        # Settings → Configure painter… opens a real dialog here, not the
+        # slide-out drawer, which is shaped for a titlebar cell that this
+        # session does not have (qml/SettingsDrawer.qml `asDialog`).
+        def open_settings():
+            return shell.show_dialog(
+                "settings", "Configure painter", QML / "SettingsPage.qml",
+                size=(480, 430), props={"app": shell.root})
+
+        shell.on_action("set", open_settings)
         # The window is how the controller knows whether he is watching: a batch
         # that finishes behind a rolled-up or unfocused painter says so with a
         # desktop toast instead (Painter._onscreen).
@@ -2659,6 +2668,12 @@ def main():
             # PAINTER_MENUS: the menubar/toolbar as text. A menu is not on
             # screen until it is opened, so no render can show what is in one —
             # this is the only check the KDE menu structure gets.
+            # PAINTER_DIALOG: build and grab the settings dialog, which no
+            # shot of the main window can contain — it is its own window.
+            if plasma and os.environ.get("PAINTER_DIALOG"):
+                dlg = open_settings()
+                dlg.grab().save(os.environ["PAINTER_DIALOG"])
+                print(f"selftest: wrote {os.environ['PAINTER_DIALOG']}")
             if plasma and os.environ.get("PAINTER_MENUS"):
                 print(shell.dump_chrome())
             if os.environ.get("PAINTER_TREE"):
