@@ -93,6 +93,21 @@ STATE_NORMAL = 0
 STATE_LIT = 1
 STATE_DISABLED = 2
 
+# THE MENU VOCABULARY EVERY KDE PROGRAM SHARES.
+#
+# Kate, Konsole, Dolphin, Gwenview and Okular do not merely have menus with
+# these names — they have them in this ORDER, with Settings second-to-last and
+# Help last, whatever else is between. That ordering is most of what makes an
+# unfamiliar KDE program navigable, so it is enforced here rather than left to
+# the order an app happens to list its actions in. A group an app invents is
+# kept, inserted before `settings` so the tail stays where hands expect it.
+MENU_ORDER = ["file", "edit", "view", "go", "bookmarks", "tools", "settings", "help"]
+MENU_TITLE = {
+    "file": "&File", "edit": "&Edit", "view": "&View", "go": "&Go",
+    "bookmarks": "&Bookmarks", "tools": "&Tools", "settings": "Se&ttings",
+    "help": "&Help",
+}
+
 
 def controls_style() -> str:
     """The Qt Quick Controls style an app should pin at startup.
@@ -488,6 +503,11 @@ def _build_shell_class():
             self._line_prop = "statusLine"
             self._progress_prop = "statusProgress"
             self._actions = {}      # id -> QAction
+            self._groups = {}       # group name -> QActionGroup (radio sets)
+            self._menu_order = []
+            # First build decides whether the toolbar shows at all; after that
+            # its visibility belongs to the user (Settings -> Show Toolbar).
+            self._chrome_restored = False
             self._root = None
 
         # ---------------------------------------------------------- engine
@@ -538,8 +558,12 @@ def _build_shell_class():
                 return
             self._root = root
             if menu_order is None:
-                menu_order = root.property("menuOrder") or []
-            self._menu_order = [str(m) for m in menu_order]
+                # A QML `property var` arrives as a QJSValue, which is not
+                # iterable in Python — same trap as `_entries` below.
+                menu_order = root.property("menuOrder")
+                if hasattr(menu_order, "toVariant"):
+                    menu_order = menu_order.toVariant()
+            self._menu_order = [str(m) for m in (menu_order or [])]
             self._rebuild()
 
             if titlebar is not None:
@@ -558,7 +582,13 @@ def _build_shell_class():
             # A QML `property var` arrives as a QJSValue, which is not iterable
             # in Python — `.toVariant()` is what turns it into the list of dicts
             # and "-" strings the array actually is.
-            raw = self._root.property("tbButtons")
+            # `actions` — the app's COMPLETE table — where it has one, because a
+            # menubar is the complete set; `tbButtons` is the subset the
+            # titlebar column has cells for and is all an app without the
+            # bigger table publishes.
+            raw = self._root.property("actions")
+            if raw is None or (hasattr(raw, "isUndefined") and raw.isUndefined()):
+                raw = self._root.property("tbButtons")
             if hasattr(raw, "toVariant"):
                 raw = raw.toVariant()
             raw = raw or []
@@ -571,57 +601,72 @@ def _build_shell_class():
             return out
 
         def _rebuild(self):
-            from PySide6.QtWidgets import QToolBar, QStatusBar, QLabel
-
             entries = self._entries()
+
+            # THE CHROME WIDGETS FIRST, the menus second: the Settings menu
+            # carries "Show Toolbar"/"Show Statusbar", which need something to
+            # toggle.
+            self._ensure_toolbar()
+            self._ensure_status()
+
             bar = self.window.menuBar()
             bar.clear()
-            self._actions.clear()
+            # Not `self._actions.clear()` — a QAction is reused across rebuilds
+            # so a menu row and a toolbar row are the SAME object and their
+            # checked/enabled state can never disagree. Clearing here made every
+            # rebuild mint new ones and leak the old shortcuts.
 
-            groups = {}
-            order = list(self._menu_order)
+            # A separator belongs to the group of the row BEFORE it, which is
+            # what carries the app's own grouping (generate/cancel | open) into
+            # the menus. One that ends up at a group boundary is trimmed off
+            # again by `_trim`.
+            groups, cur = {}, None
             for e in entries:
                 if e is None:
+                    if cur is not None:
+                        groups[cur].append(None)
                     continue
                 g = str(e.get("menu", "") or "")
                 if not g:
                     continue
+                cur = g
                 groups.setdefault(g, []).append(e)
-                if g not in order:
-                    order.append(g)
+            groups = {g: self._trim(items) for g, items in groups.items()}
 
-            first_menu = None
-            for g in order:
-                items = groups.get(g)
-                if not items:
-                    continue
-                menu = bar.addMenu("&" + g.capitalize())
-                if first_menu is None:
-                    first_menu = menu
+            for g in self._order(groups):
+                menu = bar.addMenu(MENU_TITLE.get(g, "&" + g.capitalize()))
+                items = groups.get(g, [])
+                prev_sep = True
                 for e in items:
+                    if e is None:
+                        menu.addSeparator()
+                        prev_sep = True
+                        continue
                     menu.addAction(self._action_for(e))
-
-            # THE VERBS EVERY KDE PROGRAM HAS, wherever the app's own array does
-            # not already provide them. Quit closes the leftmost menu the way it
-            # does in every other window on the desktop; About is what a program
-            # with a name in the taskbar is expected to answer for. Both use the
-            # platform's standard shortcut rather than a literal, so they are
-            # whatever this desktop says they are.
-            if first_menu is not None:
-                first_menu.addSeparator()
-                first_menu.addAction(self._quit_action())
-            help_menu = bar.addMenu("&Help")
-            help_menu.addAction(self._about_action())
+                    prev_sep = False
+                # THE VERBS EVERY KDE PROGRAM HAS, wherever the app's own array
+                # did not provide them. Quit closes File the way it does in
+                # every other window on this desktop; the two view toggles and
+                # About are what a program with a name in the taskbar is
+                # expected to answer for. All take the platform's standard
+                # shortcut rather than a literal.
+                if g == "file":
+                    if not prev_sep:
+                        menu.addSeparator()
+                    menu.addAction(self._quit_action())
+                elif g == "settings":
+                    if not prev_sep:
+                        menu.addSeparator()
+                    menu.addAction(self._toggle_action("toolbar"))
+                    menu.addAction(self._toggle_action("statusbar"))
+                elif g == "help":
+                    menu.addAction(self._about_action())
+                    menu.addAction(self._about_qt_action())
 
             # The toolbar: the app's own choice, `bar: true` per entry. A KDE
             # program's toolbar is its primary verbs, not everything it can do —
             # the menus are the complete set.
             tb = self._toolbar
-            if tb is None:
-                tb = QToolBar("main", self.window)
-                tb.setMovable(False)
-                self.window.addToolBar(tb)
-                self._toolbar = tb
             tb.clear()
             prev_sep = True
             for e in entries:
@@ -634,10 +679,63 @@ def _build_shell_class():
                     continue
                 tb.addAction(self._action_for(e))
                 prev_sep = False
-            tb.setVisible(not tb.actions() == [])
+            # A trailing separator is a line under the last row with nothing
+            # after it — the toolbar's `bar:` filter makes one whenever the
+            # table's last group is menu-only, as painter's Settings row is.
+            acts = tb.actions()
+            while acts and acts[-1].isSeparator():
+                tb.removeAction(acts.pop())
+            if not self._chrome_restored:
+                tb.setVisible(bool(tb.actions()))
+                self._chrome_restored = True
+            self._sync_toggles()
 
+        @staticmethod
+        def _trim(items):
+            """Drop leading, trailing and doubled separators — a menu's rows
+            come from a filter over one flat table, so any of the three can be
+            left behind by a row that went to a different menu."""
+            out = []
+            for e in items:
+                if e is None and (not out or out[-1] is None):
+                    continue
+                out.append(e)
+            while out and out[-1] is None:
+                out.pop()
+            return out
+
+        def _order(self, groups):
+            """The menus this window will have, in KDE's order. An app's own
+            `menuOrder` decides only where its OWN groups sit among the ones
+            MENU_ORDER does not name; File stays first and Settings/Help stay
+            last regardless, because that is the part a user relies on."""
+            named = [g for g in MENU_ORDER if g in groups or g in ("file", "help")]
+            extra = [g for g in self._menu_order if g in groups and g not in MENU_ORDER]
+            extra += [g for g in groups if g not in MENU_ORDER and g not in extra]
+            if not extra:
+                return named
+            out = []
+            for g in named:
+                if g == "settings":
+                    out.extend(extra)
+                    extra = []
+                out.append(g)
+            return out + extra
+
+        # ------------------------------------------------------------ widgets
+        def _ensure_toolbar(self):
+            from PySide6.QtWidgets import QToolBar
+            if self._toolbar is None:
+                tb = QToolBar("main", self.window)
+                tb.setMovable(False)
+                tb.setObjectName("mainToolBar")
+                self.window.addToolBar(tb)
+                self._toolbar = tb
+            return self._toolbar
+
+        def _ensure_status(self):
+            from PySide6.QtWidgets import QStatusBar, QLabel, QProgressBar
             if self._status is None:
-                from PySide6.QtWidgets import QProgressBar
                 self._status = QStatusBar(self.window)
                 self._status_label = QLabel("")
                 self._progress = QProgressBar()
@@ -647,6 +745,41 @@ def _build_shell_class():
                 self._status.addPermanentWidget(self._progress)
                 self._status.addPermanentWidget(self._status_label)
                 self.window.setStatusBar(self._status)
+            return self._status
+
+        def _toggle_action(self, which):
+            """Show Toolbar / Show Statusbar — checkable, and checked FROM the
+            widget rather than from a variable, so the menu cannot claim a bar
+            is showing when it is not."""
+            key = "__show_" + which
+            act = self._actions.get(key)
+            if act is None:
+                label = "Show &Toolbar" if which == "toolbar" else "Show Status&bar"
+                act = QAction(label, self.window)
+                act.setCheckable(True)
+
+                def toggled(on, w=which):
+                    widget = self._toolbar if w == "toolbar" else self._status
+                    if widget is not None:
+                        widget.setVisible(on)
+
+                act.toggled.connect(toggled)
+                self._actions[key] = act
+            return act
+
+        def _sync_toggles(self):
+            for which in ("toolbar", "statusbar"):
+                act = self._actions.get("__show_" + which)
+                widget = self._toolbar if which == "toolbar" else self._status
+                if act is None or widget is None:
+                    continue
+                # isHidden(), not isVisible(): `bind_chrome` runs before
+                # `show()`, and a child of an unshown window is not visible
+                # however much it is going to be. isHidden() answers the
+                # question actually being asked — was this bar switched off.
+                act.blockSignals(True)
+                act.setChecked(not widget.isHidden())
+                act.blockSignals(False)
 
         def _quit_action(self):
             from PySide6.QtGui import QKeySequence
@@ -682,28 +815,70 @@ def _build_shell_class():
                 self._actions["__about"] = act
             return act
 
+        def _about_qt_action(self):
+            act = self._actions.get("__aboutqt")
+            if act is None:
+                from PySide6.QtWidgets import QApplication
+                act = QAction("About &Qt", self.window)
+                act.triggered.connect(lambda: QApplication.aboutQt())
+                self._actions["__aboutqt"] = act
+            return act
+
         def _action_for(self, e):
             """One QAction per button id, reused across rebuilds so a menu and a
             toolbar row are the same object — check state, enabled state and
             icon can then never disagree between the two."""
+            from PySide6.QtGui import QKeySequence
             bid = str(e.get("id", ""))
             act = self._actions.get(bid)
             if act is None:
                 act = QAction(self.window)
                 act.triggered.connect(lambda _=False, i=bid: self._invoke(i))
+                # Added to the window as well as to its menu, so its shortcut
+                # works with no menu open — and so it survives a `menuBar.clear()`.
+                self.window.addAction(act)
                 self._actions[bid] = act
-            # A row's label is the button's TOOLTIP, not its two-character
-            # titlebar glyph — docs/DESIGN.md §7.6.
-            act.setText(str(e.get("tip") or e.get("label") or bid))
+            # A row's label is the button's `menuText` if it has one, else its
+            # TOOLTIP — never its two-character titlebar glyph (docs/DESIGN.md §7.6).
+            act.setText(str(e.get("menuText") or e.get("tip") or e.get("label") or bid))
             act.setToolTip(str(e.get("tip") or ""))
             icon = str(e.get("icon") or "")
             if icon:
                 act.setIcon(QIcon.fromTheme(icon))
+
+            # THE SHORTCUT IS THIS FACE'S ALONE. The app's QML `Shortcut`s stand
+            # down under Plasma (two owners of one sequence in one window is an
+            # ambiguous shortcut, and Qt answers those by firing NEITHER), so
+            # whatever the table says here is what the key does.
+            sc = str(e.get("shortcut") or "")
+            if sc and act.shortcut().isEmpty():
+                if sc.startswith("@"):
+                    std = getattr(QKeySequence.StandardKey, sc[1:], None)
+                    if std is not None:
+                        act.setShortcut(QKeySequence(std))
+                else:
+                    act.setShortcut(QKeySequence(sc))
+                act.setShortcutContext(Qt.WindowShortcut)
+
             state = int(e.get("state", STATE_NORMAL) or 0)
             act.setEnabled(state != STATE_DISABLED)
-            act.setCheckable(state == STATE_LIT or act.isCheckable())
-            if act.isCheckable():
+            checkable = bool(e.get("checkable")) or state == STATE_LIT or act.isCheckable()
+            act.setCheckable(checkable)
+            if checkable:
                 act.setChecked(state == STATE_LIT)
+
+            # A radio set — `group:` on two or more rows (a pane switcher, a
+            # zoom mode). Exclusive, so the pair cannot both be off, which two
+            # independent checkboxes can.
+            gname = str(e.get("group") or "")
+            if gname and act.actionGroup() is None:
+                from PySide6.QtGui import QActionGroup
+                grp = self._groups.get(gname)
+                if grp is None:
+                    grp = QActionGroup(self.window)
+                    grp.setExclusive(True)
+                    self._groups[gname] = grp
+                grp.addAction(act)
             return act
 
         def _refresh(self):
@@ -717,6 +892,40 @@ def _build_shell_class():
 
         def _invoke(self, bid):
             QMetaObject.invokeMethod(self._root, "tbAction", Q_ARG("QVariant", bid))
+
+        # ------------------------------------------------------------- probe
+        def dump_chrome(self):
+            """The menubar, the toolbar and the statusbar as text.
+
+            The only way to check this face without looking at it: a menu is
+            not on screen until it is opened, so no render can show what is in
+            one. Prints menu -> row, with the shortcut, and `[x]`/`[ ]` for a
+            checkable row and `(disabled)` for a greyed one.
+            """
+            out = []
+            for act in self.window.menuBar().actions():
+                menu = act.menu()
+                out.append(str(act.text()))
+                for a in (menu.actions() if menu is not None else []):
+                    if a.isSeparator():
+                        out.append("    ---")
+                        continue
+                    flag = ("[x] " if a.isChecked() else "[ ] ") if a.isCheckable() else ""
+                    sc = a.shortcut().toString()
+                    out.append("    %s%s%s%s" % (
+                        flag, a.text(),
+                        ("  " + sc) if sc else "",
+                        "" if a.isEnabled() else "  (disabled)"))
+            tb = self._toolbar
+            out.append("toolbar%s" % ("" if tb is not None and tb.isVisible() else " (hidden)"))
+            for a in (tb.actions() if tb is not None else []):
+                out.append("    ---" if a.isSeparator() else "    %s%s" % (
+                    a.text(), "" if a.isEnabled() else "  (disabled)"))
+            st = self._status
+            out.append("statusbar: %r%s" % (
+                self._status_label.text() if self._status_label is not None else "",
+                "" if st is not None and st.isVisible() else " (hidden)"))
+            return "\n".join(out)
 
         # --------------------------------------------------------- statusbar
         def bind_status(self, line_prop="statusLine", progress_prop="statusProgress"):
