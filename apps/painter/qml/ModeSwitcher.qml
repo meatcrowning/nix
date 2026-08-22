@@ -34,6 +34,20 @@ Column {
     // pin the preset button row"). Same protocol — a label to know it by and a
     // value to show — and the row that gets pinned is this whole switcher, so
     // the buttons stay clickable up there.
+    // THE PANEL THIS ROW IS IN, found by walking up rather than by the id
+    // `panel` alone: `ParamsPanel.qml` had no such id and every row in the
+    // sampling section was quietly unpinnable for it. The id is still the fast
+    // path; this is the one that cannot be forgotten.
+    function pinHost() {
+        if (typeof panel !== "undefined" && panel && panel.pinMenu) return panel
+        var p = sw.parent
+        for (var i = 0; i < 8 && p; i++) {
+            if (p.pinMenu !== undefined) return p
+            p = p.parent
+        }
+        return null
+    }
+
     property string pinLabel: "preset"
     // THIS ROW HIDES ITSELF; the panel must not park it. A parked row is
     // reparented, and a Repeater whose ancestor is reparented loses its
@@ -42,8 +56,10 @@ Column {
     // it to the panel's state is available where it is not for a Field (whose
     // caller often binds its own).
     property bool selfHides: true
-    visible: typeof panel === "undefined" || !panel || !panel.collapsed
-             || panel.pins.indexOf(sw.pinLabel) >= 0
+    visible: {
+        var h = sw.pinHost()
+        return !h || !h.collapsed || h.pins.indexOf(sw.pinLabel) >= 0
+    }
     readonly property string pinValue: App.mode === "" ? "none" : App.mode
 
     // Right-click anywhere in the row for its pin menu, the same as a labelled
@@ -52,8 +68,10 @@ Column {
     // anything at all — "Flow will not function", 44 times a load.
     TapHandler {
         acceptedButtons: Qt.RightButton
-        onTapped: if (typeof panel !== "undefined" && panel && panel.pinMenu)
-                      panel.pinMenu(sw, point.scenePosition.x, point.scenePosition.y)
+        onTapped: {
+            var host = sw.pinHost()
+            if (host) host.pinMenu(sw, point.scenePosition.x, point.scenePosition.y)
+        }
     }
 
     function refresh() { sw.items = App.modes() }

@@ -2089,6 +2089,33 @@ def test_panel_order_and_pins(win, ctl, tmp, keep):
     menu.metaObject().invokeMethod(menu, "close")
     spin(60)
 
+    # EVERY PANEL, not just this one. `ParamsPanel.qml` had no `id: panel`, so
+    # every row in the sampling section was silently unpinnable — the lookup is
+    # guarded, so nothing said a word. This walks each panel in the column and
+    # asks its first labelled row for a menu.
+    for pkey in ("model", "resolution", "prompt", "lora", "sampling", "patches"):
+        _ld, pan = _loader_for(pane, pkey)
+        if pan is None:
+            continue
+        cand = [it for it in walk(pan)
+                if it.property("pinLabel") not in (None, "")
+                and it.metaObject().className().startswith(("Field", "Toggle",
+                                                            "ModeSwitcher"))]
+        if not cand:
+            continue
+        target = cand[0]
+        host = target
+        found = False
+        for _ in range(8):
+            host = host.parentItem()
+            if host is None:
+                break
+            if host.property("pins") is not None:
+                found = True
+                break
+        check("a row in the %s panel can find its panel" % pkey, found,
+              str(target.property("pinLabel")))
+
     panel.metaObject().invokeMethod(panel, "togglePin", Q_ARG("QVariant", row))
     spin(120)
     pins = prop(panel, "pins") or []
