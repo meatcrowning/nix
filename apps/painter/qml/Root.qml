@@ -55,6 +55,10 @@ Item {
     // The before/after slider in the single-output view. On by default, and off
     // is per-session-remembered like the other view toggles.
     property bool showCompare: true
+    // HOW MANY COLUMNS THE GRID LAYS OUT: 0 is automatic (whole columns of a
+    // cell near 210px, the width-driven default), 1..6 a fixed count. See the
+    // `cols*` rows in `actions` and `GalleryView.columns`.
+    property int gridColumns: 0
     readonly property bool canCompare: root.inView && !root.selIsVideo
         && root.selOne !== "" && App.compareSource(root.selOne) !== ""
     readonly property bool canStep: Gallery.count > 1
@@ -513,6 +517,15 @@ Item {
     // to read rather than something to glance at.
     readonly property string statusRight: {
         var bits = []
+        // WHAT YOU ARE LOOKING AT, before the tally of what there is — [his]
+        // "in individual output view it should display the resolution of the
+        // output and, if video, the duration - to the left of the number of
+        // outputs". Only in View: over the grid there is no one output for it
+        // to describe. `OutputView` measures it off the decode itself, so it
+        // fills in a moment after the picture does rather than being read
+        // twice from the file.
+        if (root.inView && results.output.infoText !== "")
+            bits.push(results.output.infoText)
         // The output tally used to be a line of text over the grid; it is one
         // number about what is on screen, which is what a status bar is for.
         var sel = results.gallery.selection.length
@@ -626,12 +639,26 @@ Item {
     // `shortcut` is the KDE face's alone: the QML `Shortcut`s at the bottom of
     // this file stand down under Plasma so exactly one thing owns each key.
     // "@Name" takes the platform's standard sequence rather than a literal.
-    readonly property var actions: root.allActions
+    // ...minus the rows that have nothing to act on right now. A row is
+    // normally DISABLED rather than absent (docs/DESIGN.md §10.1 — a menu whose
+    // contents move around is one you cannot learn); `hidden` is the deliberate
+    // exception, for a verb that is meaningless outside one kind of output.
+    // kdeshell trims the separators a filtered-out row leaves behind.
+    readonly property var actions:
+        root.allActions.filter((a) => a === "-" || a.hidden !== true)
 
     readonly property var allActions: [
         // ------------------------------------------------------------- file
-        { id: "gen",  label: "gen",  tb: true, state: App.busy ? 2 : 0,
-          tip: "Generate", menu: "file", icon: "media-playback-start",
+        // GENERATE STAYS LIVE WHILE ONE IS RUNNING, because ComfyUI has a
+        // queue and pressing this again is how you fill it — [his] "allow the
+        // user to queue generations, currently they are unable to". It used to
+        // grey out on `App.busy`, which also took Ctrl+Return away (a disabled
+        // QAction swallows its shortcut), so a second job could not be asked
+        // for at all. The word changes instead: what the press does is queue.
+        { id: "gen",  label: "gen",  tb: true, state: 0,
+          tip: App.busy ? "Queue another generation" : "Generate",
+          menuText: App.busy ? "Queue Another Generation" : "Generate",
+          menu: "file", icon: "media-playback-start",
           bar: true, shortcut: "Ctrl+Return" },
         { id: "stop", label: "x",    tb: true, state: App.busy ? 0 : 2,
           tip: "Cancel all", menu: "file", icon: "process-stop",
@@ -701,10 +728,37 @@ Item {
         { id: "zoom100", tip: "Actual Size", menu: "view", icon: "zoom-original",
           shortcut: "Ctrl+Shift+0", state: root.canZoom ? 0 : 2 },
         "-",
+        // ONLY WHERE THERE IS SOMETHING TO COMPARE — an edit output, in View,
+        // whose before-image this machine can find. [his] "the compare button
+        // should only show when the output viewed is an edit". Everywhere else
+        // it is a switch for a thing that cannot happen, which is worse than no
+        // switch at all; `hidden` is read by `actions` below.
         { id: "compare", tip: "Compare", menu: "view", icon: "view-split-left-right",
           bar: true, barText: "compare", checkable: true,
+          hidden: !root.canCompare,
           state: root.showCompare ? 1 : 0,
           menuText: "Compare before/after" },
+        "-",
+        // HOW MANY COLUMNS THE GRID LAYS OUT — a radio set, `auto` being the
+        // width-driven default the grid has always used (a cell near 210px).
+        // [his] "give the user the option to select how many colums are shown
+        // in the browser". Remembered, like the other view choices.
+        { id: "cols0", tip: "Columns: Automatic", menu: "view",
+          menuText: "Columns: Automatic", checkable: true, group: "cols",
+          state: root.gridColumns === 0 ? 1 : 0 },
+        { id: "cols1", tip: "Columns: 1", menu: "view", menuText: "Columns: 1",
+          checkable: true, group: "cols", state: root.gridColumns === 1 ? 1 : 0 },
+        { id: "cols2", tip: "Columns: 2", menu: "view", menuText: "Columns: 2",
+          checkable: true, group: "cols", state: root.gridColumns === 2 ? 1 : 0 },
+        { id: "cols3", tip: "Columns: 3", menu: "view", menuText: "Columns: 3",
+          checkable: true, group: "cols", state: root.gridColumns === 3 ? 1 : 0 },
+        { id: "cols4", tip: "Columns: 4", menu: "view", menuText: "Columns: 4",
+          checkable: true, group: "cols", state: root.gridColumns === 4 ? 1 : 0 },
+        { id: "cols5", tip: "Columns: 5", menu: "view", menuText: "Columns: 5",
+          checkable: true, group: "cols", state: root.gridColumns === 5 ? 1 : 0 },
+        { id: "cols6", tip: "Columns: 6", menu: "view", menuText: "Columns: 6",
+          checkable: true, group: "cols", state: root.gridColumns === 6 ? 1 : 0 },
+        "-",
         { id: "full", tip: "Full Screen", menu: "view", icon: "view-fullscreen",
           checkable: true, state: App.fullScreen ? 1 : 0, shortcut: "@FullScreen" },
         // --------------------------------------------------------------- go
@@ -803,6 +857,7 @@ Item {
         else if (id === "back") root.inView = false
         else if (id === "forward") root.enterView("")
         else if (id === "compare") root.showCompare = !root.showCompare
+        else if (id.indexOf("cols") === 0) root.gridColumns = parseInt(id.substring(4))
         else if (id === "prev") root.stepOutput(-1)
         else if (id === "next") root.stepOutput(1)
         else if (id === "rescan") App.rescan()
@@ -858,6 +913,10 @@ Item {
     onShowCompareChanged: {
         pushButtons()
         if (root.restored) Prefs.set("showCompare", root.showCompare)
+    }
+    onGridColumnsChanged: {
+        pushButtons()
+        if (root.restored) Prefs.set("gridColumns", root.gridColumns)
     }
     onShowParamsChanged: {
         pushButtons()
@@ -1180,6 +1239,8 @@ Item {
         // away, so a fresh profile gets the controls rather than a blank window.
         root.showParams = Prefs.get("showParams") !== false
         root.showCompare = Prefs.get("showCompare") !== false
+        var gc = Prefs.get("gridColumns")
+        if (gc >= 0 && gc <= 6) root.gridColumns = gc
         var r = Prefs.get("splitRatio")
         if (r > 0 && r < 1) {
             // The panes swapped sides on 2026-08-05; a ratio saved before that

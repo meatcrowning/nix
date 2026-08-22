@@ -743,6 +743,18 @@ names take the platform's standard sequence), `group:` makes a radio set, and
 one `QAction` per id is reused across rebuilds so a menu row and a toolbar row
 can never disagree.
 
+**A row that LEAVES the table takes its chrome with it.** A state flip
+(`state`, `checkable`) is applied to the existing `QAction`s in place, because
+rebuilding the menubar would close a menu the user has open — but that path
+cannot delete a button, so a row an app drops from `actions` (painter's
+`compare`, offered only for an edit output) used to leave a live button behind
+for a verb that was no longer on offer. `_refresh_now` compares the ids it was
+last built from and rebuilds only when that set changed; a cached `barText`
+widget whose row has gone is hidden explicitly, since `QToolBar.clear()` drops
+the action but leaves the widget parented. Dropping a row is still the
+exception — a verb with nothing to act on is normally DISABLED, not absent
+(docs/DESIGN.md §10.1).
+
 **`shell.toolbar_search(on_text)`** puts a filter field at the right-hand end of
 the toolbar, behind a stretch, where Dolphin/Gwenview/Okular keep theirs. It is
 re-appended after every `_rebuild`, since that clears the toolbar.

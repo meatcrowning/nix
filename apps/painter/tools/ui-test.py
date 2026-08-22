@@ -33,6 +33,7 @@ import os
 import struct
 import sys
 import tempfile
+from pathlib import Path
 import time
 
 Q_ARG = None  # bound in build(), once PySide6 is importable
@@ -41,6 +42,14 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"   # hard, never setdefault
 os.environ.pop("WAYLAND_DISPLAY", None)       # no way back to his session
 os.environ.pop("DISPLAY", None)
 os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Basic")
+# WHICH ROOF THIS HARNESS RENDERS, pinned rather than inherited. `is_plasma()`
+# reads XDG_CURRENT_DESKTOP, so a run started from a Plasma session laid out the
+# QML with `plasma: true` — a 0-height QueueBar, since that face's status bar is
+# a real QStatusBar — and the queue-strip checks below failed on the session the
+# run happened to be launched from. The Hyprland roof is the one this file's
+# checks describe; the Plasma face's own chrome is QtWidgets and is not built
+# here at all. `DESK_SESSION=plasma` still forces the other look by hand.
+os.environ.setdefault("DESK_SESSION", "hypr")
 os.environ.pop("PAINTER_BACKEND_SSH", None)   # never drive top's systemd
 os.environ.pop("PAINTER_COMFY_URL", None)
 
@@ -2326,6 +2335,128 @@ def test_browse_view(win, ctl, tmp):
     spin(120)
 
 
+def test_compare_and_columns(win, ctl, tmp):
+    """The before/after slider, the compare row's visibility, and the grid's
+    column count — the three View-side answers to a question about ONE output
+    rather than about the set of them.
+    """
+    import main as P
+
+    from PySide6.QtGui import QColor, QImage
+
+    content = win.contentItem()
+    out = find(content, "OutputView")
+    grid = find(content, "KineticGridView")
+
+    # A real before-image on disk, and an edit output that names it.
+    before = os.path.join(tmp, "before-src.png")
+    im = QImage(64, 48, QImage.Format_RGB32)
+    im.fill(QColor("#3050a0"))
+    im.save(before)
+    edit = fake_png(os.path.join(tmp, "out", "painter-edit_00001_.png"),
+                    {"positive": "make it night", "edit": True, "kind": "edit",
+                     "input_image_local": before, "steps": 8})
+    plain = fake_png(os.path.join(tmp, "out", "plain_00001_.png"),
+                     {"positive": "a plain output", "steps": 9})
+    for pth in (before, edit, plain):
+        pass
+    ctl.gallery.add(plain)
+    ctl.gallery.add(edit)
+    spin(200)
+
+    def rows():
+        return [r for r in prop(APP, "actions") if isinstance(r, dict)]
+
+    def has_compare():
+        return any(r.get("id") == "compare" for r in rows())
+
+    # --- generate stays live while a job runs, so a second can be queued ---
+    was_busy = ctl._busy
+    ctl._busy = True
+    ctl.busyChanged.emit()
+    spin(120)
+    gen = [r for r in rows() if r.get("id") == "gen"]
+    check("generate is still offered while a job runs (so it can be queued)",
+          bool(gen) and gen[0].get("state") == 0,
+          gen[0].get("state") if gen else None)
+    ctl._busy = was_busy
+    ctl.busyChanged.emit()
+    spin(120)
+
+    # --- the compare row is only offered where it can do something ---------
+    APP.metaObject().invokeMethod(APP, "enterView", Q_ARG("QVariant", edit))
+    spin(250)
+    check("an edit output can be compared",
+          APP.property("canCompare") is True
+          and out.property("beforePath") == before
+          and out.property("comparing") is True,
+          (APP.property("canCompare"), out.property("beforePath"),
+           out.property("comparing")))
+    check("...so the compare row is offered", has_compare())
+    cv = find(out, "CompareView")
+    check("...and the slider is the thing on screen",
+          cv is not None and cv.isVisible() is True,
+          None if cv is None else cv.isVisible())
+
+    APP.metaObject().invokeMethod(APP, "enterView", Q_ARG("QVariant", plain))
+    spin(250)
+    check("a plain output has nothing to compare",
+          APP.property("canCompare") is False
+          and out.property("comparing") is False,
+          (APP.property("canCompare"), out.property("comparing")))
+    check("...so the compare row is not offered at all", not has_compare())
+
+    # --- the status bar says what the viewed output IS ---------------------
+    check("View reports the output's pixels in the status bar",
+          out.property("infoText") == "1x1"
+          and str(APP.property("statusRight")).startswith("1x1"),
+          (out.property("infoText"), APP.property("statusRight")))
+    APP.metaObject().invokeMethod(APP, "tbAction", Q_ARG("QVariant", "back"))
+    spin(150)
+    check("...and says nothing about one over the grid",
+          "1x1" not in str(APP.property("statusRight")),
+          APP.property("statusRight"))
+
+    # --- the column count ---------------------------------------------------
+    auto = grid.property("cols")
+    APP.metaObject().invokeMethod(APP, "tbAction", Q_ARG("QVariant", "cols3"))
+    spin(200)
+    check("choosing 3 columns lays out 3",
+          APP.property("gridColumns") == 3 and grid.property("cols") == 3,
+          (APP.property("gridColumns"), grid.property("cols"),
+           grid.property("cellWidth")))
+    APP.metaObject().invokeMethod(APP, "tbAction", Q_ARG("QVariant", "cols0"))
+    spin(200)
+    check("...and automatic puts the width-driven count back",
+          APP.property("gridColumns") == 0 and grid.property("cols") == auto,
+          (grid.property("cols"), auto))
+
+    # --- the before-copy filed beside the output ---------------------------
+    # It is what makes an edit comparable after its source has moved — and, on
+    # book, what makes one generated on top comparable at all.
+    P.Painter._keep_before(Path(edit), {"edit": True, "input_image_local": before})
+    kept = P.Painter._before_dir(Path(edit)) / "painter-edit_00001_.png"
+    check("an edit files a copy of its source beside the output", kept.is_file(),
+          str(kept))
+    os.remove(before)
+    check("...and the slider still finds a before when the source has gone",
+          ctl.compareSource(edit) == str(kept), ctl.compareSource(edit))
+    check("a plain output still compares against nothing",
+          ctl.compareSource(plain) == "", ctl.compareSource(plain))
+
+    for pth in (edit, plain):
+        try:
+            os.remove(pth)
+        except OSError:
+            pass
+    try:
+        os.remove(kept)
+    except OSError:
+        pass
+    ctl.gallery.load_existing()
+    spin(150)
+
+
 def test_inject(win, ctl, tmp):
     """Left-click an output -> inject all / prompt / params."""
     params = {"positive": "injected positive", "negative": "injected negative",
@@ -3445,6 +3576,7 @@ def main():
     print("== panel order + pins =="); test_panel_order_and_pins(win, ctl, tmp, keep)
     print("== filter ==");           test_filter(win, ctl, tmp)
     print("== browse/view ==");      test_browse_view(win, ctl, tmp)
+    print("== compare + columns =="); test_compare_and_columns(win, ctl, tmp)
     print("== inject ==");            test_inject(win, ctl, tmp)
     print("== copy prompt ==");       test_copy_prompt(win, ctl, tmp)
     print("== clip params ==");       test_clip_params(win, ctl, tmp)

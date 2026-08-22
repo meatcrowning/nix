@@ -46,6 +46,36 @@ Item {
         (view.source === "" || view.isVideo) ? "" : App.compareSource(view.source)
     readonly property bool comparing: view.compare && view.beforePath !== ""
 
+    // WHAT THIS OUTPUT IS, in one phrase for the status bar: its pixels, and a
+    // clip's running time after them. Measured off the decode that is already
+    // happening — the Image's implicit size for a still, the player's metadata
+    // for a clip — rather than re-read from the file, so there is one answer
+    // and it costs nothing. Empty until something has decoded: a status bar
+    // that says "0x0" for a moment is worse than one that fills in.
+    readonly property int clipW: {
+        var r = player.metaData ? player.metaData.value(MediaMetaData.Resolution)
+                                : undefined
+        return (r && r.width) ? r.width : 0
+    }
+    readonly property int clipH: {
+        var r = player.metaData ? player.metaData.value(MediaMetaData.Resolution)
+                                : undefined
+        return (r && r.height) ? r.height : 0
+    }
+    readonly property string infoText: {
+        if (view.source === "") return ""
+        if (!view.isVideo)
+            return view.natW > 0 ? (view.natW + "x" + view.natH) : ""
+        var bits = []
+        if (view.clipW > 0) bits.push(view.clipW + "x" + view.clipH)
+        if (player.duration > 0) {
+            var t = Math.round(player.duration / 1000)
+            var r = t % 60
+            bits.push(Math.floor(t / 60) + ":" + (r < 10 ? "0" : "") + r)
+        }
+        return bits.join("  ")
+    }
+
     function setZoom(z) { view.zoom = Math.max(0.05, Math.min(16, z)) }
     function zoomIn() { view.setZoom((view.fitting ? view.fitScale : view.zoom) * 1.25) }
     function zoomOut() { view.setZoom((view.fitting ? view.fitScale : view.zoom) / 1.25) }
@@ -185,7 +215,8 @@ Item {
         PixelText {
             id: tag
             anchors.centerIn: parent
-            text: view.isVideo ? "clip"
+            text: view.isVideo
+                ? (view.infoText === "" ? "clip" : view.infoText)
                 : view.natW > 0
                   ? (view.natW + "x" + view.natH + "  "
                      + Math.round(view.scaleNow * 100) + "%")

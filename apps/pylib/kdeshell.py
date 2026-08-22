@@ -555,6 +555,10 @@ def _build_shell_class():
             self._no_drag = _build_no_drag_filter()(self.window)
             self._overlay_filter = _build_overlay_filter()(self)
             self._refresh_pending = False
+            # The ids the chrome was last BUILT from, in order. A state flip is
+            # applied in place (see `_refresh_now`); a row appearing or leaving
+            # the table is a different chrome and needs the full rebuild.
+            self._row_sig = None
             self._dock_actions = [] # their toggleViewAction()s, for the View menu
             self._menu_order = []
             # First build decides whether the toolbar shows at all; after that
@@ -723,6 +727,7 @@ def _build_shell_class():
 
         def _rebuild(self):
             entries = self._entries()
+            self._row_sig = self._row_signature(entries)
 
             # THE CHROME WIDGETS FIRST, the menus second: the Settings menu
             # carries "Show Toolbar"/"Show Statusbar", which need something to
@@ -825,6 +830,16 @@ def _build_shell_class():
             # A trailing separator is a line under the last row with nothing
             # after it — the toolbar's `bar:` filter makes one whenever the
             # table's last group is menu-only, as painter's Settings row is.
+            # A `barText` button is a WIDGET, cached across rebuilds so its
+            # action stays the same object. `tb.clear()` drops the action that
+            # carried it but leaves the widget parented to the toolbar, so a row
+            # that is no longer offered has to be hidden explicitly or it stays
+            # on screen with nothing behind it.
+            live = {str(e.get("id", "")) for e in entries
+                    if e is not None and e.get("bar")}
+            for bid, btn in self._bar_buttons.items():
+                if bid not in live:
+                    btn.hide()
             acts = tb.actions()
             while acts and acts[-1].isSeparator():
                 tb.removeAction(acts.pop())
@@ -1139,9 +1154,24 @@ def _build_shell_class():
             self._refresh_pending = False
             if self._root is None:
                 return
-            for e in self._entries():
+            entries = self._entries()
+            # A ROW THAT CAME OR WENT IS NOT A STATE FLIP. Updating the existing
+            # QActions in place cannot remove a button, so an app that drops a
+            # row from its table (painter's `compare`, offered only for an edit
+            # output) kept a live button for a verb that was no longer offered.
+            # Rebuilding is the expensive path and closes an open menu, so it
+            # runs only when the ids themselves changed.
+            if self._row_signature(entries) != self._row_sig:
+                self._rebuild()
+                return
+            for e in entries:
                 if e is not None:
                     self._action_for(e)
+
+        @staticmethod
+        def _row_signature(entries):
+            return tuple("-" if e is None else str(e.get("id", ""))
+                         for e in entries)
 
         def _invoke(self, bid):
             fn = self._hooks.get(bid)
