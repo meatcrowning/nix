@@ -17,7 +17,7 @@ Item {
     // Whose list is open: the overlay holds one callback, and ours is a stable
     // function reference, so this is an identity test rather than bookkeeping
     // two components have to keep in step.
-    readonly property bool open: pickerOverlay.visible && pickerOverlay.onPicked === picker.accept
+    readonly property bool open: root.pickerOverlay.visible && root.pickerOverlay.onPicked === picker.accept
     signal picked(string value)
 
     // Report the pick; do NOT write `value`. It is bound to the model
@@ -62,10 +62,10 @@ Item {
             cursorShape: Qt.PointingHandCursor
             onClicked: {
                 if (picker.open) {
-                    pickerOverlay.close()
+                    root.pickerOverlay.close()
                 } else {
-                    pickerOverlay.visibleRows = picker.visibleRows
-                    pickerOverlay.openFor(box, picker.options, picker.value, picker.accept)
+                    root.pickerOverlay.visibleRows = picker.visibleRows
+                    root.pickerOverlay.openFor(box, picker.options, picker.value, picker.accept)
                 }
             }
         }
