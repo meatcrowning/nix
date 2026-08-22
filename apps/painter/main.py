@@ -487,7 +487,12 @@ class Gallery(QAbstractListModel):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # TWO LISTS. `_all` is every output; `_rows` is what the view shows,
+        # which is `_all` unless a filter is typed in the toolbar. They hold the
+        # SAME dicts, so a poster landing in one lands in both.
+        self._all = []
         self._rows = []
+        self._filter = ""
         # Poster frames are extracted one at a time, off the GUI thread. A
         # gallery of 60 videos would otherwise fork 60 ffmpegs at once on a
         # machine that is already busy sampling.
@@ -514,7 +519,49 @@ class Gallery(QAbstractListModel):
                 self.PosterRole: r["poster"]}.get(role)
 
     def has_path(self, path):
-        return any(r["path"] == str(path) for r in self._rows)
+        return any(r["path"] == str(path) for r in self._all)
+
+    # ------------------------------------------------------------- filtering
+    @Slot(str)
+    def setFilter(self, text):
+        """Show only the outputs whose FILENAME or PROMPT contains `text`.
+
+        Case-insensitive, every word must match, and the prompt is read out of
+        the file the first time it is needed and then kept — sixty PNG chunks is
+        a few milliseconds once, and nothing at all on the next keystroke."""
+        text = str(text or "").strip().lower()
+        if text == self._filter:
+            return
+        self._filter = text
+        self._refilter()
+
+    filterText = Property(str, lambda self: self._filter, notify=countChanged)
+
+    def _haystack(self, r):
+        if "hay" not in r:
+            bits = [r["name"]]
+            try:
+                p = outmeta.params_for(r["path"]) or {}
+                for k in ("positive", "negative", "model", "family"):
+                    v = p.get(k)
+                    if v:
+                        bits.append(str(v))
+            except Exception:  # noqa: BLE001  — an unreadable file still matches its name
+                pass
+            r["hay"] = " ".join(bits).lower()
+        return r["hay"]
+
+    def _matches(self, r):
+        if not self._filter:
+            return True
+        hay = self._haystack(r)
+        return all(w in hay for w in self._filter.split())
+
+    def _refilter(self):
+        self.beginResetModel()
+        self._rows = [r for r in self._all if self._matches(r)]
+        self.endResetModel()
+        self.countChanged.emit()
 
     @staticmethod
     def _dedup_key(path):
@@ -538,12 +585,17 @@ class Gallery(QAbstractListModel):
                 "key": self._dedup_key(p)}
 
     def _drop_key(self, key):
-        for i, r in enumerate(self._rows):
-            if r["key"] == key:
-                self.beginRemoveRows(QModelIndex(), i, i)
-                self._rows.pop(i)
-                self.endRemoveRows()
-                return
+        for j, r in enumerate(self._all):
+            if r["key"] != key:
+                continue
+            self._all.pop(j)
+            for i, vr in enumerate(self._rows):
+                if vr is r:
+                    self.beginRemoveRows(QModelIndex(), i, i)
+                    self._rows.pop(i)
+                    self.endRemoveRows()
+                    break
+            return
 
     def add(self, path):
         if is_muted_copy(path) or self.has_path(path):
@@ -552,12 +604,15 @@ class Gallery(QAbstractListModel):
         # startup may already be showing it. The local one replaces it: it is
         # the copy with the parameters written into it.
         self._drop_key(self._dedup_key(path))
-        self.beginInsertRows(QModelIndex(), 0, 0)
-        self._rows.insert(0, self._row_for(path))
-        self.endInsertRows()
+        row = self._row_for(path)
+        self._all.insert(0, row)
+        if self._matches(row):
+            self.beginInsertRows(QModelIndex(), 0, 0)
+            self._rows.insert(0, row)
+            self.endInsertRows()
         self.countChanged.emit()
-        if self._rows[0]["is_video"]:
-            self._want_poster(self._rows[0]["path"])
+        if row["is_video"]:
+            self._want_poster(row["path"])
 
     def load_existing(self, limit=60):
         # Videos land in a subdirectory of their own, because that is where
@@ -590,11 +645,9 @@ class Gallery(QAbstractListModel):
                 seen.add(key)
                 found.append((mtime, p))
         files = [p for _m, p in sorted(found, key=lambda t: t[0], reverse=True)[:limit]]
-        self.beginResetModel()
-        self._rows = [self._row_for(p) for p in files]
-        self.endResetModel()
-        self.countChanged.emit()
-        for r in self._rows:
+        self._all = [self._row_for(p) for p in files]
+        self._refilter()
+        for r in self._all:
             if r["is_video"]:
                 self._want_poster(r["path"])
 
@@ -661,12 +714,18 @@ class Gallery(QAbstractListModel):
 
     def _poster_ready(self, path, dest):
         self.posterReady.emit(str(path), str(dest))
-        for i, r in enumerate(self._rows):
-            if r["path"] == path:
-                r["poster"] = QUrl.fromLocalFile(str(dest)).toString()
-                idx = self.index(i, 0)
-                self.dataChanged.emit(idx, idx, [self.PosterRole])
-                return
+        for r in self._all:
+            if r["path"] != path:
+                continue
+            # `_rows` holds the same dict, so this reaches both lists; only the
+            # VISIBLE list has a row index to report a change for.
+            r["poster"] = QUrl.fromLocalFile(str(dest)).toString()
+            for i, vr in enumerate(self._rows):
+                if vr is r:
+                    idx = self.index(i, 0)
+                    self.dataChanged.emit(idx, idx, [self.PosterRole])
+                    break
+            return
 
     @Slot(int, result=str)
     def pathAt(self, i):
@@ -2389,6 +2448,23 @@ class Painter(QObject):
             return False
 
     @Slot()
+    def startSystemMove(self):
+        """Drag the WINDOW from a piece of its own background.
+
+        The compositor moves the window; the app only asks. `self.window` is a
+        QWindow under both roofs — the QML `Window` under Hyprland, the
+        QMainWindow's handle under Plasma — so one call serves both, and neither
+        needs the app to track the pointer.
+        """
+        w = self.window
+        if w is None:
+            return
+        try:
+            w.startSystemMove()
+        except (AttributeError, RuntimeError):
+            pass
+
+    @Slot()
     def toggleFullScreen(self):
         """One implementation for both roofs: `self.window` is a QWindow either
         way — the QML `Window` under Hyprland, the QMainWindow's window handle
@@ -2635,6 +2711,9 @@ def main():
                 size=(480, 430), props={"app": shell.root})
 
         shell.on_action("set", open_settings)
+        # The filter field at the right-hand end of the toolbar, where every KDE
+        # program keeps one. It filters the gallery by filename and prompt.
+        shell.toolbar_search(ctl.gallery.setFilter, placeholder="Filter outputs")
         # The window is how the controller knows whether he is watching: a batch
         # that finishes behind a rolled-up or unfocused painter says so with a
         # desktop toast instead (Painter._onscreen).
@@ -2674,6 +2753,16 @@ def main():
                 dlg = open_settings()
                 dlg.grab().save(os.environ["PAINTER_DIALOG"])
                 print(f"selftest: wrote {os.environ['PAINTER_DIALOG']}")
+            # PAINTER_ABOUT: trigger Help → About. Its own window, and the one
+            # that used to take the whole app down with it (kdeshell's
+            # `_about_action` records the crash), so it is worth a check that
+            # costs one line.
+            if plasma and os.environ.get("PAINTER_ABOUT"):
+                shell._actions["__about"].trigger()
+                app.processEvents()
+                shell._about_box.grab().save(os.environ["PAINTER_ABOUT"])
+                print(f"selftest: wrote {os.environ['PAINTER_ABOUT']}")
+                shell._about_box.hide()
             if plasma and os.environ.get("PAINTER_MENUS"):
                 print(shell.dump_chrome())
             if os.environ.get("PAINTER_TREE"):
