@@ -614,7 +614,7 @@ class Gallery(QAbstractListModel):
         if row["is_video"]:
             self._want_poster(row["path"])
 
-    def load_existing(self, limit=60):
+    def load_existing(self, limit=0):
         # Videos land in a subdirectory of their own, because that is where
         # SaveVideo's filename_prefix puts them — a gallery that only globbed
         # *.png here would show nothing at all for a video model.
@@ -644,12 +644,24 @@ class Gallery(QAbstractListModel):
                     continue   # deleted between the glob and the stat
                 seen.add(key)
                 found.append((mtime, p))
-        files = [p for _m, p in sorted(found, key=lambda t: t[0], reverse=True)[:limit]]
+        # ALL OF THEM, newest first. This was capped at 60 — a number from when
+        # the grid was a strip — so the history simply stopped partway with
+        # nothing saying so. The view is a GridView and only builds the
+        # delegates it can see, so the cost of the rest is one small dict each;
+        # `limit` survives for a caller that wants a slice.
+        ordered = sorted(found, key=lambda t: t[0], reverse=True)
+        files = [p for _m, p in (ordered[:limit] if limit else ordered)]
         self._all = [self._row_for(p) for p in files]
         self._refilter()
+        # The first screenful eagerly, the rest on demand (`requestPoster`).
+        eager = 0
         for r in self._all:
-            if r["is_video"]:
-                self._want_poster(r["path"])
+            if not r["is_video"]:
+                continue
+            self._want_poster(r["path"])
+            eager += 1
+            if eager >= 24:
+                break
 
     # -- poster frames -----------------------------------------------------
 
@@ -666,8 +678,21 @@ class Gallery(QAbstractListModel):
         if dest.exists():
             self._poster_ready(path, dest)
             return
+        if any(p == path for p, _d in self._poster_queue):
+            return          # already waiting; a delegate rebuilt is not a job
         self._poster_queue.append((path, dest))
         self._next_poster()
+
+    @Slot(str)
+    def requestPoster(self, path):
+        """A clip's delegate, asking for its own poster frame.
+
+        The gallery shows EVERY output now, and this library is a few hundred
+        clips — extracting a frame from all of them at startup would be a few
+        hundred ffmpeg runs for thumbnails nobody has scrolled to yet. The first
+        screenful is queued eagerly (`load_existing`) so the top of the grid is
+        never blank; everything after it asks on the way past."""
+        self._want_poster(str(path))
 
     def _next_poster(self):
         if self._poster_proc is not None or not self._poster_queue:
@@ -2770,7 +2795,15 @@ def main():
                 def walk(it, depth=0):
                     if depth > 12 or it is None:
                         return
-                    for ch in it.children():
+                    # VISUAL children, not QObject children. A Repeater's
+                    # delegates and anything a view reparents into its
+                    # contentItem keep their QObject parent where it was, so a
+                    # QObject walk went straight past the whole parameter
+                    # column — the tree said it was not there while the render
+                    # showed it plainly.
+                    kids = (it.childItems() if hasattr(it, "childItems")
+                            else it.children())
+                    for ch in kids:
                         try:
                             cls = ch.metaObject().className()
                             # QML-DEFINED TYPES ARE THE ONES WORTH SEEING, and

@@ -843,9 +843,9 @@ def _build_shell_class():
                 # braces, since the property is the style's promise rather than
                 # ours (the size grip is a CHILD widget, so it is untouched by
                 # a filter installed on the bar itself).
-                self._status.setProperty("_kde_no_window_grab", True)
-                self._status.installEventFilter(self._no_drag)
+                self._no_grab(self._status)
                 self._status_label = QLabel("")
+                self._no_grab(self._status_label)
                 # addWidget, not addPermanentWidget: this is the message area,
                 # and it gives way to a transient showMessage() the way every
                 # other KDE status bar's does.
@@ -855,10 +855,26 @@ def _build_shell_class():
                 self._progress.setTextVisible(False)
                 self._progress.setVisible(False)
                 self._status_right = QLabel("")
+                self._no_grab(self._status_right)
+                self._no_grab(self._progress)
                 self._status.addPermanentWidget(self._progress)
                 self._status.addPermanentWidget(self._status_right)
                 self.window.setStatusBar(self._status)
             return self._status
+
+        def _no_grab(self, widget):
+            """Make this widget UNDRAGGABLE, the whole of it.
+
+            Both halves are needed and the second is why: the property is what
+            Oxygen's WindowManager blacklist reads, but that manager looks at
+            the widget UNDER THE POINTER — and a status bar is mostly covered by
+            its own labels, so blacklisting the bar alone left the half under
+            the message label still dragging the window. Every child that fills
+            part of the bar gets both, and the size grip (which does want its
+            press) is not one of them.
+            """
+            widget.setProperty("_kde_no_window_grab", True)
+            widget.installEventFilter(self._no_drag)
 
         def _toggle_action(self, which):
             """Show Toolbar / Show Statusbar — checkable, and checked FROM the
