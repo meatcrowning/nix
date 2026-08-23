@@ -267,13 +267,12 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
       (re-run it before changing a constant); off Plasma it is the
       win31/beveled/flat variant from the panel's `settings.json`, the same
       three surfer injects. `scrollbar-theme`
-      (wrapper: `home/prog/scrollbar-theme.nix`) writes the two things Vivaldi
-      can read: `~/.local/share/chan-theme/desktop-scrollbar.user.js` (every
-      page, live against `/scrollbar.css` on the courier) and
-      `~/.local/share/vivaldi-ui/custom.css` (Vivaldi's OWN UI, read at startup
-      — `vivaldi://experiments` -> allow CSS modifications, then Settings >
-      Appearance > Custom UI Modifications; the `vivaldi-ui-css` path unit in
-      `home/srvs/chan-theme.nix` re-mints it whenever the palette moves).
+      (wrapper: `home/prog/scrollbar-theme.nix`) writes the page half —
+      `~/.local/share/chan-theme/desktop-scrollbar.user.js`, live against
+      `/scrollbar.css` on the courier. The same sheet reaches Vivaldi's OWN UI
+      through `~/.local/share/vivaldi-ui/custom.css`, which `vivaldi-theme`
+      writes (see the entry below) and the `vivaldi-ui-css` path unit in
+      `home/srvs/chan-theme.nix` re-mints whenever the palette moves.
       `pylib/userscript.py` is the ONE Tampermonkey runtime both scripts carry
       — embedded sheet, gmxhr poll, `adoptedStyleSheets` — so the two cannot
       drift; the 4chan gate is its only parameter. Harness
@@ -295,11 +294,19 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
       window), and a theme entry for `Preferences`.
       `vivaldi-theme` (wrapper: `home/prog/scrollbar-theme.nix`) writes
       `~/.local/share/vivaldi-ui/custom.css` — chrome **and** scrollbar, one
-      writer — plus `--prefs`. **`themes.current` alone is ignored at startup**
+      writer — plus `--prefs`, which also sets
+      `appearance.css_ui_mods_directory`. **That path is used VERBATIM: a `~`
+      in it is never expanded**, so a folder typed into Settings by hand
+      resolves to nothing and the whole sheet silently does not load, which is
+      exactly how the first version of this shipped a browser that looked
+      untouched. The writer therefore sets it itself, absolute. **And
+      `themes.current` alone is ignored at startup**
       (measured on 8.1, for a generated id and a built-in one alike): the
       engine resolves through `vivaldi.theme.schedule.o_s`, so the writer sets
-      both, refuses when he has scheduling switched on, and refuses while
-      Vivaldi is running at all (it rewrites Preferences from memory on exit).
+      both, keeps a copy of the mapping it replaces beside the css, refuses
+      when he has scheduling switched ON, and refuses while Vivaldi holds THAT
+      profile — read off Chromium's own `SingletonLock`, never `pgrep`, which
+      also matches the isolated instance the probe runs.
       Everything here is READ off a running Vivaldi by
       `pylib/tools/vivaldi-probe.py`, which starts its OWN `Xvfb` and a
       throwaway profile — never his browser, no window on any screen he has.

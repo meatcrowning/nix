@@ -18,9 +18,10 @@
 # Vivaldi reads it at startup — so `chan-theme.nix`'s path unit rewrites it
 # whenever the palette moves, which keeps it current for the next launch.
 #
-# Vivaldi needs telling once, by hand: `vivaldi://experiments` -> "Allow for
-# using CSS modifications", then Settings > Appearance > Custom UI Modifications
-# -> ~/.local/share/vivaldi-ui.
+# Nothing has to be typed into Vivaldi: `vivaldi-theme --prefs` sets the
+# Custom UI Modifications folder itself, as an ABSOLUTE path (Vivaldi hands that
+# setting to the filesystem verbatim, so a `~` in it silently resolves to
+# nothing and the sheet never loads). It must run with Vivaldi closed.
 #
 # Live source at apps/pylib/tools/scrollbar-userscript.py (absolute path, valid
 # on both machines); a rebuild is only needed to change THIS wrapper.
