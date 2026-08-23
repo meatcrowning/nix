@@ -139,17 +139,8 @@ v3 = re.search(r"@version\s+(\S+)", gen.build("plasma", "win31", TMP / "o.js")[0
 check("the version is stable across an unchanged regeneration", v1 == v2)
 check("and moves when the sheet does", v1 != v3)
 
-# --- Vivaldi's own UI --------------------------------------------------------
-uidir = TMP / "vivaldi-ui"
-path, uiprov, changed = gen.write_ui("hypr", "win31", uidir)
-check("custom.css is written into the folder Vivaldi is pointed at",
-      path == uidir / "custom.css" and path.exists() and changed)
-body = path.read_text()
-check("it names itself generated, so it is not hand-edited",
-      "hand-edit" in body and "::-webkit-scrollbar{" in body)
-check("an unchanged palette does not rewrite it (wal-set.sh calls this every run)",
-      gen.write_ui("hypr", "win31", uidir)[2] is False)
-check("a changed pick does", gen.write_ui("hypr", "flat", uidir)[2] is True)
+# Vivaldi's custom.css is written by vivaldi-theme.py (one writer, chrome and
+# scrollbar in one file) and checked by vivaldi-theme-test.py.
 
 # --- Chromium itself, offscreen ---------------------------------------------
 ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])

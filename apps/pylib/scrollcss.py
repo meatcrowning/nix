@@ -26,12 +26,12 @@ Two faces, the same rule the rest of the desktop follows (`kdetheme.is_plasma`):
 """
 from __future__ import annotations
 
-import colorsys
 import json
 import os
 from pathlib import Path
 from urllib.parse import quote
 
+import hexcolor
 import kdetheme
 
 SETTINGS = Path.home() / ".config" / "quickshell" / "settings.json"
@@ -56,40 +56,10 @@ def scrollbar_style(path=SETTINGS) -> str:
 
 
 # ---- colour helpers ---------------------------------------------------------
-def _rgb(hexstr):
-    h = hexstr.lstrip("#")
-    if len(h) == 3:
-        h = "".join(c * 2 for c in h)
-    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
-
-
-def _hex(rgb):
-    return "#%02x%02x%02x" % tuple(max(0, min(255, round(c))) for c in rgb)
-
-
-def _lum(hexstr):
-    r, g, b = (c / 255.0 for c in _rgb(hexstr))
-    return colorsys.rgb_to_hls(r, g, b)[1]
-
-
-def _scale_l(hexstr, factor, floor=0.0):
-    """`hexstr` with its HLS lightness multiplied — hue and saturation kept.
-
-    MULTIPLIED, not offset: Oxygen's own shade() works in HCY and compresses as
-    the scheme darkens, and a measured sweep across six schemes (window
-    lightness 0.06 to 1.0) came out very close to a constant ratio, where a
-    constant delta was nowhere near. See the probe named in the module
-    docstring for the numbers.
-    """
-    r, g, b = (c / 255.0 for c in _rgb(hexstr))
-    h, l, s = colorsys.rgb_to_hls(r, g, b)
-    l = max(floor, min(1.0, l * factor))
-    return _hex(tuple(c * 255 for c in colorsys.hls_to_rgb(h, l, s)))
-
-
-def _mix(a, b, t):
-    ra, rb = _rgb(a), _rgb(b)
-    return _hex(tuple(ra[i] + (rb[i] - ra[i]) * t for i in range(3)))
+# All in `hexcolor.py`, shared with the other injected sheets; the local names
+# stay so the rules below read as they were measured.
+_rgb, _hex, _lum = hexcolor.rgb, hexcolor.hex_, hexcolor.lum
+_scale_l, _mix = hexcolor.scale_l, hexcolor.mix
 
 
 def _uri(svg):

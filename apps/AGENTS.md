@@ -282,6 +282,29 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
       **surfer still draws its own** in `qml/Main.qml` (`scrollbarJs()`), and
       its Plasma branch is the older Breeze pill rather than this — the two
       have not been joined up yet.
+    - **`pylib/vivaldichrome.py` — Vivaldi's own INTERFACE, on this desktop's
+      palette.** Its UI is a Chromium page whose every colour comes from ~90
+      CSS custom properties its theme engine sets on `#browser`, so the browser
+      re-themes the way a web page does — there is no build to patch (the
+      Chromium layer is only partly published and the Vivaldi layer not at
+      all). Three separable layers: the colour ladder (the durable one — the
+      names are the engine's), Oxygen's relief on the surfaces that have one
+      (`#header`, `.toolbar-mainbar`, `.tab.active`, `.UrlBar-AddressField`,
+      `.ToolbarButton-Button` — Vivaldi's own class names, so a redesign
+      degrades this to "colours right, shapes Vivaldi's", never to a broken
+      window), and a theme entry for `Preferences`.
+      `vivaldi-theme` (wrapper: `home/prog/scrollbar-theme.nix`) writes
+      `~/.local/share/vivaldi-ui/custom.css` — chrome **and** scrollbar, one
+      writer — plus `--prefs`. **`themes.current` alone is ignored at startup**
+      (measured on 8.1, for a generated id and a built-in one alike): the
+      engine resolves through `vivaldi.theme.schedule.o_s`, so the writer sets
+      both, refuses when he has scheduling switched on, and refuses while
+      Vivaldi is running at all (it rewrites Preferences from memory on exit).
+      Everything here is READ off a running Vivaldi by
+      `pylib/tools/vivaldi-probe.py`, which starts its OWN `Xvfb` and a
+      throwaway profile — never his browser, no window on any screen he has.
+      Harness `pylib/tools/vivaldi-theme-test.py` (Qt-free, browser-free; the
+      property list in it is what the probe last saw).
     - `deskstyle.py` asks it for `fontFamily`/`fontSize` (KDE's point size,
       converted at the screen's own DPI), `smooth`, the motion factor and the
       scrollbar in that session. The two GEOMETRY keys do not move: border
