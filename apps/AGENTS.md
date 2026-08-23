@@ -235,14 +235,28 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
       stylesheet follows any document `<style>`), plus the KStyle relief above
       when `kde_chrome()` gives one. surfer adopts it live over
       `surferonee://`; **Vivaldi** has no Stylus and only Tampermonkey (where
-      OneeChan already lives), so the generator BAKES the same bytes into a
-      userscript — `chan-theme` (wrapper: `home/prog/chan-theme.nix`) writes
+      OneeChan already lives), so the generator writes a userscript —
+      `chan-theme` (wrapper: `home/prog/chan-theme.nix`) writes
       `~/.local/share/chan-theme/desktop-4chan.user.js`, and he opens that
-      `file://` URL to install. Baked means stale by design: **re-run
-      `chan-theme` after a colour-scheme or wallpaper change.** That is why
-      `chantheme` is Qt-free — the generator runs with no Qt, no browser and no
+      `file://` URL to install.
+      **Vivaldi is LIVE too, since 2026-08-23** — it was baked-only, and
+      therefore stale from the next wallpaper change, until
+      `pylib/tools/chan-theme-server.py` gave the userscript a Python to ask:
+      a stdlib HTTP courier on **127.0.0.1:8791** (`home/srvs/chan-theme.nix`,
+      `/chan.css` + `/version`) that rebuilds the sheet from the live palette
+      **on every request**, so nothing — not wal-set.sh, not a rebuild —
+      has to notify it. The script polls with `If-None-Match` every 30s and
+      re-adopts only when the ETag moves, so an OPEN 4chan tab repaints. The
+      fetch is `GM_xmlhttpRequest`, not `fetch()`: a 4chan page is https and
+      `http://127.0.0.1` is mixed content, hence the `@grant`/`@connect` lines.
+      The baked sheet stays inside the script as the courier-down fallback, so
+      **`chan-theme` is now re-run only when the SHEET changes**, not for a
+      palette change. Loopback-only and parameterless — not a firewall
+      decision. The builder both halves share is `pylib/chansource.py`; that is
+      also why `chantheme` is Qt-free — it runs with no Qt, no browser and no
       app. Harness `pylib/tools/chan-userscript-test.py`, whose real job is the
-      seam: the baked CSS must equal what surfer serves for the same palette.
+      seam: the baked CSS, the courier's response and what surfer serves must
+      be the same bytes for the same palette.
     - `deskstyle.py` asks it for `fontFamily`/`fontSize` (KDE's point size,
       converted at the screen's own DPI), `smooth`, the motion factor and the
       scrollbar in that session. The two GEOMETRY keys do not move: border

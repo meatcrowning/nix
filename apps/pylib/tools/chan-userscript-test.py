@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Checks for the Vivaldi userscript generator (`chan-userscript.py`).
+"""Checks for the Vivaldi userscript generator (`chan-userscript.py`) and the
+loopback courier that keeps it live (`chan-theme-server.py`).
 
 Qt-free and offline — it never reads his live `kdeglobals`, never writes to
-`~/.local/share`, and never touches a browser. What it guards is the seam that
-makes two browsers wear ONE sheet: the CSS the userscript bakes must be
-byte-identical to the CSS surfer's courier serves for the same palette, and the
-userscript's own scaffolding (self-gate, adoption, match rules, a version that
-moves only when the colours do) must survive an edit.
+`~/.local/share`, and never touches a browser. The courier half binds an
+EPHEMERAL loopback port of its own, never 8791, so a run cannot disturb the
+one his Vivaldi is polling. What it guards is the seam that makes two browsers
+wear ONE sheet: the CSS the userscript bakes must be byte-identical to the CSS
+surfer's courier serves for the same palette, the courier must serve those same
+bytes with a moving ETag, and the userscript's own scaffolding (self-gate,
+adoption, match rules, the gmxhr grant, a version that moves only when the
+colours do) must survive an edit.
 
     apps/pylib/tools/chan-userscript-test.py    # exits 0 on pass, 1 on failure
 """
@@ -23,6 +27,7 @@ sys.path.insert(0, str(HERE.parent))
 TMP = Path(tempfile.mkdtemp(prefix="chan-userscript-"))
 os.environ["DESK_SESSION"] = "hypr"          # nothing here may read his session
 
+import chansource                                                   # noqa: E402
 import chantheme                                                    # noqa: E402
 import kdetheme                                                     # noqa: E402
 sys.path.insert(0, str(HERE))
@@ -90,7 +95,7 @@ check("plasma + oxygen: the baked sheet carries the KStyle relief",
 check("the provenance line names the style it came from", "oxygen" in prov)
 
 for want in ("@run-at       document-start", "@match        *://boards.4chan.org/*",
-             "@grant        none"):
+             "@grant        GM_xmlhttpRequest", "@connect      127.0.0.1"):
     check("header carries %r" % want.split()[0] + " " + want.split()[-1],
           want in text)
 check("self-gate on html.oneechan survives", "contains('oneechan')" in text)
@@ -98,6 +103,18 @@ check("adopts rather than appends (cascades after ch4SS)",
       "adoptedStyleSheets" in text)
 check("a <style> fallback exists for no constructable stylesheets",
       "desk-chan-theme" in text)
+
+# --- the live half: the script must ASK, not only wear what it was baked with
+check("the script polls the loopback courier",
+      "http://127.0.0.1:%d/chan.css" % chansource.PORT in text)
+check("it asks through GM_xmlhttpRequest (a 4chan page is https)",
+      "GM_xmlhttpRequest({" in text)
+check("it sends If-None-Match, so an unmoved palette costs a 304",
+      "If-None-Match" in text)
+check("it re-polls on an interval rather than once",
+      "setInterval(pull" in text)
+check("the baked sheet is still applied first, as the courier-down fallback",
+      "apply(CSS);" in text)
 
 # Version: content-derived, so regenerating an unchanged palette does not churn
 # Tampermonkey's update check, and a colour change always moves it.
@@ -110,6 +127,59 @@ check("the version is stable across an unchanged regeneration", v1 == v2)
 check("the version moves when the sheet does", v1 != v3)
 check("plasma + breeze: a flat KStyle bakes no gradient",
       "linear-gradient(to bottom" not in v3text)
+
+# --- the courier: same bytes, moving ETag, 304 on an unmoved palette --------
+# Ephemeral port, bound in-process on 127.0.0.1; never 8791, so his own
+# chan-theme.service and whatever Vivaldi is polling are untouched.
+os.environ["DESK_SESSION"] = "plasma"
+os.environ["DESK_KDEGLOBALS"] = scheme("oxygen")
+
+import threading                                                    # noqa: E402
+import urllib.error                                                 # noqa: E402
+import urllib.request                                               # noqa: E402
+from http.server import ThreadingHTTPServer                         # noqa: E402
+
+_sspec = importlib.util.spec_from_file_location("srv", HERE / "chan-theme-server.py")
+srv = importlib.util.module_from_spec(_sspec)
+_sspec.loader.exec_module(srv)
+
+httpd = ThreadingHTTPServer(("127.0.0.1", 0), srv.Handler)
+httpd.verbose = False
+httpd.daemon_threads = True
+base = "http://127.0.0.1:%d" % httpd.server_address[1]
+threading.Thread(target=httpd.serve_forever, daemon=True).start()
+try:
+    with urllib.request.urlopen(base + "/chan.css", timeout=5) as r:
+        served = r.read().decode("utf-8")
+        etag = r.headers.get("ETag")
+        ctype = r.headers.get("Content-Type")
+    check("the courier serves the same bytes the userscript bakes", served == baked)
+    check("it is text/css", (ctype or "").startswith("text/css"))
+    check("it carries an ETag", bool(etag))
+
+    req = urllib.request.Request(base + "/chan.css", headers={"If-None-Match": etag})
+    code = None
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            code = r.status
+    except urllib.error.HTTPError as e:
+        code = e.code
+    check("an unmoved palette answers 304, not the sheet again", code == 304)
+
+    # The whole point: nothing notifies the courier, it rebuilds per request.
+    os.environ["DESK_KDEGLOBALS"] = scheme("breeze")
+    with urllib.request.urlopen(base + "/chan.css", timeout=5) as r:
+        moved, etag2 = r.read().decode("utf-8"), r.headers.get("ETag")
+    check("a palette change is picked up with nothing restarted", moved != served)
+    check("and moves the ETag, so an open tab re-adopts", etag2 != etag)
+
+    with urllib.request.urlopen(base + "/version", timeout=5) as r:
+        ver = json.loads(r.read().decode("utf-8"))
+    check("/version names the stamp and the provenance",
+          ver.get("stamp") == chansource.stamp(moved) and "breeze" in ver.get("provenance", ""))
+finally:
+    httpd.shutdown()
+    httpd.server_close()
 
 os.environ["DESK_SESSION"] = "hypr"
 os.environ.pop("DESK_KDEGLOBALS", None)
