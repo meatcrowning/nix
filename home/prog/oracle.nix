@@ -13,7 +13,10 @@
 #     its FFmpeg backend live in that module. yt-dlp is on PATH for the same
 #     tool — it is what turns a YouTube (or other) watch page into the stream
 #     URL the player pulls; without it only a DIRECT video file URL resolves,
-#     which the tool then says (docs/DESIGN.md §10).
+#     which the tool then says (docs/DESIGN.md §10). playerctl is the other
+#     binary on that PATH: `control_player` drives the music player over MPRIS
+#     through it, because PySide cannot demarshal MPRIS's `a{sv}` Metadata
+#     (apps/oracle/AGENTS.md — the title came back empty).
 #
 # Both run the LIVE source at ~/nix/apps/oracle/main.py, so QML/Python edits need
 # no rebuild — only changing the runtime deps does.
@@ -91,7 +94,7 @@ let
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/oracle \
             --add-flags /home/lam/nix/apps/oracle/main.py \
-            --prefix PATH : ${pkgs.yt-dlp}/bin \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.yt-dlp pkgs.playerctl ]} \
             --set-default QT_FFMPEG_DECODING_HW_DEVICE_TYPES cuda \
             --prefix XDG_DATA_DIRS : ${lib.concatStringsSep ":" [
               "${pkgs.kdePackages.oxygen-icons}/share"

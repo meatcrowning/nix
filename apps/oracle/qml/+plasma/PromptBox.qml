@@ -27,7 +27,15 @@ Item {
     // prompt [his, 2026-08-22]; the Frame's own padding is the only spare room
     // there should be, and `implicitHeight` on a TextArea is already one line
     // when it is empty. It grows with what he types, to a cap.
-    height: Math.min(180, Math.max(area.implicitHeight, 34))
+    //
+    // The floor is the SEND BUTTON, measured, not a round number: 34 was two
+    // pixels more than the button needs and four more than the input does, and
+    // all six of them landed under the text, because the input is anchored to
+    // the top and slack falls out of the bottom [his, 2026-08-23: "extra empty
+    // space under the text line and the bottom edge"]. Whatever slack the
+    // button's height still imposes is now SPLIT — the input is centred on it —
+    // so the box reads as padding rather than as a gap.
+    height: Math.min(180, Math.max(area.implicitHeight, sendBtn.implicitHeight))
 
     // THE STYLE'S OWN TEXT INPUT, not a Frame around one. Oxygen draws an input
     // as a recessed hole — a dark View-coloured fill inside a rounded inset
@@ -40,8 +48,9 @@ Item {
     // every KDE program uses.
     ScrollView {
         id: frame
-        anchors { top: parent.top; bottom: parent.bottom
-                  left: parent.left; right: sendBtn.left; rightMargin: 6 }
+        anchors { left: parent.left; right: sendBtn.left; rightMargin: 6
+                  verticalCenter: parent.verticalCenter }
+        height: Math.min(root.height, area.implicitHeight)
         clip: true
 
         TextArea {

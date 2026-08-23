@@ -39,11 +39,14 @@ model's context window (READ_MAX_LINES / READ_MAX_BYTES / LIST_MAX_ENTRIES).
 import base64
 import binascii
 import fnmatch
+import hashlib
 import json
 import os
 import re
 import shutil
+import subprocess
 import sys
+from datetime import datetime, timezone
 
 # --- context caps: a tool result must never blow the model's context window ---
 READ_MAX_LINES = 300      # default lines returned by one read (paginate for more)
@@ -241,6 +244,176 @@ def op_image(root, req):
     return {"ok": True, "path": rel_to_root(root, p), "media": media,
             "bytes": len(raw),
             "b64": base64.b64encode(raw).decode("ascii")}
+
+
+#: What a file IS, sniffed from its first bytes — never from its extension,
+#: which is a claim and not a fact (the same rule op_image follows). Only the
+#: shapes worth naming to a model; anything else comes back as text or bytes.
+FILE_MAGIC = (
+    (b"%PDF-", "application/pdf"), (b"PK\x03\x04", "application/zip"),
+    (b"\x1f\x8b", "application/gzip"), (b"7z\xbc\xaf\x27\x1c", "application/x-7z-compressed"),
+    (b"ID3", "audio/mpeg"), (b"fLaC", "audio/flac"), (b"OggS", "application/ogg"),
+    (b"RIFF", "audio/wav"), (b"\x7fELF", "application/x-executable"),
+    (b"SQLite format 3", "application/vnd.sqlite3"),
+    (b"\x89PNG\r\n\x1a\n", "image/png"), (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF8", "image/gif"), (b"BM", "image/bmp"),
+)
+
+#: How much of a media file's ffprobe result is worth a model's context. A raw
+#: `-show_streams` on a video runs to hundreds of lines of side data.
+META_MAX_STREAMS = 8
+META_MAX_TAGS = 24
+META_TAG_CHARS = 300
+META_TEXT_MAX_BYTES = 64 << 20   # past this a line/word count is not worth the read
+
+
+def _stamp(epoch):
+    """One timestamp shape for every op that reports a time: local ISO to the
+    minute, which is what a model can quote back at him without conversion."""
+    try:
+        return datetime.fromtimestamp(epoch, timezone.utc).astimezone().isoformat(
+            timespec="minutes")
+    except (OSError, OverflowError, ValueError):
+        return ""
+
+
+def _sniff_kind(p):
+    """(media_type, head_bytes) for one file, by MAGIC."""
+    try:
+        head = open(p, "rb").read(64)
+    except OSError:
+        return "", b""
+    if head[4:12] == b"ftypisom" or head[4:8] == b"ftyp":
+        return "video/mp4", head
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp", head
+    if head[:4] == b"RIFF" and head[8:12] == b"AVI ":
+        return "video/x-msvideo", head
+    if head[:4] == b"\x1aE\xdf\xa3":
+        return "video/x-matroska", head
+    for magic, mt in FILE_MAGIC:
+        if head.startswith(magic):
+            return mt, head
+    return "", head
+
+
+def _ffprobe(p):
+    """ffprobe's format+streams for one file, projected down to what is worth
+    saying. Returns {} when ffprobe is absent (this script is stdlib-only and
+    runs on whatever host it landed on) or when the file is not media."""
+    exe = shutil.which("ffprobe")
+    if not exe:
+        return {}
+    try:
+        out = subprocess.run(
+            [exe, "-v", "error", "-print_format", "json", "-show_format",
+             "-show_streams", "--", p],
+            capture_output=True, timeout=20)
+        info = json.loads(out.stdout.decode("utf-8", "replace") or "{}")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return {}
+    if not isinstance(info, dict):
+        return {}
+
+    def tags(d):
+        t = d.get("tags") or {}
+        if not isinstance(t, dict):
+            return {}
+        return {k.lower(): str(v)[:META_TAG_CHARS]
+                for k, v in list(t.items())[:META_MAX_TAGS]}
+
+    fmt = info.get("format") or {}
+    out = {}
+    if fmt.get("format_long_name") or fmt.get("format_name"):
+        out["container"] = fmt.get("format_long_name") or fmt.get("format_name")
+    for key, name in (("duration", "duration_seconds"), ("bit_rate", "bit_rate")):
+        try:
+            if fmt.get(key) is not None:
+                out[name] = round(float(fmt[key]), 3)
+        except (TypeError, ValueError):
+            pass
+    if tags(fmt):
+        out["tags"] = tags(fmt)
+    streams = []
+    for st in (info.get("streams") or [])[:META_MAX_STREAMS]:
+        one = {"type": st.get("codec_type") or "?",
+               "codec": st.get("codec_name") or ""}
+        for k in ("width", "height", "sample_rate", "channels", "bit_rate",
+                  "pix_fmt", "profile", "r_frame_rate", "duration"):
+            if st.get(k) not in (None, ""):
+                one[k] = st[k]
+        if tags(st):
+            one["tags"] = tags(st)
+        streams.append(one)
+    if streams:
+        out["streams"] = streams
+    return out
+
+
+def op_meta(root, req):
+    """What a file IS, without reading it: size, times, type, and — for media —
+    its container, duration, codecs, dimensions and TAGS.
+
+    A read op (same wide read root), and the answer `read_file` cannot give: a
+    3-minute flac is bytes to `read`, and a model asked "how long is this / what
+    bitrate / who is the artist" had to guess from the filename. ffprobe does
+    the media half when it is on the target host; everything else here is
+    stdlib, so this still answers over ssh on a machine with nothing installed.
+    """
+    p = resolve(root, req.get("path", ""), must_exist=True)
+    try:
+        st = os.stat(p)
+    except OSError as e:
+        fail("cannot stat: " + str(e))
+    out = {"ok": True, "path": rel_to_root(root, p),
+           "name": os.path.basename(p),
+           "bytes": st.st_size,
+           "modified": _stamp(st.st_mtime),
+           "mode": oct(st.st_mode & 0o7777)[2:].rjust(4, "0")}
+    if os.path.isdir(p):
+        try:
+            kids = os.listdir(p)
+        except OSError as e:
+            fail("cannot read: " + str(e))
+        out["kind"] = "directory"
+        out["entries"] = len(kids)
+        return out
+    out["kind"] = "file"
+    media, head = _sniff_kind(p)
+    if media:
+        out["media_type"] = media
+    if not _is_binary(p):
+        out["media_type"] = out.get("media_type") or "text/plain"
+        # Counted over the WHOLE file, streaming: a capped count is a WRONG
+        # count, and "3062 lines" of a 5904-line file is worse than no number.
+        try:
+            lines, words, seen, last = 0, 0, 0, b"\n"
+            with open(p, "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    if seen > META_TEXT_MAX_BYTES:
+                        out["counts_partial"] = True
+                        break
+                    seen += len(chunk)
+                    lines += chunk.count(b"\n")
+                    words += len(chunk.split())
+                    last = chunk[-1:] or last
+            out["lines"] = lines + (1 if last != b"\n" else 0)
+            out["words"] = words
+        except OSError:
+            pass
+    probe = _ffprobe(p)
+    if probe:
+        out.update(probe)
+    if req.get("hash"):
+        try:
+            h = hashlib.sha256()
+            with open(p, "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+            out["sha256"] = h.hexdigest()
+        except OSError as e:
+            out["sha256_error"] = str(e)
+    return out
 
 
 def op_write(root, req):
@@ -511,7 +684,7 @@ def op_tree(root, req):
 OPS = {"list": op_list, "read": op_read, "write": op_write, "edit": op_edit,
        "move": op_move, "delete": op_delete, "mkdir": op_mkdir, "put": op_put,
        "glob": op_glob, "grep": op_grep, "tree": op_tree,
-       "image": op_image}
+       "image": op_image, "meta": op_meta}
 
 # The READ-ONLY ops. They may reach a WIDER root than the mutating ops: the
 # model gets read access to the whole filesystem, root '/' (his ask,
@@ -520,7 +693,7 @@ OPS = {"list": op_list, "read": op_read, "write": op_write, "edit": op_edit,
 # Absent argv[2], read ops fall back to the write root — so an older executor
 # over ssh (the OTHER host not yet pulled) just keeps the old jailed-both
 # behaviour rather than breaking.
-READ_OPS = {"list", "read", "glob", "grep", "tree", "image"}
+READ_OPS = {"list", "read", "glob", "grep", "tree", "image", "meta"}
 
 
 def main():

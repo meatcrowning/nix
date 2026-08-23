@@ -32,7 +32,15 @@ Rectangle {
 
     // Hug the text: the floor is the send button plus the box's own padding,
     // not a round 48 that left a dead band under a one-line prompt.
-    height: Math.max(sendBtn.height + 16, Math.min(160, input.implicitHeight + 16))
+    //
+    // The button is taller than one line of text, so a floor alone still leaves
+    // slack — and anchoring the input to the top dropped ALL of it under the
+    // line [his, 2026-08-23: "extra empty space under the text line and the
+    // bottom edge"]. The input is centred on the box now, so what is left reads
+    // as padding above and below rather than as a gap under the text.
+    readonly property int pad: 8
+    height: Math.max(sendBtn.height + 2 * pad,
+                     Math.min(160, input.implicitHeight + 2 * pad))
     color: Theme.bgAlt
     radius: Theme.rounding
     border.width: Theme.ctrlBorder
@@ -40,9 +48,10 @@ Rectangle {
 
     KineticFlickable {
         id: inputFlick
-        anchors { top: parent.top; bottom: parent.bottom
-                  left: parent.left; right: sendBtn.left
-                  margins: 8 }
+        anchors { left: parent.left; right: sendBtn.left
+                  leftMargin: root.pad; rightMargin: root.pad
+                  verticalCenter: parent.verticalCenter }
+        height: Math.min(root.height - 2 * root.pad, input.implicitHeight)
         contentWidth: width
         contentHeight: input.implicitHeight
         clip: true
