@@ -460,6 +460,63 @@ http(s) URL in, the page's **text** out, paged.
   a fair number of sites and a tool that cannot read them is not the tool this
   is meant to be. It cannot post a form or log in.
 
+## Web APIs (call_api)
+
+`fetch_url` already GETs a JSON endpoint — a booru's `posts.json` came back as
+raw text and worked. It was just bad at it: 20k characters of budget spent on
+eight posts of metadata nobody asked for, no way to send a credential, and the
+model guessing each site's endpoint shape. `CALL_API_TOOL` (`call_api`, offered
+every turn) is the same GET with the three missing pieces, and nothing more.
+
+- **Read-only by construction** (his call): `method` is a two-value enum, GET
+  and HEAD. A tool-calling model holding his keys cannot favourite, upload or
+  delete on a remote account, and that is a property of the schema, not of a
+  check somewhere.
+- **Field projection before the cap.** The response is parsed, the result list
+  located (`select`, a dotted path; the registry knows the wrapped ones), and
+  each row cut down to `fields` — dotted, so `file.url` reaches into e621's
+  nested shape. `["*"]` keeps whole rows. Twenty usable rows instead of eight
+  whole posts: measured, a 5-post danbooru search projects to 4.7k characters.
+- **The cap DROPS WHOLE ROWS, never cuts a document in half.** `API_CHARS`
+  (16000) against the serialized rows, popping from the end until it fits, with
+  `count_total`/`next_offset` to page. A half-serialized row is unreadable to
+  the model; a short list is not.
+- **`API_SITES` is the registry** — danbooru, safebooru, e621, gelbooru,
+  rule34, yandere, konachan: base, endpoint, default params, default fields,
+  where the list lives, and a note. It is a convenience, **not the surface**:
+  `url` reaches any http(s) JSON API, with `auth` naming a keyring entry. The
+  tool description is BUILT from the table (`_api_sites_blurb`), so it cannot
+  drift from what the code sends.
+- **A named client User-Agent, not fetch_url's browser one** — the opposite
+  rule holds here and it is measured (2026-08-22): danbooru's JSON API answers
+  that Chrome string with **403** and `chatter/1.0 (oracle desktop client)`
+  with 200. An API wants a named client; a page wants a browser.
+- **The keyring, so a key never enters a transcript.**
+  `~/.config/oracle/api-keys.json` (override `$ORACLE_API_KEYS`), read on every
+  call so adding a key needs no restart: entry name →
+  `{"params": {...}, "headers": {...}, "basic": [user, key]}`. Every credential
+  parameter is stripped from the URL that reaches the model, the session file
+  and the disclosure line (`_api_safe_url`, `API_SECRET_PARAMS`) — a session
+  transcript is a file that syncs.
+- **A site known to refuse anonymous requests is refused BEFORE the network**,
+  naming the exact JSON to put in the keyring (docs/DESIGN.md §10 — never a
+  silent failure, and never a guessed key). Measured 2026-08-22: gelbooru 401s,
+  e621 403s, rule34 answers 200 with a *"missing authentication"* body;
+  danbooru, safebooru, yandere and konachan answer anonymously.
+- **It runs wherever the window is** — the shared `QNetworkAccessManager`,
+  exactly like `fetch_url`/`fetch_image`, so no executor and no host branch —
+  and it is surfaced through the **web-search disclosure**
+  (`webSearchStarted`/`webSearchDone`/`webSearchError`), so an API call folds
+  into the same sources block as a search. No QML change was needed for it.
+- **It pairs with `fetch_image`**: a booru row's `file_url` is a direct image
+  URL, so "find me X and show it" is `call_api` then `fetch_image`, and the
+  tool descriptions say so.
+- **Harness `tools/api-tool-test.py`** — offline and deterministic (it builds
+  requests against a fake NAM and projects canned responses, and points the
+  keyring at a throwaway file), with `--live` for read-only GETs against the
+  four boorus that answer anonymously. Re-run it after touching the registry,
+  the projection or the keyring.
+
 ## Web images (fetch_image)
 
 The model can DOWNLOAD an image from the web and have it shown inline in the
