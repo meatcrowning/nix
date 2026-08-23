@@ -56,7 +56,9 @@ class Stub(http.server.BaseHTTPRequestHandler):
         ROUNDS["n"] += 1
         i = ROUNDS["n"]
         if i <= 2:
-            frames = [{"message": {"content": "looking at round %d." % i,
+            # Round 1 says NOTHING and only calls a tool — the bookkeeping that
+            # folds. Round 2 speaks, which is output and must stay drawn.
+            frames = [{"message": {"content": "" if i == 1 else "looking at round 2.",
                                    "tool_calls": [
                                        {"function": {"name": "get_current_time",
                                                      "arguments": {}}}]},
@@ -115,7 +117,7 @@ if len(replies) == 3:
           [r["step"] for r in replies] == [1, 2, 3],
           str([r["step"] for r in replies]))
     check("each round's prose stays on its own row",
-          replies[0]["body"].strip() == "looking at round 1."
+          replies[0]["body"].strip() == ""
           and replies[1]["body"].strip() == "looking at round 2."
           and replies[2]["body"].strip() == "and here is the answer.",
           json.dumps([r["body"] for r in replies]))
@@ -134,14 +136,14 @@ check("the fold reports itself", bool(mf))
 if mf:
     fold = json.loads(mf.group(1))
     check("his prompt is never folded", fold[0]["head"] == -1)
-    check("both finished rounds fold into the FIRST of them",
-          [f["head"] for f in fold] == [-1, 1, 1, -1],
+    check("the SILENT round folds and the speaking one does not",
+          [f["head"] for f in fold] == [-1, 1, -1, -1],
           json.dumps([f["head"] for f in fold]))
-    check("and they are folded, not merely groupable",
-          fold[1]["folded"] and fold[2]["folded"])
+    check("and it is folded, not merely groupable", fold[1]["folded"])
+    check("a round that produced output stays drawn", not fold[2]["folded"])
     check("the answer stays drawn", not fold[3]["folded"])
     check("the one line says how much is under it",
-          fold[1]["label"].startswith("2 rounds · 2 tools"), fold[1]["label"])
+          fold[1]["label"].startswith("1 round · 1 tool"), fold[1]["label"])
 
 print("FAILED: " + ", ".join(fails) if fails else "OK")
 sys.exit(1 if fails else 0)

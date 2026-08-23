@@ -957,6 +957,14 @@ the answer are drawn in full.
   is stored to say so — `win.isRoundRow(i)` reads it off the log — so the LIVE
   row is never folded (nothing follows it yet) and a round folds the instant
   the next one opens.
+- **And only if it SAID NOTHING** [his, 2026-08-23]. What folds is the
+  bookkeeping: a round that only called tools. A round that produced prose, a
+  picture or a video is OUTPUT, and output is never hidden — the first cut
+  folded away the round that fetched the image he had just asked to see.
+  `win.roundIsSilent(r)` is the test, read off the row's own roles (never a
+  child item's `visible` — the latch that hid a picture for good). A speaking
+  round stays drawn with its own tool disclosures shut, and it breaks the run
+  of folded rounds around it.
 - **One fold per run, not per round.** `roundGroupHead(i)` walks back to the
   first round row of the run; that row draws the line and holds the state
   (`roundsOpen`, a model role, so a `branchAt` truncation cannot leave the
