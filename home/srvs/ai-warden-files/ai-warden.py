@@ -564,13 +564,25 @@ class Warden:
         if time.time() - self.last_watchdog < 120:
             return
         cands = []
+        # "Hard pressure" is the watchdog's own trip — past CRIT_FLOOR or past
+        # the PSI trip — never the HARD_FLOOR byte count. The 2026-08-22 freeze
+        # tripped on PSI while avail was still 12.2G, and by the time avail
+        # sank to 2.5G the box was already dead; gating the interrupt on bytes
+        # would have missed the very window it exists for.
         for b in BACKENDS:
             held = self.footprint(b)
             if held < 1 * GiB:
                 continue
             bsy, _ = self.busy(b)
             if bsy:
-                continue
+                # A busy-but-LOADING ollama is still freeable under hard
+                # pressure: a lease is held but the GPU is not yet emitting
+                # tokens (gpu_util below the 40% busy bar), so interrupting it
+                # costs a reload, not a lost reply — and a reload is cheap and
+                # re-runnable where a freeze is not. A genuinely generating
+                # ollama (gpu_util >= 40) is still never touched.
+                if not (b == "ollama" and gpu_util() < 40):
+                    continue
             cands.append((held, b))
         if not cands:
             log("watchdog: pressure (avail=%s psi=%.1f) but nothing idle to free"

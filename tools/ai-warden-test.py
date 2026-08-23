@@ -204,12 +204,24 @@ w = world.install()
 w.watchdog()
 check("freed ollama", world.freed == ["ollama"], str(world.freed))
 
-print("\n...and never a busy one")
-world = World(avail_gb=2, ollama_gb=20, comfy_gb=6, comfy_queue=1)
+print("\n...and never a genuinely generating one")
+# A busy ollama is protected only while it is actually emitting tokens (gpu
+# >= 40). Here ollama is mid-reply AND generating, comfy is rendering: the
+# watchdog must freeze nobody out.
+world = World(avail_gb=2, ollama_gb=20, comfy_gb=6, comfy_queue=1, gpu=80)
 w = world.install()
 w.leases["ollama"] = W.time.time() + 300
 w.watchdog()
 check("froze nobody out", world.freed == [], str(world.freed))
+
+print("\n...but a busy-but-LOADING ollama under pressure IS freed")
+# A lease held with the GPU not yet generating is a model mid-load: a reload
+# is cheap and re-runnable where a freeze is not, so the watchdog frees it.
+world = World(avail_gb=2, ollama_gb=20, comfy_gb=6, comfy_queue=1)
+w = world.install()
+w.leases["ollama"] = W.time.time() + 300
+w.watchdog()
+check("freed the loading ollama", world.freed == ["ollama"], str(world.freed))
 
 print("\nPSI trips the watchdog even with bytes apparently free")
 world = World(avail_gb=20, psi=45.0, ollama_gb=18)
