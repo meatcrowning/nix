@@ -93,7 +93,25 @@ print("estimate: two numbers, not one")
 w = World(tags={"big:35b": 23.0}).install()
 need, hard = w.estimate("ollama", "big:35b")
 check("need is generous", need > 23 * GiB, "need=%s" % W.gb(need))
-check("hard is the raw weights", hard == int(23 * GiB), "hard=%s" % W.gb(hard))
+# `hard` is what will sit in RAM: the file, minus what free VRAM can hold, plus
+# the runtime. 23G of weights with 11G of VRAM free is ~13G of RAM, not 23.
+check("hard discounts what the GPU will hold",
+      int(12.5 * GiB) < hard < int(14 * GiB), "hard=%s" % W.gb(hard))
+w = World(tags={"big:35b": 23.0}, vram_free_gb=0.2).install()
+check("...and charges the whole file when the GPU is full",
+      w.estimate("ollama", "big:35b")[1] >= int(23 * GiB),
+      "hard=%s" % W.gb(w.estimate("ollama", "big:35b")[1]))
+
+print("a model that fits, on a machine painter is not using")
+# HIS case, 2026-08-23: painter shut for hours (its daemon up but holding only
+# its own 1.1G baseline, so freeing it releases nothing), 24.4G available, a
+# 22.2G model — refused for being 0.3G short of `raw + HARD_FLOOR`, which is a
+# bill it should never have been sent.
+w = World(avail_gb=24.4, comfy_gb=1.1, tags={"his:35b": 22.2},
+          vram_free_gb=10.8).install()
+r = w.reserve("ollama", "his:35b")
+check("his own model is not refused for a painter that holds nothing",
+      r["ok"], r["reason"])
 check("hard < need", hard < need)
 
 print("\na resident model costs nothing to talk to again")

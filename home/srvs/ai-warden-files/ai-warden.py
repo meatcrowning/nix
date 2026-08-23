@@ -112,6 +112,21 @@ VRAM_FLOOR = int(float(os.environ.get("AI_WARDEN_VRAM_FLOOR_GB", "0.7")) * GiB)
 #: costs an unnecessary unload, under-estimating costs the machine.
 OLLAMA_OVERHEAD = 1.10
 OLLAMA_FIXED = int(1.5 * GiB)
+#: …and what the GPU takes OFF the RAM bill. A model's tag size is its file
+#: size, but the layers ollama offloads live in VRAM, and the pages it read them
+#: through are file-backed cache the kernel can drop — `MemAvailable` already
+#: counts those as available. Charging the whole file against RAM therefore
+#: double-counts, and on `top` it double-counts by more than the machine has
+#: spare: 2026-08-23, with painter shut and 24.4G free, a 22.2G model was
+#: REFUSED for being 0.3G short of `raw + HARD_FLOOR` — while that same model
+#: had been running all day with 10.8G of it on the GPU [his: *"why does chatter
+#: keep erroring out saying its still short after unloading painter? i havent
+#: even opened painter in hours"*]. So a REFUSAL is measured against what will
+#: actually sit in RAM: the file, minus what free VRAM can hold, plus the
+#: runtime. `need` — the number that decides whether to FREE — is untouched and
+#: still counts the whole file, because over-freeing is cheap and the freeze
+#: this daemon exists for came from under-estimating.
+OLLAMA_HARD_FIXED = int(1 * GiB)
 COMFY_OVERHEAD = 1.25
 COMFY_FIXED = int(2 * GiB)
 COMFY_DEFAULT = int(14 * GiB)      # no hint from painter: assume a big family
@@ -238,6 +253,33 @@ def comfy_cgroup():
                   recursive=True):
         return cgroup_bytes(p)
     return 0
+
+
+def hogs_note():
+    """", and it is X and Y holding it" — the biggest RSS outside the backends.
+
+    A refusal that names no culprit sends him looking at the two AI backends,
+    which is exactly where the memory is NOT when this branch fires."""
+    try:
+        out = subprocess.run(["ps", "-eo", "rss=,comm=", "--sort=-rss"],
+                             capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    skip = ("ollama", "python3", "comfy")
+    named = []
+    for line in out.splitlines()[:40]:
+        try:
+            rss, comm = line.split(None, 1)
+            rss = int(rss) * 1024
+        except ValueError:
+            continue
+        comm = comm.strip()
+        if rss < 1 * GiB or comm in skip:
+            continue
+        named.append("%s %s" % (comm, gb(rss)))
+        if len(named) == 3:
+            break
+    return (" — " + ", ".join(named) + " are holding it") if named else ""
 
 
 def vram():
@@ -399,10 +441,16 @@ class Warden:
             if not raw:
                 raw = int(6 * GiB)      # unknown model: assume a middling one
             want = int(raw * OLLAMA_OVERHEAD + OLLAMA_FIXED)
+            # What the GPU will take off the RAM bill (OLLAMA_HARD_FIXED above).
+            # Measured at decision time, so a GPU that is already full charges
+            # the whole model against RAM — conservative in the right direction.
+            vf, _vt = vram()
+            on_gpu = min(raw, max(0, vf - VRAM_FLOOR))
+            hard = max(0, raw - on_gpu) + OLLAMA_HARD_FIXED
             # Swapping model A for model B frees A first (OLLAMA_NUM_PARALLEL
             # and OLLAMA_MAX_LOADED_MODELS are both 1), so only the difference
             # is genuinely new.
-            return max(0, want - held), max(0, raw - held)
+            return max(0, want - held), max(0, hard - held)
         raw = int(hint) if hint else int(COMFY_DEFAULT / COMFY_OVERHEAD)
         want = int(raw * COMFY_OVERHEAD + COMFY_FIXED)
         # A comfy already holding at least this much has the weights it needs or
@@ -527,9 +575,16 @@ class Warden:
         # has already been given back at this point, so a shortfall here means
         # something outside the two backends is holding the machine.
         if hard and (avail - hard) < HARD_FLOOR:
+            # SAY WHAT IS ACTUALLY HOLDING IT. "still short after unloading
+            # painter" is a lie when painter released nothing — it had no
+            # weights loaded, and the memory is somewhere else entirely. Name
+            # the floor too: "needs 22.2G, 24.4G free" reads as arithmetic
+            # nonsense until you know 2.5G of that is reserved [his, 2026-08-23].
+            gave = ("after unloading %s, " % NICE[other]) if released else ""
             return self._refuse(
-                "still short after unloading %s: needs %s, %s free"
-                % (NICE[other], gb(hard), gb(avail)), need, avail, freed)
+                "%sneeds %s plus a %s floor, only %s free%s"
+                % (gave, gb(hard), gb(HARD_FLOOR), gb(avail), hogs_note()),
+                need, avail, freed)
         self._take_lease(backend, lease)
         return {"ok": True, "reason": "", "freed": freed, "need": need,
                 "available": avail}

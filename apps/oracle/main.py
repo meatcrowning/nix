@@ -5650,6 +5650,7 @@ class Ollama(QObject):
 
         gen = os.environ.get("ORACLE_PAINTER", "").strip()
         cmd = gen or ("painter-qtenv python3 " + shlex.quote(PAINTER_SMOKE))
+        stub = bool(gen)
         cmd += " --prompt " + shlex.quote(str(args.get("prompt") or ""))
         cmd += " --out-dir " + shlex.quote(MAKE_IMAGE_DIR)
         cmd += flag("--negative", "negative")
@@ -5658,12 +5659,15 @@ class Ollama(QObject):
         cmd += flag("--height", "height", int)
         cmd += flag("--steps", "steps", int)
         cmd += flag("--seed", "seed", int)
-        script = ("mkdir -p %s; " % shlex.quote(MAKE_IMAGE_DIR)
-                  + "systemctl --user start comfy-painter.service >/dev/null 2>&1; "
-                  + "for i in $(seq 1 90); do "
-                    "curl -sf -m 2 -o /dev/null http://127.0.0.1:8188/system_stats "
-                    "&& break; sleep 2; done; "
-                  + cmd)
+        # The BACKEND preamble is skipped for a stub: a test that starts
+        # comfy-painter is a test that changed his machine, and this one did —
+        # it left the daemon up and 1.1G held after a run [2026-08-23].
+        wake = ("" if stub else
+                "systemctl --user start comfy-painter.service >/dev/null 2>&1; "
+                "for i in $(seq 1 90); do "
+                "curl -sf -m 2 -o /dev/null http://127.0.0.1:8188/system_stats "
+                "&& break; sleep 2; done; ")
+        script = "mkdir -p %s; %s%s" % (shlex.quote(MAKE_IMAGE_DIR), wake, cmd)
         if ON_BOOK:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
             ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")

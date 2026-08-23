@@ -574,6 +574,15 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
       GiB of VRAM — it is blind for the whole duration of a load, which is
       exactly the window a freeze happens in. `memory.current` was correct
       throughout, so every footprint is `max(API, cgroup)`.
+    - **A refusal is measured against what will sit in RAM, not the file
+      size.** A model's tag size is its whole file, but the layers ollama
+      offloads live in VRAM and the pages it read them through are file-backed
+      cache `MemAvailable` already counts as free — so charging the file against
+      RAM double-counts. On 2026-08-23 that refused his own 22.2G model with
+      painter shut and 24.4G free, for being 0.3G short. `hard` now subtracts
+      what free VRAM can hold; `need` (which decides whether to FREE) still
+      counts the whole file, because over-freeing is cheap and the freeze this
+      daemon exists for came from under-estimating.
     - **RAM refuses; VRAM only tidies.** A VRAM shortfall degrades a job
       (ollama offloads, comfy errors); only RAM takes the desktop with it.
     - **Two floors, on purpose.** `RAM_FLOOR` (6G) decides whether to *free* —
