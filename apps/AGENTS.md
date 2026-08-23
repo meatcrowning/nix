@@ -295,6 +295,15 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
       session — there is no window roll there to match — and `qmlcommon/VScroll.qml`
       takes `styleScrollWidth` for its gutter. **Adding one is a row in
       `oxygenstyle._KEYS` and a Property in `deskstyle.py`**, nothing more.
+    - **Where a real `QStyle` is in the window, ask IT rather than these
+      numbers.** `qmlcommon/+plasma/VScroll.qml` (2026-08-22) is a bare
+      `QtQuick.Controls` `ScrollBar` — under `org.kde.desktop` the live style
+      paints it, so Oxygen's groove, gradient slider and chevron steppers are
+      the genuine ones. `../VScroll.qml`'s hand-drawn Plasma pill imitated
+      *Breeze* and was the one control in a chatter/painter/player window that
+      still read as not themed. The twin is selected only for the `kdeshell`
+      apps (the file selector, below), which are the only ones with a
+      `QApplication` at all.
     - Oxygen's `AnimationsEnabled=false` arrives as `reduceMotion`, not as a
       silent ignore: a window whose real widgets have stopped animating must
       not have QML still sliding inside it.
