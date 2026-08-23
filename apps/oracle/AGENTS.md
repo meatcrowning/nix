@@ -1343,6 +1343,43 @@ picker, and the window carries on from the fork. Nothing is deleted anywhere.
 re-sends the prompt above the answer unchanged. Both stand down while a reply is
 streaming. Harness: `tools/toolbox-test.py`.
 
+## The models themselves (manage_models)
+
+**Asked to install a model, chatter reached for `run_bash` and lost** [his,
+2026-08-23]. `ollama pull qwen3.6:27b` died with `runtime/cgo: pthread_create
+failed` before a byte was downloaded, the model read that as thread exhaustion,
+delegated it to a subagent, failed the same way, and finished by advising him to
+edit `/etc/security/limits.conf` — *"which won't work on macOS"*. Two separate
+faults, both worth naming:
+
+1. **The runner's `RLIMIT_AS` was 1 GiB, and address space is not memory.** A Go
+   runtime RESERVES far more virtual space than it touches (arenas, 8 MB of
+   stack per OS thread), so EVERY Go binary on this machine died under that cap
+   while a python loop allocating real memory sailed under it. Measured with
+   `ulimit -v`: `ollama list` aborts at 1 GiB and works at 2 GiB. It is 4 GiB
+   now (`tools/sandbox-exec.py`), and what actually bounds a runaway is still
+   the wall clock, the CPU cap and oomd.
+2. **A pull was never a shell job.** `ollama` on the command line is a client
+   for the daemon chatter is ALREADY a client of. `manage_models` calls that API
+   directly: `list` (installed models, biggest first), `show` (the real context
+   length and capabilities, off `/api/show`), `pull` (streamed, so progress goes
+   to the same live tail a running program writes to — a 20 GB download looks
+   like work rather than a hang), and `remove`. No shell, no rlimits, and
+   ollama's own error text instead of a shell's exit code.
+
+**A pull checks the DISK first** (`MODEL_DISK_FLOOR`, 5 GB): the weights land on
+`/`, which runs fairly full, and finding that out 18 GB in is not a check. It
+carries no transfer timeout — `MODEL_PULL_MS` (90 min) is the only leash — and
+it is the same endpoint from either machine, since book's `$OLLAMA` is the
+tunnel to top.
+
+**`remove` needs `confirm: true`.** Deleting 20 GB of weights is not undoable
+and is not the kind of thing a model should be able to do while tidying up; the
+first call comes back telling it to ask him. Harness: `tools/toolbox-test.py`,
+against a stand-in ollama that serves `/api/tags`, `/api/show`, a streamed
+`/api/pull` and `/api/delete` — so a test run never pulls onto his disk or
+deletes a model he uses.
+
 ## The music player (control_player)
 
 **A reply can see and drive what is playing** [his, 2026-08-23: *"give agents
