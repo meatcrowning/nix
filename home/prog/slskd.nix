@@ -60,9 +60,10 @@
   # would double the read load on `top`'s samba for identical content. Gated on
   # `host`, not on path, so both machines evaluate the same file.
   #
-  # `global.download.slots` caps how many downloads proceed at once. Do not be
-  # misled by the `global:` key — 0.24.x reads that (master later renamed the
-  # block `transfers:`); it feeds the Soulseek client's
+  # `transfers.download.slots` caps how many downloads proceed at once. The
+  # block is `transfers:` (renamed from `global:` by slskd PR #1672; the pinned
+  # 0.26.0 rejects the old `global:` key outright and refuses to start — that is
+  # the crash-loop signature in the journal). It feeds the Soulseek client's
   # `maximumConcurrentDownloads`, i.e. the number of simultaneous download
   # connections slskd will hold. It is read once at startup (OptionsAtStartup in
   # Program.cs), so changing it needs a `systemctl --user restart slskd`, not
@@ -114,7 +115,7 @@
       if [ "$host" = "top" ]; then
         sharesYml=$'  directories:\n    - /run/media/lam/SSD/aud'
       fi
-      run sh -c 'printf "web:\n  ip_address: 127.0.0.1,[::1]\n  https:\n    ip_address: 127.0.0.1,[::1]\n  authentication:\n    disabled: true\n    api_keys:\n      soul_sync:\n        key: \"%s\"\n        role: Administrator\n        cidr: 127.0.0.1/32,::1/128\nglobal:\n  download:\n    slots: 50\nshares:\n%s\n" "$1" "$2" > "$3"' _ \
+      run sh -c 'printf "web:\n  ip_address: 127.0.0.1,[::1]\n  https:\n    ip_address: 127.0.0.1,[::1]\n  authentication:\n    disabled: true\n    api_keys:\n      soul_sync:\n        key: \"%s\"\n        role: Administrator\n        cidr: 127.0.0.1/32,::1/128\ntransfers:\n  download:\n    slots: 50\nshares:\n%s\n" "$1" "$2" > "$3"' _ \
         "$(cat "$keyFile")" "$sharesYml" "$HOME/.local/share/slskd/slskd.yml"
       usrFile="$HOME/.secrets/slskd-username"
       pwdFile="$HOME/.secrets/slskd-password"
