@@ -119,6 +119,31 @@ check("a 31-char booru md5 is refused before the request",
 run("![one](%s/a.png)\n![one again](%s/a.png)" % (BASE, BASE))
 check("a repeated URL is fetched once", o._md_images["n"] == 1)
 
+# 5. a picture the turn ALREADY fetched, named again in the write-up, is drawn
+#    on the bubble that names it — no second download, and never twice on one
+#    bubble. A turn that gathers pictures over several rounds and then writes
+#    them up used to end with a list naming eleven of them and a bubble holding
+#    none [his, 2026-08-22]: they were up-thread on the round bubbles that
+#    fetched them, and the write-up's own markdown is demoted to links.
+settle = QTimer()
+settle.setSingleShot(True)
+settle.timeout.connect(app.quit)
+settle.start(1500)
+app.exec()                       # let case 4's fetch land before we look
+entries.clear()
+o._acc_content = "here they all are\n\n![again](%s/a.png)" % BASE
+o._row_urls = set()              # the write-up is its own bubble
+check("naming a picture already fetched starts no second download",
+      o._attach_typed_images() is False)
+check("...and it is drawn on the bubble that names it",
+      len(entries) == 1 and entries[0].get("ok") is True
+      and entries[0].get("alt") == "again", json.dumps(entries)[:160])
+entries.clear()
+o._attach_typed_images()         # same bubble, same picture
+check("...but never twice on the same bubble", entries == [],
+      json.dumps(entries)[:160])
+o._set_busy(False)
+
 # ---- copying a reply keeps its markdown ----------------------------------
 # The clipboard here is the OFFSCREEN platform's own, process-local — his
 # session's clipboard is never touched (root AGENTS.md).
