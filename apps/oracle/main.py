@@ -472,6 +472,136 @@ EXEC_TOOL = {
 }
 EXEC_TOOL_NAMES = {"run_python"}
 
+#: SKILLS — the reusable expert instructions Claude Code carries, reached here
+#: as a REAL TOOL rather than baked in as a persona (his call, 2026-08-22: the
+#: video-prompt skill used to be the `vidprompt` base prompt, which meant
+#: switching persona for one message and switching back afterwards, and only
+#: ever covered the one skill). A skill is a directory under ~/.claude/skills:
+#: `SKILL.md` (YAML frontmatter with `name`/`description`, then the
+#: instructions) plus optional reference guides beside it. Nothing is vendored
+#: — `~/.claude` syncs to both hosts (home/srvs/claude-state.nix), so chatter
+#: and Claude Code read ONE source of truth and none of it lands in this
+#: public repo. Read in-process off the host the window runs on: it is a plain
+#: file read, so unlike the sandbox/session/memory stores it needs no ssh
+#: branch to `top`.
+SKILLS_ROOT = os.path.expanduser(
+    os.environ.get("ORACLE_SKILLS", "~/.claude/skills"))
+#: One skill file's text, capped so a huge guide cannot swallow the context
+#: (the largest today, video-prompt's full-reference guide, is ~24k).
+SKILL_MAX_CHARS = 40000
+SKILL_TOOL_NAMES = {"use_skill"}
+
+
+def skill_dirs():
+    """Every readable skill directory, sorted by name. Absent root -> []."""
+    try:
+        return sorted((d for d in Path(SKILLS_ROOT).iterdir()
+                       if (d / "SKILL.md").is_file()), key=lambda d: d.name)
+    except OSError:
+        return []
+
+
+def _skill_read(path):
+    """One skill file as `(text, truncated)`, capped at SKILL_MAX_CHARS."""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if len(text) > SKILL_MAX_CHARS:
+        return (text[:SKILL_MAX_CHARS], True)
+    return (text, False)
+
+
+def _skill_front(text):
+    """`(description, body)` from a SKILL.md — the `description:` out of the
+    leading `---` frontmatter (continuation lines folded in), and the
+    instructions with that frontmatter stripped. No YAML parser: the shape is
+    fixed and stdlib-only is the rule for everything chatter shells out to."""
+    if not text.startswith("---"):
+        return ("", text)
+    end = text.find("\n---", 3)
+    if end < 0:
+        return ("", text)
+    head = text[3:end]
+    body = text[end + 4:].lstrip("\n")
+    desc, key = "", ""
+    for line in head.splitlines():
+        if re.match(r"^\s+\S", line) and key == "description":
+            desc += " " + line.strip()          # folded continuation
+            continue
+        m = re.match(r"^([A-Za-z_-]+):\s*(.*)$", line)
+        if not m:
+            continue
+        key, val = m.group(1), m.group(2).strip()
+        if key == "description":
+            desc = val
+    return (desc.strip(), body)
+
+
+def skill_catalog():
+    """`[{name, description}]` for every installed skill — what the system
+    prompt lists and what the tool's own `name` enum is built from."""
+    out = []
+    for d in skill_dirs():
+        try:
+            text, _ = _skill_read(d / "SKILL.md")
+        except OSError:
+            continue
+        desc, _body = _skill_front(text)
+        out.append({"name": d.name, "description": desc})
+    return out
+
+
+def skill_tool(catalog=None):
+    """The `use_skill` function tool, built from the skills actually present —
+    the name enum and the description name them, so the model cannot call a
+    skill that is not installed. `None` when there are none, and the tool is
+    then not offered at all (docs/DESIGN.md §10 — never an affordance that is
+    not there)."""
+    cat = skill_catalog() if catalog is None else catalog
+    if not cat:
+        return None
+    listing = "; ".join("%s: %s" % (s["name"], s["description"]) for s in cat)
+    return {
+        "type": "function",
+        "function": {
+            "name": "use_skill",
+            "description": (
+                "Load a SKILL — a set of expert instructions for one specific "
+                "job, written for exactly this task and better than anything "
+                "you would improvise. Call it BEFORE you start writing "
+                "whenever the job matches one, then follow what it returns to "
+                "the letter, including its output contract (a skill may "
+                "require that your whole reply IS the thing it produces, with "
+                "no preamble and no offer to revise). Call it again with "
+                "`guide` to read one of the reference guides it lists. "
+                "Installed skills — " + listing),
+            "parameters": {"type": "object", "properties": {
+                "name": {"type": "string",
+                         "enum": [s["name"] for s in cat],
+                         "description": "Which skill to load."},
+                "guide": {"type": "string",
+                          "description": ("Optional: a reference guide of that "
+                                          "skill to read in full, by the name "
+                                          "the skill listed. Omit to get the "
+                                          "skill's instructions.")}},
+                "required": ["name"]}},
+    }
+
+
+def skills_note(catalog=None):
+    """The always-on listing of installed skills for the system prompt — the
+    same thing Claude Code puts in an agent's context. A model does not go
+    looking for a tool it was not told about, so the catalog is named every
+    turn; the instructions themselves stay behind the tool call, so a skill
+    costs context only when it is actually used."""
+    cat = skill_catalog() if catalog is None else catalog
+    if not cat:
+        return ""
+    lines = ["Skills available to you, loaded with the use_skill tool. Each is "
+             "expert instructions for one job; when what he asks matches one, "
+             "call use_skill FIRST and then follow it exactly, including its "
+             "output contract:"]
+    lines += ["- %s — %s" % (s["name"], s["description"]) for s in cat]
+    return "\n".join(lines)
+
 #: How many tool rounds one turn may take before we stop looping and let the
 #: model answer with what it has — a guard against a model that keeps searching.
 MAX_TOOL_ROUNDS = 4
@@ -527,7 +657,9 @@ CAPABILITY_NOTE = (
     "time in any timezone; read, write, edit, move, delete and search files in a "
     "jailed sandbox on the host (including any files the user drags onto the "
     "window, which are staged into that sandbox for you); read your past "
-    "conversations; save, list and delete your own durable memories; and RUN "
+    "conversations; save, list and delete your own durable memories; load a "
+    "SKILL (use_skill) — expert instructions for one job, listed for you "
+    "below; and RUN "
     "Python code (run_python) — real execution on the host, not a simulation. "
     "The code runs with your file sandbox as its working directory and no "
     "network, and is killed after a few seconds; it is not a full container, so "
@@ -685,69 +817,6 @@ PROMPT_PRESETS = [
         "lecturing and no corporate polish. Match his energy, ask a friendly "
         "follow-up when it fits, and don't pad short exchanges with formality. "
         "Still be honest and helpful when he actually needs something.")},
-    # The video-prompt writer. The routing table, defaults and traps are inline
-    # (a small model must not need a tool call to get the shape right); the
-    # field-by-field format lives in the guides under ~/.claude/skills, which
-    # the read-only file tools reach — one source of truth with the same skill
-    # Claude Code runs, and it syncs to both hosts, so nothing is vendored here.
-    {"id": "vidprompt", "label": "Video prompt writer", "text": (
-        "You write prompts for video-generation models, and nothing else.\n\n"
-        "THE OUTPUT CONTRACT: your entire reply is the prompt. No preamble, no "
-        "\"here's the prompt\", no code fence, no notes on which mode you chose "
-        "or what you assumed, no offer to adjust it. If he wants a change he "
-        "says so and you emit a new prompt, alone again. Never ask a "
-        "clarifying question — missing information is invented: pick the "
-        "reading that makes the most watchable video and commit to it. Sparse "
-        "input is licence to author, not a reason to stall.\n\n"
-        "Everything is in English, except dialogue and lyrics inside <d> and "
-        "text visibly present in the scene — those keep their original "
-        "language and punctuation verbatim.\n\n"
-        "MODE, routed on what is actually attached rather than what he says he "
-        "wants: no image -> T2VA; one image, the opening (the default reading) "
-        "-> I2VA; one image stated to be the ending -> L2VA; two images -> "
-        "FL2VA, first then last; assets used as characters, scenes, styles, "
-        "source footage or a voice rather than as concrete frames, or more "
-        "than two assets -> full-reference.\n\n"
-        "BEFORE WRITING, read the guide the route lands on with read_file: "
-        "`.claude/skills/video-prompt/references/base-modes.md` for T2VA / "
-        "I2VA / FL2VA / L2VA, or "
-        "`.claude/skills/video-prompt/references/full-reference-mode.md` for "
-        "full-reference — which inherits the shot, camera, speaker and sound "
-        "formats from the base guide, so read both on that branch. Page "
-        "through the whole guide; it is longer than one read returns. When an "
-        "image is attached, look at it and take the style, subjects, clothing, "
-        "colours, props, composition and lighting from what is there — never "
-        "describe an image you were not given.\n\n"
-        "DEFAULTS when he did not say: 5 seconds, so the alignment line reads "
-        "`5.00-second mark` (use his number when he gives one, to two "
-        "decimals); one shot, unless the content genuinely needs a cut, and "
-        "FL2VA in particular stays a single shot so the model can interpolate; "
-        "style `Live-action, cinematic` for T2VA, taken from the reference "
-        "image otherwise; no dialogue — only write <d> content he supplied or "
-        "asked for, never invent lines and never translate the ones you are "
-        "given; write a score for non_diegetic_music unless he asked for none, "
-        "then `N/A`.\n\n"
-        "SHAPE. T2VA / I2VA / FL2VA / L2VA: the alignment instruction (absent "
-        "for T2VA) as the first line, one blank line, then "
-        "integrated_multimodal_description, overall_soundscape and "
-        "non_diegetic_music, separated by blank lines. Full-reference: six "
-        "sections in order — subject_definitions, summary, retention_analysis, "
-        "detailed_description, overall_soundscape, non_diegetic_music.\n\n"
-        "TRAPS. [Shot 1] carries no timestamp; every later shot opens with a "
-        "strictly increasing `At MM:SS.mmm,` inside the duration. Camera "
-        "motion is natural English action inside the shot (\"the camera pushes "
-        "in with small amplitude at slow speed toward…\"), never labels "
-        "stacked at the end. Speaker IDs (S1), (S2) are assigned in order of "
-        "actual vocal events and reused; a character who never vocalises gets "
-        "none, and the identifying phrase, action and delivery live outside "
-        "<d> while only the language tag and the spoken words live inside. "
-        "overall_soundscape is ambience, physical action sound and non-verbal "
-        "human sound only — dialogue, singing and diegetic music stay in the "
-        "description. non_diegetic_music is instrumentation, tempo, rhythm and "
-        "dynamics, with no mood words and no explaining what the music makes "
-        "the viewer feel. Visible on-screen text goes in double quotes, "
-        "verbatim, untranslated. For FL2VA do not write two static image "
-        "descriptions — write the path between them.")},
 ]
 PROMPT_PRESET_IDS = {p["id"] for p in PROMPT_PRESETS}
 
@@ -1714,6 +1783,9 @@ class Ollama(QObject):
         base += "\n\n" + RECALL_GUIDANCE
         base += "\n\n" + SAVE_GUIDANCE
         base += "\n\n" + CAPABILITY_NOTE
+        skills = skills_note()
+        if skills:
+            base += "\n\n" + skills
         if research:
             base += "\n\n" + research
         # His chosen base (a preset or his own custom text) LEADS — the time
@@ -1805,7 +1877,8 @@ class Ollama(QObject):
         can call (docs/DESIGN.md §10 — a true list, not a remembered one)."""
         tools = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, SELF_TOOL,
                  IMAGE_TOOL, SEARCH_IMAGE_TOOL, EXEC_TOOL]
-                 + list(SESSION_TOOLS) + list(MEMORY_TOOLS))
+                 + list(SESSION_TOOLS) + list(MEMORY_TOOLS)
+                 + [t for t in [skill_tool()] if t])
         names = [t.get("function", {}).get("name", "") for t in tools
                  if isinstance(t, dict) and t.get("function")]
         return sorted(n for n in names if n)
@@ -1853,7 +1926,8 @@ class Ollama(QObject):
         # model.
         payload["tools"] = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL,
                             SELF_TOOL, IMAGE_TOOL, SEARCH_IMAGE_TOOL, EXEC_TOOL]
-                            + list(SESSION_TOOLS) + list(MEMORY_TOOLS))
+                            + list(SESSION_TOOLS) + list(MEMORY_TOOLS)
+                            + [t for t in [skill_tool()] if t])
         body = json.dumps(payload).encode("utf-8")
         req = QNetworkRequest(QUrl(OLLAMA + "/api/chat"))
         req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
@@ -2012,6 +2086,8 @@ class Ollama(QObject):
                 self._run_session_tool(name, args, i, remaining, calls)
             elif name in MEMORY_TOOL_NAMES:
                 self._run_memory_tool(name, args, i, remaining, calls)
+            elif name in SKILL_TOOL_NAMES:
+                self._run_skill_tool(args, i, remaining, calls)
             else:
                 self._tool_results[i] = {
                     "role": "tool", "tool_name": name,
@@ -2694,6 +2770,85 @@ class Ollama(QObject):
         mem = result.get("memory") or {}
         verb = "updated" if a.get("id") else "saved"
         return "%s memory %s" % (verb, mem.get("id", ""))
+
+    # ---- skills (Claude Code's own, loaded on demand) ----
+
+    def _run_skill_tool(self, args, idx, remaining, calls):
+        """use_skill: hand the model one skill's instructions, or one of that
+        skill's reference guides in full. Synchronous — a local file read, no
+        subprocess and no host branch (`~/.claude` is on both machines). A
+        whole guide comes back in ONE call rather than the model paging it
+        through read_file, which is the point of it being a tool."""
+        a = args if isinstance(args, dict) else {}
+        name = str(a.get("name", "")).strip()
+        guide = str(a.get("guide", "")).strip()
+        catalog = skill_catalog()
+        known = {s["name"] for s in catalog}
+        self.fileToolStarted.emit(
+            ("reading %s guide %s" % (name, guide)) if guide
+            else ("loading skill " + (name or "?")))
+        if name not in known:
+            result = {"error": "unknown skill: " + (name or "(none given)"),
+                      "available": sorted(known)}
+            self._skill_done(result, "use_skill: " + result["error"], idx,
+                             remaining, calls)
+            return
+        root = Path(SKILLS_ROOT) / name
+        try:
+            if guide:
+                # The guide is resolved by BASENAME against the skill's own
+                # references, never by the path the model hands us — the same
+                # jail shape sessions-store.py uses for a session id.
+                stem = Path(guide).name
+                hit = next((f for f in self._skill_guides(root)
+                            if f.name == stem or f.stem == Path(stem).stem), None)
+                if hit is None:
+                    result = {"error": "unknown guide: " + guide,
+                              "skill": name,
+                              "guides": [f.name for f in self._skill_guides(root)]}
+                    self._skill_done(result, "use_skill: " + result["error"],
+                                     idx, remaining, calls)
+                    return
+                text, cut = _skill_read(hit)
+                result = {"skill": name, "guide": hit.name, "text": text}
+                outcome = "read %s/%s" % (name, hit.name)
+            else:
+                text, cut = _skill_read(root / "SKILL.md")
+                desc, body = _skill_front(text)
+                guides = [f.name for f in self._skill_guides(root)]
+                result = {"skill": name, "description": desc,
+                          "instructions": body, "guides": guides}
+                if guides:
+                    result["note"] = ("Call use_skill again with guide=<name> "
+                                      "to read one of these in full.")
+                outcome = "loaded skill " + name
+            if cut:
+                result["truncated"] = ("output capped at %d characters"
+                                       % SKILL_MAX_CHARS)
+        except OSError as e:
+            result = {"error": "cannot read skill %s: %s" % (name, e)}
+            outcome = "use_skill: " + result["error"]
+        self._skill_done(result, outcome, idx, remaining, calls)
+
+    @staticmethod
+    def _skill_guides(root):
+        """A skill's reference guides — the markdown beside SKILL.md, whether
+        it keeps them in `references/` or loose in the skill directory."""
+        out = []
+        for base in (root / "references", root):
+            try:
+                out += sorted(f for f in base.iterdir()
+                              if f.is_file() and f.name != "SKILL.md"
+                              and f.suffix.lower() in (".md", ".txt"))
+            except OSError:
+                pass
+        return out
+
+    def _skill_done(self, result, outcome, idx, remaining, calls):
+        self._tool_results[idx] = {"role": "tool", "tool_name": "use_skill",
+                                   "content": json.dumps(result)}
+        self.fileToolDone.emit(outcome[:200], "error" not in result)
+        self._tool_done(remaining, calls)
 
 
 class Backend(QObject):

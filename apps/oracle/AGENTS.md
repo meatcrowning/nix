@@ -134,7 +134,7 @@ nothing until at least one stat exists.
 
 A selectable **base system prompt** leads every turn's system message: a handful
 of built-in **presets** (`default` — no persona, the historical behaviour —
-plus `concise`, `coder`, `tutor`, `writer`, `casual`, `vidprompt`) and **your own custom
+plus `concise`, `coder`, `tutor`, `writer`, `casual`) and **your own custom
 text**, picked from the *prompt* row (a boxed selector, docs/DESIGN.md §7.2, like
 the model/session pickers) with an **edit** button that opens the custom-text
 editor. The dropdown carries a **preview pane** (docs/DESIGN.md §9.1) that shows
@@ -154,18 +154,46 @@ be read before it is chosen, not picked blind from a label.
   is kept even while a preset is active. `setPromptChoice`/`setCustomPrompt`
   (slots) write it; `promptPresets`/`promptChoice`/`customPrompt` (properties)
   feed the UI. Malformed/absent → the `default` preset.
-- **`vidprompt` is the one preset that reads a file.** It is Claude Code's own
-  `video-prompt` skill turned into a persona: the output contract (the whole
-  reply is the prompt, never a clarifying question), the T2VA / I2VA / FL2VA /
-  L2VA / full-reference routing, the defaults and the traps are inline — a
-  small model must not need a tool call to get the shape right — while the
-  field-by-field format stays in the skill's own guides, which the preset tells
-  the model to `read_file` at
-  `.claude/skills/video-prompt/references/{base-modes,full-reference-mode}.md`.
-  That works because the read-only file tools reach his whole home (see *FS*),
-  and `~/.claude` syncs to both hosts, so the guides are **not vendored here**
-  — one source of truth with the skill, and nothing of it lands in this public
-  repo.
+
+## Skills (Claude Code's own, as a real tool)
+
+`use_skill` (`skill_tool()`, offered every turn, dispatched `_run_skill_tool`)
+loads a **skill** — a set of expert instructions for one job — mid-turn, and
+the model follows it, output contract and all. It is the same mechanism Claude
+Code has, ported here in the same shape: the **catalog** (each skill's name and
+`description`) is named in every system prompt (`skills_note()`), and the
+**instructions** cost context only when the model actually calls the tool.
+
+Until 2026-08-22 the one skill chatter had was `vidprompt`, a **base-prompt
+preset** — which meant picking a persona for one message, getting a video prompt
+for everything you said afterwards, and picking the persona back off. **That
+preset is gone**; a persisted `{"choice": "vidprompt"}` falls back to `default`
+by itself (`_load_prompt_config` already rejects an unknown id). One tool now
+covers every skill, and a skill added under `~/.claude/skills` is offered with
+no code change at all.
+
+- **Where they live** — `SKILLS_ROOT` (`~/.claude/skills`, override
+  `$ORACLE_SKILLS`): a directory per skill holding `SKILL.md` (YAML
+  frontmatter `name`/`description`, then the instructions) plus reference
+  guides in `references/`. **Nothing is vendored here** — `~/.claude` syncs to
+  both hosts (`home/srvs/claude-state.nix`), so chatter and Claude Code read
+  ONE source of truth and none of it lands in this public repo. Today:
+  `video-prompt`, `flux-klein-edit` (the painter edit-mode instruction) and
+  `krea-prompt` (the positive/negative image pair).
+- **`use_skill(name)`** returns that skill's `description`, its `instructions`
+  (the SKILL.md with frontmatter stripped) and the names of its `guides`;
+  **`use_skill(name, guide=…)`** returns one guide **in full**, in ONE call —
+  the point of it being a tool rather than the old preset's instruction to page
+  through the file with `read_file`. Capped at `SKILL_MAX_CHARS` (40000; the
+  largest guide today is ~24k) and a cut is reported in the result.
+- **Read in-process, no host branch.** Unlike the sandbox/session/memory
+  stores it is a plain local file read, so it runs wherever the window is —
+  both machines have the same `~/.claude`.
+- **The `name` is an enum built from what is installed**, and the tool is not
+  offered at all when the skills directory is missing (docs/DESIGN.md §10 —
+  never an affordance that is not there). A `guide` is resolved by **basename**
+  against the skill's own files, so a crafted path cannot escape the skill
+  directory — the jail shape `sessions-store.py` uses for a session id.
 
 ## Sessions
 
