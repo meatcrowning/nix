@@ -92,6 +92,18 @@
     # ships a patchelf'd prebuilt, so pinning its nixpkgs would only forfeit
     # that cache hit. Bump with `nix flake update llm-agents`.
     llm-agents.url = "github:numtide/llm-agents.nix";
+
+    # agenix — the one secret this desktop keeps in-repo: chatter's Tavily API
+    # key (sys/ai/tavily-key.nix). ~/nix is PUBLIC, so the key is committed
+    # ENCRYPTED (secrets/tavily-key.age, recipients in secrets/secrets.nix) and
+    # decrypted at activation by top's ssh host key. It used to be an
+    # unmanaged one-line file in ~/.config/oracle that nothing owned and that
+    # silently went missing, taking web search with it.
+    agenix = {
+      url = "github:ryantm/agenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.home-manager.follows = "home-manager";
+    };
   };
 
   outputs = { nixpkgs, home-manager, plasma-manager, aerothemeplasma-nix, ... }@inputs:
