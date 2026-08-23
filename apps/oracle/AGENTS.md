@@ -948,49 +948,45 @@ prompt beside a long-named model's two-letter answer, measured on the rendered
 
 Every message carries the time it landed, under its bubble and on its own side
 — dim, faded, the weight of the speaker caption above it (§9.1) [his,
-2026-08-23]. `win.timeLabel(ts)` is 24h `HH:mm`, the clock everything else on
-this desktop is written in; the DATE stays a once-a-day separator across the
+2026-08-23]. `win.timeLabel(ts)` is 12h — `2:07 pm`, lowercase [his,
+2026-08-23]; the DATE stays a once-a-day separator across the
 column (`opensNewDay`), so a session held in one sitting draws one date and a
 time per message. A row from before the store kept `ts` shows no time rather
 than a made-up one. Harness: `tools/exec-peek-test.py`.
 
-### Successive rounds fold into one line
+### One meta block per turn, at the top of it
 
 One row per round fixed the "where did round 3 begin" problem and made a new
-one: six rounds in a row flood the window and his own prompt is off the top of
-it [his, 2026-08-23]. So the rounds that are DONE fold away behind a single
-subordinated line (docs/DESIGN.md §9.1), and only the round still working and
-the answer are drawn in full.
+one: between two things the model SAID sat three or four lines of bookkeeping —
+that round's reasoning heading, its tools, its sources, its files [his,
+2026-08-23]. So the bubbles of a turn now run **one after another with nothing
+between them but their timestamps**, and every disclosure of every round is
+aggregated into ONE block above the first bubble, where the counts, the clock
+and the live state already were. (It replaces the old per-run fold, which
+existed to get the silent rounds out of the way.)
 
-- **A round row is a model row with another model row after it.** The last row
-  of a turn is the answer; everything before it was working towards it. Nothing
-  is stored to say so — `win.isRoundRow(i)` reads it off the log — so the LIVE
-  row is never folded (nothing follows it yet) and a round folds the instant
-  the next one opens.
-- **And only if it SAID NOTHING** [his, 2026-08-23]. What folds is the
-  bookkeeping: a round that only called tools. A round that produced prose, a
-  picture or a video is OUTPUT, and output is never hidden — the first cut
-  folded away the round that fetched the image he had just asked to see.
-  `win.roundIsSilent(r)` is the test, read off the row's own roles (never a
-  child item's `visible` — the latch that hid a picture for good). A speaking
-  round stays drawn with its own tool disclosures shut, and it breaks the run
-  of folded rounds around it.
-- **One fold per run, not per round.** `roundGroupHead(i)` walks back to the
-  first round row of the run; that row draws the line and holds the state
-  (`roundsOpen`, a model role, so a `branchAt` truncation cannot leave the
-  state pointing at the wrong row). Six rounds are one line, not six.
-- **The line says what is under it**: `3 rounds · 7 tools · thought for 12s`.
-  The clock is on it because the per-row `thought for …` headings fold away
-  with the rows — a turn still reports what it spent. Clicking it puts every
-  row back, whole, where it was.
-- **A folded row is `visible: false`, not height 0.** An Item of height 0 still
-  takes the column's 12px spacing, so six folded rounds left a 72px hole.
-- Folded by default, including a session loaded from the store — an old turn
-  that took eight rounds opens as a prompt, a line and an answer.
-- Harness: `tools/round-split-test.py`, on `Root.foldJson()` (what the fold made
-  of each row, never drawn). `Root.openRounds(head, open)` is the only route in
-  from outside the delegate; `tools/think-clock-test.py` uses it, since the
-  reasoning headings it asserts on live under the fold.
+- **The head of a turn is the first model row after his prompt** —
+  `win.turnHead(i)`, read off the log, nothing stored. That row draws the block
+  for the whole run; no other row draws any meta at all, or repeats the
+  speaker's name.
+- **`win.turnAgg(head)` is the block's whole input**: reasoning text and
+  tokens, tool names and count, agents, sources, files and the exec tail,
+  summed and concatenated over the run, plus the live flags. One object, so a
+  disclosure reads `turn.agg.files` instead of a row role.
+- **What re-evaluates it.** A ListModel notifies no binding when `setProperty`
+  writes a role, and rebuilding the aggregate per token would redo the whole
+  turn for every visible row on every delta. So the block carries a 300ms
+  `Timer` that bumps `win.metaRev` while `Ollama.busy`, and `chatRev` (bumped
+  wherever a row settles) carries the final state.
+- **A round that said NOTHING is drawn nowhere** — its bookkeeping is in the
+  block, so the row has nothing left of its own. `win.roundIsSilent(r)` is the
+  test, read off the row's own roles (never a child item's `visible` — the
+  latch that hid a picture for good). `visible: false`, not height 0: an Item
+  of height 0 still takes the column's 12px spacing.
+- **Output is never hidden**: a round that produced prose, a picture or a video
+  keeps its bubble, under the same one block.
+- Harness: `tools/round-split-test.py`, on `Root.turnJson()` (what the block
+  made of each row, never drawn).
 
 ### A picture the write-up names is drawn where it names it
 

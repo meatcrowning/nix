@@ -190,12 +190,6 @@ spin(2500)
 check("a tool round in flight reads `waiting…`",
       any(x.startswith("waiting") for x in SEEN), repr(SEEN))
 
-# The finished rounds of a turn fold away (AGENTS.md "Successive rounds fold"),
-# and their reasoning headings go with them — so open the fold before reading
-# what those headings say. What is asserted below is the row's own heading,
-# unchanged by the fold; the fold's OWN line is round-split-test.py's business.
-QMetaObject.invokeMethod(root, "openRounds", Q_ARG("QVariant", 1),
-                         Q_ARG("QVariant", True))
 spin(100)
 
 h = headings()

@@ -112,39 +112,32 @@ Item {
     function dayLabel(ts) {
         return Qt.formatDate(new Date(ts * 1000), "dddd d MMMM").toLowerCase();
     }
-    // "14:07" — when a message landed, under its bubble. 24h, the same clock
-    // every other timestamp on this desktop is written in.
+    // "2:07 pm" — when a message landed, under its bubble. 12h [his,
+    // 2026-08-23], lowercase like every other string here (§7.2).
     function timeLabel(ts) {
-        return Qt.formatTime(new Date(ts * 1000), "HH:mm");
+        return Qt.formatTime(new Date(ts * 1000), "h:mm ap").toLowerCase();
     }
 
-    // ---- the finished rounds of a turn, folded into one line ---------------
+    // ---- one meta block per TURN, at the top of it -------------------------
     // A turn is one row PER TOOL ROUND (AGENTS.md "One bubble PER ROUND"), and
-    // six of them push his own prompt off the top of the window [his,
-    // 2026-08-23]. So the rounds that are DONE fold away behind a single
-    // subordinated heading (docs/DESIGN.md §9.1) — the round still working and
-    // the answer are drawn in full, and what he asked stays on screen. Nothing
-    // is lost: the heading says how much is under it and one click puts the
-    // rows back, whole, where they were.
+    // each of those rows used to carry its own reasoning, tool, web and file
+    // headings — so between two things the model SAID there sat three or four
+    // lines of bookkeeping [his, 2026-08-23]. Now the bubbles of a turn run one
+    // after another with nothing between them but their timestamps, and every
+    // disclosure of the turn is AGGREGATED into one block at the top of it,
+    // where the counts, the clock and the live state already were.
     //
-    // A round row is a model row with another model row after it — the LAST row
-    // of a turn is the answer; everything before it was working towards it. So
-    // the live row is never folded (nothing follows it yet) and the fold closes
-    // over a round the moment the next one opens.
-    //
-    // ...and ONLY IF IT SAID NOTHING [his, 2026-08-23]. What folds is the
-    // BOOKKEEPING — a round that only called tools. A round that produced
-    // something he can read or look at (prose, a picture, a video) is output,
-    // and output is never hidden: he asked for that image, and the round that
-    // fetched it went under the fold with everything else. So a speaking round
-    // stays drawn, its own tool disclosures shut as they always were, and it
-    // ends the run of folded rounds around it.
-    function isRoundRow(i) {
+    // The head of a turn is the first model row of the run following one of his
+    // prompts; it draws the block for every row under it. A round that said
+    // NOTHING is drawn nowhere at all now — its bookkeeping is in the block, so
+    // the row has nothing left of its own to show. That replaces the old
+    // per-run fold, which existed to get exactly those rows out of the way.
+    function turnHead(i) {
         win.chatRev;                       // rows settle without notifying
-        if (i < 0 || i + 1 >= chatLog.count) return false;
-        var r = chatLog.get(i);
-        if (r.isUser || chatLog.get(i + 1).isUser) return false;
-        return win.roundIsSilent(r);
+        if (i < 0 || i >= chatLog.count || chatLog.get(i).isUser) return -1;
+        var h = i;
+        while (h > 0 && !chatLog.get(h - 1).isUser) h--;
+        return h;
     }
     // Did this round leave anything on screen? Media is read off the ROW's own
     // roles, never a child item's `visible` — the latch that hid a picture for
@@ -154,38 +147,68 @@ Item {
                && (r.images || "[]") === "[]" && !r.imagesActive
                && (r.videos || "[]") === "[]" && !r.videosActive;
     }
-    // The first round row of the run `i` belongs to: the row that draws the
-    // heading and holds the run's open/closed state. -1 if `i` is not in a run.
-    function roundGroupHead(i) {
-        if (!win.isRoundRow(i)) return -1;
-        var h = i;
-        while (h > 0 && win.isRoundRow(h - 1)) h--;
-        return h;
-    }
-    // What the folded line says: how much work it stands for. It carries the
-    // rounds' clock too, since the per-row `thought for …` headings go under
-    // the fold with them and a turn must still report what it spent.
-    function roundGroupLabel(head) {
-        win.chatRev;
-        var n = 0, tools = 0, ms = 0;
-        for (var i = head; win.isRoundRow(i); i++) {
-            var r = chatLog.get(i);
-            n++;
-            tools += r.toolCount || 0;
-            ms += r.thinkMs || 0;
-        }
-        return n + (n === 1 ? " round" : " rounds")
-             + (tools > 0 ? " · " + tools + (tools === 1 ? " tool" : " tools") : "")
-             + (ms >= 1000 ? " · thought for " + win.fmtDur(ms) : "");
-    }
 
-    // Open or close a run of folded rounds from OUTSIDE the delegate — the one
-    // route a harness has (tools/think-clock-test.py reads the reasoning
-    // headings that live under the fold).
-    function openRounds(head, open) {
-        if (head < 0 || head >= chatLog.count) return;
-        chatLog.setProperty(head, "roundsOpen", !!open);
-        win.chatRev++;
+    // `metaRev` is what re-evaluates the block. A ListModel notifies no binding
+    // when setProperty writes a role, and rebuilding the aggregate per token
+    // would redo it for every visible row on every delta — so the block's own
+    // timer ticks this while a reply is in flight, and `chatRev` (bumped
+    // wherever a row settles) carries the final state.
+    property int metaRev: 0
+
+    // Everything the rows of one turn spent, as ONE object: the block reads
+    // this instead of five sets of per-row roles.
+    function turnAgg(head) {
+        win.chatRev; win.metaRev;
+        var a = { rounds: 0, thinking: "", thinkTokens: 0, thinkMs: 0,
+                  thinkStart: 0, thinkingActive: false, awaiting: false,
+                  tools: "", toolCount: 0, toolsActive: false,
+                  agents: "", agentCount: 0, agentsActive: false,
+                  agentHead: "", agentsBad: false,
+                  sources: "", searchCount: 0, searching: false,
+                  files: "", fileCount: 0, filesActive: false,
+                  execTail: "", execRunning: false, loading: false };
+        if (head < 0 || head >= chatLog.count) return a;
+        for (var i = head; i < chatLog.count && !chatLog.get(i).isUser; i++) {
+            var r = chatLog.get(i);
+            a.rounds++;
+            if ((r.thinking || "") !== "")
+                a.thinking += (a.thinking !== "" ? "\n\n" : "") + r.thinking;
+            a.thinkTokens += r.thinkTokens || 0;
+            a.thinkMs += r.thinkMs || 0;
+            if (r.thinkStart > 0) a.thinkStart = r.thinkStart;
+            if (r.thinkingActive) a.thinkingActive = true;
+            if (r.awaiting) a.awaiting = true;
+            if ((r.tools || "") !== "")
+                a.tools += (a.tools !== "" ? "\n" : "") + r.tools;
+            a.toolCount += r.toolCount || 0;
+            if (r.toolsActive) a.toolsActive = true;
+            if ((r.agents || "") !== "")
+                a.agents += (a.agents !== "" ? "\n\n" : "") + r.agents;
+            a.agentCount += r.agentCount || 0;
+            if (r.agentsActive) { a.agentsActive = true; a.agentHead = r.agentHead || ""; }
+            if (r.agentsBad) a.agentsBad = true;
+            if ((r.sources || "") !== "")
+                a.sources += (a.sources !== "" ? "\n\n" : "") + r.sources;
+            a.searchCount += r.searchCount || 0;
+            if (r.searching) a.searching = true;
+            if ((r.files || "") !== "")
+                a.files += (a.files !== "" ? "\n" : "") + r.files;
+            a.fileCount += r.fileCount || 0;
+            if (r.filesActive) a.filesActive = true;
+            // The tail belongs to whichever row is running a program now, or
+            // to the last one that did.
+            if ((r.execTail || "") !== "") {
+                a.execTail = r.execTail;
+                a.execRunning = !!r.execRunning;
+            }
+            // Nothing said and nothing thought while a row still streams: the
+            // turn is waiting on its first anything, and that is a line of its
+            // own — never at the same time as the clock (`waiting…`), which is
+            // why the reasoning heading below stands down for it.
+            if (r.streaming && (r.body || "") === "" && (r.thinking || "") === "")
+                a.loading = true;
+        }
+        return a;
     }
 
     // Files he dragged onto the window, attached to the NEXT message and cleared
@@ -699,8 +722,7 @@ Item {
                          videos: "[]", videosActive: false, videosPending: 0,
                          execTail: "", execRunning: false,
                          tools: "", toolCount: 0, toolsActive: false,
-                         streaming: true, isError: false,
-                         roundsOpen: false });
+                         streaming: true, isError: false });
         win.activeIndex = chatLog.count - 1;
         win.chatRev++;
         win.accrueThink(win.activeIndex);
@@ -727,16 +749,20 @@ Item {
         return JSON.stringify(a);
     }
 
-    // What the ROUND FOLD is doing right now, for a HARNESS to read (never
-    // drawn): tools/round-split-test.py asserts that a turn's finished rounds
-    // come out as ONE line, and that opening it puts them back.
-    function foldJson() {
+    // What the TURN META BLOCK is doing right now, for a HARNESS to read (never
+    // drawn): tools/round-split-test.py asserts that a turn's bookkeeping comes
+    // out as one block at its head, and that a round which said nothing is not
+    // drawn as a row at all.
+    function turnJson() {
         var a = [];
         for (var i = 0; i < chatLog.count; i++) {
-            var h = win.roundGroupHead(i);
+            var r = chatLog.get(i);
+            var h = win.turnHead(i);
+            var g = h === i ? win.turnAgg(h) : null;
             a.push({ head: h,
-                     folded: h >= 0 && chatLog.get(h).roundsOpen !== true,
-                     label: h === i ? win.roundGroupLabel(i) : "" });
+                     drawn: r.isUser || h === i || !win.roundIsSilent(r),
+                     rounds: g ? g.rounds : 0,
+                     tools: g ? g.toolCount : 0 });
         }
         return JSON.stringify(a);
     }
@@ -771,8 +797,7 @@ Item {
                              execTail: "", execRunning: false,
                              tools: t.tools || "", toolCount: t.toolCount || 0, toolsActive: false,
                              streaming: false, isError: !!t.isError,
-                             step: t.step || 0, ts: t.ts || 0,
-                             roundsOpen: false });
+                             step: t.step || 0, ts: t.ts || 0 });
         }
         win.sessionId = id;
         win.sessionTitle = title;
@@ -846,8 +871,7 @@ Item {
                          videos: "[]", videosActive: false, videosPending: 0,
                          execTail: "", execRunning: false,
                          tools: "", toolCount: 0, toolsActive: false,
-                         streaming:false, isError: false, step: 0,
-                         roundsOpen: false });
+                         streaming:false, isError: false, step: 0 });
         win.appendReplyRow(1);
         win.autoContinues = 0;             // a new prompt re-arms the auto-press
         Ollama.rememberModel(win.model);   // the model he last used is next launch's default
@@ -2016,25 +2040,22 @@ Item {
                         readonly property int rowIndex: index
                         width: replyCol.width
                         height: rowStack.height
-                        // A folded round draws NOTHING and takes no slot: an
-                        // Item of height 0 would still take the column's 12px
-                        // spacing, so six folded rounds left a 72px hole.
-                        visible: !folded || isGroupHead
+                        // A round that said nothing draws NOTHING and takes no
+                        // slot — its bookkeeping is in the head's meta block, so
+                        // there is nothing left on the row. `visible: false`,
+                        // not height 0: an Item of height 0 still takes the
+                        // column's 12px spacing, so six of them left a 72px hole.
+                        visible: isUser || turn.isHead || turn.speaks
 
-                        // Which finished-round run this row is in, if any
-                        // (win.isRoundRow). The head row carries the heading and
-                        // the whole run's open/closed state, so the rows under
-                        // it read it off the model rather than each keeping
-                        // their own.
-                        readonly property int groupHead: win.roundGroupHead(index)
-                        readonly property bool midRound: groupHead >= 0
-                        readonly property bool isGroupHead: groupHead === index
-                        readonly property bool groupOpen: {
-                            win.chatRev;
-                            return midRound && groupHead < chatLog.count
-                                   && chatLog.get(groupHead).roundsOpen === true;
-                        }
-                        readonly property bool folded: midRound && !groupOpen
+                        // Which TURN this row is in: the head is the first model
+                        // row of the run after his prompt, and it is the row
+                        // that draws the whole turn's meta block.
+                        readonly property int head: win.turnHead(index)
+                        readonly property bool isHead: head === index
+                        readonly property var agg: win.turnAgg(turn.isHead ? index : -1)
+                        // Did this row leave anything on screen of its own?
+                        readonly property bool speaks:
+                            isError || body !== "" || turn.hasMedia
 
                         // The disclosure's open/closed is VIEW state, per row, and
                         // it defaults CLOSED: reasoning is collapsed until he opens
@@ -2093,44 +2114,9 @@ Item {
                             width: parent.width
                             spacing: 2
 
-                            // The fold itself: one line standing for every
-                            // finished round of this turn, in the same
-                            // vocabulary as the reasoning and tool disclosures
-                            // beneath it — a `+`, dim text, no accent
-                            // (docs/DESIGN.md §9.1).
-                            Item {
-                                id: roundFold
-                                width: parent.width
-                                visible: turn.isGroupHead
-                                height: visible ? Theme.lineHeight : 0
-                                Row {
-                                    anchors { left: parent.left
-                                              verticalCenter: parent.verticalCenter }
-                                    spacing: 6
-                                    PixelText {
-                                        text: turn.groupOpen ? "-" : "+"
-                                        color: Theme.textDim
-                                    }
-                                    PixelText {
-                                        text: win.roundGroupLabel(turn.groupHead)
-                                        color: Theme.textDim
-                                    }
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        chatLog.setProperty(turn.groupHead, "roundsOpen",
-                                                            !turn.groupOpen);
-                                        win.chatRev++;
-                                    }
-                                }
-                            }
-
                             Column {
                                 id: turnStack
                                 width: parent.width
-                                visible: !turn.folded
                                 spacing: 2
 
                                 // The date, once, on the first turn of a day that
@@ -2156,554 +2142,585 @@ Item {
                                 PixelText {
                                     id: whoText
                                     x: isUser ? turnStack.width - width : 0
-                                    // Just the speaker. The caption used to name
-                                    // the round from 2 on ("model · round 2"); the
-                                    // SPLIT is what he wanted, not a label on it
-                                    // [his, 2026-08-22] — a new bubble already says
-                                    // a new round began.
+                                    // Just the speaker, ONCE per turn. The caption
+                                    // used to name the round from 2 on ("model ·
+                                    // round 2"); the SPLIT is what he wanted, not a
+                                    // label on it [his, 2026-08-22] — and the later
+                                    // rounds of one turn repeat neither the name nor
+                                    // anything else between their bubbles [his,
+                                    // 2026-08-23].
+                                    visible: isUser || turn.isHead
                                     text: who
                                     color: Theme.textDim
                                 }
 
-                                // Before the model has said ANYTHING — no answer, no
-                                // reasoning — the wait is a line of its own, outside
-                                // the bubble, with the same animated ellipsis every
-                                // other in-flight heading here carries [his,
-                                // 2026-08-22]. It used to be a static "…" inside an
-                                // otherwise empty bubble, which read as a message
-                                // rather than as a wait (§10 — the state is shown,
-                                // and it is honest about being a state).
-                                Item {
-                                    id: waiting
+                                // ---- the turn's bookkeeping, ONCE, at the top of it
+                                // Every disclosure of every round of this turn,
+                                // aggregated into one block above the FIRST
+                                // bubble [his, 2026-08-23]. The rounds' bubbles
+                                // then run one after another with nothing
+                                // between them but their timestamps; the
+                                // counts, the clock and the live state are all
+                                // still here, at the top, where he reads them.
+                                Column {
+                                    id: turnMeta
                                     width: parent.width
-                                    visible: !isUser && !isError && body === ""
-                                             && thinking === "" && streaming
-                                    height: visible ? Theme.lineHeight : 0
+                                    spacing: 2
+                                    visible: !isUser && turn.isHead
 
-                                    property int dotPhase: 0
+                                    // What re-evaluates the aggregate while the
+                                    // reply is in flight: a ListModel notifies no
+                                    // binding when setProperty writes a role, and
+                                    // rebuilding it per token would redo the whole
+                                    // turn for every visible row on every delta.
+                                    // `chatRev` carries the settled state, so this
+                                    // stops the moment the reply does.
                                     Timer {
-                                        interval: motion.ms(motion.slideMs)
-                                        running: waiting.visible && !motion.reduceMotion
+                                        interval: 300
+                                        running: turnMeta.visible && Ollama.busy
                                         repeat: true
-                                        onTriggered: waiting.dotPhase = (waiting.dotPhase + 1) % 4
-                                    }
-                                    PixelText {
-                                        anchors { left: parent.left; verticalCenter: parent.verticalCenter }
-                                        text: "loading" + (motion.reduceMotion ? "…"
-                                              : "...".substring(0, waiting.dotPhase))
-                                        color: Theme.text
-                                    }
-                                }
-
-                                // The reasoning, a COLLAPSIBLE disclosure that starts
-                                // folded. Its heading reports progress: "thinking…"
-                                // (one step brighter) while the reasoning streams, and
-                                // settles to "thinking" (textDim) once the answer
-                                // starts. Subordinated per docs/DESIGN.md §9.1 —
-                                // indented, a `border` hairline at the indent, text one
-                                // step dim, never accent — revealed by §6.2's clipped
-                                // growth from under the toggle.
-                                Item {
-                                    id: think
-                                    width: parent.width
-                                    // Shown whenever the clock ran at all: a turn
-                                    // that only WAITED on tools reported nothing at
-                                    // all before [his, 2026-08-22].
-                                    // ...and NOT while the `loading` line above is
-                                    // up. An empty bubble waiting on its first tool
-                                    // satisfied both, so "loading…" and "waiting…"
-                                    // stacked on top of each other [his,
-                                    // 2026-08-22]. One state at a time: `loading`
-                                    // owns a bubble with nothing in it yet, the
-                                    // clock takes over once there is something.
-                                    visible: !isUser && !waiting.visible
-                                             && (hasBody || thinkMs > 0
-                                                 || thinkStart > 0 || awaiting)
-                                    height: visible ? thinkToggle.height + thinkReveal.height : 0
-
-                                    readonly property bool hasBody: thinking !== ""
-                                    readonly property bool expanded: hasBody && turn.userSet
-                                                                     ? turn.userOpen : false
-
-                                    // The live count for the heading, ticked half a
-                                    // second at a time while the clock runs (a
-                                    // binding on Date.now() would never re-evaluate).
-                                    property int elapsed: 0
-                                    Timer {
-                                        interval: 500
-                                        running: thinkStart > 0
-                                        repeat: true
-                                        triggeredOnStart: true
-                                        onTriggered: think.elapsed = Date.now() - thinkStart
+                                        onTriggered: win.metaRev++
                                     }
 
+                                    // Before the model has said ANYTHING — no answer, no
+                                    // reasoning — the wait is a line of its own, outside
+                                    // the bubble, with the same animated ellipsis every
+                                    // other in-flight heading here carries [his,
+                                    // 2026-08-22]. It used to be a static "…" inside an
+                                    // otherwise empty bubble, which read as a message
+                                    // rather than as a wait (§10 — the state is shown,
+                                    // and it is honest about being a state).
                                     Item {
-                                        id: thinkToggle
+                                        id: waiting
                                         width: parent.width
-                                        height: Theme.lineHeight
-                                        // The ellipsis cycles 0→1→2→3 dots while the
-                                        // reasoning streams, so the heading reads as
-                                        // alive even between token deltas. One roll
-                                        // beat per dot (§6.2) — no fresh literal, and
-                                        // reduceMotion collapses it to a static "…".
+                                        visible: turn.agg.loading
+                                        height: visible ? Theme.lineHeight : 0
+
                                         property int dotPhase: 0
-                                        readonly property string dots:
-                                            motion.reduceMotion ? "…" : "...".substring(0, dotPhase)
                                         Timer {
                                             interval: motion.ms(motion.slideMs)
-                                            running: (thinkingActive || awaiting)
-                                                     && !motion.reduceMotion
+                                            running: waiting.visible && !motion.reduceMotion
                                             repeat: true
-                                            onTriggered: thinkToggle.dotPhase = (thinkToggle.dotPhase + 1) % 4
+                                            onTriggered: waiting.dotPhase = (waiting.dotPhase + 1) % 4
                                         }
-                                        Row {
+                                        PixelText {
                                             anchors { left: parent.left; verticalCenter: parent.verticalCenter }
-                                            spacing: 6
-                                            // No toggle when there is no reasoning to
-                                            // unfold — a turn can spend its whole
-                                            // clock waiting on tools (§10.2: never a
-                                            // control that opens nothing).
-                                            PixelText {
-                                                visible: think.hasBody
-                                                text: think.expanded ? "-" : "+"
-                                                color: Theme.textDim
+                                            text: "loading" + (motion.reduceMotion ? "…"
+                                                  : "...".substring(0, waiting.dotPhase))
+                                            color: Theme.text
+                                        }
+                                    }
+
+                                    // The reasoning, a COLLAPSIBLE disclosure that starts
+                                    // folded. Its heading reports progress: "thinking…"
+                                    // (one step brighter) while the reasoning streams, and
+                                    // settles to "thinking" (textDim) once the answer
+                                    // starts. Subordinated per docs/DESIGN.md §9.1 —
+                                    // indented, a `border` hairline at the indent, text one
+                                    // step dim, never accent — revealed by §6.2's clipped
+                                    // growth from under the toggle.
+                                    Item {
+                                        id: think
+                                        width: parent.width
+                                        // Shown whenever the clock ran at all: a turn
+                                        // that only WAITED on tools reported nothing at
+                                        // all before [his, 2026-08-22].
+                                        // ...and NOT while the `loading` line above is
+                                        // up. An empty bubble waiting on its first tool
+                                        // satisfied both, so "loading…" and "waiting…"
+                                        // stacked on top of each other [his,
+                                        // 2026-08-22]. One state at a time: `loading`
+                                        // owns a bubble with nothing in it yet, the
+                                        // clock takes over once there is something.
+                                        visible: !waiting.visible
+                                                 && (hasBody || turn.agg.thinkMs > 0
+                                                     || turn.agg.thinkStart > 0 || turn.agg.awaiting)
+                                        height: visible ? thinkToggle.height + thinkReveal.height : 0
+
+                                        readonly property bool hasBody: turn.agg.thinking !== ""
+                                        readonly property bool expanded: hasBody && turn.userSet
+                                                                         ? turn.userOpen : false
+
+                                        // The live count for the heading, ticked half a
+                                        // second at a time while the clock runs (a
+                                        // binding on Date.now() would never re-evaluate).
+                                        property int elapsed: 0
+                                        Timer {
+                                            interval: 500
+                                            running: turn.agg.thinkStart > 0
+                                            repeat: true
+                                            triggeredOnStart: true
+                                            onTriggered: think.elapsed = Date.now() - turn.agg.thinkStart
+                                        }
+
+                                        Item {
+                                            id: thinkToggle
+                                            width: parent.width
+                                            height: Theme.lineHeight
+                                            // The ellipsis cycles 0→1→2→3 dots while the
+                                            // reasoning streams, so the heading reads as
+                                            // alive even between token deltas. One roll
+                                            // beat per dot (§6.2) — no fresh literal, and
+                                            // reduceMotion collapses it to a static "…".
+                                            property int dotPhase: 0
+                                            readonly property string dots:
+                                                motion.reduceMotion ? "…" : "...".substring(0, dotPhase)
+                                            Timer {
+                                                interval: motion.ms(motion.slideMs)
+                                                running: (turn.agg.thinkingActive || turn.agg.awaiting)
+                                                         && !motion.reduceMotion
+                                                repeat: true
+                                                onTriggered: thinkToggle.dotPhase = (thinkToggle.dotPhase + 1) % 4
                                             }
-                                            // The reasoning-token count, named and
-                                            // still, to the LEFT of the time [his,
-                                            // 2026-08-22]: "240 tokens", "1.2k
-                                            // tokens". It PERSISTS once counted, so a
-                                            // COLLAPSED block still reports its size
-                                            // after the answer starts — the heading is
-                                            // all he sees when it is folded (§9.1
-                                            // subordinated — one step dim, never
-                                            // accent).
-                                            PixelText {
-                                                visible: thinkTokens > 0
-                                                text: win.fmtCount(thinkTokens)
-                                                      + (thinkTokens === 1 ? " token ·"
-                                                                           : " tokens ·")
-                                                color: Theme.textDim
-                                            }
-                                            // The state, and the ellipsis rides it
-                                            // because it is the part still running:
-                                            // "waiting…" while a tool is out,
-                                            // "thinking for 12s…" while it reasons,
-                                            // and the TOTAL of both as "thought for
-                                            // 12s" once the turn settles.
-                                            PixelText {
-                                                text: {
-                                                    if (awaiting)
-                                                        return "waiting" + thinkToggle.dots;
-                                                    var live = thinkMs + (thinkStart > 0
-                                                                          ? think.elapsed : 0);
-                                                    var d = win.fmtDur(thinkingActive ? live
-                                                                                      : thinkMs);
-                                                    if (thinkingActive)
-                                                        return (d !== "" ? "thinking for " + d
-                                                                         : "thinking")
-                                                               + thinkToggle.dots;
-                                                    return d !== "" ? "thought for " + d
-                                                                    : "thought";
+                                            Row {
+                                                anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                                                spacing: 6
+                                                // No toggle when there is no reasoning to
+                                                // unfold — a turn can spend its whole
+                                                // clock waiting on tools (§10.2: never a
+                                                // control that opens nothing).
+                                                PixelText {
+                                                    visible: think.hasBody
+                                                    text: think.expanded ? "-" : "+"
+                                                    color: Theme.textDim
                                                 }
-                                                color: (thinkingActive || awaiting) ? Theme.text
-                                                                                    : Theme.textDim
+                                                // The reasoning-token count, named and
+                                                // still, to the LEFT of the time [his,
+                                                // 2026-08-22]: "240 tokens", "1.2k
+                                                // tokens". It PERSISTS once counted, so a
+                                                // COLLAPSED block still reports its size
+                                                // after the answer starts — the heading is
+                                                // all he sees when it is folded (§9.1
+                                                // subordinated — one step dim, never
+                                                // accent).
+                                                PixelText {
+                                                    visible: turn.agg.thinkTokens > 0
+                                                    text: win.fmtCount(turn.agg.thinkTokens)
+                                                          + (turn.agg.thinkTokens === 1 ? " token ·"
+                                                                               : " tokens ·")
+                                                    color: Theme.textDim
+                                                }
+                                                // The state, and the ellipsis rides it
+                                                // because it is the part still running:
+                                                // "waiting…" while a tool is out,
+                                                // "thinking for 12s…" while it reasons,
+                                                // and the TOTAL of both as "thought for
+                                                // 12s" once the turn settles.
+                                                PixelText {
+                                                    text: {
+                                                        if (turn.agg.awaiting)
+                                                            return "waiting" + thinkToggle.dots;
+                                                        var live = turn.agg.thinkMs + (turn.agg.thinkStart > 0
+                                                                              ? think.elapsed : 0);
+                                                        var d = win.fmtDur(turn.agg.thinkingActive ? live
+                                                                                          : turn.agg.thinkMs);
+                                                        if (turn.agg.thinkingActive)
+                                                            return (d !== "" ? "thinking for " + d
+                                                                             : "thinking")
+                                                                   + thinkToggle.dots;
+                                                        return d !== "" ? "thought for " + d
+                                                                        : "thought";
+                                                    }
+                                                    color: (turn.agg.thinkingActive || turn.agg.awaiting) ? Theme.text
+                                                                                        : Theme.textDim
+                                                }
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                enabled: think.hasBody
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: { turn.userOpen = !think.expanded; turn.userSet = true; }
                                             }
                                         }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            enabled: think.hasBody
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: { turn.userOpen = !think.expanded; turn.userSet = true; }
-                                        }
-                                    }
 
-                                    Item {
-                                        id: thinkReveal
-                                        anchors { top: thinkToggle.bottom; left: parent.left; right: parent.right }
-                                        clip: true
-                                        height: think.expanded ? thinkBody.height : 0
-                                        Behavior on height {
-                                            NumberAnimation { duration: motion.ms(motion.slideMs)
-                                                              easing.type: motion.slideEasing }
-                                        }
-                                        Rectangle {
-                                            anchors { left: parent.left; leftMargin: 3
-                                                      top: parent.top; bottom: parent.bottom }
-                                            width: Theme.ctrlBorder
-                                            color: Theme.border
-                                        }
-                                        PixelText {
-                                            id: thinkBody
-                                            anchors { top: parent.top; left: parent.left; right: parent.right
-                                                      leftMargin: 12 }
-                                            wrapMode: Text.Wrap
-                                            text: thinking
-                                            color: Theme.textDim
-                                        }
-                                    }
-                                }
-
-                                // The generic tool activity: every tool the model
-                                // called this round, named — the same subordinated,
-                                // folded-by-default disclosure (docs/DESIGN.md §9.1,
-                                // §10 — a tool call is shown, never silent), so a tool
-                                // with no richer block of its own still appears. The
-                                // heading reads "calling tools…" while the round is in
-                                // flight and settles to "tools · N"; the body is one
-                                // tool name per line (PixelText verbatim, dim).
-                                Item {
-                                    id: toolAct
-                                    width: parent.width
-                                    visible: !isUser && (tools !== "" || toolsActive)
-                                    height: visible ? toolToggle.height + toolReveal.height : 0
-
-                                    readonly property bool expanded: turn.toolUserSet ? turn.toolUserOpen
-                                                                                      : false
-
-                                    Item {
-                                        id: toolToggle
-                                        width: parent.width
-                                        height: Theme.lineHeight
-                                        property int dotPhase: 0
-                                        readonly property string dots:
-                                            motion.reduceMotion ? "…" : "...".substring(0, dotPhase)
-                                        Timer {
-                                            interval: motion.ms(motion.slideMs)
-                                            running: toolsActive && !motion.reduceMotion
-                                            repeat: true
-                                            onTriggered: toolToggle.dotPhase = (toolToggle.dotPhase + 1) % 4
-                                        }
-                                        Row {
-                                            anchors { left: parent.left; verticalCenter: parent.verticalCenter }
-                                            spacing: 6
-                                            PixelText { text: toolAct.expanded ? "-" : "+"; color: Theme.textDim }
-                                            PixelText {
-                                                text: toolsActive ? "calling tools"
-                                                                  : "tools · " + toolCount
-                                                color: toolsActive ? Theme.text : Theme.textDim
+                                        Item {
+                                            id: thinkReveal
+                                            anchors { top: thinkToggle.bottom; left: parent.left; right: parent.right }
+                                            clip: true
+                                            height: think.expanded ? thinkBody.height : 0
+                                            Behavior on height {
+                                                NumberAnimation { duration: motion.ms(motion.slideMs)
+                                                                  easing.type: motion.slideEasing }
+                                            }
+                                            Rectangle {
+                                                anchors { left: parent.left; leftMargin: 3
+                                                          top: parent.top; bottom: parent.bottom }
+                                                width: Theme.ctrlBorder
+                                                color: Theme.border
                                             }
                                             PixelText {
-                                                visible: toolsActive
-                                                text: toolToggle.dots
+                                                id: thinkBody
+                                                anchors { top: parent.top; left: parent.left; right: parent.right
+                                                          leftMargin: 12 }
+                                                wrapMode: Text.Wrap
+                                                text: turn.agg.thinking
                                                 color: Theme.textDim
                                             }
                                         }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: { turn.toolUserOpen = !toolAct.expanded; turn.toolUserSet = true; }
-                                        }
                                     }
 
+                                    // The generic tool activity: every tool the model
+                                    // called this round, named — the same subordinated,
+                                    // folded-by-default disclosure (docs/DESIGN.md §9.1,
+                                    // §10 — a tool call is shown, never silent), so a tool
+                                    // with no richer block of its own still appears. The
+                                    // heading reads "calling tools…" while the round is in
+                                    // flight and settles to "tools · N"; the body is one
+                                    // tool name per line (PixelText verbatim, dim).
                                     Item {
-                                        id: toolReveal
-                                        anchors { top: toolToggle.bottom; left: parent.left; right: parent.right }
-                                        clip: true
-                                        height: toolAct.expanded ? toolBody.height : 0
-                                        Behavior on height {
-                                            NumberAnimation { duration: motion.ms(motion.slideMs)
-                                                              easing.type: motion.slideEasing }
-                                        }
-                                        Rectangle {
-                                            anchors { left: parent.left; leftMargin: 3
-                                                      top: parent.top; bottom: parent.bottom }
-                                            width: Theme.ctrlBorder
-                                            color: Theme.border
-                                        }
-                                        PixelText {
-                                            id: toolBody
-                                            anchors { top: parent.top; left: parent.left; right: parent.right
-                                                      leftMargin: 12 }
-                                            wrapMode: Text.Wrap
-                                            text: tools
-                                            color: Theme.textDim
-                                        }
-                                    }
-                                }
-
-                                // The subagents this turn spawned, drawn as their own
-                                // subordinated disclosure (docs/DESIGN.md §9.1, §10).
-                                // While one works the heading is the live agent, its
-                                // round and the tool it just called — a spawn is the
-                                // longest wait in a turn and it used to be silent. It
-                                // settles to "agents · N" (or names the failure, §10),
-                                // and the body holds one block per agent: who, the
-                                // task, what it cost, and what it answered.
-                                Item {
-                                    id: agentAct
-                                    width: parent.width
-                                    visible: !isUser && (agents !== "" || agentsActive)
-                                    height: visible ? agentToggle.height + agentReveal.height : 0
-
-                                    readonly property bool expanded: turn.agentUserSet ? turn.agentUserOpen
-                                                                                       : false
-
-                                    Item {
-                                        id: agentToggle
+                                        id: toolAct
                                         width: parent.width
-                                        height: Theme.lineHeight
-                                        property int dotPhase: 0
-                                        readonly property string dots:
-                                            motion.reduceMotion ? "…" : "...".substring(0, dotPhase)
-                                        Timer {
-                                            interval: motion.ms(motion.slideMs)
-                                            running: agentsActive && !motion.reduceMotion
-                                            repeat: true
-                                            onTriggered: agentToggle.dotPhase = (agentToggle.dotPhase + 1) % 4
+                                        visible: turn.agg.tools !== "" || turn.agg.toolsActive
+                                        height: visible ? toolToggle.height + toolReveal.height : 0
+
+                                        readonly property bool expanded: turn.toolUserSet ? turn.toolUserOpen
+                                                                                          : false
+
+                                        Item {
+                                            id: toolToggle
+                                            width: parent.width
+                                            height: Theme.lineHeight
+                                            property int dotPhase: 0
+                                            readonly property string dots:
+                                                motion.reduceMotion ? "…" : "...".substring(0, dotPhase)
+                                            Timer {
+                                                interval: motion.ms(motion.slideMs)
+                                                running: turn.agg.toolsActive && !motion.reduceMotion
+                                                repeat: true
+                                                onTriggered: toolToggle.dotPhase = (toolToggle.dotPhase + 1) % 4
+                                            }
+                                            Row {
+                                                anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                                                spacing: 6
+                                                PixelText { text: toolAct.expanded ? "-" : "+"; color: Theme.textDim }
+                                                PixelText {
+                                                    text: turn.agg.toolsActive ? "calling turn.agg.tools"
+                                                                      : "tools · " + turn.agg.toolCount
+                                                    color: turn.agg.toolsActive ? Theme.text : Theme.textDim
+                                                }
+                                                PixelText {
+                                                    visible: turn.agg.toolsActive
+                                                    text: toolToggle.dots
+                                                    color: Theme.textDim
+                                                }
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: { turn.toolUserOpen = !toolAct.expanded; turn.toolUserSet = true; }
+                                            }
                                         }
-                                        Row {
-                                            anchors { left: parent.left; verticalCenter: parent.verticalCenter }
-                                            spacing: 6
-                                            PixelText { text: agentAct.expanded ? "-" : "+"; color: Theme.textDim }
-                                            PixelText {
-                                                text: agentsActive
-                                                      ? (agentHead !== "" ? agentHead : "agent working")
-                                                      : ((agentCount === 1 ? "agent · 1"
-                                                                           : "agents · " + agentCount)
-                                                         + (agentsBad ? " · failed" : ""))
-                                                color: agentsActive ? Theme.text
-                                                                    : (agentsBad ? Theme.crit : Theme.textDim)
+
+                                        Item {
+                                            id: toolReveal
+                                            anchors { top: toolToggle.bottom; left: parent.left; right: parent.right }
+                                            clip: true
+                                            height: toolAct.expanded ? toolBody.height : 0
+                                            Behavior on height {
+                                                NumberAnimation { duration: motion.ms(motion.slideMs)
+                                                                  easing.type: motion.slideEasing }
+                                            }
+                                            Rectangle {
+                                                anchors { left: parent.left; leftMargin: 3
+                                                          top: parent.top; bottom: parent.bottom }
+                                                width: Theme.ctrlBorder
+                                                color: Theme.border
                                             }
                                             PixelText {
-                                                visible: agentsActive
-                                                text: agentToggle.dots
+                                                id: toolBody
+                                                anchors { top: parent.top; left: parent.left; right: parent.right
+                                                          leftMargin: 12 }
+                                                wrapMode: Text.Wrap
+                                                text: turn.agg.tools
                                                 color: Theme.textDim
                                             }
                                         }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: { turn.agentUserOpen = !agentAct.expanded; turn.agentUserSet = true; }
-                                        }
                                     }
 
+                                    // The subagents this turn spawned, drawn as their own
+                                    // subordinated disclosure (docs/DESIGN.md §9.1, §10).
+                                    // While one works the heading is the live agent, its
+                                    // round and the tool it just called — a spawn is the
+                                    // longest wait in a turn and it used to be silent. It
+                                    // settles to "agents · N" (or names the failure, §10),
+                                    // and the body holds one block per agent: who, the
+                                    // task, what it cost, and what it answered.
                                     Item {
-                                        id: agentReveal
-                                        anchors { top: agentToggle.bottom; left: parent.left; right: parent.right }
-                                        clip: true
-                                        height: agentAct.expanded ? agentBody.height : 0
-                                        Behavior on height {
-                                            NumberAnimation { duration: motion.ms(motion.slideMs)
-                                                              easing.type: motion.slideEasing }
-                                        }
-                                        Rectangle {
-                                            anchors { left: parent.left; leftMargin: 3
-                                                      top: parent.top; bottom: parent.bottom }
-                                            width: Theme.ctrlBorder
-                                            color: Theme.border
-                                        }
-                                        PixelText {
-                                            id: agentBody
-                                            anchors { top: parent.top; left: parent.left; right: parent.right
-                                                      leftMargin: 12 }
-                                            wrapMode: Text.Wrap
-                                            text: agents
-                                            color: Theme.textDim
-                                        }
-                                    }
-                                }
-
-                                // The web-search sources: the same subordinated,
-                                // folded-by-default disclosure as the reasoning
-                                // (docs/DESIGN.md §9.1), showing which sources the
-                                // model searched. Heading reads "searching the web…"
-                                // (one step brighter) while a search is live and
-                                // settles to "web · N sources" once results land; the
-                                // body is Tavily's answer plus themed links, drawn
-                                // through MarkdownText.
-                                Item {
-                                    id: src
-                                    width: parent.width
-                                    visible: !isUser && (sources !== "" || searching)
-                                    height: visible ? srcToggle.height + srcReveal.height : 0
-
-                                    readonly property bool expanded: turn.srcUserSet ? turn.srcUserOpen
-                                                                                     : false
-
-                                    Item {
-                                        id: srcToggle
+                                        id: agentAct
                                         width: parent.width
-                                        height: Theme.lineHeight
-                                        property int dotPhase: 0
-                                        readonly property string dots:
-                                            motion.reduceMotion ? "…" : "...".substring(0, dotPhase)
-                                        Timer {
-                                            interval: motion.ms(motion.slideMs)
-                                            running: searching && !motion.reduceMotion
-                                            repeat: true
-                                            onTriggered: srcToggle.dotPhase = (srcToggle.dotPhase + 1) % 4
+                                        visible: turn.agg.agents !== "" || turn.agg.agentsActive
+                                        height: visible ? agentToggle.height + agentReveal.height : 0
+
+                                        readonly property bool expanded: turn.agentUserSet ? turn.agentUserOpen
+                                                                                           : false
+
+                                        Item {
+                                            id: agentToggle
+                                            width: parent.width
+                                            height: Theme.lineHeight
+                                            property int dotPhase: 0
+                                            readonly property string dots:
+                                                motion.reduceMotion ? "…" : "...".substring(0, dotPhase)
+                                            Timer {
+                                                interval: motion.ms(motion.slideMs)
+                                                running: turn.agg.agentsActive && !motion.reduceMotion
+                                                repeat: true
+                                                onTriggered: agentToggle.dotPhase = (agentToggle.dotPhase + 1) % 4
+                                            }
+                                            Row {
+                                                anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                                                spacing: 6
+                                                PixelText { text: agentAct.expanded ? "-" : "+"; color: Theme.textDim }
+                                                PixelText {
+                                                    text: turn.agg.agentsActive
+                                                          ? (turn.agg.agentHead !== "" ? turn.agg.agentHead : "agent working")
+                                                          : ((turn.agg.agentCount === 1 ? "agent · 1"
+                                                                               : "agents · " + turn.agg.agentCount)
+                                                             + (turn.agg.agentsBad ? " · failed" : ""))
+                                                    color: turn.agg.agentsActive ? Theme.text
+                                                                        : (turn.agg.agentsBad ? Theme.crit : Theme.textDim)
+                                                }
+                                                PixelText {
+                                                    visible: turn.agg.agentsActive
+                                                    text: agentToggle.dots
+                                                    color: Theme.textDim
+                                                }
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: { turn.agentUserOpen = !agentAct.expanded; turn.agentUserSet = true; }
+                                            }
                                         }
-                                        Row {
-                                            anchors { left: parent.left; verticalCenter: parent.verticalCenter }
-                                            spacing: 6
-                                            PixelText { text: src.expanded ? "-" : "+"; color: Theme.textDim }
-                                            PixelText {
-                                                text: searching ? "searching the web"
-                                                                : "web · " + searchCount + (searchCount === 1 ? " source" : " sources")
-                                                color: searching ? Theme.text : Theme.textDim
+
+                                        Item {
+                                            id: agentReveal
+                                            anchors { top: agentToggle.bottom; left: parent.left; right: parent.right }
+                                            clip: true
+                                            height: agentAct.expanded ? agentBody.height : 0
+                                            Behavior on height {
+                                                NumberAnimation { duration: motion.ms(motion.slideMs)
+                                                                  easing.type: motion.slideEasing }
+                                            }
+                                            Rectangle {
+                                                anchors { left: parent.left; leftMargin: 3
+                                                          top: parent.top; bottom: parent.bottom }
+                                                width: Theme.ctrlBorder
+                                                color: Theme.border
                                             }
                                             PixelText {
-                                                visible: searching
-                                                text: srcToggle.dots
+                                                id: agentBody
+                                                anchors { top: parent.top; left: parent.left; right: parent.right
+                                                          leftMargin: 12 }
+                                                wrapMode: Text.Wrap
+                                                text: turn.agg.agents
                                                 color: Theme.textDim
                                             }
                                         }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: { turn.srcUserOpen = !src.expanded; turn.srcUserSet = true; }
-                                        }
                                     }
 
+                                    // The web-search sources: the same subordinated,
+                                    // folded-by-default disclosure as the reasoning
+                                    // (docs/DESIGN.md §9.1), showing which sources the
+                                    // model searched. Heading reads "searching the web…"
+                                    // (one step brighter) while a search is live and
+                                    // settles to "web · N sources" once results land; the
+                                    // body is Tavily's answer plus themed links, drawn
+                                    // through MarkdownText.
                                     Item {
-                                        id: srcReveal
-                                        anchors { top: srcToggle.bottom; left: parent.left; right: parent.right }
-                                        clip: true
-                                        height: src.expanded ? srcBody.height : 0
-                                        Behavior on height {
-                                            NumberAnimation { duration: motion.ms(motion.slideMs)
-                                                              easing.type: motion.slideEasing }
-                                        }
-                                        Rectangle {
-                                            anchors { left: parent.left; leftMargin: 3
-                                                      top: parent.top; bottom: parent.bottom }
-                                            width: Theme.ctrlBorder
-                                            color: Theme.border
-                                        }
-                                        MarkdownText {
-                                            id: srcBody
-                                            anchors { top: parent.top; left: parent.left; right: parent.right
-                                                      leftMargin: 12 }
-                                            text: sources
-                                        }
-                                    }
-                                }
-
-                                // The file-tool activity: the same subordinated,
-                                // folded-by-default disclosure (docs/DESIGN.md §9.1),
-                                // showing which files the model read or changed. The
-                                // heading reads "working with files…" while an op is in
-                                // flight and settles to "files · N" once done; the body
-                                // is one plain outcome line per op (paths, not markdown
-                                // — PixelText verbatim, the shared guard).
-                                Item {
-                                    id: fileAct
-                                    width: parent.width
-                                    visible: !isUser && (files !== "" || filesActive)
-                                    height: visible ? fileToggle.height + fileReveal.height : 0
-
-                                    // Closed by default, running program or not
-                                    // [his, 2026-08-23]. It used to spring open on
-                                    // its own while one ran — live output nobody
-                                    // can see is not live output — but a build or
-                                    // a download prints hundreds of lines and the
-                                    // block became the flood it was meant to
-                                    // contain. The heading previews the last line
-                                    // instead (`execPeek`), which is the line a
-                                    // progress bar is redrawing anyway. His own
-                                    // click still wins, in both directions.
-                                    readonly property bool expanded: turn.fileUserSet ? turn.fileUserOpen
-                                                                                      : false
-
-                                    Item {
-                                        id: fileToggle
+                                        id: src
                                         width: parent.width
-                                        height: Theme.lineHeight
-                                        property int dotPhase: 0
-                                        readonly property string dots:
-                                            motion.reduceMotion ? "…" : "...".substring(0, dotPhase)
-                                        Timer {
-                                            interval: motion.ms(motion.slideMs)
-                                            running: filesActive && !motion.reduceMotion
-                                            repeat: true
-                                            onTriggered: fileToggle.dotPhase = (fileToggle.dotPhase + 1) % 4
+                                        visible: turn.agg.sources !== "" || turn.agg.searching
+                                        height: visible ? srcToggle.height + srcReveal.height : 0
+
+                                        readonly property bool expanded: turn.srcUserSet ? turn.srcUserOpen
+                                                                                         : false
+
+                                        Item {
+                                            id: srcToggle
+                                            width: parent.width
+                                            height: Theme.lineHeight
+                                            property int dotPhase: 0
+                                            readonly property string dots:
+                                                motion.reduceMotion ? "…" : "...".substring(0, dotPhase)
+                                            Timer {
+                                                interval: motion.ms(motion.slideMs)
+                                                running: turn.agg.searching && !motion.reduceMotion
+                                                repeat: true
+                                                onTriggered: srcToggle.dotPhase = (srcToggle.dotPhase + 1) % 4
+                                            }
+                                            Row {
+                                                anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                                                spacing: 6
+                                                PixelText { text: src.expanded ? "-" : "+"; color: Theme.textDim }
+                                                PixelText {
+                                                    text: turn.agg.searching ? "searching the web"
+                                                                    : "web · " + turn.agg.searchCount + (turn.agg.searchCount === 1 ? " source" : " turn.agg.sources")
+                                                    color: turn.agg.searching ? Theme.text : Theme.textDim
+                                                }
+                                                PixelText {
+                                                    visible: turn.agg.searching
+                                                    text: srcToggle.dots
+                                                    color: Theme.textDim
+                                                }
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: { turn.srcUserOpen = !src.expanded; turn.srcUserSet = true; }
+                                            }
                                         }
-                                        Row {
-                                            id: fileHead
-                                            anchors { left: parent.left; verticalCenter: parent.verticalCenter }
-                                            spacing: 6
-                                            PixelText { text: fileAct.expanded ? "-" : "+"; color: Theme.textDim }
-                                            PixelText {
-                                                text: filesActive ? "working with files"
-                                                                  : "files · " + fileCount
-                                                color: filesActive ? Theme.text : Theme.textDim
+
+                                        Item {
+                                            id: srcReveal
+                                            anchors { top: srcToggle.bottom; left: parent.left; right: parent.right }
+                                            clip: true
+                                            height: src.expanded ? srcBody.height : 0
+                                            Behavior on height {
+                                                NumberAnimation { duration: motion.ms(motion.slideMs)
+                                                                  easing.type: motion.slideEasing }
+                                            }
+                                            Rectangle {
+                                                anchors { left: parent.left; leftMargin: 3
+                                                          top: parent.top; bottom: parent.bottom }
+                                                width: Theme.ctrlBorder
+                                                color: Theme.border
+                                            }
+                                            MarkdownText {
+                                                id: srcBody
+                                                anchors { top: parent.top; left: parent.left; right: parent.right
+                                                          leftMargin: 12 }
+                                                text: turn.agg.sources
+                                            }
+                                        }
+                                    }
+
+                                    // The file-tool activity: the same subordinated,
+                                    // folded-by-default disclosure (docs/DESIGN.md §9.1),
+                                    // showing which files the model read or changed. The
+                                    // heading reads "working with files…" while an op is in
+                                    // flight and settles to "files · N" once done; the body
+                                    // is one plain outcome line per op (paths, not markdown
+                                    // — PixelText verbatim, the shared guard).
+                                    Item {
+                                        id: fileAct
+                                        width: parent.width
+                                        visible: turn.agg.files !== "" || turn.agg.filesActive
+                                        height: visible ? fileToggle.height + fileReveal.height : 0
+
+                                        // Closed by default, running program or not
+                                        // [his, 2026-08-23]. It used to spring open on
+                                        // its own while one ran — live output nobody
+                                        // can see is not live output — but a build or
+                                        // a download prints hundreds of lines and the
+                                        // block became the flood it was meant to
+                                        // contain. The heading previews the last line
+                                        // instead (`execPeek`), which is the line a
+                                        // progress bar is redrawing anyway. His own
+                                        // click still wins, in both directions.
+                                        readonly property bool expanded: turn.fileUserSet ? turn.fileUserOpen
+                                                                                          : false
+
+                                        Item {
+                                            id: fileToggle
+                                            width: parent.width
+                                            height: Theme.lineHeight
+                                            property int dotPhase: 0
+                                            readonly property string dots:
+                                                motion.reduceMotion ? "…" : "...".substring(0, dotPhase)
+                                            Timer {
+                                                interval: motion.ms(motion.slideMs)
+                                                running: turn.agg.filesActive && !motion.reduceMotion
+                                                repeat: true
+                                                onTriggered: fileToggle.dotPhase = (fileToggle.dotPhase + 1) % 4
+                                            }
+                                            Row {
+                                                id: fileHead
+                                                anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                                                spacing: 6
+                                                PixelText { text: fileAct.expanded ? "-" : "+"; color: Theme.textDim }
+                                                PixelText {
+                                                    text: turn.agg.filesActive ? "working with turn.agg.files"
+                                                                      : "files · " + turn.agg.fileCount
+                                                    color: turn.agg.filesActive ? Theme.text : Theme.textDim
+                                                }
+                                                PixelText {
+                                                    visible: turn.agg.filesActive
+                                                    text: fileToggle.dots
+                                                    color: Theme.textDim
+                                                }
+                                            }
+                                            // What the program printed LAST, on the
+                                            // heading, while the block is shut [his,
+                                            // 2026-08-23]: the tool is usually a
+                                            // download or a build, and the one line
+                                            // that matters is the one it is redrawing
+                                            // right now. Elided rather than wrapped —
+                                            // a heading is one line — and gone the
+                                            // moment the block is open, where the whole
+                                            // tail is already drawn.
+                                            Text {
+                                                id: execPeek
+                                                anchors { left: fileHead.right; leftMargin: 8
+                                                          right: parent.right
+                                                          verticalCenter: parent.verticalCenter }
+                                                visible: !fileAct.expanded && turn.agg.execTail !== ""
+                                                font: Theme.editorFont
+                                                renderType: Text.NativeRendering
+                                                textFormat: Text.PlainText
+                                                elide: Text.ElideRight
+                                                text: win.lastLine(turn.agg.execTail)
+                                                color: turn.agg.execRunning ? Theme.text : Theme.textDim
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: { turn.fileUserOpen = !fileAct.expanded; turn.fileUserSet = true; }
+                                            }
+                                        }
+
+                                        Item {
+                                            id: fileReveal
+                                            anchors { top: fileToggle.bottom; left: parent.left; right: parent.right }
+                                            clip: true
+                                            height: fileAct.expanded
+                                                    ? fileBody.height + (execBody.visible
+                                                       ? execBody.height + 2 : 0) : 0
+                                            Behavior on height {
+                                                NumberAnimation { duration: motion.ms(motion.slideMs)
+                                                                  easing.type: motion.slideEasing }
+                                            }
+                                            Rectangle {
+                                                anchors { left: parent.left; leftMargin: 3
+                                                          top: parent.top; bottom: parent.bottom }
+                                                width: Theme.ctrlBorder
+                                                color: Theme.border
                                             }
                                             PixelText {
-                                                visible: filesActive
-                                                text: fileToggle.dots
+                                                id: fileBody
+                                                anchors { top: parent.top; left: parent.left; right: parent.right
+                                                          leftMargin: 12 }
+                                                wrapMode: Text.Wrap
+                                                text: turn.agg.files
                                                 color: Theme.textDim
                                             }
-                                        }
-                                        // What the program printed LAST, on the
-                                        // heading, while the block is shut [his,
-                                        // 2026-08-23]: the tool is usually a
-                                        // download or a build, and the one line
-                                        // that matters is the one it is redrawing
-                                        // right now. Elided rather than wrapped —
-                                        // a heading is one line — and gone the
-                                        // moment the block is open, where the whole
-                                        // tail is already drawn.
-                                        Text {
-                                            id: execPeek
-                                            anchors { left: fileHead.right; leftMargin: 8
-                                                      right: parent.right
-                                                      verticalCenter: parent.verticalCenter }
-                                            visible: !fileAct.expanded && execTail !== ""
-                                            font: Theme.editorFont
-                                            renderType: Text.NativeRendering
-                                            textFormat: Text.PlainText
-                                            elide: Text.ElideRight
-                                            text: win.lastLine(execTail)
-                                            color: execRunning ? Theme.text : Theme.textDim
-                                        }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: { turn.fileUserOpen = !fileAct.expanded; turn.fileUserSet = true; }
-                                        }
-                                    }
-
-                                    Item {
-                                        id: fileReveal
-                                        anchors { top: fileToggle.bottom; left: parent.left; right: parent.right }
-                                        clip: true
-                                        height: fileAct.expanded
-                                                ? fileBody.height + (execBody.visible
-                                                   ? execBody.height + 2 : 0) : 0
-                                        Behavior on height {
-                                            NumberAnimation { duration: motion.ms(motion.slideMs)
-                                                              easing.type: motion.slideEasing }
-                                        }
-                                        Rectangle {
-                                            anchors { left: parent.left; leftMargin: 3
-                                                      top: parent.top; bottom: parent.bottom }
-                                            width: Theme.ctrlBorder
-                                            color: Theme.border
-                                        }
-                                        PixelText {
-                                            id: fileBody
-                                            anchors { top: parent.top; left: parent.left; right: parent.right
-                                                      leftMargin: 12 }
-                                            wrapMode: Text.Wrap
-                                            text: files
-                                            color: Theme.textDim
-                                        }
-                                        // What the program is printing, right now.
-                                        // The editor font, because it is output and
-                                        // not prose; one step dim, because it is
-                                        // the machine talking (§9.1).
-                                        Text {
-                                            id: execBody
-                                            anchors { top: fileBody.bottom; topMargin: execBody.visible ? 2 : 0
-                                                      left: parent.left; right: parent.right
-                                                      leftMargin: 12 }
-                                            visible: execTail !== ""
-                                            font: Theme.editorFont
-                                            renderType: Text.NativeRendering
-                                            textFormat: Text.PlainText
-                                            wrapMode: Text.Wrap
-                                            text: execTail
-                                            color: execRunning ? Theme.text : Theme.textDim
+                                            // What the program is printing, right now.
+                                            // The editor font, because it is output and
+                                            // not prose; one step dim, because it is
+                                            // the machine talking (§9.1).
+                                            Text {
+                                                id: execBody
+                                                anchors { top: fileBody.bottom; topMargin: execBody.visible ? 2 : 0
+                                                          left: parent.left; right: parent.right
+                                                          leftMargin: 12 }
+                                                visible: turn.agg.execTail !== ""
+                                                font: Theme.editorFont
+                                                renderType: Text.NativeRendering
+                                                textFormat: Text.PlainText
+                                                wrapMode: Text.Wrap
+                                                text: turn.agg.execTail
+                                                color: turn.agg.execRunning ? Theme.text : Theme.textDim
+                                            }
                                         }
                                     }
                                 }
