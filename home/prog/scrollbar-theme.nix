@@ -30,5 +30,12 @@
       exec ${pkgs.python3}/bin/python3 \
         /home/lam/nix/apps/pylib/tools/scrollbar-userscript.py "$@"
     '')
+    # And the chrome around it: the colour ladder, Oxygen's relief and the same
+    # scrollbar sheet, in the custom.css Vivaldi reads at startup, plus the
+    # theme entry that makes Vivaldi's own light/dark classification agree.
+    (pkgs.writeShellScriptBin "vivaldi-theme" ''
+      exec ${pkgs.python3}/bin/python3 \
+        /home/lam/nix/apps/pylib/tools/vivaldi-theme.py "$@"
+    '')
   ];
 }
