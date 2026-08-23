@@ -457,6 +457,30 @@ naming modal.
   outside `ORACLE_SANDBOX`, so this was the narrower option over widening the
   sandbox to cover them.
 
+### When a turn happened
+
+Every row carries **`ts`** — unix seconds, stamped when it is appended, saved
+with the turn and read back on load (an old transcript with no `ts` reads 0 and
+behaves as it always did). It exists because the model could not see time at
+all: the system prompt is built at send time and says "the current time right
+now", while the transcript under it was undated, so a session reopened three
+days later read as if all of it had just been said and "earlier"/"yesterday"
+were unanswerable.
+
+- **In the history, only HIS turns are stamped, and only when stale.**
+  `stampedBody` prefixes `[sent YYYY-MM-DD HH:MM local]` to a user turn older
+  than `stampAfter` (1h). The model never sees its own output stamped, so there
+  is no format for it to imitate, and his last stamp against the system
+  prompt's "now" places the whole gap. A conversation held in one sitting goes
+  to the model exactly as before.
+- **On screen it is a date, once.** `opensNewDay(i)` is true only for the first
+  row of a day that is not the previous row's, and that row draws
+  `dayLabel(ts)` above its caption (docs/DESIGN.md §9.1). A same-day session
+  draws nothing.
+- Harness `tools/timestamp-test.py`, off the `ORACLE_TIMES` probe in the
+  selftest's `ORACLE_FAKE` block (whose demo turns now span two days, so
+  `ORACLE_SHOT` shows the divider).
+
 ## Memory (chatter's own durable facts)
 
 Distinct from *Sessions*: a session is a past **transcript** the model can read;
