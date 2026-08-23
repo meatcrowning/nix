@@ -205,6 +205,21 @@ Item {
             chatLog.setProperty(win.activeIndex, "awaiting", true);
             win.accrueThink(win.activeIndex);
         }
+        // A NEW TOOL ROUND. One bubble per round [his, 2026-08-23]: the row the
+        // last round wrote into is settled where it is — with the tools IT
+        // called still attached to it — and a fresh row opens for what the model
+        // says next. Without this a turn that took six rounds was one bubble
+        // holding six rounds of prose, every tool name and the final answer,
+        // with nothing to show where one round ended and the next began.
+        function onRoundStarted(n) {
+            if (win.activeIndex < 0) return;
+            win.stopThinkClock(win.activeIndex);
+            chatLog.setProperty(win.activeIndex, "streaming", false);
+            chatLog.setProperty(win.activeIndex, "thinkingActive", false);
+            chatLog.setProperty(win.activeIndex, "awaiting", false);
+            chatLog.setProperty(win.activeIndex, "toolsActive", false);
+            win.appendReplyRow(n);
+        }
         // The image-fetch tool: the model asked for an image, and one entry came
         // back — either a fetched picture (rendered inline) or a failure line
         // (docs/DESIGN.md §10 — the failure is shown, never dropped). ONE data
@@ -307,7 +322,7 @@ Item {
         var turns = [];
         for (var j = 0; j < chatLog.count; j++) {
             var t = chatLog.get(j);
-            turns.push({ isUser: t.isUser, who: t.who, body: t.body,
+            turns.push({ isUser: t.isUser, who: t.who, body: t.body, step: t.step,
                          thinking: t.thinking, thinkTokens: t.thinkTokens,
                          thinkMs: t.thinkMs, cutOff: t.cutOff,
                          sources: t.sources, searchCount: t.searchCount,
@@ -342,6 +357,40 @@ Item {
         promptEditor.load();
     }
 
+    // ONE assistant row, appended and made the active one. `step` is the round
+    // it belongs to: 1 for the row his prompt opens, 2 and up for the row each
+    // further tool round opens. The caption names it from 2 on ("model · round
+    // 2") — round 1 needs no label, and an old session (no `step`) reads 0 and
+    // shows none either (docs/DESIGN.md §9.1).
+    function appendReplyRow(step) {
+        chatLog.append({ isUser: false, who: win.model, body: "", step: step,
+                         thinking: "", thinkingActive: false, thinkTokens: 0,
+                         thinkStart: 0, thinkMs: 0, awaiting: true, cutOff: false,
+                         sources: "", searchCount: 0, searching: false,
+                         files: "", fileCount: 0, filesActive: false, filesPending: 0,
+                         images: "[]", imagesActive: false, imagesPending: 0,
+                         tools: "", toolCount: 0, toolsActive: false,
+                         streaming: true, isError: false });
+        win.activeIndex = chatLog.count - 1;
+        win.chatRev++;
+        win.accrueThink(win.activeIndex);
+    }
+
+    // What the log holds right now, for a HARNESS to read (never drawn):
+    // tools/round-split-test.py asserts on it that a turn taking two tool rounds
+    // ends up as three rows — round 1, round 2, the answer — rather than one
+    // bubble with everything in it.
+    function rowsJson() {
+        var a = [];
+        for (var i = 0; i < chatLog.count; i++) {
+            var r = chatLog.get(i);
+            a.push({ isUser: r.isUser, who: r.who, step: r.step,
+                     body: r.body, tools: r.tools, toolCount: r.toolCount,
+                     streaming: r.streaming, isError: r.isError });
+        }
+        return JSON.stringify(a);
+    }
+
     // Rebuild the log from a loaded transcript (transient flags reset).
     function loadTurns(id, title, turnsJson) {
         var arr;
@@ -366,7 +415,8 @@ Item {
                              filesActive: false, filesPending: 0,
                              images: t.images || "[]", imagesActive: false, imagesPending: 0,
                              tools: t.tools || "", toolCount: t.toolCount || 0, toolsActive: false,
-                             streaming: false, isError: !!t.isError });
+                             streaming: false, isError: !!t.isError,
+                             step: t.step || 0 });
         }
         win.sessionId = id;
         win.sessionTitle = title;
@@ -434,16 +484,8 @@ Item {
                          files: "", fileCount: 0, filesActive: false, filesPending: 0,
                          images: "[]", imagesActive: false, imagesPending: 0,
                          tools: "", toolCount: 0, toolsActive: false,
-                         streaming:false, isError: false });
-        chatLog.append({ isUser: false, who: win.model, body: "",
-                         thinking: "", thinkingActive: false, thinkTokens: 0,
-                         thinkStart: 0, thinkMs: 0, awaiting: false, cutOff: false,
-                         sources: "", searchCount: 0, searching: false,
-                         files: "", fileCount: 0, filesActive: false, filesPending: 0,
-                         images: "[]", imagesActive: false, imagesPending: 0,
-                         tools: "", toolCount: 0, toolsActive: false,
-                         streaming:true, isError: false });
-        win.activeIndex = chatLog.count - 1;
+                         streaming:false, isError: false, step: 0 });
+        win.appendReplyRow(1);
         win.autoContinues = 0;             // a new prompt re-arms the auto-press
         Ollama.rememberModel(win.model);   // the model he last used is next launch's default
         Ollama.send(win.model, sendPrompt, JSON.stringify(history), JSON.stringify(atts));
@@ -1735,7 +1777,7 @@ Item {
                             PixelText {
                                 id: whoText
                                 x: isUser ? turnStack.width - width : 0
-                                text: who
+                                text: step > 1 ? who + " · round " + step : who
                                 color: Theme.textDim
                             }
 

@@ -649,6 +649,30 @@ presses. Two changes:
   something he already asked for. Without it a model treats one tool round as
   one turn and hands back a description of what it would do next.
 
+### One bubble PER ROUND
+
+A turn that took six tool rounds used to be ONE row: six rounds of prose, every
+tool name and the final answer stacked together, with nothing to say where a
+round began [his, 2026-08-23]. Now each round is its own row.
+
+`Ollama.roundStarted(n)` fires in `_tool_done`, after a round's results are back
+and before the next POST. QML settles the row that round wrote into — its prose,
+and the tools, sources, files and images IT called, stay on it — and
+`appendReplyRow(n)` opens a fresh one. `step` is the round a row belongs to: 1
+for the row his prompt opens, 2 and up for each round after it, persisted with
+the turn and rendered in the caption from 2 on (`model · round 2`). An old
+session has no `step`, reads 0, and shows no label.
+
+Everything keyed on "the last row" still means the ANSWER row, since that is the
+last one: `continue`, the auto-press, `canContinue`.
+
+Harness: `tools/round-split-test.py` — it drives one real prompt through the
+real window offscreen against a stub ollama that asks for two tool rounds, and
+asserts the log comes out as three reply rows with the prose and the tool on the
+round that made them. It rides on `ORACLE_SEND` (send this prompt, then print
+the chat log as JSON via `Root.rowsJson()`), which is the only way to see what
+the ROWS became.
+
 ### It presses `continue` for him
 
 Even with `PERSISTENCE_NOTE` on every prompt, gemma4 ends a turn by ANNOUNCING

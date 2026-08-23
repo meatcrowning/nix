@@ -1476,6 +1476,15 @@ class Ollama(QObject):
     # inline images) remain the DETAIL view for the tools that have one.
     toolCallStarted = Signal(str)           # the tool name
 
+    #: A NEW TOOL ROUND is about to generate. Emitted after a round's results
+    #: are back and before the next POST, so QML can close the row that round
+    #: wrote into and open a fresh one: one bubble per round, instead of every
+    #: round's prose and every round's tools piling into one bubble with the
+    #: final answer, where it was impossible to see where a round began [his,
+    #: 2026-08-23]. The int is the round about to start (the prompt's own
+    #: first generation is round 1, so a tool round is always 2 or more).
+    roundStarted = Signal(int)
+
     # The image-fetch tool, surfaced so QML can render the picture INLINE (the
     # whole point of the tool) and, on failure, an honest error line in its place
     # (docs/DESIGN.md §10). ONE data contract with QML: `imageFetchResult` carries
@@ -3306,6 +3315,9 @@ class Ollama(QObject):
         for tr in self._tool_results:
             if tr is not None:
                 self._messages.append(tr)
+        # A new round: the segment just finished is closed and QML opens a
+        # fresh bubble for what comes next (see `roundStarted`).
+        self.roundStarted.emit(self._rounds + 1)
         # The wrap-up round (see `_on_finished`): say why there are no tools.
         if self._no_tools:
             self._messages.append({"role": "user",
@@ -4479,6 +4491,40 @@ def run_selftest(app, shell, win, plasma, warnings):
                          _label.property("text") if _label else None))
                 _box.setProperty("text", "")
                 app.processEvents()
+        # ORACLE_SEND: drive ONE real prompt through the window, against
+        # whatever OLLAMA_HOST points at (tools/round-split-test.py points it at
+        # a stub on 127.0.0.1 — never his daemon), then print the log as JSON.
+        # It is the only way to check what the CHAT ROWS end up as, which is
+        # where the per-round split lives.
+        if os.environ.get("ORACLE_SEND"):
+            from PySide6.QtCore import Q_ARG, Q_RETURN_ARG, QMetaObject, QObject
+            target = shell.root if plasma else win.findChild(QObject, "content")
+            target.setProperty("model", os.environ.get("ORACLE_SEND_MODEL",
+                                                       "stub:latest"))
+            box = target.findChild(QObject, "promptBox")
+            box.setProperty("text", os.environ["ORACLE_SEND"])
+            app.processEvents()
+            QMetaObject.invokeMethod(target, "send")
+            def _rows():
+                return QMetaObject.invokeMethod(target, "rowsJson",
+                                                Q_RETURN_ARG("QVariant"))
+
+            _t0 = time.monotonic()
+            while time.monotonic() - _t0 < 60:
+                app.processEvents()
+                time.sleep(0.01)
+                if time.monotonic() - _t0 < 1.0:
+                    continue
+                try:
+                    rows = json.loads(_rows() or "[]")
+                except ValueError:
+                    continue
+                if rows and not any(r.get("streaming") for r in rows):
+                    break
+            for _ in range(20):
+                app.processEvents()
+                time.sleep(0.01)
+            print("rows: %s" % _rows())
         # ORACLE_POKE: fire the menu rows themselves, which is the only check
         # that the ids in `actions` and the ones `tbAction` answers are the same
         # set — a typo in either is silent (the row is there, the click does
