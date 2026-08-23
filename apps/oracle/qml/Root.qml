@@ -76,8 +76,42 @@ Item {
     // The whole conversation, one row per turn. Roles: `isUser` (bool), `who`
     // (the caption — "you" or the answering model), `body`, `thinking`,
     // `thinkingActive` (the reasoning is streaming right now), `streaming` (the
-    // answer is), `isError`.
+    // answer is), `isError`, `ts` (unix seconds, when the row was appended).
     ListModel { id: chatLog }
+
+    // WHEN a turn happened, which the model could not see at all until now. The
+    // system prompt carries "the current time right now" built at send time, so
+    // a session reopened three days later read as if all of it had just been
+    // said — "earlier", "yesterday" and every relative reference were
+    // unanswerable, and stale context passed for present. So a user turn older
+    // than an hour goes into the history with its own time on it. Only HIS
+    // turns: the model never sees its own output stamped, so it has no format
+    // to imitate, and the pair (his last stamp, the system prompt's now) is
+    // enough to place the whole gap.
+    readonly property int stampAfter: 3600
+    function stampedBody(h) {
+        var now = Math.floor(Date.now() / 1000);
+        if (!h.isUser || !h.ts || now - h.ts < win.stampAfter)
+            return h.body;
+        return "[sent " + Qt.formatDateTime(new Date(h.ts * 1000),
+                                            "yyyy-MM-dd HH:mm") + " local] "
+               + h.body;
+    }
+
+    // A row that opens a new calendar day gets a date above it; rows on the
+    // same day get nothing, so a conversation held in one sitting is unchanged
+    // (docs/DESIGN.md §9.1 — subordinated, and never noise for its own sake).
+    function opensNewDay(i) {
+        win.chatRev;                       // rows settle without notifying
+        if (i <= 0 || i >= chatLog.count) return false;
+        var a = chatLog.get(i - 1).ts, b = chatLog.get(i).ts;
+        if (!a || !b) return false;
+        return Qt.formatDate(new Date(a * 1000), "yyyy-MM-dd")
+            !== Qt.formatDate(new Date(b * 1000), "yyyy-MM-dd");
+    }
+    function dayLabel(ts) {
+        return Qt.formatDate(new Date(ts * 1000), "dddd d MMMM").toLowerCase();
+    }
 
     // Files he dragged onto the window, attached to the NEXT message and cleared
     // once it is sent (docs/DESIGN.md §13 — dropping into a window works like a
@@ -323,6 +357,7 @@ Item {
         for (var j = 0; j < chatLog.count; j++) {
             var t = chatLog.get(j);
             turns.push({ isUser: t.isUser, who: t.who, body: t.body, step: t.step,
+                         ts: t.ts,
                          thinking: t.thinking, thinkTokens: t.thinkTokens,
                          thinkMs: t.thinkMs, cutOff: t.cutOff,
                          sources: t.sources, searchCount: t.searchCount,
@@ -396,6 +431,7 @@ Item {
     // shows none either (docs/DESIGN.md §9.1).
     function appendReplyRow(step) {
         chatLog.append({ isUser: false, who: win.model, body: "", step: step,
+                         ts: Math.floor(Date.now() / 1000),
                          thinking: "", thinkingActive: false, thinkTokens: 0,
                          thinkStart: 0, thinkMs: 0, awaiting: true, cutOff: false,
                          sources: "", searchCount: 0, searching: false,
@@ -416,7 +452,7 @@ Item {
         var a = [];
         for (var i = 0; i < chatLog.count; i++) {
             var r = chatLog.get(i);
-            a.push({ isUser: r.isUser, who: r.who, step: r.step,
+            a.push({ isUser: r.isUser, who: r.who, step: r.step, ts: r.ts,
                      body: r.body, tools: r.tools, toolCount: r.toolCount,
                      images: r.images, imagesActive: r.imagesActive,
                      streaming: r.streaming, isError: r.isError });
@@ -449,7 +485,7 @@ Item {
                              images: t.images || "[]", imagesActive: false, imagesPending: 0,
                              tools: t.tools || "", toolCount: t.toolCount || 0, toolsActive: false,
                              streaming: false, isError: !!t.isError,
-                             step: t.step || 0 });
+                             step: t.step || 0, ts: t.ts || 0 });
         }
         win.sessionId = id;
         win.sessionTitle = title;
@@ -506,11 +542,13 @@ Item {
             var h = chatLog.get(i);
             if (h.isError || h.body.trim() === "")
                 continue;
-            history.push({ role: h.isUser ? "user" : "assistant", content: h.body });
+            history.push({ role: h.isUser ? "user" : "assistant",
+                           content: win.stampedBody(h) });
         }
         // Append the pair now, then stream into the assistant row. Prior turns
         // are left untouched — the log grows downward (docs/DESIGN.md §14).
         chatLog.append({ isUser: true, who: "you", body: shownBody,
+                         ts: Math.floor(Date.now() / 1000),
                          thinking: "", thinkingActive: false, thinkTokens: 0,
                          thinkStart: 0, thinkMs: 0, awaiting: false, cutOff: false,
                          sources: "", searchCount: 0, searching: false,
@@ -713,7 +751,8 @@ Item {
             var h = chatLog.get(k);
             if (h.isError || h.body.trim() === "")
                 continue;
-            history.push({ role: h.isUser ? "user" : "assistant", content: h.body });
+            history.push({ role: h.isUser ? "user" : "assistant",
+                           content: win.stampedBody(h) });
         }
         chatLog.setProperty(i, "cutOff", false);
         chatLog.setProperty(i, "streaming", true);
@@ -1688,6 +1727,23 @@ Item {
                             id: turnStack
                             width: parent.width
                             spacing: 2
+
+                            // The date, once, on the first turn of a day that
+                            // is not the previous turn's. A session held in one
+                            // sitting never draws it.
+                            Item {
+                                width: parent.width
+                                height: dayMark.visible ? dayMark.height + 6 : 0
+                                PixelText {
+                                    id: dayMark
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    anchors.bottom: parent.bottom
+                                    visible: win.opensNewDay(index)
+                                    text: visible ? win.dayLabel(ts) : ""
+                                    color: Theme.textDim
+                                    opacity: 0.7
+                                }
+                            }
 
                             // The speaker's name, OUTSIDE the bubble and on its
                             // side — a caption, not a line of the message

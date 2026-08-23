@@ -5441,7 +5441,8 @@ def run_selftest(app, shell, win, plasma, warnings):
         # switch already uses — so the harness invents no path of its own, and
         # nothing is written to the store (`saveCurrent` no-ops on an empty log).
         if os.environ.get("ORACLE_FAKE"):
-            from PySide6.QtCore import Q_ARG, QMetaObject, QObject
+            from PySide6.QtCore import (Q_ARG, Q_RETURN_ARG, QMetaObject,
+                                        QObject)
             from PySide6.QtGui import QImage, QPainter
             # One generated picture, so a render shows where images sit in a
             # bubble (the top) with their caption. Written beside the selftest's
@@ -5458,6 +5459,11 @@ def run_selftest(app, shell, win, plasma, warnings):
                 pic.save(shot_img)
             except (OSError, RuntimeError):
                 shot_img = ""
+            # WHEN each demo turn happened: the first four yesterday, the rest
+            # today, so a render shows the date divider a new day draws and the
+            # old prompts are stale enough to be stamped into history.
+            _now = int(time.time())
+            _stamps = [_now - h * 3600 for h in (27, 27, 26, 26, 3, 3, 2, 2)]
             demo = [
                 {"isUser": True, "who": "you", "body": "hi"},
                 {"isUser": False, "who": "qwen3.6:35b-a3b",
@@ -5486,6 +5492,8 @@ def run_selftest(app, shell, win, plasma, warnings):
                 {"isUser": False, "who": "qwen3.6:35b-a3b",
                  "body": "and this one stopped mid-sen", "cutOff": True},
             ]
+            for _i, _t in enumerate(demo):
+                _t["ts"] = _stamps[_i]
             # Under Hyprland the QML root is the WINDOW; `loadTurns` lives on
             # the `Root` item inside it, and invoking it on the Window is a
             # silent no-op (the demo log simply never appears).
@@ -5524,6 +5532,24 @@ def run_selftest(app, shell, win, plasma, warnings):
                          _label.property("text") if _label else None))
                 _box.setProperty("text", "")
                 app.processEvents()
+            # THE TIMES, as text — tools/timestamp-test.py asserts on these
+            # three lines. `ts` is what came back out of the store, `stamped` is
+            # what an old turn looks like in the history the model gets, and
+            # `newday` is which rows draw a date above them.
+            if os.environ.get("ORACLE_TIMES"):
+                _rows = json.loads(QMetaObject.invokeMethod(
+                    target, "rowsJson", Q_RETURN_ARG("QVariant")) or "[]")
+                print("times ts: %s" % json.dumps([r.get("ts") for r in _rows]))
+                _stamped, _newday = [], []
+                for _i, _t in enumerate(demo):
+                    _stamped.append(QMetaObject.invokeMethod(
+                        target, "stampedBody", Q_RETURN_ARG("QVariant"),
+                        Q_ARG("QVariant", _t)))
+                    _newday.append(bool(QMetaObject.invokeMethod(
+                        target, "opensNewDay", Q_RETURN_ARG("QVariant"),
+                        Q_ARG("QVariant", _i))))
+                print("times stamped: %s" % json.dumps(_stamped))
+                print("times newday: %s" % json.dumps(_newday))
         # ORACLE_SEND: drive real prompts through the window, against whatever
         # OLLAMA_HOST points at (tools/round-split-test.py points it at a stub
         # on 127.0.0.1 — never his daemon), then print the log as JSON. It is
