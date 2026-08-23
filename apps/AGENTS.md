@@ -760,11 +760,24 @@ theme — so a stripped or offscreen environment behaves like the session.
 vocabulary — File, Edit, View, Go, Bookmarks, Tools, Settings, Help — with File
 first and Settings/Help last whatever an app's own `menuOrder` says; a group an
 app invents is inserted before Settings. `kdeshell` supplies what the app did
-not: Quit at the end of File, Show Toolbar/Show Statusbar in Settings, About and
+not: Quit at the end of File, the view toggles in Settings, About and
 About Qt in Help. A row's shortcut comes from the action table (`"@Quit"`-style
 names take the platform's standard sequence), `group:` makes a radio set, and
 one `QAction` per id is reused across rebuilds so a menu row and a toolbar row
 can never disagree.
+
+**The view toggles LEAD Settings, and Show Menubar is one of them.** Every KDE
+program opens that menu with Show Menubar / Show Toolbar / Show Statusbar and
+puts its own rows after — Kate, Dolphin and Konsole all do — and until
+2026-08-23 `kdeshell` appended them at the FOOT, which put chatter's seven
+base-prompt rows in front of the one row a KDE hand goes to Settings for. They
+are inserted ahead of the app's own entries now, with a separator between.
+**Show Menubar carries Ctrl+M and is added to the WINDOW, not only to the menu
+it lives in**: a menubar toggle reachable only from the menubar is a trapdoor,
+so the shortcut has to fire with no menubar on screen — which is exactly what
+`KStandardAction::showMenubar` does. `ORACLE_TREE`'s header line reports
+`menubar=on-window|menu-only` so a harness can prove it (chatter's
+`tools/plasma-chrome-test.py`).
 
 **A row that LEAVES the table takes its chrome with it.** A state flip
 (`state`, `checkable`) is applied to the existing `QAction`s in place, because

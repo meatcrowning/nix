@@ -396,6 +396,34 @@ Item {
     //
     // The words follow the session: the KDE menu around it says Copy and Select
     // All, this desktop's own menus are lowercase (docs/agents/his-voice.md).
+    // THE MESSAGE THE EDIT MENU ACTS ON. A transcript is many independent
+    // read-only editors, so "Copy" has no single target the way it does in a
+    // text editor; the one a KDE hand means is the message it just selected in.
+    // Each body reports itself here when its selection changes, and the Edit
+    // menu's rows are disabled while nothing has one — never a row that looks
+    // live and does nothing (docs/DESIGN.md §10).
+    property var selectedBody: null
+    property bool selectedIsMd: false
+    property string selectedText: ""
+    function noteSelection(item, md) {
+        win.selectedBody = item;
+        win.selectedIsMd = md;
+        win.selectedText = item ? item.selectedText : "";
+    }
+
+    // Run one row of `textMenu` against the message the selection is in — the
+    // Edit menu's rows and the right-click menu's are then literally the same
+    // triggers, and cannot drift apart.
+    function runTextRow(i) {
+        var item = win.selectedBody;
+        if (!item)
+            return;
+        var rows = win.textMenu(item, win.selectedIsMd);
+        var row = rows[i];
+        if (row && row.trigger && row.enabled !== false)
+            row.trigger();
+    }
+
     function textMenu(item, md) {
         return [
             { label: win.plasma ? "Copy" : "copy",
@@ -621,6 +649,25 @@ Item {
         out.push({ id: "detach", menu: "chat", menuText: "Clear Attachments",
                    state: attachments.count > 0 ? 0 : 2 });
 
+        // &Edit — the verbs a KDE hand goes to the menubar for. chatter was
+        // the only app of ours with no Edit menu at all: Copy and Select All
+        // existed ONLY on the transcript's right-click menu, so Ctrl+C had no
+        // home a menu could show and no way to discover it. They act on the
+        // message the selection is in (win.selectedBody), and are disabled
+        // while there is none rather than silently doing nothing.
+        out.push({ id: "copy", menu: "edit", menuText: "Copy",
+                   tip: "copy the selected text", icon: "edit-copy",
+                   shortcut: "@Copy",
+                   state: win.selectedText !== "" ? 0 : 2 });
+        out.push({ id: "copy-message", menu: "edit",
+                   menuText: "Copy Whole Message",
+                   tip: "copy the message the selection is in",
+                   state: win.selectedBody !== null ? 0 : 2 });
+        out.push("-");
+        out.push({ id: "select-all", menu: "edit", menuText: "Select All",
+                   icon: "edit-select-all", shortcut: "@SelectAll",
+                   state: win.selectedBody !== null ? 0 : 2 });
+
         out.push({ id: "refresh-models", menu: "tools",
                    menuText: "Refresh Model List", icon: "view-refresh",
                    shortcut: "@Refresh" });
@@ -703,6 +750,12 @@ Item {
                                }
                                break;
         case "edit-prompt":    win.openPromptEditor();          break;
+        // The Edit menu, through the SAME code the transcript's right-click
+        // menu runs (win.textMenu) — one implementation of copy, two ways in,
+        // so a reply is copied as MARKDOWN from either.
+        case "copy":           win.runTextRow(0);               break;
+        case "copy-message":   win.runTextRow(1);               break;
+        case "select-all":     win.runTextRow(3);               break;
         }
     }
 
@@ -2266,6 +2319,12 @@ Item {
                                         text: body
                                         color: isError ? Theme.crit : Theme.text
 
+                                        // Tell the window which body Edit ▸ Copy
+                                        // means (see win.noteSelection).
+                                        onSelectedTextChanged:
+                                            if (selectedText !== "" || win.selectedBody === plainBody)
+                                                win.noteSelection(plainBody, false);
+
                                         // Right-click only: every other button
                                         // falls through to the TextEdit under
                                         // it, so selecting and dragging are
@@ -2308,6 +2367,10 @@ Item {
                                             body.replace(/!\[([^\]]*)\]\(/g, "[$1](")
                                         text: md
                                         source: md
+
+                                        onSelectedTextChanged:
+                                            if (selectedText !== "" || win.selectedBody === mdBody)
+                                                win.noteSelection(mdBody, true);
 
                                         MouseArea {
                                             anchors.fill: parent

@@ -826,12 +826,24 @@ def _build_shell_class():
                     for a in self._dock_actions:
                         menu.addAction(a)
                 elif g == "settings":
-                    if not prev_sep:
-                        menu.addSeparator()
-                    menu.addAction(self._toggle_action("toolbar"))
-                    for ident in self._toolbars:
-                        menu.addAction(self._toggle_action("tb:" + ident))
-                    menu.addAction(self._toggle_action("statusbar"))
+                    # THE VIEW TOGGLES LEAD, which is where every KDE program
+                    # keeps them (Kate, Dolphin, Konsole: Settings opens with
+                    # Show Menubar / Show Toolbar / Show Statusbar, and the
+                    # app's own rows come after). They were appended at the
+                    # foot here, which put chatter's seven base-prompt rows in
+                    # front of the one row a KDE hand goes to Settings for.
+                    first = menu.actions()[0] if menu.actions() else None
+                    lead = [self._toggle_action("menubar"),
+                            self._toggle_action("toolbar")]
+                    lead += [self._toggle_action("tb:" + i) for i in self._toolbars]
+                    lead.append(self._toggle_action("statusbar"))
+                    if first is not None:
+                        for a in lead:
+                            menu.insertAction(first, a)
+                        menu.insertSeparator(first)
+                    else:
+                        for a in lead:
+                            menu.addAction(a)
                 elif g == "help":
                     menu.addAction(self._about_action())
                     menu.addAction(self._about_qt_action())
@@ -1234,18 +1246,30 @@ def _build_shell_class():
                 return self._toolbar
             if which == "statusbar":
                 return self._status
+            if which == "menubar":
+                return self.window.menuBar()
             if which.startswith("tb:"):
                 return self._toolbars.get(which[3:])
             return None
 
         def _toggle_action(self, which):
-            """Show Toolbar / Show Statusbar — checkable, and checked FROM the
-            widget rather than from a variable, so the menu cannot claim a bar
-            is showing when it is not."""
+            """Show Menubar / Show Toolbar / Show Statusbar — checkable, and
+            checked FROM the widget rather than from a variable, so the menu
+            cannot claim a bar is showing when it is not.
+
+            **Show Menubar carries Ctrl+M and is added to the WINDOW**, not
+            only to the menu it lives in. A menubar toggle reachable only from
+            the menubar is a trapdoor: hide it once and the row that puts it
+            back is gone with it. On the window the shortcut still fires with
+            no menubar on screen, which is exactly how KDE's own
+            `KStandardAction::showMenubar` behaves.
+            """
             key = "__show_" + which
             act = self._actions.get(key)
             if act is None:
-                if which == "toolbar":
+                if which == "menubar":
+                    label = "Show &Menubar"
+                elif which == "toolbar":
                     label = "Show &Toolbar"
                 elif which == "statusbar":
                     label = "Show Status&bar"
@@ -1253,6 +1277,11 @@ def _build_shell_class():
                     label = "Show " + self._toolbar_titles.get(which[3:], which[3:])
                 act = QAction(label, self.window)
                 act.setCheckable(True)
+                if which == "menubar":
+                    from PySide6.QtGui import QKeySequence
+                    act.setShortcut(QKeySequence("Ctrl+M"))
+                    act.setShortcutContext(Qt.WindowShortcut)
+                    self.window.addAction(act)
 
                 def toggled(on, w=which):
                     widget = self._bar_widget(w)
@@ -1264,7 +1293,7 @@ def _build_shell_class():
             return act
 
         def _sync_toggles(self):
-            for which in (["toolbar", "statusbar"]
+            for which in (["menubar", "toolbar", "statusbar"]
                           + ["tb:" + i for i in self._toolbars]):
                 act = self._actions.get("__show_" + which)
                 widget = self._bar_widget(which)
