@@ -32,6 +32,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import shlex
+from html.parser import HTMLParser
 
 from PySide6.QtCore import (QObject, Slot, Signal, Property, QUrl,
                             QFileSystemWatcher, QProcess, QProcessEnvironment,
@@ -40,9 +41,24 @@ from PySide6.QtGui import QGuiApplication, QColor, QImage
 from PySide6.QtNetwork import (QNetworkAccessManager, QNetworkRequest,
                                QNetworkReply)
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
+# Imported for its side effect: it registers the QtQuick wrapper types, so the
+# QML root arrives as a QQuickWindow rather than a bare QWindow — which is what
+# the selftest's `grabWindow()` needs.
+from PySide6.QtQuick import QQuickWindow  # noqa: F401
 
 HERE = Path(__file__).resolve().parent
 QML = HERE / "qml"
+
+# HIS FILES ARE NOT THE HARNESS'S, and this has to happen before the store paths
+# below are computed — hence up here rather than in `main()`. Poking the
+# Settings menu calls `setPromptChoice`, which PERSISTS, so a selftest run with
+# no override rewrote his own base prompt (root AGENTS.md → "Testing without
+# interfering with the user"). Both stores go somewhere disposable unless the
+# caller has already said where.
+if "--selftest" in sys.argv:
+    _tmp = Path(os.environ.get("TMPDIR", "/tmp")) / "oracle-selftest"
+    os.environ.setdefault("ORACLE_CONFIG", str(_tmp / "config"))
+    os.environ.setdefault("ORACLE_SESSIONS", str(_tmp / "sessions"))
 
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
@@ -145,6 +161,84 @@ SEARCH_IMAGE_TOOL = {
             "required": ["query"]}},
 }
 SEARCH_IMAGE_TOOL_NAMES = {"search_images"}
+
+#: The PAGE-READER tool. web_search returns Tavily's snippets, which are a
+#: paragraph at most — so a model handed a link (by him, or by its own search)
+#: could not actually READ it. This closes that: one URL in, the page's text
+#: out, paged. It is the only tool that fetches arbitrary web TEXT (fetch_image
+#: fetches bytes and shows them; search_images finds URLs), and it reaches
+#: nothing but http(s) — no file://, no local scheme.
+FETCH_URL_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "fetch_url",
+        "description": (
+            "Fetch one web page or text/JSON URL and read its contents. Use it "
+            "whenever you have a link and need what is actually on the page — "
+            "after web_search when a snippet is not enough, or when he gives "
+            "you a URL. HTML is reduced to readable text. Long pages come back "
+            "truncated: read again with `offset` set to the `next_offset` you "
+            "were given to continue. http and https only, and it cannot post a "
+            "form or log in."),
+        "parameters": {"type": "object", "properties": {
+            "url": {"type": "string",
+                    "description": "Absolute http(s) URL of the page to read."},
+            "offset": {"type": "integer",
+                       "description": ("0-based character offset into the page "
+                                       "text. Default 0; use next_offset to page.")}},
+            "required": ["url"]}},
+}
+FETCH_URL_TOOL_NAMES = {"fetch_url"}
+#: Caps: the biggest body worth downloading, and how much page TEXT one call
+#: hands back (his rule 5 — a tool result must never blow the context window).
+FETCH_URL_MAX_BYTES = 4 * 1024 * 1024
+FETCH_URL_CHARS = 20000
+
+
+class _PageText(HTMLParser):
+    """HTML -> readable text, stdlib only. Drops script/style/head noise, turns
+    block elements into line breaks and collapses runs of whitespace, and keeps
+    the <title>. Not a renderer — enough that a model reads prose instead of
+    markup, which is all the tool promises."""
+
+    SKIP = {"script", "style", "noscript", "svg", "template", "iframe"}
+    BLOCK = {"p", "div", "br", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6",
+             "section", "article", "header", "footer", "blockquote", "pre",
+             "ul", "ol", "table", "hr"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts, self.title, self._skip, self._in_title = [], "", 0, False
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.SKIP:
+            self._skip += 1
+        elif tag == "title":
+            self._in_title = True
+        if tag in self.BLOCK:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag in self.SKIP and self._skip:
+            self._skip -= 1
+        elif tag == "title":
+            self._in_title = False
+        if tag in self.BLOCK:
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        if self._skip:
+            return
+        if self._in_title:
+            self.title += data.strip()
+            return
+        if data.strip():
+            self.parts.append(re.sub(r"[ \t\r\f\v]+", " ", data))
+
+    def text(self):
+        out = "".join(self.parts)
+        out = re.sub(r"[ \t]*\n[ \t]*", "\n", out)
+        return re.sub(r"\n{3,}", "\n\n", out).strip()
 
 #: Where fetched images land — LOCAL to the machine running the window (not top,
 #: unlike the sandbox/sessions/memory), because a QML Image loads a local file
@@ -771,7 +865,12 @@ ON_BOOK = socket.gethostname() == "book"
 #:   `suggested.json` a JSON array of model names AGENTS write to recommend a
 #:                    model. Those present in /api/tags are ranked ABOVE the rest
 #:                    of the dropdown, in the file's order (see apps/oracle/AGENTS.md).
-CONFIG_DIR = Path.home() / ".config" / "oracle"
+#: `$ORACLE_CONFIG` moves the whole directory, which is what a harness points
+#: somewhere disposable — his base prompt and his last model are HIS, and a
+#: selftest that pokes the Settings menu must not write them (root AGENTS.md →
+#: "Testing without interfering with the user"; one did, once).
+CONFIG_DIR = Path(os.path.expanduser(
+    os.environ.get("ORACLE_CONFIG", "~/.config/oracle")))
 LAST_MODEL_PATH = CONFIG_DIR / "last-model"
 SUGGESTED_PATH = CONFIG_DIR / "suggested.json"
 
@@ -3152,12 +3251,35 @@ class Sessions(QObject):
 
 
 def main():
-    app = QGuiApplication(sys.argv)
-    app.setApplicationName("oracle")
-    app.setDesktopFileName("oracle")
+    # OFFSCREEN ONLY (root AGENTS.md → "Testing without interfering with the
+    # user"): the harness renders this window on the offscreen platform, never
+    # on his screen, and refuses to run anywhere else.
+    selftest = "--selftest" in sys.argv
+    if selftest:
+        sys.argv.remove("--selftest")
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        os.environ.pop("WAYLAND_DISPLAY", None)
+        os.environ.pop("DISPLAY", None)
 
-    engine = QQmlApplicationEngine()
-    ctx = engine.rootContext()
+    # The Controls style, and with it the whole face: `Basic` in the Hyprland
+    # session, `org.kde.desktop` under Plasma — which is not an imitation of the
+    # KDE style but a renderer THROUGH it, so a Button here is drawn by Oxygen's
+    # own code. pylib/kdeshell.py.
+    kdeshell.pin_controls_style()
+
+    # A QApplication under Plasma, the QGuiApplication we have always used
+    # otherwise: QStyle is a QtWidgets class, and without it there is no system
+    # style to paint with. See kdeshell.make_app.
+    app = kdeshell.make_app(sys.argv, "oracle")
+    if selftest and app.platformName() != "offscreen":
+        raise SystemExit("selftest refuses to run on platform %r, not offscreen"
+                         % app.platformName())
+    app.setApplicationName("oracle")
+    # The name he knows it by. `applicationName` stays `oracle` — the settings
+    # key, the runtime paths and the source directory all do (AGENTS.md) — but
+    # everything a person reads says chatter, About included.
+    app.setApplicationDisplayName("chatter")
+    app.setDesktopFileName("oracle")
 
     palette = Palette(theme_source(PANEL_THEME))
     style = DeskStyle()
@@ -3165,6 +3287,24 @@ def main():
     ollama = Ollama()
     backend = Backend()
     sessions = Sessions()
+
+    # TWO ROOFS, ONE APP (docs/DESIGN.md §7.6). Under Hyprland the QML tree IS
+    # the window and the compositor draws the titlebar. Under Plasma the same
+    # `Root.qml` is the central widget of a real QMainWindow, so the menubar,
+    # the toolbar (with the model and session pickers on it) and the status bar
+    # are KDE widgets and the window background is the system style's.
+    plasma = is_plasma()
+    shell = kdeshell.shell("chatter", size=(620, 720),
+                           min_size=(420, 360)) if plasma else None
+    engine = shell.engine() if plasma else QQmlApplicationEngine()
+    if plasma:
+        # THE SELECTOR IS HOW THE CONTENT CHANGES CLOTHES WITHOUT CHANGING CODE:
+        # with "plasma" set, `qml/+plasma/Foo.qml` transparently replaces
+        # `qml/Foo.qml` at every call site, so the compose box and the
+        # attachment chips are QtQuick.Controls painted through the KDE style
+        # while the Hyprland tree keeps ours, with no branch at either call site.
+        kdeshell.select_plasma_files(engine)
+    ctx = engine.rootContext()
 
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("DeskStyle", style)
@@ -3174,6 +3314,10 @@ def main():
     ctx.setContextProperty("Sessions", sessions)
     ctx.setContextProperty("ollamaHost", OLLAMA)
 
+    warnings = []
+    engine.warnings.connect(
+        lambda errs: warnings.extend(e.toString() for e in errs))
+
     theme_comp = QQmlComponent(engine, QUrl.fromLocalFile(str(QML / "theme" / "Theme.qml")))
     theme = theme_comp.create()
     if theme is None:
@@ -3182,15 +3326,278 @@ def main():
     theme.setParent(app)
     ctx.setContextProperty("Theme", theme)
 
-    engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
-    if not engine.rootObjects():
-        sys.exit(1)
+    if plasma:
+        # Root.qml, not Main.qml: the Window wrapper is the Hyprland roof, and
+        # a QQuickWidget hosts an Item.
+        if not shell.load(QML / "Root.qml"):
+            print("failed to load Root.qml", file=sys.stderr)
+            for w in shell.errors() + warnings:
+                print(f"  {w}", file=sys.stderr)
+            sys.exit(1)
+        build_kde_chrome(shell, ollama, sessions, backend)
+        shell.show()
+    else:
+        engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
+        if not engine.rootObjects():
+            for w in warnings:
+                print(f"  {w}", file=sys.stderr)
+            sys.exit(1)
+
+    win = None if plasma else engine.rootObjects()[0]
+
+    if selftest:
+        sys.exit(run_selftest(app, shell, win, plasma, warnings))
 
     ollama.refreshModels()
     backend.pollStatus()
     sessions.refresh()
     ollama.refreshMemories()
     sys.exit(app.exec())
+
+
+def run_selftest(app, shell, win, plasma, warnings):
+    """Render this window offscreen and report what it is wearing.
+
+    The only way to check the Plasma face without looking at it (docs/DESIGN.md,
+    root AGENTS.md): `ORACLE_CHROME` prints the menubar, toolbar and status bar
+    as text — a menu is not on screen until it is opened, so no render can show
+    what is in one — `ORACLE_FACES` proves the file selector actually swapped
+    the components, and `ORACLE_SHOT` writes the window to a PNG to LOOK at.
+
+        QT_QPA_PLATFORMTHEME=kde DESK_SESSION=plasma ORACLE_CHROME=1 \
+            ORACLE_SHOT=/tmp/chatter.png oracle-qtenv python3 main.py --selftest
+
+    `QT_QPA_PLATFORMTHEME=kde` is not optional there: without it no KDE platform
+    theme loads and the widgets take Qt's default light palette while the QML
+    takes his dark scheme — a bug in the harness, not in the app.
+    """
+    rc = [0]
+
+    def finish():
+        # ORACLE_POKE: fire the menu rows themselves, which is the only check
+        # that the ids in `actions` and the ones `tbAction` answers are the same
+        # set — a typo in either is silent (the row is there, the click does
+        # nothing). Every one of them is state-free here: nothing is sent, no
+        # session exists to delete, and the daemon is not touched.
+        if plasma and os.environ.get("ORACLE_POKE"):
+            for bid in ("new-session", "prompt:concise", "detach",
+                        "refresh-models"):
+                act = shell._actions.get(bid)
+                if act is None:
+                    print(f"poke {bid}: NO ACTION", file=sys.stderr)
+                    rc[0] = 1
+                    continue
+                act.trigger()
+                app.processEvents()
+                print(f"poke {bid}: ok")
+            # ...and that the poke LANDED: the base-prompt radio set is the
+            # one whose new state comes back through the table.
+            lit = [i for i, a in shell._actions.items()
+                   if i.startswith("prompt:") and a.isChecked()]
+            print("prompt set now = %r" % lit)
+        if plasma and os.environ.get("ORACLE_CHROME"):
+            print(shell.dump_chrome())
+        if os.environ.get("ORACLE_TREE"):
+            from PySide6.QtGui import QIcon
+            print(f"style={app.style().objectName() if hasattr(app, 'style') else '-'} "
+                  f"window={app.palette().window().color().name()} "
+                  f"text={app.palette().windowText().color().name()} "
+                  f"icons={QIcon.themeName()}")
+        if os.environ.get("ORACLE_FACES"):
+            seen = {}
+
+            def faces(it, depth=0):
+                if depth > 14 or it is None:
+                    return
+                kids = (it.childItems() if hasattr(it, "childItems")
+                        else it.children())
+                for ch in kids:
+                    f = ch.property("face")
+                    # A STRING specifically: qmlcommon/VScroll.qml has a `color
+                    # face` of its own and would otherwise report itself swapped
+                    # in both sessions.
+                    if isinstance(f, str) and f:
+                        seen[ch.metaObject().className().split("_QMLTYPE")[0]] = str(f)
+                    faces(ch, depth + 1)
+
+            # Under Hyprland the root object is the Window; its children are
+            # QObject children, which is enough to reach the tree from here.
+            root_item = shell.root if plasma else win
+            faces(root_item)
+            for cls in sorted(seen):
+                print(f"face {cls} = {seen[cls]}")
+            if not seen:
+                print("face: none found")
+        shot = os.environ.get("ORACLE_SHOT")
+        if shot:
+            try:
+                if plasma:
+                    shell.window.grab().save(shot)
+                else:
+                    win.grabWindow().save(shot)
+                print(f"selftest: wrote {shot}")
+            except Exception as exc:  # noqa: BLE001
+                print(f"selftest: shot failed: {exc}", file=sys.stderr)
+        for w in warnings:
+            print(f"QML WARNING: {w}", file=sys.stderr)
+        if warnings:
+            rc[0] = 1
+        print(f"selftest: root loaded, {len(warnings)} QML warning(s)")
+        app.quit()
+
+    QTimer.singleShot(1200, finish)
+    app.exec()
+    return rc[0]
+
+
+def build_kde_chrome(shell, ollama, sessions, backend):
+    """chatter's Plasma chrome: the menubar and toolbar out of `actions`, the
+    status bar out of `statusLine`/`statusRight`, and the two pickers that
+    cannot be QActions — the model list and the session list — as real combo
+    boxes on the toolbar, where Dolphin keeps its view controls."""
+    from PySide6.QtCore import Q_ARG, QMetaObject
+    from PySide6.QtWidgets import QComboBox, QMessageBox
+
+    root = shell.root
+    # No `titlebar` argument: chatter registers no hyprvtb buttons and its
+    # bridge publishes no `buttonsChanged`, so `bind_chrome` binds the QML
+    # root's own `actionsChanged` instead — `actions` is a binding over every
+    # state it reports, so it fires whenever any of them moves.
+    shell.bind_chrome(None)
+    shell.bind_status()
+    shell.bind_title("windowTitle")
+
+    # ---- the model picker -------------------------------------------------
+    # A real QComboBox: the daemon's models, with the AGENT-SUGGESTED ones
+    # ranked first and a separator ruling them off from the rest, exactly as the
+    # QML dropdown does under Hyprland (`suggested.json` — apps/oracle/AGENTS.md).
+    mirroring = []
+    model_box = QComboBox()
+    model_box.setMinimumWidth(220)
+    model_box.setToolTip("the model this conversation talks to")
+
+    def fill_models():
+        mirroring.append(1)
+        try:
+            model_box.clear()
+            names = list(ollama.models)
+            for i, name in enumerate(names):
+                model_box.addItem(name)
+                if i + 1 == int(ollama.suggestedCount) and i + 1 < len(names):
+                    model_box.insertSeparator(model_box.count())
+            cur = str(root.property("model") or "")
+            if cur:
+                idx = model_box.findText(cur)
+                if idx >= 0:
+                    model_box.setCurrentIndex(idx)
+            model_box.setEnabled(bool(names))
+        finally:
+            mirroring.pop()
+
+    def picked_model(text):
+        if mirroring or not text:
+            return
+        root.setProperty("model", text)
+
+    def model_changed():
+        if mirroring:
+            return
+        cur = str(root.property("model") or "")
+        if cur and model_box.currentText() != cur:
+            idx = model_box.findText(cur)
+            if idx >= 0:
+                mirroring.append(1)
+                try:
+                    model_box.setCurrentIndex(idx)
+                finally:
+                    mirroring.pop()
+
+    model_box.textActivated.connect(picked_model)
+    ollama.modelsChanged.connect(fill_models)
+    msig = getattr(root, "modelChanged", None)
+    if msig is not None and hasattr(msig, "connect"):
+        msig.connect(model_changed)
+    fill_models()
+    shell.toolbar_widget("main", model_box)
+
+    # ---- the session picker -----------------------------------------------
+    # The same list the File menu carries, whole rather than capped, plus the
+    # row that starts a new conversation — the one entry that is not a session.
+    session_box = QComboBox()
+    session_box.setMinimumWidth(200)
+    session_box.setToolTip("the saved conversation on screen")
+
+    def fill_sessions():
+        mirroring.append(1)
+        try:
+            session_box.clear()
+            session_box.addItem("New Session", "")
+            for row in sessions.sessions:
+                session_box.addItem(str(row.get("title") or "session"),
+                                    str(row.get("id") or ""))
+            sid = str(root.property("sessionId") or "")
+            idx = session_box.findData(sid)
+            session_box.setCurrentIndex(max(0, idx))
+        finally:
+            mirroring.pop()
+
+    def picked_session(i):
+        if mirroring or i < 0:
+            return
+        sid = str(session_box.itemData(i) or "")
+        if not sid:
+            QMetaObject.invokeMethod(root, "newSession")
+        elif sid != str(root.property("sessionId") or ""):
+            sessions.open(sid)
+
+    def session_changed():
+        if mirroring:
+            return
+        fill_sessions()
+
+    session_box.activated.connect(picked_session)
+    sessions.listChanged.connect(fill_sessions)
+    ssig = getattr(root, "sessionIdChanged", None)
+    if ssig is not None and hasattr(ssig, "connect"):
+        ssig.connect(session_changed)
+    tsig = getattr(root, "sessionTitleChanged", None)
+    if tsig is not None and hasattr(tsig, "connect"):
+        tsig.connect(session_changed)
+    fill_sessions()
+    shell.toolbar_widget("main", session_box)
+
+    # ---- deleting a session is asked about first --------------------------
+    # It is the one row here that destroys something of his, and the store keeps
+    # no undo (docs/DESIGN.md §10.3). NOT `QMessageBox.question()`: the static
+    # helpers run a nested exec() and hand the box to the KDE native dialog
+    # helper, whose teardown segfaults the app (apps/AGENTS.md → kdeshell).
+    boxes = []
+
+    def confirm_delete():
+        title = str(root.property("sessionTitle") or "this conversation")
+        box = QMessageBox(shell.window)
+        box.setOption(QMessageBox.Option.DontUseNativeDialog, True)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Delete session")
+        box.setText("Delete “%s”?" % title)
+        box.setInformativeText("The transcript is removed from the store. "
+                               "This cannot be undone.")
+        box.setStandardButtons(QMessageBox.Cancel | QMessageBox.Yes)
+        box.setDefaultButton(QMessageBox.Cancel)
+
+        def answered(btn):
+            if box.standardButton(btn) == QMessageBox.Yes:
+                QMetaObject.invokeMethod(root, "deleteCurrentSession")
+            box.hide()
+        box.buttonClicked.connect(answered)
+        boxes.append(box)          # a dialog owned by the stack crashes
+        box.show()
+        box.raise_()
+
+    shell.on_action("delete-session", confirm_delete)
+    # The action shortcuts are this face's (Ctrl+Return sends), and a bare-key
+    # one would be typed into the compose box rather than fired — chatter has
+    # none, so there is nothing here to guard.
 
 
 if __name__ == "__main__":
