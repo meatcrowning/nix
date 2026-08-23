@@ -649,6 +649,28 @@ presses. Two changes:
   something he already asked for. Without it a model treats one tool round as
   one turn and hands back a description of what it would do next.
 
+### It presses `continue` for him
+
+Even with `PERSISTENCE_NOTE` on every prompt, gemma4 ends a turn by ANNOUNCING
+its next step — "I'd like to proceed with…", "Shall I?", "I'll now grep for…" —
+and he was pressing `continue` over and over to get one task done [his,
+2026-08-23]. So the app presses it:
+
+- `Ollama.looksUnfinished(text)` reads the last 400 characters of a finished
+  answer against `UNFINISHED_PATTERNS` — announcements of the model's own next
+  action, and permission-asks for work he already asked for. An answer that just
+  ENDS matches nothing, and a real question to him ("which of the two?") is not
+  an announcement.
+- QML's `autoContinue()` runs off `onReplyDone`: at most
+  `AUTO_CONTINUE_MAX` (3) presses per prompt, `continueReply("proceed")` each
+  time, streaming into the same row. `PROCEED_PROMPT` tells the model to act
+  rather than ask again.
+- **It says so**: the status line reads `carrying on by itself (n/3)`, and when
+  the budget runs out with the answer still announcing, `it stopped short again
+  — press continue` (docs/DESIGN.md §10 — nothing on his behalf in silence).
+- **Stop is stop**: `stopReply` spends the whole budget, so a turn he
+  interrupted is never carried on for him. His next prompt re-arms it.
+
 ### The wrap-up round — why replies came back EMPTY
 
 **Either limit above ends the loop, and ending it used to end the turn.** Until

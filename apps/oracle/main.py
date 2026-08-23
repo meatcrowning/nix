@@ -1071,6 +1071,31 @@ PERSISTENCE_NOTE = (
     "to say what you would do next; do it. Come back early only if you "
     "genuinely need a decision from him, or the job is done." % MAX_TOOL_ROUNDS)
 
+#: How many times a turn may carry ITSELF on before it has to hand back. A
+#: model that announces its next step instead of taking it is the single reason
+#: he was pressing `continue` over and over [his, 2026-08-23: "its still
+#: stopping mid generation and making me press continue over and over again"] —
+#: PERSISTENCE_NOTE asks it not to, and gemma4 does it anyway. So the app
+#: presses the button for him, a bounded number of times.
+AUTO_CONTINUE_MAX = 3
+
+#: A reply that ANNOUNCES work rather than doing it. Matched against the tail of
+#: a finished answer: "I'll now grep for…", "Shall I proceed?", "The next step
+#: is…". Deliberately narrow — an answer that simply ENDS matches nothing here,
+#: and a genuine question to him ("which of these two do you want?") is not an
+#: announcement of the model's own next action.
+UNFINISHED_PATTERNS = [
+    r"\b(i'?ll|i will|i'?m going to|i am going to|let me|i'?d like to)\b"
+    r"[^.?!\n]{0,90}\b(now|next|then|proceed|start|begin|run|execute|check|"
+    r"verify|read|edit|write|create|search|grep|look|inspect|apply|use)\b",
+    r"\bshall i\b",
+    r"\bwould you like me to\b",
+    r"\bshould i (go ahead|proceed|continue|start)\b",
+    r"\bproceed(ing)? (with|to)\b",
+    r"\bthe (next|final) step\b",
+    r"\bstand by\b",
+]
+
 #: How wide a web search fans out, scaled to the query's apparent complexity
 #: (see `Ollama._research_budget`). A simple factual ask (a weather lookup, a
 #: definition) needs a handful of sources; a genuinely broad research question
@@ -1528,6 +1553,12 @@ class Ollama(QObject):
     def busy(self):
         return self._busy
 
+    @Property(int, constant=True)
+    def autoContinueMax(self):
+        """How many times one prompt may be carried on without him."""
+        return AUTO_CONTINUE_MAX
+
+
     def _set_busy(self, v):
         if v != self._busy:
             self._busy = v
@@ -1930,6 +1961,13 @@ class Ollama(QObject):
         "not repeat or summarise what you already said, and do not open with a "
         "preamble like \"continuing\" or \"sure\".")
 
+    #: What an AUTO-CONTINUE says: the model announced its next step instead of
+    #: taking it, so it is told to take it. A user turn, like the others.
+    PROCEED_PROMPT = (
+        "Yes — go ahead and do it, now, with your tools. That was already what "
+        "he asked for, so do not ask again and do not restate the plan: act, "
+        "then tell him what happened. If it turns out you cannot, say why.")
+
     #: What it says when the previous turn produced NO words at all (it spent
     #: the turn on tools and never wrote). There is nothing to carry on from.
     ANSWER_PROMPT = (
@@ -1965,6 +2003,8 @@ class Ollama(QObject):
         self._max_results = budget["max_results"]
         if not partial.strip():
             instruction = self.ANSWER_PROMPT
+        elif mode == "proceed":
+            instruction = self.PROCEED_PROMPT
         elif mode == "extend":
             instruction = self.EXTEND_PROMPT
         else:
@@ -1996,6 +2036,21 @@ class Ollama(QObject):
             self._post_chat()
 
         self._warden.reserve("ollama", model=model, cb=_go)
+
+    @Slot(str, result=bool)
+    def looksUnfinished(self, text):
+        """Did this answer ANNOUNCE its next step instead of taking it?
+
+        True means the app carries the turn on by itself rather than making him
+        press `continue` (QML counts those, AUTO_CONTINUE_MAX of them). Only the
+        TAIL is read — the last couple of sentences are where a model says what
+        it is about to do — so a long answer that merely mentions a plan in
+        passing and then finishes the work does not match.
+        """
+        tail = (text or "")[-400:].lower()
+        if not tail.strip():
+            return False
+        return any(re.search(p, tail) for p in UNFINISHED_PATTERNS)
 
     @Slot(str, result="QVariant")
     def localFileInfo(self, url):

@@ -187,15 +187,52 @@ MODE["tool_loop"] = True
 CHATS.clear()
 chunks.clear()
 done.clear()
+room = o._ctx_room
+o._ctx_room = lambda: False          # as if the window were already full
 o.send("stub:latest", "go find something", "[]")
-# One real round, then stuff the context: the next `_on_finished` must wrap up.
-pump(lambda: len(CHATS) >= 2)
-o._messages.append({"role": "user", "content": "x" * (oracle.CHAT_NUM_CTX * 4)})
 pump(lambda: bool(done))
-check("a full context wraps the turn up early",
-      len(CHATS) < oracle.MAX_TOOL_ROUNDS, "%d chats" % len(CHATS))
+o._ctx_room = room
+check("a full context wraps the turn up on the FIRST round",
+      len(CHATS) == 2, "%d chats" % len(CHATS))
 check("and it still ends in words",
       "".join(chunks) == "and here is the rest of it.", repr("".join(chunks)))
+
+# ---- carrying the turn on WITHOUT him ------------------------------------
+# The model announcing its next step instead of taking it is what had him
+# pressing continue over and over [his, 2026-08-23]. `looksUnfinished` is what
+# QML asks before pressing it for him.
+ANNOUNCES = [
+    "I'd like to proceed with the final step: using `edit_file` to inject it.",
+    "Shall I proceed with inspecting `AGENTS.md`?",
+    "I'm going to use `grep` to find the class and the prompt methods.",
+    "I'll now run the test suite and report the failures.",
+]
+FINISHES = [
+    "Done — I edited main.py and re-read it to check the change landed.",
+    "Yes, I do. I have access to a real bash shell via the run_bash tool.",
+    "The trip from Juneau takes about 15-20 minutes by floatplane.",
+    "Which of the two directories do you want me to use?",
+]
+for t in ANNOUNCES:
+    check("announced work is unfinished: %r" % t[:34], o.looksUnfinished(t))
+for t in FINISHES:
+    check("a finished answer is not: %r" % t[:34], not o.looksUnfinished(t))
+check("and neither is nothing at all", not o.looksUnfinished(""))
+check("the auto-press is bounded", 1 <= o.autoContinueMax <= 5,
+      str(o.autoContinueMax))
+
+# The auto-press itself is `continueReply` in `proceed` mode.
+CHATS.clear()
+chunks.clear()
+done.clear()
+MODE["tool_loop"] = False
+o.continueReply("stub:latest", "[]", ANNOUNCES[0], "proceed")
+pump(lambda: bool(done))
+last = CHATS[-1]["messages"][-1]
+check("proceed tells it to act, not to ask again",
+      last["role"] == "user" and "go ahead and do it" in last["content"]
+      and "do not ask again" in last["content"], json.dumps(last)[:160])
+check("and the tools are all still on the table", bool(CHATS[-1].get("tools")))
 
 srv.shutdown()
 print("FAILED: " + ", ".join(fails) if fails else "OK")

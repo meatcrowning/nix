@@ -243,6 +243,7 @@ Item {
             chatLog.setProperty(win.activeIndex, "toolsActive", false);
             win.chatRev++;              // the compose button can offer `continue`
             win.saveCurrent();          // the finished turn persists to the session
+            win.autoContinue();
         }
         function onReplyError(reason) {
             if (win.activeIndex < 0) return;
@@ -443,6 +444,7 @@ Item {
                          tools: "", toolCount: 0, toolsActive: false,
                          streaming:true, isError: false });
         win.activeIndex = chatLog.count - 1;
+        win.autoContinues = 0;             // a new prompt re-arms the auto-press
         Ollama.rememberModel(win.model);   // the model he last used is next launch's default
         Ollama.send(win.model, sendPrompt, JSON.stringify(history), JSON.stringify(atts));
         promptBox.clear();
@@ -620,15 +622,16 @@ Item {
     // bubbles that have to be read together [his, 2026-08-22]. Only ever the
     // last row: continuing one further up would write into the middle of the
     // conversation.
-    function continueReply() {
+    function continueReply(forced) {
         var i = chatLog.count - 1;
         if (i < 0 || win.model === "") return;
         var row = chatLog.get(i);
         if (row.isUser || row.streaming || row.isError) return;
-        var mode = row.cutOff ? "resume" : "extend";
-        // An extension is its own paragraph; a resume picks the sentence back
-        // up where it broke, so nothing may come between the two halves.
-        if (mode === "extend" && row.body.trim() !== "")
+        var mode = forced ? forced : (row.cutOff ? "resume" : "extend");
+        // An extension (and an auto-`proceed`) is its own paragraph; a resume
+        // picks the sentence back up where it broke, so nothing may come
+        // between the two halves.
+        if (mode !== "resume" && row.body.trim() !== "")
             chatLog.setProperty(i, "body", row.body + "\n\n");
         var history = [];
         for (var k = 0; k < i; k++) {
@@ -642,6 +645,31 @@ Item {
         win.chatRev++;
         win.activeIndex = i;
         Ollama.continueReply(win.model, JSON.stringify(history), row.body, mode);
+    }
+
+    // CARRY THE TURN ON BY ITSELF. A model that announces its next step instead
+    // of taking it ("I'd like to proceed with…", "Shall I?") is the whole reason
+    // he was pressing `continue` over and over [his, 2026-08-23]. So the app
+    // presses it for him, at most AUTO_CONTINUE_MAX times per prompt, and says
+    // in the status line that it did (docs/DESIGN.md §10 — nothing happens on
+    // his behalf in silence). Pressing stop ends it: the count is not reset
+    // until his next prompt, and a stopped row is `cutOff`, not unfinished.
+    property int autoContinues: 0
+    function autoContinue() {
+        var i = chatLog.count - 1;
+        if (i < 0 || Ollama.busy) return;
+        var row = chatLog.get(i);
+        if (row.isUser || row.isError || row.cutOff) return;
+        if (win.autoContinues >= Ollama.autoContinueMax) {
+            if (Ollama.looksUnfinished(row.body))
+                win.status = "it stopped short again — press continue";
+            return;
+        }
+        if (!Ollama.looksUnfinished(row.body)) return;
+        win.autoContinues++;
+        win.status = "carrying on by itself (" + win.autoContinues + "/"
+                     + Ollama.autoContinueMax + ")";
+        win.continueReply("proceed");
     }
 
     // The reasoning clock. It accrues while the model is REASONING or WAITING ON
@@ -698,6 +726,9 @@ Item {
     // fires no replyDone/replyError, so nothing else would (§10.6 — a stopped
     // stream must not still read as running).
     function stopReply() {
+        // Stop is stop: it also spends the auto-continue budget, so a turn he
+        // interrupted is never carried on for him.
+        win.autoContinues = Ollama.autoContinueMax;
         Ollama.cancel();
         if (win.activeIndex >= 0) {
             win.stopThinkClock(win.activeIndex);
