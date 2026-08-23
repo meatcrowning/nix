@@ -7,12 +7,15 @@ userscript has no Python to ask — so until now the CSS was BAKED into the
 script and went stale the moment the colour scheme or the wallpaper moved.
 
 This is the Python the userscript can ask. One stdlib HTTP server on
-127.0.0.1, one route, rebuilt from the live palette on every request (a build
-is ~1ms — it reads kdeglobals or Theme.qml and formats a 3.6 KB sheet), so
-there is nothing to invalidate and no hook into wal-set.sh to keep in step:
+127.0.0.1, rebuilt from the live palette on every request (a build is ~1ms — it
+reads kdeglobals or Theme.qml and formats a few KB of CSS), so there is nothing
+to invalidate and no hook into wal-set.sh to keep in step:
 
-    GET /chan.css   ->  text/css, ETag: "<crc>"   (304 on If-None-Match)
-    GET /version    ->  {"stamp": "...", "provenance": "..."}
+    GET /chan.css       ->  text/css, ETag: "<crc>"   (304 on If-None-Match)
+    GET /scrollbar.css  ->  the desktop's scrollbar (pylib/scrollcss.py):
+                            Oxygen's own bar under Plasma, the win31/beveled/
+                            flat variant otherwise
+    GET /version        ->  {"stamp": ..., "scrollbarStamp": ..., ...}
 
 LOOPBACK ONLY, and that is the whole of its security story: it binds
 127.0.0.1, it takes no parameters, and every byte it can emit is a stylesheet
@@ -42,6 +45,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
 import chansource                                               # noqa: E402
+import scrollcss                                                # noqa: E402
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -75,10 +79,34 @@ class Handler(BaseHTTPRequestHandler):
         if body:
             self.wfile.write(body)
 
+    # path -> the builder behind it. Both rebuild from the live palette per
+    # request; neither caches, so a colour-scheme or wallpaper change needs
+    # nothing restarted and nothing notified.
+    ROUTES = {
+        "/chan.css": lambda src: chansource.build_css(src),
+        "/": lambda src: chansource.build_css(src),
+        "/css": lambda src: chansource.build_css(src),
+        "/scrollbar.css": lambda src: scrollcss.build(src),
+    }
+
     def do_GET(self):
         path = self.path.split("?", 1)[0]
+        route = self.ROUTES.get(path)
+        if route is None and path != "/version":
+            self._send(404, b"chan-theme: /chan.css, /scrollbar.css or /version\n")
+            return
         try:
-            css, prov = chansource.build_css(self.source)
+            if path == "/version":
+                css, prov = chansource.build_css(self.source)
+                bar, barprov = scrollcss.build(self.source)
+                body = json.dumps({"stamp": chansource.stamp(css),
+                                   "provenance": prov,
+                                   "scrollbarStamp": chansource.stamp(bar),
+                                   "scrollbarProvenance": barprov}).encode("utf-8")
+                self._send(200, body, "application/json",
+                           [("ETag", '"%s"' % chansource.stamp(css + bar))])
+                return
+            css, _prov = route(self.source)
         except SystemExit as e:
             self._send(503, str(e).encode("utf-8"))
             return
@@ -86,22 +114,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send(500, ("%s: %s" % (type(e).__name__, e)).encode("utf-8"))
             return
         tag = '"%s"' % chansource.stamp(css)
-        if path in ("/chan.css", "/", "/css"):
-            if self.headers.get("If-None-Match") == tag:
-                self.send_response(304)
-                self.send_header("ETag", tag)
-                self.send_header("Content-Length", "0")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                return
-            self._send(200, css.encode("utf-8"), "text/css; charset=utf-8",
-                       [("ETag", tag)])
-        elif path == "/version":
-            body = json.dumps({"stamp": chansource.stamp(css),
-                               "provenance": prov}).encode("utf-8")
-            self._send(200, body, "application/json", [("ETag", tag)])
-        else:
-            self._send(404, b"chan-theme: /chan.css or /version\n")
+        if self.headers.get("If-None-Match") == tag:
+            self.send_response(304)
+            self.send_header("ETag", tag)
+            self.send_header("Content-Length", "0")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            return
+        self._send(200, css.encode("utf-8"), "text/css; charset=utf-8", [("ETag", tag)])
 
 
 def main():
@@ -111,10 +131,13 @@ def main():
                     help="force the palette source instead of the live session")
     ap.add_argument("--once", action="store_true",
                     help="build the sheet once, print it, exit")
+    ap.add_argument("--route", choices=("chan", "scrollbar"), default="chan",
+                    help="which sheet --once builds")
     ap.add_argument("-v", "--verbose", action="store_true")
     a = ap.parse_args()
     if a.once:
-        css, prov = chansource.build_css(a.source)
+        build = scrollcss.build if a.route == "scrollbar" else chansource.build_css
+        css, prov = build(a.source)
         sys.stderr.write("from: %s (stamp %s)\n" % (prov, chansource.stamp(css)))
         sys.stdout.write(css)
         return 0
@@ -122,7 +145,7 @@ def main():
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
     srv.verbose = a.verbose
     srv.daemon_threads = True
-    sys.stderr.write("chan-theme: http://127.0.0.1:%d/chan.css\n" % a.port)
+    sys.stderr.write("chan-theme: http://127.0.0.1:%d/{chan,scrollbar}.css\n" % a.port)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

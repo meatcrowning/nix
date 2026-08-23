@@ -44,4 +44,34 @@
     };
     Install.WantedBy = [ "default.target" ];
   };
+
+  # Vivaldi's OWN UI (panels, settings, the tab stack) is a Chromium page too,
+  # and it takes the same scrollbar sheet — but through a `custom.css` it reads
+  # at STARTUP, so it cannot poll the courier the way a userscript does. Nothing
+  # else can keep it current either: the palette moves when wal-set.sh rewrites
+  # Theme.qml or when the KDE scheme changes, neither of which Vivaldi sees.
+  # So a path unit watches those two files and re-mints the css; whenever he
+  # next launches Vivaldi, what it reads is current. Unchanged content is not
+  # rewritten, so a run that changes nothing costs nothing.
+  systemd.user.services.vivaldi-ui-css = {
+    Unit.Description = "Mint Vivaldi's custom.css from the live palette";
+    Service = {
+      Type = "oneshot";
+      ExecStart = "${pkgs.python3}/bin/python3 /home/lam/nix/apps/pylib/tools/scrollbar-userscript.py --ui";
+      TimeoutStartSec = "1min";
+    };
+    Install.WantedBy = [ "default.target" ];
+  };
+
+  systemd.user.paths.vivaldi-ui-css = {
+    Unit.Description = "Watch the palette sources Vivaldi's custom.css is built from";
+    Path = {
+      PathChanged = [
+        "%h/.config/quickshell/Theme.qml"      # the Hyprland face
+        "%h/.config/kdeglobals"                # the Plasma one
+      ];
+      Unit = "vivaldi-ui-css.service";
+    };
+    Install.WantedBy = [ "paths.target" ];
+  };
 }

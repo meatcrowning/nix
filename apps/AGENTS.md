@@ -257,6 +257,31 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
       app. Harness `pylib/tools/chan-userscript-test.py`, whose real job is the
       seam: the baked CSS, the courier's response and what surfer serves must
       be the same bytes for the same palette.
+    - **`pylib/scrollcss.py` + `pylib/userscript.py` — the desktop's scrollbar
+      in a browser that is not ours.** Chromium paints its own bar in Aura and
+      never asks Qt or GTK, so a page is the one surface `qmlcommon/VScroll.qml`
+      cannot reach; this builds the same bar as `::-webkit-scrollbar` CSS.
+      Under Plasma that is **Oxygen's own bar, measured** — every ratio comes
+      from `pylib/tools/oxygen-scrollbar-probe.py`, which renders a real
+      `QScrollBar` offscreen under the live style and prints the ladder
+      (re-run it before changing a constant); off Plasma it is the
+      win31/beveled/flat variant from the panel's `settings.json`, the same
+      three surfer injects. `scrollbar-theme`
+      (wrapper: `home/prog/scrollbar-theme.nix`) writes the two things Vivaldi
+      can read: `~/.local/share/chan-theme/desktop-scrollbar.user.js` (every
+      page, live against `/scrollbar.css` on the courier) and
+      `~/.local/share/vivaldi-ui/custom.css` (Vivaldi's OWN UI, read at startup
+      — `vivaldi://experiments` -> allow CSS modifications, then Settings >
+      Appearance > Custom UI Modifications; the `vivaldi-ui-css` path unit in
+      `home/srvs/chan-theme.nix` re-mints it whenever the palette moves).
+      `pylib/userscript.py` is the ONE Tampermonkey runtime both scripts carry
+      — embedded sheet, gmxhr poll, `adoptedStyleSheets` — so the two cannot
+      drift; the 4chan gate is its only parameter. Harness
+      `pylib/tools/scrollcss-test.py` (`--web` loads the sheet into an
+      offscreen Chromium and checks it kept every rule).
+      **surfer still draws its own** in `qml/Main.qml` (`scrollbarJs()`), and
+      its Plasma branch is the older Breeze pill rather than this — the two
+      have not been joined up yet.
     - `deskstyle.py` asks it for `fontFamily`/`fontSize` (KDE's point size,
       converted at the screen's own DPI), `smooth`, the motion factor and the
       scrollbar in that session. The two GEOMETRY keys do not move: border
