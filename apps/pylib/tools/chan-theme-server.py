@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""The loopback courier that makes the Vivaldi 4chan re-skin LIVE.
+
+surfer serves this sheet to its own pages over `surferonee://`, in-process.
+Vivaldi is somebody else's browser: the only seat is Tampermonkey, and a
+userscript has no Python to ask — so until now the CSS was BAKED into the
+script and went stale the moment the colour scheme or the wallpaper moved.
+
+This is the Python the userscript can ask. One stdlib HTTP server on
+127.0.0.1, one route, rebuilt from the live palette on every request (a build
+is ~1ms — it reads kdeglobals or Theme.qml and formats a 3.6 KB sheet), so
+there is nothing to invalidate and no hook into wal-set.sh to keep in step:
+
+    GET /chan.css   ->  text/css, ETag: "<crc>"   (304 on If-None-Match)
+    GET /version    ->  {"stamp": "...", "provenance": "..."}
+
+LOOPBACK ONLY, and that is the whole of its security story: it binds
+127.0.0.1, it takes no parameters, and every byte it can emit is a stylesheet
+this repo generated. It is NOT a firewall hole — nothing in sys/net has to
+learn about it (see AGENTS.md, "Off-LAN: the tailnet": anything loopback-pinned
+stays loopback-pinned).
+
+A 4chan page is https, so a plain fetch() to http://127.0.0.1 is blocked as
+mixed content — the userscript reaches this through GM_xmlhttpRequest, which
+is exactly why it needs `@grant GM_xmlhttpRequest` + `@connect 127.0.0.1`.
+Access-Control-Allow-Origin is sent anyway, for a hand `curl` and for any
+future caller that is not gmxhr.
+
+    apps/pylib/tools/chan-theme-server.py            # serve on 8791
+    apps/pylib/tools/chan-theme-server.py --port N
+    apps/pylib/tools/chan-theme-server.py --once     # build once, print, exit
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+
+import chansource                                               # noqa: E402
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "chan-theme/1.0"
+    protocol_version = "HTTP/1.1"
+    source = None
+
+    def log_message(self, fmt, *a):
+        # Quiet by default: this answers a poll every 30s per open 4chan tab,
+        # and the journal is not a place to keep that.
+        if self.server.verbose:
+            sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % a))
+
+    def handle_one_request(self):
+        # A poller that hangs up mid-response (a tab closing, gmxhr timing out)
+        # is normal here and must not print a traceback into the journal.
+        try:
+            super().handle_one_request()
+        except (ConnectionResetError, BrokenPipeError):
+            self.close_connection = True
+
+    def _send(self, code, body=b"", ctype="text/plain; charset=utf-8", extra=()):
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", "no-cache")
+        for k, v in extra:
+            self.send_header(k, v)
+        self.end_headers()
+        if body:
+            self.wfile.write(body)
+
+    def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        try:
+            css, prov = chansource.build_css(self.source)
+        except SystemExit as e:
+            self._send(503, str(e).encode("utf-8"))
+            return
+        except Exception as e:                                  # noqa: BLE001
+            self._send(500, ("%s: %s" % (type(e).__name__, e)).encode("utf-8"))
+            return
+        tag = '"%s"' % chansource.stamp(css)
+        if path in ("/chan.css", "/", "/css"):
+            if self.headers.get("If-None-Match") == tag:
+                self.send_response(304)
+                self.send_header("ETag", tag)
+                self.send_header("Content-Length", "0")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                return
+            self._send(200, css.encode("utf-8"), "text/css; charset=utf-8",
+                       [("ETag", tag)])
+        elif path == "/version":
+            body = json.dumps({"stamp": chansource.stamp(css),
+                               "provenance": prov}).encode("utf-8")
+            self._send(200, body, "application/json", [("ETag", tag)])
+        else:
+            self._send(404, b"chan-theme: /chan.css or /version\n")
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--port", type=int, default=chansource.PORT)
+    ap.add_argument("--source", choices=("hypr", "plasma"),
+                    help="force the palette source instead of the live session")
+    ap.add_argument("--once", action="store_true",
+                    help="build the sheet once, print it, exit")
+    ap.add_argument("-v", "--verbose", action="store_true")
+    a = ap.parse_args()
+    if a.once:
+        css, prov = chansource.build_css(a.source)
+        sys.stderr.write("from: %s (stamp %s)\n" % (prov, chansource.stamp(css)))
+        sys.stdout.write(css)
+        return 0
+    Handler.source = a.source
+    srv = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
+    srv.verbose = a.verbose
+    srv.daemon_threads = True
+    sys.stderr.write("chan-theme: http://127.0.0.1:%d/chan.css\n" % a.port)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

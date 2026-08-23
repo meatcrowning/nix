@@ -6,8 +6,15 @@
 # surfer wears the same sheet natively, through its own `surferonee://` courier
 # (live, no regeneration). Vivaldi is somebody else's browser: no Stylus, and
 # the only injection seat is Tampermonkey — where OneeChan already lives — so
-# the CSS has to be BAKED into a userscript, and therefore re-baked whenever
-# the colour scheme or the wallpaper moves. This is that command.
+# the CSS goes into a userscript. This is the command that writes it.
+#
+# Writing it is no longer the same as keeping it current: since 2026-08-23 the
+# script POLLS `home/srvs/chan-theme.nix`'s loopback courier
+# (127.0.0.1:8791, `apps/pylib/tools/chan-theme-server.py`) and re-adopts the
+# sheet whenever the palette moves, open tab included. The embedded copy is
+# only the fallback for a page loaded while that unit is down. So re-run this
+# when the SHEET (`apps/pylib/chantheme.py`) or the generator changes — NOT
+# after a colour-scheme or wallpaper change, which now needs nothing.
 #
 # Live source at apps/pylib/tools/chan-userscript.py (absolute path, valid on
 # both machines); a rebuild is only needed to change THIS wrapper. Plain

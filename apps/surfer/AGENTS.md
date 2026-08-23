@@ -675,10 +675,11 @@ reloaded.**
 
 **The sheet itself is NOT in this app.** It lives in `pylib/chantheme.py`,
 Qt-free and pure, because Vivaldi wears it too — `apps/pylib/tools/chan-userscript.py`
-bakes the same bytes into a Tampermonkey userscript (`chan-theme` regenerates
-it; see `apps/AGENTS.md`). Edit the rules there, not here, or the two browsers
-drift; `chan-userscript-test.py` asserts they are byte-identical for one
-palette. What stays in surfer is the courier:
+puts the same bytes into a Tampermonkey userscript, and `chan-theme-server.py`
+serves them to it live on 127.0.0.1:8791, which is Vivaldi's equivalent of the
+courier below (see `apps/AGENTS.md`). Edit the rules there, not here, or the
+two browsers drift; `chan-userscript-test.py` asserts all three are
+byte-identical for one palette. What stays in surfer is the courier:
 
 Exactly the dark-mode courier's shape, on a parallel scheme:
 
