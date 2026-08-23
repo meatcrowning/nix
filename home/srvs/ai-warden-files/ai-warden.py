@@ -149,6 +149,12 @@ def gb(n):
 
 
 def notify(summary, body, urgency="normal"):
+    """LOWERCASE, TERSE, NO EXPLAINING. Every string this desktop authors is
+    lowercase (docs/DESIGN.md §7.2), and his correction on the first draft of
+    these was that they read AI-written: a summary that is the fact
+    (`unloaded chatter (24.0G)`) and a body that is the reason in four words
+    (`painter needed the room`). No "it reloads its weights next time you use
+    it" — he knows. Same voice for the refusals below."""
     if os.environ.get("AI_WARDEN_NO_NOTIFY") == "1":
         log("notify (suppressed): %s — %s" % (summary, body))
         return
@@ -326,7 +332,7 @@ class Warden:
         with self.lock:
             until = self.leases.get(backend, 0)
         if until > time.time():
-            return True, "%s has a turn in flight" % NICE[backend]
+            return True, "%s is mid-reply" % NICE[backend]
         if backend == "comfy":
             q = comfy_queue()
             if q:
@@ -336,7 +342,7 @@ class Warden:
         # under sustained GPU load is the only hint there is, and it is
         # advisory — say so in the reason rather than claiming certainty.
         if ollama_ps() and gpu_util() >= 40:
-            return True, "chatter looks to be generating (GPU busy)"
+            return True, "chatter looks busy (gpu %d%%)" % gpu_util()
         return False, ""
 
     def snapshot(self):
@@ -469,10 +475,8 @@ class Warden:
                 return {"ok": True, "reason": "", "freed": [], "need": need,
                         "available": avail}
             return self._refuse(
-                "not enough memory: %s needs at least %s, only %s is free and "
-                "nothing of %s's is loaded to give back"
-                % (NICE[backend], gb(hard), gb(avail), NICE[other]),
-                need, avail)
+                "not enough memory: needs %s, %s free, nothing to unload"
+                % (gb(hard), gb(avail)), need, avail)
 
         bsy, why = self.busy(other)
         if bsy:
@@ -485,26 +489,21 @@ class Warden:
                 return {"ok": True, "reason": "", "freed": [], "need": need,
                         "available": avail}
             return self._refuse(
-                "%s — its %s of weights cannot be freed under it. Try again "
-                "when it finishes." % (why, gb(held)), need, avail)
+                "%s, %s stuck under it" % (why, gb(held)), need, avail)
 
         released = self.free(other)
         if released:
             freed.append(other)
-            notify("Freed %s to make room for %s" % (NICE[other], NICE[backend]),
-                   "%s wanted about %s. %s gave back %s — it reloads its weights "
-                   "next time you use it." % (NICE[backend], gb(need),
-                                              NICE[other], gb(released)))
+            notify("unloaded %s (%s)" % (NICE[other], gb(released)),
+                   "%s needed the room" % NICE[backend])
         avail = mem_available()
         # Refuse on `hard`, never on `need` — see estimate(). Everything of ours
         # has already been given back at this point, so a shortfall here means
         # something outside the two backends is holding the machine.
         if hard and (avail - hard) < HARD_FLOOR:
             return self._refuse(
-                "still short after freeing %s: %s needs at least %s and only %s "
-                "is free. Something else on the machine is holding it."
-                % (NICE[other], NICE[backend], gb(hard), gb(avail)),
-                need, avail, freed)
+                "still short after unloading %s: needs %s, %s free"
+                % (NICE[other], gb(hard), gb(avail)), need, avail, freed)
         self._take_lease(backend, lease)
         return {"ok": True, "reason": "", "freed": freed, "need": need,
                 "available": avail}
@@ -559,10 +558,8 @@ class Warden:
         self.last_watchdog = time.time()
         released = self.free(b)
         if released:
-            notify("Freed %s — the machine was running out" % NICE[b],
-                   "Only %s of memory was left, so %s's %s of weights were "
-                   "unloaded. It reloads them next time you use it."
-                   % (gb(avail), NICE[b], gb(released)))
+            notify("unloaded %s (%s)" % (NICE[b], gb(released)),
+                   "only %s was left" % gb(avail))
 
 
 WARDEN = Warden()
