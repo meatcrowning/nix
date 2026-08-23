@@ -58,6 +58,14 @@ import QtQuick.Controls.Basic
 // the Hyprland look. Its WIDTH, though, is the live style's own number
 // (`DeskStyle.styleScrollWidth`, Oxygen's `ScrollBarWidth`) rather than a
 // literal — see `barW`.
+//
+// AND IN A KDESHELL APP IT IS NOT THIS FILE AT ALL: `+plasma/VScroll.qml` is
+// selected in its place (painter, player, chatter — the apps with a
+// `QApplication`, a live `QStyle` and `QT_QUICK_CONTROLS_STYLE=org.kde.desktop`),
+// and hands the painting to the style itself, so Oxygen's groove, gradient
+// slider and chevron steppers are the real ones rather than an approximation of
+// Breeze's. The pill below is what every OTHER app in a Plasma session gets —
+// none of them has a QStyle to ask, which is why it stays.
 ScrollBar {
     id: vb
 
