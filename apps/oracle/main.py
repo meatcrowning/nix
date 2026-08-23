@@ -5637,6 +5637,49 @@ def run_selftest(app, shell, win, plasma, warnings):
                 while time.monotonic() - _t0 < 0.8:
                     app.processEvents()
                     time.sleep(0.01)
+        # ORACLE_SELECT: put a real selection into the first reply, which is
+        # what the &Edit menu's rows are enabled BY (win.noteSelection). No
+        # other hook can produce one — a selection comes from a drag, and the
+        # rows are deliberately dead without it, so without this the menu can
+        # only ever be photographed disabled.
+        if os.environ.get("ORACLE_SELECT"):
+            from PySide6.QtCore import Q_ARG, QMetaObject, QObject
+            target = shell.root if plasma else win.findChild(QObject, "content")
+
+            # The LONGEST reply, not the first: a demo conversation opens with a
+            # one-word one, where select(0, 12) selects nothing and the check
+            # reads as broken.
+            bodies = []
+
+            def _sel_all(it, want, depth=0):
+                if it is None or depth > 16:
+                    return
+                kids = (it.childItems() if hasattr(it, "childItems")
+                        else it.children())
+                for ch in kids:
+                    if ch.objectName() == want:
+                        bodies.append(ch)
+                    _sel_all(ch, want, depth + 1)
+
+            _sel_all(target, "mdBody")
+            body = max(bodies, key=lambda b: len(str(b.property("text") or "")),
+                       default=None)
+            if body is None:
+                print("select: no mdBody (needs ORACLE_FAKE)", file=sys.stderr)
+                rc[0] = 1
+            else:
+                # int, not QVariant: TextEdit::select(int,int) is a real slot
+                # signature and a QVariant arg silently matches nothing.
+                QMetaObject.invokeMethod(body, "select", Q_ARG(int, 0),
+                                         Q_ARG(int, 12))
+                app.processEvents()
+                root_item = shell.root if plasma else win.findChild(QObject, "content")
+                print("select: selectedText=%r rows=%s"
+                      % (root_item.property("selectedText"),
+                         {i: (shell._actions[i].isEnabled() if plasma
+                              and i in shell._actions else None)
+                          for i in ("copy", "copy-message", "select-all")}))
+
         # ORACLE_POKE: fire the menu rows themselves, which is the only check
         # that the ids in `actions` and the ones `tbAction` answers are the same
         # set — a typo in either is silent (the row is there, the click does
@@ -5691,10 +5734,15 @@ def run_selftest(app, shell, win, plasma, warnings):
             # see, and the half that goes wrong when the KDE platform theme is
             # missing (kdeshell.apply_palette).
             from PySide6.QtGui import QIcon
+            # `menubar=` is the trapdoor check: Show Menubar must be an action
+            # of the WINDOW, not only a row inside the menubar it hides, or
+            # Ctrl+M cannot bring it back (kdeshell._toggle_action).
+            _mb = shell._actions.get("__show_menubar") if plasma else None
             print(f"style={app.style().objectName() if hasattr(app, 'style') else '-'} "
                   f"window={app.palette().window().color().name()} "
                   f"text={app.palette().windowText().color().name()} "
-                  f"icons={QIcon.themeName()}")
+                  f"icons={QIcon.themeName()} "
+                  f"menubar={'on-window' if _mb is not None and _mb in shell.window.actions() else 'menu-only'}")
             want = os.environ["ORACLE_TREE"]
             root_item = shell.root if plasma else win
 

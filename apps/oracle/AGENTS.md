@@ -93,6 +93,21 @@ exactly what it always was.
   harness where a `Button` drew fine), and it is a ~20px control in a 16px text
   row besides. Both are readouts in the CONTENT, not chrome — the line the
   audit drew.
+- **There is an `&Edit` menu**, added 2026-08-23. chatter was the only app of
+  ours without one: Copy and Select All existed on the transcript's right-click
+  menu and nowhere a menu could show them, so `Ctrl+C` had no home and no way
+  to be discovered. Its three rows — **Copy** (Ctrl+C), **Copy Whole Message**,
+  **Select All** (Ctrl+A) — run `runTextRow(i)`, which calls the SAME
+  `textMenu()` rows the right-click menu does, so a reply is copied as markdown
+  from either and the two cannot drift.
+    - **They act on the message the selection is in.** A transcript is many
+      independent read-only editors, so "Copy" has no single target the way it
+      has in an editor; each body reports itself through `win.noteSelection()`
+      on `onSelectedTextChanged`, and `win.selectedBody` is what the rows use.
+    - **With no selection every row is DISABLED, not silently inert**
+      (docs/DESIGN.md §10). `ORACLE_SELECT=1` makes a real selection in the
+      longest reply — the only way a harness can see the rows live, since a
+      selection otherwise only comes from a drag.
 - **The transcript has a right-click menu** — Copy (dead while nothing is
   selected), Copy Message, Select All — because Ctrl+C on a mouse selection was
   the only way to get text out of it, and every other program on this desktop
@@ -110,7 +125,9 @@ exactly what it always was.
 
   `ORACLE_CHROME` prints the menus as text (a menu is not on screen until it is
   opened, so no render can show what is in one), `ORACLE_POKE` fires a few of
-  them, `ORACLE_FACES` proves the file selector took. `--selftest` points
+  them, `ORACLE_FACES` proves the file selector took, and `ORACLE_SELECT` makes
+  a real text selection in the longest reply (what the `&Edit` rows are enabled
+  by). `--selftest` points
   `ORACLE_CONFIG` and `ORACLE_SESSIONS` at a temp directory — poking Settings
   calls `setPromptChoice`, which persists, and a run without that override
   rewrote his own base prompt.
@@ -1242,6 +1259,40 @@ non-default host.
 a 40 KB byte ceiling, over-long lines clipped, `next_offset` to page on),
 listings are capped at 200 entries with `truncated`, binary files are refused
 rather than dumped, and every tool result is a compact JSON object.
+
+## Does the Plasma face still wear KDE's conventions?
+
+`tools/plasma-chrome-test.py` — the standing check that this face is a KDE
+program and not a Qt one wearing a KDE palette. It builds the real window
+offscreen and reads what the shell actually made: the KStyle resolved to
+something that is not Fusion, the palette came from his colour scheme and not
+Qt's default light one, the icon theme is the desktop's, `&File` leads and
+`&Edit` is second, Settings opens with the three view toggles and the app's
+rows come after, `Show Menubar` is on the WINDOW (the trapdoor check), and the
+`&Edit` rows go live with a selection and are disabled without one. Re-run it
+after touching `apps/pylib/kdeshell.py`, since that file is shared with painter
+and player — `player/tools/plasma-chrome-test.py` is the same check from their
+side and covers the toolbar/transport half.
+
+What the 2026-08-23 sweep MEASURED as already correct, so nobody re-derives it:
+the live session resolves `widgetStyle=oxygen` (out of `kdedefaults/kdeglobals`
+— the user file has no such key, which is normal for a Global Theme), the QML
+font is `Oxygen-Sans` at 12px with `smooth` inverted for Plasma
+(`deskstyle._kde_type`), every toolbar icon name resolves in the oxygen icon
+theme at 16/22/32, and there is not one hardcoded colour literal in this app's
+QML. `PixelText` under Plasma is therefore the SYSTEM font, not the pixel one —
+it is the app's one `Text` type, not a pixel-only type.
+
+Two deviations are known and deliberate rather than missed:
+
+- **Help is Qt's shape, not KDE's** — `About chatter` and `About Qt`, where a
+  KDE program has Handbook / What's This / Report Bug / About / **About KDE**.
+  The KDE half of that lives in KXmlGui, which has no PySide6 bindings; a
+  hand-written "About KDE" would be a fake of a dialog everyone recognises, so
+  it is left off rather than imitated (docs/DESIGN.md §10).
+- **`Meter.qml` and a reply's picture frames keep OUR drawing** — measured
+  2026-08-22, a KStyle `ProgressBar` paints nothing inside a `QQuickWidget`,
+  and both are readouts in the CONTENT rather than chrome. See *Two roofs*.
 
 ## Packaging & verifying
 
