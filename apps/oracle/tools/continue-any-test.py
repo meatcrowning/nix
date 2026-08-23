@@ -135,6 +135,11 @@ check("and it is asked for what comes NEXT, not a mid-word resume",
       and "cut off" not in msgs[-1]["content"], json.dumps(msgs[-1])[:160])
 
 # ---- an EMPTY previous turn ----------------------------------------------
+# Each scenario here is its own conversation, so the working memory of the last
+# one is cleared first (`_prior`, added 2026-08-22 — a turn now starts with what
+# the turn before it did, tool rounds and all; tools/memory-carry-test.py is
+# what covers that behaviour).
+o._prior, o._prior_users = [], []
 chunks.clear()
 done.clear()
 o.continueReply("stub:latest", "[]", "", "resume")

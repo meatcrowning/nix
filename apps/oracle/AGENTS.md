@@ -701,6 +701,62 @@ presses. Two changes:
   something he already asked for. Without it a model treats one tool round as
   one turn and hands back a description of what it would do next.
 
+### Working memory — what the last turn did comes with it
+
+**A turn starts with the tool rounds of the turn before it, not blind.** Until
+2026-08-22 it did not, and that single fact is what made long jobs impossible:
+`send()` rebuilt the message list from the chat log every turn, and
+`_parse_history` keeps `user`/`assistant` TEXT and nothing else — so every tool
+call and every tool RESULT died with the turn that made it. Reading the session
+where he asked an agent to change something in `~/nix` is the whole argument: it
+re-read the same files turn after turn, re-derived the same conclusion five
+separate times, and never reached the edit. It was not short of tools. It had no
+memory of using them.
+
+- **`_prior`** holds the last finished turn's whole message list (tool rounds
+  included), snapshotted by **`_remember_turn()`** at the two points a turn ends.
+- **`_carry(hist)`** hands it back when this turn continues the same
+  conversation, and `None` otherwise — matched on `_prior_users`, the RAW
+  prompts, against the user turns QML sent. Prompts, deliberately, not assistant
+  text: the chat log splits one answer into a row per round (above) while the
+  message list holds one, so matching on assistant text would fail on exactly
+  the turns worth carrying. A switched session, a reopened one, an edited log or
+  a fresh app all fail the match and fall back to the old text-only history,
+  which is why nothing here can leak one chat into another.
+- **`TOOL_CARRY_CHARS` (12k) is charged NEWEST FIRST**, and what does not fit is
+  STUBBED, not dropped (`_trim_carry`): the assistant message that *called* the
+  tool always survives, so the model can see it already ran `read_file` on that
+  path even when the output is gone. ~3k tokens against a 32k window.
+- **`continueReply` carries it too**, and needs it most — `continue` is pressed
+  exactly when a turn ran out of room mid-job. Two things it does that `send`
+  does not: the instruction it writes and the partial answer QML hands it are
+  marked `_synthetic` and kept OUT of the memory (they were never his words, and
+  the partial comes back as part of the finished answer via `_partial_prefix`),
+  and if the memory already ends with that same partial, the memory's copy is
+  dropped so the model does not read its own last words twice.
+- **It is in RAM, per running app.** Restart chatter, or switch away and back,
+  and the conversation is still whole (the store has every turn) but the tool
+  memory of it is gone. That is the honest limit of this version.
+
+Harness: `tools/memory-carry-test.py` — two prompts through the real window
+against a stub daemon, asserting on the REQUEST BODIES that turn 2 still carries
+turn 1's tool call, its result and the file's actual text.
+
+### The tree tells the agent its own rules
+
+**The first file tool to touch a tree that has an `AGENTS.md` gets that path
+handed back with the result** (`_house_note`, `HOUSE_FILES`), so he does not
+have to point the agent at the conventions of the place it is standing in [his,
+2026-08-22: *"i just want it to be easy for me to change things about chatter
+and the rest of the system without needing to point it to every little thing"*].
+It walks up from the path to `$HOME` and stops there — `/` and `/nix/store` have
+no house rules — takes the NEAREST guide, and names it once per conversation.
+
+**Named, never inlined.** `~/nix/AGENTS.md` alone is 62 KB, a fifth of the
+32k-token window, and there are three more in the trees chatter touches most.
+The pointer costs a line; reading it is the model's own call, with its own
+`read_file`, only when it is actually working there.
+
 ### One bubble PER ROUND
 
 A turn that took six tool rounds used to be ONE row: six rounds of prose, every
