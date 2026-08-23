@@ -1425,6 +1425,45 @@ so the two lists cannot drift. Subagents get them too, through the same
 registry, and every custom description carries `BUILT_BY_HIM` so the model knows
 whose failure it is looking at.
 
+## Chatter extends ITSELF (make_tool / make_skill / make_agent)
+
+The section above is a directory HE writes into. This is the model writing into
+it [his, 2026-08-23: *"ensure agents have the ability to create tools for
+themselves and other / future agents… oracle should have a ton of self
+modification ability"*]. Three tools, offered every turn and to subagents too:
+
+| Tool | Writes | Read back by |
+|---|---|---|
+| `make_tool` | `$ORACLE_TOOLS/<name>.json` + `<name>.py`/`.sh`, chmod 755 | `custom_tools()`, every turn |
+| `make_skill` | `$ORACLE_SKILLS/<name>/SKILL.md` (frontmatter + body) | `skill_catalog()` / `use_skill` |
+| `make_agent` | `$ORACLE_AGENTS/<name>.md` (frontmatter + prompt) | `agent_catalog()` / `spawn_agent` |
+
+- **It could already do this with `write_file`** — and that is exactly why the
+  tools exist. A skill or an agent is one markdown file and hard to get wrong; a
+  TOOL is a manifest plus an executable plus a JSON schema, and a model that
+  gets one of the three subtly wrong installs something that silently never
+  loads. So the shape is written here, VALIDATED, and reported back as live or
+  not at all (docs/DESIGN.md §10): the name is checked against the app's own
+  tool names, the program is syntax-checked (`compile()` for python, `bash -n`
+  for bash) before it is installed, a missing description is refused because it
+  is all a future model will know, and the result says whether the catalog
+  actually picked it up.
+- **Live on the NEXT tool call.** All three stores are read fresh every turn, so
+  nothing restarts and nothing rebuilds — the same property that makes his own
+  manifests work.
+- **`delete` is the same door**, and deleting an agent definition puts the
+  app's own built-in of that name back.
+- **Subagents get them** (`AGENT_TOOL_GROUPS["author"]`, in the default set),
+  which is the "and other / future agents" half: an agent can leave a tool
+  behind for the next one.
+- **The model is TOLD** — `authoring_note()` in every system prompt, beside
+  `skills_note()` and `agents_note()`. A model does not reach for a door it was
+  never told about; chatter's own answer before this existed was "no, those are
+  defined by the framework I run in".
+- Harness: `tools/self-extend-test.py`, against temporary stores — it writes a
+  tool, runs it the way chatter does, checks the refusals, and deletes all
+  three. His own tools, skills and agents are never touched.
+
 ## Watching a program run (run_bash / run_python)
 
 `tools/sandbox-exec.py` takes `stream: true` and then emits its child's output
