@@ -1057,6 +1057,81 @@ DEFAULT_SMART_LISTS = [
 ]
 
 
+#: ---- the finder's field filters ------------------------------------------
+#: `genre:shoegaze`, `year:1997`, `year:1990-1999`, `year:>2010`, `year:<1980`.
+#: Everything else in the box is free text and matches title/artist/album as it
+#: always did, so an ordinary search is unchanged and a filter is opt-in by
+#: typing a field name (his, 2026-08-23: search and filter by genre and year).
+#:
+#: Deliberately NOT a second query language: the same two fields the smart
+#: playlists already own (`SMART_FIELDS`), spelled the way a person types into
+#: a search box. A smart list is for a rule he keeps; this is for a question he
+#: asks once. `year` is COALESCE(orig_year, year) here exactly as it is there
+#: (`_FIELD_EXPR`), so a 2011 reissue of a 1979 record answers to 1979 in both.
+_QUERY_TERM = re.compile(r'(genre|year):("[^"]*"|\S*)', re.IGNORECASE)
+_YEAR_RANGE = re.compile(r'^(\d{4})?\s*(?:-|\.\.)\s*(\d{4})?$')
+
+
+def parse_query(text):
+    """`text` -> (words, genres, year_lo, year_hi).
+
+    `words` are the free-text terms, casefolded, as before. `genres` are
+    casefolded substrings, ALL of which must be present in a track's genre tag
+    (so `genre:post genre:rock` narrows). The year bounds are inclusive and
+    either may be None for an open end. A field with no value (`genre:`, a
+    half-typed query) contributes nothing rather than matching nothing —
+    filtering to zero rows on every keystroke while he types is worse than
+    ignoring an incomplete term."""
+    text = (text or "").strip()
+    genres, lo, hi = [], None, None
+    def take(m):
+        field = m.group(1).lower()
+        val = m.group(2).strip('"').strip()
+        if not val:
+            return " "
+        if field == "genre":
+            genres.append(val.casefold())
+            return " "
+        nonlocal lo, hi
+        rng = _YEAR_RANGE.match(val)
+        if rng and (rng.group(1) or rng.group(2)):
+            lo = int(rng.group(1)) if rng.group(1) else None
+            hi = int(rng.group(2)) if rng.group(2) else None
+        elif val.startswith(">") and val[1:].isdigit():
+            lo = int(val[1:]) + 1
+        elif val.startswith(">=") and val[2:].isdigit():
+            lo = int(val[2:])
+        elif val.startswith("<") and val[1:].isdigit():
+            hi = int(val[1:]) - 1
+        elif val.startswith("<=") and val[2:].isdigit():
+            hi = int(val[2:])
+        elif val.isdigit():
+            lo = hi = int(val)
+        return " "
+    # `>=` / `<=` are two characters, so test them before the one-character
+    # forms above; simplest is to normalise here rather than order the branches.
+    text = text.replace(">= ", ">=").replace("<= ", "<=")
+    rest = _QUERY_TERM.sub(take, text)
+    return rest.casefold().split(), genres, lo, hi
+
+
+def query_has_filter(text):
+    """Does this query carry a field filter at all? What the results header
+    uses to say why nothing matched."""
+    _, g, lo, hi = parse_query(text)
+    return bool(g) or lo is not None or hi is not None
+
+
+def year_in(value, lo, hi):
+    """Inclusive bounds against a possibly-missing year. A track with no year
+    matches only an unbounded query — a missing tag is not a 0."""
+    if lo is None and hi is None:
+        return True
+    if not value:
+        return False
+    return (lo is None or value >= lo) and (hi is None or value <= hi)
+
+
 def _cfold(s):
     """SQLite's `cfold` — Unicode-correct casefolding, registered by Library.
 
@@ -1376,13 +1451,15 @@ class Library(QObject):
         self._con.commit()
         self._tagwriter = tagwriter
         self._scanner = None
-        self._search_rows = None  # lazy [(casefolded haystack, id)]
+        self._search_rows = None  # lazy [(haystack, id, genre, year)]
+        self._album_meta = None   # lazy {album_id: (genre blob, year)}
         # Rows for files opened by path that the library has never scanned —
         # negative ids, memory only, never written to the DB. See ids_for_paths.
         self._transient = {}
         self._transient_by_path = {}
         self._transient_seq = 0
         self.changed.connect(lambda: setattr(self, "_search_rows", None))
+        self.changed.connect(lambda: setattr(self, "_album_meta", None))
 
     # ---- scanning ----
 
@@ -1565,21 +1642,50 @@ class Library(QObject):
         return out
 
     def search(self, text):
-        """Casefolded substring search over title/artist/album — Unicode-correct
-        (the Japanese titles) and instant at 11k rows against a cached
-        haystack."""
-        text = (text or "").casefold().strip()
-        if not text:
+        """Casefolded substring search over title/artist/album, plus the
+        `genre:` / `year:` field filters (`parse_query`) — Unicode-correct (the
+        Japanese titles) and instant at 11k rows against a cached haystack.
+
+        The genre and the year are held BESIDE the haystack rather than in it:
+        folded into the same string, `year:1997` would also match a track
+        called "1997" and `genre:rock` an album called Rock, which is the one
+        thing a field filter exists to stop."""
+        words, genres, lo, hi = parse_query(text)
+        if not words and not genres and lo is None and hi is None:
             return []
         if self._search_rows is None:
             self._search_rows = [
                 ((f'{r["title"] or ""}\n{r["artist"] or ""}\n{r["album"] or ""}'
-                  f'\n{r["album_artist"] or ""}').casefold(), r["id"])
+                  f'\n{r["album_artist"] or ""}').casefold(), r["id"],
+                 (r["genre"] or "").casefold(), r["orig_year"] or r["year"])
                 for r in self._con.execute(
-                    "SELECT id, title, artist, album, album_artist FROM tracks")]
-        words = text.split()
-        ids = [tid for hay, tid in self._search_rows if all(w in hay for w in words)]
+                    "SELECT id, title, artist, album, album_artist, genre,"
+                    " year, orig_year FROM tracks")]
+        ids = [tid for hay, tid, gen, yr in self._search_rows
+               if all(w in hay for w in words)
+               and all(g in gen for g in genres)
+               and year_in(yr, lo, hi)]
         return self.tracks_by_ids(ids[:400])
+
+    def album_meta(self):
+        """{album_id: (folded genre blob, year)} — every genre any of an
+        album's tracks carries, for the grid's `genre:` filter.
+
+        The albums table has no genre column and should not grow one: a genre
+        is a TRACK tag and a compilation has as many as it has tracks. Derived
+        and cached beside the search haystack, invalidated by the same signal."""
+        if self._album_meta is None:
+            out = {}
+            for r in self._con.execute(
+                    "SELECT album_id, genre, year, orig_year FROM tracks"
+                    " WHERE album_id IS NOT NULL"):
+                gen, yr = out.get(r["album_id"], ("", None))
+                g = (r["genre"] or "").casefold()
+                if g and g not in gen:
+                    gen = (gen + "\n" + g) if gen else g
+                out[r["album_id"]] = (gen, yr or r["orig_year"] or r["year"])
+            self._album_meta = out
+        return self._album_meta
 
     @Slot(int, bool)
     def setInstrumental(self, track_id, yes):
@@ -1661,6 +1767,124 @@ class Library(QObject):
             if self._scrobbler is not None:
                 self._scrobbler.setLoved(dict(t), bool(fav))
         self.trackChanged.emit(track_id)
+
+    def merge_lastfm(self, payload):
+        """Fold a Last.fm account's loves, play counts and last-played times
+        into the local library. Returns a summary dict.
+
+        **The local side always wins where it is richer** [his, 2026-08-23:
+        *"if i have a track liked here that\'s not liked on lastfm keep the
+        local like"*]. Every field merges one way only:
+
+        - **favourite** — set, never cleared. A love on Last.fm hearts the
+          track here; a local heart that Last.fm does not know about stays
+          exactly as it is, and is counted into `local_only_loves` so the
+          asymmetry is reported rather than silently reconciled.
+        - **play_count** — `max(local, remote)`, never lowered. Last.fm has
+          only counted since the account was linked and this library has been
+          counting for longer; taking the larger is the only merge that cannot
+          lose a play. (`tools/dbsync.py` merges the two machines by the same
+          rule, for the same reason.)
+        - **last_played** — moved forward only.
+        - **rating** — untouched. Last.fm has no such thing, so there is
+          nothing to merge and a "sync" that cleared one would be a bug.
+
+        Matching is `trackmatch.keys` (the one artist/title normaliser, see
+        `../pylib/trackmatch.py`), not raw tag equality: a scrobble carries
+        whatever tag the file had when it played, decorations and featured
+        artists included. Unmatched rows are counted, not guessed at.
+        """
+        rows = self._rows("SELECT id, artist, title, favorite, play_count,"
+                          " last_played, path FROM tracks")
+        index = {}
+        for r in rows:
+            for k in trackmatch.keys(r["artist"], r["title"]):
+                index.setdefault(k, []).append(r)
+
+        def hits(artist, title):
+            seen, out = set(), []
+            for k in trackmatch.keys(artist, title):
+                for r in index.get(k, ()):
+                    if r["id"] not in seen:
+                        seen.add(r["id"])
+                        out.append(r)
+            return out
+
+        loved = payload.get("loved") or []
+        plays = payload.get("plays") or []
+        recent = payload.get("recent") or []
+        stats = {"loved": len(loved), "plays": len(plays),
+                 "hearted": 0, "counts": 0, "played": 0, "unmatched": 0,
+                 "local_only_loves": 0}
+        # (id -> the columns to write), so a track named by several remote rows
+        # is one UPDATE and one tag write.
+        pending = {}
+
+        def want(r, **fields):
+            cur = pending.setdefault(r["id"], {"row": r})
+            cur.update(fields)
+
+        matched_love_ids = set()
+        for e in loved:
+            rs = hits(e.get("artist"), e.get("track"))
+            if not rs:
+                stats["unmatched"] += 1
+                continue
+            for r in rs:
+                matched_love_ids.add(r["id"])
+                if not r["favorite"]:
+                    want(r, favorite=1)
+                    stats["hearted"] += 1
+
+        for e in plays:
+            n = int(e.get("playcount") or 0)
+            rs = hits(e.get("artist"), e.get("track"))
+            if not rs:
+                stats["unmatched"] += 1
+                continue
+            # Several local files can be the same recording (a single and the
+            # album cut). Last.fm counts the RECORDING, so raising every copy
+            # to the remote total would multiply his history; only the
+            # most-played local copy takes it.
+            r = max(rs, key=lambda x: x["play_count"] or 0)
+            if n > (r["play_count"] or 0):
+                want(r, play_count=n)
+                stats["counts"] += 1
+
+        for e in recent:
+            uts = int(e.get("uts") or 0)
+            if not uts:
+                continue
+            for r in hits(e.get("artist"), e.get("track")):
+                if uts > (r["last_played"] or 0):
+                    want(r, last_played=uts)
+                    stats["played"] += 1
+                break        # most recent first: the first match is the answer
+
+        stats["local_only_loves"] = sum(
+            1 for r in rows if r["favorite"] and r["id"] not in matched_love_ids)
+
+        now = time.time()
+        for tid, fields in pending.items():
+            r = fields.pop("row")
+            if not fields:
+                continue
+            sets = ", ".join(f"{k}=?" for k in fields)
+            params = list(fields.values())
+            if "favorite" in fields:      # the tiebreaker dbsync merges on
+                sets += ", meta_mtime=?"
+                params.append(now)
+            self._con.execute(f"UPDATE tracks SET {sets} WHERE id=?",
+                              params + [tid])
+            self._tagwriter.enqueue(
+                r["path"],
+                favorite=bool(fields["favorite"]) if "favorite" in fields else "keep",
+                play_count=fields.get("play_count", "keep"))
+        self._con.commit()
+        if pending:
+            self.changed.emit()
+        stats["changed"] = len(pending)
+        return stats
 
     def bump_playcount(self, track_id):
         self._con.execute(
@@ -3045,12 +3269,16 @@ class Bridge(QObject):
 
     def _apply_album_filter(self, merge=False):
         rows = self._album_rows
-        f = self._filter.casefold().strip()
-        if f:
-            words = f.split()
+        words, genres, lo, hi = parse_query(self._filter)
+        if words or genres or lo is not None or hi is not None:
+            # An album's genre is whatever its tracks carry (Library.album_meta);
+            # its year is the album row's own, which is already COALESCEd.
+            meta = self._library.album_meta() if genres else {}
             rows = [r for r in rows
                     if all(w in f'{(r["album"] or "").casefold()}\n'
-                                f'{(r["album_artist"] or "").casefold()}' for w in words)]
+                                f'{(r["album_artist"] or "").casefold()}' for w in words)
+                    and all(g in meta.get(r["id"], ("", None))[0] for g in genres)
+                    and year_in(r["orig_year"] or r["year"], lo, hi)]
         out = [album_row(r) for r in rows]
         if merge:
             self.albumsModel.merge(out)
@@ -4088,6 +4316,9 @@ def main():
     scrobbler = Scrobbler(prefs)
     player.set_scrobbler(scrobbler)
     library.set_scrobbler(scrobbler)
+    # The fetch is the scrobbler's (network, its own thread); the merge is the
+    # library's, on the GUI thread with the library's own connection.
+    scrobbler.set_merger(library.merge_lastfm)
     # The approval page opens in his browser — the one moment this app opens
     # anything, and only because he clicked `connect` a moment before.
     scrobbler.authUrlReady.connect(lambda u: QDesktopServices.openUrl(QUrl(u)))

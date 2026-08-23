@@ -384,6 +384,97 @@ def _queue_write(entries):
 
 
 # ---------------------------------------------------------------------------
+# Reading a whole account back — what the local library is merged FROM
+# ---------------------------------------------------------------------------
+#
+# Last.fm pages at 1000 rows a request and answers with `@attr.totalPages`, so
+# these walk it. `PAGE_CAP` is the stop: a library this size is a handful of
+# requests, and an account whose paging is broken must not spin forever.
+PAGE_SIZE = 1000
+PAGE_CAP = 40
+
+
+def _rows(obj, *path):
+    """The list at `path`, however Last.fm wrapped it. A ONE-row response is a
+    bare object rather than a list of one — the single sharpest edge in this
+    API, and the reason a naive merge silently skips accounts with one loved
+    track."""
+    for k in path:
+        obj = (obj or {}).get(k)
+    if obj is None:
+        return []
+    return obj if isinstance(obj, list) else [obj]
+
+
+def _pages(method, params, listpath, cfg=None, cap=PAGE_CAP):
+    """Every row of a paged method, as one list."""
+    out, page, total = [], 1, 1
+    while page <= min(total, cap):
+        p = dict(params)
+        p.update({"limit": PAGE_SIZE, "page": page})
+        obj = call(method, p, cfg=cfg)
+        wrapper = (obj or {}).get(listpath[0]) or {}
+        out += _rows(obj, *listpath)
+        try:
+            total = int((wrapper.get("@attr") or {}).get("totalPages") or 1)
+        except (TypeError, ValueError):
+            total = 1
+        page += 1
+    return out
+
+
+def loved_tracks(user=None, cfg=None):
+    """[{artist, track, uts}] — everything he has hearted on Last.fm."""
+    c = load() if cfg is None else cfg
+    rows = _pages("user.getLovedTracks", {"user": user or username(c)},
+                  ("lovedtracks", "track"), cfg=c)
+    return [{"artist": ((r.get("artist") or {}).get("name")
+                        or (r.get("artist") or {}).get("#text") or ""),
+             "track": r.get("name") or "",
+             "uts": _uts(r)}
+            for r in rows if r.get("name")]
+
+
+def top_tracks(user=None, cfg=None):
+    """[{artist, track, playcount}] over ALL time — the per-track scrobble
+    total, which is the only place Last.fm publishes a play count."""
+    c = load() if cfg is None else cfg
+    rows = _pages("user.getTopTracks",
+                  {"user": user or username(c), "period": "overall"},
+                  ("toptracks", "track"), cfg=c)
+    out = []
+    for r in rows:
+        try:
+            n = int(r.get("playcount") or 0)
+        except (TypeError, ValueError):
+            n = 0
+        if r.get("name") and n > 0:
+            out.append({"artist": ((r.get("artist") or {}).get("name") or ""),
+                        "track": r["name"], "playcount": n})
+    return out
+
+
+def recent_tracks(user=None, pages=3, cfg=None):
+    """[{artist, track, uts}] most recent first — where `last_played` comes
+    from. Capped: the whole history is not worth downloading for a timestamp
+    the merge only ever moves FORWARD."""
+    c = load() if cfg is None else cfg
+    rows = _pages("user.getRecentTracks", {"user": user or username(c)},
+                  ("recenttracks", "track"), cfg=c, cap=max(1, int(pages)))
+    return [{"artist": ((r.get("artist") or {}).get("#text")
+                        or (r.get("artist") or {}).get("name") or ""),
+             "track": r.get("name") or "", "uts": _uts(r)}
+            for r in rows if r.get("name")]
+
+
+def _uts(row):
+    try:
+        return int((row.get("date") or {}).get("uts") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+# ---------------------------------------------------------------------------
 # The two writes that are not a scrobble
 # ---------------------------------------------------------------------------
 

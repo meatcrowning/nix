@@ -263,6 +263,35 @@ Item {
                     onClicked: Lastfm.setLoveOnFavorite(!Lastfm.loveOnFavorite)
                 }
             }
+
+            // One direction, always: it raises play counts and hearts tracks
+            // here, and can neither clear a local favourite nor lower a count.
+            Item {
+                width: parent.width
+                height: 20
+                visible: Lastfm.connected
+                PixelText {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "pull stats"
+                    color: root.fgText
+                }
+                HeaderButton {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    label: Lastfm.syncing ? "reading..." : "sync"
+                    iconName: "view-refresh"
+                    fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
+                    lit: Lastfm.syncing
+                    onClicked: if (!Lastfm.syncing) Lastfm.beginSync()
+                }
+            }
+            PixelText {
+                width: parent.width
+                visible: Lastfm.syncStatus !== ""
+                wrapMode: Text.Wrap
+                color: root.fgDim
+                text: Lastfm.syncStatus
+            }
         }
 
         Rectangle { width: parent.width; height: 1; color: Theme.border }

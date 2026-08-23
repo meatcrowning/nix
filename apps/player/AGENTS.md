@@ -297,6 +297,41 @@ fails. Two traps that harness paid for: `highlight` must not be a grey, because
 directory's file listing on first load, so a scratch `.qml` written afterwards
 fails with "File name case mismatch".
 
+## The finder takes `genre:` and `year:` (2026-08-23)
+
+`parse_query(text)` -> `(words, genres, year_lo, year_hi)`, and BOTH search
+paths run through it: `Library.search` (the results overlay) and
+`Bridge._apply_album_filter` (the album grid). Free text still matches
+title/artist/album exactly as before — a filter is opt-in by typing a field
+name.
+
+    genre:shoegaze          genre:"post rock"       genre:a genre:b   (both)
+    year:1997   year:1990-1999   year:2010-   year:>2010   year:<1980
+
+- **The genre and the year are held BESIDE the search haystack, not in it.**
+  Folded into the same string, `year:1997` would also match a track called
+  "1997" and `genre:rock` an album called Rock — the one thing a field filter
+  exists to prevent. `_search_rows` is now `(haystack, id, genre, year)`.
+- **`year` is `COALESCE(orig_year, year)`**, the same expression the smart
+  playlists use (`_FIELD_EXPR`), so a 2011 reissue of a 1979 record answers to
+  1979 in both places. A track with no year matches only an unbounded query —
+  a missing tag is not a 0 (`year_in`).
+- **An incomplete term (`genre:`, mid-typing) contributes nothing** rather
+  than matching nothing: filtering to zero rows on every keystroke while he
+  types is worse than ignoring a half-written term.
+- **The albums table has no genre and should not grow one** — a genre is a
+  TRACK tag and a compilation has as many as it has tracks. `Library.album_meta()`
+  derives `{album_id: (folded genre blob, year)}`, cached beside the search
+  haystack and invalidated by the same `changed` signal.
+- **This is not a second query language.** It is the two fields the smart
+  playlists already own, spelled the way a person types into a search box: a
+  smart list is a rule he keeps, this is a question he asks once.
+- **The empty results state is where the syntax is named** — a 90px search box
+  cannot carry a placeholder that explains it, and a syntax nobody is told
+  about is a feature nobody has (docs/DESIGN.md §10).
+- Harness: `tools/lastfm-test.py` (the parser cases live with the merge, since
+  both needed a real `main.py` import).
+
 ## Last.fm: one listen is one play count AND one scrobble
 
 `scrobble.py` is the Qt half; `../pylib/lastfm.py` is the API, the credential
@@ -332,6 +367,29 @@ his browser and finishes by itself once he says yes.
   `tools/` relies on.
 - Prefs: `scrobble` (default on) and `scrobbleLove` (default on) — the two
   switches in the settings page, both hidden until an account is linked.
+- **Pulling the account back in is ONE DIRECTION** [his, 2026-08-23: *"if i
+  have a track liked here that's not liked on lastfm keep the local like"*].
+  `Library.merge_lastfm` is the whole rule, and every field merges one way:
+  **favourite** is set, never cleared (a local-only heart survives and is
+  counted into `local_only_loves`, reported rather than reconciled);
+  **play_count** is `max(local, remote)`, never lowered — Last.fm has only
+  counted since the account was linked and this library has counted for longer,
+  and `tools/dbsync.py` merges the two machines by the same rule;
+  **last_played** moves forward only; **rating** is untouched, because Last.fm
+  has no such thing and a "sync" that cleared one would be a bug.
+    - **It does not push local favourites up.** The count is reported instead:
+      a bulk write to his account is not what "update the local stuff" asked
+      for, and `scrobbleLove` already loves everything hearted from now on.
+    - **Matching is `trackmatch.keys`, not tag equality** — a scrobble carries
+      whatever tag the file had when it played, decorations and featured
+      artists included. Unmatched remote rows are counted, never guessed at.
+    - **Several local files can be one recording** (a single and the album
+      cut). Last.fm counts the RECORDING, so only the most-played local copy
+      takes the remote total; raising every copy would multiply his history.
+    - The fetch is the scrobbler's (network, its own thread), the merge is the
+      library's (GUI thread, the library's own connection) — a second writer is
+      how a library loses ratings. `Scrobbler.set_merger`, wired in `main()`.
+      Button: settings ▸ last.fm ▸ **pull stats**.
 - Harness: `tools/lastfm-test.py`. It stands up a stub audioscrobbler on
   loopback with `$LASTFM_CONFIG`/`$LASTFM_QUEUE` in a temp directory, so it
   cannot read his credentials or write to his real listening history. Run it
