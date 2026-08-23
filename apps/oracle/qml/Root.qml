@@ -222,6 +222,40 @@ Item {
             chatLog.setProperty(win.activeIndex, "filesPending", pending);
             chatLog.setProperty(win.activeIndex, "filesActive", pending > 0);
         }
+        // DELEGATION, its own subordinated disclosure (docs/DESIGN.md §9.1, §10).
+        // A spawn used to be drawn through the file block, which said "files ·
+        // N" about work that touched no file of his and hid both the wait and
+        // the answer. Now: the heading names the live agent and counts its
+        // rounds while it works, and the body keeps one block per agent — who,
+        // the task, what it cost, and what it came back with.
+        function onAgentStarted(name, task, model) {
+            if (win.activeIndex < 0) return;
+            var cur = chatLog.get(win.activeIndex);
+            chatLog.setProperty(win.activeIndex, "agentsPending", cur.agentsPending + 1);
+            chatLog.setProperty(win.activeIndex, "agentsActive", true);
+            chatLog.setProperty(win.activeIndex, "agentHead",
+                                name + (model !== "" ? " · " + model : ""));
+            // The turn is WAITING on it, exactly as it waits on a tool call —
+            // and a subagent is the longest wait there is.
+            chatLog.setProperty(win.activeIndex, "awaiting", true);
+            win.accrueThink(win.activeIndex);
+        }
+        function onAgentProgress(name, round, tool) {
+            if (win.activeIndex < 0) return;
+            chatLog.setProperty(win.activeIndex, "agentHead",
+                                name + " · round " + round + " · " + tool);
+        }
+        function onAgentDone(name, ok, block) {
+            if (win.activeIndex < 0) return;
+            var cur = chatLog.get(win.activeIndex);
+            var prefix = cur.agents !== "" ? cur.agents + "\n\n" : "";
+            chatLog.setProperty(win.activeIndex, "agents", prefix + block);
+            chatLog.setProperty(win.activeIndex, "agentCount", cur.agentCount + 1);
+            if (!ok) chatLog.setProperty(win.activeIndex, "agentsBad", true);
+            var pending = Math.max(0, cur.agentsPending - 1);
+            chatLog.setProperty(win.activeIndex, "agentsPending", pending);
+            chatLog.setProperty(win.activeIndex, "agentsActive", pending > 0);
+        }
         // The generic per-round tool indicator: every tool the model calls is
         // named in the transcript (docs/DESIGN.md §9.1, §10 — never silent),
         // whether or not it also has a richer disclosure (web sources, files,
@@ -290,6 +324,8 @@ Item {
             chatLog.setProperty(win.activeIndex, "filesActive", false);
             chatLog.setProperty(win.activeIndex, "imagesActive", false);
             chatLog.setProperty(win.activeIndex, "toolsActive", false);
+            chatLog.setProperty(win.activeIndex, "agentsActive", false);
+            chatLog.setProperty(win.activeIndex, "agentsPending", 0);
             win.chatRev++;              // the compose button can offer `continue`
             win.saveCurrent();          // the finished turn persists to the session
             win.autoContinue();
@@ -306,6 +342,8 @@ Item {
             chatLog.setProperty(win.activeIndex, "filesActive", false);
             chatLog.setProperty(win.activeIndex, "imagesActive", false);
             chatLog.setProperty(win.activeIndex, "toolsActive", false);
+            chatLog.setProperty(win.activeIndex, "agentsActive", false);
+            chatLog.setProperty(win.activeIndex, "agentsPending", 0);
             win.chatRev++;
             win.saveCurrent();
         }
@@ -362,6 +400,8 @@ Item {
                          thinkMs: t.thinkMs, cutOff: t.cutOff,
                          sources: t.sources, searchCount: t.searchCount,
                          files: t.files, fileCount: t.fileCount,
+                         agents: t.agents, agentCount: t.agentCount,
+                         agentsBad: t.agentsBad,
                          images: t.images,
                          tools: t.tools, toolCount: t.toolCount,
                          isError: t.isError });
@@ -464,6 +504,8 @@ Item {
                          thinkStart: 0, thinkMs: 0, awaiting: true, cutOff: false,
                          sources: "", searchCount: 0, searching: false,
                          files: "", fileCount: 0, filesActive: false, filesPending: 0,
+                         agents: "", agentCount: 0, agentsActive: false,
+                         agentsPending: 0, agentHead: "", agentsBad: false,
                          images: "[]", imagesActive: false, imagesPending: 0,
                          tools: "", toolCount: 0, toolsActive: false,
                          streaming: true, isError: false });
@@ -482,6 +524,7 @@ Item {
             var r = chatLog.get(i);
             a.push({ isUser: r.isUser, who: r.who, step: r.step, ts: r.ts,
                      body: r.body, tools: r.tools, toolCount: r.toolCount,
+                     agents: r.agents, agentCount: r.agentCount,
                      images: r.images, imagesActive: r.imagesActive,
                      streaming: r.streaming, isError: r.isError });
         }
@@ -510,6 +553,9 @@ Item {
                              searching: false,
                              files: t.files || "", fileCount: t.fileCount || 0,
                              filesActive: false, filesPending: 0,
+                             agents: t.agents || "", agentCount: t.agentCount || 0,
+                             agentsActive: false, agentsPending: 0, agentHead: "",
+                             agentsBad: !!t.agentsBad,
                              images: t.images || "[]", imagesActive: false, imagesPending: 0,
                              tools: t.tools || "", toolCount: t.toolCount || 0, toolsActive: false,
                              streaming: false, isError: !!t.isError,
@@ -581,6 +627,8 @@ Item {
                          thinkStart: 0, thinkMs: 0, awaiting: false, cutOff: false,
                          sources: "", searchCount: 0, searching: false,
                          files: "", fileCount: 0, filesActive: false, filesPending: 0,
+                         agents: "", agentCount: 0, agentsActive: false,
+                         agentsPending: 0, agentHead: "", agentsBad: false,
                          images: "[]", imagesActive: false, imagesPending: 0,
                          tools: "", toolCount: 0, toolsActive: false,
                          streaming:false, isError: false, step: 0 });
@@ -1747,6 +1795,9 @@ Item {
                         // Same, for the generic tool-activity disclosure.
                         property bool toolUserSet: false
                         property bool toolUserOpen: false
+                        // Same, for the subagent disclosure.
+                        property bool agentUserSet: false
+                        property bool agentUserOpen: false
 
                         // ---- the bubble --------------------------------
                         // A turn is a BUBBLE, on the speaker's own side of the
@@ -2064,6 +2115,88 @@ Item {
                                                   leftMargin: 12 }
                                         wrapMode: Text.Wrap
                                         text: tools
+                                        color: Theme.textDim
+                                    }
+                                }
+                            }
+
+                            // The subagents this turn spawned, drawn as their own
+                            // subordinated disclosure (docs/DESIGN.md §9.1, §10).
+                            // While one works the heading is the live agent, its
+                            // round and the tool it just called — a spawn is the
+                            // longest wait in a turn and it used to be silent. It
+                            // settles to "agents · N" (or names the failure, §10),
+                            // and the body holds one block per agent: who, the
+                            // task, what it cost, and what it answered.
+                            Item {
+                                id: agentAct
+                                width: parent.width
+                                visible: !isUser && (agents !== "" || agentsActive)
+                                height: visible ? agentToggle.height + agentReveal.height : 0
+
+                                readonly property bool expanded: turn.agentUserSet ? turn.agentUserOpen
+                                                                                   : false
+
+                                Item {
+                                    id: agentToggle
+                                    width: parent.width
+                                    height: Theme.lineHeight
+                                    property int dotPhase: 0
+                                    readonly property string dots:
+                                        motion.reduceMotion ? "…" : "...".substring(0, dotPhase)
+                                    Timer {
+                                        interval: motion.ms(motion.slideMs)
+                                        running: agentsActive && !motion.reduceMotion
+                                        repeat: true
+                                        onTriggered: agentToggle.dotPhase = (agentToggle.dotPhase + 1) % 4
+                                    }
+                                    Row {
+                                        anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                                        spacing: 6
+                                        PixelText { text: agentAct.expanded ? "-" : "+"; color: Theme.textDim }
+                                        PixelText {
+                                            text: agentsActive
+                                                  ? (agentHead !== "" ? agentHead : "agent working")
+                                                  : ((agentCount === 1 ? "agent · 1"
+                                                                       : "agents · " + agentCount)
+                                                     + (agentsBad ? " · failed" : ""))
+                                            color: agentsActive ? Theme.text
+                                                                : (agentsBad ? Theme.crit : Theme.textDim)
+                                        }
+                                        PixelText {
+                                            visible: agentsActive
+                                            text: agentToggle.dots
+                                            color: Theme.textDim
+                                        }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: { turn.agentUserOpen = !agentAct.expanded; turn.agentUserSet = true; }
+                                    }
+                                }
+
+                                Item {
+                                    id: agentReveal
+                                    anchors { top: agentToggle.bottom; left: parent.left; right: parent.right }
+                                    clip: true
+                                    height: agentAct.expanded ? agentBody.height : 0
+                                    Behavior on height {
+                                        NumberAnimation { duration: motion.ms(motion.slideMs)
+                                                          easing.type: motion.slideEasing }
+                                    }
+                                    Rectangle {
+                                        anchors { left: parent.left; leftMargin: 3
+                                                  top: parent.top; bottom: parent.bottom }
+                                        width: Theme.ctrlBorder
+                                        color: Theme.border
+                                    }
+                                    PixelText {
+                                        id: agentBody
+                                        anchors { top: parent.top; left: parent.left; right: parent.right
+                                                  leftMargin: 12 }
+                                        wrapMode: Text.Wrap
+                                        text: agents
                                         color: Theme.textDim
                                     }
                                 }

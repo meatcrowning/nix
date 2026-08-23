@@ -415,10 +415,19 @@ that swap is worth it; nothing else does it.
   `_spawn_agent` reaches every tool through `_dispatch_tool` — the same branch
   the main agent uses, rather than a second copy of it that would drift.
 - **Non-streaming** (`stream: false`): there is no bubble to fill, the answer is
-  a tool result. It still surfaces — its own tools appear in the transcript as
-  `<agent>: <tool>` and the spawn itself as a file-disclosure line (`agent
-  explorer finished, 4 rounds`), so nothing it did is silent (docs/DESIGN.md
-  §9.1, §10).
+  a tool result.
+- **Delegation is its OWN disclosure** (`agentStarted`/`agentProgress`/
+  `agentDone` → the `agents` block in `Root.qml`), not the file block it used to
+  borrow. That block said `files · N` about work that touched no file of his,
+  counted a subagent's fourteen reads as the main agent's own tool calls, and
+  reduced minutes of work to `agent explorer finished, 4 rounds`. Now the
+  heading is the live agent, its round and the tool it just called while it
+  works, and the body keeps one block per agent: who (with the **model**, when
+  the definition names one that is not the parent's — that swap costs ollama a
+  full unload and load, and was otherwise only audible), the full task, the
+  rounds and tools it spent, and **what it answered**, that being the one thing
+  that says whether delegating was worth it (docs/DESIGN.md §9.1, §10). A
+  failure, an empty answer or a cut one names itself in the heading.
 - **Bounded**: `AGENT_MAX_ROUNDS` (12), `AGENT_CTX_FRACTION` (0.7) and the same
   **wrap-up round** the main loop learned to do — a subagent out of rounds is
   re-posted with no tools rather than allowed to return a frame that is all
@@ -431,7 +440,9 @@ that swap is worth it; nothing else does it.
   window (offscreen) against a stub ollama and reads all four request bodies:
   the subagent gets its own system prompt and its own restricted tool list, it
   carries none of the main conversation, and **the bulk it read never enters
-  the main context**. Plus the definition rules (fallbacks, group resolution,
+  the main context** It reads the rendered transcript too: the agent
+  block names the agent, the task, the cost and the answer, and the subagent's
+  `read_file` never lands in the turn's own tool list. Plus the definition rules (fallbacks, group resolution,
   a file replacing a built-in).
 
 ## Sessions
