@@ -28,13 +28,49 @@
     # lam. Point the service at the real data instead of moving 105G;
     # DynamicUser still needs "other" rwx on that tree (chmod, not this file).
     modelsDir = "/home/lam/.ollama/models";
+
+    # ONE model, ONE slot. Both default to more, and both multiply what a single
+    # chat costs in memory: a second loaded model is a second full set of
+    # weights, and each parallel slot is its own KV cache over a 32k context. He
+    # is one person in one window, so neither buys anything and both can cost
+    # the machine. This is also what makes `ai-warden`'s "swapping model A for
+    # model B frees A first" estimate true rather than hopeful.
+    environmentVariables = {
+      OLLAMA_MAX_LOADED_MODELS = "1";
+      OLLAMA_NUM_PARALLEL = "1";
+    };
   };
 
   # ProtectHome=true (module default) hides /home entirely, so the service
   # can't even traverse to /home/lam/.ollama/models despite ReadWritePaths
   # naming it. "read-only" keeps /home visible (real inodes, so the path
   # exists) while ReadWritePaths still punches a write hole for modelsDir.
-  systemd.services.ollama.serviceConfig.ProtectHome = lib.mkForce "read-only";
+  #
+  # THE HOLE `sys/oomd.nix` LEAVES OPEN. That module arms systemd-oomd on the
+  # USER slices only, on the reasoning that a desktop's runaway is a user
+  # process — which is right about comfy-painter, the browser and the agent
+  # scopes, and wrong about exactly one thing: ollama is a SYSTEM unit, and it
+  # is the single biggest memory holder on the box. Measured 2026-08-22 with
+  # nothing unusual running, `memory.current` on this cgroup was 24.7 GiB of
+  # 31 for one `qwen3.6:35b-a3b`. Nothing was watching it.
+  #
+  # A hard `MemoryMax` is the wrong tool here — it would OOM-kill a model
+  # mid-load, i.e. turn "big model" into "chatter never works". So:
+  #
+  #   MemoryHigh  a THROTTLE at 24G, leaving the 6G floor `ai-warden` also
+  #               keeps for the desktop. Past it this cgroup reclaims against
+  #               itself instead of taking pages from the session.
+  #   ManagedOOM* lets oomd reach this ONE system unit under sustained pressure,
+  #               which is the freeze precursor. Losing a reply is recoverable;
+  #               a livelock takes the compositor with it and needs the power
+  #               button (sys/oomd.nix has the mechanism at length).
+  systemd.services.ollama.serviceConfig = {
+    ProtectHome = lib.mkForce "read-only";
+    MemoryAccounting = true;
+    MemoryHigh = "24G";
+    ManagedOOMMemoryPressure = "kill";
+    ManagedOOMMemoryPressureLimit = "60%";
+  };
 
   # oracle's start/stop buttons (apps/oracle/main.py Backend). On top they run
   # `sudo -A systemctl {start,stop} ollama.service` locally; on book, which has
