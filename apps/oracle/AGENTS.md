@@ -629,22 +629,43 @@ faces (`--selftest` with `ORACLE_FAKE`, whose demo log ends on a finished turn)
 and reads the button's label back: `continue` with nothing typed, `send` the
 moment there is.
 
+### How long a turn may work — rounds, context, and the wrap-up
+
+**The tool loop is a work budget, and he should never have to press `continue`
+to get one task finished** [his, 2026-08-23]. It used to stop after
+`MAX_TOOL_ROUNDS = 4`, which a real job (find a directory, read three files,
+edit one, check the edit) exhausts halfway through, so a task took several
+presses. Two changes:
+
+- **`MAX_TOOL_ROUNDS` is 24** and is now only a runaway guard — the backstop for
+  a model looping on the same call forever. He can always press stop.
+- **What really ends a long turn is `_ctx_room()`**: four-chars-to-the-token
+  over the whole message list, against `TOOL_CTX_FRACTION` (0.75) of
+  `CHAT_NUM_CTX`. Past that the next tool result would be truncated by the
+  server anyway (no context-shift on this model), so the turn is better spent
+  answering. Measured, not guessed.
+- **`PERSISTENCE_NOTE` is on every system prompt**: finish the job in THIS turn,
+  look → act → check, do not stop to announce a plan or ask permission for
+  something he already asked for. Without it a model treats one tool round as
+  one turn and hands back a description of what it would do next.
+
 ### The wrap-up round — why replies came back EMPTY
 
-`MAX_TOOL_ROUNDS` (4) caps the tool loop. Until 2026-08-23 hitting it just
-stopped the loop and "took the answer as-is" — but a model that is still calling
-tools at the cap has written NO prose in that frame, so what he got was an
+**Either limit above ends the loop, and ending it used to end the turn.** Until
+2026-08-23 the loop just stopped and "took the answer as-is" — but a model
+still calling tools when it stops has written NO prose in that frame, so what he got was an
 **empty message**: observed twice in a row on 2026-08-22, gemma4 spending four
 `run_bash` rounds hunting for a directory and then saying nothing at all, with
 no `cutOff` either (ollama's `done_reason` was `stop`, not `length`) so not even
 a `continue` to press.
 
-So the cap now takes one more round instead of dropping the turn: the last
+So the limit now takes one more round instead of dropping the turn: the last
 round's tool calls still run, and the follow-up POST carries **no `tools` key at
 all** plus `TOOL_CAP_PROMPT` as a user turn — leaving the model nothing to do
 but answer with what it found. `_no_tools` is the one-shot flag (`_post_chat`
 drops the tool list, `_tool_done` appends the prompt); it is cleared by `send`
-and `continueReply`, so the next turn gets the full loop back.
+and `continueReply`, so the next turn gets the full loop back. Harness:
+`tools/continue-any-test.py`, which drives the whole loop to both limits.
 
 ## Web images (fetch_image)
 

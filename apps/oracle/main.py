@@ -973,9 +973,22 @@ def skills_note(catalog=None):
     lines += ["- %s — %s" % (s["name"], s["description"]) for s in cat]
     return "\n".join(lines)
 
-#: How many tool rounds one turn may take before we stop looping and let the
-#: model answer with what it has — a guard against a model that keeps searching.
-MAX_TOOL_ROUNDS = 4
+#: How many tool rounds one turn may take before the wrap-up round makes it
+#: answer with what it has. This is a RUNAWAY guard, not a work budget: at 4 it
+#: was the work budget, and a real job — find a directory, read three files,
+#: edit one, check the edit — ran out of rounds mid-task, so he had to press
+#: `continue` over and over to get one task done [his, 2026-08-23: "i shouldnt
+#: have to keep clicking continue for the agent to do its task"]. The thing that
+#: actually has to stop a turn is the CONTEXT filling up (`_ctx_room` below),
+#: which is measured rather than guessed at; this number is only the backstop
+#: for a model looping on the same call forever, and he can always press stop.
+MAX_TOOL_ROUNDS = 24
+
+#: How much of `CHAT_NUM_CTX` the conversation may fill before the tool loop
+#: wraps up. Past this the next round would be truncated by the server anyway
+#: (this model's KV cache does not context-shift), so the turn is better spent
+#: writing the answer than on one more tool call whose result will not fit.
+TOOL_CTX_FRACTION = 0.75
 
 #: The recall guidance, on the system prompt of EVERY turn. Without it the model
 #: treats a fact it does not see in the CURRENT chat as unknown — or, worse, as
@@ -1045,6 +1058,18 @@ CAPABILITY_NOTE = (
     "Describe your abilities in these terms, and call "
     "describe_self for the exact live tool list — never claim a capability you "
     "do not have, and never deny one you do.")
+
+#: FINISH THE JOB. A model that treats one tool round as one turn stops after a
+#: look-around and describes what it would do next, which left him pressing
+#: `continue` to get a single task done [his, 2026-08-23]. It has MAX_TOOL_ROUNDS
+#: rounds of tool calls per turn and should spend them on the task.
+PERSISTENCE_NOTE = (
+    "Finish the job in THIS turn. You get many rounds of tool calls before you "
+    "have to answer \u2014 around %d \u2014 so keep going until the task is "
+    "actually done: look, act, then CHECK what you did. Do not stop to announce "
+    "a plan, to ask whether to proceed with something he already asked for, or "
+    "to say what you would do next; do it. Come back early only if you "
+    "genuinely need a decision from him, or the job is done." % MAX_TOOL_ROUNDS)
 
 #: How wide a web search fans out, scaled to the query's apparent complexity
 #: (see `Ollama._research_budget`). A simple factual ask (a weather lookup, a
@@ -2349,6 +2374,7 @@ class Ollama(QObject):
         base += "\n\n" + RECALL_GUIDANCE
         base += "\n\n" + SAVE_GUIDANCE
         base += "\n\n" + CAPABILITY_NOTE
+        base += "\n\n" + PERSISTENCE_NOTE
         skills = skills_note()
         if skills:
             base += "\n\n" + skills
@@ -2480,6 +2506,17 @@ class Ollama(QObject):
         except (OSError, ValueError, IndexError):
             pass
         return ""
+
+    def _ctx_room(self):
+        """Is there still context room for another tool round?
+
+        Four characters to the token is the standard rough count and is all this
+        needs to be: it decides between one more tool round and wrapping up, and
+        both are safe. It counts the whole message list — system prompt, history,
+        every tool result so far — because that is what the next POST carries.
+        """
+        chars = sum(len(str(m.get("content") or "")) for m in self._messages)
+        return (chars / 4) < (CHAT_NUM_CTX * TOOL_CTX_FRACTION)
 
     def _post_chat(self):
         """POST the current message list, streaming, offering every tool.
@@ -2621,14 +2658,15 @@ class Ollama(QObject):
             return
         # A tool round: run the calls, feed the results back, and let the model
         # continue. Past the cap, stop looping and take the answer as-is.
-        if self._tool_calls and self._rounds < MAX_TOOL_ROUNDS:
+        if (self._tool_calls and self._rounds < MAX_TOOL_ROUNDS
+                and self._ctx_room()):
             self._rounds += 1
             self._messages.append({"role": "assistant",
                                    "content": self._acc_content,
                                    "tool_calls": self._tool_calls})
             self._run_tool_calls(self._tool_calls)
             return
-        # AT the cap and STILL calling tools. Stopping here is what handed him
+        # OUT of rounds or out of context, and STILL calling tools. Stopping here is what handed him
         # an EMPTY message (observed 2026-08-22: four run_bash rounds hunting
         # for a directory, then nothing at all, twice in a row) — the model's
         # last frame was tool calls and no prose, so there was no answer to
