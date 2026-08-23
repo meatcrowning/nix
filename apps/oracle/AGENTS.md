@@ -1244,6 +1244,105 @@ book keeps Qt's default. Harness: `tools/video-test.py` (offscreen; a stub
 resolver and a 127.0.0.1 server, so it reaches neither his screen nor the
 network), `--shot` for a PNG of the card.
 
+## Showing, making and capturing a picture
+
+Three tools that put pixels in the chat, and they are three because they differ
+in **who sees what** — the distinction `view_image` alone could not make.
+
+**`show_image` — DISPLAY, not LOOK** [his, 2026-08-23]. Until this existed, the
+only way to put a local picture in the chat was `view_image`, which is a VISION
+tool: it needs a vision-capable model, reads the whole file, and spends up to
+8 MB of context on base64 — all to display a graph the model had just plotted
+itself. `show_image` shows it and hands the model *nothing*, so a coding model
+with no vision can still draw something and show it. The fast path is the honest
+one: a QML `Image` loads a local file, so the entry points straight at it — no
+copy, no re-encode. `_display_image` is the shared half; a file on the OTHER
+machine comes back through the same jailed executor and is saved locally,
+because QML cannot load a path that is not here.
+
+**`make_image` — painter's backend, not a second one.** `apps/painter/tools/
+smoke.py` is painter's OWN registry/graph/client path with the GUI taken off, so
+chatter runs THAT, on `top`, where the weights and the GPU are; it builds no
+graph and knows nothing about models, which is what keeps the two from drifting.
+One shell does three things because they are one act: start `comfy-painter` if
+it is down (a user unit, `start` on a running one is a no-op), wait for
+`/system_stats` to answer, then generate. The result is drawn through
+`_display_image`, so a book window shows a picture made on top.
+
+**The warden goes first, and its refusal is the honest answer** (`apps/pylib/
+warden.py`). ollama and ComfyUI share 31 GiB, and a collision does not fail an
+allocation — it livelocks the desktop. Note what that means in practice: while a
+23 GiB model is loaded and mid-reply, the warden REFUSES, and it is right to.
+The tool result says so in the terms he can act on — a smaller model leaves room
+— rather than pretending the picture is coming.
+
+**`screenshot` — his screen, and he sees what was seen.** `grim` under Hyprland,
+Spectacle under Plasma, chosen by what is installed rather than by a guess about
+the session; `$ORACLE_SHOT_CMD` replaces it (the harness points it at a stub, so
+no test photographs his desk). The frame is drawn in the chat AND attached to
+the model's next turn, because a model looking at his screen while he cannot see
+what it looked at is exactly the secret docs/DESIGN.md §10 forbids; over
+`ATTACH_IMAGE_MAX` it is downscaled rather than refused. `show_only` captures
+without handing it over.
+
+**This does NOT cross root AGENTS.md's line.** That rule forbids an AGENT'S TEST
+from screenshotting his session. This is the opposite direction — he asked the
+app for it, at his own keystroke, in his own window — and no harness may call it
+for real.
+
+## Tools he writes himself (a directory of manifests)
+
+Asked whether it could make its own tools, chatter answered "no — those are
+defined by the framework I run in" [his session, 2026-08-23]. This is the door.
+`$ORACLE_TOOLS` (default `~/.local/share/oracle/tools`) holds one JSON manifest
+per tool:
+
+```json
+{"description": "What it does, written for the model.",
+ "parameters": {"type": "object", "properties": {"city": {"type": "string"}},
+                "required": ["city"]},
+ "run": "weather.sh", "timeout": 30}
+```
+
+`run` is optional (default: the executable of the same stem beside it). The
+program gets the call's arguments as **JSON on stdin** and whatever it prints on
+stdout is the result — parsed as JSON when it parses, text otherwise; a non-zero
+exit is an error carrying its stderr, so the model can tell him which of his
+scripts broke and how. That is the shape of every executor here, so a tool is a
+shell script that reads stdin and prints.
+
+Read FRESH every turn, so adding one is saving a file, not restarting chatter.
+A manifest that will not parse, names no runnable program, or collides with a
+BUILT-IN name is skipped rather than offered (§10 — never an affordance that is
+not there); `Ollama._builtin_tools()` is what the collision is decided against,
+so the two lists cannot drift. Subagents get them too, through the same
+registry, and every custom description carries `BUILT_BY_HIM` so the model knows
+whose failure it is looking at.
+
+## Watching a program run (run_bash / run_python)
+
+`tools/sandbox-exec.py` takes `stream: true` and then emits its child's output
+as NDJSON lines — `{"t":"o"|"e","d":"…"}` — with the result object still LAST,
+exactly as before, so a caller that does not ask (or an older copy of the script
+reached over ssh, which ignores the key) is unaffected. chatter parses those
+lines out of the pipe and emits `execOutput`; the row keeps a bounded tail
+(`execTailMax`, 4000 chars) under the files disclosure, which **auto-opens while
+a program is running** — live output nobody can see is not live output — and his
+own click still wins in both directions. The tail is transient and is not
+persisted: what the program MEANT is in the reply.
+
+## Branching: edit and resend, ask again
+
+Right-click a prompt of his → **edit & resend**; right-click an answer → **ask
+again** [his, 2026-08-23]. Both go through `branchAt(i)`, and the rule there is
+that going back is **not** undo: what came after is a real conversation. So the
+transcript as it stands is SAVED under the id it already has, and the shortened
+one becomes a NEW session — the old branch keeps its title and its rows in the
+picker, and the window carries on from the fork. Nothing is deleted anywhere.
+`edit & resend` puts the text back in the box and sends nothing; `ask again`
+re-sends the prompt above the answer unchanged. Both stand down while a reply is
+streaming. Harness: `tools/toolbox-test.py`.
+
 ## The music player (control_player)
 
 **A reply can see and drive what is playing** [his, 2026-08-23: *"give agents

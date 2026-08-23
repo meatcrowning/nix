@@ -339,6 +339,24 @@ Item {
             chatLog.setProperty(win.activeIndex, "videosPending", pending);
             chatLog.setProperty(win.activeIndex, "videosActive", pending > 0);
         }
+        // A run_bash / run_python program, AS IT RUNS [his, 2026-08-23]. The
+        // tail is bounded (execTailMax) — this is a window on the work, not a
+        // second transcript — and it lives under the files disclosure with the
+        // tool lines it belongs to. It is transient: `saveCurrent` does not
+        // persist it, because what the program MEANT is in the reply.
+        function onExecStarted(lang) {
+            if (win.activeIndex < 0) return;
+            chatLog.setProperty(win.activeIndex, "execTail", "");
+            chatLog.setProperty(win.activeIndex, "execRunning", true);
+        }
+        function onExecOutput(chunk) {
+            if (win.activeIndex < 0 || chunk === "") return;
+            var cur = chatLog.get(win.activeIndex);
+            var t = (cur.execTail || "") + chunk;
+            if (t.length > win.execTailMax)
+                t = "…" + t.substring(t.length - win.execTailMax);
+            chatLog.setProperty(win.activeIndex, "execTail", t);
+        }
         function onReplyDone() {
             if (win.activeIndex < 0) return;
             win.stopThinkClock(win.activeIndex);
@@ -349,6 +367,7 @@ Item {
             chatLog.setProperty(win.activeIndex, "filesActive", false);
             chatLog.setProperty(win.activeIndex, "imagesActive", false);
             chatLog.setProperty(win.activeIndex, "videosActive", false);
+            chatLog.setProperty(win.activeIndex, "execRunning", false);
             chatLog.setProperty(win.activeIndex, "toolsActive", false);
             chatLog.setProperty(win.activeIndex, "agentsActive", false);
             chatLog.setProperty(win.activeIndex, "agentsPending", 0);
@@ -368,6 +387,7 @@ Item {
             chatLog.setProperty(win.activeIndex, "filesActive", false);
             chatLog.setProperty(win.activeIndex, "imagesActive", false);
             chatLog.setProperty(win.activeIndex, "videosActive", false);
+            chatLog.setProperty(win.activeIndex, "execRunning", false);
             chatLog.setProperty(win.activeIndex, "toolsActive", false);
             chatLog.setProperty(win.activeIndex, "agentsActive", false);
             chatLog.setProperty(win.activeIndex, "agentsPending", 0);
@@ -491,6 +511,55 @@ Item {
             row.trigger();
     }
 
+    // BRANCHING [his, 2026-08-23]. Going back to an earlier turn and asking
+    // again is not "undo": what came after is a real conversation and must not
+    // evaporate. So the transcript as it stands is SAVED first, under the id it
+    // already has, and the shortened one becomes a NEW session — the old branch
+    // keeps its title and its rows in the picker, and this window carries on
+    // from the fork. Nothing is deleted anywhere.
+    function branchAt(i) {
+        if (i < 0 || i >= chatLog.count || Ollama.busy)
+            return false;
+        win.saveCurrent();               // the branch he is leaving, intact
+        win.sessionId = "";              // …and the one he is entering is new
+        win.sessionTitle = "";
+        Ollama.cancel();
+        while (chatLog.count > i)
+            chatLog.remove(chatLog.count - 1);
+        win.activeIndex = -1;
+        win.chatRev++;
+        return true;
+    }
+
+    // Put an earlier prompt back in the box, with everything after it on its
+    // own branch. He edits and presses send; nothing is sent for him.
+    function editFrom(i) {
+        if (i < 0 || i >= chatLog.count)
+            return;
+        var text = chatLog.get(i).body;
+        if (!branchAt(i))
+            return;
+        promptBox.text = text;
+        promptBox.forceActiveFocus();
+    }
+
+    // Ask the same question again: drop this answer (and anything after it) and
+    // re-send the prompt above it, unchanged.
+    function retryFrom(i) {
+        if (i < 0 || i >= chatLog.count)
+            return;
+        var j = i;
+        while (j >= 0 && !chatLog.get(j).isUser)
+            j--;
+        if (j < 0)
+            return;
+        var text = chatLog.get(j).body;
+        if (!branchAt(j))
+            return;
+        promptBox.text = text;
+        win.send();
+    }
+
     function textMenu(item, md) {
         return [
             { label: win.plasma ? "Copy" : "copy",
@@ -510,6 +579,24 @@ Item {
             { label: win.plasma ? "Select All" : "select all",
               trigger: function () { item.forceActiveFocus(); item.selectAll(); } }
         ];
+    }
+
+    // The same menu, plus what can be done to THIS turn: edit a prompt of his
+    // and ask again, or ask the same question again. Both branch (above), and
+    // both stand down while a reply is streaming — re-asking mid-answer would
+    // race the stream (§10.2: a row that cannot act is disabled, never inert).
+    function turnMenu(item, md, i, isUser) {
+        var rows = win.textMenu(item, md);
+        rows.push({ separator: true });
+        if (isUser)
+            rows.push({ label: win.plasma ? "Edit && Resend" : "edit & resend",
+                        enabled: !Ollama.busy,
+                        trigger: function () { win.editFrom(i); } });
+        else
+            rows.push({ label: win.plasma ? "Ask Again" : "ask again",
+                        enabled: !Ollama.busy,
+                        trigger: function () { win.retryFrom(i); } });
+        return rows;
     }
 
     // Open the custom-prompt editor (from the picker's "custom…" or the "edit"
@@ -535,6 +622,7 @@ Item {
                          agentsPending: 0, agentHead: "", agentsBad: false,
                          images: "[]", imagesActive: false, imagesPending: 0,
                          videos: "[]", videosActive: false, videosPending: 0,
+                         execTail: "", execRunning: false,
                          tools: "", toolCount: 0, toolsActive: false,
                          streaming: true, isError: false });
         win.activeIndex = chatLog.count - 1;
@@ -546,6 +634,9 @@ Item {
     // tools/round-split-test.py asserts on it that a turn taking two tool rounds
     // ends up as three rows — round 1, round 2, the answer — rather than one
     // bubble with everything in it.
+    // How much of a running program's output the row keeps on screen.
+    readonly property int execTailMax: 4000
+
     function rowsJson() {
         var a = [];
         for (var i = 0; i < chatLog.count; i++) {
@@ -587,6 +678,7 @@ Item {
                              agentsBad: !!t.agentsBad,
                              images: t.images || "[]", imagesActive: false, imagesPending: 0,
                              videos: t.videos || "[]", videosActive: false, videosPending: 0,
+                             execTail: "", execRunning: false,
                              tools: t.tools || "", toolCount: t.toolCount || 0, toolsActive: false,
                              streaming: false, isError: !!t.isError,
                              step: t.step || 0, ts: t.ts || 0 });
@@ -661,6 +753,7 @@ Item {
                          agentsPending: 0, agentHead: "", agentsBad: false,
                          images: "[]", imagesActive: false, imagesPending: 0,
                          videos: "[]", videosActive: false, videosPending: 0,
+                         execTail: "", execRunning: false,
                          tools: "", toolCount: 0, toolsActive: false,
                          streaming:false, isError: false, step: 0 });
         win.appendReplyRow(1);
@@ -988,6 +1081,7 @@ Item {
             chatLog.setProperty(win.activeIndex, "filesActive", false);
             chatLog.setProperty(win.activeIndex, "imagesActive", false);
             chatLog.setProperty(win.activeIndex, "videosActive", false);
+            chatLog.setProperty(win.activeIndex, "execRunning", false);
             win.chatRev++;
             win.saveCurrent();   // keep the partial turn in the session
         }
@@ -1810,6 +1904,10 @@ Item {
                     model: chatLog
                     delegate: Item {
                         id: turn
+                        // Captured at creation, so a menu built on a click can
+                        // name its own row without reaching for a context
+                        // property that may not be there by then.
+                        readonly property int rowIndex: index
                         width: replyCol.width
                         height: turnStack.height
 
@@ -2329,8 +2427,13 @@ Item {
                                 visible: !isUser && (files !== "" || filesActive)
                                 height: visible ? fileToggle.height + fileReveal.height : 0
 
+                                // Closed by default — a file tool is a line of
+                                // bookkeeping. EXCEPT while a program is
+                                // actually running: live output nobody can see
+                                // is not live output. His own click still wins,
+                                // in both directions.
                                 readonly property bool expanded: turn.fileUserSet ? turn.fileUserOpen
-                                                                                  : false
+                                                                                  : execRunning
 
                                 Item {
                                     id: fileToggle
@@ -2371,7 +2474,9 @@ Item {
                                     id: fileReveal
                                     anchors { top: fileToggle.bottom; left: parent.left; right: parent.right }
                                     clip: true
-                                    height: fileAct.expanded ? fileBody.height : 0
+                                    height: fileAct.expanded
+                                            ? fileBody.height + (execBody.visible
+                                               ? execBody.height + 2 : 0) : 0
                                     Behavior on height {
                                         NumberAnimation { duration: motion.ms(motion.slideMs)
                                                           easing.type: motion.slideEasing }
@@ -2389,6 +2494,23 @@ Item {
                                         wrapMode: Text.Wrap
                                         text: files
                                         color: Theme.textDim
+                                    }
+                                    // What the program is printing, right now.
+                                    // The editor font, because it is output and
+                                    // not prose; one step dim, because it is
+                                    // the machine talking (§9.1).
+                                    Text {
+                                        id: execBody
+                                        anchors { top: fileBody.bottom; topMargin: execBody.visible ? 2 : 0
+                                                  left: parent.left; right: parent.right
+                                                  leftMargin: 12 }
+                                        visible: execTail !== ""
+                                        font: Theme.editorFont
+                                        renderType: Text.NativeRendering
+                                        textFormat: Text.PlainText
+                                        wrapMode: Text.Wrap
+                                        text: execTail
+                                        color: execRunning ? Theme.text : Theme.textDim
                                     }
                                 }
                             }
@@ -2553,7 +2675,9 @@ Item {
                                             onClicked: function (m) {
                                                 var p = mapToItem(win, m.x, m.y);
                                                 ctxMenu.open(p.x, p.y,
-                                                    win.textMenu(plainBody, false));
+                                                    win.turnMenu(plainBody, false,
+                                                                 turn.rowIndex,
+                                                                 isUser));
                                             }
                                         }
                                     }
@@ -2596,7 +2720,9 @@ Item {
                                             onClicked: function (m) {
                                                 var p = mapToItem(win, m.x, m.y);
                                                 ctxMenu.open(p.x, p.y,
-                                                    win.textMenu(mdBody, true));
+                                                    win.turnMenu(mdBody, true,
+                                                                 turn.rowIndex,
+                                                                 false));
                                             }
                                         }
                                     }

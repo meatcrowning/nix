@@ -49,17 +49,23 @@ SUCCESSFUL run with a non-zero `exit_code` and the traceback in `stderr`.
 import json
 import os
 import resource
+import select
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
+import time
 
 # --- caps: a run must never wedge the host or blow the model's context window ---
 TIMEOUT_DEFAULT = 10          # wall-clock seconds if the caller names none
 TIMEOUT_MAX = 30              # hard ceiling on the wall clock, whatever is asked
 OUT_MAX_BYTES = 40_000        # per stream (stdout / stderr); the rest is dropped
 CODE_MAX_BYTES = 256_000      # refuse an absurdly large program outright
+#: How much LIVE output one run may echo while it works. The full stdout is
+#: still returned (clipped by OUT_MAX_BYTES); this only bounds the tail he
+#: watches, so a program printing a gigabyte cannot flood the pipe either.
+STREAM_MAX_BYTES = 20000
 STDIN_MAX_BYTES = 256_000     # ...and an absurdly large stdin feed
 CPU_SECONDS = 20              # RLIMIT_CPU — a hair above the wall cap, a backstop
 MEM_BYTES = 1024 * 1024 * 1024  # RLIMIT_AS — 1 GiB address space per run
@@ -117,6 +123,68 @@ def _clip(raw):
     if cut:
         text += "\n…[output truncated at %d bytes]" % OUT_MAX_BYTES
     return text, cut
+
+
+def _pump(proc, stdin_bytes, timeout):
+    """Run the child, echoing its output line-by-line as it comes.
+
+    Returns (stdout, stderr, timed_out) exactly as `communicate` would, so the
+    result object is built from the same bytes either way — the stream is an
+    ADDITION to the protocol, never a replacement for its answer. Output is
+    still capped by `_clip` at the end; what is echoed live is capped here too,
+    so a program printing a gigabyte cannot flood the caller's pipe either.
+    """
+    if stdin_bytes:
+        try:
+            proc.stdin.write(stdin_bytes)
+        except OSError:
+            pass
+    try:
+        proc.stdin.close()
+    except OSError:
+        pass
+    chunks = {proc.stdout: [], proc.stderr: []}
+    kind = {proc.stdout: "o", proc.stderr: "e"}
+    live = [0]
+    deadline = time.monotonic() + timeout
+    open_pipes = [proc.stdout, proc.stderr]
+    timed_out = False
+    while open_pipes:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            timed_out = True
+            break
+        ready, _, _ = select.select(open_pipes, [], [], min(left, 0.5))
+        for pipe in ready:
+            data = os.read(pipe.fileno(), 65536)
+            if not data:
+                open_pipes.remove(pipe)
+                continue
+            chunks[pipe].append(data)
+            if live[0] < STREAM_MAX_BYTES:
+                text = data.decode("utf-8", "replace")
+                live[0] += len(data)
+                if live[0] >= STREAM_MAX_BYTES:
+                    text += "\n… (live output capped; the full result follows)"
+                print(json.dumps({"t": kind[pipe], "d": text}), flush=True)
+        if not ready and proc.poll() is not None and not open_pipes:
+            break
+    if timed_out:
+        try:                           # kill the whole group, not just python
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            proc.kill()
+        for pipe in list(open_pipes):
+            try:
+                chunks[pipe].append(pipe.read() or b"")
+            except OSError:
+                pass
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+    return (b"".join(chunks[proc.stdout]), b"".join(chunks[proc.stderr]),
+            timed_out)
 
 
 def main():
@@ -193,16 +261,26 @@ def main():
                 preexec_fn=_child_setup)
         except OSError as e:
             fail("cannot run %s: %s" % (lang, e))
-        timed_out = False
-        try:
-            out_raw, err_raw = proc.communicate(input=stdin_bytes, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            try:                       # kill the whole group, not just python
-                os.killpg(proc.pid, signal.SIGKILL)
-            except OSError:
-                proc.kill()
-            out_raw, err_raw = proc.communicate()
+        # STREAMING (`stream: true`) — the caller watches the program work
+        # instead of staring at a still window for thirty seconds. Each chunk
+        # goes out as its own NDJSON line, `{"t":"o"|"e","d":"…"}`, and the
+        # final result object is the LAST line exactly as before, so a caller
+        # that does not ask for it — or an OLDER copy of this script reached
+        # over ssh, which ignores the unknown key — is unaffected.
+        if req.get("stream"):
+            out_raw, err_raw, timed_out = _pump(proc, stdin_bytes, timeout)
+        else:
+            timed_out = False
+            try:
+                out_raw, err_raw = proc.communicate(input=stdin_bytes,
+                                                    timeout=timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                try:                   # kill the whole group, not just python
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except OSError:
+                    proc.kill()
+                out_raw, err_raw = proc.communicate()
         out, out_cut = _clip(out_raw or b"")
         err, err_cut = _clip(err_raw or b"")
         res = {"ok": True, "lang": lang, "timed_out": timed_out,

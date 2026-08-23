@@ -24,6 +24,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import socket
 import sys
 import time
@@ -35,8 +36,8 @@ import shlex
 from html.parser import HTMLParser
 
 from PySide6.QtCore import (QObject, Slot, Signal, Property, QUrl, QUrlQuery,
-                            QFileSystemWatcher, QProcess, QProcessEnvironment,
-                            QTimer)
+                            QBuffer, QFileSystemWatcher, QProcess,
+                            QProcessEnvironment, Qt, QTimer)
 from PySide6.QtGui import QGuiApplication, QColor, QImage
 from PySide6.QtNetwork import (QNetworkAccessManager, QNetworkRequest,
                                QNetworkReply)
@@ -171,6 +172,115 @@ VIEW_IMAGE_TOOL = {
             "required": ["path"]}},
 }
 VIEW_IMAGE_TOOL_NAMES = {"view_image"}
+
+#: SHOWING is not LOOKING [his, 2026-08-23]. Until now the only way to put a
+#: local picture in the chat was `view_image`, which is a VISION tool: it needs
+#: a vision-capable model, reads the whole file, and spends 8 MB of context on
+#: base64 the model then has to think about — all to display a graph it had just
+#: drawn itself. This is the other half: the picture goes on screen and NOTHING
+#: goes to the model, so a coding model with no vision can still plot something
+#: and show it.
+SHOW_IMAGE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "show_image",
+        "description": (
+            "DISPLAY an image file in the chat for him to look at. Use it "
+            "whenever you have made or found a picture on this machine and he "
+            "should see it — a chart or graph you just plotted, a screenshot, a "
+            "diagram, a photo he asked you to find on disk. This does NOT show "
+            "it to you: it costs you nothing and needs no vision support. If "
+            "you also need to SEE it yourself, use view_image instead (or as "
+            "well). Say what the picture shows in your reply if it needs "
+            "saying; do not describe it as though you had looked at it."),
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string",
+                     "description": "Path of the image file to display."},
+            "caption": {"type": "string",
+                        "description": "A short caption drawn under it (optional)."},
+            "host": {"type": "string", "enum": ["top", "book"],
+                     "description": ("Which machine the file is on. Default: "
+                                     "the one this window runs on.")}},
+            "required": ["path"]}},
+}
+SHOW_IMAGE_TOOL_NAMES = {"show_image"}
+
+#: THE SCREEN, as a picture [his, 2026-08-23]. `grim` under Hyprland, Spectacle
+#: under Plasma; the frame lands in IMAGES_ROOT, is drawn in the chat so he sees
+#: exactly what was captured (docs/DESIGN.md §10 — nothing looked at in secret),
+#: and is attached to the model's next turn when the model has vision. NOTE the
+#: boundary this does NOT cross: root AGENTS.md forbids an AGENT'S TEST from
+#: screenshotting his session. This is the opposite direction — he asked the app
+#: for it, at his own keystroke — and no harness may call it.
+SCREENSHOT_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "screenshot",
+        "description": (
+            "Take a picture of his screen right now and LOOK at it. Use it when "
+            "the question is about what is on screen — 'what does this error "
+            "say', 'what am I looking at', 'is this laid out right' — or when "
+            "he asks you to look at his screen. The capture is shown in the "
+            "chat as well, so he sees exactly what you were shown. It is "
+            "attached to your NEXT turn, so after calling this, wait for it and "
+            "then answer from what you see. Needs a vision-capable model."),
+        "parameters": {"type": "object", "properties": {
+            "show_only": {"type": "boolean",
+                          "description": ("Only put it in the chat, do not send "
+                                          "it to you. Use when he just wants a "
+                                          "screenshot saved.")}},
+            "required": []}},
+}
+SCREENSHOT_TOOL_NAMES = {"screenshot"}
+
+#: MAKING a picture, not fetching one [his, 2026-08-23]. painter's backend is
+#: already on `top` — ComfyUI, 246 GB of weights, and `painter/tools/smoke.py`,
+#: which is painter's OWN registry/graph/client path with the GUI taken off. So
+#: this tool is that script, run where the weights are, and the result drawn in
+#: the chat: chatter builds no graph of its own and knows nothing about models,
+#: which is what keeps the two from drifting.
+#:
+#: It reserves through the ai-warden first (`apps/pylib/warden.py`): ollama and
+#: ComfyUI share 31 GiB and a collision livelocks the machine rather than
+#: failing, so a generation asks for room and takes "no, and here is why" for an
+#: answer (home/srvs/ai-warden.nix).
+MAKE_IMAGE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "make_image",
+        "description": (
+            "GENERATE a picture from a text description and show it in the "
+            "chat. Use it when he asks you to draw, generate, imagine or make "
+            "an image — not when he wants a real photograph of something that "
+            "exists, which is search_images plus fetch_image. Write the prompt "
+            "the way an image model wants it: subject first, then the concrete "
+            "visual details, then style and lighting; commas, not sentences. "
+            "This runs on his own machine and takes anywhere from twenty "
+            "seconds to a few minutes, so call it ONCE and wait. He sees the "
+            "picture; you do not, unless you view_image it afterwards."),
+        "parameters": {"type": "object", "properties": {
+            "prompt": {"type": "string",
+                       "description": "What to draw, as image-model prompt text."},
+            "negative": {"type": "string",
+                         "description": "What to keep out of it (optional)."},
+            "model": {"type": "string",
+                      "description": ("Part of a model name to use, e.g. 'krea' "
+                                      "or 'anima'. Omit for his default.")},
+            "width": {"type": "integer", "description": "Pixels (optional)."},
+            "height": {"type": "integer", "description": "Pixels (optional)."},
+            "seed": {"type": "integer",
+                     "description": "Fixed seed, for a repeatable picture (optional)."},
+            "steps": {"type": "integer", "description": "Sampling steps (optional)."}},
+            "required": ["prompt"]}},
+}
+MAKE_IMAGE_TOOL_NAMES = {"make_image"}
+
+#: painter's headless generator, and how long one picture may take. The command
+#: starts the backend if it is down (it is a user unit, and a `start` on a
+#: running one is a no-op), waits for it to answer, and only then generates —
+#: which is what painter's own launcher does on book (home/prog/painter.nix).
+PAINTER_SMOKE = "/home/lam/nix/apps/painter/tools/smoke.py"
+MAKE_IMAGE_MS = 15 * 60 * 1000
 
 #: The IMAGE-SEARCH tool. fetch_image can only GET a URL the model already has,
 #: and a model asked for "a picture of X" tends to GUESS a plausible-looking
@@ -575,6 +685,11 @@ class _PageText(HTMLParser):
 #: $ORACLE_IMAGES.
 IMAGES_ROOT = os.path.expanduser(
     os.environ.get("ORACLE_IMAGES", "~/.local/share/oracle/images"))
+
+#: Where a GENERATED picture lands (make_image). Under the image store, because
+#: it is the same kind of thing: a file this chat produced, kept so a reloaded
+#: session still shows it.
+MAKE_IMAGE_DIR = os.path.join(IMAGES_ROOT, "made")
 
 #: A ceiling on a single image download, so a mis-pointed URL cannot pull a
 #: multi-gigabyte body into memory.
@@ -1190,6 +1305,108 @@ def skills_note(catalog=None):
 #: written here is one it can use too (chatter ignores frontmatter it does not
 #: know, and a `tools:` list naming tools chatter does not have falls back to
 #: the default set rather than producing an agent that can do nothing).
+#: TOOLS AS FILES [his, 2026-08-23]. Chatter's own answer, when he asked it
+#: whether it could make its own tools, was "no — those are defined by the
+#: framework I run in". This is that door: a directory of MANIFESTS, each naming
+#: a program to run, loaded fresh every turn and offered beside the built-ins.
+#: Nothing here is vendored and nothing is written by chatter — the directory is
+#: HIS (and the model's, through the file tools it already has).
+#:
+#: One tool is `<name>.json`:
+#:
+#:     {"description": "What it does, written for the model.",
+#:      "parameters": {"type": "object", "properties": {...}, "required": [...]},
+#:      "run": "weather.sh",          // optional; default: <name>[.*] beside it
+#:      "timeout": 30}                // optional seconds, capped at CUSTOM_MAX_SECS
+#:
+#: The program is run with the call's arguments as JSON on **stdin**; whatever
+#: it prints on stdout is the result (parsed as JSON when it parses, text
+#: otherwise), and a non-zero exit is an error carrying its stderr. That is the
+#: same shape as every executor here, so a tool is a shell script that reads
+#: stdin and prints — nothing to import, nothing to register.
+CUSTOM_TOOLS_ROOT = os.path.expanduser(
+    os.environ.get("ORACLE_TOOLS", "~/.local/share/oracle/tools"))
+#: A custom tool's answer is model context like any other: cap it.
+CUSTOM_MAX_BYTES = 40000
+CUSTOM_MAX_SECS = 300
+CUSTOM_DEFAULT_SECS = 30
+
+
+def custom_tools():
+    """Every usable custom tool, as `{name: spec}`.
+
+    A manifest that will not parse, names no runnable program, or collides with
+    a BUILT-IN name is skipped rather than offered — a tool that cannot run is
+    an affordance that is not there (docs/DESIGN.md §10). Read fresh on every
+    turn, so adding one is saving a file, not restarting chatter."""
+    out = {}
+    try:
+        files = sorted(Path(CUSTOM_TOOLS_ROOT).iterdir(), key=lambda f: f.name)
+    except OSError:
+        return out
+    for f in files:
+        if f.suffix != ".json" or not f.is_file():
+            continue
+        try:
+            spec = json.loads(f.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(spec, dict):
+            continue
+        name = str(spec.get("name") or f.stem).strip()
+        if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", name or ""):
+            continue
+        run = str(spec.get("run") or "").strip()
+        prog = None
+        if run:
+            cand = Path(run) if os.path.isabs(run) else f.parent / run
+            prog = cand if cand.is_file() and os.access(cand, os.X_OK) else None
+        else:
+            for cand in sorted(f.parent.glob(f.stem + ".*")):
+                if cand.suffix != ".json" and cand.is_file() and os.access(cand, os.X_OK):
+                    prog = cand
+                    break
+            if prog is None and (f.parent / f.stem).is_file():
+                cand = f.parent / f.stem
+                prog = cand if os.access(cand, os.X_OK) else None
+        if prog is None:
+            continue
+        params = spec.get("parameters")
+        if not isinstance(params, dict):
+            params = {"type": "object", "properties": {}}
+        try:
+            secs = float(spec.get("timeout") or CUSTOM_DEFAULT_SECS)
+        except (TypeError, ValueError):
+            secs = CUSTOM_DEFAULT_SECS
+        out[name] = {"name": name, "prog": str(prog),
+                     "description": str(spec.get("description") or
+                                        ("custom tool " + name)),
+                     "parameters": params,
+                     "timeout": max(1.0, min(secs, CUSTOM_MAX_SECS))}
+    return out
+
+
+def custom_tool_defs(catalog=None):
+    """The custom tools as function definitions, minus any name a built-in
+    already owns — a custom `read_file` must never shadow the real one."""
+    cat = custom_tools() if catalog is None else catalog
+    return [{"type": "function",
+             "function": {"name": t["name"],
+                          "description": t["description"] + BUILT_BY_HIM,
+                          "parameters": t["parameters"]}}
+            for t in cat.values() if t["name"] not in BUILTIN_TOOL_NAMES]
+
+
+#: Said on every custom tool, once: the model should know which of its tools are
+#: the app's and which are his, because the failure modes differ (a built-in
+#: that errors is a bug here; one of his that errors is a script to fix).
+BUILTIN_TOOL_NAMES = set()          # filled once Ollama is defined, below
+
+
+BUILT_BY_HIM = (" (A tool HE wrote and installed, not one of the app's own. If "
+                "it fails, say what it printed — he can fix the script.)")
+
+
 AGENTS_ROOT = os.path.expanduser(
     os.environ.get("ORACLE_AGENTS", "~/.claude/agents"))
 #: One definition's prompt, capped like a skill's.
@@ -1354,8 +1571,9 @@ def _tool_registry():
     same objects the main payload carries, so the two cannot drift; spawn_agent
     itself is absent, which is what keeps subagents one level deep."""
     tools = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, FETCH_URL_TOOL,
-             CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
-             + list(SESSION_TOOLS) + [t for t in [skill_tool()] if t])
+             CALL_API_TOOL, EXEC_TOOL, BASH_TOOL, SHOW_IMAGE_TOOL]
+             + list(SESSION_TOOLS) + [t for t in [skill_tool()] if t]
+             + custom_tool_defs())
     return {t["function"]["name"]: t for t in tools
             if isinstance(t, dict) and isinstance(t.get("function"), dict)}
 
@@ -1589,8 +1807,12 @@ CAPABILITY_NOTE = (
     "(show_video — a YouTube or other watch page, or a direct video "
     "file, streamed into the chat with a play button he presses); "
     "read the current time in any "
-    "timezone; SEE AND CONTROL THE MUSIC (control_player — what is playing, "
-    "pause, skip, seek, volume, on the machine this window runs on); read a "
+    "timezone; SHOW him a picture that is already on the machine (show_image — "
+    "for a chart you plotted or a file you found: it costs you nothing and "
+    "needs no vision); GENERATE one (make_image, his own image backend); LOOK "
+    "AT HIS SCREEN (screenshot); SEE AND CONTROL THE MUSIC (control_player — "
+    "what is playing, pause, skip, seek, volume, on the machine this window "
+    "runs on); read a "
     "file's real type, size, duration, codecs and TAGS without opening it "
     "(file_metadata); read, write, edit, move, delete and search files on the host — "
     + ("the WHOLE filesystem, not a sandbox, exactly what the user himself can "
@@ -1613,7 +1835,11 @@ CAPABILITY_NOTE = (
     "first and nothing is undone. You cannot use root (there is no sudo). "
     "Describe your abilities in these terms, and call "
     "describe_self for the exact live tool list — never claim a capability you "
-    "do not have, and never deny one you do.")
+    "do not have, and never deny one you do. Some of the tools you are offered "
+    "are HIS: he writes them as scripts in a directory and they appear beside "
+    "the app's own (their descriptions say so). You can read and write that "
+    "directory with the file tools, so if a job needs a tool that does not "
+    "exist, you can propose one — or write it.")
 
 #: FINISH THE JOB. A model that treats one tool round as one turn stops after a
 #: look-around and describes what it would do next, which left him pressing
@@ -2161,6 +2387,14 @@ class Ollama(QObject):
     # streams; nothing is on disk but the poster frame.
     videoStarted = Signal(str)              # url — resolving
     videoResult = Signal(str)               # one JSON entry (the contract above)
+
+    # A run_bash/run_python program's output AS IT RUNS (tools/sandbox-exec.py
+    # `stream: true`). One chunk per signal, already decoded; QML keeps a
+    # bounded tail of it on the row so a thirty-second command is not a still
+    # window (docs/DESIGN.md §10 — the wait is shown, and here it is shown with
+    # the work in it).
+    execOutput = Signal(str)                # one chunk of live output
+    execStarted = Signal(str)               # the language, as a heading
 
     # The player tool's result, as JSON — for a harness to read what one call
     # actually produced without a bus of its own.
@@ -3333,6 +3567,19 @@ class Ollama(QObject):
         self._tool_done(remaining, calls)
 
     @staticmethod
+    def _builtin_tools():
+        """Every tool the APP itself defines. Split out from `_all_tools` so a
+        custom tool of his can never shadow one of these: the collision is
+        decided against this list, not against a hand-kept copy of it."""
+        return (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, SELF_TOOL,
+                IMAGE_TOOL, SEARCH_IMAGE_TOOL, VIEW_IMAGE_TOOL, SHOW_IMAGE_TOOL,
+                SCREENSHOT_TOOL, MAKE_IMAGE_TOOL, VIDEO_TOOL, PLAYER_TOOL,
+                FETCH_URL_TOOL,
+                CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
+                + list(SESSION_TOOLS) + list(MEMORY_TOOLS)
+                + [t for t in [skill_tool(), spawn_agent_tool()] if t])
+
+    @staticmethod
     def _all_tools():
         """EVERY tool offered to the main agent this turn, built once.
 
@@ -3342,13 +3589,7 @@ class Ollama(QObject):
         catalog-built tools (skills, subagents) are absent when nothing is
         installed, so neither is ever offered as an affordance that is not
         there (docs/DESIGN.md §10)."""
-        return (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, SELF_TOOL,
-                IMAGE_TOOL, SEARCH_IMAGE_TOOL, VIEW_IMAGE_TOOL, VIDEO_TOOL,
-                PLAYER_TOOL,
-                FETCH_URL_TOOL,
-                CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
-                + list(SESSION_TOOLS) + list(MEMORY_TOOLS)
-                + [t for t in [skill_tool(), spawn_agent_tool()] if t])
+        return Ollama._builtin_tools() + custom_tool_defs()
 
     @staticmethod
     def _offered_tool_names():
@@ -3686,6 +3927,12 @@ class Ollama(QObject):
             self._fetch_image(str(args.get("url", "")).strip(),
                               str(args.get("alt", "")).strip(),
                               i, remaining, calls)
+        elif name in SHOW_IMAGE_TOOL_NAMES:
+            self._show_image(args, i, remaining, calls)
+        elif name in MAKE_IMAGE_TOOL_NAMES:
+            self._make_image(args, i, remaining, calls)
+        elif name in SCREENSHOT_TOOL_NAMES:
+            self._screenshot(args, i, remaining, calls)
         elif name in VIEW_IMAGE_TOOL_NAMES:
             self._view_image(args, i, remaining, calls)
         elif name in PLAYER_TOOL_NAMES:
@@ -3714,6 +3961,8 @@ class Ollama(QObject):
             self._run_skill_tool(args, i, remaining, calls)
         elif name in SPAWN_TOOL_NAMES:
             self._spawn_agent(args, i, remaining, calls)
+        elif name in custom_tools():
+            self._run_custom_tool(name, args, i, remaining, calls)
         else:
             remaining["sink"][i] = {
                 "role": "tool", "tool_name": name,
@@ -4607,6 +4856,97 @@ class Ollama(QObject):
         except OSError:
             return ""
 
+    # ---- his own tools (a directory of manifests, see CUSTOM_TOOLS_ROOT) ----
+
+    def _run_custom_tool(self, name, args, idx, remaining, calls):
+        """Run one of HIS tools: arguments as JSON on stdin, stdout is the
+        answer.
+
+        The same async QProcess idiom as every executor here, and the same
+        honesty on failure — a non-zero exit comes back as an error carrying
+        what the program printed on stderr, so the model can tell him which of
+        his scripts broke and how (docs/DESIGN.md §10). Output is capped like
+        any other tool result; a program that never exits is killed at its own
+        `timeout` and says so."""
+        spec = custom_tools().get(name)
+        if not spec:
+            remaining["sink"][idx] = {
+                "role": "tool", "tool_name": name,
+                "content": json.dumps({"error": "that tool is no longer installed"})}
+            self._tool_done(remaining, calls)
+            return
+        self.fileToolStarted.emit("running your tool: " + name)
+        proc = QProcess(self)
+        self._procs.append(proc)
+        state = {"done": False, "timeout": False}
+
+        def answer(result, ok, line):
+            remaining["sink"][idx] = {"role": "tool", "tool_name": name,
+                                       "content": json.dumps(result)}
+            self.fileToolDone.emit(line, ok)
+            self._tool_done(remaining, calls)
+
+        def finished(*_):
+            if state["done"]:
+                return
+            state["done"] = True
+            if proc in self._procs:
+                self._procs.remove(proc)
+            try:
+                out = bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")
+                err = bytes(proc.readAllStandardError()).decode("utf-8", "replace")
+                rc = proc.exitCode()
+            except RuntimeError:
+                return
+            proc.deleteLater()
+            if state["timeout"]:
+                answer({"error": "%s ran past its %g second timeout and was killed"
+                        % (name, spec["timeout"])}, False,
+                       name + ": timed out")
+                return
+            out = out[:CUSTOM_MAX_BYTES]
+            if rc != 0:
+                why = (err.strip().splitlines() or ["exit %d" % rc])[-1]
+                answer({"error": why, "exit_code": rc,
+                        "stdout": out.strip()[:2000]}, False,
+                       "%s: %s" % (name, why[:120]))
+                return
+            try:
+                parsed = json.loads(out or "null")
+            except ValueError:
+                parsed = None
+            result = (parsed if isinstance(parsed, (dict, list))
+                      else {"ok": True, "output": out.strip()})
+            answer(result, True, name + " ok")
+
+        def failed(err):
+            if state["done"] or err != QProcess.ProcessError.FailedToStart:
+                return
+            state["done"] = True
+            if proc in self._procs:
+                self._procs.remove(proc)
+            proc.deleteLater()
+            answer({"error": "could not run %s (%s)" % (name, spec["prog"])},
+                   False, name + ": could not run")
+
+        def expire():
+            if state["done"]:
+                return
+            state["timeout"] = True
+            try:
+                proc.kill()
+            except RuntimeError:
+                pass
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(failed)
+        QTimer.singleShot(int(spec["timeout"] * 1000), expire)
+        proc.setWorkingDirectory(os.path.dirname(spec["prog"]) or ".")
+        proc.start(spec["prog"], [])
+        proc.write(json.dumps(args if isinstance(args, dict) else {})
+                   .encode("utf-8"))
+        proc.closeWriteChannel()
+
     # ---- the music player (control_player, over MPRIS) ----
 
     @staticmethod
@@ -5178,6 +5518,386 @@ class Ollama(QObject):
         proc.write(json.dumps({"op": "image", "path": path}).encode("utf-8"))
         proc.closeWriteChannel()
 
+    def _show_image(self, args, idx, remaining, calls):
+        """Put a local picture in the chat WITHOUT showing it to the model.
+
+        The fast path is the honest one: a QML `Image` loads a local file, so if
+        this window's own Qt can decode it, the entry points straight at it — no
+        copy, no base64, no vision model, no context spent. Only when the file
+        is not readable here (it is on the other machine) does it fall back to
+        the same jailed executor `view_image` uses, saving the bytes locally so
+        QML has something to load.
+        """
+        path = str(args.get("path", "") or "").strip()
+        caption = str(args.get("caption", "") or "").strip()
+        target_host = str(args.get("host", "") or "").strip().lower() or None
+        name = "show_image"
+        local_host = "book" if ON_BOOK else "top"
+
+        def answer(result, ok=True):
+            remaining["sink"][idx] = {"role": "tool", "tool_name": name,
+                                       "content": json.dumps(result)}
+            self.fileToolDone.emit(
+                ("showed " + os.path.basename(path)) if ok
+                else ("show_image " + (path or "(no path)") + " — "
+                      + str(result.get("error", ""))), ok)
+            self._tool_done(remaining, calls)
+
+        if not path:
+            self.fileToolStarted.emit("show an image")
+            answer({"error": "no path given"}, False)
+            return
+        self.fileToolStarted.emit("show " + os.path.basename(path))
+        self._display_image(path, caption, target_host, answer)
+
+    def _display_image(self, path, caption, target_host, answer):
+        """Draw one picture in the chat, wherever the file is.
+
+        Local is the fast path and the honest one: a QML `Image` loads a local
+        file, so if this window's Qt can decode it the entry points straight at
+        it — no copy, no base64. A file on the OTHER machine comes back through
+        the same jailed executor `view_image` uses and is saved locally, because
+        QML cannot load a path that is not here. `answer(result, ok)` reports
+        the outcome either way."""
+        local_host = "book" if ON_BOOK else "top"
+        here = os.path.abspath(os.path.expanduser(path))
+        if target_host in (None, local_host):
+            probe = QImage()
+            if probe.load(here) and not probe.isNull():
+                self.imageFetchStarted.emit(here)
+                self._emit_image({"ok": True, "url": "", "path": here,
+                                  "alt": caption or os.path.basename(here),
+                                  "w": probe.width(), "h": probe.height()})
+                answer({"ok": True, "path": here, "width": probe.width(),
+                        "height": probe.height(),
+                        "note": ("Shown in the chat. You have NOT seen it — "
+                                 "use view_image if you need to.")})
+                return
+            answer({"error": "not an image this window can display: " + path},
+                   False)
+            return
+
+        # The OTHER machine: read it through the executor there and keep a local
+        # copy, since QML can only load a local file.
+        argv = self._fs_argv(target_host)
+        proc = QProcess(self)
+        self._procs.append(proc)
+
+        def finished(*_):
+            if proc not in self._procs:
+                return
+            self._procs.remove(proc)
+            try:
+                out = bytes(proc.readAllStandardOutput())
+                err = bytes(proc.readAllStandardError())
+                rc = proc.exitCode()
+            except RuntimeError:
+                return
+            proc.deleteLater()
+            result = self._fs_result(out, err, rc)
+            b64 = result.pop("b64", "") if isinstance(result, dict) else ""
+            if "error" in result or not b64:
+                answer({"error": result.get("error", "could not read the image")},
+                       False)
+                return
+            try:
+                data = base64.b64decode(b64)
+            except (binascii.Error, ValueError):
+                answer({"error": "the image did not decode"}, False)
+                return
+            probe = QImage()
+            probe.loadFromData(data)
+            saved = self._save_image(data, "file://" + here,
+                                     result.get("media", ""))
+            if not saved:
+                answer({"error": "could not save the image locally"}, False)
+                return
+            self.imageFetchStarted.emit(saved)
+            self._emit_image({"ok": True, "url": "", "path": saved,
+                              "alt": caption or os.path.basename(here),
+                              "w": probe.width(), "h": probe.height()})
+            answer({"ok": True, "path": path, "width": probe.width(),
+                    "height": probe.height(),
+                    "note": "Shown in the chat. You have NOT seen it."})
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(lambda *_: None)
+        proc.start(argv[0], argv[1:])
+        proc.write(json.dumps({"op": "image", "path": path}).encode("utf-8"))
+        proc.closeWriteChannel()
+
+    # ---- generating a picture (make_image, through painter's backend) ----
+
+    @staticmethod
+    def _make_image_argv(args):
+        """The one command that generates a picture on `top`.
+
+        Three steps in one shell, because they are one act: start the backend
+        if it is down (a user unit; `start` on a running one is a no-op), wait
+        until it answers, then run painter's own headless generator. Same host
+        branch as the code runner — local on top, over the tunnel's ssh master
+        from book — because the weights and the GPU are only there.
+        `$ORACLE_PAINTER` replaces the generator whole, which is how the harness
+        drives a stub and never loads 20 GB of weights for a test."""
+        def flag(name, key, cast=str):
+            v = args.get(key)
+            if v in (None, "", 0):
+                return ""
+            try:
+                return " %s %s" % (name, shlex.quote(str(cast(v))))
+            except (TypeError, ValueError):
+                return ""
+
+        gen = os.environ.get("ORACLE_PAINTER", "").strip()
+        cmd = gen or ("painter-qtenv python3 " + shlex.quote(PAINTER_SMOKE))
+        cmd += " --prompt " + shlex.quote(str(args.get("prompt") or ""))
+        cmd += " --out-dir " + shlex.quote(MAKE_IMAGE_DIR)
+        cmd += flag("--negative", "negative")
+        cmd += flag("--model", "model")
+        cmd += flag("--width", "width", int)
+        cmd += flag("--height", "height", int)
+        cmd += flag("--steps", "steps", int)
+        cmd += flag("--seed", "seed", int)
+        script = ("mkdir -p %s; " % shlex.quote(MAKE_IMAGE_DIR)
+                  + "systemctl --user start comfy-painter.service >/dev/null 2>&1; "
+                  + "for i in $(seq 1 90); do "
+                    "curl -sf -m 2 -o /dev/null http://127.0.0.1:8188/system_stats "
+                    "&& break; sleep 2; done; "
+                  + cmd)
+        if ON_BOOK:
+            host = os.environ.get("OLLAMA_SSH_HOST", "top")
+            ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+            argv = [ssh, "-o", "BatchMode=yes"]
+            ctl = os.environ.get("OLLAMA_SSH_CTL")
+            if ctl:
+                argv += ["-o", "ControlMaster=auto", "-o", "ControlPersist=30",
+                         "-o", "ControlPath=" + ctl]
+            return argv + [host, "bash -lc " + shlex.quote(script)]
+        return ["bash", "-lc", script]
+
+    def _make_image(self, args, idx, remaining, calls):
+        """Generate one picture through painter's backend and draw it here.
+
+        The warden goes FIRST (apps/pylib/warden.py): ollama is holding this
+        model's weights and ComfyUI wants most of what is left, and the two
+        colliding does not fail an allocation, it livelocks the desktop. A
+        refusal is a reason the model relays, never a silent nothing."""
+        a = args if isinstance(args, dict) else {}
+        prompt = str(a.get("prompt") or "").strip()
+        name = "make_image"
+
+        def answer(result, ok=True, line=""):
+            remaining["sink"][idx] = {"role": "tool", "tool_name": name,
+                                       "content": json.dumps(result)}
+            self.fileToolDone.emit(line or ("make_image — "
+                                            + str(result.get("error", ""))), ok)
+            self._tool_done(remaining, calls)
+
+        if not prompt:
+            self.fileToolStarted.emit("make a picture")
+            answer({"error": "make_image needs a prompt"}, False)
+            return
+        head = prompt if len(prompt) <= 60 else prompt[:59].rstrip() + "…"
+        self.fileToolStarted.emit("making a picture: " + head)
+
+        def go(ok, reason):
+            if not ok:
+                answer({"error": ("no room to generate right now — " +
+                                  str(reason or "memory") + ". The picture "
+                                  "cannot be made while this much of the "
+                                  "machine is his model: tell him, and say a "
+                                  "smaller model would leave room.")}, False,
+                       "make_image: no room — " + str(reason or ""))
+                return
+            self._make_image_run(a, answer)
+
+        # nbytes 0 — "a big family, size unknown", which is what the warden
+        # reads it as; painter knows its weights, chatter does not.
+        self._warden.reserve("comfy", nbytes=0, cb=go)
+
+    def _make_image_run(self, args, answer):
+        proc = QProcess(self)
+        self._procs.append(proc)
+        state = {"done": False, "timeout": False}
+
+        def release():
+            self._warden.done("comfy")
+
+        def finished(*_):
+            if state["done"]:
+                return
+            state["done"] = True
+            if proc in self._procs:
+                self._procs.remove(proc)
+            try:
+                out = bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")
+                err = bytes(proc.readAllStandardError()).decode("utf-8", "replace")
+                rc = proc.exitCode()
+            except RuntimeError:
+                return
+            proc.deleteLater()
+            release()
+            if state["timeout"]:
+                answer({"error": "the generation ran past %d minutes and was "
+                                 "stopped" % (MAKE_IMAGE_MS // 60000)}, False,
+                       "make_image: timed out")
+                return
+            made = re.findall(r"(?m)^\s*saved (.+?) \(\d+ bytes\)$", out)
+            if rc != 0 or not made:
+                why = (([l for l in err.strip().splitlines() if l.strip()]
+                        or [l for l in out.strip().splitlines() if l.strip()]
+                        or ["the backend produced no image"])[-1])
+                answer({"error": why[:400]}, False,
+                       "make_image: " + why[:120])
+                return
+            path = made[-1]
+            caption = str(args.get("prompt") or "")
+
+            def shown(result, ok=True):
+                if not ok:
+                    answer(result, False)
+                    return
+                answer({"ok": True, "path": path,
+                        "note": ("Generated and shown to him in the chat. You "
+                                 "have not seen it — view_image if you need "
+                                 "to.")}, True,
+                       "made " + os.path.basename(path))
+
+            self._display_image(path, caption,
+                                "top" if ON_BOOK else None, shown)
+
+        def failed(err):
+            if state["done"] or err != QProcess.ProcessError.FailedToStart:
+                return
+            state["done"] = True
+            if proc in self._procs:
+                self._procs.remove(proc)
+            proc.deleteLater()
+            release()
+            answer({"error": "could not start the image backend command"}, False)
+
+        def expire():
+            if state["done"]:
+                return
+            state["timeout"] = True
+            try:
+                proc.kill()
+            except RuntimeError:
+                pass
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(failed)
+        QTimer.singleShot(MAKE_IMAGE_MS, expire)
+        argv = self._make_image_argv(args)
+        proc.start(argv[0], argv[1:])
+
+    # ---- the screen, as a picture (screenshot) ----
+
+    def _screenshot(self, args, idx, remaining, calls):
+        """Capture his screen, draw it in the chat, and hand it to the model.
+
+        `grim` under Hyprland (wlroots) and Spectacle under Plasma (KWin, where
+        grim cannot bind the protocol) — one capture, whichever the session is,
+        chosen by what is actually there rather than by a guess about the
+        session. The frame is drawn in the chat either way, because a model
+        looking at his screen and him not seeing what it saw is exactly the
+        secret docs/DESIGN.md §10 forbids.
+        """
+        name = "screenshot"
+        show_only = bool(args.get("show_only"))
+        vision = "vision" in (self._caps or []) and self._ctx_model == self._model
+
+        def answer(result, ok=True, line=""):
+            remaining["sink"][idx] = {"role": "tool", "tool_name": name,
+                                       "content": json.dumps(result)}
+            self.fileToolDone.emit(line or ("screenshot — "
+                                            + str(result.get("error", ""))), ok)
+            self._tool_done(remaining, calls)
+
+        self.fileToolStarted.emit("taking a screenshot")
+        try:
+            os.makedirs(IMAGES_ROOT, exist_ok=True)
+        except OSError as e:
+            answer({"error": str(e)}, False)
+            return
+        shot = os.path.join(IMAGES_ROOT,
+                            "screen-%s.png" % time.strftime("%Y%m%d-%H%M%S"))
+        argv = self._shot_argv(shot)
+        if not argv:
+            answer({"error": "no screenshot tool on this machine (grim under "
+                             "Hyprland, spectacle under Plasma)"}, False)
+            return
+        proc = QProcess(self)
+        self._procs.append(proc)
+
+        def finished(*_):
+            if proc not in self._procs:
+                return
+            self._procs.remove(proc)
+            try:
+                err = bytes(proc.readAllStandardError()).decode("utf-8", "replace")
+                rc = proc.exitCode()
+            except RuntimeError:
+                return
+            proc.deleteLater()
+            probe = QImage()
+            if rc != 0 or not probe.load(shot) or probe.isNull():
+                answer({"error": (err.strip().splitlines() or
+                                  ["the capture produced no image"])[-1]}, False)
+                return
+            self.imageFetchStarted.emit(shot)
+            self._emit_image({"ok": True, "url": "", "path": shot,
+                              "alt": "his screen", "w": probe.width(),
+                              "h": probe.height()})
+            if show_only or not vision:
+                note = ("Captured and shown in the chat. You have not seen it"
+                        + ("." if show_only else
+                           " — this model has no vision, so tell him to pick a "
+                           "vision-capable one if he wants you to look."))
+                answer({"ok": True, "path": shot, "width": probe.width(),
+                        "height": probe.height(), "note": note}, True,
+                       "screenshot · %dx%d" % (probe.width(), probe.height()))
+                return
+            try:
+                raw = open(shot, "rb").read()
+            except OSError as e:
+                answer({"error": str(e)}, False)
+                return
+            if len(raw) > ATTACH_IMAGE_MAX:
+                # Downscale rather than refuse: a 4K frame is megabytes of PNG
+                # and the model reads it at a fraction of that anyway.
+                small = probe.scaledToWidth(1600, Qt.TransformationMode.SmoothTransformation)
+                buf = QBuffer()
+                buf.open(QBuffer.OpenModeFlag.WriteOnly)
+                small.save(buf, "PNG")
+                raw = bytes(buf.data())
+                buf.close()
+            self._pending_vision.append(base64.b64encode(raw).decode("ascii"))
+            answer({"ok": True, "path": shot, "width": probe.width(),
+                    "height": probe.height(),
+                    "note": ("The screen is attached to your next turn — look at "
+                             "it and answer from what you SEE. He can see it "
+                             "too, in the chat.")}, True,
+                   "screenshot · %dx%d" % (probe.width(), probe.height()))
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(lambda *_: None)
+        proc.start(argv[0], argv[1:])
+
+    @staticmethod
+    def _shot_argv(dest):
+        """The capture command, by what is installed rather than by what session
+        we think this is. `$ORACLE_SHOT_CMD` overrides it whole (the harness
+        points it at a stub, so no test ever photographs his desk)."""
+        override = os.environ.get("ORACLE_SHOT_CMD", "").strip()
+        if override:
+            return shlex.split(override) + [dest]
+        for argv in ([shutil.which("grim"), dest],
+                     [shutil.which("spectacle"), "-b", "-n", "-o", dest]):
+            if argv[0]:
+                return argv
+        return []
+
     def _house_note(self, path):
         """The nearest house guide above `path`, named once per conversation.
 
@@ -5304,7 +6024,10 @@ class Ollama(QObject):
         body = a.get("command") if bash else a.get("code")
         if not body:
             body = a.get("code") if bash else a.get("command")
-        req = {"code": str(body or ""), "lang": "bash" if bash else "python"}
+        req = {"code": str(body or ""), "lang": "bash" if bash else "python",
+               # Watch it work. An older executor over ssh ignores the key and
+               # answers with one object exactly as before.
+               "stream": True}
         if a.get("stdin") is not None:
             req["stdin"] = str(a.get("stdin"))
         if a.get("timeout") is not None:
@@ -5312,20 +6035,45 @@ class Ollama(QObject):
         if a.get("cwd"):
             req["cwd"] = str(a.get("cwd"))
         self.fileToolStarted.emit("running bash" if bash else "running python")
+        self.execStarted.emit("bash" if bash else "python")
         proc = QProcess(self)
         self._procs.append(proc)
+        # The NDJSON stream arrives in whatever pieces the pipe gives us, so a
+        # line can be split across two reads: hold the tail until it ends.
+        buf = {"text": "", "last": ""}
+
+        def pump():
+            try:
+                buf["text"] += bytes(proc.readAllStandardOutput()).decode(
+                    "utf-8", "replace")
+            except RuntimeError:
+                return
+            while "\n" in buf["text"]:
+                line, buf["text"] = buf["text"].split("\n", 1)
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(obj, dict) and obj.get("t") in ("o", "e"):
+                    self.execOutput.emit(str(obj.get("d") or ""))
+                else:
+                    buf["last"] = line      # the result object, always last
 
         def finished(*_):
             if proc not in self._procs:
                 return
             self._procs.remove(proc)
+            pump()
             try:
-                out = bytes(proc.readAllStandardOutput())
                 err = bytes(proc.readAllStandardError())
                 rc = proc.exitCode()
             except RuntimeError:
                 return
             proc.deleteLater()
+            out = (buf["last"] or buf["text"]).encode("utf-8")
             result = self._fs_result(out, err, rc)
             remaining["sink"][idx] = {"role": "tool", "tool_name": name,
                                        "content": json.dumps(result)}
@@ -5333,6 +6081,7 @@ class Ollama(QObject):
                                    "error" not in result)
             self._tool_done(remaining, calls)
 
+        proc.readyReadStandardOutput.connect(pump)
         proc.finished.connect(finished)
         proc.errorOccurred.connect(lambda *_: None)  # surfaced through finished
         proc.start(self._exec_argv()[0], self._exec_argv()[1:])
@@ -5998,6 +6747,12 @@ class Sessions(QObject):
                 return
             self.refresh()
         self._run({"op": "delete", "id": sid}, done)
+
+
+#: Now that `Ollama` exists, the collision set is what IT offers — never a
+#: second list that could drift from it.
+BUILTIN_TOOL_NAMES = {t["function"]["name"] for t in Ollama._builtin_tools()
+                      if isinstance(t, dict) and t.get("function")}
 
 
 def main():
