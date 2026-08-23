@@ -91,6 +91,7 @@
           pkgs.git
           pkgs.gh
           pkgs.coreutils
+          pkgs.gnused          # the size-cap diagnostic pipes through sed
           pkgs.util-linux
           pkgs.inetutils
         ]}"

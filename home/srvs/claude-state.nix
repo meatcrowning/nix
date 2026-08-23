@@ -33,12 +33,17 @@
 
 let
   # git for the sync, gh for the credential helper (`!gh auth git-credential`),
-  # coreutils/util-linux/inetutils for date+wc+flock+hostname. The ambient
-  # systemd-user PATH cannot be relied on for any of them.
+  # coreutils/util-linux/inetutils for date+wc+flock+hostname, gnused for the
+  # size-cap diagnostic — which is the one that got missed, and it showed up
+  # exactly where it hurts: `sed: command not found` on 2026-08-23, in the
+  # branch that lists the largest staged paths when a commit is REFUSED for
+  # size. The refusal worked; the explanation of what to look at did not. The
+  # ambient systemd-user PATH cannot be relied on for any of them.
   syncPath = lib.makeBinPath [
     pkgs.git
     pkgs.gh
     pkgs.coreutils
+    pkgs.gnused
     pkgs.util-linux
     pkgs.inetutils
   ];
