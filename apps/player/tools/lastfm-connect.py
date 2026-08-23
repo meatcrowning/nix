@@ -23,7 +23,7 @@ import time
 import webbrowser
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pylib"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pylib"))
 import lastfm  # noqa: E402
 
 
