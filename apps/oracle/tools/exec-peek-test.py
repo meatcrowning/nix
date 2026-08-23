@@ -127,15 +127,16 @@ if len(bubbles) == 2:
 # ---- the time under each bubble ------------------------------------------
 # 1787452020 / 1787452080 are 60s apart, so the two rows must read different
 # minutes — the local clock is whatever this machine is set to, which is why
-# the assertion is on the SHAPE and the gap, not on two literal strings.
+# the assertion is on the SHAPE and the gap, not on two literal strings. The
+# shape is 12h since 2026-08-23 ("2:07 pm").
 import re                                                          # noqa: E402
 stamps = [c.property("text") for c in
           walk(win, lambda c: isinstance(c.property("text"), str)
-               and re.fullmatch(r"\d\d:\d\d", c.property("text") or ""), [])]
+               and re.fullmatch(r"\d?\d:\d\d [ap]m", c.property("text") or ""), [])]
 stamps = sorted(set(stamps))
 check("every bubble carries the time it landed", len(stamps) == 2, repr(stamps))
 check("a row with no stamp gets no label",
-      all(t != "00:00" for t in stamps), repr(stamps))
+      all(not t.startswith("12:00 am") for t in stamps), repr(stamps))
 
 # ---- 2. the heading previews the last line -------------------------------
 QMetaObject.invokeMethod(root, "appendReplyRow", Q_ARG("QVariant", 1))
