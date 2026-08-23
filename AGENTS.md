@@ -368,6 +368,19 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   below. It lives in the **private** `docs/` repo (see `docs/` below), so a
   fresh clone of *this* repo does not contain it — the source comments across
   the panel, the apps and the plugin still cite it by that path.
+- `docs/agents/his-voice.md` — **how he writes, and how he wants to be written
+  to.** Two halves, one corpus. Part A is the register for every string the
+  desktop SHOWS — toasts, labels, menu items, board bullets, error text: it is
+  what `docs/DESIGN.md` §7.2's "lowercase" rule turns into once you are
+  actually choosing words, and it exists because he read a set of toasts an
+  agent had written and said they were *"too ai-coded"* (2026-08-22). Part B is
+  the contract for ANSWERING him, of which the load-bearing rule is that
+  landing work is **one line — what it does, pushed as `<sha>`** and nothing
+  else unless there is a problem. Both are derived from the 1,061 prompts he
+  has actually typed, not from taste; `tools/voice-corpus.py` is the extractor,
+  so the reading can be redone rather than believed. Part B is also installed
+  as the `lam` output style in `~/.claude`, which is the half that binds a
+  reply; this file is the half an agent reads before writing a string.
 - `docs/HARDWARE.md` — **what these two machines physically are**, and the command
   that measures each fact. CPU/thread count, RAM and swap, both GPUs (only one
   drives the screen), the board and its `nct6683` sensor chip, the real fan/pwm
@@ -736,6 +749,7 @@ how something looks, update it in the same commit.
 | Editing | Read |
 |---|---|
 | **Anything visual, anywhere** | **`docs/DESIGN.md`** (always), then the row below |
+| **Any string the desktop SHOWS** — a toast, a label, a menu item, a board bullet, an error | **`docs/agents/his-voice.md`** Part A |
 | **Anything about the metal** — cores, RAM, GPU, sensors, fans, disks, the display, or which host you are on | **`docs/HARDWARE.md`** (before you measure) |
 | The Quickshell panel (`home/prog/quickshell-files/*.qml`) | `home/prog/quickshell-files/AGENTS.md` |
 | Hyprland config, the `hyprvtb` plugin, the sandbox | `home/prog/AGENTS.md` |
