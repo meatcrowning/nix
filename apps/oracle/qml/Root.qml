@@ -1856,9 +1856,14 @@ Item {
                         // would fold it into a column two words wide. The
                         // disclosures no longer count — they sit OUTSIDE the
                         // bubble now [his, 2026-08-22].
-                        readonly property bool wide:
+                        // MEDIA IS A PROPERTY OF THE ROW, not of an item's
+                        // visibility. Read it off the model roles only — see
+                        // the bubble's `visible` below, where reading a child's
+                        // `visible` instead latched a picture off for good.
+                        readonly property bool hasMedia:
                             !isUser && (images !== "[]" || imagesActive
                                         || videos !== "[]" || videosActive)
+                        readonly property bool wide: hasMedia
 
                         Column {
                             id: turnStack
@@ -2398,8 +2403,23 @@ Item {
                                 // carry the wait, so an empty slab under them
                                 // would be a second, blank bubble (§10 — never a
                                 // control with no reading).
-                                visible: body !== "" || imageCol.visible
-                                         || videoCol.visible
+                                // ...and a picture or a video, which is what a
+                                // round can carry with NO words at all —
+                                // `view_image` says nothing, it just looks.
+                                //
+                                // NEVER `imageCol.visible` here [his,
+                                // 2026-08-23: a graph the model made, and the
+                                // bubble that should have held it, absent]. QML
+                                // `visible` is EFFECTIVE visibility — false if
+                                // any ancestor is hidden — so this bubble asked
+                                // a child inside itself whether to be visible,
+                                // and a picture landing on a row with no text
+                                // found the bubble already hidden, read its own
+                                // child as invisible, and stayed hidden for
+                                // good. Reloading the session drew it, because
+                                // then the row was born with the picture on it:
+                                // the latch only catches a picture that ARRIVES.
+                                visible: body !== "" || turn.hasMedia
                                 user: isUser
                                 isError: model.isError
                                 x: isUser ? turnStack.width - width : 0

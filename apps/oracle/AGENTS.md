@@ -1041,6 +1041,19 @@ with the caption under it, and each failure as a crit line. `imageFetchStarted`/
 `imagesActive` drive the in-flight line. The model also gets a text tool result
 (`{ok, note}` or `{error}`) so it knows the outcome.
 
+**NEVER ask a child whether the bubble should be visible.** The bubble shows
+when the row has words OR media, and that condition is read off the model roles
+(`turn.hasMedia`) — never off `imageCol.visible`, which is what it used to do.
+QML's `visible` is EFFECTIVE visibility (false if any ancestor is hidden), so a
+hidden bubble asking its own child produced a latch: a picture landing on a
+round with no text — `view_image` says nothing, it just looks — found the bubble
+hidden, read its child as hidden, and stayed hidden for good [his, 2026-08-23:
+a graph the model had just plotted, and no graph]. Reloading the session drew it
+perfectly, which is what made it look like a fluke: a row BORN with its picture
+never hits the latch, only one the picture ARRIVES on. Harness:
+`tools/media-row-test.py`, which drives the live order (empty row, then the
+signal) for both a picture and a video.
+
 **Pictures sit at the TOP of the bubble** [his, 2026-08-22] — before the words,
 the way a message with a photo in it reads everywhere else — and **their
 captions are always drawn, not only on hover**: a caption you have to go looking
