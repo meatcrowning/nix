@@ -37,7 +37,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -46,6 +49,50 @@ sys.path.insert(0, str(HERE.parent))
 
 import chansource                                               # noqa: E402
 import scrollcss                                                # noqa: E402
+
+
+# --------------------------------------------------------------------------- #
+#  Which session is this, at REQUEST time
+# --------------------------------------------------------------------------- #
+# `kdetheme.is_plasma()` reads `XDG_CURRENT_DESKTOP` out of the process
+# environment, which is right for an app ("themed by the session that started
+# it") and wrong for a daemon: this unit is `WantedBy=default.target`, so it
+# starts at login BEFORE the session runs `systemctl --user import-environment`
+# and inherits a manager environment that names no desktop at all. is_plasma()
+# then reads False for the whole login and a Plasma session gets served the
+# Hyprland face — flat, wallpaper-derived, no Oxygen relief — with nothing in
+# the log to say so. Measured on `top` 2026-08-23.
+#
+# So re-read the manager's own store instead of believing what we inherited.
+# Cheap (one fork per 15s at most, against a 30s-per-tab poll) and it also
+# tracks a session switch under a lingering manager, which a restart-only fix
+# would not.
+_SESSION_KEYS = ("XDG_CURRENT_DESKTOP", "XDG_SESSION_DESKTOP", "KDE_FULL_SESSION")
+_ENV_TTL = 15.0
+_env_checked = [0.0]
+
+
+def refresh_session_env(now=None):
+    """Pull the session-identifying vars from the systemd user manager."""
+    now = time.monotonic() if now is None else now
+    if now - _env_checked[0] < _ENV_TTL:
+        return
+    _env_checked[0] = now
+    try:
+        out = subprocess.run(["systemctl", "--user", "show-environment"],
+                             capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return
+    live = {}
+    for line in out.splitlines():
+        k, _, v = line.partition("=")
+        if k in _SESSION_KEYS:
+            live[k] = v
+    for k in _SESSION_KEYS:
+        if k in live:
+            os.environ[k] = live[k]
+        else:
+            os.environ.pop(k, None)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -90,6 +137,7 @@ class Handler(BaseHTTPRequestHandler):
     }
 
     def do_GET(self):
+        refresh_session_env()
         path = self.path.split("?", 1)[0]
         route = self.ROUTES.get(path)
         if route is None and path != "/version":
