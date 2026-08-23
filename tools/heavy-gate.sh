@@ -51,6 +51,14 @@ COMFY_URL=${HEAVY_GATE_COMFY_URL:-${COMFY_GATE_URL:-http://127.0.0.1:8188}}
 OLLAMA_URL=${HEAVY_GATE_OLLAMA_URL:-http://127.0.0.1:11434}
 COMFY_UNIT=comfy-painter.service
 OLLAMA_UNIT=ollama.service
+# ollama is a SYSTEM unit, so its cgroup is fixed under system.slice (unlike
+# comfy's user unit, which heavy-gate reads via systemctl). This is the same
+# path the ai-warden reads (ai-warden.py ollama_cgroup()) and the reason is
+# identical: `/api/ps` reports {"models":[]} for the whole duration a model
+# LOADS, which is precisely the window a rebuild collides with, while
+# memory.current is correct throughout (measured 2026-08-22: it said "nothing
+# resident" while llama-server held 14.4 GiB).
+OLLAMA_CGROUP=${OLLAMA_CGROUP:-/sys/fs/cgroup/system.slice/ollama.service/memory.current}
 # tmpfs: a reboot mid-rebuild leaves nothing to undo.
 STATE_DIR=/run/heavy-gate
 POLL=10
@@ -108,19 +116,24 @@ comfy_state() {
 
 # `warm` is the whole point for ollama: a model that finished answering an hour
 # ago still holds its weights until keep_alive expires, and THAT is the memory a
-# build would have to fit around. /api/ps is the only endpoint that says so.
-# Prints: "<count> <bytes>" — 0 0 when nothing is resident or ollama is down.
+# build would have to fit around. Reads the unit's cgroup, NOT `/api/ps` — the
+# endpoint is blind for the whole duration a model loads (measured 2026-08-22:
+# `{"models":[]}` while llama-server held 14.4 GiB RSS), which is exactly the
+# window a rebuild collides with; memory.current is correct throughout and is
+# the same source the ai-warden trusts. A warm model holds gigabytes, an idle
+# daemon sits near zero, so > 1 GiB is the "resident or loading" bar.
+# Prints: "<1|0> <bytes>" — the count is a proxy for the cgroup bar, kept so the
+# callers' "N model(s)" wording survives.
+OLLAMA_WARM_BYTES=$((1024 * 1024 * 1024))
 ollama_resident() {
-  local body
-  body=$(curl -sf -m 3 "$OLLAMA_URL/api/ps" 2>/dev/null) || { echo "0 0"; return; }
-  printf '%s' "$body" | python3 -c '
-import json, sys
-try:
-    ms = json.load(sys.stdin).get("models") or []
-except Exception:
-    ms = []
-print(len(ms), sum(int(m.get("size") or 0) for m in ms))
-' 2>/dev/null || echo "0 0"
+  local b=0
+  if [ -r "$OLLAMA_CGROUP" ]; then
+    b=$(cat "$OLLAMA_CGROUP" 2>/dev/null | tr -d '[:space:]')
+  fi
+  case "${b:-0}" in
+    ''|*[!0-9]*) b=0 ;;
+  esac
+  if [ "$b" -gt "$OLLAMA_WARM_BYTES" ]; then echo "1 $b"; else echo "0 $b"; fi
 }
 
 ollama_state() {
