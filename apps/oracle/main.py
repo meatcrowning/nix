@@ -7471,6 +7471,9 @@ def run_selftest(app, shell, win, plasma, warnings):
                     app.processEvents()
                     time.sleep(0.01)
             print("rows: %s" % _rows())
+            # And what the round fold made of them (Root.foldJson).
+            print("fold: %s" % QMetaObject.invokeMethod(target, "foldJson",
+                                                        Q_RETURN_ARG("QVariant")))
         # ORACLE_MENU: open the log's right-click menu over the first reply,
         # which no other render can show — a menu is not on screen until it is
         # opened, and this one has no action, no id and no keyboard route. The
