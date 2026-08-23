@@ -85,11 +85,24 @@ Rectangle {
         onBrowseArtistRequested: function(a) { root.browseArtistRequested(a); }
     }
 
-    PixelText {
+    // The empty state is also the only place the field filters are named. A
+    // placeholder cannot carry them (the box is 90px under Hyprland and the
+    // platform's own line edit under Plasma), and a syntax nobody is told
+    // about is a feature nobody has (docs/DESIGN.md §10).
+    Column {
         anchors.centerIn: parent
+        spacing: 4
         visible: SearchModel.count === 0 && root.query.length > 0
-        text: "nothing found"
-        color: Theme.dim
+        PixelText {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: "nothing found"
+            color: Theme.dim
+        }
+        PixelText {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: "genre:shoegaze   year:1997   year:1990-1999"
+            color: Theme.dim
+        }
     }
 
     // Swallow clicks meant for the views underneath.

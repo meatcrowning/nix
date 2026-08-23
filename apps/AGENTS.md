@@ -138,6 +138,12 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
     caller**: `~/.local/state/lastfm/scrobble-queue.json`, flushed with the
     next successful submit, dropped past Last.fm's own 14-day window rather
     than retried into a permanent refusal.
+  - **`loved_tracks()` / `top_tracks()` / `recent_tracks()` walk the paging**
+    (1000 rows a request, `@attr.totalPages`, `PAGE_CAP` as the stop) and are
+    what player's *pull stats* merges from. The edge they exist to hide:
+    **Last.fm answers a ONE-row page as a bare object, not a list of one** —
+    the sharpest thing in this API, and a naive merge silently skips an
+    account with a single loved track.
   - Link an account: `apps/player/tools/lastfm-connect.py --keys KEY SECRET`
     once (from an API account at https://www.last.fm/api/account/create), then
     the same tool with no arguments, or the `connect` button in player's

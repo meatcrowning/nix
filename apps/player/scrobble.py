@@ -48,6 +48,7 @@ class Scrobbler(QObject):
     _sigStatus = Signal()          # worker thread -> GUI thread
     _sigError = Signal(str)
     _sigUrl = Signal(str)
+    _sigSync = Signal("QVariant")
 
     def __init__(self, prefs, parent=None):
         super().__init__(parent)
@@ -59,6 +60,10 @@ class Scrobbler(QObject):
         self._sigStatus.connect(self._refresh)
         self._sigError.connect(self._set_error)
         self._sigUrl.connect(self.authUrlReady)
+        self._sigSync.connect(self._apply_sync)
+        self._syncing = False
+        self._sync_status = ""
+        self._merge = None
         self._thread = threading.Thread(target=self._run, name="lastfm",
                                         daemon=True)
         self._thread.start()
@@ -203,6 +208,85 @@ class Scrobbler(QObject):
             return
         fn = lastfm.love if loved else lastfm.unlove
         self._post(lambda: fn(f["artist"], f["track"]))
+
+    # ---- pulling the account back into the library ----
+
+    def set_merger(self, fn):
+        """`Library.merge_lastfm`, handed in by main.py. The FETCH is this
+        object's job (it is network, and network is this thread's job); the
+        MERGE is the library's, and it runs on the GUI thread with the
+        library's own connection — a second writer is how a library loses
+        ratings (AGENTS.md)."""
+        self._merge = fn
+
+    @Property(bool, notify=statusChanged)
+    def syncing(self):
+        return self._syncing
+
+    @Property(str, notify=statusChanged)
+    def syncStatus(self):
+        return self._sync_status
+
+    @Slot()
+    def beginSync(self):
+        """Pull loves, play counts and last-played times down and merge them.
+
+        One direction only, by his rule: Last.fm can raise a play count and
+        heart a track here, and can never clear a local favourite or lower a
+        count. What it does NOT do is push local favourites up — the count of
+        those is reported instead, because a bulk write to his account is not
+        what "update the local stuff" asked for."""
+        if self._syncing or not self._st.get("connected") or self._merge is None:
+            if not self._st.get("connected"):
+                self._set_error("no last.fm account is linked")
+            return
+        self._syncing = True
+        self._sync_status = "reading last.fm…"
+        self._set_error("")
+        self.statusChanged.emit()
+        self._post(self._do_sync)
+
+    def _do_sync(self):
+        try:
+            payload = {"loved": lastfm.loved_tracks(),
+                       "plays": lastfm.top_tracks(),
+                       "recent": lastfm.recent_tracks()}
+            self._sigSync.emit(payload)
+        except lastfm.LastfmError:
+            self._syncing = False
+            self._sigSync.emit(None)       # clears the spinner; _run reports why
+            raise
+
+    def _apply_sync(self, payload):
+        """GUI thread: hand the fetched rows to the library and say what moved."""
+        self._syncing = False
+        if not payload or self._merge is None:
+            self._sync_status = ""
+            self.statusChanged.emit()
+            return
+        try:
+            st = self._merge(payload) or {}
+        except Exception as e:                  # a merge must not take the app
+            self._set_error("%s: %s" % (type(e).__name__, e))
+            self._sync_status = ""
+            self.statusChanged.emit()
+            return
+        bits = []
+        if st.get("hearted"):
+            bits.append("%d hearted" % st["hearted"])
+        if st.get("counts"):
+            bits.append("%d play counts" % st["counts"])
+        if st.get("played"):
+            bits.append("%d last played" % st["played"])
+        if not bits:
+            bits.append("nothing to change")
+        if st.get("unmatched"):
+            bits.append("%d not in the library" % st["unmatched"])
+        if st.get("local_only_loves"):
+            bits.append("%d local favourites not loved there"
+                        % st["local_only_loves"])
+        self._sync_status = " \u00b7 ".join(bits)
+        self._refresh()
 
     # ---- connect / disconnect, from the settings page ----
 

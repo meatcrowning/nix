@@ -167,6 +167,15 @@ Item {
                     coverMenu.open(p.x, p.y, [
                         { label: "play album",
                           trigger: function() { Player.playAlbum(aid, -1); } },
+                        // The album grid's row, on the cover you are looking
+                        // at: the whole album in track order, straight after
+                        // the playing song. Greyed with an empty queue, where
+                        // it would only be a second "play album" (AlbumGrid
+                        // greys its twin for the same reason).
+                        { label: "play album next", enabled: Player.queueLength > 0,
+                          trigger: function() { Player.playAlbumNext(aid); } },
+                        { label: "queue album",
+                          trigger: function() { Player.queueAlbum(aid); } },
                         { label: "shuffle artist",
                           enabled: art !== "",
                           trigger: function() { Player.playArtistShuffled(art); } },

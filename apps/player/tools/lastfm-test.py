@@ -19,6 +19,7 @@ The last section needs PySide6 on the path, i.e.
 `oracle-qtenv python3 tools/lastfm-test.py`; without it that section is
 skipped and the rest still runs.
 """
+import importlib.util
 import json
 import os
 import sys
@@ -86,6 +87,17 @@ class Stub(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(n).decode()
         self._answer(dict(urllib.parse.parse_qsl(raw)))
+
+
+def load_app(name, path):
+    """Import an app's `main.py` under its OWN module name. Both apps call
+    theirs `main`, so a plain `import main` gets whichever was imported first
+    — silently, with the second app's names simply missing."""
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def check(name, cond, detail=""):
@@ -201,7 +213,8 @@ def main():
     # Imported for one staticmethod; importing the module builds no window.
     sys.path.insert(0, str(HERE.parents[1] / "oracle"))
     try:
-        import main as oracle
+        oracle = load_app("oracle_main",
+                          str(HERE.parents[1] / "oracle" / "main.py"))
     except ImportError as e:
         # No Qt on the path: the client half above is what this harness is
         # for, so say what is missing rather than failing on it.
@@ -222,6 +235,75 @@ def main():
         check("the tool is offered", "lastfm" in oracle.Ollama._offered_tool_names())
         check("and a subagent can be given it",
               "lastfm" in oracle._tool_registry())
+
+    print("\nthe finder's field filters, and the merge")
+    os.environ["XDG_DATA_HOME"] = str(Path(TMP) / "data")
+    os.environ["XDG_STATE_HOME"] = str(Path(TMP) / "state")
+    os.environ["XDG_CACHE_HOME"] = str(Path(TMP) / "cache")
+    sys.path.insert(0, str(HERE.parents[0]))
+    try:
+        player = load_app("player_main", str(HERE.parents[0] / "main.py"))
+    except ImportError as e:
+        print("  skip player's half — %s (run it as: "
+              "player-qtenv python3 tools/lastfm-test.py)" % e)
+    else:
+        q = player.parse_query
+        check("plain text is unchanged",
+              q("chet faker") == (["chet", "faker"], [], None, None), str(q("chet faker")))
+        check("genre: is lifted out of the words",
+              q("gemini genre:soul") == (["gemini"], ["soul"], None, None), str(q("gemini genre:soul")))
+        check("a quoted genre keeps its space",
+              q('genre:"post rock"') == ([], ["post rock"], None, None), str(q('genre:"post rock"')))
+        check("year: one value is an exact year",
+              q("year:1997") == ([], [], 1997, 1997), str(q("year:1997")))
+        check("year: a range", q("year:1990-1999") == ([], [], 1990, 1999))
+        check("year: an open end", q("year:2010-") == ([], [], 2010, None))
+        check("year: a comparison", q("year:>2010") == ([], [], 2011, None))
+        check("an incomplete term matches everything, not nothing",
+              q("genre:") == ([], [], None, None), str(q("genre:")))
+        check("a missing year matches only an unbounded query",
+              player.year_in(None, 1990, None) is False
+              and player.year_in(None, None, None) is True)
+
+        # A real Library against a throwaway DB — the merge is the point.
+        prefs = player.Prefs()
+        lib = player.Library(player.TagWriter(prefs))
+        con = lib._con
+        def add(tid, artist, title, fav=0, plays=0, last=None):
+            con.execute("INSERT INTO tracks (id, path, mtime, size, title,"
+                        " artist, favorite, play_count, last_played, added_at)"
+                        " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                        (tid, "/tmp/%d.flac" % tid, 0, 0, title, artist,
+                         fav, plays, last, 0))
+        add(1, "Chet Faker", "Gemini", fav=1, plays=9)      # loved HERE only
+        add(2, "Chet Faker", "Talk Is Cheap", fav=0, plays=2)
+        add(3, "Hadouken!", "Oxygen (Gemini Remix)", fav=0, plays=40)
+        con.commit()
+
+        st = lib.merge_lastfm({
+            "loved": [{"artist": "Chet Faker", "track": "Talk Is Cheap"},
+                      {"artist": "Nobody", "track": "Nothing"}],
+            "plays": [{"artist": "Chet Faker", "track": "Talk Is Cheap",
+                       "playcount": 17},
+                      {"artist": "Hadouken!", "track": "Oxygen", "playcount": 3}],
+            "recent": [{"artist": "Chet Faker", "track": "Talk Is Cheap",
+                        "uts": 1999999999}]})
+        rows = {r["id"]: r for r in lib._rows("SELECT * FROM tracks")}
+        check("a love on last.fm hearts it here", rows[2]["favorite"] == 1)
+        check("a local-only favourite is KEPT", rows[1]["favorite"] == 1)
+        check("and reported rather than reconciled",
+              st["local_only_loves"] == 1, str(st))
+        check("a higher remote count is taken", rows[2]["play_count"] == 17)
+        check("a higher LOCAL count is never lowered", rows[3]["play_count"] == 40,
+              str(rows[3]["play_count"]))
+        check("last_played moves forward", rows[2]["last_played"] == 1999999999)
+        check("a track that is not in the library is counted, not guessed at",
+              st["unmatched"] == 1, str(st))
+        check("the decorated title still matched (trackmatch)",
+              st["counts"] == 1, str(st))
+        check("ratings are untouched",
+              all(r["rating"] is None for r in rows.values()))
+        lib.close()
 
     srv.shutdown()
     print("\n%d checks failed" % len(FAILS))
