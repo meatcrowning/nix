@@ -1532,6 +1532,7 @@ AGENT_TOOL_GROUPS = {
     "web": ["web_search", "fetch_url", "call_api"],
     "sessions": ["list_sessions", "read_session"],
     "skills": ["use_skill"],
+    "author": ["make_tool", "make_skill", "make_agent"],
     "time": ["get_current_time"],
 }
 #: What a subagent gets when its definition names no tools. Everything that
@@ -1541,7 +1542,8 @@ AGENT_TOOL_GROUPS = {
 #: is never in any set — subagents are one level deep, on purpose.
 AGENT_TOOLS_DEFAULT = (AGENT_TOOL_GROUPS["read"] + AGENT_TOOL_GROUPS["write"]
                        + AGENT_TOOL_GROUPS["exec"] + AGENT_TOOL_GROUPS["web"]
-                       + AGENT_TOOL_GROUPS["skills"] + AGENT_TOOL_GROUPS["time"])
+                       + AGENT_TOOL_GROUPS["skills"] + AGENT_TOOL_GROUPS["author"]
+                       + AGENT_TOOL_GROUPS["time"])
 
 #: Always present, whether or not anything is installed on disk — a spawn that
 #: names nothing still has to work, and an empty agents directory should not
@@ -1672,7 +1674,8 @@ def _tool_registry():
     itself is absent, which is what keeps subagents one level deep."""
     tools = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, FETCH_URL_TOOL,
              CALL_API_TOOL, EXEC_TOOL, BASH_TOOL, SHOW_IMAGE_TOOL]
-             + list(SESSION_TOOLS) + [t for t in [skill_tool()] if t]
+             + list(SESSION_TOOLS) + list(AUTHOR_TOOLS)
+             + [t for t in [skill_tool()] if t]
              + custom_tool_defs())
     return {t["function"]["name"]: t for t in tools
             if isinstance(t, dict) and isinstance(t.get("function"), dict)}
@@ -1803,6 +1806,140 @@ def agents_note(catalog=None):
         "rewrite an agent he is relying on without telling him."
         % (AGENTS_ROOT, ", ".join(sorted(AGENT_TOOL_GROUPS))))
     return "\n".join(lines)
+
+
+# ---- self-authoring: the model writes its own tools, skills and agents -----
+#
+# Everything above is something the model can USE. This is the door the other
+# way [his, 2026-08-23]: a tool it can call to write a NEW tool, skill or
+# subagent definition, for itself and for every future turn and agent. It could
+# already do it with `write_file` — the notes say where the files live and what
+# shape they are — but a tool is not a file, it is a manifest plus an
+# executable plus a JSON schema, and a model that gets one of the three subtly
+# wrong produces something that silently never loads. So the shape is written
+# HERE, validated, and reported back as live or not at all (docs/DESIGN.md §10).
+#
+# All three stores are read fresh every turn (`custom_tools`, `skill_catalog`,
+# `agent_catalog`), so what it writes is live on the NEXT round of the same
+# turn — no restart, and no rebuild.
+AUTHOR_MAX_CODE = 100000
+AUTHOR_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
+
+AUTHOR_TOOLS = [
+    {"type": "function", "function": {
+        "name": "make_tool",
+        "description": (
+            "Write a NEW TOOL for yourself — one you and every future "
+            "conversation and subagent can then call like any built-in. Use it "
+            "when a job keeps coming back and no tool fits it: the thing you "
+            "would otherwise re-write as run_bash/run_python every time. You "
+            "give it a name, the description the model reads to decide when to "
+            "call it, a JSON-schema `parameters` object, and the program. The "
+            "program is run with the call's arguments as JSON on stdin and "
+            "whatever it prints on stdout is the result (JSON if it parses, "
+            "text otherwise); a non-zero exit is an error carrying its stderr. "
+            "The tool is live from your very next tool call — say so, and say "
+            "what you made. Pass `delete` to remove one you wrote."),
+        "parameters": {"type": "object", "properties": {
+            "name": {"type": "string", "description": (
+                "Tool name: lowercase letters, digits, _ and -, up to 64. It "
+                "cannot be one of the app's own tool names.")},
+            "description": {"type": "string", "description": (
+                "What the tool does and when to call it, written for a model "
+                "choosing between tools. This is all a future you will know "
+                "about it.")},
+            "parameters": {"type": "object", "description": (
+                "JSON Schema for the call arguments: {\"type\": \"object\", "
+                "\"properties\": {...}, \"required\": [...]}. Omit for a "
+                "tool that takes none.")},
+            "language": {"type": "string", "enum": ["python", "bash"],
+                         "description": "What the program is written in."},
+            "code": {"type": "string", "description": (
+                "The program. It reads the arguments as JSON on stdin and "
+                "prints the result on stdout. A shebang is added if you leave "
+                "it out.")},
+            "timeout": {"type": "number", "description": (
+                "Optional seconds before the tool is killed (default %d, max "
+                "%d)." % (CUSTOM_DEFAULT_SECS, CUSTOM_MAX_SECS))},
+            "delete": {"type": "boolean", "description": (
+                "Delete this tool instead of writing it.")}},
+            "required": ["name"]}}},
+    {"type": "function", "function": {
+        "name": "make_skill",
+        "description": (
+            "Write a NEW SKILL — expert instructions for one job, which you "
+            "and every future conversation load with use_skill. Use it when "
+            "you have worked out HOW to do something well (a format he wants, "
+            "a procedure that took several tries to get right) and want the "
+            "next you to start from it rather than rediscover it. The "
+            "description is what a future model reads to decide whether the "
+            "job matches; the instructions are what it then follows. Pass "
+            "`delete` to remove one."),
+        "parameters": {"type": "object", "properties": {
+            "name": {"type": "string", "description": (
+                "Skill name: lowercase letters, digits, _ and -.")},
+            "description": {"type": "string", "description": (
+                "One line: when this skill applies. It is listed in every "
+                "future turn's context, so make it say what job it is for.")},
+            "instructions": {"type": "string", "description": (
+                "The skill itself: what to do, step by step, and what the "
+                "output must look like. Markdown.")},
+            "delete": {"type": "boolean",
+                       "description": "Delete this skill instead of writing it."}},
+            "required": ["name"]}}},
+    {"type": "function", "function": {
+        "name": "make_agent",
+        "description": (
+            "Write a NEW SUBAGENT DEFINITION — a named specialist you and "
+            "future conversations can hand a job to with spawn_agent. Use it "
+            "when a kind of errand keeps recurring and none of the existing "
+            "agents fits, or to fix one that keeps getting something wrong "
+            "(write it again with the same name to replace it). Pass `delete` "
+            "to remove one you wrote; the app's own built-in agents come back "
+            "when their file is deleted."),
+        "parameters": {"type": "object", "properties": {
+            "name": {"type": "string", "description": (
+                "Agent name: lowercase letters, digits, _ and -.")},
+            "description": {"type": "string", "description": (
+                "One line: what this agent is for. It is listed in every "
+                "future turn's context and is how a model picks it.")},
+            "prompt": {"type": "string", "description": (
+                "The agent's system prompt: who it is, how it should work, "
+                "and what its final answer must contain.")},
+            "tools": {"type": "string", "description": (
+                "Optional: which tools it gets — any of the groups (%s), "
+                "individual tool names, or `all`. Omit for the default set."
+                % ", ".join(sorted(AGENT_TOOL_GROUPS)))},
+            "model": {"type": "string", "description": (
+                "Optional: an installed ollama model to run it on. Omit to "
+                "run it on the model you are — a swap costs a full reload.")},
+            "delete": {"type": "boolean",
+                       "description": "Delete this definition instead of writing it."}},
+            "required": ["name"]}}},
+]
+AUTHOR_TOOL_NAMES = {"make_tool", "make_skill", "make_agent"}
+
+
+def authoring_note():
+    """The always-on line telling the model it can EXTEND itself, and where
+    each store lives. Same reasoning as `skills_note`/`agents_note`: a model
+    does not reach for a door it was never told about — chatter's own answer,
+    when he asked whether it could make its own tools, was "no, those are
+    defined by the framework I run in" [his, 2026-08-23]."""
+    return ("You can extend yourself, permanently, and every future "
+            "conversation and subagent inherits what you write:\n"
+            "- make_tool writes a new TOOL (stored in %s) — a program you can "
+            "call like any built-in.\n"
+            "- make_skill writes a new SKILL (%s) — instructions a future you "
+            "loads with use_skill.\n"
+            "- make_agent writes a new SUBAGENT (%s) — a specialist to hand "
+            "jobs to with spawn_agent.\n"
+            "All three are live from your next tool call, with nothing "
+            "restarted. Do it when a job keeps recurring, when you had to work "
+            "out how to do something and the next you should start from it, or "
+            "when he asks for it — and TELL him what you wrote, in a line. Do "
+            "not replace something he relies on without saying so."
+            % (CUSTOM_TOOLS_ROOT, SKILLS_ROOT, AGENTS_ROOT))
 
 
 #: How many tool rounds one turn may take before the wrap-up round makes it
@@ -3624,6 +3761,7 @@ class Ollama(QObject):
         agents = agents_note()
         if agents:
             base += "\n\n" + agents
+        base += "\n\n" + authoring_note()
         if research:
             base += "\n\n" + research
         # His chosen base (a preset or his own custom text) LEADS — the time
@@ -3723,7 +3861,7 @@ class Ollama(QObject):
                 MUSIC_TOOL, MODEL_TOOL,
                 FETCH_URL_TOOL,
                 CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
-                + list(SESSION_TOOLS) + list(MEMORY_TOOLS)
+                + list(SESSION_TOOLS) + list(MEMORY_TOOLS) + list(AUTHOR_TOOLS)
                 + [t for t in [skill_tool(), spawn_agent_tool()] if t])
 
     @staticmethod
@@ -4110,6 +4248,8 @@ class Ollama(QObject):
             self._run_memory_tool(name, args, i, remaining, calls)
         elif name in SKILL_TOOL_NAMES:
             self._run_skill_tool(args, i, remaining, calls)
+        elif name in AUTHOR_TOOL_NAMES:
+            self._run_author_tool(name, args, i, remaining, calls)
         elif name in SPAWN_TOOL_NAMES:
             self._spawn_agent(args, i, remaining, calls)
         elif name in custom_tools():
@@ -6842,6 +6982,214 @@ class Ollama(QObject):
         mem = result.get("memory") or {}
         verb = "updated" if a.get("id") else "saved"
         return "%s memory %s" % (verb, mem.get("id", ""))
+
+    # ---- self-authoring (make_tool / make_skill / make_agent) --------------
+
+    def _run_author_tool(self, name, args, idx, remaining, calls):
+        """The model writing its own tool, skill or subagent definition.
+
+        Synchronous: it is a couple of local file writes, on the host the
+        window runs on, exactly like `use_skill`'s read. Every failure is
+        returned as an `error` the model can act on rather than raised — a
+        refused name or a program that will not parse is something it can fix
+        in the same turn."""
+        a = args if isinstance(args, dict) else {}
+        nm = str(a.get("name", "")).strip()
+        drop = bool(a.get("delete"))
+        kind = {"make_tool": "tool", "make_skill": "skill",
+                "make_agent": "agent"}.get(name, "thing")
+        self.fileToolStarted.emit(
+            ("deleting %s %s" % (kind, nm or "?")) if drop
+            else ("writing %s %s" % (kind, nm or "?")))
+        if not AUTHOR_NAME_RE.fullmatch(nm):
+            result = {"error": ("bad name %r: lowercase letters, digits, _ and "
+                                "-, up to 64 characters" % nm)}
+        elif name == "make_tool":
+            result = self._author_tool(nm, a, drop)
+        elif name == "make_skill":
+            result = self._author_skill(nm, a, drop)
+        else:
+            result = self._author_agent(nm, a, drop)
+        line = (("%s: %s" % (name, result["error"]))[:200] if "error" in result
+                else "%s %s %s" % ("deleted" if drop else "wrote", kind, nm))
+        remaining["sink"][idx] = {"role": "tool", "tool_name": name,
+                                   "content": json.dumps(result)}
+        self.fileToolDone.emit(line, "error" not in result)
+        self._tool_done(remaining, calls)
+
+    @staticmethod
+    def _author_tool(nm, a, drop):
+        """Write (or delete) one custom tool: the manifest and the program.
+
+        The program is syntax-checked before it is installed — a tool that
+        cannot parse is one the model would call, once, per turn, forever, and
+        it costs nothing to find out here."""
+        root = Path(CUSTOM_TOOLS_ROOT)
+        manifest = root / (nm + ".json")
+        if drop:
+            gone = []
+            for f in (manifest, root / (nm + ".py"), root / (nm + ".sh")):
+                try:
+                    f.unlink()
+                    gone.append(str(f))
+                except OSError:
+                    pass
+            if not gone:
+                return {"error": "no tool named " + nm}
+            return {"ok": True, "deleted": gone}
+        if nm in BUILTIN_TOOL_NAMES:
+            return {"error": ("%s is one of the app's own tools; pick another "
+                              "name" % nm)}
+        code = str(a.get("code") or "")
+        if not code.strip():
+            return {"error": "no code: the tool needs a program to run"}
+        if len(code) > AUTHOR_MAX_CODE:
+            return {"error": "code is too long (%d chars, max %d)"
+                             % (len(code), AUTHOR_MAX_CODE)}
+        lang = str(a.get("language") or "python").strip().lower()
+        if lang not in ("python", "bash"):
+            return {"error": "language must be python or bash"}
+        params = a.get("parameters")
+        if not isinstance(params, dict) or not params:
+            params = {"type": "object", "properties": {}, "required": []}
+        desc = str(a.get("description") or "").strip()
+        if not desc:
+            return {"error": ("no description: it is all a future model will "
+                              "know about this tool")}
+        try:
+            secs = float(a.get("timeout") or CUSTOM_DEFAULT_SECS)
+        except (TypeError, ValueError):
+            secs = CUSTOM_DEFAULT_SECS
+        secs = max(1.0, min(secs, CUSTOM_MAX_SECS))
+        shebang = ("#!/usr/bin/env python3" if lang == "python"
+                   else "#!/usr/bin/env bash")
+        if not code.startswith("#!"):
+            code = shebang + "\n" + code
+        if not code.endswith("\n"):
+            code += "\n"
+        bad = Ollama._author_syntax(lang, code)
+        if bad:
+            return {"error": "the program does not parse: " + bad}
+        prog = root / (nm + (".py" if lang == "python" else ".sh"))
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            prog.write_text(code, encoding="utf-8")
+            os.chmod(prog, 0o755)
+            manifest.write_text(json.dumps(
+                {"name": nm, "description": desc, "parameters": params,
+                 "run": prog.name, "timeout": secs}, indent=2) + "\n",
+                encoding="utf-8")
+        except OSError as exc:
+            return {"error": "could not write it: %s" % exc}
+        live = nm in custom_tools()
+        return {"ok": True, "name": nm, "manifest": str(manifest),
+                "program": str(prog), "live": live,
+                "note": ("It is loaded fresh every turn, so you can call it "
+                         "from your next tool call." if live else
+                         "Written, but it did not load — check the manifest.")}
+
+    @staticmethod
+    def _author_syntax(lang, code):
+        """`None` if the program parses, else what the parser said."""
+        if lang == "python":
+            try:
+                compile(code, "<tool>", "exec")
+                return None
+            except SyntaxError as exc:
+                return "%s (line %s)" % (exc.msg, exc.lineno)
+        import subprocess          # the only shell-out here; nothing else needs it
+        try:
+            out = subprocess.run(["bash", "-n"], input=code, text=True,
+                                 capture_output=True, timeout=10)
+            return None if out.returncode == 0 else (out.stderr.strip()[:400]
+                                                     or "bash -n failed")
+        except (OSError, subprocess.SubprocessError):
+            return None          # no bash to check with: install it anyway
+
+    @staticmethod
+    def _author_skill(nm, a, drop):
+        """Write (or delete) one skill: `<root>/<name>/SKILL.md`, frontmatter
+        plus body — the same shape Claude Code reads, since it is the same
+        directory."""
+        d = Path(SKILLS_ROOT) / nm
+        if drop:
+            f = d / "SKILL.md"
+            try:
+                f.unlink()
+            except OSError:
+                return {"error": "no skill named " + nm}
+            try:
+                d.rmdir()                    # only if it is now empty
+            except OSError:
+                pass
+            return {"ok": True, "deleted": str(f)}
+        desc = str(a.get("description") or "").strip()
+        body = str(a.get("instructions") or "").strip()
+        if not desc:
+            return {"error": ("no description: it is the line a future model "
+                              "reads to decide whether this skill applies")}
+        if not body:
+            return {"error": "no instructions: the skill would load nothing"}
+        if len(body) > SKILL_MAX_CHARS:
+            return {"error": "instructions are too long (%d chars, max %d)"
+                             % (len(body), SKILL_MAX_CHARS)}
+        text = ("---\nname: %s\ndescription: %s\n---\n\n%s\n"
+                % (nm, desc.replace("\n", " "), body))
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "SKILL.md").write_text(text, encoding="utf-8")
+        except OSError as exc:
+            return {"error": "could not write it: %s" % exc}
+        live = any(s["name"] == nm for s in skill_catalog())
+        return {"ok": True, "name": nm, "path": str(d / "SKILL.md"),
+                "live": live,
+                "note": "use_skill can load it from your next tool call."}
+
+    @staticmethod
+    def _author_agent(nm, a, drop):
+        """Write (or delete) one subagent definition: `<root>/<name>.md`,
+        frontmatter plus the prompt. The resolved tool list comes back, so the
+        model sees what its `tools:` string actually bought."""
+        f = Path(AGENTS_ROOT) / (nm + ".md")
+        if drop:
+            try:
+                f.unlink()
+            except OSError:
+                return {"error": "no agent definition named " + nm}
+            builtin = any(b["name"] == nm for b in BUILTIN_AGENTS)
+            return {"ok": True, "deleted": str(f),
+                    "note": ("The app's own %s is back in its place." % nm
+                             if builtin else "")}
+        desc = str(a.get("description") or "").strip()
+        prompt = str(a.get("prompt") or "").strip()
+        if not desc:
+            return {"error": ("no description: it is how a future model picks "
+                              "this agent")}
+        if not prompt:
+            return {"error": "no prompt: the agent would be told nothing"}
+        if len(prompt) > AGENT_MAX_CHARS:
+            return {"error": "prompt is too long (%d chars, max %d)"
+                             % (len(prompt), AGENT_MAX_CHARS)}
+        tools = str(a.get("tools") or "").strip()
+        model = str(a.get("model") or "").strip()
+        head = ["---", "name: " + nm,
+                "description: " + desc.replace("\n", " ")]
+        if tools:
+            head.append("tools: " + tools)
+        if model:
+            head.append("model: " + model)
+        head.append("---")
+        try:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text("\n".join(head) + "\n\n" + prompt + "\n",
+                         encoding="utf-8")
+        except OSError as exc:
+            return {"error": "could not write it: %s" % exc}
+        live = [x for x in agent_catalog() if x["name"] == nm]
+        return {"ok": True, "name": nm, "path": str(f),
+                "live": bool(live),
+                "tools": _agent_tool_names(tools) if tools else "(the default set)",
+                "note": "spawn_agent can use it from your next tool call."}
 
     # ---- skills (Claude Code's own, loaded on demand) ----
 
