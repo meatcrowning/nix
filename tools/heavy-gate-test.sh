@@ -5,9 +5,11 @@
 #
 # It drives the gate against STUB endpoints, never the real ComfyUI or the real
 # ollama: a test may not put a job on his backend any more than it may put a
-# window on his screen. The stubs' queue_remaining and /api/ps bodies are files
-# this script writes, so "a render is in flight" and "a 23G model is warm" are
-# states the test can turn on and off.
+# window on his screen. The comfy stub's queue_remaining body is a file this
+# script writes, and ollama is stubbed at the CGROUP — the gate reads ollama's
+# footprint from `memory.current`, not `/api/ps` (that endpoint is blind during
+# a model load, see heavy-gate.sh) — so "a render is in flight" and "a 23G model
+# is warm" are states the test turns on and off by writing those files.
 #
 # THE TOAST IS NEVER RAISED HERE. `ask` is exercised through
 # HEAVY_GATE_ASK_ANSWER, which is the same code path minus notify-send — his
@@ -23,9 +25,10 @@ GATE="$(dirname "$0")/heavy-gate.sh"
 CPORT=18188
 OPORT=18434
 TMP=$(mktemp -d)
-Q="$TMP/queue"; PS="$TMP/ps"
+Q="$TMP/queue"; PS="$TMP/ps"; CGROUP="$TMP/cgroup"
 echo 0 >"$Q"
 echo '{"models":[]}' >"$PS"
+echo 0 >"$CGROUP"
 fails=0
 
 check() {
@@ -59,12 +62,13 @@ sleep 1
 
 export HEAVY_GATE_COMFY_URL="http://127.0.0.1:$CPORT"
 export HEAVY_GATE_OLLAMA_URL="http://127.0.0.1:$OPORT"
+export OLLAMA_CGROUP="$CGROUP"
 export HEAVY_GATE_NO_NOTIFY=1
 
-warm() {  # $1 = how many bytes resident
-  printf '{"models":[{"name":"qwen3.6:35b-a3b","size":%s,"size_vram":%s}]}\n' "$1" "$1" >"$PS"
+warm() {  # $1 = how many bytes the (stubbed) cgroup says are resident
+  echo "$1" >"$CGROUP"
 }
-cold() { echo '{"models":[]}' >"$PS"; }
+cold() { echo 0 >"$CGROUP"; }
 
 # --- ollama: warm is the signal, and it is independent of comfy -------------
 if systemctl is-active --quiet ollama.service; then
@@ -121,7 +125,7 @@ fi
 
 # --- both down: nothing to ask, nothing to undo -----------------------------
 if ! systemctl --user is-active --quiet comfy-painter.service \
-   && ! { systemctl is-active --quiet ollama.service && grep -q '"name"' "$PS"; }; then
+   && ! { systemctl is-active --quiet ollama.service && [ "$(cat "$CGROUP" 2>/dev/null || echo 0)" -gt 0 ]; }; then
   check "ask with nothing loaded answers 'clear'" "$("$GATE" ask 1 2>/dev/null)" clear
 fi
 check "resume with nothing suspended is a no-op" "$("$GATE" resume >/dev/null 2>&1; echo $?)" 0
