@@ -1119,6 +1119,20 @@ Item {
         return (one === Math.floor(one) ? one : one.toFixed(1)) + "k";
     }
 
+    // The last line a running program printed — what the collapsed files
+    // disclosure previews. Split on \r as well as \n: a download or a build
+    // redraws ONE line with carriage returns, so splitting on newlines alone
+    // hands back the whole progress bar's history as a single huge line.
+    function lastLine(s) {
+        if (!s) return "";
+        var parts = s.split(/[\r\n]+/);
+        for (var i = parts.length - 1; i >= 0; i--) {
+            var t = parts[i].trim();
+            if (t !== "") return t;
+        }
+        return "";
+    }
+
     // "12s", "1m 30s" — the reasoning duration, in the shortest honest form
     // (docs/DESIGN.md §7.2: the fact and its number, nothing else).
     function fmtDur(ms) {
@@ -2555,13 +2569,18 @@ Item {
                                     visible: !isUser && (files !== "" || filesActive)
                                     height: visible ? fileToggle.height + fileReveal.height : 0
 
-                                    // Closed by default — a file tool is a line of
-                                    // bookkeeping. EXCEPT while a program is
-                                    // actually running: live output nobody can see
-                                    // is not live output. His own click still wins,
-                                    // in both directions.
+                                    // Closed by default, running program or not
+                                    // [his, 2026-08-23]. It used to spring open on
+                                    // its own while one ran — live output nobody
+                                    // can see is not live output — but a build or
+                                    // a download prints hundreds of lines and the
+                                    // block became the flood it was meant to
+                                    // contain. The heading previews the last line
+                                    // instead (`execPeek`), which is the line a
+                                    // progress bar is redrawing anyway. His own
+                                    // click still wins, in both directions.
                                     readonly property bool expanded: turn.fileUserSet ? turn.fileUserOpen
-                                                                                      : execRunning
+                                                                                      : false
 
                                     Item {
                                         id: fileToggle
@@ -2577,6 +2596,7 @@ Item {
                                             onTriggered: fileToggle.dotPhase = (fileToggle.dotPhase + 1) % 4
                                         }
                                         Row {
+                                            id: fileHead
                                             anchors { left: parent.left; verticalCenter: parent.verticalCenter }
                                             spacing: 6
                                             PixelText { text: fileAct.expanded ? "-" : "+"; color: Theme.textDim }
@@ -2590,6 +2610,28 @@ Item {
                                                 text: fileToggle.dots
                                                 color: Theme.textDim
                                             }
+                                        }
+                                        // What the program printed LAST, on the
+                                        // heading, while the block is shut [his,
+                                        // 2026-08-23]: the tool is usually a
+                                        // download or a build, and the one line
+                                        // that matters is the one it is redrawing
+                                        // right now. Elided rather than wrapped —
+                                        // a heading is one line — and gone the
+                                        // moment the block is open, where the whole
+                                        // tail is already drawn.
+                                        Text {
+                                            id: execPeek
+                                            anchors { left: fileHead.right; leftMargin: 8
+                                                      right: parent.right
+                                                      verticalCenter: parent.verticalCenter }
+                                            visible: !fileAct.expanded && execTail !== ""
+                                            font: Theme.editorFont
+                                            renderType: Text.NativeRendering
+                                            textFormat: Text.PlainText
+                                            elide: Text.ElideRight
+                                            text: win.lastLine(execTail)
+                                            color: execRunning ? Theme.text : Theme.textDim
                                         }
                                         MouseArea {
                                             anchors.fill: parent
@@ -2673,9 +2715,13 @@ Item {
                                     user: isUser
                                     isError: model.isError
                                     x: isUser ? turnStack.width - width : 0
+                                    // No FLOOR: a one-character message is a
+                                    // one-character bubble [his, 2026-08-23]. It
+                                    // used to be held open at 72px, which read as
+                                    // a padded slab around a `k`.
                                     width: turn.wide ? turn.bubbleMax
                                            : Math.min(turn.bubbleMax,
-                                                      Math.max(72, turnCol.natural + 2 * turn.pad))
+                                                      turnCol.natural + 2 * turn.pad)
                                     height: visible ? turnCol.height + 2 * turn.pad : 0
 
                                     Column {
@@ -2695,10 +2741,13 @@ Item {
                                         // post-wrap measurement, and a hidden item
                                         // reports 0, so this is the max over whichever
                                         // of them is showing.
+                                        // The CAPTION is not in this: it sits
+                                        // outside the bubble, so measuring it in
+                                        // held every short message open to the
+                                        // width of the model's name.
                                         readonly property real natural:
                                             Math.max(plainBody.contentWidth,
-                                                     mdBody.contentWidth,
-                                                     whoText.contentWidth)
+                                                     mdBody.contentWidth)
 
 
                                         // The pictures a reply carries, at the TOP of the

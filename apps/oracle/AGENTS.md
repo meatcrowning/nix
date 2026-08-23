@@ -928,6 +928,22 @@ round that made them. It rides on `ORACLE_SEND` (send this prompt, then print
 the chat log as JSON via `Root.rowsJson()`), which is the only way to see what
 the ROWS became.
 
+### A bubble hugs its text, with no floor
+
+A message's bubble is as wide as its longest laid-out line and no wider (capped
+at `bubbleMax`). Two things used to stop that being true for a SHORT one, and
+both are gone [his, 2026-08-23]:
+
+- a **72px floor**, which drew a padded slab around a one-character `k`;
+- the **speaker caption in the measurement** — `whoText.contentWidth` was in
+  `turnCol.natural`, so every short reply was held open to the width of the
+  model's name, and the caption is not even inside the bubble.
+
+`natural` is now `max(plainBody, mdBody)`. A row carrying media still takes the
+full cap (`turn.wide`). Harness: `tools/exec-peek-test.py` — a one-character
+prompt beside a long-named model's two-letter answer, measured on the rendered
+`Bubble`.
+
 ### Successive rounds fold into one line
 
 One row per round fixed the "where did round 3 begin" problem and made a new
@@ -1356,10 +1372,23 @@ as NDJSON lines — `{"t":"o"|"e","d":"…"}` — with the result object still L
 exactly as before, so a caller that does not ask (or an older copy of the script
 reached over ssh, which ignores the key) is unaffected. chatter parses those
 lines out of the pipe and emits `execOutput`; the row keeps a bounded tail
-(`execTailMax`, 4000 chars) under the files disclosure, which **auto-opens while
-a program is running** — live output nobody can see is not live output — and his
-own click still wins in both directions. The tail is transient and is not
-persisted: what the program MEANT is in the reply.
+(`execTailMax`, 4000 chars) under the files disclosure. The tail is transient
+and is not persisted: what the program MEANT is in the reply.
+
+**The heading previews the last line; the block stays shut** [his, 2026-08-23].
+It used to spring open on its own while a program ran — live output nobody can
+see is not live output — but a build or a download prints hundreds of lines and
+the block became the flood it was there to contain. So `execPeek` puts the LAST
+line of the tail on the heading, elided to one line, beside `working with
+files…`, and disappears when he opens the block (where the whole tail is drawn
+anyway). His own click still wins in both directions.
+
+- **`win.lastLine()` splits on `\r` as well as `\n`.** A download or a build
+  redraws ONE line with carriage returns, so splitting on newlines alone hands
+  back the whole progress bar's history as a single enormous line — and the
+  line being redrawn is exactly the one worth previewing.
+- Harness: `tools/exec-peek-test.py`, which drives `execOutput` with a
+  carriage-return progress bar and reads the heading the delegate rendered.
 
 ## Branching: edit and resend, ask again
 
