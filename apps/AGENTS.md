@@ -808,7 +808,9 @@ and in the QML:
   `contentItem`, `activeFocusItem`, assigning `width`) moves out or goes
   through `root.Window.*`.
 - **`tbButtons` gains `icon:`** (a freedesktop icon name — a two-character cell
-  is a titlebar affordance and has no place on a real toolbar) **and `bar:`**
+  is a titlebar affordance and has no place on a real toolbar; the same rule
+  reaches an app's own buttons, see player's `HeaderButton` `plainLabel`/
+  `iconName`/`iconOnly`) **and `bar:`**
   (this entry earns a toolbar slot; the menus stay the complete set). Both are
   inert on the vtb wire like `menu:`.
 - **`Theme.windowFill`** is `bg` under Hyprland and `transparent` under Plasma:

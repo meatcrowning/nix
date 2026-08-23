@@ -67,6 +67,7 @@ Item {
                     spacing: 2
                     HeaderButton {
                         label: "-"
+                        iconName: "list-remove"; iconOnly: true
                         fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                         onClicked: root.columnsRequested(root.columns - 1)
                     }
@@ -79,6 +80,7 @@ Item {
                     }
                     HeaderButton {
                         label: "+"
+                        iconName: "list-add"; iconOnly: true
                         fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                         onClicked: root.columnsRequested(root.columns + 1)
                     }
@@ -120,15 +122,13 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     width: 90
                     label: Player.replayGain
+                    options: ["auto", "track", "album", "off"]
                     fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
-                    onPicked: function (x, y) {
-                        var items = [];
-                        ["auto", "track", "album", "off"].forEach(function (m) {
-                            items.push({ label: m, trigger: function () { root.replayGainRequested(m); } });
-                        });
+                    onPicked: function (x, y, items) {
                         var p = root.mapFromItem(null, x, y);
                         rgMenu.open(p.x, p.y, items);
                     }
+                    onChose: function (m) { root.replayGainRequested(m); }
                 }
             }
 
@@ -182,6 +182,7 @@ Item {
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 label: root.scanning ? "scanning" : "rescan"
+                iconName: "view-refresh"
                 fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                 lit: root.scanning
                 onClicked: if (!root.scanning) root.rescanRequested()

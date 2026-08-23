@@ -1,4 +1,5 @@
 import QtQuick
+import "../../qmlcommon"
 
 // Full search results over the whole library (SearchModel, casefolded
 // substring match on title/artist/album — fed live by the header search
@@ -16,7 +17,33 @@ Rectangle {
     signal openAlbumRequested(int albumId)
     signal browseArtistRequested(string artist)
 
-    color: Theme.bg
+    // THE WINDOW'S OWN SURFACE, not a flat fill of it (docs/DESIGN.md §7.6).
+    // This overlay covers the whole content area, so under Plasma a `Theme.bg`
+    // rectangle was a flat patch of the scheme's window colour laid over
+    // Oxygen's gradient — the one break in the surface that runs unbroken from
+    // the titlebar down through the menubar and toolbar. `windowFill` is
+    // transparent there and `Theme.bg` under Hyprland, exactly as before.
+    color: Theme.windowFill
+    // It still has to OCCLUDE the views underneath, which transparency alone
+    // does not, so the style's own background is drawn behind it instead —
+    // opaque, and continuous with the chrome above.
+    clip: root.plasma
+
+    readonly property bool plasma: (typeof DeskStyle !== "undefined" && DeskStyle)
+                                   ? DeskStyle.plasma === true : false
+
+    // The provider crops the style's render to the VIEW's rectangle and pads
+    // from this item's own top-left (qmlcommon/StyledBackground.qml), so it is
+    // put back at the view origin and the overlay's clip cuts it. This item's
+    // parent fills the view, so its own x/y IS that offset. Invisible and free
+    // under Hyprland.
+    StyledBackground {
+        x: -root.x
+        y: -root.y
+        width: root.width + root.x
+        height: root.height + root.y
+        z: -1
+    }
 
     Row {
         id: head
@@ -30,11 +57,13 @@ Rectangle {
         }
         HeaderButton {
             label: "> play all"
+            plainLabel: "play all"; iconName: "media-playback-start"
             fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
             onClicked: Library.playFromModel(SearchModel, 0)
         }
         HeaderButton {
             label: "x close"
+            plainLabel: "close"; iconName: "window-close"
             fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
             onClicked: root.closed()
         }

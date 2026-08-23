@@ -34,6 +34,22 @@ Item {
 
     visible: false
 
+    // THE SESSION, and the one number the two faces cannot share. Every row
+    // here was sized to the pixel face's 24px control; under Plasma the style
+    // owns those heights (Oxygen's field and combo are both taller), and a row
+    // pinned to 24 crops the frame it is drawing. `ctrlH` is 0 outside a Plasma
+    // session, so every `Math.max(<the old literal>, root.ctrlH)` below is
+    // exactly the old literal there and the Hyprland layout cannot move.
+    readonly property bool plasma: (typeof DeskStyle !== "undefined" && DeskStyle)
+                                   ? DeskStyle.plasma === true : false
+    readonly property int ctrlH: root.plasma
+        ? Math.max(hProbe.implicitHeight, pProbe.implicitHeight) : 0
+    // Measured, not tabulated: the style's metrics are the style's, and the
+    // `+plasma` twins are the only things that know them. Invisible, never laid
+    // out, and free in the session that ignores them.
+    EditField { id: hProbe; visible: false }
+    SelectButton { id: pProbe; visible: false }
+
     // ---- working copy ----
     property string origName: ""     // "" = creating; else the list being replaced
     property string listName: ""
@@ -73,7 +89,7 @@ Item {
         limitN = spec.limit;
         visible = true;
         recount();
-        nameField.forceActiveFocus();
+        nameField.focusInput();
         nameField.selectAll();
     }
 
@@ -188,16 +204,12 @@ Item {
         MouseArea { anchors.fill: parent; onClicked: root.cancel() }
     }
 
-    Rectangle {
+    SheetFrame {
         id: box
         anchors.centerIn: parent
         width: Math.min(460, root.width - 16)
         height: Math.min(head.height + body.contentHeight + foot.height + 24,
                          root.height - 16)
-        color: Theme.bg
-        radius: Theme.windowRounding
-        border.width: Theme.windowBorderWidth
-        border.color: Theme.windowBorder
 
         MouseArea { anchors.fill: parent }   // swallow: not an outside click
 
@@ -210,7 +222,7 @@ Item {
         Item {
             id: head
             anchors { top: parent.top; left: parent.left; right: parent.right; margins: 12 }
-            height: 20
+            height: Math.max(20, root.ctrlH)
             PixelText {
                 anchors.verticalCenter: parent.verticalCenter
                 text: root.origName === "" ? "new smart playlist" : "edit smart playlist"
@@ -220,6 +232,7 @@ Item {
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 label: "x"
+                iconName: "window-close"; iconOnly: true
                 fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                 onClicked: root.cancel()
             }
@@ -248,34 +261,20 @@ Item {
                 spacing: 8
 
                 // ---- name ----
-                Rectangle {
+                EditField {
+                    id: nameField
                     width: parent.width
-                    height: 24
-                    color: Theme.bgAlt
-                    radius: Theme.rounding
-                    border.width: Theme.ctrlBorder
-                    border.color: nameField.activeFocus ? root.fgAccent : Theme.border
-                    TextInput {
-                        id: nameField
-                        anchors.fill: parent
-                        anchors.margins: 4
-                        verticalAlignment: TextInput.AlignVCenter
-                        font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
-                        renderType: Text.NativeRendering
-                        color: root.fgText
-                        clip: true
-                        maximumLength: 64
-                        text: root.listName
-                        onTextChanged: root.listName = text
-                        Keys.onEscapePressed: root.cancel()
-                        onAccepted: root.save()
-                        PixelText {
-                            visible: parent.text === ""
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "playlist name"
-                            color: Theme.dim
-                        }
-                    }
+                    placeholderText: "playlist name"
+                    maximumLength: 64
+                    fgText: root.fgText; fgAccent: root.fgAccent
+                    text: root.listName
+                    // `textEdited`, not a `text` watcher: the binding above
+                    // writes this box whenever the working copy is loaded, and
+                    // a two-way watcher would answer that write with a write of
+                    // its own.
+                    onTextEdited: root.listName = text
+                    onEscaped: root.cancel()
+                    onAccepted: root.save()
                 }
 
                 // ---- match all / any ----
@@ -314,38 +313,33 @@ Item {
                         readonly property bool hasValue: Library.smartOpTakesValue(modelData.op)
 
                         width: col.width
-                        height: box.narrow && hasValue ? 50 : 24
+                        height: box.narrow && hasValue
+                              ? Math.max(50, root.ctrlH * 2 + 2)
+                              : Math.max(24, root.ctrlH)
 
                         // field + operator, always on the first line
                         Row {
                             id: pickers
                             anchors.left: parent.left
                             anchors.top: parent.top
-                            height: 24
+                            height: Math.max(24, root.ctrlH)
                             spacing: 4
 
                             SelectButton {
                                 width: box.narrow ? 100 : 110
                                 label: root.fieldLabel(ruleRow.modelData.field)
+                                options: root._opts(Library.smartFields())
                                 fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
-                                onPicked: function (x, y) {
-                                    var items = [], f = Library.smartFields();
-                                    for (var i = 0; i < f.length; i++)
-                                        items.push(root._pick(f[i].label, f[i].key,
-                                                              ruleRow.index, true));
-                                    root.openMenu(x, y, items);
-                                }
+                                onPicked: function (x, y, items) { root.openMenu(x, y, items); }
+                                onChose: function (k) { root.setField(ruleRow.index, k); }
                             }
                             SelectButton {
                                 width: box.narrow ? 110 : 120
                                 label: ruleRow.modelData.op
+                                options: Library.smartOps(ruleRow.modelData.field)
                                 fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
-                                onPicked: function (x, y) {
-                                    var items = [], o = Library.smartOps(ruleRow.modelData.field);
-                                    for (var i = 0; i < o.length; i++)
-                                        items.push(root._pick(o[i], o[i], ruleRow.index, false));
-                                    root.openMenu(x, y, items);
-                                }
+                                onPicked: function (x, y, items) { root.openMenu(x, y, items); }
+                                onChose: function (o) { root.setOp(ruleRow.index, o); }
                             }
                         }
 
@@ -360,39 +354,26 @@ Item {
                             anchors.topMargin: box.narrow ? 2 : 0
                             anchors.right: parent.right
                             anchors.rightMargin: box.narrow ? 0 : 22
-                            height: 24
+                            height: Math.max(24, root.ctrlH)
 
                             // text / number entry
-                            Rectangle {
+                            EditField {
+                                id: valueField
                                 anchors.fill: parent
                                 anchors.rightMargin: unit.visible ? unit.width + 4 : 0
                                 visible: ruleRow.kind === "text" || ruleRow.kind === "count"
                                          || ruleRow.kind === "minutes" || ruleRow.kind === "date"
-                                color: Theme.bgAlt
-                                radius: Theme.rounding
-                                border.width: Theme.ctrlBorder
-                                border.color: valueField.activeFocus ? root.fgAccent : Theme.border
-                                TextInput {
-                                    id: valueField
-                                    anchors.fill: parent
-                                    anchors.margins: 4
-                                    verticalAlignment: TextInput.AlignVCenter
-                                    font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
-                                    renderType: Text.NativeRendering
-                                    color: root.fgText
-                                    clip: true
-                                    // A number field that accepts letters would
-                                    // silently store 0 (§10.2: refuse visibly).
-                                    validator: ruleRow.kind === "text"
-                                               ? null : doubleVal
-                                    text: ruleRow.modelData.value === undefined
-                                          ? "" : String(ruleRow.modelData.value)
-                                    onTextEdited: root.setValue(
-                                        ruleRow.index,
-                                        ruleRow.kind === "text" ? text : Number(text || 0))
-                                    Keys.onEscapePressed: root.cancel()
-                                    onAccepted: root.save()
-                                }
+                                fgText: root.fgText; fgAccent: root.fgAccent
+                                // A number field that accepts letters would
+                                // silently store 0 (§10.2: refuse visibly).
+                                validator: ruleRow.kind === "text" ? null : doubleVal
+                                text: ruleRow.modelData.value === undefined
+                                      ? "" : String(ruleRow.modelData.value)
+                                onTextEdited: root.setValue(
+                                    ruleRow.index,
+                                    ruleRow.kind === "text" ? text : Number(text || 0))
+                                onEscaped: root.cancel()
+                                onAccepted: root.save()
                             }
                             PixelText {
                                 id: unit
@@ -439,6 +420,7 @@ Item {
                             anchors.right: parent.right
                             anchors.verticalCenter: pickers.verticalCenter
                             label: "x"
+                            iconName: "list-remove"; iconOnly: true
                             fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                             onClicked: root.removeRule(ruleRow.index)
                         }
@@ -447,6 +429,7 @@ Item {
 
                 HeaderButton {
                     label: "+ rule"
+                    plainLabel: "add rule"; iconName: "list-add"
                     fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                     onClicked: root.addRule()
                 }
@@ -464,17 +447,10 @@ Item {
                     SelectButton {
                         width: 110
                         label: root.sortLabel(root.sortKey)
+                        options: root._opts(Library.smartSorts())
                         fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
-                        onPicked: function (x, y) {
-                            var items = [], s = Library.smartSorts();
-                            for (var i = 0; i < s.length; i++) {
-                                items.push({ label: s[i].label,
-                                             trigger: (function (k) {
-                                                 return function () { root.sortKey = k; };
-                                             })(s[i].key) });
-                            }
-                            root.openMenu(x, y, items);
-                        }
+                        onPicked: function (x, y, items) { root.openMenu(x, y, items); }
+                        onChose: function (k) { root.sortKey = k; }
                     }
                     HeaderButton {
                         // Meaningless for a random order, and a control that
@@ -494,28 +470,15 @@ Item {
                         text: "limit to"
                         color: root.fgDim
                     }
-                    Rectangle {
+                    EditField {
+                        id: limitField
                         width: 60
-                        height: 24
-                        color: Theme.bgAlt
-                        radius: Theme.rounding
-                        border.width: Theme.ctrlBorder
-                        border.color: limitField.activeFocus ? root.fgAccent : Theme.border
-                        TextInput {
-                            id: limitField
-                            anchors.fill: parent
-                            anchors.margins: 4
-                            verticalAlignment: TextInput.AlignVCenter
-                            font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
-                            renderType: Text.NativeRendering
-                            color: root.fgText
-                            clip: true
-                            validator: IntValidator { bottom: 0; top: 100000 }
-                            text: String(root.limitN)
-                            onTextEdited: { root.limitN = Number(text || 0); root.recount(); }
-                            Keys.onEscapePressed: root.cancel()
-                            onAccepted: root.save()
-                        }
+                        fgText: root.fgText; fgAccent: root.fgAccent
+                        validator: IntValidator { bottom: 0; top: 100000 }
+                        text: String(root.limitN)
+                        onTextEdited: { root.limitN = Number(text || 0); root.recount(); }
+                        onEscaped: root.cancel()
+                        onAccepted: root.save()
                     }
                     PixelText {
                         anchors.verticalCenter: parent.verticalCenter
@@ -538,7 +501,7 @@ Item {
         Item {
             id: foot
             anchors { bottom: parent.bottom; left: parent.left; right: parent.right; margins: 12 }
-            height: 20
+            height: Math.max(20, root.ctrlH)
             PixelText {
                 anchors.verticalCenter: parent.verticalCenter
                 text: root.matchCount === 1 ? "1 track matches"
@@ -551,11 +514,13 @@ Item {
                 spacing: 8
                 HeaderButton {
                     label: "cancel"
+                    iconName: "dialog-cancel"
                     fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                     onClicked: root.cancel()
                 }
                 HeaderButton {
                     label: "save"
+                    iconName: "document-save"
                     lit: true
                     fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                     onClicked: root.save()
@@ -571,14 +536,15 @@ Item {
     // against the whole window rather than the row the button sits in.
     CtxMenu { id: pickMenu; anchors.fill: parent }
 
-    // A field/op menu entry. Written once because the closure over `key` is
-    // exactly the thing a for-loop gets wrong.
-    function _pick(label, key, index, isField) {
-        return { label: label,
-                 trigger: function () {
-                     if (isField) root.setField(index, key);
-                     else root.setOp(index, key);
-                 } };
+    // main.py's `[{label, key}]` vocabularies as SelectButton `options`
+    // (`[{label, value}]`). It replaces `_pick`, which built a menu entry with a
+    // closure per row: the choices are declared on the button now, so the
+    // Plasma face can be the KStyle's own ComboBox (SelectButton.qml).
+    function _opts(list) {
+        var out = [];
+        for (var i = 0; i < (list || []).length; i++)
+            out.push({ label: list[i].label, value: list[i].key });
+        return out;
     }
 
     Keys.onEscapePressed: root.cancel()
