@@ -21,6 +21,52 @@ editable custom text (*The base prompt* below). It remembers the **model
 selector** too — the model last used and an agent-suggested ranking (see *The
 model selector* below).
 
+## Two roofs
+
+**Under Plasma, chatter is a REAL KDE window** — a `QMainWindow` with a real
+menubar, toolbar and status bar, built by `pylib/kdeshell.py` (the third app to
+get one, after painter and player; read `apps/AGENTS.md` → kdeshell BEFORE
+touching any of it, and docs/DESIGN.md §7.6 for why). The Hyprland face is
+exactly what it always was.
+
+- **`qml/Root.qml` is the whole app, as an `Item`**; `qml/Main.qml` is the
+  Hyprland session's `Window` wrapper around it. Nothing Window-only lives in
+  Root — the title is published as `windowTitle`.
+- **The four header rows collapse in that session.** model, session, base
+  prompt and server become: two `QComboBox`es on the toolbar (model, session),
+  the File menu's session rows, the Settings menu's base-prompt radio set, and
+  the Tools menu's Unload/Start/Stop with the observed state in the status bar's
+  right-hand slot. They stay in the tree at zero height, not branched away, so
+  every id they carry (the three dropdowns, the prompt editor) still resolves
+  and one file still serves both faces.
+- **`actions` is the table, and it reaches no socket.** chatter registers no
+  hyprvtb buttons — the compositor draws only its title — so this table exists
+  for the KDE chrome alone (`bind_chrome(None)`, bound to `actionsChanged`).
+  `Titlebar.setButtons` is never called; adding a row here cannot change the
+  Hyprland window. `tbAction(id)` answers every id, including the `session:` and
+  `prompt:` prefixes the two radio sets are built from.
+- **Deleting a session is asked about first** — the one row that destroys
+  something of his, with no undo in the store. A constructed `QMessageBox` with
+  `DontUseNativeDialog`, shown modelessly: the static helpers segfault this
+  stack (apps/AGENTS.md).
+- **`qml/PromptBox.qml` and `qml/Chip.qml` have `+plasma` twins** (the compose
+  box as a `Frame`/`TextArea`/`Button`, the attachment chip as a flat `Button`),
+  swapped by the file selector with the same API either way.
+- **The harness renders it**, offscreen and never on his screen:
+
+  ```
+  QT_QPA_PLATFORMTHEME=kde DESK_SESSION=plasma ORACLE_CHROME=1 ORACLE_POKE=1 \
+      ORACLE_FACES=1 ORACLE_SHOT=/tmp/chatter.png \
+      oracle-qtenv python3 main.py --selftest     # then LOOK at the PNG
+  ```
+
+  `ORACLE_CHROME` prints the menus as text (a menu is not on screen until it is
+  opened, so no render can show what is in one), `ORACLE_POKE` fires a few of
+  them, `ORACLE_FACES` proves the file selector took. `--selftest` points
+  `ORACLE_CONFIG` and `ORACLE_SESSIONS` at a temp directory — poking Settings
+  calls `setPromptChoice`, which persists, and a run without that override
+  rewrote his own base prompt.
+
 ## Shape
 
 - **`main.py`** — the whole app. `Ollama` (on `QNetworkAccessManager`) is the
@@ -41,7 +87,8 @@ model selector* below).
     QML for its sources disclosure. The consequence is the same one the file
     tools already carry: **a model with no tool support rejects a request that
     carries `tools`**, so point oracle at a tool-capable model.
-- **`qml/Main.qml`** — one file: the selector row, a `KineticFlickable`
+- **`qml/Root.qml`** (`qml/Main.qml` is the Hyprland `Window` around it) — the
+  selector row, a `KineticFlickable`
   conversation area, and a prompt `TextEdit` (Enter sends, Shift+Enter newline).
   The model dropdown is inline rather than a shared `CtxMenu`, keeping this
   window's imports to the theme, `PixelText` and the `qmlcommon` Kinetic views.

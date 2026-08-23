@@ -661,9 +661,11 @@ retune all of them together (docs/DESIGN.md §2.2).
 **An app with the KDE shell below stands this bar down** — `systemBar: true`,
 and `shown` goes false while `plasma` stays true. Two menubars, one of them
 ours and wrong, is what that flag prevents. painter and player both do; the
-other apps still use this bar and are unaffected.
+other apps still use this bar and are unaffected. chatter has no `DeskMenuBar`
+at all — it never registered a titlebar button either — so there is nothing
+there to stand down.
 
-### `pylib/kdeshell.py` — under Plasma, a REAL KDE window `[painter, player]`
+### `pylib/kdeshell.py` — under Plasma, a REAL KDE window `[painter, player, chatter]`
 
 **In that session we do not imitate the system theme; we let the system theme
 paint.** `kdetheme.py` moves the palette, the font and the motion to
@@ -861,6 +863,27 @@ and prints why, the same way `bind_status` degrades — but a poll is not the fi
 taskbar entry says what player is playing from the same expression `Main.qml`
 binds under Hyprland.
 
+**An app with NO vtb bridge passes `bind_chrome(None)`** and gets bound to its
+QML root's own `actionsChanged` instead. chatter registers no titlebar buttons —
+the compositor draws only its title — so there is no `pushButtons()` to hang the
+refresh off; but `actions` is a binding over every state it reports, so the
+property's own change signal is exactly the notification. Publishing a table for
+this face WITHOUT sending it to the socket is how an app gains a menubar and
+leaves its Hyprland face untouched: `Titlebar.setButtons` is simply never called.
+
+**`shell.toolbar_widget("main", w)` puts a widget on the toolbar every window
+has**, after the action rows and before the search field's stretch. A picker with
+the daemon's whole model list in it is not a `QAction` and has no business in a
+menu, so chatter's model and session combos stand there — the same place Dolphin
+keeps its view controls. Like the search field they are re-appended after every
+rebuild, and like it they keep their original `QWidgetAction` (see `_clear_bar`).
+
+**About says the name he KNOWS it by** — `applicationDisplayName` where the app
+sets one, `applicationName` otherwise. chatter's window, desktop entry and About
+box all say chatter while its settings key, its store paths and its source
+directory stay `oracle` (apps/oracle/AGENTS.md); the About box's
+`~/nix/apps/<name>` line is the directory, so it stays the internal one.
+
 **`shell.guard_typing(widget)`** suspends the bare-key action shortcuts while
 that widget has the keyboard. A QAction shortcut is matched BEFORE the key
 reaches the focused widget, so player giving Space to play/pause — which it has
@@ -885,7 +908,9 @@ painter's `Panel` is a styled `GroupBox` there, `Spin` a `SpinBox`, `Picker` a
 `ComboBox`, `Toggle` a `CheckBox`, `TextButton` a `Button`, and `CtxMenu` /
 `ToolTipArea` the style's own popups; player's `HeaderButton` is a flat
 `Button`, `SelectButton` a `Button` with the style's indicator, `Slider` a QQC2
-`Slider` and `CtxMenu` the style's `Menu` — each with the SAME API as the file it
+`Slider` and `CtxMenu` the style's `Menu`; chatter's `PromptBox` is a `Frame`
+around a `TextArea` with a real `Button` beside it and its attachment `Chip` a
+flat `Button` with the style's remove icon — each with the SAME API as the file it
 replaces, so `Root.qml` and every panel are untouched. Each variant carries
 `property string face: "plasma"`, which is how a harness proves the swap
 actually happened. Two traps paid for already:
@@ -911,6 +936,15 @@ QT_QPA_PLATFORMTHEME=kde DESK_SESSION=plasma PAINTER_SHOT=/tmp/x.png \
     painter-qtenv python3 main.py --selftest        # then LOOK at the PNG
 PAINTER_TREE=panel   # …and/or dump item geometry + the widget palette
 ```
+
+chatter's is the same shape again (`oracle-qtenv`, `ORACLE_SHOT`/`ORACLE_TREE`/
+`ORACLE_FACES`, plus `ORACLE_CHROME` for `dump_chrome` and **`ORACLE_POKE`**,
+which TRIGGERS a few menu rows — the only check that the ids in `actions` and
+the ones `tbAction` answers are the same set, since a typo in either is silent).
+Its `--selftest` repoints `ORACLE_CONFIG`/`ORACLE_SESSIONS` at a temp directory
+before the module's store paths are computed: poking the Settings menu calls
+`setPromptChoice`, which PERSISTS, and a run without that override rewrote his
+own base prompt.
 
 player's is the same shape (`player-qtenv`, `PLAYER_SHOT`/`PLAYER_TREE`/
 `PLAYER_MENUS`/`PLAYER_DIALOG`/`PLAYER_VIEW`), plus **`PLAYER_FACES=1`**, which

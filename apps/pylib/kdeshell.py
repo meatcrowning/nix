@@ -693,6 +693,18 @@ def _build_shell_class():
             self._rebuild()
 
             bound = False
+            # AN APP WITH NO VTB BRIDGE BINDS ITS OWN TABLE. chatter registers
+            # no titlebar buttons at all (the compositor draws only its title),
+            # so there is no `pushButtons()` to hang off — but `actions` is a
+            # QML binding over every state it reports, and a QML property's own
+            # change signal is exactly the notification this face needs.
+            if titlebar is None:
+                for prop in ("actions", "tbButtons"):
+                    s2 = getattr(root, prop + "Changed", None)
+                    if s2 is not None and hasattr(s2, "connect"):
+                        s2.connect(lambda *_: self._refresh())
+                        bound = True
+                        break
             if titlebar is not None:
                 for sig in ("buttonsChanged", "footerChanged", "loadingChanged"):
                     s = getattr(titlebar, sig, None)
@@ -721,7 +733,9 @@ def _build_shell_class():
                 # Nothing failed, nothing warned. A poll cannot be as good as
                 # the signal, so it also says so.
                 print("kdeshell: %r publishes no buttonsChanged — polling the "
-                      "chrome instead. Add the signal." % type(titlebar).__name__,
+                      "chrome instead. Add the signal."
+                      % (type(titlebar).__name__ if titlebar is not None
+                         else "the QML root"),
                       file=sys.stderr)
                 from PySide6.QtCore import QTimer
                 self._chrome_timer = QTimer(self.window)
@@ -869,6 +883,15 @@ def _build_shell_class():
             acts = tb.actions()
             while acts and acts[-1].isSeparator():
                 tb.removeAction(acts.pop())
+            # ...and the WIDGETS the main bar was given, in the order they were
+            # added, after the buttons and before the stretch. chatter's model
+            # and session combos are these: a picker with a hundred rows in it
+            # is not a QAction, and it belongs on the bar rather than in a menu
+            # (apps/oracle). `_clear_bar` took them off the layout, so like the
+            # search field they are put back every rebuild.
+            for w in self._toolbar_widgets.get("main", ()):
+                self._append_widget(tb, w)
+
             # THE SEARCH FIELD SURVIVES A REBUILD. `_clear_bar` above takes it off
             # the layout, so it is re-appended here — after the
             # buttons, behind its stretch, which is what keeps it right-aligned
@@ -1050,9 +1073,15 @@ def _build_shell_class():
             `stretch` gives it the room the buttons leave — a seek bar wants
             every pixel of it, and a `QToolBar` hands that over only to a widget
             whose size policy asks.
+
+            `ident` may be `"main"`, for the toolbar every window has: a combo
+            box with the daemon's whole model list in it is not a QAction and
+            has no business in a menu, so chatter's two pickers stand there.
             """
             from PySide6.QtWidgets import QSizePolicy
-            tb = self._toolbars.get(ident)
+            # "main" is the toolbar every window has; the rest are `toolbar()`'s.
+            tb = self._ensure_toolbar() if ident == "main" \
+                else self._toolbars.get(ident)
             if tb is None:
                 raise KeyError("no such toolbar: %r" % ident)
             if stretch:
@@ -1266,7 +1295,12 @@ def _build_shell_class():
             act = self._actions.get("__about")
             if act is None:
                 from PySide6.QtWidgets import QApplication, QMessageBox
-                name = QApplication.applicationName() or "this program"
+                # The name HE knows it by, where the app publishes one: chatter
+                # presents nothing but that word, while `applicationName` stays
+                # `oracle` because the settings key and the source directory do
+                # (apps/oracle/AGENTS.md).
+                app_name = QApplication.applicationName() or "this program"
+                name = QApplication.applicationDisplayName() or app_name
 
                 def about():
                     # NOT `QMessageBox.about()`. That helper runs its own nested
@@ -1288,7 +1322,7 @@ def _build_shell_class():
                         box.setText(
                             f"<h3>{name}</h3>"
                             f"<p>Part of this desktop's own set of apps "
-                            f"(<code>~/nix/apps/{name}</code>), running its live "
+                            f"(<code>~/nix/apps/{app_name}</code>), running its live "
                             f"source.</p>"
                             f"<p>Qt {qt_version()} · style "
                             f"{QApplication.style().objectName()}</p>")

@@ -27,6 +27,23 @@
 let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
 
+  # The side-effect-free way to borrow chatter's Qt environment. Never source
+  # the `oracle` wrapper for it — that runs the BODY (apps/AGENTS.md: surfer's
+  # did exactly that and opened three tabs in his live browser). With arguments
+  # it execs them inside that environment; with none it prints `export` lines.
+  # Same shape as `player-qtenv` and `painter-qtenv`, and the harness needs it:
+  # the Plasma face loads the KDE style, the QPA theme and qqc2-desktop-style
+  # out of THIS wrapper's plugin path, none of which the raw store python has.
+  qtenvBody = pkgs.writeShellScript "oracle-qtenv-body" ''
+    if [ "$#" -eq 0 ]; then
+      for v in ''${!QT_@} ''${!QML@} ''${!NIXPKGS_QT@} LOCALE_ARCHIVE PATH; do
+        if [ -n "''${!v-}" ]; then printf 'export %s=%q\n' "$v" "''${!v}"; fi
+      done
+      exit 0
+    fi
+    exec "$@"
+  '';
+
   oracle =
     if host == "air" then
       pkgs.writeShellScriptBin "oracle" ''
@@ -40,7 +57,28 @@ let
         dontUnpack = true;
 
         nativeBuildInputs = [ pkgs.qt6.wrapQtAppsHook pkgs.makeWrapper ];
-        buildInputs = [ pyEnv pkgs.qt6.qtdeclarative ];
+        buildInputs = [
+          pyEnv
+          pkgs.qt6.qtdeclarative
+
+          # THE PLASMA FACE (apps/pylib/kdeshell.py). In a Plasma session
+          # chatter is a real QMainWindow — menubar, a toolbar carrying the
+          # model and session pickers, a status bar — whose chrome and
+          # background are drawn by the KDE style itself. That means the style
+          # has to be IN this wrapper's plugin path: it is not enough that the
+          # session has it, because a missing plugin here does not fail, it
+          # silently leaves the window in Fusion, which is exactly the
+          # odd-window-out that face exists to prevent. None of it is loaded in
+          # the Hyprland session.
+          pkgs.kdePackages.plasma-integration  # the KDE QPA theme: palette,
+                                               # fonts, icon theme, widgetStyle
+          pkgs.kdePackages.oxygen              # the style + its decoration
+          pkgs.kdePackages.breeze              # the default style, as fallback
+          pkgs.kdePackages.qqc2-desktop-style  # QQC2 rendered THROUGH QStyle
+          pkgs.kdePackages.kirigami            # which qqc2-desktop-style needs
+          pkgs.kdePackages.kiconthemes
+          pkgs.kdePackages.oxygen-icons        # the icon set the toolbar draws
+        ];
 
         dontWrapQtApps = true; # we wrap the python launcher ourselves
         installPhase = ''
@@ -48,6 +86,16 @@ let
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/oracle \
             --add-flags /home/lam/nix/apps/oracle/main.py \
+            --prefix XDG_DATA_DIRS : ${lib.concatStringsSep ":" [
+              "${pkgs.kdePackages.oxygen-icons}/share"
+              "${pkgs.kdePackages.breeze-icons}/share"
+            ]} \
+            "''${qtWrapperArgs[@]}"
+
+          # Same Qt environment, none of chatter's body:
+          #     oracle-qtenv python3 apps/oracle/main.py --selftest
+          makeWrapper ${qtenvBody} $out/bin/oracle-qtenv \
+            --prefix PATH : ${pyEnv}/bin \
             "''${qtWrapperArgs[@]}"
           runHook postInstall
         '';
