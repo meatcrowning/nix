@@ -557,19 +557,34 @@ IMAGE_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
 #: before anything could play, and `-S res:1080` keeps a 4K variant off a bubble
 #: 500px wide.
 #:
-#: NO `proto` SORT, deliberately — measured on a YouTube watch page 2026-08-23.
-#: The obvious `-S proto:https` picks the progressive mp4 (itag 18) over the HLS
-#: manifest, and that URL answers **403 to everyone but yt-dlp itself**: with
-#: yt-dlp's own User-Agent, from the same IP, seconds later, curl still got 403,
-#: and Qt's player got `ResourceError / Could not open file`. The HLS manifest
-#: `-f b` picks on its own needs no headers at all — ffprobe reads it, and the
-#: QML MediaPlayer played it to `PlayingState`, 213s of duration, first try.
-#: So the rule is: take what yt-dlp ranks best and do not second-guess the
-#: protocol. Override the binary with $ORACLE_YTDLP (the harness does, with a
-#: stub, so it never touches the network).
+#: THE LADDER, and why it exists [his, 2026-08-23: *"look into why it cant play
+#: the streams of the steve reich and phillip glass videos"*]. YouTube hands
+#: yt-dlp a URL that then **403s to every player on this machine** — measured on
+#: three watch pages that afternoon: yt-dlp's OWN downloader, ffmpeg and mpv all
+#: got 403 on the progressive mp4, so nothing chatter could have done with that
+#: URL would have played. What changes the answer is WHICH CLIENT the extraction
+#: pretends to be. Same three videos, same minute:
+#:
+#:     default / mweb / android_vr / web_embedded  ->  itag 18, HTTP 403
+#:     web / web_safari / ios                      ->  "requested format is not available"
+#:     tv                                          ->  "the page needs to be reloaded"
+#:     tv_simply                                   ->  itag 18, HTTP 206, plays
+#:
+#: So rung 1 asks the default way and PREFERS HLS (`b[protocol^=m3u8]/b`) — a
+#: manifest is the highest quality single stream YouTube offers, up to 1080p,
+#: and needs no headers — and rung 2 falls back to `tv_simply`, which is 360p
+#: but answered for every video that had failed. Each rung's stream is PROVED
+#: with a ranged GET before a card is drawn (`_video_probe`), so a dead URL
+#: costs a retry rather than a card that fails when he presses play.
+#:
+#: Override the binary with $ORACLE_YTDLP (the harness does, with a stub, so it
+#: never touches the network).
 VIDEO_RESOLVER = os.environ.get("ORACLE_YTDLP", "yt-dlp")
-VIDEO_RESOLVE_ARGS = ["-j", "--no-playlist", "--no-warnings", "-f", "b",
-                      "-S", "res:1080"]
+VIDEO_RESOLVE_BASE = ["-j", "--no-playlist", "--no-warnings", "-S", "res:1080"]
+VIDEO_RESOLVE_LADDER = [
+    ["-f", "b[protocol^=m3u8]/b"],
+    ["--extractor-args", "youtube:player_client=tv_simply", "-f", "b"],
+]
 VIDEO_RESOLVE_MS = 45000            # a resolver that hangs is a failed resolve
 
 #: A URL that plainly names a media file skips the resolver: it is HEADed, and
@@ -4508,12 +4523,12 @@ class Ollama(QObject):
     def _show_video(self, url, alt, idx, remaining, calls):
         """Resolve ONE video to a playable stream URL and hand it to QML.
 
-        Two routes, cheap one first: a URL that names a media file is HEADed,
-        and if the server agrees it is video then that URL IS the stream — no
+        Two routes, cheap one first: a URL that names a media file is PROBED,
+        and if the server serves video bytes then that URL IS the stream — no
         subprocess and no resolver. Everything else — a YouTube watch page, a
         Vimeo link, a shortener, and a media-looking URL the server would not
-        confirm — goes to yt-dlp, which is the thing that knows how to turn a
-        page into a stream.
+        serve — goes to yt-dlp, which is the thing that knows how to turn a page
+        into a stream.
 
         Nothing is downloaded on either route: the entry carries a `src` the QML
         MediaPlayer streams itself, so the picture appears at the speed of a
@@ -4526,56 +4541,96 @@ class Ollama(QObject):
             return
         self.videoStarted.emit(url)
         if VIDEO_DIRECT_RE.search(url):
-            self._video_head(url, alt, idx, remaining, calls)
+            self._video_probe(url, lambda ok, status, ctype:
+                              self._on_video_direct(ok, ctype, url, alt,
+                                                    idx, remaining, calls))
         else:
-            self._video_resolve(url, alt, idx, remaining, calls)
+            self._video_resolve(url, alt, idx, remaining, calls, 0)
 
-    def _video_head(self, url, alt, idx, remaining, calls):
-        """Ask the server what a media-looking URL actually is, without pulling
-        a byte of it. HEAD, so a 4 GB mkv costs one round trip."""
+    def _video_probe(self, url, cb):
+        """Ask the server for the FIRST KILOBYTE of a stream, and call back with
+        (ok, status, content-type).
+
+        A RANGED GET, not a HEAD — this is the check that decides whether a card
+        is drawn at all, and on googlevideo the two answer differently: measured
+        2026-08-23, the same URL gave 403 to a plain GET and 206 to a ranged one.
+        A kilobyte is enough to see the status and the type and is the whole cost
+        of knowing, before he clicks, that there is something on the other end."""
         req = QNetworkRequest(QUrl(url))
         req.setHeader(QNetworkRequest.KnownHeaders.UserAgentHeader,
                       "oracle-chatter/1.0")
-        reply = self._nam.head(req)
-        reply.finished.connect(
-            lambda: self._on_video_head(reply, url, alt, idx, remaining, calls))
+        req.setRawHeader(b"Range", b"bytes=0-1024")
+        reply = self._nam.get(req)
 
-    def _on_video_head(self, reply, url, alt, idx, remaining, calls):
-        if not self._busy:            # turn was cancelled mid-probe
+        def done():
+            status = reply.attribute(
+                QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+            ctype = str(reply.header(
+                QNetworkRequest.KnownHeaders.ContentTypeHeader)
+                or "").split(";")[0].strip().lower()
+            ok = (reply.error() == QNetworkReply.NetworkError.NoError
+                  and (status is None or int(status) in (200, 206)))
             reply.deleteLater()
+            cb(ok, int(status) if status is not None else 0, ctype)
+
+        reply.finished.connect(done)
+
+    def _on_video_direct(self, ok, ctype, url, alt, idx, remaining, calls):
+        """A media-looking URL that really serves video is the stream itself.
+        Anything else — a page wearing an .mp4 name, a refusal, a redirect to
+        HTML — falls through to the resolver rather than handing QML a source
+        that would fail silently in the decoder (docs/DESIGN.md §10)."""
+        if not self._busy:            # turn was cancelled mid-probe
             return
-        ctype = str(reply.header(QNetworkRequest.KnownHeaders.ContentTypeHeader)
-                    or "").split(";")[0].strip().lower()
-        ok = (reply.error() == QNetworkReply.NetworkError.NoError
-              and any(ctype.startswith(t) for t in VIDEO_CTYPES))
-        reply.deleteLater()
-        if ok:
+        if ok and any(ctype.startswith(t) for t in VIDEO_CTYPES):
             name = os.path.basename(QUrl(url).path()) or url
             self._video_done({"ok": True, "url": url, "src": url, "alt": alt,
                               "title": name, "w": 0, "h": 0, "duration": 0,
                               "live": False}, idx, remaining, calls)
             return
-        self._video_resolve(url, alt, idx, remaining, calls)
+        self._video_resolve(url, alt, idx, remaining, calls, 0)
 
-    def _video_resolve(self, url, alt, idx, remaining, calls):
-        """Run yt-dlp over one page and read the stream URL out of its JSON.
+    def _video_resolve(self, url, alt, idx, remaining, calls, step):
+        """Run yt-dlp over one page, read the stream URL out of its JSON, and
+        PROVE the stream answers before drawing a card for it.
+
+        `step` walks VIDEO_RESOLVE_LADDER: each rung asks YouTube a different way,
+        and a rung whose stream does not answer is not a failure, it is the next
+        rung's turn. That ladder is the whole fix for the class of failure he hit
+        on 2026-08-23 — see the constant.
 
         The async QProcess idiom the file tools use, so the window never blocks
-        on a resolve that can take seconds; a resolver that hangs is killed at
-        VIDEO_RESOLVE_MS and reported as a failure rather than leaving the turn
-        waiting on it forever."""
+        on a resolve; a resolver that hangs is killed at VIDEO_RESOLVE_MS."""
         proc = QProcess(self)
         self._procs.append(proc)
         state = {"done": False, "timeout": False}
 
-        def settle(entry):
-            if entry.get("ok") and entry.get("poster_url"):
-                self._video_poster(entry, idx, remaining, calls)
-            elif entry.get("ok"):
-                self._video_done(entry, idx, remaining, calls)
+        def nextrung(reason):
+            if step + 1 < len(VIDEO_RESOLVE_LADDER):
+                self._video_resolve(url, alt, idx, remaining, calls, step + 1)
             else:
-                self._video_failed(url, entry.get("error", "could not resolve"),
-                                   idx, remaining, calls)
+                self._video_failed(url, reason, idx, remaining, calls)
+
+        def settle(entry):
+            if not entry.get("ok"):
+                nextrung(entry.get("error", "could not resolve"))
+                return
+
+            def probed(ok, status, ctype):
+                if not self._busy:
+                    return
+                if not ok:
+                    nextrung("the site refused the stream it gave us"
+                             + (" (HTTP %d)" % status if status else "")
+                             + " — it may offer no playable single stream for "
+                               "this video right now; try a different one")
+                    return
+                if entry.get("poster_url"):
+                    self._video_poster(entry, idx, remaining, calls)
+                else:
+                    self._video_done(entry, idx, remaining, calls)
+
+            self._video_probe(entry["src"], probed)
 
         def finished(*_):
             if state["done"]:
@@ -4590,6 +4645,8 @@ class Ollama(QObject):
             except RuntimeError:
                 return
             proc.deleteLater()
+            if not self._busy:        # turn was cancelled mid-resolve
+                return
             if state["timeout"]:
                 settle({"ok": False, "error": "resolving that link timed out "
                         "after %d seconds" % (VIDEO_RESOLVE_MS // 1000)})
@@ -4621,7 +4678,8 @@ class Ollama(QObject):
         proc.finished.connect(finished)
         proc.errorOccurred.connect(failed)
         QTimer.singleShot(VIDEO_RESOLVE_MS, expire)
-        proc.start(VIDEO_RESOLVER, VIDEO_RESOLVE_ARGS + ["--", url])
+        proc.start(VIDEO_RESOLVER,
+                   VIDEO_RESOLVE_BASE + VIDEO_RESOLVE_LADDER[step] + ["--", url])
 
     @staticmethod
     def _video_entry(out, err, rc, url, alt):
@@ -4691,9 +4749,10 @@ class Ollama(QObject):
         reply.finished.connect(done)
 
     def _video_done(self, entry, idx, remaining, calls):
-        """Hand the card to QML and the outcome to the model. The model is told
-        it does NOT autoplay, so it says the video is there instead of narrating
-        it as if he had already watched it."""
+        """Hand the card to QML and the outcome to the model. The result says the
+        video is SHOWN — like fetch_image's, and for the same reason: a note that
+        asks the model to announce it buys a whole extra paragraph saying the
+        video is above, which is a second message about a thing he can see."""
         entry.pop("poster_url", None)
         self.videoResult.emit(json.dumps(entry))
         if idx is None:
@@ -4701,9 +4760,9 @@ class Ollama(QObject):
         result = {"ok": True, "url": entry.get("url"),
                   "title": entry.get("title") or "",
                   "duration_seconds": entry.get("duration") or 0,
-                  "note": ("The video is now in the chat with its title and a "
-                           "play button. It does not start on its own — tell "
-                           "him it is there.")}
+                  "note": ("The video is now playable inline in the chat, with "
+                           "its title under it. He can see it, so do not "
+                           "announce it or describe it unless he asks.")}
         remaining["sink"][idx] = {"role": "tool", "tool_name": "show_video",
                                    "content": json.dumps(result)}
         self._tool_done(remaining, calls)

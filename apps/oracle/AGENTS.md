@@ -1145,15 +1145,31 @@ would not confirm — goes to **yt-dlp**, async on the file tools' `QProcess`
 idiom, killed at `VIDEO_RESOLVE_MS` (45s) so a hung resolver fails the tool
 instead of stranding the turn.
 
-**`-f b` and NO protocol sort**, measured on a YouTube watch page 2026-08-23.
-`-f b` asks for the best SINGLE file (a video+audio pair would have to be
-downloaded and merged before anything could play). The tempting `-S proto:https`
-picks the progressive mp4 (itag 18) over the HLS manifest — and that URL answers
-**403 to everyone but yt-dlp**: with yt-dlp's own User-Agent, same IP, seconds
-later, curl still got 403 and Qt's player got `ResourceError / Could not open
-file`. The manifest `-f b` chooses on its own needs no headers: ffprobe reads
-it, and the real player reached `PlayingState` with 213s of duration first try.
-Take what yt-dlp ranks best; do not second-guess the protocol.
+**A LADDER, and every rung is PROVED before a card is drawn.** `-f b` asks for
+the best SINGLE file (a video+audio pair would have to be downloaded and merged
+before anything could play). What that returns is not reliably playable, and the
+failure is not chatter's to fix by choosing formats: on 2026-08-23 three YouTube
+watch pages resolved to a progressive mp4 that answered **403 to every player on
+this machine** — yt-dlp's own downloader, ffmpeg and mpv all refused, so no
+source chatter could have handed QML would have played. What changes the answer
+is which CLIENT the extraction pretends to be. The same three videos, the same
+minute:
+
+| `player_client` | result |
+|---|---|
+| default / mweb / android_vr / web_embedded | itag 18, **HTTP 403** |
+| web / web_safari / ios | "requested format is not available" |
+| tv | "the page needs to be reloaded" |
+| **tv_simply** | itag 18, **HTTP 206**, plays |
+
+So rung 1 is the default extraction PREFERRING HLS (`b[protocol^=m3u8]/b`) — a
+manifest is the best single stream YouTube offers, up to 1080p, and needs no
+headers — and rung 2 is `tv_simply`, which is only 360p but answered for every
+video that had failed. `_video_probe` proves each rung's stream with a RANGED
+GET (not a HEAD: googlevideo gave 403 to a plain GET and 206 to a ranged one on
+the same URL) before the card exists, so a dead stream costs a retry instead of
+a card that fails when he presses play — and when no rung serves, the reply says
+so with the status code instead of drawing one.
 
 **It never autoplays, and the decoder is built on the click.** The card sits on
 its poster under a drawn play marker (the staircase of §2.3, not a `▶` two of
@@ -1166,14 +1182,35 @@ six. The transport strip (elapsed clock in a fixed slot, scrub track, duration)
 sits INSIDE the artwork on hover, seeks with the pointer and no easing (§6.4),
 and is absent for a live stream, which has nothing to scrub.
 
+**Fullscreen BORROWS the player** [his, 2026-08-23]. The strip's right-hand mark
+— four corner brackets, drawn, turning inward when it is already full — throws
+the video onto `VideoStage.qml`, the lightbox's counterpart for a moving
+picture: a scene-level overlay in `Root.qml` (z:290, under the image lightbox),
+Escape or a click on the ground to leave, space or a click on the picture to
+pause. It builds NO second player. A `MediaPlayer`'s `videoOutput` is only where
+its frames land, so the stage points that at its own surface and hands it back
+on the way out — the stream neither restarts nor re-buffers nor loses its
+position, which a second player and a reparented card would each cost. The strip
+itself is one file (`VideoTransport.qml`) worn by both, because the scrub is
+exactly the control that must not differ between them (§0.1).
+
 **Failure is drawn** (docs/DESIGN.md §10): a non-http URL is refused before any
 request, a resolve that fails reports yt-dlp's own last line, a resolve that
 produced no single stream says so, a missing yt-dlp names itself and the limit
 it leaves ("only a DIRECT video file URL"), and a stream the decoder rejects
 puts `can't play this stream` on the card rather than leaving a black box.
 Each reaches both audiences — a crit line in the chat, an error the model can
-act on — and the model's success result says the video does NOT start on its
-own, so it tells him it is there instead of narrating it as watched.
+act on.
+
+**The success result says the video is SHOWN, not "tell him about it"** — the
+first wording asked the model to announce it, and it did: a turn on 2026-08-23
+ended with the card and its sentence in the round-2 bubble and then a whole
+extra bubble saying the video "is now in the chat above, ready to press play"
+[his: *"why … it produced a video and then sent another message i dont
+understand"*]. Two rules met badly — one bubble per round, and a note that
+commissions a paragraph about something he can already see — so the note now
+reads like `fetch_image`'s: he can see it, do not announce or describe it unless
+he asks.
 
 **Packaging**: `home/prog/oracle.nix` adds `qt6.qtmultimedia` (the QML
 MediaPlayer/VideoOutput and its FFmpeg backend), puts `yt-dlp` on the wrapper's

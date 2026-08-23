@@ -93,6 +93,10 @@ class H(http.server.BaseHTTPRequestHandler):
             self._send("image/png", PNG)
         elif self.path.startswith("/clip.mp4"):
             self._send("video/mp4", b"\x00" * 16)
+        elif self.path.startswith("/liar.mp4"):
+            self._send("text/html", b"<html>not a video</html>")
+        elif self.path.startswith("/refused"):
+            self.send_error(403)     # what googlevideo does to a dead stream
         else:
             self.send_error(404)
 
@@ -152,7 +156,7 @@ check("a confirmed video URL is the stream itself",
 
 # 3. a watch page: resolved, with title, duration and poster frame
 INFO = {"title": "A Title", "duration": 213.0, "width": 640, "height": 360,
-        "url": "https://stream.test/video.mp4",
+        "url": BASE + "/clip.mp4",          # proved with a ranged GET before use
         "thumbnail": BASE + "/poster.png", "is_live": False}
 stub("cat <<'EOF'\n" + json.dumps(INFO) + "\nEOF")
 e = run("https://www.youtube.test/watch?v=abc", "")
@@ -170,7 +174,7 @@ check("...and the resolver's raw fields do not leak to QML",
 # 4. a media-looking URL that is really a page falls through to the resolver
 stub("cat <<'EOF'\n" + json.dumps(INFO) + "\nEOF")
 e = run(BASE + "/liar.mp4")
-check("a media-looking URL that HEADs as a page goes to the resolver",
+check("a media-looking URL that serves a PAGE goes to the resolver",
       e is not None and e.get("ok") is True and e.get("src") == INFO["url"],
       json.dumps(e)[:160])
 
@@ -194,6 +198,27 @@ check("a missing resolver says so and names the limit",
       e is not None and e.get("ok") is False
       and "not installed" in e.get("error", ""), json.dumps(e)[:200])
 
+# 8. THE LADDER: rung 1 resolves a stream that 403s, rung 2 resolves one that
+#    answers — and the card is drawn from rung 2. This is the failure he hit on
+#    2026-08-23 (three YouTube videos whose stream 403'd every player on the
+#    machine, playable only via player_client=tv_simply).
+DEAD = dict(INFO, url=BASE + "/refused", thumbnail="")
+LIVE = dict(INFO, url=BASE + "/clip.mp4", thumbnail="")
+stub("if echo \"$@\" | grep -q tv_simply; then\n"
+     "cat <<'EOF'\n" + json.dumps(LIVE) + "\nEOF\n"
+     "else\ncat <<'EOF'\n" + json.dumps(DEAD) + "\nEOF\nfi")
+e = run("https://www.youtube.test/watch?v=gated", "", ms=12000)
+check("a stream that 403s falls through to the next rung",
+      e is not None and e.get("ok") is True and e.get("src") == LIVE["url"],
+      json.dumps(e)[:160])
+
+# 9. ...and when EVERY rung is refused, the card is not drawn at all
+stub("cat <<'EOF'\n" + json.dumps(DEAD) + "\nEOF")
+e = run("https://www.youtube.test/watch?v=dead", "", ms=12000)
+check("a video no rung can serve fails honestly, with the status",
+      e is not None and e.get("ok") is False and "403" in e.get("error", ""),
+      json.dumps(e)[:200])
+
 # ---- the card itself builds and binds -------------------------------------
 # In a real (offscreen) Window: a Column lays out on POLISH, and an item with no
 # window is never polished — measured here, every height reads 0 without one.
@@ -208,6 +233,23 @@ Window {
     color: Theme.bg
     property var entries: []
     property alias deck: loader.item
+    property alias stage: stageLoader.item
+    // A stand-in for a MediaPlayer: the stage only ever reads playbackState and
+    // MOVES videoOutput, so this is the whole surface it touches.
+    QtObject {
+        id: fakePlayer
+        property var videoOutput: null
+        property int playbackState: 0
+        property real position: 0
+        property real duration: 0
+    }
+    Item { id: fakeOut }
+    Loader { id: stageLoader; anchors.fill: parent; source: "%s/VideoStage.qml" }
+    function goFull() { stageLoader.item.open(fakePlayer, fakeOut, null); }
+    function leaveFull() { stageLoader.item.close(); }
+    function outIsStage() { return fakePlayer.videoOutput !== null
+                                   && fakePlayer.videoOutput !== fakeOut; }
+    function outIsHome() { return fakePlayer.videoOutput === fakeOut; }
     Loader {
         id: loader
         objectName: "loader"
@@ -217,7 +259,7 @@ Window {
         onLoaded: item.entries = Qt.binding(function () { return entries })
     }
 }
-''' % QMLDIR, encoding="utf-8")
+''' % (QMLDIR, QMLDIR), encoding="utf-8")
 
 engine = QQmlApplicationEngine()
 ctx = engine.rootContext()
@@ -258,6 +300,20 @@ if roots:
     h = deck.property("height") if deck else 0
     # one 16:9 card at 560 wide (315) + its caption + the failure line
     check("a card and a failure line both lay out", h > 315, "height=%s" % h)
+    # ---- fullscreen: the stage BORROWS the player and hands it back --------
+    from PySide6.QtCore import QMetaObject                          # noqa: E402
+    QMetaObject.invokeMethod(win, "goFull")
+    app.processEvents()
+    stage = win.property("stage")
+    check("the fullscreen stage opens and takes the picture",
+          stage is not None and stage.property("opened") is True,
+          str(stage.property("opened") if stage else None))
+    QMetaObject.invokeMethod(win, "leaveFull")
+    app.processEvents()
+    check("...and closing hands the player back to the card",
+          stage is not None and stage.property("opened") is False
+          and stage.property("playing") is None)
+
     if "--shot" in ARGV:
         out = Path(os.environ.get("TMPDIR", "/tmp")) / "video-card.png"
         win.grabWindow().save(str(out))

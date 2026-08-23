@@ -2486,6 +2486,7 @@ Item {
 
                                         VideoDeck {
                                             width: videoCol.width
+                                            stage: videoStage
                                             entries: {
                                                 try { return JSON.parse(videos); }
                                                 catch (e) { return []; }
@@ -2666,6 +2667,17 @@ Item {
     // sends it.
     Lightbox {
         id: lightbox
+        onClosed: replyFlick.forceActiveFocus()
+    }
+
+    // ------------------------------------------------------- the video stage
+    // A video from a reply, thrown full-window [his, 2026-08-23: "can you add a
+    // fullscreen button to videos?"]. It borrows the card's player rather than
+    // starting a second one, so the picture moves and the stream does not —
+    // VideoStage.qml. Under the lightbox, since a picture opened from a reply
+    // is the more recent act when both are up.
+    VideoStage {
+        id: videoStage
         onClosed: replyFlick.forceActiveFocus()
     }
 
