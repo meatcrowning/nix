@@ -618,7 +618,8 @@ Item {
 
         PixelText {
             id: modelLabel
-            anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+            anchors { right: picker.left; rightMargin: 10
+                      verticalCenter: parent.verticalCenter }
             text: "model"
             color: Theme.textDim
         }
@@ -626,11 +627,17 @@ Item {
         // The selector: a boxed control showing the current model, which opens
         // an inline list of the daemon's models under itself (docs/DESIGN.md
         // §7.2 — no combo boxes on this desktop).
+        //
+        // It HUGS the window's right edge with its label beside it [his,
+        // 2026-08-22], rather than stretching the row: the width is the model
+        // name's own laid-out width plus the caret, capped at 60% of the row so
+        // a long name elides instead of pushing the label off the left.
         Rectangle {
             id: picker
-            anchors { left: modelLabel.right; leftMargin: 10
-                      right: parent.right
+            anchors { right: parent.right
                       verticalCenter: parent.verticalCenter }
+            width: Math.min(Math.max(120, top.width * 0.6),
+                            pickerText.implicitWidth + caret.width + 24)
             height: 24
             color: pickerMouse.containsMouse ? Theme.highlight : Theme.bgAlt
             radius: Theme.rounding
@@ -640,6 +647,7 @@ Item {
             property bool open: false
 
             PixelText {
+                id: pickerText
                 anchors { left: parent.left; leftMargin: 6
                           right: caret.left; rightMargin: 6
                           verticalCenter: parent.verticalCenter }
@@ -684,7 +692,8 @@ Item {
 
         PixelText {
             id: sessionLabel
-            anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+            anchors { right: sessionPicker.left; rightMargin: 10
+                      verticalCenter: parent.verticalCenter }
             text: "session"
             color: Theme.textDim
         }
@@ -713,11 +722,13 @@ Item {
             }
         }
 
+        // Same as the model picker: hugs the right, beside "+ new".
         Rectangle {
             id: sessionPicker
-            anchors { left: sessionLabel.right; leftMargin: 10
-                      right: newBtn.left; rightMargin: 10
+            anchors { right: newBtn.left; rightMargin: 10
                       verticalCenter: parent.verticalCenter }
+            width: Math.min(Math.max(120, sessionRow.width * 0.6),
+                            sessionText.implicitWidth + sessionCaret.width + 24)
             height: 24
             color: sessionMouse.containsMouse ? Theme.highlight : Theme.bgAlt
             radius: Theme.rounding
@@ -727,6 +738,7 @@ Item {
             property bool open: false
 
             PixelText {
+                id: sessionText
                 anchors { left: parent.left; leftMargin: 6
                           right: sessionCaret.left; rightMargin: 6
                           verticalCenter: parent.verticalCenter }
@@ -1498,7 +1510,7 @@ Item {
                     delegate: Item {
                         id: turn
                         width: replyCol.width
-                        height: turnCol.height
+                        height: turnStack.height
 
                         // The disclosure's open/closed is VIEW state, per row, and
                         // it defaults CLOSED: reasoning is collapsed until he opens
@@ -1515,12 +1527,45 @@ Item {
                         property bool toolUserSet: false
                         property bool toolUserOpen: false
 
-                        Column {
-                            id: turnCol
-                            width: parent.width
-                            spacing: 4
+                        // ---- the bubble --------------------------------
+                        // A turn is a BUBBLE, on the speaker's own side of the
+                        // column: his prompts sit right in an accent-tinted
+                        // slab, the model's answers left on `bgAlt`
+                        // [his, 2026-08-22]. Both HUG their text — the width is
+                        // the longest laid-out line, capped at `bubbleMax` —
+                        // which is what makes a two-word answer read as a two-
+                        // word answer instead of a full-width band.
+                        //
+                        // The corner is `Theme.rounding`, the desktop-wide
+                        // radius (docs/DESIGN.md §4), not a shape invented here:
+                        // at the shipped 0 these are square slabs, and one
+                        // Settings slider rounds every corner on the desktop
+                        // including these. No new colours either — the fills are
+                        // alphas of `accent`/`crit` over the existing tokens,
+                        // the same idiom the drop overlay already uses (§3).
+                        readonly property real pad: 8
+                        readonly property real bubbleMax:
+                            Math.max(160, replyCol.width * 0.82)
+                        readonly property real innerW: bubbleMax - 2 * pad
+                        // A row carrying a picture takes the full cap: an image
+                        // wraps to the bubble, and hugging a two-word caption
+                        // would fold it into a column two words wide. The
+                        // disclosures no longer count — they sit OUTSIDE the
+                        // bubble now [his, 2026-08-22].
+                        readonly property bool wide:
+                            !isUser && (images !== "[]" || imagesActive)
 
+                        Column {
+                            id: turnStack
+                            width: parent.width
+                            spacing: 2
+
+                            // The speaker's name, OUTSIDE the bubble and on its
+                            // side — a caption, not a line of the message
+                            // (§9.1: subordinated, one step dim).
                             PixelText {
+                                id: whoText
+                                x: isUser ? turnStack.width - width : 0
                                 text: who
                                 color: Theme.textDim
                             }
@@ -1847,130 +1892,184 @@ Item {
                                 }
                             }
 
-                            // The turn's text. User prompts and error lines stay
-                            // verbatim on the plain SelectableText (PlainText —
-                            // never interpreted, the shared guard — but read-only
-                            // selectable so he can copy them). A model row with no
-                            // content yet shows "…" only when nothing else is
-                            // speaking (no reasoning block carrying the wait); that
-                            // placeholder is not selectable content, so it stays a
-                            // plain PixelText.
-                            SelectableText {
-                                width: parent.width
-                                visible: (isUser || isError) && body !== ""
-                                text: body
-                                color: isError ? Theme.crit : Theme.text
-                            }
-                            PixelText {
-                                width: parent.width
-                                wrapMode: Text.Wrap
-                                visible: !isUser && !isError && body === "" && streaming
-                                         && thinking === ""
-                                text: "…"
-                                color: Theme.text
-                            }
+                            Rectangle {
+                                id: bubble
+                                // Nothing to box when the turn has no text yet —
+                                // the reasoning above carries the wait, so an
+                                // empty slab under it would be a second, blank
+                                // bubble (§10 — never a control with no reading).
+                                visible: body !== "" || imageCol.visible
+                                         || (!isUser && streaming && thinking === "")
+                                x: isUser ? turnStack.width - width : 0
+                                width: turn.wide ? turn.bubbleMax
+                                       : Math.min(turn.bubbleMax,
+                                                  Math.max(72, turnCol.natural + 2 * turn.pad))
+                                height: visible ? turnCol.height + 2 * turn.pad : 0
+                                // A BUTTON, not a tinted slab [his, 2026-08-22]:
+                                // the desktop's own button spec — `Theme.bg` on
+                                // the `bgAlt` reply panel, `Theme.ctrlBorder` at
+                                // `Theme.border`, `Theme.rounding` (docs/DESIGN.md
+                                // §4, §7.2). No hover fill: the log is selectable
+                                // text and nothing here is clickable, and a fill
+                                // that answers the pointer would promise a press
+                                // that never happens (§10.2).
+                                radius: Theme.rounding
+                                border.width: Theme.ctrlBorder
+                                color: Theme.bg
+                                border.color: isError ? Theme.crit
+                                              : (isUser ? Theme.accent : Theme.border)
 
-                            // The model's answer, rendered as Markdown (the reply
-                            // comes back in it — docs/DESIGN.md §2). Only the
-                            // assistant body; user text and errors above stay plain.
-                            //
-                            // A markdown IMAGE (`![alt](url)`) is DEMOTED to a plain
-                            // link (`[alt](url)`) first: Text.MarkdownText would draw
-                            // it at its intrinsic pixel size — overflowing the column
-                            // — and fetch the URL on render (the risk MarkdownText.qml
-                            // itself flags). A picture the model wants shown comes
-                            // through fetch_image and the capped `images` delegate
-                            // below, exactly ONCE; a stray `![](…)` in the prose must
-                            // not become a second, giant, uncontrolled copy. As a link
-                            // the URL is still there and clickable (docs/DESIGN.md §10
-                            // — nothing hidden), just not auto-fetched or upscaled.
-                            MarkdownText {
-                                width: parent.width
-                                visible: !isUser && !isError && body !== ""
-                                text: body.replace(/!\[([^\]]*)\]\(/g, "[$1](")
-                            }
+                                Column {
+                                    id: turnCol
+                                    x: turn.pad
+                                    y: turn.pad
+                                    // A FIXED wrapping width, not the bubble's:
+                                    // the bubble hugs `natural`, which is measured
+                                    // from these items, so reading it back here
+                                    // would be a binding loop. Text is left-aligned
+                                    // and never paints past what it laid out.
+                                    width: turn.innerW
+                                    spacing: 4
 
-                            // Images the model fetched from the web with
-                            // fetch_image, rendered INLINE — the one place a reply
-                            // becomes a picture. Each entry (the Python↔QML
-                            // contract) is either a fetched image, framed like
-                            // every surface here (1px border, Theme.rounding,
-                            // never upscaled past its own size), with the model's
-                            // caption under it, or an honest crit line for a fetch
-                            // that failed or a file that will not load
-                            // (docs/DESIGN.md §10 — surfaced, never vanished).
-                            Column {
-                                id: imageCol
-                                width: parent.width
-                                spacing: 6
-                                visible: !isUser && (images !== "[]" || imagesActive)
+                                    // The longest line any of this turn's text
+                                    // actually laid out — `contentWidth` is the
+                                    // post-wrap measurement, and a hidden item
+                                    // reports 0, so this is the max over whichever
+                                    // of them is showing.
+                                    readonly property real natural:
+                                        Math.max(plainBody.contentWidth,
+                                                 mdBody.contentWidth,
+                                                 whoText.contentWidth)
 
-                                Repeater {
-                                    model: {
-                                        try { return JSON.parse(images); }
-                                        catch (e) { return []; }
+
+                                    // The turn's text. User prompts and error lines stay
+                                    // verbatim on the plain SelectableText (PlainText —
+                                    // never interpreted, the shared guard — but read-only
+                                    // selectable so he can copy them). A model row with no
+                                    // content yet shows "…" only when nothing else is
+                                    // speaking (no reasoning block carrying the wait); that
+                                    // placeholder is not selectable content, so it stays a
+                                    // plain PixelText.
+                                    SelectableText {
+                                        id: plainBody
+                                        width: parent.width
+                                        visible: (isUser || isError) && body !== ""
+                                        text: body
+                                        color: isError ? Theme.crit : Theme.text
                                     }
-                                    delegate: Column {
-                                        width: imageCol.width
-                                        spacing: 2
+                                    PixelText {
+                                        width: parent.width
+                                        wrapMode: Text.Wrap
+                                        visible: !isUser && !isError && body === "" && streaming
+                                                 && thinking === ""
+                                        text: "…"
+                                        color: Theme.text
+                                    }
 
-                                        Rectangle {
-                                            visible: !!modelData.ok
-                                            width: pic.width + 2
-                                            height: pic.height + 2
-                                            color: Theme.bgAlt
-                                            radius: Theme.rounding
-                                            border.width: Theme.ctrlBorder
-                                            border.color: Theme.border
-                                            Image {
-                                                id: pic
-                                                x: 1; y: 1
-                                                // sourceSize.width caps the decode
-                                                // to the column and, set alone,
-                                                // scales height by the real aspect
-                                                // — and never upscales past native.
-                                                readonly property real natW:
-                                                    (modelData.w && modelData.w > 0)
-                                                    ? modelData.w : (imageCol.width - 2)
-                                                sourceSize.width:
-                                                    Math.min(imageCol.width - 2, natW)
-                                                fillMode: Image.PreserveAspectFit
-                                                asynchronous: true
-                                                source: modelData.ok
-                                                        ? "file://" + modelData.path : ""
+                                    // The model's answer, rendered as Markdown (the reply
+                                    // comes back in it — docs/DESIGN.md §2). Only the
+                                    // assistant body; user text and errors above stay plain.
+                                    //
+                                    // A markdown IMAGE (`![alt](url)`) is DEMOTED to a plain
+                                    // link (`[alt](url)`) first: Text.MarkdownText would draw
+                                    // it at its intrinsic pixel size — overflowing the column
+                                    // — and fetch the URL on render (the risk MarkdownText.qml
+                                    // itself flags). A picture the model wants shown comes
+                                    // through fetch_image and the capped `images` delegate
+                                    // below, exactly ONCE; a stray `![](…)` in the prose must
+                                    // not become a second, giant, uncontrolled copy. As a link
+                                    // the URL is still there and clickable (docs/DESIGN.md §10
+                                    // — nothing hidden), just not auto-fetched or upscaled.
+                                    MarkdownText {
+                                        id: mdBody
+                                        width: parent.width
+                                        visible: !isUser && !isError && body !== ""
+                                        text: body.replace(/!\[([^\]]*)\]\(/g, "[$1](")
+                                    }
+
+                                    // Images the model fetched from the web with
+                                    // fetch_image, rendered INLINE — the one place a reply
+                                    // becomes a picture. Each entry (the Python↔QML
+                                    // contract) is either a fetched image, framed like
+                                    // every surface here (1px border, Theme.rounding,
+                                    // never upscaled past its own size), with the model's
+                                    // caption under it, or an honest crit line for a fetch
+                                    // that failed or a file that will not load
+                                    // (docs/DESIGN.md §10 — surfaced, never vanished).
+                                    Column {
+                                        id: imageCol
+                                        width: parent.width
+                                        spacing: 6
+                                        visible: !isUser && (images !== "[]" || imagesActive)
+
+                                        Repeater {
+                                            model: {
+                                                try { return JSON.parse(images); }
+                                                catch (e) { return []; }
+                                            }
+                                            delegate: Column {
+                                                width: imageCol.width
+                                                spacing: 2
+
+                                                Rectangle {
+                                                    visible: !!modelData.ok
+                                                    width: pic.width + 2
+                                                    height: pic.height + 2
+                                                    color: Theme.bgAlt
+                                                    radius: Theme.rounding
+                                                    border.width: Theme.ctrlBorder
+                                                    border.color: Theme.border
+                                                    Image {
+                                                        id: pic
+                                                        x: 1; y: 1
+                                                        // sourceSize.width caps the decode
+                                                        // to the column and, set alone,
+                                                        // scales height by the real aspect
+                                                        // — and never upscales past native.
+                                                        readonly property real natW:
+                                                            (modelData.w && modelData.w > 0)
+                                                            ? modelData.w : (imageCol.width - 2)
+                                                        sourceSize.width:
+                                                            Math.min(imageCol.width - 2, natW)
+                                                        fillMode: Image.PreserveAspectFit
+                                                        asynchronous: true
+                                                        source: modelData.ok
+                                                                ? "file://" + modelData.path : ""
+                                                    }
+                                                }
+                                                // The caption (the model's alt text),
+                                                // subordinated (§9.1 — one step dim).
+                                                PixelText {
+                                                    visible: !!modelData.ok
+                                                             && !!modelData.alt && modelData.alt !== ""
+                                                    width: imageCol.width
+                                                    wrapMode: Text.Wrap
+                                                    text: modelData.alt || ""
+                                                    color: Theme.textDim
+                                                }
+                                                // The honest failure: a refused/failed
+                                                // fetch, or a saved file that will not
+                                                // load (§10 — say so, never a blank).
+                                                PixelText {
+                                                    visible: !modelData.ok || pic.status === Image.Error
+                                                    width: imageCol.width
+                                                    wrapMode: Text.Wrap
+                                                    text: "image: "
+                                                          + (modelData.error ? modelData.error
+                                                                             : "could not display")
+                                                          + (modelData.url ? " (" + modelData.url + ")" : "")
+                                                    color: Theme.crit
+                                                }
                                             }
                                         }
-                                        // The caption (the model's alt text),
-                                        // subordinated (§9.1 — one step dim).
+
+                                        // A fetch still in flight (§10 — the wait is shown).
                                         PixelText {
-                                            visible: !!modelData.ok
-                                                     && !!modelData.alt && modelData.alt !== ""
-                                            width: imageCol.width
-                                            wrapMode: Text.Wrap
-                                            text: modelData.alt || ""
-                                            color: Theme.textDim
-                                        }
-                                        // The honest failure: a refused/failed
-                                        // fetch, or a saved file that will not
-                                        // load (§10 — say so, never a blank).
-                                        PixelText {
-                                            visible: !modelData.ok || pic.status === Image.Error
-                                            width: imageCol.width
-                                            wrapMode: Text.Wrap
-                                            text: "image: "
-                                                  + (modelData.error ? modelData.error
-                                                                     : "could not display")
-                                                  + (modelData.url ? " (" + modelData.url + ")" : "")
-                                            color: Theme.crit
+                                            visible: imagesActive
+                                            text: "fetching an image…"
+                                            color: Theme.text
                                         }
                                     }
-                                }
-
-                                // A fetch still in flight (§10 — the wait is shown).
-                                PixelText {
-                                    visible: imagesActive
-                                    text: "fetching an image…"
-                                    color: Theme.text
                                 }
                             }
                         }
@@ -2057,7 +2156,10 @@ Item {
     PromptBox {
         id: promptBox
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom
-                  leftMargin: 10; rightMargin: 10; bottomMargin: 10 }
+                  leftMargin: 10; rightMargin: 10
+                  // Under Plasma the status bar is already a band below this;
+                  // our own 10px on top of it read as a gap [his, 2026-08-22].
+                  bottomMargin: win.plasma ? 4 : 10 }
         busy: Ollama.busy
         armed: win.canSend
         onSubmitted: win.send()

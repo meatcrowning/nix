@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""oracle's jailed Python code runner — the muscle behind its run_python tool.
+"""oracle's Python code runner — the muscle behind its run_python tool.
 
 oracle offers the local ollama model a `run_python` tool (see apps/oracle/main.py
 `EXEC_TOOL`) so it can actually RUN code instead of only reasoning about it — the
@@ -7,22 +7,23 @@ gap gemma4:e4b named honestly ("no code-execution env"). Executing model-written
 code is a security decision he took deliberately (the board question of
 2026-08-11); this script is where that runs, and it is the jail:
 
-  * a WRITE root as argv[1] — the same `~/.local/share/oracle/sandbox` the file
-    tools use — is the process's WORKING DIRECTORY, so relative paths the code
-    writes stay inside the sandbox;
-  * NETWORK is cut with an unprivileged network+user namespace (`unshare -rn`)
-    when the host allows it, so the code cannot reach the internet or a
-    loopback backend;
+  * a SCRATCH root as argv[1] — `~/.local/share/oracle/sandbox` — is the
+    process's default WORKING DIRECTORY, so relative paths the code writes land
+    somewhere tidy. A request may name its own `cwd` instead;
   * WALL TIME, CPU, ADDRESS SPACE, FILE SIZE and OUTPUT are all capped, so a
     runaway loop, a fork bomb of allocations, a 10 GB write or a flood of prints
     cannot wedge the host or blow the model's context window.
 
-It is NOT a container. The code runs as the user, so it can still READ the
-user's files (exactly what the read-only file tools already grant) and, with an
-absolute path, write outside the working directory. The confinement that IS hard
-here — no network, bounded resources, sandbox as cwd — is real; the honesty note
-in main.py's EXEC_TOOL and CAPABILITY_NOTE says so plainly rather than implying a
-container that is not there (docs/DESIGN.md §10).
+**This is NOT a jail, since 2026-08-22** ("i dont really want them to be
+[sandboxed]"). The code runs as the user with the network up, so it can read,
+write and delete whatever the user can and reach whatever the user can reach —
+the same reach the file tools now have, which is the point. Pass `--no-net` as
+argv[2] to put the old network cut back (an unprivileged net+user namespace via
+`unshare -rn`, reported in `network_isolated`); main.py sends it when
+`ORACLE_EXEC_NET=0`. What remains hard either way is the RESOURCE caps, which
+protect this desktop from a runaway program rather than from its author, and
+main.py's EXEC_TOOL / CAPABILITY_NOTE describe exactly this (docs/DESIGN.md
+§10 — never overstate a jail, in either direction).
 
 WHERE it runs: oracle's compute is ollama on `top`, so this runs there too —
 locally on `top`, over the SAME ssh master tools/ollama-tunnel.sh holds open on
@@ -31,7 +32,7 @@ executors. Pure stdlib on purpose, so top's system python3 runs it over ssh with
 nothing installed.
 
 PROTOCOL: one JSON request object on stdin, one JSON result object on stdout.
-    {"code": "print(2**10)", "timeout": 5, "stdin": ""}
+    {"code": "print(2**10)", "timeout": 5, "stdin": "", "cwd": "/home/lam"}
     -> {"ok": true, "stdout": "1024\n", "stderr": "", "exit_code": 0,
         "timed_out": false, "network_isolated": true, ...}
 An error in the HARNESS (bad request, unwritable sandbox) is `{"error": "..."}`
@@ -109,10 +110,11 @@ def main():
     if len(sys.argv) < 2:
         fail("no sandbox root given")
     root = os.path.realpath(os.path.expanduser(sys.argv[1]))
+    no_net = "--no-net" in sys.argv[2:]
     try:
-        os.makedirs(root, exist_ok=True)      # a fresh top has no sandbox yet
+        os.makedirs(root, exist_ok=True)      # a fresh top has no scratch dir
     except OSError as e:
-        fail("cannot create sandbox root: " + str(e))
+        fail("cannot create scratch root: " + str(e))
 
     try:
         req = json.loads(sys.stdin.read() or "{}")
@@ -140,17 +142,30 @@ def main():
         timeout = TIMEOUT_DEFAULT
     timeout = max(1.0, min(timeout, TIMEOUT_MAX))
 
-    # The program goes to a temp file INSIDE the sandbox (so it too lives in the
-    # jail), run with -I (isolated: ignore env/user-site, reproducible).
+    # Where the program runs. The scratch root by default; a caller-named `cwd`
+    # (absolute, or relative to that root) otherwise — the code may write
+    # anywhere the user can, so it may also RUN anywhere the user can.
+    cwd = root
+    want = req.get("cwd", "")
+    if isinstance(want, str) and want.strip():
+        cand = os.path.expanduser(want.strip())
+        cand = cand if os.path.isabs(cand) else os.path.join(root, cand)
+        if os.path.isdir(cand):
+            cwd = os.path.realpath(cand)
+        else:
+            fail("no such working directory: " + want)
+
+    # The program goes to a temp file in the scratch root, run with -I
+    # (isolated: ignore env/user-site, so a run is reproducible).
     fd, path = tempfile.mkstemp(prefix="run-", suffix=".py", dir=root)
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(code_bytes)
-        net = _net_isolation_argv()
+        net = _net_isolation_argv() if no_net else []
         argv = net + [sys.executable, "-I", path]
         try:
             proc = subprocess.Popen(
-                argv, cwd=root, stdin=subprocess.PIPE,
+                argv, cwd=cwd, stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 preexec_fn=_child_setup)
         except OSError as e:
@@ -171,7 +186,12 @@ def main():
                "exit_code": None if timed_out else proc.returncode,
                "stdout": out, "stderr": err,
                "stdout_truncated": out_cut, "stderr_truncated": err_cut,
-               "network_isolated": bool(net), "timeout": timeout}
+               "network_isolated": bool(net), "cwd": cwd,
+               "timeout": timeout}
+        if no_net and not net:
+            res["note_network"] = ("asked to isolate the network but this host "
+                                   "has no unprivileged user namespaces — the "
+                                   "run had network access")
         if timed_out:
             res["note"] = "killed after %g s (wall-clock cap)" % timeout
         print(json.dumps(res))

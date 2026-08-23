@@ -88,7 +88,9 @@ exactly what it always was.
     tools already carry: **a model with no tool support rejects a request that
     carries `tools`**, so point oracle at a tool-capable model.
 - **`qml/Root.qml`** (`qml/Main.qml` is the Hyprland `Window` around it) — the
-  selector row, a `KineticFlickable`
+  selector row — the model and session pickers **hug the window's right edge**
+  with their labels beside them [his, 2026-08-22], sized to their own text and
+  capped at 60% of the row — a `KineticFlickable`
   conversation area, and a prompt `TextEdit` (Enter sends, Shift+Enter newline).
   The model dropdown is inline rather than a shared `CtxMenu`, keeping this
   window's imports to the theme, `PixelText` and the `qmlcommon` Kinetic views.
@@ -109,7 +111,9 @@ exactly what it always was.
   only while he is already at the bottom (see *The model selector* §streaming) —
   scroll up mid-stream and it stops yanking. A model's
   reasoning is a **collapsible disclosure, folded by default** (§9.1
-  subordinated), whose heading reports progress: while the reasoning streams it
+  subordinated) that sits **OUTSIDE the bubble** [his, 2026-08-22] — as do the
+  tool, web-search and file disclosures, all four between the speaker caption
+  and the bubble, full width, so the bubble carries only the answer itself, whose heading reports progress: while the reasoning streams it
   reads `thinking` (one brightness step up) with a **live token count** and an
   **animated ellipsis** beside it (dim, §9.1) — the count is the running frame
   count `Ollama` emits on `replyThinkTokens` (ollama streams one token per NDJSON
@@ -341,42 +345,44 @@ told him it "has no code-execution env": true at the time, but reached for blind
 rather than from its real inventory. That gap is now closed — see *Code runner*
 below — and `describe_self` still gives the exact live tool list on demand.
 
-## Code runner (run_python, jailed, on top)
+## Code runner (run_python, on top)
 
 `run_python` (`EXEC_TOOL`, offered every turn, dispatched `_run_exec_tool` →
 `_exec_argv`) lets the model actually **execute Python** instead of only
 reasoning about it — the board decision of 2026-08-11 (he ticked *add a jailed
 code-runner*; running untrusted model output is a security call he took
-deliberately). It runs through **`tools/sandbox-exec.py`**, which IS the jail,
-and returns `{stdout, stderr, exit_code, timed_out, network_isolated, …}` fed
-back into the same async tool loop as the file tools (`fileToolStarted`/
+deliberately). It runs through **`tools/sandbox-exec.py`** and returns
+`{stdout, stderr, exit_code, timed_out, cwd, network_isolated, …}` fed back
+into the same async tool loop as the file tools (`fileToolStarted`/
 `fileToolDone` → the "files · N" disclosure; heading `running python`).
 
-**What the jail is — and honestly is not.** The runner is confined by what a
-pure-stdlib script over ssh can actually enforce, no more:
+**It stopped being a jail on 2026-08-22** — his call, the same one that widened
+the write root (*"i dont really want them to be [sandboxed]"*). What that
+changed and what it did not:
 
-- **working directory = the file-tool sandbox** (`SANDBOX_ROOT`), so relative
-  writes land beside what `read_file`/`write_file` see — the model can write a
-  file, run it, and read the result back;
-- **no network** — an unprivileged user+net namespace (`unshare -rn`, probed
-  once and reported in `network_isolated`; degrades honestly to `false` on a
-  host without user namespaces rather than failing every run);
-- **bounded** — wall clock (default 10 s, max 30), CPU, address space, file
-  size and per-stream output all capped, and a timeout kills the whole process
-  group (not just python), so spawned children can't linger;
-- **NOT a container.** The code runs as `lam`, so it can still **read** files
-  outside the sandbox (exactly what the read-only file tools already grant) and,
-  with an absolute path, write outside it. `EXEC_TOOL`'s description and
-  `CAPABILITY_NOTE` say this plainly — the confinement that is real (cwd,
-  no-net, bounded) is claimed; a filesystem container that is not there is not.
-  To harden later, wrap the invocation in `bwrap`/`firejail` (neither is on top
-  today) in `sandbox-exec.py`'s `argv`.
+- **The network is up.** The `unshare -rn` net+user namespace is no longer
+  applied; `ORACLE_EXEC_NET=0` sends `--no-net` and puts it back (probed as
+  before, so a host with no unprivileged user namespaces degrades honestly to
+  `network_isolated: false` plus a `note_network` line rather than pretending).
+  A runner that could rewrite his filesystem but not open a socket was theatre.
+- **The working directory is a default, not a fence.** `SANDBOX_ROOT` is still
+  argv[1] and still the default cwd — a scratch dir, which is all it usefully
+  ever was — and a call may name its own `cwd` (absolute, or relative to that
+  root; a missing directory is an error, never a silent fallback).
+- **The resource caps are unchanged and stay**: wall clock (default 10 s, max
+  30), CPU, address space, file size, per-stream output, and a timeout that
+  kills the whole process group. Those protect this desktop from a runaway
+  program, not from its author.
+- **`EXEC_TOOL`'s description and `CAPABILITY_NOTE` say all of this plainly**
+  (docs/DESIGN.md §10 — never overstate a jail *or* a freedom), and they tell
+  the model what the freedom obliges: read before overwriting, prefer an edit
+  to a replacement, never delete what it did not create.
 
 **Where it runs** — on `top`, like every other executor: local on `top`, over
 the tunnel's ssh master from `book` (`ssh top python3 sandbox-exec.py
-<sandbox>`). Pure stdlib so top's system python3 runs it with nothing installed.
-**Because it runs on top, top's checkout needs `sandbox-exec.py`** — a `book`
-edit is inert until top pulls (same caveat the `put` op carries).
+<scratch>`). Pure stdlib so top's system python3 runs it with nothing
+installed. **Because it runs on top, top's checkout needs `sandbox-exec.py`**
+— a `book` edit is inert until top pulls (same caveat the `put` op carries).
 
 ## Talking to ollama
 
@@ -426,6 +432,33 @@ oracle opens no listener and reaches Tavily only when a search is actually run.
 The request is `POST https://api.tavily.com/search` with `api_key` in the body,
 `include_answer: true`, `max_results: 5`; the reply's `answer` and each hit's
 `title`/`url`/`content` are fed back to the model and shown in the disclosure.
+
+## Reading a page (fetch_url)
+
+`web_search` returns Tavily's snippets — a paragraph at most — so a model
+handed a link could not actually **read** it. `FETCH_URL_TOOL` (`fetch_url`,
+offered every turn, dispatched `_fetch_url`/`_on_fetch_url`) closes that: one
+http(s) URL in, the page's **text** out, paged.
+
+- **In-process, no executor.** The same shared `QNetworkAccessManager`
+  `fetch_image` uses (Qt6 follows redirects), so it runs wherever the window is
+  and needs no host branch. It is surfaced through the **web-search
+  disclosure** (`webSearchStarted`/`webSearchDone`/`webSearchError`), so a
+  fetched page appears in the same folded sources block as a search.
+- **HTML → readable text** by `_PageText`, a stdlib `HTMLParser` that drops
+  `script`/`style`/`svg`/`iframe` *and* the page furniture (`nav`, `aside`,
+  `form`, `select`, `button`, `menu` — Wikipedia's chrome alone is the first
+  ~2k characters otherwise), turns block elements into line breaks, collapses
+  whitespace and keeps the `<title>`. JSON and plain text pass through
+  untouched.
+- **Paged, capped, honest.** `FETCH_URL_CHARS` (20000) of text per call with
+  `chars_total`/`next_offset` to continue, `FETCH_URL_MAX_BYTES` (4 MB) on the
+  body. An image URL is refused by name (*use fetch_image*), other binary types
+  by content-type, a non-http(s) URL before the network — each reaching both
+  the model and the disclosure (docs/DESIGN.md §10).
+- **It sends a browser User-Agent**, because a default Qt UA gets a bot wall on
+  a fair number of sites and a tool that cannot read them is not the tool this
+  is meant to be. It cannot post a form or log in.
 
 ## Web images (fetch_image)
 
@@ -520,7 +553,7 @@ clears when the message is sent. A message may be text, files, or both.
   does not silently re-see them. (The staged copies under `attachments/` do
   persist in the sandbox — the model may have edited them on purpose.)
 
-## File tools (jailed, on top)
+## File tools (unjailed since 2026-08-22)
 
 oracle offers the model a set of **file tools on every turn** — `list_dir`,
 `read_file`, `write_file`, `edit_file`, `move_path`, `delete_path`, `make_dir`,
@@ -543,16 +576,21 @@ every request now carries `tools`, a model with **no tool support rejects it**
 (the same reason the `web` toggle was opt-in). oracle is a tool-calling window
 now; point it at a tool-capable model.
 
-**The jail — two roots since 2026-08-11, the read root widened to the FULL
-filesystem the same day.** Every op runs through `tools/sandbox-fs.py`, which
-refuses to touch anything outside its root, **symlinks included**
+**Both roots are now `/`.** Every op runs through `tools/sandbox-fs.py`,
+which refuses to touch anything outside its root, **symlinks included**
 (`os.path.realpath` + a containment check — `_under()`, which has to normalize
 a root of `/` specially, since `"/" + os.sep` is `"//"`, a prefix nothing
 starts with; that bug shipped and was caught the same day the root widened to
-`/`). The catch is that the **read-only ops reach a wider root than the
-mutating ops**: the model gets **read access to the WHOLE filesystem** (his
-ask — chatter agents needed to read his files, then widened past just his home
-the same day), while writes stay confined to the sandbox.
+`/`). Until 2026-08-22 the read ops reached the whole
+filesystem while the mutating ops stayed in the sandbox — so a chatter agent
+could read any file on the machine and then not fix it. **That half-jail is
+gone** (*"i dont really want them to be [sandboxed]"*): `WRITE_ROOT` is `/`
+too, and a local model can now overwrite, move and delete anything the user
+can, with no confirmation step. That is a real security decision and it is
+his; `ORACLE_WRITE_ROOT` is how it is taken back (point it at `SANDBOX_ROOT`
+for the pre-2026-08-22 behaviour, or at his home for something in between).
+`SANDBOX_ROOT` survives as the model's **scratch directory** — where dropped
+attachments are staged and where `run_python` starts — not as a fence.
 
 - `list_dir`, `read_file`, `find_files`, `search_text`, `show_tree` (the
   `READ_OPS` set in `sandbox-fs.py`) resolve against `READ_ROOT` — **`/`** by
@@ -560,19 +598,24 @@ the same day), while writes stay confined to the sandbox.
   restore the 2026-08-11 scope, or at `SANDBOX_ROOT` to restore jailed reads).
   Their paths are **root-relative** (`'.'` is `/`).
 - `write_file`, `edit_file`, `move_path`, `delete_path`, `make_dir` (and the
-  internal `put`) resolve against `SANDBOX_ROOT` — `~/.local/share/oracle/sandbox`,
-  overridable with `$ORACLE_SANDBOX`. Their paths are **sandbox-relative**. The
-  `FILE_TOOLS` descriptions carry that split so the model uses the right base.
-  **This jail is unchanged** by the read-root widening — a local model still
-  cannot write, edit, move or delete anything outside its own sandbox, on
-  either machine.
+  internal `put`) resolve against `WRITE_ROOT` — **`/`**, overridable with
+  `$ORACLE_WRITE_ROOT`. Their paths are root-relative like the read ops', so
+  an absolute path is what the model should pass. **The tool descriptions are
+  built from the live root** (`WRITE_FREE`/`WRITE_PATH`/`WRITE_WHERE` in
+  `main.py`), so re-jailing with the env var re-words the tools instead of
+  leaving them promising a reach they no longer have — the same rule
+  `skill_tool()` follows.
+- **Attachment staging follows the write root.** Dropped files still land in
+  `SANDBOX_ROOT/attachments`, but the `put` op resolves against `WRITE_ROOT`,
+  so `_stage_path()` expresses that target relative to it and hands the model
+  the absolute path to read (`_stage_note`).
 
 `sandbox-fs.py` takes the write root as `argv[1]` and the read root as an
 optional `argv[2]`; with no `argv[2]` the read ops fall back to the write root,
 so an older executor over ssh (the OTHER host not yet pulled) keeps the old
-jailed-both behaviour rather than breaking. There is still deliberately **no
-write access outside the sandbox** — that would hand a local model
-delete/overwrite over everything and is a separate decision for him.
+jailed-both behaviour rather than breaking. (The `argv[2]`-less fallback also means an un-pulled host silently keeps
+whatever roots ITS copy was told, which is why a change here is only real once
+both checkouts have it.)
 (`sandbox-fs.py` also carries a `put` op that writes base64 bytes —
 binary-safe, sandbox-jailed — used only by oracle's own attachment staging,
 never offered to the model.)

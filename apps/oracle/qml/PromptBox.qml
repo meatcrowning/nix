@@ -20,7 +20,9 @@ Rectangle {
 
     function clear() { input.clear(); }
 
-    height: Math.max(48, Math.min(160, input.implicitHeight + 16))
+    // Hug the text: the floor is the send button plus the box's own padding,
+    // not a round 48 that left a dead band under a one-line prompt.
+    height: Math.max(sendBtn.height + 16, Math.min(160, input.implicitHeight + 16))
     color: Theme.bgAlt
     radius: Theme.rounding
     border.width: Theme.ctrlBorder

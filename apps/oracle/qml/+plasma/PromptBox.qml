@@ -21,7 +21,11 @@ Item {
 
     function clear() { area.clear(); }
 
-    height: Math.max(56, Math.min(180, area.implicitHeight + 2 * frame.padding + 12))
+    // HUG THE TEXT. A floor of 56 left 16px of nothing under a one-line
+    // prompt [his, 2026-08-22]; the Frame's own padding is the only spare room
+    // there should be, and `implicitHeight` on a TextArea is already one line
+    // when it is empty. It grows with what he types, to a cap.
+    height: Math.min(180, area.implicitHeight + frame.topPadding + frame.bottomPadding)
 
     Frame {
         id: frame

@@ -16,6 +16,9 @@ Window {
 
     Root {
         id: content
+        // Named so the selftest harness can reach the Root item's functions
+        // from Python (a Window is not the QML root object's `Root`).
+        objectName: "content"
         anchors.fill: parent
     }
 }

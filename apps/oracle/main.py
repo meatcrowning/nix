@@ -201,7 +201,11 @@ class _PageText(HTMLParser):
     the <title>. Not a renderer — enough that a model reads prose instead of
     markup, which is all the tool promises."""
 
-    SKIP = {"script", "style", "noscript", "svg", "template", "iframe"}
+    # Chrome, not content: a page's nav/menu/form furniture would otherwise be
+    # the first several thousand characters the model reads (Wikipedia's is
+    # ~2k before the article starts) and it is never what was asked for.
+    SKIP = {"script", "style", "noscript", "svg", "template", "iframe",
+            "nav", "aside", "form", "select", "button", "menu"}
     BLOCK = {"p", "div", "br", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6",
              "section", "article", "header", "footer", "blockquote", "pre",
              "ul", "ol", "table", "hr"}
@@ -275,20 +279,43 @@ IMAGE_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
              "image/webp": ".webp", "image/bmp": ".bmp", "image/svg+xml": ".svg",
              "image/tiff": ".tiff", "image/x-icon": ".ico", "image/avif": ".avif"}
 
+#: The WRITE root — **`/` since 2026-08-22, his call**: "i dont really want
+#: them to be [sandboxed]". Until then write_file/edit_file/move_path/
+#: delete_path/make_dir resolved against SANDBOX_ROOT while the read ops
+#: already reached the whole filesystem, so a chatter agent could read any file
+#: on the machine and then not fix it — the one half-jail left, and what made
+#: it an assistant rather than an agent. It is a real security decision and it
+#: is his: a local model can now overwrite and delete anything the user can,
+#: with no confirmation step. `ORACLE_WRITE_ROOT` puts the jail back — point it
+#: at SANDBOX_ROOT for the pre-2026-08-22 behaviour, or at his home for
+#: something in between. SANDBOX_ROOT survives as the model's SCRATCH directory
+#: (attachment staging, run_python's working directory), which is what it
+#: always usefully was.
+WRITE_ROOT = os.path.expanduser(os.environ.get("ORACLE_WRITE_ROOT", "/"))
+#: True when writes are unjailed, i.e. the write root is the whole filesystem.
+#: The write tools' own descriptions are built from this, so what the model is
+#: told about its reach is never a stale string (docs/DESIGN.md §10).
+WRITE_FREE = os.path.realpath(WRITE_ROOT) == os.sep
+#: How the write tools describe a path they take, and their reach — one phrase
+#: each, so re-jailing with ORACLE_WRITE_ROOT re-words the tools rather than
+#: leaving them lying about a sandbox that is no longer there.
+WRITE_PATH = ("absolute (or relative to '/')" if WRITE_FREE
+              else "relative to your sandbox root")
+WRITE_WHERE = ("anywhere on the filesystem" if WRITE_FREE else "in your sandbox")
+
 #: The FILE TOOLS oracle offers the model on EVERY turn (no toggle — his call:
-#: "always available to the model"). Reading and manipulation both, but every
-#: one runs THROUGH tools/sandbox-fs.py against a jailed root the model cannot
-#: escape (see FS below and apps/oracle/AGENTS.md). TWO jails: the READ-ONLY
-#: tools (list_dir/read_file/find_files/search_text/show_tree) reach the WHOLE
-#: filesystem (root '/', his ask, widened 2026-08-11 from just his home) of
-#: EITHER machine — they take an optional `host` ("top"/"book") so the model can
-#: read book's files from a top window and top's from a book window, not just
-#: whichever machine its own compute happens to run on; their paths are
-#: root-relative. The MUTATING tools (write/edit/move/delete/make_dir) stay
-#: confined to the sandbox on top, their paths sandbox-relative, and take no
-#: `host` — there is only one sandbox and it always lives on top. Descriptions
-#: carry that split, and note reads are paginated so the model asks for more
-#: rather than assuming a short read is the whole file.
+#: "always available to the model"). Reading and manipulation both, and every
+#: one runs THROUGH tools/sandbox-fs.py against a root it cannot escape (see FS
+#: below and apps/oracle/AGENTS.md) — but since 2026-08-22 BOTH roots are `/`
+#: by default, so the containment is a mechanism kept for the env overrides,
+#: not a jail the model is in. The READ-ONLY tools (list_dir/read_file/
+#: find_files/search_text/show_tree) reach EITHER machine — they take an
+#: optional `host` ("top"/"book") so the model can read book's files from a top
+#: window and top's from a book window, not just whichever machine its own
+#: compute happens to run on. The MUTATING tools (write/edit/move/delete/
+#: make_dir) always land on `top` and take no `host`. Every path is
+#: root-relative, and reads are paginated so the model asks for more rather
+#: than assuming a short read is the whole file.
 FILE_TOOLS = [
     {"type": "function", "function": {
         "name": "list_dir",
@@ -320,19 +347,19 @@ FILE_TOOLS = [
             "required": ["path"]}}},
     {"type": "function", "function": {
         "name": "write_file",
-        "description": ("Create or overwrite a text file in your sandbox with the "
-                        "given content. Parent directories are created."),
+        "description": ("Create or overwrite a text file " + WRITE_WHERE + " with "
+                        "the given content. Parent directories are created."),
         "parameters": {"type": "object", "properties": {
-            "path": {"type": "string", "description": "File to write, sandbox-relative."},
+            "path": {"type": "string", "description": "File to write, " + WRITE_PATH + "."},
             "content": {"type": "string", "description": "Full new file contents."}},
             "required": ["path", "content"]}}},
     {"type": "function", "function": {
         "name": "edit_file",
-        "description": ("Replace an exact substring in a sandbox file. `old` must "
-                        "match once unless `replace_all` is set. Use write_file to "
-                        "create a file or replace it wholesale."),
+        "description": ("Replace an exact substring in a file " + WRITE_WHERE + ". "
+                        "`old` must match once unless `replace_all` is set. Use "
+                        "write_file to create a file or replace it wholesale."),
         "parameters": {"type": "object", "properties": {
-            "path": {"type": "string", "description": "File to edit, sandbox-relative."},
+            "path": {"type": "string", "description": "File to edit, " + WRITE_PATH + "."},
             "old": {"type": "string", "description": "Exact text to find."},
             "new": {"type": "string", "description": "Text to put in its place."},
             "replace_all": {"type": "boolean",
@@ -340,25 +367,27 @@ FILE_TOOLS = [
             "required": ["path", "old", "new"]}}},
     {"type": "function", "function": {
         "name": "move_path",
-        "description": "Move or rename a file or directory within your sandbox.",
+        "description": "Move or rename a file or directory " + WRITE_WHERE + ".",
         "parameters": {"type": "object", "properties": {
-            "src": {"type": "string", "description": "Path to move, sandbox-relative."},
-            "dst": {"type": "string", "description": "Destination, sandbox-relative."}},
+            "src": {"type": "string", "description": "Path to move, " + WRITE_PATH + "."},
+            "dst": {"type": "string", "description": "Destination, " + WRITE_PATH + "."}},
             "required": ["src", "dst"]}}},
     {"type": "function", "function": {
         "name": "delete_path",
-        "description": ("Delete a file or directory in your sandbox. Pass "
-                        "`recursive` to delete a non-empty directory."),
+        "description": ("Delete a file or directory " + WRITE_WHERE + ". Pass "
+                        "`recursive` to delete a non-empty directory. This is "
+                        "permanent — there is no trash and no undo, so be sure "
+                        "before you delete something you did not create."),
         "parameters": {"type": "object", "properties": {
-            "path": {"type": "string", "description": "Path to delete, sandbox-relative."},
+            "path": {"type": "string", "description": "Path to delete, " + WRITE_PATH + "."},
             "recursive": {"type": "boolean",
                           "description": "Delete a directory and its contents."}},
             "required": ["path"]}}},
     {"type": "function", "function": {
         "name": "make_dir",
-        "description": "Create a directory (and parents) in your sandbox.",
+        "description": "Create a directory (and parents) " + WRITE_WHERE + ".",
         "parameters": {"type": "object", "properties": {
-            "path": {"type": "string", "description": "Directory to create, sandbox-relative."}},
+            "path": {"type": "string", "description": "Directory to create, " + WRITE_PATH + "."}},
             "required": ["path"]}}},
     {"type": "function", "function": {
         "name": "find_files",
@@ -549,15 +578,20 @@ EXEC_TOOL = {
         "description": (
             "Run a Python 3 program and get its stdout, stderr and exit code "
             "back — use this to actually compute, test or verify code instead "
-            "of working the answer out in your head. It runs on the host in a "
-            "sandbox: the working directory is your file-tool sandbox (so files "
-            "you write with a relative path land there and you can read them "
-            "back with read_file), the network is disabled, and it is killed "
-            "after a few seconds. Only the standard library is available. Print "
-            "what you want to see; a bare expression is not echoed."),
+            "of working the answer out in your head. It runs on the host as the "
+            "user, with the network up and the whole filesystem reachable, so "
+            "it can do real work — and real damage, so read before you "
+            "overwrite and never delete what you did not create. The working "
+            "directory is your scratch directory unless you name `cwd`, and a "
+            "run is killed after a few seconds. Only the standard library is "
+            "available. Print what you want to see; a bare expression is not "
+            "echoed."),
         "parameters": {"type": "object", "properties": {
             "code": {"type": "string",
                      "description": "The Python 3 source to run."},
+            "cwd": {"type": "string",
+                    "description": ("Optional working directory (absolute). "
+                                    "Default: your scratch directory.")},
             "stdin": {"type": "string",
                       "description": "Optional text fed to the program's stdin."},
             "timeout": {"type": "integer",
@@ -747,21 +781,24 @@ SAVE_GUIDANCE = (
 #: silently is not there, in either direction, and never overstate a jail).
 CAPABILITY_NOTE = (
     "What you can actually do in this app, through function tools offered every "
-    "turn: search the public web; fetch and display images; read the current "
-    "time in any timezone; read, write, edit, move, delete and search files in a "
-    "jailed sandbox on the host (including any files the user drags onto the "
-    "window, which are staged into that sandbox for you); read your past "
-    "conversations; save, list and delete your own durable memories; load a "
-    "SKILL (use_skill) — expert instructions for one job, listed for you "
-    "below; and RUN "
-    "Python code (run_python) — real execution on the host, not a simulation. "
-    "The code runs with your file sandbox as its working directory and no "
-    "network, and is killed after a few seconds; it is not a full container, so "
-    "it runs as the user and can read files outside the sandbox, but writes "
-    "should stay in the sandbox. You do NOT have shell access or general "
-    "internet beyond web search and image fetch. Describe your abilities in "
-    "these terms, and call describe_self for the exact live tool list — never "
-    "claim a capability you do not have, and never deny one you do.")
+    "turn: search the public web; READ a web page or JSON URL by link "
+    "(fetch_url); fetch and display images; read the current time in any "
+    "timezone; read, write, edit, move, delete and search files on the host — "
+    + ("the WHOLE filesystem, not a sandbox, exactly what the user himself can "
+       "touch" if WRITE_FREE else
+       "reading anywhere, writing only inside your own sandbox directory") +
+    " (files he drags onto the window are staged for you too); read your "
+    "past conversations; save, list and delete your own durable memories; load "
+    "a SKILL (use_skill) — expert instructions for one job, listed for you "
+    "below; and RUN Python code (run_python) — real execution on the host, as "
+    "the user, with the network up, killed after a few seconds and capped in "
+    "CPU and memory. That reach is real and so is the damage it can do: read a "
+    "file before you overwrite it, prefer editing to replacing, never delete "
+    "or move anything you did not create unless he asked for it in this "
+    "conversation, and say what you changed. You do NOT have shell access, and "
+    "you cannot use root. Describe your abilities in these terms, and call "
+    "describe_self for the exact live tool list — never claim a capability you "
+    "do not have, and never deny one you do.")
 
 #: How wide a web search fans out, scaled to the query's apparent complexity
 #: (see `Ollama._research_budget`). A simple factual ask (a weather lookup, a
@@ -843,6 +880,11 @@ MEMORY_SCRIPT = str(HERE / "tools" / "memory-store.py")
 #: the sandbox is the code's working directory, so files it writes relatively
 #: sit beside what the file tools see.
 EXEC_SCRIPT = str(HERE / "tools" / "sandbox-exec.py")
+#: Whether run_python may reach the network — YES since 2026-08-22, with the
+#: rest of the unjailing (`ORACLE_EXEC_NET=0` cuts it again, which is the
+#: `unshare -rn` the runner used to do unconditionally). A code runner that
+#: could write his whole filesystem but not open a socket would be theatre.
+EXEC_NET = os.environ.get("ORACLE_EXEC_NET", "1") not in ("0", "false", "no")
 
 #: How much of the memory store to inject into each turn's system prompt (newest
 #: first): a bound so a large store can never crowd out the conversation. The
@@ -1678,6 +1720,24 @@ class Ollama(QObject):
         base = os.path.basename(str(name)) or "file"
         return base.replace("/", "_").replace("\\", "_") or "file"
 
+    @staticmethod
+    def _stage_path(safe_name):
+        """Where a dropped file is staged, as `(op_path, shown_path)`.
+
+        Attachments still land in SANDBOX_ROOT (the scratch dir), but the
+        executor resolves a `put` against the WRITE root — which is now `/` —
+        so the op path is the sandbox path expressed relative to that root.
+        `shown_path` is what the model is told to read, absolute when writes
+        are free."""
+        target = os.path.join(SANDBOX_ROOT, ATTACH_STAGE_DIR, safe_name)
+        root = os.path.realpath(WRITE_ROOT)
+        real = os.path.realpath(target)
+        if real == root or real.startswith(root.rstrip(os.sep) + os.sep):
+            rel = os.path.relpath(real, root)
+        else:                       # a write root that excludes the sandbox
+            rel = os.path.join(ATTACH_STAGE_DIR, safe_name)
+        return (rel, real if WRITE_FREE else rel)
+
     def _stage_attachments(self, file_items):
         """Copy each dropped NON-image attachment into the sandbox on top (under
         ATTACH_STAGE_DIR) so the model's file tools can read the FULL file and
@@ -1702,12 +1762,12 @@ class Ollama(QObject):
             except OSError as e:
                 errors.append("%s (could not read: %s)" % (name, e.strerror))
                 continue
-            rel = ATTACH_STAGE_DIR + "/" + self._safe_stage_name(name)
+            rel, shown = self._stage_path(self._safe_stage_name(name))
             ok, err = self._run_fs_sync({
                 "op": "put", "path": rel,
                 "data": base64.b64encode(data).decode("ascii")})
             if ok:
-                staged.append({"name": name, "rel": rel})
+                staged.append({"name": name, "rel": shown})
             else:
                 errors.append("%s (%s)" % (name, err))
         return staged, errors
@@ -1720,10 +1780,10 @@ class Ollama(QObject):
         if staged:
             listing = ", ".join("`%s` (%s)" % (s["rel"], s["name"]) for s in staged)
             parts.append(
-                "These attachments are also saved in your file sandbox: "
+                "These attachments are also saved on the host at: "
                 + listing + ". Use read_file to read one in full (the inlined "
-                "text above may be truncated), and edit_file/write_file to modify "
-                "it in place there.")
+                "text above may be truncated), and edit_file/write_file to "
+                "modify it in place there.")
         if errors:
             parts.append("Could not stage for the file tools: "
                          + "; ".join(errors) + ".")
@@ -1955,6 +2015,10 @@ class Ollama(QObject):
             },
             "last_tokens_per_sec": round(self._tps, 1) if self._tps else 0,
             "native_capabilities": self._caps,
+            "file_access": {"read_root": READ_ROOT, "write_root": WRITE_ROOT,
+                            "writes_jailed": not WRITE_FREE,
+                            "scratch_dir": SANDBOX_ROOT,
+                            "code_runner_network": EXEC_NET},
             "persona": persona,
             "base_prompt": (base_text[:800] if base_text
                             else "(default — no persona)"),
@@ -1975,7 +2039,7 @@ class Ollama(QObject):
         puts in the payload, so `describe_self` reports exactly what the model
         can call (docs/DESIGN.md §10 — a true list, not a remembered one)."""
         tools = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, SELF_TOOL,
-                 IMAGE_TOOL, SEARCH_IMAGE_TOOL, EXEC_TOOL]
+                 IMAGE_TOOL, SEARCH_IMAGE_TOOL, FETCH_URL_TOOL, EXEC_TOOL]
                  + list(SESSION_TOOLS) + list(MEMORY_TOOLS)
                  + [t for t in [skill_tool()] if t])
         names = [t.get("function", {}).get("name", "") for t in tools
@@ -2024,7 +2088,8 @@ class Ollama(QObject):
         # spelled out in apps/oracle/AGENTS.md; point oracle at a tool-capable
         # model.
         payload["tools"] = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL,
-                            SELF_TOOL, IMAGE_TOOL, SEARCH_IMAGE_TOOL, EXEC_TOOL]
+                            SELF_TOOL, IMAGE_TOOL, SEARCH_IMAGE_TOOL,
+                            FETCH_URL_TOOL, EXEC_TOOL]
                             + list(SESSION_TOOLS) + list(MEMORY_TOOLS)
                             + [t for t in [skill_tool()] if t])
         body = json.dumps(payload).encode("utf-8")
@@ -2177,6 +2242,9 @@ class Ollama(QObject):
             elif name in SEARCH_IMAGE_TOOL_NAMES:
                 self._search_images(str(args.get("query", "")).strip(),
                                     i, remaining, calls)
+            elif name in FETCH_URL_TOOL_NAMES:
+                self._fetch_url(str(args.get("url", "")).strip(),
+                                args.get("offset", 0), i, remaining, calls)
             elif name in FILE_TOOL_NAMES:
                 self._run_fs_tool(name, args, i, remaining, calls)
             elif name in EXEC_TOOL_NAMES:
@@ -2336,6 +2404,106 @@ class Ollama(QObject):
             reply.deleteLater()
             self._tool_done(remaining, calls)
 
+    def _fetch_url(self, url, offset, idx, remaining, calls):
+        """Read one web page as text. The same in-process GET fetch_image uses
+        (shared QNetworkAccessManager, Qt6 follows redirects), so it runs
+        wherever the window is — no executor, no host branch — and it is
+        surfaced through the web-search disclosure like search_images."""
+        try:
+            offset = max(0, int(offset or 0))
+        except (TypeError, ValueError):
+            offset = 0
+        u = QUrl(url)
+        if u.scheme().lower() not in ("http", "https") or not u.host():
+            self.webSearchError.emit(url or "(no url)", "not an http(s) URL")
+            self._tool_results[idx] = {
+                "role": "tool", "tool_name": "fetch_url",
+                "content": json.dumps({"error": "fetch_url takes an absolute "
+                                       "http:// or https:// URL"})}
+            self._tool_done(remaining, calls)
+            return
+        self.webSearchStarted.emit(url)
+        req = QNetworkRequest(u)
+        # A default Qt UA gets a bot wall on a fair number of sites; naming a
+        # real browser shape is what makes the tool actually able to READ them.
+        req.setRawHeader(b"User-Agent",
+                         b"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                         b"(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
+        req.setRawHeader(b"Accept", b"text/html,application/xhtml+xml,"
+                                    b"application/json;q=0.9,text/plain;q=0.8,*/*;q=0.5")
+        reply = self._nam.get(req)
+        reply.finished.connect(
+            lambda: self._on_fetch_url(reply, url, offset, idx, remaining, calls))
+
+    def _on_fetch_url(self, reply, url, offset, idx, remaining, calls):
+        if not self._busy:              # turn was cancelled mid-fetch
+            reply.deleteLater()
+            return
+        try:
+            data = bytes(reply.readAll().data())
+            if reply.error() != QNetworkReply.NetworkError.NoError:
+                msg = reply.errorString()
+                self.webSearchError.emit(url, msg)
+                self._tool_results[idx] = {
+                    "role": "tool", "tool_name": "fetch_url",
+                    "content": json.dumps({"error": "fetch failed: " + msg,
+                                           "url": url})}
+                return
+            ctype = str(reply.header(
+                QNetworkRequest.KnownHeaders.ContentTypeHeader) or "")
+            final = reply.url().toString() or url
+            if len(data) > FETCH_URL_MAX_BYTES:
+                data = data[:FETCH_URL_MAX_BYTES]
+            low = ctype.lower()
+            # Binary is refused rather than dumped as mojibake — the same
+            # honesty the file tools' binary refusal carries. An image URL is
+            # named for what it is, so the model reaches for fetch_image.
+            if low.startswith("image/"):
+                result = {"error": "that URL is an image, not a page — use "
+                                   "fetch_image to show it", "url": final,
+                          "content_type": ctype}
+                self.webSearchError.emit(url, "not a page (" + ctype + ")")
+            elif (low.startswith("application/") and "json" not in low
+                  and "xml" not in low and "javascript" not in low) \
+                    or low.startswith(("audio/", "video/", "font/")):
+                result = {"error": "not text: " + (ctype or "unknown type"),
+                          "url": final, "content_type": ctype}
+                self.webSearchError.emit(url, "not text (" + ctype + ")")
+            else:
+                body = data.decode("utf-8", "replace")
+                title = ""
+                if "html" in low or (not ctype and body.lstrip()[:1] == "<"):
+                    parser = _PageText()
+                    try:
+                        parser.feed(body)
+                        parser.close()
+                    except Exception:            # a malformed page still gives
+                        pass                     # us whatever it parsed so far
+                    text, title = parser.text(), parser.title
+                else:
+                    text = body.strip()
+                total = len(text)
+                page = text[offset:offset + FETCH_URL_CHARS]
+                result = {"url": final, "title": title,
+                          "content_type": ctype or "unknown",
+                          "chars_total": total, "offset": offset,
+                          "text": page}
+                if offset + len(page) < total:
+                    result["truncated"] = True
+                    result["next_offset"] = offset + len(page)
+                self.webSearchDone.emit(
+                    url, "- [" + (title or final) + "](" + final + ")", 1)
+            self._tool_results[idx] = {"role": "tool", "tool_name": "fetch_url",
+                                       "content": json.dumps(result)}
+        except (ValueError, TypeError) as e:
+            self.webSearchError.emit(url, str(e))
+            self._tool_results[idx] = {
+                "role": "tool", "tool_name": "fetch_url",
+                "content": json.dumps({"error": str(e), "url": url})}
+        finally:
+            reply.deleteLater()
+            self._tool_done(remaining, calls)
+
     def _tool_done(self, remaining, calls):
         remaining["n"] -= 1
         if remaining["n"] > 0 or not self._busy:
@@ -2485,7 +2653,7 @@ class Ollama(QObject):
         host = target_host if target_host in ("top", "book") else "top"
         local = "book" if ON_BOOK else "top"
         if host == local:
-            return [sys.executable, FS_SCRIPT, SANDBOX_ROOT, READ_ROOT]
+            return [sys.executable, FS_SCRIPT, WRITE_ROOT, READ_ROOT]
         ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
         argv = [ssh, "-o", "BatchMode=yes"]
         if ON_BOOK and host == "top":
@@ -2497,7 +2665,7 @@ class Ollama(QObject):
         else:
             ssh_host = host
         argv += [ssh_host, "python3", shlex.quote(FS_SCRIPT),
-                 shlex.quote(SANDBOX_ROOT), shlex.quote(READ_ROOT)]
+                 shlex.quote(WRITE_ROOT), shlex.quote(READ_ROOT)]
         return argv
 
     def _run_fs_tool(self, name, args, idx, remaining, calls):
@@ -2547,8 +2715,10 @@ class Ollama(QObject):
         """The command that runs one Python program through tools/sandbox-exec.py
         against the sandbox on top — the same host branch as `_fs_argv`: local on
         `top`, over the tunnel's ssh master from `book`, so the code always runs
-        where oracle's compute is. Only SANDBOX_ROOT (the write jail) is passed;
-        the runner uses it as the working directory."""
+        where oracle's compute is. SANDBOX_ROOT is passed as the SCRATCH
+        root — the runner's default working directory, not a jail — plus
+        `--no-net` when ORACLE_EXEC_NET=0 asks for the old network cut."""
+        extra = [] if EXEC_NET else ["--no-net"]
         if ON_BOOK:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
             ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
@@ -2558,20 +2728,24 @@ class Ollama(QObject):
                 argv += ["-o", "ControlMaster=auto", "-o", "ControlPersist=30",
                          "-o", "ControlPath=" + ctl]
             argv += [host, "python3", shlex.quote(EXEC_SCRIPT),
-                     shlex.quote(SANDBOX_ROOT)]
+                     shlex.quote(SANDBOX_ROOT)] + extra
             return argv
-        return [sys.executable, EXEC_SCRIPT, SANDBOX_ROOT]
+        return [sys.executable, EXEC_SCRIPT, SANDBOX_ROOT] + extra
 
     def _run_exec_tool(self, args, idx, remaining, calls):
-        """run_python: execute a model-written program in the sandbox and feed
-        its stdout/stderr/exit code back into the tool loop, async and concurrent
-        exactly like the file tools. The jail is tools/sandbox-exec.py itself."""
+        """run_python: execute a model-written program on the host and feed its
+        stdout/stderr/exit code back into the tool loop, async and concurrent
+        exactly like the file tools. tools/sandbox-exec.py is the runner — it
+        caps time, CPU, memory and output; since 2026-08-22 it no longer cuts
+        the network or confines the code (see WRITE_ROOT)."""
         a = args if isinstance(args, dict) else {}
         req = {"code": str(a.get("code", ""))}
         if a.get("stdin") is not None:
             req["stdin"] = str(a.get("stdin"))
         if a.get("timeout") is not None:
             req["timeout"] = a.get("timeout")
+        if a.get("cwd"):
+            req["cwd"] = str(a.get("cwd"))
         self.fileToolStarted.emit("running python")
         proc = QProcess(self)
         self._procs.append(proc)
@@ -3374,6 +3548,42 @@ def run_selftest(app, shell, win, plasma, warnings):
     rc = [0]
 
     def finish():
+        # ORACLE_FAKE: a demo conversation in the log, so a render has bubbles
+        # in it at all. It goes in through `loadTurns` — the function a session
+        # switch already uses — so the harness invents no path of its own, and
+        # nothing is written to the store (`saveCurrent` no-ops on an empty log).
+        if os.environ.get("ORACLE_FAKE"):
+            from PySide6.QtCore import Q_ARG, QMetaObject, QObject
+            demo = [
+                {"isUser": True, "who": "you", "body": "hi"},
+                {"isUser": False, "who": "qwen3.6:35b-a3b",
+                 "body": "Hello. Ask me anything."},
+                {"isUser": True, "who": "you",
+                 "body": "explain what a bubble layout is, briefly, and why it "
+                         "reads better than a full-width row"},
+                {"isUser": False, "who": "qwen3.6:35b-a3b",
+                 "body": "A **bubble** hugs its own text and sits on the "
+                         "speaker's side of the column, so the shape of the "
+                         "conversation is legible before a word of it is read:\n\n"
+                         "- short answers look short\n"
+                         "- who said what needs no label\n\n"
+                         "`code` and fenced blocks keep the monospaced face.",
+                 "thinking": "The user wants a short answer. Keep it to a "
+                             "definition plus two reasons.",
+                 "thinkTokens": 24},
+                {"isUser": False, "who": "qwen3.6:35b-a3b",
+                 "body": "ollama: connection refused", "isError": True},
+            ]
+            # Under Hyprland the QML root is the WINDOW; `loadTurns` lives on
+            # the `Root` item inside it, and invoking it on the Window is a
+            # silent no-op (the demo log simply never appears).
+            target = shell.root if plasma else win.findChild(QObject, "content")
+            QMetaObject.invokeMethod(target, "loadTurns",
+                                     Q_ARG("QVariant", "demo"),
+                                     Q_ARG("QVariant", "Demo conversation"),
+                                     Q_ARG("QVariant", json.dumps(demo)))
+            for _ in range(3):
+                app.processEvents()
         # ORACLE_POKE: fire the menu rows themselves, which is the only check
         # that the ids in `actions` and the ones `tbAction` answers are the same
         # set — a typo in either is silent (the row is there, the click does
@@ -3398,11 +3608,41 @@ def run_selftest(app, shell, win, plasma, warnings):
         if plasma and os.environ.get("ORACLE_CHROME"):
             print(shell.dump_chrome())
         if os.environ.get("ORACLE_TREE"):
+            # What the WIDGET half is wearing — the half a QML-only dump cannot
+            # see, and the half that goes wrong when the KDE platform theme is
+            # missing (kdeshell.apply_palette).
             from PySide6.QtGui import QIcon
             print(f"style={app.style().objectName() if hasattr(app, 'style') else '-'} "
                   f"window={app.palette().window().color().name()} "
                   f"text={app.palette().windowText().color().name()} "
                   f"icons={QIcon.themeName()}")
+            want = os.environ["ORACLE_TREE"]
+            root_item = shell.root if plasma else win
+
+            def walk(it, depth=0):
+                if depth > 14 or it is None:
+                    return
+                # VISUAL children, not QObject children: a Repeater's delegates
+                # keep their QObject parent where it was.
+                kids = (it.childItems() if hasattr(it, "childItems")
+                        else it.children())
+                for ch in kids:
+                    try:
+                        cls = ch.metaObject().className()
+                        if ch.property("height") is None:
+                            walk(ch, depth)
+                            continue
+                        name = ch.property("label") or ch.property("text") or ""
+                        if want == "1" or want.lower() in (cls + " " + str(name)).lower():
+                            print("  " * depth + f"{cls} {str(name)[:24]!r} "
+                                  f"x={ch.property('x')} w={ch.property('width')} "
+                                  f"y={ch.property('y')} h={ch.property('height')} "
+                                  f"vis={ch.property('visible')}")
+                    except Exception:  # noqa: BLE001
+                        pass
+                    walk(ch, depth + 1)
+
+            walk(root_item)
         if os.environ.get("ORACLE_FACES"):
             seen = {}
 
