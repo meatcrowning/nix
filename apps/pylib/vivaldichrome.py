@@ -193,6 +193,15 @@ def relief_css(pal, chrome=None) -> str:
         ".tab.active,.tab-position.active .tab{%s;border:1px solid %s!important;"
         "box-shadow:inset 0 1px 0 %s,0 1px 2px %s!important}"
         % (slab(btn_top, btn_bottom), border, bevel, shade),
+        # THE ACTIVE TAB'S INK. Vivaldi assumes the active tab carries the
+        # ACCENT colour and inks its title with the contrast tone it computed
+        # for that — with a light accent that is a near-black, and our slab is
+        # not the accent, so the title came out invisible on it (measured: ink
+        # #2b2317 on a #574936 slab). Say what it is instead of inheriting an
+        # assumption. `*` reaches the title span and the close button; svg
+        # icons follow currentColor and want the same value anyway.
+        ".tab.active,.tab.active *{color:%s!important}"
+        % hexcolor.readable_on(btn_top, fg, pal("textDim"), bg),
         ".tab:not(.active){background:%s!important;box-shadow:inset 0 -1px 0 %s!important}"
         % (hexcolor.scale_l(bg, 0.93), shade),
         # The address field is a HOLE, the way every Oxygen text field is.
