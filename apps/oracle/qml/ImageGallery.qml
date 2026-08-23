@@ -180,13 +180,19 @@ Column {
                                        Theme.accent.b, 0.14)
                     }
                     // ...and the caption INSIDE the artwork, not a strip of its
-                    // own (§5.1).
+                    // own (§5.1) — and ALWAYS DRAWN, not only on hover [his,
+                    // 2026-08-22]: a caption you have to go looking for with the
+                    // pointer is not a caption, and a solo picture has had its
+                    // own under it all along. The wash goes one step more opaque
+                    // as the pointer arrives, so the text stays readable over a
+                    // busy crop without hiding the picture the rest of the time.
                     Rectangle {
                         anchors { left: parent.left; right: parent.right
                                   bottom: parent.bottom }
                         height: capText.height + 4
-                        visible: hover.containsMouse && !!tile.e && !!tile.e.alt
-                        color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.82)
+                        visible: !!tile.e && !!tile.e.alt
+                        color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b,
+                                       hover.containsMouse ? 0.92 : 0.72)
                         PixelText {
                             id: capText
                             anchors { left: parent.left; right: parent.right
