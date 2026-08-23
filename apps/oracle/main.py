@@ -725,6 +725,22 @@ FILE_OP = {"list_dir": "list", "read_file": "read", "write_file": "write",
            "show_tree": "tree"}
 FILE_TOOL_NAMES = set(FILE_OP)
 
+#: The house rules of a directory tree, by filename. `~/nix` and every tree
+#: under it carries an `AGENTS.md` (the nearest one wins, and `CLAUDE.md` is its
+#: symlink at the repo root) stating how work is done there — the rebuild
+#: command, the commit rules, the things never to touch. A model that has not
+#: read it will cheerfully hand-edit a generated file or leave a change
+#: unrebuilt, and he should not have to say so on every request [his,
+#: 2026-08-22: *"i just want it to be easy for me to change things about chatter
+#: and the rest of the system without needing to point it to every little
+#: thing"*].
+HOUSE_FILES = ("AGENTS.md", "CLAUDE.md")
+
+#: NAMED, never inlined. `~/nix/AGENTS.md` alone is 62 KB — a fifth of the
+#: 32k-token window — and there are three more of them in the trees oracle
+#: touches most. The pointer costs a line; reading it is the model's own call,
+#: with its own read_file, only when it is actually working in that tree.
+
 #: The READ-ONLY tool names — these five (and only these) accept a `host`
 #: argument, since only they resolve against the whole-filesystem READ_ROOT
 #: rather than the single sandbox on top (see `Ollama._fs_argv`).
@@ -1023,6 +1039,29 @@ MAX_TOOL_ROUNDS = 24
 #: (this model's KV cache does not context-shift), so the turn is better spent
 #: writing the answer than on one more tool call whose result will not fit.
 TOOL_CTX_FRACTION = 0.75
+
+#: How many characters of PAST turns' tool output the next turn may carry.
+#:
+#: Until 2026-08-22 the answer was zero, and it is what wrecked a real session
+#: [his]: the message list handed to the model was rebuilt every turn from the
+#: chat log alone (`_parse_history` keeps user/assistant TEXT and nothing else),
+#: so every tool call and every tool result died with the turn that made it. An
+#: agent asked to change something in `~/nix` therefore re-read the same files
+#: on every turn and every `continue`, re-derived the same conclusion five times
+#: in one conversation, and never got as far as the edit. Tools were never the
+#: missing piece — working memory was.
+#:
+#: The budget is charged NEWEST FIRST and the rest is stubbed rather than
+#: dropped (see `_trim_carry`), because the shape of the exchange — which tool
+#: was called, with which arguments — is what stops the model repeating itself,
+#: and that lives on the assistant message, which is always kept. 12k chars is
+#: ~3k tokens against a 32k window: a real memory that cannot crowd out the
+#: conversation it belongs to.
+TOOL_CARRY_CHARS = 12000
+
+#: What a stubbed-out old tool result says in its place.
+TOOL_CARRY_STUB = ("[earlier output dropped to save context — the call above is "
+                   "what you ran; call it again if you need the output back]")
 
 #: The recall guidance, on the system prompt of EVERY turn. Without it the model
 #: treats a fact it does not see in the CURRENT chat as unknown — or, worse, as
@@ -1578,6 +1617,14 @@ class Ollama(QObject):
         self._tool_results = []  # results being gathered for the current round
         self._rounds = 0         # tool rounds taken this turn (MAX_TOOL_ROUNDS cap)
         self._no_tools = False   # the wrap-up round: answer, do not call tools
+        self._prior = []         # the LAST finished turn's messages, tool rounds
+                                 # and all — see `_carry` (working memory)
+        self._prior_users = []   # the RAW prompts behind it, for the match
+        self._pending_users = []  # …of the turn in flight, promoted when it ends
+        self._synthetic = set()   # indices in _messages the harness wrote, not
+                                  # him — kept out of the memory (continueReply)
+        self._partial_prefix = ""  # the answer so far, when this turn continues one
+        self._house_seen = set()  # guides already named this conversation
         self._max_results = RESEARCH_MAX  # per-search source cap for this turn (set in send)
         self._procs = []         # live file-tool QProcesses, so none is GC'd mid-run
         self._memories = []      # oracle's own durable memories, injected each turn
@@ -1958,9 +2005,22 @@ class Ollama(QObject):
         user_msg = {"role": "user", "content": content}
         if images_b64:                     # ollama /api/chat: base64 on the message
             user_msg["images"] = images_b64
+        # WHAT IT DID LAST TURN COMES WITH IT. `_carry` returns the previous
+        # turn's whole message list — tool calls and results included — when
+        # this is the next turn of the same conversation, so the agent starts
+        # where it left off instead of blind (TOOL_CARRY_CHARS).
+        hist = self._parse_history(history_json)
+        carried = self._carry(hist)
+        if carried is None:
+            self._house_seen = set()      # a different chat: name the guides again
+        # What the NEXT turn's history will look like if this one lands: the
+        # prompts as QML holds them, before attachments and notes are inlined.
+        self._pending_users = self._user_texts(hist) + [prompt]
+        self._synthetic = set()
+        self._partial_prefix = ""
         self._messages = ([{"role": "system",
                             "content": self._system_prompt(budget["guidance"])}]
-                          + self._parse_history(history_json)
+                          + (carried if carried is not None else hist)
                           + [user_msg])
         self._think_tokens = 0
         self._rounds = 0
@@ -2068,11 +2128,38 @@ class Ollama(QObject):
             instruction = self.CONTINUE_PROMPT
         prior = ([{"role": "assistant", "content": partial}]
                  if partial.strip() else [])
+        # Same working memory as `send` — and it matters more here: `continue`
+        # is pressed exactly when a turn ran out of room mid-job, and rebuilding
+        # from the chat log alone threw away everything that turn had read.
+        hist = self._parse_history(history_json)
+        carried = self._carry(hist)
+        # `partial` IS the last answer, handed over by QML — so if the memory
+        # ends with that same answer, the memory's copy goes, not this one.
+        # Otherwise the model reads its own last words twice in a row and
+        # continues from the wrong end of them.
+        if carried and partial.strip():
+            last = carried[-1]
+            body = str(last.get("content") or "").strip()
+            if (last.get("role") == "assistant" and not last.get("tool_calls")
+                    and body and partial.strip().startswith(body[:200])):
+                carried = carried[:-1]
+        # The instruction below is the harness talking, not him: the chat log
+        # will not have it next turn, so the fingerprint stays the prompts.
+        self._pending_users = (self._prior_users if carried is not None
+                               else self._user_texts(hist))
         self._messages = ([{"role": "system",
                             "content": self._system_prompt(budget["guidance"])}]
-                          + self._parse_history(history_json)
+                          + (carried if carried is not None else hist)
                           + prior
                           + [{"role": "user", "content": instruction}])
+        # The partial answer and the instruction are the HARNESS talking, and
+        # neither belongs in what the next turn remembers: the instruction was
+        # never his, and the partial comes back as part of the finished answer
+        # (`_partial_prefix`). Their indices are stable — tool rounds only ever
+        # append past them.
+        self._synthetic = set(range(len(self._messages) - len(prior) - 1,
+                                    len(self._messages)))
+        self._partial_prefix = partial if partial.strip() else ""
         self._think_tokens = 0
         self._rounds = 0
         self._images_shown = set()
@@ -2377,6 +2464,78 @@ class Ollama(QObject):
             if role in ("user", "assistant") and isinstance(content, str) and content.strip():
                 out.append({"role": role, "content": content})
         return out
+
+    # ---- working memory: the tool rounds of the turns before this one -------
+
+    @staticmethod
+    def _user_texts(msgs):
+        """The user messages of a message list, in order — the fingerprint a
+        carried list is matched on.
+
+        USER messages specifically, because they are the one part both sides
+        agree on: the chat log splits a long answer into several assistant rows
+        (one per tool round) while the message list holds one, so comparing
+        assistant text would fail on exactly the turns worth carrying."""
+        return [str(m.get("content") or "") for m in msgs
+                if m.get("role") == "user"]
+
+    def _carry(self, hist):
+        """The previous turn's full message list when this turn continues the
+        same conversation, else None.
+
+        `hist` is what QML sent (user/assistant text only). If its user turns
+        are the ones the carried list already has, this is the next turn of that
+        same chat and the carried list is strictly richer — it has the tool
+        calls and results in it. Anything else (a switched session, a reopened
+        one, an edited log, a fresh app) fails the match and the turn is built
+        from `hist` exactly as it always was.
+        """
+        if not self._prior:
+            return None
+        # `_prior_users` is the RAW prompts, not the user messages actually
+        # sent: a turn that carried dropped files (or a `continue`) puts extra
+        # text — and extra user messages — into the list, and comparing those
+        # would switch the memory off on exactly the turns that used it most.
+        if self._prior_users != self._user_texts(hist):
+            return None
+        return self._trim_carry([dict(m) for m in self._prior])
+
+    @staticmethod
+    def _trim_carry(msgs):
+        """Charge `TOOL_CARRY_CHARS` newest-first; stub what does not fit.
+
+        The assistant messages that CALLED the tools are never touched — a model
+        that can see it already ran `read_file` on a path does not run it again,
+        which is the whole point. Only the output is dropped, and it says so.
+        """
+        spent = 0
+        for m in reversed(msgs):
+            if m.get("role") != "tool":
+                continue
+            body = str(m.get("content") or "")
+            if spent + len(body) <= TOOL_CARRY_CHARS:
+                spent += len(body)
+            else:
+                m["content"] = TOOL_CARRY_STUB
+        return msgs
+
+    def _remember_turn(self):
+        """Snapshot the turn that just finished, tool rounds and all.
+
+        The final assistant answer is appended here rather than in the loop:
+        `_on_finished` only appends an assistant message when it is going round
+        again, so the last one would otherwise be missing from the memory of the
+        turn. The system message is dropped — it is rebuilt every turn (the
+        clock in it moves) and carrying a stale one would pin the model to an
+        old `now`.
+        """
+        msgs = [m for i, m in enumerate(self._messages)
+                if m.get("role") != "system" and i not in self._synthetic]
+        answer = (self._partial_prefix + self._acc_content).strip()
+        if answer:
+            msgs.append({"role": "assistant", "content": answer})
+        self._prior = msgs
+        self._prior_users = list(self._pending_users)
 
     @staticmethod
     def _research_budget(prompt):
@@ -2797,6 +2956,7 @@ class Ollama(QObject):
         # there. replyDone waits for those downloads.
         if self._attach_typed_images():
             return
+        self._remember_turn()
         self._set_busy(False)
         if self._done_reason == "length":
             self.replyTruncated.emit(self._done_reason)
@@ -2843,6 +3003,7 @@ class Ollama(QObject):
         remaining["n"] -= 1
         if remaining["n"] > 0 or not self._busy:
             return
+        self._remember_turn()
         self._set_busy(False)
         if self._done_reason == "length":
             self.replyTruncated.emit(self._done_reason)
@@ -3693,6 +3854,46 @@ class Ollama(QObject):
         proc.write(json.dumps({"op": "image", "path": path}).encode("utf-8"))
         proc.closeWriteChannel()
 
+    def _house_note(self, path):
+        """The nearest house guide above `path`, named once per conversation.
+
+        Walks up from the path to `$HOME` (never past it — `/` and `/nix/store`
+        have no house rules and a stray hit there would be noise). Returns the
+        sentence to hand back with the tool result, or "" when there is nothing
+        to say or it has already been said this conversation.
+        """
+        p = str(path or "").strip()
+        if not p:
+            return ""
+        try:
+            here = Path(os.path.expanduser(p)).resolve()
+        except (OSError, RuntimeError, ValueError):
+            return ""
+        home = Path.home().resolve()
+        if not here.is_dir():
+            here = here.parent
+        found = None
+        while True:
+            for fn in HOUSE_FILES:
+                cand = here / fn
+                if cand.is_file():
+                    found = cand
+                    break
+            if found is not None or here == home or here.parent == here:
+                break
+            here = here.parent
+        if found is None:
+            return ""
+        key = str(found)
+        if key in self._house_seen:
+            return ""
+        self._house_seen.add(key)
+        return ("This tree has house rules: %s. It states how work is done "
+                "here — what to run after a change, what never to edit by hand, "
+                "how to commit. The NEAREST one to the file you are touching "
+                "wins. Read the part that covers what you are about to do "
+                "BEFORE you change anything in this tree." % key)
+
     def _run_fs_tool(self, name, args, idx, remaining, calls):
         """Run one file tool as an async QProcess, feeding the JSON result back
         into the tool loop exactly as the web search does. Concurrent with any
@@ -3721,6 +3922,14 @@ class Ollama(QObject):
                 return
             proc.deleteLater()
             result = self._fs_result(out, err, rc)
+            # The tree's own guide, named the first time this conversation
+            # touches that tree (HOUSE_FILES) — so he never has to point the
+            # agent at the rules of the place it is standing in.
+            if isinstance(result, dict) and "error" not in result:
+                guide = self._house_note(
+                    args.get("path") if isinstance(args, dict) else "")
+                if guide:
+                    result["guide"] = guide
             self._tool_results[idx] = {"role": "tool", "tool_name": name,
                                        "content": json.dumps(result)}
             self.fileToolDone.emit(self._fs_outcome(name, args, result),
@@ -4672,39 +4881,45 @@ def run_selftest(app, shell, win, plasma, warnings):
                          _label.property("text") if _label else None))
                 _box.setProperty("text", "")
                 app.processEvents()
-        # ORACLE_SEND: drive ONE real prompt through the window, against
-        # whatever OLLAMA_HOST points at (tools/round-split-test.py points it at
-        # a stub on 127.0.0.1 — never his daemon), then print the log as JSON.
-        # It is the only way to check what the CHAT ROWS end up as, which is
-        # where the per-round split lives.
+        # ORACLE_SEND: drive real prompts through the window, against whatever
+        # OLLAMA_HOST points at (tools/round-split-test.py points it at a stub
+        # on 127.0.0.1 — never his daemon), then print the log as JSON. It is
+        # the only way to check what the CHAT ROWS end up as, which is where the
+        # per-round split lives.
+        #
+        # `;;` separates SEVERAL prompts, each sent once the last one has
+        # finished — the only way to exercise anything that spans turns, which
+        # is what the working memory across them is (tools/memory-carry-test.py).
         if os.environ.get("ORACLE_SEND"):
             from PySide6.QtCore import Q_ARG, Q_RETURN_ARG, QMetaObject, QObject
             target = shell.root if plasma else win.findChild(QObject, "content")
             target.setProperty("model", os.environ.get("ORACLE_SEND_MODEL",
                                                        "stub:latest"))
             box = target.findChild(QObject, "promptBox")
-            box.setProperty("text", os.environ["ORACLE_SEND"])
-            app.processEvents()
-            QMetaObject.invokeMethod(target, "send")
+
             def _rows():
                 return QMetaObject.invokeMethod(target, "rowsJson",
                                                 Q_RETURN_ARG("QVariant"))
 
-            _t0 = time.monotonic()
-            while time.monotonic() - _t0 < 60:
+            for _prompt in os.environ["ORACLE_SEND"].split(";;"):
+                box.setProperty("text", _prompt)
                 app.processEvents()
-                time.sleep(0.01)
-                if time.monotonic() - _t0 < 1.0:
-                    continue
-                try:
-                    rows = json.loads(_rows() or "[]")
-                except ValueError:
-                    continue
-                if rows and not any(r.get("streaming") for r in rows):
-                    break
-            for _ in range(20):
-                app.processEvents()
-                time.sleep(0.01)
+                QMetaObject.invokeMethod(target, "send")
+                _t0 = time.monotonic()
+                while time.monotonic() - _t0 < 60:
+                    app.processEvents()
+                    time.sleep(0.01)
+                    if time.monotonic() - _t0 < 1.0:
+                        continue
+                    try:
+                        rows = json.loads(_rows() or "[]")
+                    except ValueError:
+                        continue
+                    if rows and not any(r.get("streaming") for r in rows):
+                        break
+                for _ in range(20):
+                    app.processEvents()
+                    time.sleep(0.01)
             print("rows: %s" % _rows())
         # ORACLE_MENU: open the log's right-click menu over the first reply,
         # which no other render can show — a menu is not on screen until it is
