@@ -102,6 +102,16 @@ for sel in ("#header", ".toolbar-mainbar", ".UrlBar-AddressField", ".ToolbarButt
 check("the address field is a HOLE (inset shadow), not a raised pill",
       "inset 0 1px 2px" in oxy)
 
+# The active tab's INK. Vivaldi inks it with the contrast tone it computed for
+# an ACCENT-coloured tab; our slab is not the accent, so inheriting that put
+# near-black text on a dark slab and the title vanished.
+import re as _re
+m = _re.search(r"\.tab\.active,\.tab\.active \*\{color:(#[0-9a-f]{6})", oxy)
+check("the active tab says what its ink is", bool(m))
+if m:
+    check("and that ink is readable on the slab it sits on",
+          vivaldichrome.hexcolor.contrast(m.group(1), CHROME["buttonTop"]) >= 4.5)
+
 # --- the whole sheet ---------------------------------------------------------
 css = vivaldichrome.css(PAL.__getitem__, CHROME, extra="::-webkit-scrollbar{width:9px}")
 check("the ladder is emitted on #browser, where the engine sets it", "#browser," in css)
