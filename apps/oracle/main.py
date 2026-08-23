@@ -4123,6 +4123,13 @@ def build_kde_chrome(shell, ollama, sessions, backend):
     shell.bind_status()
     shell.bind_title("windowTitle")
 
+    # The two pickers sit at the RIGHT end of the toolbar [his, 2026-08-22],
+    # not beside the action buttons: an expanding blank widget in front of them
+    # takes every pixel the buttons leave, which is how a QToolBar right-aligns
+    # anything (it has no alignment of its own).
+    from PySide6.QtWidgets import QWidget
+    shell.toolbar_widget("main", QWidget(), stretch=True)
+
     # ---- the model picker -------------------------------------------------
     # A real QComboBox: the daemon's models, with the AGENT-SUGGESTED ones
     # ranked first and a separator ruling them off from the rest, exactly as the
