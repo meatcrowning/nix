@@ -167,6 +167,36 @@ check("so the turn ends in words, not an empty message",
 check("every earlier round DID carry tools",
       all(c.get("tools") for c in CHATS[:-1]))
 
+# ---- the loop is long enough to DO something, and stops on context ---------
+# He should not have to press `continue` to get one task finished [his,
+# 2026-08-23], so the round cap is a runaway guard, not a work budget — and the
+# thing that really ends a long turn is the context filling up.
+check("the tool loop is a working budget, not four rounds",
+      oracle.MAX_TOOL_ROUNDS >= 20, str(oracle.MAX_TOOL_ROUNDS))
+check("the model is told to finish the job in one turn",
+      "Finish the job in THIS turn" in oracle.PERSISTENCE_NOTE
+      and str(oracle.MAX_TOOL_ROUNDS) in oracle.PERSISTENCE_NOTE)
+
+o._messages = [{"role": "user", "content": "x"}]
+check("an empty conversation has room for another round", o._ctx_room())
+o._messages = [{"role": "user", "content": "x" * (oracle.CHAT_NUM_CTX * 4)}]
+check("a conversation that has filled the window does not", not o._ctx_room())
+
+# A full context wraps the turn up EARLY — no waiting for round 24.
+MODE["tool_loop"] = True
+CHATS.clear()
+chunks.clear()
+done.clear()
+o.send("stub:latest", "go find something", "[]")
+# One real round, then stuff the context: the next `_on_finished` must wrap up.
+pump(lambda: len(CHATS) >= 2)
+o._messages.append({"role": "user", "content": "x" * (oracle.CHAT_NUM_CTX * 4)})
+pump(lambda: bool(done))
+check("a full context wraps the turn up early",
+      len(CHATS) < oracle.MAX_TOOL_ROUNDS, "%d chats" % len(CHATS))
+check("and it still ends in words",
+      "".join(chunks) == "and here is the rest of it.", repr("".join(chunks)))
+
 srv.shutdown()
 print("FAILED: " + ", ".join(fails) if fails else "OK")
 sys.exit(1 if fails else 0)
