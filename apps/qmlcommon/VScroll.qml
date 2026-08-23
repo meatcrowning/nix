@@ -22,10 +22,15 @@ import QtQuick.Controls.Basic
 // `typeof` exactly like `Motion.qml`'s, so an offscreen harness that never
 // installs DeskStyle still renders (as the default, win31) instead of throwing.
 //
-// ALWAYS VISIBLE, and no fade. `policy: AlwaysOn`, full opacity, no `Behavior on
-// opacity` anywhere — the 120 ms scrollbar fade that used to be here is gone
-// from §6.2.1's non-participants table with it. A bar that is always the same
-// width is also what keeps content from reflowing the instant a view overflows.
+// SHOWN WHEN THERE IS SOMETHING TO SCROLL, and no fade. [his, 2026-08-22]
+// *"scrollbar should only appear when needed, not all the time"* — so the bar
+// is absent while the content fits and returns the instant it overflows. It
+// never fades either way: full opacity, no `Behavior on opacity` anywhere (the
+// 120 ms fade that used to be here is gone from §6.2.1's non-participants table
+// with it), and the GUTTER is reserved from `barW` whether or not the bar is in
+// it, so a view that starts to overflow does not reflow its content. That
+// reflow was the whole argument for the old always-on rule; reserving the
+// gutter answers it without a bar standing there saying nothing.
 //
 // THE PIXELS ARE THE POINT (§2.2, §4). Every edge is a 1px Rectangle on an
 // integer coordinate and every arrow is drawn as GEOMETRY, never as text: More
@@ -74,16 +79,17 @@ ScrollBar {
         (typeof DeskStyle !== "undefined" && DeskStyle && DeskStyle.plasma) || false
 
     // ---- hide when there is nothing to scroll ---------------------------
-    // Opt-in, DEFAULT OFF: the desktop rule is AlwaysOn (§9.2, [his] "there
-    // should be a scrollbar wherever appropriate"), so every existing call
-    // site keeps its always-drawn bar. A caller that sets `hideWhenFull`
-    // gets the other honest reading of "appropriate" — the bar vanishes
-    // entirely while the content fits, and returns the instant it overflows.
-    // `size` is the visible fraction of the content: 1.0 means it all fits.
-    // Reserve the gutter from `barW` regardless (never conditionally) so a
-    // hidden bar leaves the layout exactly where a shown one would — the bar
-    // toggles, the content never reflows.
-    property bool hideWhenFull: false
+    // DEFAULT ON since 2026-08-22 (his call above; it was opt-in and off, and
+    // board was the one caller that had opted in). The bar vanishes entirely
+    // while the content fits and returns the instant it overflows. `size` is
+    // the visible fraction of the content: 1.0 means it all fits.
+    //
+    // A call site that reserves the gutter must go on reserving it from `barW`
+    // REGARDLESS (never conditionally) — that is what makes this free: a hidden
+    // bar leaves the layout exactly where a shown one would, so the bar
+    // toggles and the content never moves. Set `hideWhenFull: false` for a view
+    // that genuinely wants the old always-drawn bar; nothing does today.
+    property bool hideWhenFull: true
     readonly property bool scrollable: vb.size < 0.999
     visible: !vb.hideWhenFull || vb.scrollable
 
@@ -122,11 +128,18 @@ ScrollBar {
     }
 
     // Honesty (§10): an arrow that cannot move the view is drawn dead, and the
-    // handlers refuse. `size >= 1` is "nothing to scroll" — with AlwaysOn that
-    // case is on screen rather than hidden, so it has to say so.
+    // handlers refuse. `size >= 1` is "nothing to scroll", which now hides the
+    // whole bar — but an arrow can still go dead with the bar up (you are at
+    // one end of a scrollable view), so this stays exactly as it was.
     readonly property bool canUp: vb.size < 1 && vb.position > 0.0005
     readonly property bool canDown: vb.size < 1 && (vb.position + vb.size) < 0.9995
 
+    // AlwaysOn plus our own `visible` above, deliberately: `AsNeeded` is
+    // QQC2's own answer and it is the wrong one here — it FADES the bar in and
+    // out on a timer of its own (and, attached to a Flickable, shows it on any
+    // content change), which is the 120 ms fade §6.2.1 retired coming back in
+    // through the style. Ours is a hard toggle on "is there anything to
+    // scroll", with the gutter reserved either way.
     policy: ScrollBar.AlwaysOn
     hoverEnabled: true
     width: vb.barW
