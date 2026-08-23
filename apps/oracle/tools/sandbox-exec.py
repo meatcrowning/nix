@@ -68,7 +68,18 @@ CODE_MAX_BYTES = 256_000      # refuse an absurdly large program outright
 STREAM_MAX_BYTES = 20000
 STDIN_MAX_BYTES = 256_000     # ...and an absurdly large stdin feed
 CPU_SECONDS = 20              # RLIMIT_CPU — a hair above the wall cap, a backstop
-MEM_BYTES = 1024 * 1024 * 1024  # RLIMIT_AS — 1 GiB address space per run
+#: RLIMIT_AS — ADDRESS SPACE, not resident memory, and that distinction is what
+#: made 1 GiB the wrong number [his, 2026-08-23: chatter tried to `ollama pull`
+#: a model for him and got `runtime/cgo: pthread_create failed` before the
+#: download began]. A Go runtime RESERVES far more virtual address space than it
+#: ever touches — arenas, plus 8 MB of stack per OS thread — so every Go binary
+#: on this machine (ollama, gh, deno…) died instantly under a 1 GiB cap while a
+#: python loop happily allocating real memory sailed under it. Measured with
+#: `ulimit -v` the same afternoon: `ollama list` aborts at 1 GiB and works at
+#: 2 GiB. 4 GiB is that with headroom, and RSS — the number that can actually
+#: hurt the machine — is still bounded by the wall clock, the CPU cap and
+#: oomd's own watch on the user slice.
+MEM_BYTES = 4 * 1024 * 1024 * 1024  # RLIMIT_AS — 4 GiB of address space per run
 FSIZE_BYTES = 16 * 1024 * 1024  # RLIMIT_FSIZE — biggest file the code may write
 
 #: The interpreters a request may ask for. Python was the only one until

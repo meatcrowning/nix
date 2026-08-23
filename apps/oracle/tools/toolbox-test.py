@@ -36,6 +36,82 @@ os.environ["ORACLE_TOOLS"] = str(_TMP / "tools")
 # client treats as "yes" by design (apps/pylib/warden.py: fail open, always).
 os.environ["AI_WARDEN_URL"] = "http://127.0.0.1:1"
 
+# A STAND-IN ollama: manage_models talks to the daemon over HTTP, and a test
+# must not pull 20 GB onto his disk or delete a model he uses. `OLLAMA_HOST` is
+# read at import, so the server goes up first.
+import http.server                                                # noqa: E402
+import threading                                                  # noqa: E402
+
+PULLED = []
+
+
+class _Ollama(http.server.BaseHTTPRequestHandler):
+    def _json(self, obj, code=200):
+        body = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _body(self):
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            return json.loads(self.rfile.read(n).decode() or "{}")
+        except (ValueError, OSError):
+            return {}
+
+    def do_GET(self):
+        if self.path.startswith("/api/tags"):
+            self._json({"models": [
+                {"name": "big:35b", "size": 22 * (1 << 30),
+                 "modified_at": "2026-08-09T17:27:58Z",
+                 "details": {"family": "qwen", "parameter_size": "36B",
+                             "quantization_level": "Q4_K_M"}},
+                {"name": "small:1b", "size": 1 << 30, "modified_at": "",
+                 "details": {}}]})
+        else:
+            self._json({"error": "no"}, 404)
+
+    def do_DELETE(self):
+        PULLED.append(("delete", self._body().get("model")))
+        self._json({})
+
+    def do_POST(self):
+        req = self._body()
+        if self.path.startswith("/api/show"):
+            self._json({"details": {"parameter_size": "36B",
+                                    "quantization_level": "Q4_K_M",
+                                    "family": "qwen"},
+                        "model_info": {"qwen.context_length": 262144},
+                        "capabilities": ["tools", "vision"]})
+        elif self.path.startswith("/api/pull"):
+            PULLED.append(("pull", req.get("model")))
+            if str(req.get("model") or "").startswith("nope"):
+                body = json.dumps({"error": "pull model manifest: file does not "
+                                            "exist"}).encode() + b"\n"
+            else:
+                body = b"".join(json.dumps(o).encode() + b"\n" for o in (
+                    {"status": "pulling manifest"},
+                    {"status": "pulling abc", "total": 1000, "completed": 500},
+                    {"status": "pulling abc", "total": 1000, "completed": 1000},
+                    {"status": "success"}))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        else:
+            self._json({"error": "no"}, 404)
+
+    def log_message(self, *a):
+        pass
+
+
+_srv = http.server.HTTPServer(("127.0.0.1", 0), _Ollama)
+threading.Thread(target=_srv.serve_forever, daemon=True).start()
+os.environ["OLLAMA_HOST"] = "http://127.0.0.1:%d" % _srv.server_address[1]
+
 from PySide6.QtCore import (QMetaObject, QObject, Q_ARG, QTimer,   # noqa: E402
                             QUrl)
 from PySide6.QtGui import QGuiApplication, QImage                  # noqa: E402
@@ -199,7 +275,40 @@ check("...and the final result is still the whole thing",
       json.dumps(r)[:200])
 o._set_busy(False)
 
-# ---- 6. branching, through the real Root.qml ------------------------------
+# 6. models: the daemon's job, not the shell's
+progress = []
+o.execOutput.connect(lambda c: progress.append(c))
+r = run_tool("manage_models", {"action": "list"})
+check("list names what is installed, biggest first",
+      bool(r) and r.get("count") == 2
+      and r["models"][0]["name"] == "big:35b"
+      and r["models"][0]["size_gb"] == 22.0, json.dumps(r)[:200])
+r = run_tool("manage_models", {"action": "show", "model": "big:35b"})
+check("show reports the real context length",
+      bool(r) and r.get("context_length") == 262144
+      and "tools" in (r.get("capabilities") or []), json.dumps(r)[:200])
+progress.clear()
+r = run_tool("manage_models", {"action": "pull", "model": "small:1b"},
+             ms=20000)
+check("a pull streams progress and finishes",
+      bool(r) and r.get("ok") and any("%" in c for c in progress),
+      json.dumps(r)[:160] + " " + repr(progress)[:120])
+r = run_tool("manage_models", {"action": "pull", "model": "nope:1b"}, ms=20000)
+check("a pull that fails says what ollama said",
+      bool(r) and "does not exist" in (r.get("error") or ""),
+      json.dumps(r)[:200])
+PULLED.clear()
+r = run_tool("manage_models", {"action": "remove", "model": "big:35b"})
+check("removing weights needs an explicit confirm",
+      bool(r) and "confirm" in (r.get("error") or "") and not PULLED,
+      json.dumps(r)[:200])
+r = run_tool("manage_models", {"action": "remove", "model": "small:1b",
+                               "confirm": True})
+check("...and then it happens",
+      bool(r) and r.get("ok") and PULLED == [("delete", "small:1b")],
+      json.dumps(r)[:160])
+
+# ---- 7. branching, through the real Root.qml ------------------------------
 engine = QQmlApplicationEngine()
 ctx = engine.rootContext()
 parts = {"WalPalette": oracle.Palette(oracle.theme_source(oracle.PANEL_THEME)),

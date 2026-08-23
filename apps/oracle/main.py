@@ -440,6 +440,50 @@ MUSIC_TOOL = {
 }
 MUSIC_TOOL_NAMES = {"music_library"}
 
+#: MODELS ARE THE DAEMON'S JOB, not the shell's [his, 2026-08-23]. Asked to
+#: install a model, chatter reached for `run_bash` and `ollama pull` — and died
+#: on the runner's address-space cap before the download started, then guessed
+#: at macOS advice for a NixOS box. Both halves were avoidable: the cap is fixed
+#: in tools/sandbox-exec.py, and a pull was never a shell job in the first
+#: place. ollama's own HTTP API does it, chatter is already that daemon's
+#: client, and the API streams progress — so the download is watched rather than
+#: waited on, and it is the SAME endpoint whichever machine the window is on
+#: (book's `$OLLAMA` is the tunnel to top).
+MODEL_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "manage_models",
+        "description": (
+            "Look after the ollama models on his machine: `list` what is "
+            "installed with sizes, `show` one model's real context length and "
+            "capabilities, `pull` a new one from the ollama library (this can "
+            "take many minutes for a 20 GB model — he sees the progress, so "
+            "call it once and wait), and `remove` one to get the disk back. "
+            "Use this rather than run_bash: `ollama` on the command line is a "
+            "client for the same daemon, and here you get progress and a real "
+            "error instead of a shell's. Pull only what he asked for by name — "
+            "a wrong model is tens of gigabytes of his disk."),
+        "parameters": {"type": "object", "properties": {
+            "action": {"type": "string",
+                       "enum": ["list", "show", "pull", "remove"],
+                       "description": "What to do. Default `list`."},
+            "model": {"type": "string",
+                      "description": ("The model, exactly as ollama names it "
+                                      "(e.g. 'qwen3.6:27b'). Required for show, "
+                                      "pull and remove.")},
+            "confirm": {"type": "boolean",
+                        "description": ("Required for `remove`: it deletes his "
+                                        "weights and cannot be undone.")}},
+            "required": ["action"]}},
+}
+MODEL_TOOL_NAMES = {"manage_models"}
+
+#: A pull is minutes, not seconds, so it gets its own long leash — and the disk
+#: is checked before one starts, because the models live on `/` and it runs
+#: fairly full (root AGENTS.md).
+MODEL_PULL_MS = 90 * 60 * 1000
+MODEL_DISK_FLOOR = 5 * 1024 * 1024 * 1024
+
 #: The library and the queue socket both live with the player, on `top`.
 MUSIC_SCRIPT = "/home/lam/nix/apps/player/tools/library-ipc.py"
 
@@ -1863,7 +1907,10 @@ CAPABILITY_NOTE = (
     "(show_video — a YouTube or other watch page, or a direct video "
     "file, streamed into the chat with a play button he presses); "
     "read the current time in any "
-    "timezone; SEARCH HIS MUSIC LIBRARY and put something on (music_library "
+    "timezone; INSTALL AND MANAGE THE MODELS THEMSELVES (manage_models: list, "
+    "show, pull a new one from the ollama library with progress, remove one) — "
+    "use it rather than `ollama` in a shell; "
+    "SEARCH HIS MUSIC LIBRARY and put something on (music_library "
     "finds tracks and albums with their paths; control_player play_these / "
     "queue_these plays or queues them); "
     "SHOW him a picture that is already on the machine (show_image — "
@@ -3633,7 +3680,7 @@ class Ollama(QObject):
         return (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, SELF_TOOL,
                 IMAGE_TOOL, SEARCH_IMAGE_TOOL, VIEW_IMAGE_TOOL, SHOW_IMAGE_TOOL,
                 SCREENSHOT_TOOL, MAKE_IMAGE_TOOL, VIDEO_TOOL, PLAYER_TOOL,
-                MUSIC_TOOL,
+                MUSIC_TOOL, MODEL_TOOL,
                 FETCH_URL_TOOL,
                 CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
                 + list(SESSION_TOOLS) + list(MEMORY_TOOLS)
@@ -3995,6 +4042,8 @@ class Ollama(QObject):
             self._screenshot(args, i, remaining, calls)
         elif name in VIEW_IMAGE_TOOL_NAMES:
             self._view_image(args, i, remaining, calls)
+        elif name in MODEL_TOOL_NAMES:
+            self._run_model_tool(args, i, remaining, calls)
         elif name in MUSIC_TOOL_NAMES:
             self._run_music_tool(args, i, remaining, calls)
         elif name in PLAYER_TOOL_NAMES:
@@ -4917,6 +4966,211 @@ class Ollama(QObject):
             return path
         except OSError:
             return ""
+
+    # ---- the models themselves (manage_models, over ollama's own API) ----
+
+    def _run_model_tool(self, args, idx, remaining, calls):
+        """List, describe, pull or remove an ollama model.
+
+        Every one of these is an HTTP call to the daemon this app already talks
+        to — no shell, so no runner caps to trip over, and a `pull` STREAMS, so
+        the download is watched rather than waited on."""
+        a = args if isinstance(args, dict) else {}
+        action = str(a.get("action") or "list").strip().lower()
+        model = str(a.get("model") or "").strip()
+
+        def answer(result, ok=True, line=""):
+            remaining["sink"][idx] = {"role": "tool", "tool_name": "manage_models",
+                                       "content": json.dumps(result)}
+            self.fileToolDone.emit(line or ("models: "
+                                            + str(result.get("error", ""))), ok)
+            self._tool_done(remaining, calls)
+
+        if action in ("show", "pull", "remove") and not model:
+            self.fileToolStarted.emit("models")
+            answer({"error": action + " needs a model name"}, False)
+            return
+        if action == "list":
+            self.fileToolStarted.emit("listing models")
+            self._model_api("/api/tags", None, "GET", lambda ok, obj:
+                            self._model_list_done(ok, obj, answer))
+            return
+        if action == "show":
+            self.fileToolStarted.emit("model: " + model)
+            self._model_api("/api/show", {"model": model}, "POST", lambda ok, obj:
+                            answer(self._model_show(obj) if ok
+                                   else {"error": self._model_why(obj)}, ok,
+                                   "model · " + model))
+            return
+        if action == "remove":
+            if not a.get("confirm"):
+                self.fileToolStarted.emit("models")
+                answer({"error": "removing %s deletes his weights — ask him "
+                                 "first, then call again with confirm: true"
+                                 % model}, False)
+                return
+            self.fileToolStarted.emit("removing " + model)
+            self._model_api("/api/delete", {"model": model}, "DELETE",
+                            lambda ok, obj: answer(
+                                {"ok": True, "removed": model} if ok
+                                else {"error": self._model_why(obj)}, ok,
+                                ("removed " + model) if ok else ""))
+            return
+        if action == "pull":
+            self._model_pull(model, answer)
+            return
+        self.fileToolStarted.emit("models")
+        answer({"error": "unknown action: " + action}, False)
+
+    def _model_api(self, path, payload, verb, cb):
+        """One ollama API call, JSON in and out. `cb(ok, obj)`."""
+        req = QNetworkRequest(QUrl(OLLAMA + path))
+        req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
+                      "application/json")
+        body = json.dumps(payload or {}).encode("utf-8")
+        if verb == "GET":
+            reply = self._nam.get(req)
+        elif verb == "DELETE":
+            reply = self._nam.sendCustomRequest(req, b"DELETE", body)
+        else:
+            reply = self._nam.post(req, body)
+
+        def done():
+            try:
+                raw = bytes(reply.readAll().data()).decode("utf-8", "replace")
+                err = reply.error() != QNetworkReply.NetworkError.NoError
+                why = reply.errorString()
+            except RuntimeError:
+                return
+            reply.deleteLater()
+            try:
+                obj = json.loads(raw or "{}")
+            except ValueError:
+                obj = {"error": raw.strip()[:400] or why}
+            if err and not isinstance(obj, dict):
+                obj = {"error": why}
+            cb(not err, obj if isinstance(obj, dict) else {"data": obj})
+
+        reply.finished.connect(done)
+
+    @staticmethod
+    def _model_why(obj):
+        """ollama's own complaint, or something honest in its place."""
+        if isinstance(obj, dict):
+            for key in ("error", "message"):
+                if obj.get(key):
+                    return str(obj[key])[:400]
+        return "the ollama daemon refused that"
+
+    @staticmethod
+    def _model_list_done(ok, obj, answer):
+        if not ok:
+            answer({"error": Ollama._model_why(obj)}, False)
+            return
+        out = []
+        for m in (obj.get("models") or []):
+            det = m.get("details") or {}
+            out.append({"name": m.get("name") or m.get("model") or "",
+                        "size_gb": round((m.get("size") or 0) / (1 << 30), 1),
+                        "family": det.get("family") or "",
+                        "parameters": det.get("parameter_size") or "",
+                        "quantization": det.get("quantization_level") or "",
+                        "modified": str(m.get("modified_at") or "")[:19]})
+        out.sort(key=lambda r: -r["size_gb"])
+        answer({"ok": True, "count": len(out), "models": out}, True,
+               "models · %d installed" % len(out))
+
+    @staticmethod
+    def _model_show(obj):
+        info = obj.get("model_info") or {}
+        ctx = next((v for k, v in info.items() if k.endswith(".context_length")), 0)
+        det = obj.get("details") or {}
+        return {"ok": True, "parameters": det.get("parameter_size") or "",
+                "quantization": det.get("quantization_level") or "",
+                "family": det.get("family") or "",
+                "context_length": ctx,
+                "capabilities": obj.get("capabilities") or [],
+                "system": (obj.get("system") or "")[:500]}
+
+    def _model_pull(self, model, answer):
+        """Pull one model, streaming ollama's progress into the row.
+
+        The disk is checked FIRST: the weights land on `/`, which runs fairly
+        full, and finding that out 18 GB in is not a check. Progress arrives as
+        NDJSON — the same shape the chat stream uses — and goes to the same live
+        tail a running program writes to, so a 20-minute download looks like
+        work rather than like a hang."""
+        free = 0
+        try:
+            free = shutil.disk_usage(os.path.expanduser("~")).free
+        except OSError:
+            pass
+        if free and free < MODEL_DISK_FLOOR:
+            answer({"error": "only %.1f GB free on this disk — a model will not "
+                             "fit, and it is his root filesystem"
+                             % (free / (1 << 30))}, False)
+            return
+        self.fileToolStarted.emit("pulling " + model)
+        self.execStarted.emit("ollama pull " + model)
+        req = QNetworkRequest(QUrl(OLLAMA + "/api/pull"))
+        req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
+                      "application/json")
+        req.setTransferTimeout(0)          # a 20 GB pull is not a timeout
+        reply = self._nam.post(req, json.dumps(
+            {"model": model, "stream": True}).encode("utf-8"))
+        state = {"buf": b"", "last": "", "pct": -1, "err": ""}
+
+        def pump():
+            try:
+                state["buf"] += bytes(reply.readAll().data())
+            except RuntimeError:
+                return
+            while b"\n" in state["buf"]:
+                line, state["buf"] = state["buf"].split(b"\n", 1)
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line.decode("utf-8", "replace"))
+                except ValueError:
+                    continue
+                if obj.get("error"):
+                    state["err"] = str(obj["error"])[:400]
+                    continue
+                status = str(obj.get("status") or "")
+                total, got = obj.get("total") or 0, obj.get("completed") or 0
+                if total:
+                    pct = int(got * 100 / total)
+                    if pct != state["pct"]:
+                        state["pct"] = pct
+                        self.execOutput.emit(
+                            "%s  %d%%  (%.1f of %.1f GB)\n"
+                            % (status, pct, got / (1 << 30), total / (1 << 30)))
+                elif status and status != state["last"]:
+                    self.execOutput.emit(status + "\n")
+                state["last"] = status
+
+        def done():
+            pump()
+            try:
+                bad = reply.error() != QNetworkReply.NetworkError.NoError
+                why = reply.errorString()
+            except RuntimeError:
+                return
+            reply.deleteLater()
+            if state["err"] or bad:
+                answer({"error": state["err"] or why}, False,
+                       "pull failed: " + (state["err"] or why)[:120])
+                return
+            answer({"ok": True, "model": model,
+                    "note": ("Pulled and ready. He can pick it in the model "
+                             "selector; you are still the model you were.")},
+                   True, "pulled " + model)
+
+        reply.readyRead.connect(pump)
+        reply.finished.connect(done)
+        QTimer.singleShot(MODEL_PULL_MS, lambda: reply.abort()
+                          if reply is not None else None)
 
     # ---- his own tools (a directory of manifests, see CUSTOM_TOOLS_ROOT) ----
 
