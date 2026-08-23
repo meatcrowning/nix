@@ -732,6 +732,13 @@ with the caption under it, and each failure as a crit line. `imageFetchStarted`/
 `imagesActive` drive the in-flight line. The model also gets a text tool result
 (`{ok, note}` or `{error}`) so it knows the outcome.
 
+**Pictures sit at the TOP of the bubble** [his, 2026-08-22] — before the words,
+the way a message with a photo in it reads everywhere else — and **their
+captions are always drawn, not only on hover**: a caption you have to go looking
+for with the pointer is not a caption. On a tile the caption stays INSIDE the
+artwork (§5.1) and its wash goes one step more opaque as the pointer arrives; a
+solo picture keeps its caption under it.
+
 **Two or more pictures are a GALLERY, and one opens over the window** [his,
 2026-08-23]: they used to stack full-width, one on top of the other, so seeing
 the third meant scrolling past the first two. `qml/ImageGallery.qml` draws one

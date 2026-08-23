@@ -2224,6 +2224,46 @@ Item {
                                                  whoText.contentWidth)
 
 
+                                    // The pictures a reply carries, at the TOP of the
+                                    // bubble [his, 2026-08-22] — before the words, the way
+                                    // a message with a photo in it reads everywhere else.
+                                    // Fetched from the web with fetch_image, or read off
+                                    // this machine with view_image; the one place a reply
+                                    // becomes a picture. Each entry (the Python↔QML
+                                    // contract) is either a fetched image, framed like
+                                    // every surface here (1px border, Theme.rounding,
+                                    // never upscaled past its own size), with the model's
+                                    // caption under it, or an honest crit line for a fetch
+                                    // that failed or a file that will not load
+                                    // (docs/DESIGN.md §10 — surfaced, never vanished).
+                                    Column {
+                                        id: imageCol
+                                        width: parent.width
+                                        spacing: 6
+                                        visible: !isUser && (images !== "[]" || imagesActive)
+
+                                        // ONE picture is one picture; two or
+                                        // more are a tiled grid, and a tile
+                                        // opens the Lightbox over the whole
+                                        // window [his, 2026-08-23]. Both live
+                                        // in ImageGallery.qml.
+                                        ImageGallery {
+                                            width: imageCol.width
+                                            entries: {
+                                                try { return JSON.parse(images); }
+                                                catch (e) { return []; }
+                                            }
+                                            onEnlarge: (i) => lightbox.openAt(oks, i)
+                                        }
+
+                                        // A fetch still in flight (§10 — the wait is shown).
+                                        PixelText {
+                                            visible: imagesActive
+                                            text: "fetching an image…"
+                                            color: Theme.text
+                                        }
+                                    }
+
                                     // The turn's text. User prompts and error lines stay
                                     // verbatim on the plain SelectableText (PlainText —
                                     // never interpreted, the shared guard — but read-only
@@ -2266,42 +2306,6 @@ Item {
                                         source: md
                                     }
 
-                                    // Images the model fetched from the web with
-                                    // fetch_image, rendered INLINE — the one place a reply
-                                    // becomes a picture. Each entry (the Python↔QML
-                                    // contract) is either a fetched image, framed like
-                                    // every surface here (1px border, Theme.rounding,
-                                    // never upscaled past its own size), with the model's
-                                    // caption under it, or an honest crit line for a fetch
-                                    // that failed or a file that will not load
-                                    // (docs/DESIGN.md §10 — surfaced, never vanished).
-                                    Column {
-                                        id: imageCol
-                                        width: parent.width
-                                        spacing: 6
-                                        visible: !isUser && (images !== "[]" || imagesActive)
-
-                                        // ONE picture is one picture; two or
-                                        // more are a tiled grid, and a tile
-                                        // opens the Lightbox over the whole
-                                        // window [his, 2026-08-23]. Both live
-                                        // in ImageGallery.qml.
-                                        ImageGallery {
-                                            width: imageCol.width
-                                            entries: {
-                                                try { return JSON.parse(images); }
-                                                catch (e) { return []; }
-                                            }
-                                            onEnlarge: (i) => lightbox.openAt(oks, i)
-                                        }
-
-                                        // A fetch still in flight (§10 — the wait is shown).
-                                        PixelText {
-                                            visible: imagesActive
-                                            text: "fetching an image…"
-                                            color: Theme.text
-                                        }
-                                    }
                                 }
                             }
 
