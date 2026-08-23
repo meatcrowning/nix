@@ -119,6 +119,15 @@ check("ollama was freed", world.freed == ["ollama"], str(world.freed))
 check("painter goes ahead", r["ok"], r.get("reason", ""))
 check("the answer names what went", r["freed"] == ["ollama"])
 
+print("\nNEW: RAM looks OK but ollama is warm — free it anyway, don't wait")
+world = World(avail_gb=20, ollama_gb=18, ollama_models=[("mid:20b", 18.0)],
+              tags={"mid:20b": 18.0})
+w = world.install()
+r = w.reserve("comfy", hint=int(12 * GiB))
+check("ollama was freed up front", world.freed == ["ollama"], str(world.freed))
+check("painter goes ahead", r["ok"], r.get("reason", ""))
+check("the answer names it", r["freed"] == ["ollama"])
+
 print("\nthe reverse: painter is warm and idle, chatter wants a big model")
 world = World(avail_gb=8, comfy_gb=16, tags={"mid:20b": 14.0})
 w = world.install()

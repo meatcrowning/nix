@@ -457,9 +457,35 @@ class Warden:
         # not livelock the box (module docstring).
         vram_ok = vt == 0 or need == 0 or (vf - min(need, vt)) >= VRAM_FLOOR
 
+        # When painter wants to start on top of a WARM, IDLE ollama, free it
+        # up front even if nominal free RAM looks OK. On top's 31 GiB a 15 GiB
+        # comfy load alongside ollama's ~18 GiB model nearly always thrashes the
+        # box into a livelock before avail ever dips below the floor, and by
+        # then it is too late to react (2026-08-22: comfy loaded beside warm
+        # ollama, avail crashed to 2G, he stopped ollama by hand). A free is
+        # cheap and reloadable (keep_alive=0, daemon stays up); a late one costs
+        # a manual stop. This never interrupts chatter — busy() guards below.
+        #
+        # This runs for comfy reserves only (chatter's own swap is handled by
+        # estimate()). We mark ollama as already-freed here so the existing free
+        # path below does not free it a second time.
+        freed_other = False
+        held = self.footprint(other)
+        if backend == "comfy" and held >= 1 * GiB and ram_ok:
+            bsy, _ = self.busy(other)
+            if not bsy:
+                released = self.free(other)
+                if released:
+                    freed.append(other)
+                    freed_other = True
+                    notify("unloaded %s (%s)" % (NICE[other], gb(released)),
+                           "%s needed the room" % NICE[backend])
+                avail = mem_available()
+                ram_ok = need == 0 or (avail - need) >= RAM_FLOOR
+
         if ram_ok and vram_ok:
             self._take_lease(backend, lease)
-            return {"ok": True, "reason": "", "freed": [],
+            return {"ok": True, "reason": "", "freed": freed,
                     "need": need, "available": avail}
 
         held = self.footprint(other)
@@ -468,31 +494,31 @@ class Warden:
             # a VRAM squeeze still goes ahead.
             if ram_ok:
                 self._take_lease(backend, lease)
-                return {"ok": True, "reason": "", "freed": [], "need": need,
+                return {"ok": True, "reason": "", "freed": freed, "need": need,
                         "available": avail}
             if (avail - hard) >= HARD_FLOOR:
                 self._take_lease(backend, lease)
-                return {"ok": True, "reason": "", "freed": [], "need": need,
+                return {"ok": True, "reason": "", "freed": freed, "need": need,
                         "available": avail}
             return self._refuse(
                 "not enough memory: needs %s, %s free, nothing to unload"
-                % (gb(hard), gb(avail)), need, avail)
+                % (gb(hard), gb(avail)), need, avail, freed)
 
         bsy, why = self.busy(other)
         if bsy:
             if ram_ok:
                 self._take_lease(backend, lease)
-                return {"ok": True, "reason": "", "freed": [], "need": need,
+                return {"ok": True, "reason": "", "freed": freed, "need": need,
                         "available": avail}
             if (avail - hard) >= HARD_FLOOR:
                 self._take_lease(backend, lease)
-                return {"ok": True, "reason": "", "freed": [], "need": need,
+                return {"ok": True, "reason": "", "freed": freed, "need": need,
                         "available": avail}
             return self._refuse(
-                "%s, %s stuck under it" % (why, gb(held)), need, avail)
+                "%s, %s stuck under it" % (why, gb(held)), need, avail, freed)
 
         released = self.free(other)
-        if released:
+        if released and not freed_other:
             freed.append(other)
             notify("unloaded %s (%s)" % (NICE[other], gb(released)),
                    "%s needed the room" % NICE[backend])
