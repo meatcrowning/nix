@@ -138,6 +138,102 @@ check("no player running is said plainly",
       json.dumps(res)[:160])
 oracle.MPRIS_NAME = "player"
 
+# ---- the library: browse, then put it on ----------------------------------
+# A STUB library script ($ORACLE_MUSIC): the real one reads his 19,000-track
+# database and talks to the socket his player is listening on, and a test does
+# neither. What is checked here is chatter's half — the request it builds and
+# the answer it hands back.
+LIB = _TMP / "library-stub.py"
+LIB.write_text(
+    "#!/usr/bin/env python3\n"
+    "import json, sys\n"
+    "req = json.loads(sys.stdin.read() or '{}')\n"
+    "open(%r, 'a').write(json.dumps(req) + '\\n')\n"
+    "if req.get('op') in ('play', 'queue'):\n"
+    "    print(json.dumps({'ok': True, 'sent': len(req.get('paths') or []),\n"
+    "                      'queue_length': 3,\n"
+    "                      'now_playing': {'title': 'Roygbiv'}}))\n"
+    "else:\n"
+    "    print(json.dumps({'ok': True, 'count': 1, 'total': 1, 'tracks':\n"
+    "        [{'title': 'Roygbiv', 'artist': 'Boards of Canada',\n"
+    "          'path': '/aud/boc/01 Roygbiv.flac'}]}))\n"
+    % str(_TMP / "lib-calls.log"), encoding="utf-8")
+LIB.chmod(LIB.stat().st_mode | stat.S_IEXEC)
+os.environ["ORACLE_MUSIC"] = str(LIB)
+LIBLOG = _TMP / "lib-calls.log"
+
+
+def library(args, ms=6000):
+    LIBLOG.write_text("", encoding="utf-8")
+    remaining = {"n": 1, "sink": [None]}
+    o._tool_done = lambda *a, **k: None
+    o._run_music_tool(args, 0, remaining, [{}])
+    loop = QTimer()
+    loop.setSingleShot(True)
+    loop.timeout.connect(app.quit)
+    loop.start(ms)
+    tick = QTimer()
+    tick.setInterval(50)
+    tick.timeout.connect(lambda: app.quit() if remaining["sink"][0] else None)
+    tick.start()
+    app.exec()
+    tick.stop()
+    sink = remaining["sink"][0]
+    sent = [json.loads(l) for l in LIBLOG.read_text(encoding="utf-8").splitlines() if l]
+    return (json.loads(sink["content"]) if sink else None), sent
+
+
+res, sent = library({"action": "search", "query": "boards of canada",
+                     "favorites_only": True, "limit": 5})
+check("a library search reaches the library with his filters",
+      len(sent) == 1 and sent[0]["op"] == "search"
+      and sent[0]["q"] == "boards of canada"
+      and sent[0]["favorites_only"] is True and sent[0]["limit"] == 5,
+      json.dumps(sent)[:200])
+check("...and the rows come back with their paths",
+      bool(res) and res.get("tracks", [{}])[0].get("path"),
+      json.dumps(res)[:160])
+
+res, sent = library({"action": "albums", "artist": "aphex"})
+check("albums is its own action", sent and sent[0]["op"] == "albums",
+      json.dumps(sent)[:120])
+
+
+def put_on(args, ms=6000):
+    LIBLOG.write_text("", encoding="utf-8")
+    seen.clear()
+    remaining = {"n": 1, "sink": [None]}
+    o._run_player_tool(args, 0, remaining, [{}])
+    loop = QTimer()
+    loop.setSingleShot(True)
+    loop.timeout.connect(app.quit)
+    loop.start(ms)
+    tick = QTimer()
+    tick.setInterval(50)
+    tick.timeout.connect(lambda: app.quit() if remaining["sink"][0] else None)
+    tick.start()
+    app.exec()
+    tick.stop()
+    sink = remaining["sink"][0]
+    sent = [json.loads(l) for l in LIBLOG.read_text(encoding="utf-8").splitlines() if l]
+    return (json.loads(sink["content"]) if sink else None), sent
+
+
+res, sent = put_on({"action": "play_these",
+                    "paths": ["/aud/a.flac", "/aud/b.flac"]})
+check("play_these goes to the player's own socket, not MPRIS",
+      len(sent) == 1 and sent[0]["op"] == "play"
+      and sent[0]["paths"] == ["/aud/a.flac", "/aud/b.flac"],
+      json.dumps(sent)[:160])
+check("...and answers with what is playing", bool(res) and res.get("ok")
+      and res.get("did") == "play_these", json.dumps(res)[:160])
+res, sent = put_on({"action": "queue_these", "paths": ["/aud/c.flac"]})
+check("queue_these appends", sent and sent[0]["op"] == "queue",
+      json.dumps(sent)[:120])
+res, _ = put_on({"action": "play_these", "paths": []})
+check("nothing to play is refused with a reason",
+      bool(res) and "error" in res, json.dumps(res)[:160])
+
 # ---- file_metadata, through the REAL executor ------------------------------
 FS = str(APP / "tools" / "sandbox-fs.py")
 txt = _TMP / "notes.md"

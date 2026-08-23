@@ -84,6 +84,8 @@ class FakePlayer(QObject):
         self._q = [dict(r) for r in rows]
         self._i = 0
         self._library.trackChanged.connect(self._on_track_changed)
+        self.opened = []
+        self.queued = []
 
     @property
     def index(self):
@@ -113,6 +115,14 @@ class FakePlayer(QObject):
         # mirror the real Player: delegate to the library, let trackChanged
         # patch the cached queue dicts
         self._library.setFavorite(tid, bool(fav))
+
+    # The two queue verbs, recorded rather than acted on: what this test checks
+    # is that the socket parses them and calls the right one.
+    def playPaths(self, paths):
+        self.opened = list(paths)
+
+    def queuePaths(self, paths):
+        self.queued = list(paths)
 
 
 class FakeLyrics(QObject):
@@ -291,6 +301,18 @@ def step():
     check("TOGGLE_FAV toggles, it does not set",
           d is not None and d["tracks"][1]["favorite"] is True,
           str(d["tracks"]) if d else "no push")
+
+    # QUEUE appends and plays nothing — OPEN's counterpart, and what an agent
+    # asking to "put this album on after this one" lands in (apps/oracle).
+    while readline(120) is not None:
+        pass
+    sock.write(b"QUEUE /tmp/one.flac /tmp/two%20b.flac\n")
+    sock.flush()
+    readline()
+    check("QUEUE appends the paths it was given",
+          player.queued == ["/tmp/one.flac", "/tmp/two b.flac"],
+          str(player.queued))
+    check("...and starts nothing", player.opened == [])
 
     # an unknown verb must not throw
     sock.write(b"BOGUS 1\n")
