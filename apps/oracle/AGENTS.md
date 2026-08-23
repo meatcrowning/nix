@@ -928,6 +928,36 @@ round that made them. It rides on `ORACLE_SEND` (send this prompt, then print
 the chat log as JSON via `Root.rowsJson()`), which is the only way to see what
 the ROWS became.
 
+### Successive rounds fold into one line
+
+One row per round fixed the "where did round 3 begin" problem and made a new
+one: six rounds in a row flood the window and his own prompt is off the top of
+it [his, 2026-08-23]. So the rounds that are DONE fold away behind a single
+subordinated line (docs/DESIGN.md §9.1), and only the round still working and
+the answer are drawn in full.
+
+- **A round row is a model row with another model row after it.** The last row
+  of a turn is the answer; everything before it was working towards it. Nothing
+  is stored to say so — `win.isRoundRow(i)` reads it off the log — so the LIVE
+  row is never folded (nothing follows it yet) and a round folds the instant
+  the next one opens.
+- **One fold per run, not per round.** `roundGroupHead(i)` walks back to the
+  first round row of the run; that row draws the line and holds the state
+  (`roundsOpen`, a model role, so a `branchAt` truncation cannot leave the
+  state pointing at the wrong row). Six rounds are one line, not six.
+- **The line says what is under it**: `3 rounds · 7 tools · thought for 12s`.
+  The clock is on it because the per-row `thought for …` headings fold away
+  with the rows — a turn still reports what it spent. Clicking it puts every
+  row back, whole, where it was.
+- **A folded row is `visible: false`, not height 0.** An Item of height 0 still
+  takes the column's 12px spacing, so six folded rounds left a 72px hole.
+- Folded by default, including a session loaded from the store — an old turn
+  that took eight rounds opens as a prompt, a line and an answer.
+- Harness: `tools/round-split-test.py`, on `Root.foldJson()` (what the fold made
+  of each row, never drawn). `Root.openRounds(head, open)` is the only route in
+  from outside the delegate; `tools/think-clock-test.py` uses it, since the
+  reasoning headings it asserts on live under the fold.
+
 ### A picture the write-up names is drawn where it names it
 
 A turn that gathers pictures over several rounds and then writes them up used to

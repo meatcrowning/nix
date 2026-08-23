@@ -126,5 +126,22 @@ if len(replies) == 3:
     check("nothing is left reading as still streaming",
           not any(r["streaming"] for r in rows))
 
+# The FOLD: the two finished rounds stand behind one line, and the answer and
+# his prompt are left drawn in full, so a long turn cannot push the prompt off
+# the top of the window [his, 2026-08-23].
+mf = re.search(r"^fold: (.*)$", txt, re.M)
+check("the fold reports itself", bool(mf))
+if mf:
+    fold = json.loads(mf.group(1))
+    check("his prompt is never folded", fold[0]["head"] == -1)
+    check("both finished rounds fold into the FIRST of them",
+          [f["head"] for f in fold] == [-1, 1, 1, -1],
+          json.dumps([f["head"] for f in fold]))
+    check("and they are folded, not merely groupable",
+          fold[1]["folded"] and fold[2]["folded"])
+    check("the answer stays drawn", not fold[3]["folded"])
+    check("the one line says how much is under it",
+          fold[1]["label"].startswith("2 rounds · 2 tools"), fold[1]["label"])
+
 print("FAILED: " + ", ".join(fails) if fails else "OK")
 sys.exit(1 if fails else 0)
