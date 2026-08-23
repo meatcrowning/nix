@@ -297,6 +297,46 @@ fails. Two traps that harness paid for: `highlight` must not be a grey, because
 directory's file listing on first load, so a scratch `.qml` written afterwards
 fails with "File name case mismatch".
 
+## Last.fm: one listen is one play count AND one scrobble
+
+`scrobble.py` is the Qt half; `../pylib/lastfm.py` is the API, the credential
+file and the offline queue (read `../AGENTS.md` → `pylib/lastfm.py` first).
+Nothing here happens until an account is linked — `tools/lastfm-connect.py`,
+or the `connect` button in the settings page, which opens the approval page in
+his browser and finishes by itself once he says yes.
+
+- **`Player._maybe_count` decides, once.** It already owned "this counts as a
+  listen" for the library's own play count (half the track, or four minutes);
+  it now calls `Scrobbler.submit` at the same instant, so the two counts cannot
+  drift into telling him different stories about the same play.
+  `lastfm.scrobble_point` is that same rule, and is what refuses a track under
+  30 seconds — Last.fm's own floor.
+- **The timestamp is when the track STARTED** (`Player._started_at`, set in
+  `_set_index`), not when it crossed the threshold: Last.fm orders a history by
+  it, and submitting the halfway point puts a 20-minute track in the wrong
+  place.
+- **now-playing is re-asserted on every start AND every resume**
+  (`Player._announce`, called from `_set_index` and from the playing
+  transition). A now-playing entry expires by itself, so an unpause that does
+  not re-assert it shows him listening to nothing.
+- **A heart is a love, and the heart never waits for it.**
+  `Library.setFavorite` writes the DB and enqueues the tag exactly as it
+  always did, then posts the love; a Last.fm outage costs the love, not the
+  favourite. Prefs key `scrobbleLove` turns it off.
+- **Every call is on ONE background thread.** They are blocking HTTPS round
+  trips and this is the window he is looking at while they happen. Errors land
+  in `lastError` (shown in the settings section) and never propagate.
+- **Wired in after construction** — `player.set_scrobbler` /
+  `library.set_scrobbler`, from `main()` only. Both classes still build with no
+  account, no network and no `scrobble.py`, which is what every harness in
+  `tools/` relies on.
+- Prefs: `scrobble` (default on) and `scrobbleLove` (default on) — the two
+  switches in the settings page, both hidden until an account is linked.
+- Harness: `tools/lastfm-test.py`. It stands up a stub audioscrobbler on
+  loopback with `$LASTFM_CONFIG`/`$LASTFM_QUEUE` in a temp directory, so it
+  cannot read his credentials or write to his real listening history. Run it
+  as `oracle-qtenv python3 tools/lastfm-test.py` to get chatter's half too.
+
 ## Smart playlists are RULES the user owns (2026-08-07)
 
 They were seven hard-coded `(name, SQL, params)` tuples in `main.py` under a

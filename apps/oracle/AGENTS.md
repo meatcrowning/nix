@@ -1597,6 +1597,48 @@ writes itself (`$ORACLE_PLAYERCTL`, `$ORACLE_MPRIS`) and asserts on the argv —
 so a test run never pauses, skips or re-shuffles the music he is listening to
 (root AGENTS.md: never drive the running player).
 
+## Last.fm — what he PLAYS, not what he owns (`lastfm`)
+
+`music_library` answers "what does he have"; `LASTFM_TOOL` answers "what does
+he listen to", which is a different question and the one a recommendation
+actually needs. player scrobbles every play into the same account, so `recent`
+is a live read of what it has been writing.
+
+- **One account, one credential file** — `~/.config/lastfm/account.json`,
+  owned by `pylib/lastfm.py` (read `apps/AGENTS.md` → `pylib/lastfm.py`
+  first). Linked once with `apps/player/tools/lastfm-connect.py` or from
+  player's settings; re-read on **every call**, so linking an account while
+  chatter is open needs no relaunch.
+- **The credentials and the signature stay in pylib, the transport does
+  not.** `lastfm.request_params()` hands back the signed, urlencoded body and
+  chatter puts it on its own `QNetworkAccessManager` — the same reason every
+  other network tool here is async: `pylib`'s blocking urllib call on the GUI
+  thread would freeze the window mid-reply.
+- **Read, plus the two loves, and nothing else.** `love`/`unlove` are offered
+  because they are his own gesture, reversible in one call, and the same one
+  the player's heart makes. **There is deliberately no scrobble action**: a
+  model inventing plays would corrupt the very history the read actions exist
+  to consult, and only he can delete a scrobble.
+- **The projection is generic, by field NAME, not a shape per method**
+  (`_lastfm_project`). Every Last.fm response is one wrapper key around rows
+  carrying five sizes of the same image, a streamable flag nobody wants and,
+  on the info methods, a whole biography — so the wrapper is unwrapped,
+  `LASTFM_DROP` names what goes, long strings are cut at `LASTFM_STR_CHARS`
+  and the whole thing is capped at `LASTFM_CHARS` (his rule 5). Twenty
+  hand-written projections would not survive Last.fm adding a field; this
+  does.
+- **`user` defaults to him** and the three info methods carry his `username`,
+  so `track_info` reports his own play count and loved flag rather than the
+  world's.
+- **Not set up is a reason, not an empty result** (docs/DESIGN.md §10): with
+  no API key the tool answers with the command that fixes it, and a write with
+  no linked account is refused before it is sent.
+- Subagents can be given it — it is in `_tool_registry()` and in the new
+  `music` tool group alongside `music_library`.
+- Harness: `apps/player/tools/lastfm-test.py`, whose last section asserts this
+  projection and that the tool is offered. Run it as
+  `oracle-qtenv python3 apps/player/tools/lastfm-test.py`.
+
 ## What a file IS (file_metadata)
 
 **The answer `read_file` cannot give.** A 4-minute flac is bytes to `read_file`,

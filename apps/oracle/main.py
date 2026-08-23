@@ -68,6 +68,7 @@ from warden import Warden  # noqa: E402  (same)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
 from kdetheme import theme_source, is_plasma  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
 import kdeshell  # noqa: E402  (pylib; the Plasma session's real QtWidgets window)
+import lastfm as lastfmlib  # noqa: E402  (pylib; his Last.fm account, shared with player)
 
 #: The local ollama daemon. Loopback-pinned like everything else that speaks to
 #: a local backend here — never a new listener (root AGENTS.md → the tailnet).
@@ -439,6 +440,96 @@ MUSIC_TOOL = {
             "required": []}},
 }
 MUSIC_TOOL_NAMES = {"music_library"}
+
+#: ---- last.fm: what he has ACTUALLY listened to --------------------------
+#: `music_library` answers "what does he own"; this answers "what does he
+#: play", which is a different question and the one a recommendation needs.
+#: The account is linked once by `apps/player/tools/lastfm-connect.py` and the
+#: credentials live in `~/.config/lastfm/account.json` (`pylib/lastfm.py`) —
+#: player scrobbles into the same account, so a tool call here reads the
+#: history that player has been writing.
+#:
+#: Read plus the two loves, and nothing else. `love`/`unlove` are the only
+#: writes offered because they are HIS gesture, reversible in one call, and
+#: the same one the player's heart makes; there is deliberately no scrobble
+#: action, since a model inventing plays would corrupt the very history the
+#: read actions exist to consult.
+LASTFM_ACTIONS = {
+    # action: (method, [required args], unsigned)
+    "recent":            ("user.getRecentTracks", [], False),
+    "top_artists":       ("user.getTopArtists", [], False),
+    "top_albums":        ("user.getTopAlbums", [], False),
+    "top_tracks":        ("user.getTopTracks", [], False),
+    "loved":             ("user.getLovedTracks", [], False),
+    "user_info":         ("user.getInfo", [], False),
+    "artist_info":       ("artist.getInfo", ["artist"], False),
+    "similar_artists":   ("artist.getSimilar", ["artist"], False),
+    "artist_top_tracks": ("artist.getTopTracks", ["artist"], False),
+    "artist_top_albums": ("artist.getTopAlbums", ["artist"], False),
+    "similar_tracks":    ("track.getSimilar", ["artist", "track"], False),
+    "track_info":        ("track.getInfo", ["artist", "track"], False),
+    "album_info":        ("album.getInfo", ["artist", "album"], False),
+    "tag_top_artists":   ("tag.getTopArtists", ["tag"], False),
+    "tag_top_tracks":    ("tag.getTopTracks", ["tag"], False),
+    "search_artist":     ("artist.search", ["artist"], False),
+    "search_track":      ("track.search", ["track"], False),
+    "love":              ("track.love", ["artist", "track"], True),
+    "unlove":            ("track.unlove", ["artist", "track"], True),
+}
+#: Periods user.getTop* accepts. Named in the schema so a model cannot invent
+#: one and get a silent overall chart back.
+LASTFM_PERIODS = ["overall", "7day", "1month", "3month", "6month", "12month"]
+#: Caps, his rule 5. Rows first, then a hard character cap on the projection —
+#: an artist.getInfo carries a whole biography and a tag chart carries a
+#: hundred of them.
+LASTFM_MAX_ROWS = 50
+LASTFM_CHARS = 12000
+LASTFM_STR_CHARS = 700
+#: Dropped from every row before the model sees it: image URL sets (five
+#: sizes of the same picture, per row) and the streamable/tracking flags.
+LASTFM_DROP = {"image", "streamable", "registered", "bootstrap"}
+
+LASTFM_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "lastfm",
+        "description": (
+            "His Last.fm account — what he has actually listened to, and what "
+            "Last.fm knows about the music. player scrobbles every play into "
+            "this account, so `recent` is what he has been playing (including "
+            "right now), `top_artists` / `top_tracks` / `top_albums` are his "
+            "real charts over a period and `loved` is what he has hearted. "
+            "Use it with music_library, not instead of it: that one is what he "
+            "OWNS, this is what he PLAYS.\n"
+            "The rest is the public catalogue — `similar_artists`, "
+            "`similar_tracks`, `artist_info`, `tag_top_artists` — which is how "
+            "you find him something new rather than guessing. Cross-check a "
+            "recommendation against music_library to see whether he already "
+            "has it.\n"
+            "`love` and `unlove` are the only writes, and they are the same "
+            "gesture as the heart in the player. There is no way to scrobble "
+            "from here on purpose: his listening history is a record, not "
+            "something to write into."),
+        "parameters": {"type": "object", "properties": {
+            "action": {"type": "string", "enum": sorted(LASTFM_ACTIONS),
+                       "description": "What to ask for. Default `recent`."},
+            "artist": {"type": "string",
+                       "description": "The artist, for anything artist- or track-shaped."},
+            "track": {"type": "string", "description": "The track title."},
+            "album": {"type": "string", "description": "The album title."},
+            "tag": {"type": "string",
+                    "description": "A Last.fm tag (genre or mood), e.g. 'shoegaze'."},
+            "user": {"type": "string",
+                     "description": ("Another Last.fm user to ask about. Omit for "
+                                     "him, which is what you almost always want.")},
+            "period": {"type": "string", "enum": LASTFM_PERIODS,
+                       "description": "For the top_* charts. Default `overall`."},
+            "limit": {"type": "integer",
+                      "description": "Rows to return (max 50). Default 20."},
+            "page": {"type": "integer", "description": "1-based page, to read further."}},
+            "required": []}},
+}
+LASTFM_TOOL_NAMES = {"lastfm"}
 
 #: MODELS ARE THE DAEMON'S JOB, not the shell's [his, 2026-08-23]. Asked to
 #: install a model, chatter reached for `run_bash` and `ollama pull` — and died
@@ -1530,6 +1621,7 @@ AGENT_TOOL_GROUPS = {
     "write": ["write_file", "edit_file", "move_path", "delete_path", "make_dir"],
     "exec": ["run_python", "run_bash"],
     "web": ["web_search", "fetch_url", "call_api"],
+    "music": ["music_library", "lastfm"],
     "sessions": ["list_sessions", "read_session"],
     "skills": ["use_skill"],
     "author": ["make_tool", "make_skill", "make_agent"],
@@ -1673,7 +1765,8 @@ def _tool_registry():
     same objects the main payload carries, so the two cannot drift; spawn_agent
     itself is absent, which is what keeps subagents one level deep."""
     tools = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, FETCH_URL_TOOL,
-             CALL_API_TOOL, EXEC_TOOL, BASH_TOOL, SHOW_IMAGE_TOOL]
+             CALL_API_TOOL, EXEC_TOOL, BASH_TOOL, SHOW_IMAGE_TOOL,
+             MUSIC_TOOL, LASTFM_TOOL]
              + list(SESSION_TOOLS) + list(AUTHOR_TOOLS)
              + [t for t in [skill_tool()] if t]
              + custom_tool_defs())
@@ -2669,6 +2762,7 @@ class Ollama(QObject):
     # the work in it).
     execOutput = Signal(str)                # one chunk of live output
     execStarted = Signal(str)               # the language, as a heading
+    execFinished = Signal()                 # that program stopped running
 
     # The player tool's result, as JSON — for a harness to read what one call
     # actually produced without a bus of its own.
@@ -3858,7 +3952,7 @@ class Ollama(QObject):
         return (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, SELF_TOOL,
                 IMAGE_TOOL, SEARCH_IMAGE_TOOL, VIEW_IMAGE_TOOL, SHOW_IMAGE_TOOL,
                 SCREENSHOT_TOOL, MAKE_IMAGE_TOOL, VIDEO_TOOL, PLAYER_TOOL,
-                MUSIC_TOOL, MODEL_TOOL,
+                MUSIC_TOOL, LASTFM_TOOL, MODEL_TOOL,
                 FETCH_URL_TOOL,
                 CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
                 + list(SESSION_TOOLS) + list(MEMORY_TOOLS) + list(AUTHOR_TOOLS)
@@ -4224,6 +4318,8 @@ class Ollama(QObject):
             self._run_model_tool(args, i, remaining, calls)
         elif name in MUSIC_TOOL_NAMES:
             self._run_music_tool(args, i, remaining, calls)
+        elif name in LASTFM_TOOL_NAMES:
+            self._run_lastfm_tool(args, i, remaining, calls)
         elif name in PLAYER_TOOL_NAMES:
             self._run_player_tool(args, i, remaining, calls)
         elif name in VIDEO_TOOL_NAMES:
@@ -5338,6 +5434,7 @@ class Ollama(QObject):
             except RuntimeError:
                 return
             reply.deleteLater()
+            self.execFinished.emit()
             if state["err"] or bad:
                 answer({"error": state["err"] or why}, False,
                        "pull failed: " + (state["err"] or why)[:120])
@@ -5602,6 +5699,172 @@ class Ollama(QObject):
             self._tool_done(remaining, calls)
 
         self._music_call(req, done)
+
+    # ---- last.fm ------------------------------------------------------
+
+    def _run_lastfm_tool(self, args, idx, remaining, calls):
+        """One Last.fm call, on the network stack the rest of this window uses.
+
+        `pylib/lastfm.py` owns the credentials and the signature; this owns the
+        request, because a blocking urllib round trip on the GUI thread would
+        freeze the window mid-reply. So the params and the api_sig come from
+        there and the transport is QNetworkAccessManager, exactly like the
+        Tavily path above."""
+        a = args if isinstance(args, dict) else {}
+        action = str(a.get("action") or "recent").strip().lower()
+        spec = LASTFM_ACTIONS.get(action)
+        if not spec:
+            self._lastfm_fail(action, "unknown action: " + action, idx,
+                              remaining, calls)
+            return
+        method, required, needs_auth = spec
+
+        cfg = lastfmlib.load()
+        if not lastfmlib.has_keys(cfg):
+            self._lastfm_fail(action, "Last.fm is not set up: no API key. "
+                              "Run apps/player/tools/lastfm-connect.py --keys "
+                              "KEY SECRET (get one at " + lastfmlib.CREATE_PAGE
+                              + ").", idx, remaining, calls)
+            return
+        if needs_auth and not lastfmlib.connected(cfg):
+            self._lastfm_fail(action, "no Last.fm account is linked, so this "
+                              "cannot be written. Run "
+                              "apps/player/tools/lastfm-connect.py.",
+                              idx, remaining, calls)
+            return
+
+        vals = {k: str(a.get(k) or "").strip()
+                for k in ("artist", "track", "album", "tag", "user")}
+        missing = [k for k in required if not vals.get(k)]
+        if missing:
+            self._lastfm_fail(action, "missing: " + ", ".join(missing),
+                              idx, remaining, calls)
+            return
+
+        limit = max(1, min(int(a.get("limit") or 20), LASTFM_MAX_ROWS))
+        params = {k: v for k, v in vals.items() if v}
+        # `user` defaults to HIM. Every user.* method needs one and the linked
+        # account is the only one he has ever meant by "my scrobbles".
+        if method.startswith("user.") and not params.get("user"):
+            params["user"] = lastfmlib.username(cfg)
+            if not params["user"]:
+                self._lastfm_fail(action, "no Last.fm account is linked, so "
+                                  "there is no listening history to read. Run "
+                                  "apps/player/tools/lastfm-connect.py.",
+                                  idx, remaining, calls)
+                return
+        if not needs_auth:
+            params["limit"] = limit
+            if a.get("page"):
+                params["page"] = max(1, int(a.get("page")))
+        if method.startswith("user.getTop"):
+            period = str(a.get("period") or "overall").strip()
+            params["period"] = period if period in LASTFM_PERIODS else "overall"
+        # A track/album/artist lookup answered against HIS account carries his
+        # own playcount and loved flag, which is the fact worth having.
+        if method in ("track.getInfo", "album.getInfo", "artist.getInfo"):
+            me = lastfmlib.username(cfg)
+            if me:
+                params["username"] = me
+
+        head = (vals.get("artist") or vals.get("tag") or vals.get("user")
+                or params.get("user") or action)
+        self.fileToolStarted.emit("last.fm: %s %s" % (action, str(head)[:50]))
+
+        try:
+            body = lastfmlib.request_params(method, params, signed=needs_auth,
+                                            cfg=cfg)
+        except lastfmlib.LastfmError as e:
+            self._lastfm_fail(action, str(e), idx, remaining, calls)
+            return
+
+        # A write is a signed POST (Last.fm rejects a signed GET for the
+        # write methods); a read is a plain GET of the same encoded params.
+        url = QUrl(lastfmlib.API_ROOT if needs_auth
+                   else lastfmlib.API_ROOT + "?" + body)
+        req = QNetworkRequest(url)
+        req.setRawHeader(b"User-Agent", lastfmlib.USER_AGENT.encode("utf-8"))
+        if needs_auth:
+            req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
+                          "application/x-www-form-urlencoded")
+            reply = self._nam.post(req, body.encode("utf-8"))
+        else:
+            reply = self._nam.get(req)
+        reply.finished.connect(
+            lambda: self._on_lastfm(reply, action, limit, idx, remaining, calls))
+
+    def _lastfm_fail(self, action, msg, idx, remaining, calls):
+        remaining["sink"][idx] = {"role": "tool", "tool_name": "lastfm",
+                                   "content": json.dumps({"error": msg})}
+        self.fileToolDone.emit(("last.fm: " + msg)[:200], False)
+        self._tool_done(remaining, calls)
+
+    def _on_lastfm(self, reply, action, limit, idx, remaining, calls):
+        if not self._busy:                 # turn was cancelled
+            reply.deleteLater()
+            return
+        try:
+            data = bytes(reply.readAll().data())
+            obj = None
+            try:
+                obj = json.loads(data or b"{}")
+            except ValueError:
+                obj = None
+            # A Last.fm refusal is a 4xx WITH a JSON body saying why, which is
+            # worth far more to the model than "HTTP 403".
+            if isinstance(obj, dict) and obj.get("error"):
+                self._lastfm_fail(action, str(obj.get("message")
+                                              or "Last.fm error"),
+                                  idx, remaining, calls)
+                return
+            if reply.error() != QNetworkReply.NetworkError.NoError:
+                self._lastfm_fail(action, reply.errorString(), idx, remaining,
+                                  calls)
+                return
+            if obj is None:
+                self._lastfm_fail(action, "Last.fm returned something that is "
+                                  "not JSON", idx, remaining, calls)
+                return
+            result = {"action": action,
+                      "result": self._lastfm_project(obj, limit)}
+            remaining["sink"][idx] = {"role": "tool", "tool_name": "lastfm",
+                                       "content": json.dumps(result)}
+            self.fileToolDone.emit("last.fm · " + action, True)
+        finally:
+            reply.deleteLater()
+            self._tool_done(remaining, calls)
+
+    @staticmethod
+    def _lastfm_project(obj, limit):
+        """Last.fm's response, trimmed to what is worth context.
+
+        Generic rather than a shape per method on purpose: every response is
+        one wrapper key around rows that carry five sizes of the same image,
+        a streamable flag nobody wants and, on the info methods, a whole
+        biography. Dropping those by NAME survives Last.fm adding a field;
+        twenty hand-written projections would not."""
+        def walk(o, depth=0):
+            if isinstance(o, dict):
+                return {k: walk(v, depth + 1) for k, v in o.items()
+                        if k not in LASTFM_DROP}
+            if isinstance(o, list):
+                return [walk(v, depth + 1) for v in o[:limit]]
+            if isinstance(o, str) and len(o) > LASTFM_STR_CHARS:
+                return o[:LASTFM_STR_CHARS] + "…"
+            return o
+
+        out = walk(obj)
+        # One wrapper key ("recenttracks", "topartists", …) around everything;
+        # unwrap it so the model reads rows rather than a nesting level.
+        if isinstance(out, dict) and len(out) == 1:
+            out = next(iter(out.values()))
+        text = json.dumps(out)
+        if len(text) > LASTFM_CHARS:
+            return {"truncated": True,
+                    "note": ("cut at %d characters — ask for a smaller `limit`"
+                             % LASTFM_CHARS),
+                    "json": text[:LASTFM_CHARS]}
+        return out
 
     def _player_put_on(self, action, args, idx, remaining, calls):
         """play_these / queue_these — the queue verbs, over player's own socket.
@@ -6691,6 +6954,7 @@ class Ollama(QObject):
             result = self._fs_result(out, err, rc)
             remaining["sink"][idx] = {"role": "tool", "tool_name": name,
                                        "content": json.dumps(result)}
+            self.execFinished.emit()
             self.fileToolDone.emit(self._exec_outcome(name, result),
                                    "error" not in result)
             self._tool_done(remaining, calls)
@@ -7918,9 +8182,22 @@ def run_selftest(app, shell, win, plasma, warnings):
             from PySide6.QtCore import Q_ARG, QMetaObject, QObject
             target = shell.root if plasma else win.findChild(QObject, "content")
 
-            # The LONGEST reply, not the first: a demo conversation opens with a
-            # one-word one, where select(0, 12) selects nothing and the check
-            # reads as broken.
+            def _sel_named(it, want, depth=0):
+                if it is None or depth > 16:
+                    return None
+                kids = (it.childItems() if hasattr(it, "childItems")
+                        else it.children())
+                for ch in kids:
+                    if ch.objectName() == want:
+                        return ch
+                    hit = _sel_named(ch, want, depth + 1)
+                    if hit is not None:
+                        return hit
+                return None
+
+            # The LONGEST reply, not the first: `_sel_named` stops at the
+            # first match and with a demo conversation that is a one-word one,
+            # where select(0,12) selects nothing and the check reads as broken.
             bodies = []
 
             def _sel_all(it, want, depth=0):
@@ -7940,12 +8217,15 @@ def run_selftest(app, shell, win, plasma, warnings):
                 print("select: no mdBody (needs ORACLE_FAKE)", file=sys.stderr)
                 rc[0] = 1
             else:
-                # int, not QVariant: TextEdit::select(int,int) is a real slot
-                # signature and a QVariant arg silently matches nothing.
+                # int, not QVariant: TextEdit::select(int,int) is a real
+                # slot signature and a QVariant arg silently matches nothing.
                 QMetaObject.invokeMethod(body, "select", Q_ARG(int, 0),
                                          Q_ARG(int, 12))
                 app.processEvents()
                 root_item = shell.root if plasma else win.findChild(QObject, "content")
+                print("select: body.selectedText=%r len(text)=%d"
+                      % (body.property("selectedText"),
+                         len(str(body.property("text") or ""))))
                 print("select: selectedText=%r rows=%s"
                       % (root_item.property("selectedText"),
                          {i: (shell._actions[i].isEnabled() if plasma

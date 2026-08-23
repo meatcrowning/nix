@@ -117,6 +117,35 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
 `apps/` tree must move together or none of it does. Tools one level deeper use
 `parent.parent.parent`.
 
+- **`lastfm.py`** — his Last.fm account, for every app with a reason to ask.
+  **ONE account, ONE credential file**: `~/.config/lastfm/account.json`
+  (override `$LASTFM_CONFIG`, 0600), holding the API key + shared secret that
+  identify the PROGRAM and the session key that identifies the ACCOUNT.
+  player scrobbles into it and chatter's `lastfm` tool reads out of it, so
+  neither owns the credentials and this module is the only thing that touches
+  them.
+  - **Stdlib only, no Qt** — player calls it from a worker thread, chatter
+    takes `request_params()` and puts the signed body on its OWN
+    `QNetworkAccessManager` (a blocking urllib round trip on the GUI thread is
+    a 15-second freeze mid-reply), and `player/tools/lastfm-connect.py` calls
+    it from a terminal.
+  - **Nothing is vendored and nothing can be**: `~/nix` is public, so the API
+    key cannot ship. A machine with no account file is inert everywhere —
+    every player method returns immediately, the settings section says what
+    to run, and the chatter tool answers with the command rather than an
+    empty result (docs/DESIGN.md §10).
+  - **A failed scrobble is queued, never lost and never raised at the
+    caller**: `~/.local/state/lastfm/scrobble-queue.json`, flushed with the
+    next successful submit, dropped past Last.fm's own 14-day window rather
+    than retried into a permanent refusal.
+  - Link an account: `apps/player/tools/lastfm-connect.py --keys KEY SECRET`
+    once (from an API account at https://www.last.fm/api/account/create), then
+    the same tool with no arguments, or the `connect` button in player's
+    settings — both open the approval page and finish by themselves once he
+    says yes. Harness: `apps/player/tools/lastfm-test.py` (a stub
+    audioscrobbler on loopback and a temp credential file; it can neither read
+    his account nor send a packet off the machine).
+
 - **`handoff.py`** — hand a request to an app that is ALREADY running, so the
   common case starts no process. Measured on book, opening an image from filer
   cost ~0.5s of which the file was 0.04s; the rest was python + PySide6 + the
