@@ -120,15 +120,24 @@ Item {
             if (win.activeIndex < 0) return;
             var cur = chatLog.get(win.activeIndex);
             chatLog.setProperty(win.activeIndex, "body", cur.body + piece);
-            if (cur.thinkingActive)
+            if (cur.thinkingActive) {
                 chatLog.setProperty(win.activeIndex, "thinkingActive", false);
+                win.stopThinkClock(win.activeIndex);
+            }
         }
         function onReplyThinking(piece) {
             if (win.activeIndex < 0) return;
             var cur = chatLog.get(win.activeIndex);
             chatLog.setProperty(win.activeIndex, "thinking", cur.thinking + piece);
-            if (!cur.thinkingActive)
+            if (!cur.thinkingActive) {
                 chatLog.setProperty(win.activeIndex, "thinkingActive", true);
+                // The clock the heading counts: started at the FIRST reasoning
+                // delta, stopped at the first content one (or at the end of the
+                // turn), and kept in the row so a reloaded session still says
+                // how long it thought for.
+                if (cur.thinkStart === 0)
+                    chatLog.setProperty(win.activeIndex, "thinkStart", Date.now());
+            }
         }
         // The live reasoning-token count, written into the active row so the
         // collapsed heading shows it climbing while the model thinks.
@@ -219,6 +228,7 @@ Item {
         }
         function onReplyDone() {
             if (win.activeIndex < 0) return;
+            win.stopThinkClock(win.activeIndex);
             chatLog.setProperty(win.activeIndex, "streaming", false);
             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
             chatLog.setProperty(win.activeIndex, "searching", false);
@@ -231,6 +241,7 @@ Item {
             if (win.activeIndex < 0) return;
             chatLog.setProperty(win.activeIndex, "body", "error: " + reason);
             chatLog.setProperty(win.activeIndex, "isError", true);
+            win.stopThinkClock(win.activeIndex);
             chatLog.setProperty(win.activeIndex, "streaming", false);
             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
             chatLog.setProperty(win.activeIndex, "searching", false);
@@ -288,6 +299,7 @@ Item {
             var t = chatLog.get(j);
             turns.push({ isUser: t.isUser, who: t.who, body: t.body,
                          thinking: t.thinking, thinkTokens: t.thinkTokens,
+                         thinkMs: t.thinkMs,
                          sources: t.sources, searchCount: t.searchCount,
                          files: t.files, fileCount: t.fileCount,
                          images: t.images,
@@ -336,6 +348,7 @@ Item {
             chatLog.append({ isUser: !!t.isUser, who: t.who || "", body: t.body || "",
                              thinking: t.thinking || "", thinkingActive: false,
                              thinkTokens: t.thinkTokens || 0,
+                             thinkStart: 0, thinkMs: t.thinkMs || 0,
                              sources: t.sources || "", searchCount: t.searchCount || 0,
                              searching: false,
                              files: t.files || "", fileCount: t.fileCount || 0,
@@ -405,6 +418,7 @@ Item {
         // are left untouched — the log grows downward (docs/DESIGN.md §14).
         chatLog.append({ isUser: true, who: "you", body: shownBody,
                          thinking: "", thinkingActive: false, thinkTokens: 0,
+                         thinkStart: 0, thinkMs: 0,
                          sources: "", searchCount: 0, searching: false,
                          files: "", fileCount: 0, filesActive: false, filesPending: 0,
                          images: "[]", imagesActive: false, imagesPending: 0,
@@ -412,6 +426,7 @@ Item {
                          streaming:false, isError: false });
         chatLog.append({ isUser: false, who: win.model, body: "",
                          thinking: "", thinkingActive: false, thinkTokens: 0,
+                         thinkStart: 0, thinkMs: 0,
                          sources: "", searchCount: 0, searching: false,
                          files: "", fileCount: 0, filesActive: false, filesPending: 0,
                          images: "[]", imagesActive: false, imagesPending: 0,
@@ -562,12 +577,37 @@ Item {
     readonly property string windowTitle:
         win.sessionTitle !== "" ? "chatter — " + win.sessionTitle : "chatter"
 
+    // The reasoning clock. `thinkStart` is set at the first reasoning delta and
+    // cleared here, leaving `thinkMs` — how long the model thought for — in the
+    // row, so the heading reads "thought for 12s" ever after, session reload
+    // included (§10.6 — a finished block reports what actually happened).
+    function stopThinkClock(i) {
+        if (i < 0 || i >= chatLog.count) return;
+        var r = chatLog.get(i);
+        if (r.thinkStart > 0) {
+            chatLog.setProperty(i, "thinkMs", Date.now() - r.thinkStart);
+            chatLog.setProperty(i, "thinkStart", 0);
+        }
+    }
+
+    // "12s", "1m 30s" — the reasoning duration, in the shortest honest form
+    // (docs/DESIGN.md §7.2: the fact and its number, nothing else).
+    function fmtDur(ms) {
+        if (ms <= 0) return "";
+        var sec = Math.round(ms / 1000);
+        if (sec < 60) return sec + "s";
+        var m = Math.floor(sec / 60);
+        var r = sec % 60;
+        return m + "m " + (r < 10 ? "0" : "") + r + "s";
+    }
+
     // Stop an in-flight reply and settle the row it was writing into: cancel()
     // fires no replyDone/replyError, so nothing else would (§10.6 — a stopped
     // stream must not still read as running).
     function stopReply() {
         Ollama.cancel();
         if (win.activeIndex >= 0) {
+            win.stopThinkClock(win.activeIndex);
             chatLog.setProperty(win.activeIndex, "streaming", false);
             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
             chatLog.setProperty(win.activeIndex, "searching", false);
@@ -1587,6 +1627,18 @@ Item {
                                 readonly property bool expanded: turn.userSet ? turn.userOpen
                                                                               : false
 
+                                // The live count for the heading, ticked half a
+                                // second at a time while the model thinks (a
+                                // binding on Date.now() would never re-evaluate).
+                                property int elapsed: 0
+                                Timer {
+                                    interval: 500
+                                    running: thinkingActive && thinkStart > 0
+                                    repeat: true
+                                    triggeredOnStart: true
+                                    onTriggered: think.elapsed = Date.now() - thinkStart
+                                }
+
                                 Item {
                                     id: thinkToggle
                                     width: parent.width
@@ -1609,8 +1661,21 @@ Item {
                                         anchors { left: parent.left; verticalCenter: parent.verticalCenter }
                                         spacing: 6
                                         PixelText { text: think.expanded ? "-" : "+"; color: Theme.textDim }
+                                        // "thinking for 12s" while it runs,
+                                        // "thought for 12s" once it has [his,
+                                        // 2026-08-22] — the duration is the one
+                                        // reading a folded block still gives.
                                         PixelText {
-                                            text: "thinking"
+                                            text: {
+                                                var d = win.fmtDur(thinkingActive
+                                                                   ? think.elapsed
+                                                                   : thinkMs);
+                                                if (thinkingActive)
+                                                    return d !== "" ? "thinking for " + d
+                                                                    : "thinking";
+                                                return d !== "" ? "thought for " + d
+                                                                : "thought";
+                                            }
                                             color: thinkingActive ? Theme.text : Theme.textDim
                                         }
                                         // The reasoning-token count, and — while
@@ -1976,7 +2041,13 @@ Item {
                                         id: mdBody
                                         width: parent.width
                                         visible: !isUser && !isError && body !== ""
-                                        text: body.replace(/!\[([^\]]*)\]\(/g, "[$1](")
+                                        // One expression, both properties: `text`
+                                        // is what is drawn, `source` is what
+                                        // Ctrl+C copies (MarkdownText.qml).
+                                        readonly property string md:
+                                            body.replace(/!\[([^\]]*)\]\(/g, "[$1](")
+                                        text: md
+                                        source: md
                                     }
 
                                     // Images the model fetched from the web with

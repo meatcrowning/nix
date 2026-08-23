@@ -24,6 +24,13 @@ import QtQuick
 // stay a clean grid. No `lineHeight` pin: it is Text-only (a TextEdit errors on
 // it), and markdown mixes heading and body sizes a single cell would clip.
 TextEdit {
+    // The markdown this item was GIVEN. `text` is not it: a TextEdit whose
+    // format is MarkdownText re-serialises the parsed document when read back
+    // (escapes and all — `<Picture 1>` returns as `\<Picture 1>`), so the
+    // source has to be kept beside it for the copy path below. Callers set both
+    // from one expression; when unset, `text` is the best available.
+    property string source: ""
+
     readOnly: true
     selectByMouse: true
     textFormat: TextEdit.MarkdownText
@@ -41,4 +48,20 @@ TextEdit {
     // explicit action, never on render.
     palette.link: Theme.accent
     onLinkActivated: (url) => Qt.openUrlExternally(url)
+
+    // Ctrl+C copies the MARKDOWN, not the flattened render. Qt's own copy hands
+    // over the rendered document as plain text, which drops the blank line
+    // between paragraphs and every list marker — so a prompt copied out of the
+    // chat arrived in the next program as one run-on block [his, 2026-08-22].
+    // `Clip.copyMarkdown` serves it from this item's own source instead (main.py
+    // → Clip). If it cannot (no document yet), the key falls through to Qt's
+    // copy rather than doing nothing.
+    Keys.onPressed: (event) => {
+        if (event.key === Qt.Key_C && (event.modifiers & Qt.ControlModifier)
+                && selectedText !== "") {
+            if (Clip.copyMarkdown(textDocument, selectionStart, selectionEnd,
+                                  source !== "" ? source : text))
+                event.accepted = true;
+        }
+    }
 }

@@ -59,6 +59,7 @@ if "--selftest" in sys.argv:
     _tmp = Path(os.environ.get("TMPDIR", "/tmp")) / "oracle-selftest"
     os.environ.setdefault("ORACLE_CONFIG", str(_tmp / "config"))
     os.environ.setdefault("ORACLE_SESSIONS", str(_tmp / "sessions"))
+    os.environ.setdefault("ORACLE_IMAGES", str(_tmp / "images"))
 
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
@@ -1305,6 +1306,59 @@ class Palette(QObject):
     def info(self): return self._c("info")
 
 
+class Clip(QObject):
+    """Copy out of the chat log with the MARKDOWN still on it.
+
+    A reply is drawn through `MarkdownText.qml`, so what Qt puts on the
+    clipboard for Ctrl+C is the RENDERED document flattened to plain text: the
+    blank line between two paragraphs becomes one newline, list bullets lose
+    their markers, and a video prompt pasted into another program arrives as
+    one run-on block [his, 2026-08-22]. What he wants back is what the model
+    actually wrote.
+
+    So the copy is served from the markdown SOURCE instead:
+
+      * a whole-message selection (Ctrl+A, or a drag over all of it) copies the
+        source string verbatim — no re-serialisation, nothing to get wrong;
+      * a partial selection is re-serialised out of the document fragment
+        (`QTextDocument.toMarkdown`), which is exact for the structure Qt itself
+        parsed and keeps the paragraph breaks a plain-text copy drops.
+
+    It is the clipboard proper, not the primary selection: a middle-click paste
+    still gets whatever the item's own selection handling put there.
+    """
+
+    @Slot(QObject, int, int, str, result=bool)
+    def copyMarkdown(self, quick_doc, start, end, source):
+        from PySide6.QtGui import QTextCursor, QTextDocument
+        if quick_doc is None or end <= start:
+            return False
+        doc = quick_doc.textDocument()
+        if doc is None:
+            return False
+        # `characterCount()` counts the trailing block terminator, so a full
+        # selection ends one short of it.
+        whole = start <= 0 and end >= doc.characterCount() - 1
+        if whole and source:
+            text = source
+        else:
+            cur = QTextCursor(doc)
+            cur.setPosition(start)
+            cur.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+            tmp = QTextDocument()
+            QTextCursor(tmp).insertFragment(cur.selection())
+            # Qt escapes anything that COULD be markup on the way out, so a
+            # `<Picture 1>` or a `[Shot 1]` in a prompt comes back as
+            # `\<Picture 1>` / `\[Shot 1]`. Undo that: the text he is pasting
+            # is going somewhere that wants it as the model wrote it.
+            text = re.sub(r"\\([\\`*_{}\[\]()#+.!<>-])", r"\1",
+                          tmp.toMarkdown()).rstrip("\n")
+        if not text:
+            return False
+        QGuiApplication.clipboard().setText(text)
+        return True
+
+
 class Titlebar(QObject):
     """hyprvtb app-button bridge — oracle draws no chrome of its own, so the
     compositor draws the titlebar (docs/DESIGN.md §12). oracle has no history and
@@ -1405,6 +1459,8 @@ class Ollama(QObject):
         self._model = ""         # the model for the current turn
         self._messages = []      # the growing message list across a tool loop
         self._acc_content = ""   # assistant content accumulated in this sub-turn
+        self._images_shown = set()
+        self._md_images = {"n": 0}
         self._tool_calls = []    # tool calls accumulated in this sub-turn
         self._tool_results = []  # results being gathered for the current round
         self._rounds = 0         # tool rounds taken this turn (MAX_TOOL_ROUNDS cap)
@@ -1789,6 +1845,8 @@ class Ollama(QObject):
                           + [user_msg])
         self._think_tokens = 0
         self._rounds = 0
+        self._images_shown = set()   # every image URL already fetched this turn
+        self._md_images = {"n": 0}   # typed-markdown images still downloading
         self._resp_t0 = 0.0
         self._resp_tokens = 0
         self._set_tps(0.0)
@@ -2453,6 +2511,55 @@ class Ollama(QObject):
                                    "tool_calls": self._tool_calls})
             self._run_tool_calls(self._tool_calls)
             return
+        # A model that TYPED an image instead of calling fetch_image: attach it
+        # anyway, rather than leaving him a reply full of pictures that are not
+        # there. replyDone waits for those downloads.
+        if self._attach_typed_images():
+            return
+        self._set_busy(False)
+        self.replyDone.emit()
+
+    #: How many `![](…)` images one reply may pull in on its own. A model
+    #: listing a booru page can type a dozen; four is what fits a turn.
+    MD_IMAGE_MAX = 4
+
+    def _attach_typed_images(self):
+        """Fetch the markdown images in the finished reply. True if any started.
+
+        Models — gemma4 reliably — answer "show me pictures of X" by WRITING
+        `![alt](url)` into the reply instead of calling `fetch_image`, however
+        plainly the tool says not to (observed 2026-08-22: four typed images,
+        nothing attached, and his "you didnt attach them to your message
+        though"). `MarkdownText` demotes image markdown to a link on purpose —
+        Qt would fetch it on render, at its own pixel size — so the picture
+        simply never appeared.
+
+        This closes the gap at the other end: the same download `fetch_image`
+        does, capped and content-checked, feeding the same `images` row QML
+        already draws. The demoted link stays in the prose, so nothing is
+        hidden either way (docs/DESIGN.md §10).
+        """
+        found = []
+        for m in re.finditer(r"!\[([^\]]*)\]\(\s*(https?://[^\s)]+)", self._acc_content):
+            url = m.group(2).rstrip(")")
+            if url in self._images_shown:
+                continue
+            self._images_shown.add(url)
+            found.append((url, m.group(1).strip()))
+            if len(found) >= self.MD_IMAGE_MAX:
+                break
+        if not found:
+            return False
+        self._md_images = {"n": len(found)}
+        for url, alt in found:
+            self._fetch_image(url, alt, None, self._md_images, None)
+        return True
+
+    def _typed_image_done(self, remaining):
+        """The last typed-markdown image landed: now the turn is over."""
+        remaining["n"] -= 1
+        if remaining["n"] > 0 or not self._busy:
+            return
         self._set_busy(False)
         self.replyDone.emit()
 
@@ -2999,20 +3106,76 @@ class Ollama(QObject):
         return ({"ok": False, "url": url, "error": reason},
                 {"error": "image fetch failed: " + reason})
 
+    #: Boorus address an image by the file's own md5, and a model that retypes
+    #: one from memory gets it subtly wrong — `12a90ec8d770cc4898c17bece1ee561`
+    #: (31 chars) and `45bf9a3erm88cd10126904ca995c7` (not even hex) both went
+    #: out on 2026-08-22 and both 404'd. The shape is checkable before any
+    #: request, and the refusal can say what to do instead, which a bare 404
+    #: cannot.
+    BOORU_MD5_HOSTS = ("cdn.donmai.us", "konachan.com", "konachan.net",
+                       "img3.gelbooru.com", "video-cdn.donmai.us",
+                       "static1.e621.net", "static1.e926.net")
+
+    @classmethod
+    def _booru_url_fault(cls, url):
+        """"That url cannot be right", before it is sent — or "" if it may be."""
+        try:
+            host = QUrl(url).host().lower()
+        except (ValueError, TypeError):
+            return ""
+        if host not in cls.BOORU_MD5_HOSTS:
+            return ""
+        if re.search(r"/[0-9a-f]{32}(?:[./]|$)", url, re.I):
+            return ""
+        # Only complain when there IS something md5-shaped and it is wrong;
+        # these hosts serve other paths too (sample/, preview/, thumbnails).
+        m = re.search(r"/([0-9A-Za-z]{24,40})(?:\.[a-z0-9]+)?(?:[/?#]|$)", url)
+        if not m:
+            return ""
+        tok = m.group(1)
+        return ("that URL's md5 is %r — %d characters%s, and these sites need "
+                "exactly 32 hex. It is a URL typed from memory, not a real one. "
+                "Do not retype image URLs: copy `file_url` VERBATIM out of a "
+                "call_api / search_images result, or search again."
+                % (tok, len(tok),
+                   "" if re.fullmatch(r"[0-9a-f]+", tok, re.I)
+                   else " and not hexadecimal"))
+
+    def _image_failed(self, url, reason, idx, remaining, calls):
+        """Fail one image the same way for both audiences, tool or not."""
+        entry, result = self._image_error(url, reason)
+        self.imageFetchResult.emit(json.dumps(entry))
+        if idx is None:
+            self._typed_image_done(remaining)
+            return
+        self._tool_results[idx] = {"role": "tool", "tool_name": "fetch_image",
+                                   "content": json.dumps(result)}
+        self._tool_done(remaining, calls)
+
     def _fetch_image(self, url, alt, idx, remaining, calls):
         """Download one image by URL and hand the local path to QML to render.
 
         A GET on the shared QNAM (Qt6 follows redirects by default), validated on
-        completion in `_on_image`. A URL that is not http(s) never reaches the
-        network — it is failed immediately, still through the same contract so
-        QML and the model both see the refusal."""
+        completion in `_on_image`. A URL that is not http(s) — or one whose booru
+        md5 is plainly mistyped — never reaches the network: it is failed
+        immediately, still through the same contract so QML and the model both
+        see the refusal.
+
+        `idx` is the tool call this fetch answers, or None when the model TYPED
+        the image into its reply instead of calling the tool
+        (`_attach_typed_images`) — then there is no tool result to write, only
+        the picture."""
+        if url:
+            self._images_shown.add(url)
         if not url or not re.match(r"^https?://", url, re.I):
             self.imageFetchStarted.emit(url or "(no url)")
-            entry, result = self._image_error(url, "not a valid http(s) image URL")
-            self.imageFetchResult.emit(json.dumps(entry))
-            self._tool_results[idx] = {"role": "tool", "tool_name": "fetch_image",
-                                       "content": json.dumps(result)}
-            self._tool_done(remaining, calls)
+            self._image_failed(url, "not a valid http(s) image URL",
+                               idx, remaining, calls)
+            return
+        fault = self._booru_url_fault(url)
+        if fault:
+            self.imageFetchStarted.emit(url)
+            self._image_failed(url, fault, idx, remaining, calls)
             return
         self.imageFetchStarted.emit(url)
         req = QNetworkRequest(QUrl(url))
@@ -3037,7 +3200,15 @@ class Ollama(QObject):
             ctype = str(reply.header(QNetworkRequest.KnownHeaders.ContentTypeHeader)
                         or "").split(";")[0].strip().lower()
             if reply.error() != QNetworkReply.NetworkError.NoError:
-                entry, result = self._image_error(url, reply.errorString())
+                reason = reply.errorString()
+                # A 404 on an image URL is nearly always a URL the model typed
+                # from memory rather than copied. Say so in the result, so the
+                # retry it gets is a search and not another guess.
+                if "404" in reason:
+                    reason += (" — if you typed this URL from memory, do not: "
+                               "copy `file_url` verbatim out of a call_api / "
+                               "search_images result, or search again")
+                entry, result = self._image_error(url, reason)
             elif len(data) > IMAGE_MAX_BYTES:
                 entry, result = self._image_error(
                     url, "image too large (%d MB, limit %d MB)"
@@ -3067,6 +3238,9 @@ class Ollama(QObject):
         finally:
             reply.deleteLater()
         self.imageFetchResult.emit(json.dumps(entry))
+        if idx is None:
+            self._typed_image_done(remaining)
+            return
         self._tool_results[idx] = {"role": "tool", "tool_name": "fetch_image",
                                    "content": json.dumps(result)}
         self._tool_done(remaining, calls)
@@ -3931,6 +4105,7 @@ def main():
     ollama = Ollama()
     backend = Backend()
     sessions = Sessions()
+    clip = Clip()
 
     # TWO ROOFS, ONE APP (docs/DESIGN.md §7.6). Under Hyprland the QML tree IS
     # the window and the compositor draws the titlebar. Under Plasma the same
@@ -3957,6 +4132,7 @@ def main():
     ctx.setContextProperty("Backend", backend)
     ctx.setContextProperty("Sessions", sessions)
     ctx.setContextProperty("ollamaHost", OLLAMA)
+    ctx.setContextProperty("Clip", clip)
 
     warnings = []
     engine.warnings.connect(
@@ -4040,7 +4216,7 @@ def run_selftest(app, shell, win, plasma, warnings):
                          "`code` and fenced blocks keep the monospaced face.",
                  "thinking": "The user wants a short answer. Keep it to a "
                              "definition plus two reasons.",
-                 "thinkTokens": 24},
+                 "thinkTokens": 24, "thinkMs": 12400},
                 {"isUser": False, "who": "qwen3.6:35b-a3b",
                  "body": "ollama: connection refused", "isError": True},
             ]
