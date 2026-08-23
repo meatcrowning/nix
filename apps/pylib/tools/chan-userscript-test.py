@@ -98,7 +98,8 @@ for want in ("@run-at       document-start", "@match        *://boards.4chan.org
              "@grant        GM_xmlhttpRequest", "@connect      127.0.0.1"):
     check("header carries %r" % want.split()[0] + " " + want.split()[-1],
           want in text)
-check("self-gate on html.oneechan survives", "contains('oneechan')" in text)
+check("self-gate on html.oneechan survives",
+      'var GATE = "oneechan"' in text and "classList.contains(GATE)" in text)
 check("adopts rather than appends (cascades after ch4SS)",
       "adoptedStyleSheets" in text)
 check("a <style> fallback exists for no constructable stylesheets",
