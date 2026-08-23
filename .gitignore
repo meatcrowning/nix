@@ -12,3 +12,7 @@ __pycache__/
 # (privacy over self-describing-ness); see docs/README.md. Do not "fix" it by
 # moving either file back.
 /docs/
+
+# `nixos-rebuild build` / `nix build` drop their out-link here.
+/result
+/result-*
