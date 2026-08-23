@@ -1032,6 +1032,46 @@ ranges itself (`positionToRectangle`, `z: -1`).
   delta and each rebuild brings the flag back. Harness:
   `tools/code-block-test.py`.
 
+### Lines break where the model broke them, paragraphs stand apart
+
+Two things about a reply's shape, both his [2026-08-23], both measured on the
+laid-out document rather than on the source:
+
+- **A single newline is a LINE BREAK.** CommonMark joins it into the paragraph
+  above, so a reply written as short lines came back as one run-on block. Qt's
+  reader has no "soft breaks are hard breaks" switch, and markdown's own hard
+  break (two trailing spaces) opens a whole new BLOCK — which would give a soft
+  break the same standoff as a real paragraph and make the two
+  indistinguishable. So `Root.hardBreaks` swaps that newline for **U+2028**, the
+  separator Qt's layout breaks on INSIDE a block: same block, next line, no gap.
+  It is applied to `text` only — `source` stays the model's markdown verbatim,
+  so `Clip.copyMarkdown` still hands over what it wrote. One character for one,
+  so document positions still map to the source. Lines that open a block of
+  their own (a list marker, a heading, a quote, a fence, a table row) are left
+  alone, and nothing inside a fence is touched.
+- **A blank line opens a paragraph, and the paragraph says so.** Qt gives every
+  block a 6px top AND bottom margin, which collapse to a 6px gap — no stronger
+  than a wrapped line. `MdFormat` sets the gap on the TOP margin only (adjacent
+  margins collapse to the larger, so one side is enough): `PARA_TOP` 12,
+  `HEAD_TOP` 16, `LIST_TOP` 2 (bullets are one list, not a stack of
+  paragraphs), and 0 on the first block or every bubble opens with a blank
+  strip. Code is skipped — `styleCode` sees one block PER LINE inside a fence,
+  so a margin there would space the code out line by line.
+
+It runs in the same debounced document pass as the code blocks, and only writes
+a block format when the value differs, or the write would retrigger the pass.
+Harness: `tools/prose-layout-test.py`.
+
+### Sending scrolls him to the bottom
+
+Reading back up the log clears the view's `followBottom`, and his own new prompt
+then lands off-screen below him [his, 2026-08-23]. `send()` calls
+`replyFlick.toBottom()` — cancel any flick, re-arm `followBottom`, jump to the
+end — which is the one place jumping the view is not yanking it, since he just
+wrote the thing at the end of it. Everywhere else the rule stands: the log
+follows the newest text only while he is already at the bottom
+(docs/DESIGN.md §6.1). Harness: `tools/prose-layout-test.py`.
+
 ### One state at a time in an unfinished bubble
 
 A model row that has said nothing yet draws a `loading…` line of its own; the

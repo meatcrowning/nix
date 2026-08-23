@@ -2338,6 +2338,16 @@ class MdFormat(QObject):
     #: was fenced". QTextFormat.UserProperty + 7 is ours; Qt uses none of it.
     CODE_MARK = 0x100000 + 7
 
+    #: How far one block stands off the one above it. Qt gives every block 6px
+    #: top AND bottom, which collapse to a 6px gap — a paragraph break that
+    #: reads no stronger than a wrapped line [his, 2026-08-23]. The gap is on
+    #: the TOP margin only (adjacent margins collapse to the larger of the two,
+    #: so one side is enough) and the first block of a reply gets none, or every
+    #: bubble would open with a blank strip.
+    PARA_TOP = 12          # between paragraphs: most of a line, not a whole one
+    HEAD_TOP = 16          # a heading stands further off what came before it
+    LIST_TOP = 2           # bullets are ONE list, not a stack of paragraphs
+
     @Slot(QObject, result=str)
     def styleCode(self, quick_doc):
         """Let every fenced block wrap, and say WHERE the blocks are.
@@ -2370,6 +2380,24 @@ class MdFormat(QObject):
             # which drew a whole prose line as an embedded code panel (measured
             # against the demo transcript).
             code = fmt.hasProperty(self.CODE_MARK) or fmt.nonBreakableLines()
+            # The gap above this block. A code block is left alone: `styleCode`
+            # sees one block PER LINE inside a fence, so a margin here would
+            # space the code out line by line.
+            if not code:
+                if block.blockNumber() == 0:
+                    top = 0
+                elif block.textList() is not None:
+                    top = self.LIST_TOP
+                elif fmt.headingLevel() > 0:
+                    top = self.HEAD_TOP
+                else:
+                    top = self.PARA_TOP
+                # Only when it differs: setBlockFormat marks the document
+                # changed, and the caller re-runs this on every change.
+                if fmt.topMargin() != top or fmt.bottomMargin() != 0:
+                    fmt.setTopMargin(top)
+                    fmt.setBottomMargin(0)
+                    QTextCursor(block).setBlockFormat(fmt)
             if code:
                 if fmt.nonBreakableLines() or not fmt.hasProperty(self.CODE_MARK):
                     fmt.setNonBreakableLines(False)

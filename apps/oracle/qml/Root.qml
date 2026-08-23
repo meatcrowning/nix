@@ -118,6 +118,42 @@ Item {
         return Qt.formatTime(new Date(ts * 1000), "h:mm ap").toLowerCase();
     }
 
+    // A line the model ended with a single newline is a line he SEES ended
+    // [his, 2026-08-23]. CommonMark JOINS it into the paragraph above, so a
+    // reply written as short lines came back as one run-on block; Qt's reader
+    // has no "soft breaks are hard breaks" switch, and markdown's own hard
+    // break (two trailing spaces) opens a whole new BLOCK, which would give a
+    // soft break the same standoff as a real paragraph and make the two
+    // indistinguishable.
+    //
+    // So a soft break becomes U+2028, the line separator Qt's layout breaks on
+    // INSIDE a block: the line ends where he wrote it, and only a blank line
+    // still opens a paragraph (`MdFormat.PARA_TOP` is the gap that says so).
+    // Render only — the `source` beside it stays the model's text verbatim, so
+    // copying still hands over exactly what it wrote.
+    function hardBreaks(md) {
+        if (md.indexOf("\n") < 0) return md;
+        // A line that starts a block of its own: joining the line above onto it
+        // would eat the list marker, the heading, the quote or the fence.
+        var opensBlock = /^\s{0,3}([-*+>#]|\d+[.)]|```|~~~|\||={2,}$|-{3,}$)/;
+        var lines = md.split("\n");
+        var out = "";
+        var fence = false;
+        for (var i = 0; i < lines.length; i++) {
+            var l = lines[i];
+            if (i > 0) {
+                var prev = lines[i - 1];
+                var soft = !fence && l.trim() !== "" && prev.trim() !== ""
+                           && !opensBlock.test(l) && !opensBlock.test(prev)
+                           && !/\s\s$/.test(prev) && !/\\$/.test(prev);
+                out += soft ? "\u2028" : "\n";
+            }
+            if (/^\s{0,3}(```|~~~)/.test(l)) fence = !fence;
+            out += l;
+        }
+        return out;
+    }
+
     // ---- one meta block per TURN, at the top of it -------------------------
     // A turn is one row PER TOOL ROUND (AGENTS.md "One bubble PER ROUND"), and
     // each of those rows used to carry its own reasoning, tool, web and file
@@ -878,6 +914,11 @@ Item {
         Ollama.send(win.model, sendPrompt, JSON.stringify(history), JSON.stringify(atts));
         promptBox.clear();
         win.clearAttachments();
+        // Sending puts him back at the BOTTOM [his, 2026-08-23]. Reading back
+        // through the log clears `followBottom`, and without this his own new
+        // prompt lands off-screen below him — the one place jumping the view is
+        // not yanking it, since he just wrote the thing at the end of it.
+        replyFlick.toBottom();
     }
 
     // ---- the Plasma chrome: one table, three widgets ----------------------
@@ -2004,6 +2045,7 @@ Item {
 
         KineticFlickable {
             id: replyFlick
+            objectName: "replyFlick"      // the harness reads the scroll off it
             anchors.fill: parent
             contentWidth: width
             contentHeight: replyCol.height
@@ -2924,7 +2966,7 @@ Item {
                                             // Ctrl+C copies (MarkdownText.qml).
                                             readonly property string md:
                                                 body.replace(/!\[([^\]]*)\]\(/g, "[$1](")
-                                            text: md
+                                            text: win.hardBreaks(md)
                                             source: md
 
                                             onSelectedTextChanged:
@@ -2980,6 +3022,15 @@ Item {
                 contentY = Math.max(0, contentHeight - height)
             onContentYChanged: followBottom =
                 contentY >= Math.max(0, contentHeight - height) - 2
+            // Put him at the end and keep him there as the reply grows. Called
+            // on send; `returnToBounds` because a kinetic flick may still be
+            // running when the prompt goes.
+            function toBottom() {
+                cancelFlick();
+                followBottom = true;
+                contentY = Math.max(0, contentHeight - height);
+                returnToBounds();
+            }
 
             ScrollBar.vertical: VScroll { id: replyScroll }
         }
