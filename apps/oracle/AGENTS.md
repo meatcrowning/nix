@@ -346,24 +346,40 @@ keeping this public source clean.
 
 **Honest capabilities every turn (`CAPABILITY_NOTE`).** A model does not call
 `describe_self` on its own, so a static, honest summary of what the app actually
-lets it do — the tool families it HAS, and the **limits** on them (no shell, no
-general internet beyond web search / image fetch, and the exact bounds of the
-code runner) — is appended to every system prompt (docs/DESIGN.md §10, honesty
+lets it do — the tool families it HAS, and the **limits** on them (no root, no
+general internet beyond web search / image fetch / `fetch_url`, and the exact
+bounds of the two code runners) — is appended to every system prompt (docs/DESIGN.md §10, honesty
 in both directions, and never overstating a jail). It exists because gemma4:e4b
 told him it "has no code-execution env": true at the time, but reached for blind
-rather than from its real inventory. That gap is now closed — see *Code runner*
+rather than from its real inventory. That gap is now closed — see *Code runners*
 below — and `describe_self` still gives the exact live tool list on demand.
 
-## Code runner (run_python, on top)
+## Code runners (run_python and run_bash, on top)
 
-`run_python` (`EXEC_TOOL`, offered every turn, dispatched `_run_exec_tool` →
-`_exec_argv`) lets the model actually **execute Python** instead of only
-reasoning about it — the board decision of 2026-08-11 (he ticked *add a jailed
+`run_python` (`EXEC_TOOL`) and `run_bash` (`BASH_TOOL`) — both offered every
+turn, both dispatched `_run_exec_tool` → `_exec_argv` — let the model actually
+**execute code** instead of only reasoning about it — the board decision of 2026-08-11 (he ticked *add a jailed
 code-runner*; running untrusted model output is a security call he took
 deliberately). It runs through **`tools/sandbox-exec.py`** and returns
 `{stdout, stderr, exit_code, timed_out, cwd, network_isolated, …}` fed back
 into the same async tool loop as the file tools (`fileToolStarted`/
-`fileToolDone` → the "files · N" disclosure; heading `running python`).
+`fileToolDone` → the "files · N" disclosure; heading `running python` /
+`running bash`, outcome `python exited 0` / `bash exited 2`).
+
+**`run_bash` is the shell, added 2026-08-22** — his call: *"add bash tooling to
+agents in chatter, not just python stuff. give them the same abilities and tools
+you do when manipulating files"*. The file tools already reached the whole
+filesystem, but the work an agent actually does to files is shell work — `grep
+-rn`, `cp -a`, `git diff`, `find … -exec`, a loop over a directory — and having
+to express each of those as a Python program was the last thing keeping this an
+assistant rather than an agent. It is the **same runner**, not a second one:
+`tools/sandbox-exec.py` takes a `lang` field (`"python"` default, so an old
+caller is unchanged) and that is the only difference between the two — caps,
+`cwd` rules, protocol, host branch and disclosure are shared, so they cannot
+drift apart. `run_bash` takes `command` where `run_python` takes `code` (a model
+that swaps them gets what it meant, not an empty-program error); bash runs the
+script with the environment inherited, python still with `-I`. There is no
+`sudo` and the tool description says so.
 
 **It stopped being a jail on 2026-08-22** — his call, the same one that widened
 the write root (*"i dont really want them to be [sandboxed]"*). What that
@@ -382,7 +398,8 @@ changed and what it did not:
   30), CPU, address space, file size, per-stream output, and a timeout that
   kills the whole process group. Those protect this desktop from a runaway
   program, not from its author.
-- **`EXEC_TOOL`'s description and `CAPABILITY_NOTE` say all of this plainly**
+- **`EXEC_TOOL`'s and `BASH_TOOL`'s descriptions, and `CAPABILITY_NOTE`, say
+  all of this plainly**
   (docs/DESIGN.md §10 — never overstate a jail *or* a freedom), and they tell
   the model what the freedom obliges: read before overwriting, prefer an edit
   to a replacement, never delete what it did not create.

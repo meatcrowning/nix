@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""oracle's Python code runner — the muscle behind its run_python tool.
+"""oracle's code runner — the muscle behind its run_python and run_bash tools.
 
-oracle offers the local ollama model a `run_python` tool (see apps/oracle/main.py
-`EXEC_TOOL`) so it can actually RUN code instead of only reasoning about it — the
-gap gemma4:e4b named honestly ("no code-execution env"). Executing model-written
-code is a security decision he took deliberately (the board question of
-2026-08-11); this script is where that runs, and it is the jail:
+oracle offers the local ollama model a `run_python` tool and a `run_bash` tool
+(see apps/oracle/main.py `EXEC_TOOL` / `BASH_TOOL`) so it can actually RUN code
+instead of only reasoning about it — the gap gemma4:e4b named honestly ("no
+code-execution env"). Executing model-written code is a security decision he
+took deliberately (the board question of 2026-08-11); the SHELL half is his call
+of 2026-08-22 ("give them the same abilities and tools you do when manipulating
+files") — a model that can write and delete any file but cannot run `grep`, `cp`
+or `git` was doing the job with one hand. One request field, `lang`, picks the
+interpreter; everything else — the caps, the cwd rules, the protocol — is shared
+so the two runners cannot drift apart. This script is where that runs:
 
   * a SCRATCH root as argv[1] — `~/.local/share/oracle/sandbox` — is the
     process's default WORKING DIRECTORY, so relative paths the code writes land
@@ -32,9 +37,11 @@ executors. Pure stdlib on purpose, so top's system python3 runs it over ssh with
 nothing installed.
 
 PROTOCOL: one JSON request object on stdin, one JSON result object on stdout.
-    {"code": "print(2**10)", "timeout": 5, "stdin": "", "cwd": "/home/lam"}
+    {"code": "print(2**10)", "lang": "python", "timeout": 5, "stdin": "",
+     "cwd": "/home/lam"}
     -> {"ok": true, "stdout": "1024\n", "stderr": "", "exit_code": 0,
-        "timed_out": false, "network_isolated": true, ...}
+        "lang": "python", "timed_out": false, "network_isolated": true, ...}
+`lang` is "python" (the default, so an old caller is unchanged) or "bash".
 An error in the HARNESS (bad request, unwritable sandbox) is `{"error": "..."}`
 with exit 0 — reported to the model, never a crash. Code that itself raises is a
 SUCCESSFUL run with a non-zero `exit_code` and the traceback in `stderr`.
@@ -57,6 +64,12 @@ STDIN_MAX_BYTES = 256_000     # ...and an absurdly large stdin feed
 CPU_SECONDS = 20              # RLIMIT_CPU — a hair above the wall cap, a backstop
 MEM_BYTES = 1024 * 1024 * 1024  # RLIMIT_AS — 1 GiB address space per run
 FSIZE_BYTES = 16 * 1024 * 1024  # RLIMIT_FSIZE — biggest file the code may write
+
+#: The interpreters a request may ask for. Python was the only one until
+#: 2026-08-22; bash is the second because the file work the model does is shell
+#: work — `grep -rn`, `cp -a`, `git diff`, a for-loop over a directory. Both get
+#: the SAME caps and the same cwd rules: the language is the only difference.
+LANGS = ("python", "bash")
 
 
 def fail(reason):
@@ -123,6 +136,10 @@ def main():
     except ValueError:
         fail("bad request")
 
+    lang = str(req.get("lang") or "python").strip().lower()
+    if lang not in LANGS:
+        fail("unknown lang %r (want one of %s)" % (lang, ", ".join(LANGS)))
+
     code = req.get("code", "")
     if not isinstance(code, str) or not code.strip():
         fail("code must be a non-empty string")
@@ -155,21 +172,27 @@ def main():
         else:
             fail("no such working directory: " + want)
 
-    # The program goes to a temp file in the scratch root, run with -I
-    # (isolated: ignore env/user-site, so a run is reproducible).
-    fd, path = tempfile.mkstemp(prefix="run-", suffix=".py", dir=root)
+    # The program goes to a temp file in the scratch root. Python runs with -I
+    # (isolated: ignore env/user-site, so a run is reproducible); bash runs the
+    # script plainly, inheriting the environment — a shell with no PATH or no
+    # HOME is not the shell the model is being told it has.
+    suffix = ".sh" if lang == "bash" else ".py"
+    fd, path = tempfile.mkstemp(prefix="run-", suffix=suffix, dir=root)
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(code_bytes)
         net = _net_isolation_argv() if no_net else []
-        argv = net + [sys.executable, "-I", path]
+        if lang == "bash":
+            argv = net + [shutil.which("bash") or "/bin/bash", path]
+        else:
+            argv = net + [sys.executable, "-I", path]
         try:
             proc = subprocess.Popen(
                 argv, cwd=cwd, stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 preexec_fn=_child_setup)
         except OSError as e:
-            fail("cannot run code: " + str(e))
+            fail("cannot run %s: %s" % (lang, e))
         timed_out = False
         try:
             out_raw, err_raw = proc.communicate(input=stdin_bytes, timeout=timeout)
@@ -182,7 +205,7 @@ def main():
             out_raw, err_raw = proc.communicate()
         out, out_cut = _clip(out_raw or b"")
         err, err_cut = _clip(err_raw or b"")
-        res = {"ok": True, "timed_out": timed_out,
+        res = {"ok": True, "lang": lang, "timed_out": timed_out,
                "exit_code": None if timed_out else proc.returncode,
                "stdout": out, "stderr": err,
                "stdout_truncated": out_cut, "stderr_truncated": err_cut,
