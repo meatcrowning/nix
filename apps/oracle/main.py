@@ -232,6 +232,60 @@ VIDEO_TOOL = {
 }
 VIDEO_TOOL_NAMES = {"show_video"}
 
+#: THE MUSIC PLAYER, as a tool [his, 2026-08-23: *"give agents the ability to
+#: manipulate playback of player"*]. `apps/player` publishes the standard MPRIS
+#: interface (`org.mpris.MediaPlayer2.player`, the same one the panel's media
+#: widget drives), so this needs no new seam in the player at all — it is the
+#: session bus of the machine the WINDOW runs on, which is why it says so
+#: honestly when nothing is playing there (his music lives on `top`).
+#:
+#: What it offers is what the player actually implements: MPRIS `Stop` and
+#: `OpenUri` are no-ops in its adapter, so neither is offered as an action that
+#: would silently do nothing (docs/DESIGN.md §10). Every action answers with the
+#: resulting STATUS, so the model sees what it did rather than assuming.
+PLAYER_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "control_player",
+        "description": (
+            "See and control the music playing on this machine (the `player` "
+            "app). `status` tells you what is playing — title, artist, album, "
+            "how far in, how long, volume — and every other action does the "
+            "thing and then tells you the same. Use it when he asks what is "
+            "playing, or asks you to pause it, skip it, go back, jump to a "
+            "point, or change the volume. Every action returns the resulting "
+            "status, so never guess what happened; and if no player is running "
+            "you are told that plainly — say so rather than pretending."),
+        "parameters": {"type": "object", "properties": {
+            "action": {"type": "string",
+                       "enum": ["status", "play", "pause", "play_pause", "next",
+                                "previous", "seek", "volume", "shuffle", "loop"],
+                       "description": "What to do. `status` changes nothing."},
+            "seconds": {"type": "number",
+                        "description": ("For `seek`: where to jump to, in "
+                                        "seconds from the start — or how far to "
+                                        "jump (negative for back) when "
+                                        "`relative` is true.")},
+            "relative": {"type": "boolean",
+                         "description": "For `seek`: jump BY `seconds` rather than TO it."},
+            "level": {"type": "integer",
+                      "description": "For `volume`: 0-100."},
+            "on": {"type": "boolean", "description": "For `shuffle`: on or off."},
+            "mode": {"type": "string", "enum": ["none", "track", "playlist"],
+                     "description": "For `loop`: repeat nothing, this track, or the queue."}},
+            "required": ["action"]}},
+}
+PLAYER_TOOL_NAMES = {"control_player"}
+
+#: Which player, and what drives it. `playerctl` is the client (a real MPRIS
+#: implementation — QtDBus was the obvious route and is a dead end: PySide
+#: cannot demarshal MPRIS's `a{sv}` Metadata, so the title came back empty,
+#: measured against the real player 2026-08-23). Both are overridable, which is
+#: how the harness drives a STUB and never his player — he is listening on it
+#: while the tests run (root AGENTS.md).
+MPRIS_NAME = os.environ.get("ORACLE_MPRIS", "player")
+PLAYERCTL = os.environ.get("ORACLE_PLAYERCTL", "playerctl")
+
 #: The PAGE-READER tool. web_search returns Tavily's snippets, which are a
 #: paragraph at most — so a model handed a link (by him, or by its own search)
 #: could not actually READ it. This closes that: one URL in, the page's text
@@ -800,10 +854,34 @@ SELF_TOOL = {
 }
 
 #: tool name -> the `op` tools/sandbox-fs.py dispatches on.
+FILE_TOOLS.append({"type": "function", "function": {
+    "name": "file_metadata",
+    "description": (
+        "What a file IS, without reading it: its size, when it last changed, "
+        "its REAL type (sniffed from the bytes, not guessed from the "
+        "extension), the line and word count of a text file, and — for audio, "
+        "video and images — the container, duration, bitrate, codecs, "
+        "dimensions and embedded TAGS (artist, album, title, track number, "
+        "camera, and whatever else is in the file). Use it whenever the "
+        "question is about the file rather than its contents: how long is this "
+        "track, who is it by, what is this video encoded with, how big is it, "
+        "is this really a PNG. Read-only, works on either machine, and far "
+        "cheaper than read_file on a large or binary file — read_file on a "
+        "flac tells you nothing at all."),
+    "parameters": {"type": "object", "properties": {
+        "path": {"type": "string",
+                 "description": "The file (or directory) to inspect, relative to '/'."},
+        "hash": {"type": "boolean",
+                 "description": ("Also compute the file's sha256. Off by "
+                                 "default: it reads every byte.")},
+        "host": {"type": "string", "enum": ["top", "book"],
+                 "description": "Which machine the file is on. Default 'top'."}},
+        "required": ["path"]}}})
+
 FILE_OP = {"list_dir": "list", "read_file": "read", "write_file": "write",
            "edit_file": "edit", "move_path": "move", "delete_path": "delete",
            "make_dir": "mkdir", "find_files": "glob", "search_text": "grep",
-           "show_tree": "tree"}
+           "show_tree": "tree", "file_metadata": "meta"}
 FILE_TOOL_NAMES = set(FILE_OP)
 
 #: The house rules of a directory tree, by filename. `~/nix` and every tree
@@ -825,7 +903,8 @@ HOUSE_FILES = ("AGENTS.md", "CLAUDE.md")
 #: The READ-ONLY tool names — these five (and only these) accept a `host`
 #: argument, since only they resolve against the whole-filesystem READ_ROOT
 #: rather than the single sandbox on top (see `Ollama._fs_argv`).
-FILE_READ_TOOL_NAMES = {"list_dir", "read_file", "find_files", "search_text", "show_tree"}
+FILE_READ_TOOL_NAMES = {"list_dir", "read_file", "find_files", "search_text",
+                        "show_tree", "file_metadata"}
 
 #: The SESSION-READ tools (list_sessions / read_session), offered beside the
 #: file and web tools so the model can reach past conversations he has had with
@@ -1510,7 +1589,10 @@ CAPABILITY_NOTE = (
     "(show_video — a YouTube or other watch page, or a direct video "
     "file, streamed into the chat with a play button he presses); "
     "read the current time in any "
-    "timezone; read, write, edit, move, delete and search files on the host — "
+    "timezone; SEE AND CONTROL THE MUSIC (control_player — what is playing, "
+    "pause, skip, seek, volume, on the machine this window runs on); read a "
+    "file's real type, size, duration, codecs and TAGS without opening it "
+    "(file_metadata); read, write, edit, move, delete and search files on the host — "
     + ("the WHOLE filesystem, not a sandbox, exactly what the user himself can "
        "touch" if WRITE_FREE else
        "reading anywhere, writing only inside your own sandbox directory") +
@@ -2079,6 +2161,10 @@ class Ollama(QObject):
     # streams; nothing is on disk but the poster frame.
     videoStarted = Signal(str)              # url — resolving
     videoResult = Signal(str)               # one JSON entry (the contract above)
+
+    # The player tool's result, as JSON — for a harness to read what one call
+    # actually produced without a bus of its own.
+    playerToolDone = Signal(str)
 
     # Live model stats, drawn as readouts in the status area. `contextMax` is the
     # selected model's real context ceiling read from ollama's /api/show (the
@@ -3258,6 +3344,7 @@ class Ollama(QObject):
         there (docs/DESIGN.md §10)."""
         return (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, SELF_TOOL,
                 IMAGE_TOOL, SEARCH_IMAGE_TOOL, VIEW_IMAGE_TOOL, VIDEO_TOOL,
+                PLAYER_TOOL,
                 FETCH_URL_TOOL,
                 CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
                 + list(SESSION_TOOLS) + list(MEMORY_TOOLS)
@@ -3601,6 +3688,8 @@ class Ollama(QObject):
                               i, remaining, calls)
         elif name in VIEW_IMAGE_TOOL_NAMES:
             self._view_image(args, i, remaining, calls)
+        elif name in PLAYER_TOOL_NAMES:
+            self._run_player_tool(args, i, remaining, calls)
         elif name in VIDEO_TOOL_NAMES:
             self._show_video(str(args.get("url", "")).strip(),
                              str(args.get("alt", "")).strip(),
@@ -4518,6 +4607,192 @@ class Ollama(QObject):
         except OSError:
             return ""
 
+    # ---- the music player (control_player, over MPRIS) ----
+
+    @staticmethod
+    def _player_argv(rest):
+        """`playerctl -p <name> …` for one verb. The name, and the binary, are
+        both overridable — which is how the harness drives a STUB and never his
+        player, playing music a foot away while the tests run (root AGENTS.md).
+        """
+        return [PLAYERCTL, "-p", MPRIS_NAME] + list(rest)
+
+    #: One line carrying everything the model is told, so a status costs ONE
+    #: process rather than nine property reads. (QtDBus was the obvious route
+    #: and is a dead end here: PySide cannot demarshal MPRIS's `a{sv}` Metadata
+    #: — `QDBusArgument.asVariant()` returns null and the title comes back
+    #: empty, measured 2026-08-23 against the real player. playerctl is a real
+    #: MPRIS client and hands back text.)
+    PLAYER_FORMAT = ("{{status}}\t{{title}}\t{{artist}}\t{{album}}\t"
+                     "{{mpris:length}}\t{{position}}\t{{volume}}\t"
+                     "{{shuffle}}\t{{loop}}")
+
+    def _pctl(self, rest, cb):
+        """Run one playerctl call and hand (rc, stdout, stderr) to `cb`.
+
+        Async on the file tools' QProcess idiom: these answer in milliseconds,
+        but a player that has just died makes D-Bus wait, and the window must
+        not."""
+        proc = QProcess(self)
+        self._procs.append(proc)
+        done = {"n": False}
+
+        def finished(*_):
+            if done["n"]:
+                return
+            done["n"] = True
+            if proc in self._procs:
+                self._procs.remove(proc)
+            try:
+                out = bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")
+                err = bytes(proc.readAllStandardError()).decode("utf-8", "replace")
+                rc = proc.exitCode()
+            except RuntimeError:
+                return
+            proc.deleteLater()
+            cb(rc, out, err)
+
+        def failed(err):
+            if done["n"] or err != QProcess.ProcessError.FailedToStart:
+                return
+            done["n"] = True
+            if proc in self._procs:
+                self._procs.remove(proc)
+            proc.deleteLater()
+            cb(127, "", "playerctl is not installed here")
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(failed)
+        argv = self._player_argv(rest)
+        proc.start(argv[0], argv[1:])
+
+    @staticmethod
+    def _player_parse(line):
+        """PLAYER_FORMAT's one line -> the status the model gets back."""
+        f = (line.rstrip("\n").split("\t") + [""] * 9)[:9]
+
+        def secs(us):
+            try:
+                return round(float(us) / 1_000_000, 1)
+            except (TypeError, ValueError):
+                return 0.0
+
+        out = {"ok": True, "playing": f[0] or "Stopped", "title": f[1],
+               "artist": f[2], "album": f[3],
+               "duration_seconds": secs(f[4]), "position_seconds": secs(f[5]),
+               "shuffle": f[7].strip().lower() in ("true", "on", "1"),
+               "loop": f[8] or "None"}
+        try:
+            out["volume"] = int(round(float(f[6]) * 100))
+        except (TypeError, ValueError):
+            pass
+        return out
+
+    def _run_player_tool(self, args, idx, remaining, calls):
+        """Drive the music player, and answer with what actually happened.
+
+        Every action ends in a STATUS read, so the model reports the state it
+        produced rather than the one it intended — and a failure is a REASON,
+        never a silent no-op: nothing running on this machine's bus is the
+        common one and a real answer (his library is on `top`, so a book window
+        has nothing to drive)."""
+        a = args if isinstance(args, dict) else {}
+        action = str(a.get("action") or "status").strip().lower()
+        try:
+            verb = self._player_verb(action, a)
+        except ValueError as e:
+            self._player_result({"error": str(e)}, idx, remaining, calls)
+            return
+
+        def status(_rc=0, _out="", _err=""):
+            self._pctl(["metadata", "--format", self.PLAYER_FORMAT],
+                       lambda rc, out, err: self._player_answer(
+                           action, rc, out, err, idx, remaining, calls))
+
+        if not verb:
+            status()
+            return
+
+        def after(rc, out, err):
+            if rc != 0:
+                self._player_result(
+                    {"error": self._player_reason(err) or
+                     ("%s failed" % action)}, idx, remaining, calls)
+                return
+            status()
+
+        self._pctl(verb, after)
+
+    @staticmethod
+    def _player_verb(action, a):
+        """The playerctl arguments for one action, or [] for a pure status.
+        An action the player cannot really do is never offered (docs/DESIGN.md
+        §10) — `Stop` and `OpenUri` are no-ops in its MPRIS adapter, so they are
+        not in the tool's enum and land here as an unknown action."""
+        if action == "status":
+            return []
+        if action in ("play", "pause", "next", "previous"):
+            return [action]
+        if action == "play_pause":
+            return ["play-pause"]
+        if action == "seek":
+            try:
+                secs = float(a.get("seconds", 0))
+            except (TypeError, ValueError):
+                raise ValueError("seek needs `seconds`")
+            if a.get("relative"):
+                # playerctl's own relative syntax: `10+` forward, `10-` back.
+                return ["position", "%g%s" % (abs(secs), "-" if secs < 0 else "+")]
+            return ["position", "%g" % max(0.0, secs)]
+        if action == "volume":
+            try:
+                lvl = int(a.get("level"))
+            except (TypeError, ValueError):
+                raise ValueError("volume needs `level`, 0-100")
+            return ["volume", "%.2f" % (max(0, min(100, lvl)) / 100.0)]
+        if action == "shuffle":
+            return ["shuffle", "on" if a.get("on", True) else "off"]
+        if action == "loop":
+            mode = str(a.get("mode") or "none").strip().lower()
+            if mode not in ("none", "track", "playlist"):
+                raise ValueError("loop `mode` is none, track or playlist")
+            return ["loop", mode]
+        raise ValueError("unknown action: " + action)
+
+    @staticmethod
+    def _player_reason(err):
+        """playerctl's complaint, in one line — its "No players found" is the
+        one the model must be able to relay honestly."""
+        lines = [l.strip() for l in (err or "").splitlines() if l.strip()]
+        if not lines:
+            return ""
+        why = lines[-1]
+        if "no players found" in why.lower():
+            return ("no music player is running on this machine — `player` "
+                    "publishes MPRIS only while it is open, and his library "
+                    "lives on top")
+        return why
+
+    def _player_answer(self, action, rc, out, err, idx, remaining, calls):
+        if rc != 0 or not out.strip():
+            self._player_result(
+                {"error": self._player_reason(err)
+                 or "no music player is running on this machine"},
+                idx, remaining, calls)
+            return
+        result = self._player_parse(out.splitlines()[0])
+        result["did"] = action
+        self._player_result(result, idx, remaining, calls)
+
+    def _player_result(self, result, idx, remaining, calls):
+        if idx is None:
+            self.playerToolDone.emit(json.dumps(result))
+            return
+        self.playerToolDone.emit(json.dumps(result))
+        remaining["sink"][idx] = {"role": "tool", "tool_name": "control_player",
+                                   "content": json.dumps(result)}
+        self._tool_done(remaining, calls)
+
     # ---- the video tool (show_video) ----
 
     def _show_video(self, url, alt, idx, remaining, calls):
@@ -5112,7 +5387,8 @@ class Ollama(QObject):
         verb = {"list_dir": "listing", "read_file": "reading",
                 "write_file": "writing", "edit_file": "editing",
                 "move_path": "moving", "delete_path": "deleting",
-                "make_dir": "creating", "show_tree": "tree of"}.get(name, name)
+                "make_dir": "creating", "show_tree": "tree of",
+                "file_metadata": "inspecting"}.get(name, name)
         return verb + " " + p + suffix
 
     @staticmethod
@@ -5159,6 +5435,14 @@ class Ollama(QObject):
         if name == "show_tree":
             return "tree of %s · %d entries" % (result.get("path", "."),
                                                 result.get("count", 0))
+        if name == "file_metadata":
+            bits = [result.get("media_type") or result.get("kind") or "file"]
+            if result.get("duration_seconds"):
+                d = int(result["duration_seconds"])
+                bits.append("%d:%02d" % (d // 60, d % 60))
+            bits.append("%d B" % result.get("bytes", 0))
+            return "%s · %s" % (result.get("name") or result.get("path", ""),
+                                " · ".join(bits))
         return name + " ok"
 
     # ---- the session-read tools (past conversations, not the file jail) ----

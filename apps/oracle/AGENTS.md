@@ -776,6 +776,16 @@ So the one button beside the prompt box has three states, in this precedence
 | `send` | there is something typed or attached (`canSend`) — a prompt he wrote outranks carrying the last answer on |
 | `continue` | neither, and `canContinue` |
 
+**The box hugs ONE line, and the slack is split.** Its height is the send
+button's, floored — the button is taller than a line of text — and the input is
+CENTRED on that rather than anchored to the top, because slack anchored to the
+top all falls out of the bottom: 34px around a 30px input put six pixels under
+the text and none above it [his, 2026-08-23: *"extra empty space under the text
+line and the bottom edge"*]. Both faces do it the same way (`root.pad` in
+`qml/PromptBox.qml`, `sendBtn.implicitHeight` in `qml/+plasma/PromptBox.qml`),
+and both are measurable offscreen — `ORACLE_TREE=1` prints every item's y and h,
+which is how the asymmetry was found rather than guessed at.
+
 `PromptBox` takes `canContinue` and emits `continued()`; both faces implement it
 (`qml/PromptBox.qml` and `qml/+plasma/PromptBox.qml`, where the states are
 `Stop`/`Send`/`Continue` on a real KStyle Button). The menubar/toolbar `send`
@@ -1220,6 +1230,66 @@ reason viewer does — Qt's ffmpeg backend probes VAAPI first, and VAAPI on
 book keeps Qt's default. Harness: `tools/video-test.py` (offscreen; a stub
 resolver and a 127.0.0.1 server, so it reaches neither his screen nor the
 network), `--shot` for a PNG of the card.
+
+## The music player (control_player)
+
+**A reply can see and drive what is playing** [his, 2026-08-23: *"give agents
+the ability to manipulate playback of player"*]. `PLAYER_TOOL` takes an
+`action` — status, play, pause, play_pause, next, previous, seek, volume,
+shuffle, loop — and **every one of them ends in a status read**, so the model
+reports the state it produced rather than the one it intended. No new seam in
+`apps/player` was needed: it already publishes MPRIS
+(`org.mpris.MediaPlayer2.player`, the interface the panel's media widget
+drives).
+
+**Only what the player really does is offered** (docs/DESIGN.md §10). MPRIS
+`Stop` and `OpenUri` are no-ops in its adapter, so neither is in the enum; an
+action that is not there comes back as a refusal with a reason, never a silent
+success.
+
+**Through `playerctl`, not QtDBus.** The obvious route is a `QDBusInterface` on
+the session bus, and it is a dead end: PySide cannot demarshal MPRIS's `a{sv}`
+`Metadata` — `QDBusArgument.asVariant()` returns null, so `PlaybackStatus` and
+`Position` read fine while the title, artist, album and length all come back
+empty (measured against the real player, 2026-08-23). playerctl is a real MPRIS
+client, one `--format` line carries everything the model is told, and the whole
+status costs ONE process instead of nine property reads. It is on the wrapper's
+PATH (`home/prog/oracle.nix`); absent, the tool says so.
+
+**It is the bus of the machine the WINDOW runs on**, and that is an honest
+limit rather than a hidden one: his library lives on `top`, so a book window
+finds nothing and the result says exactly that — "no music player is running on
+this machine" — for the model to relay instead of pretending.
+
+**A seek TO and a seek BY are different commands**: `position 90` versus
+playerctl's own `position 10+` / `15-`. Volume is 0-100 to the model, 0-1 on
+the wire, and clamped rather than passed through.
+
+Harness: `tools/player-meta-test.py`, which drives a **stub playerctl** it
+writes itself (`$ORACLE_PLAYERCTL`, `$ORACLE_MPRIS`) and asserts on the argv —
+so a test run never pauses, skips or re-shuffles the music he is listening to
+(root AGENTS.md: never drive the running player).
+
+## What a file IS (file_metadata)
+
+**The answer `read_file` cannot give.** A 4-minute flac is bytes to `read_file`,
+and a model asked how long a track is, who it is by, or what a video is encoded
+with had to guess from the filename. `file_metadata` is a read-only file tool
+like the others — same executor, same wide read root, same `host` argument — and
+returns size, mtime, mode, the **real** type (sniffed from the first bytes,
+never the extension), the line and word count of a text file, and for media the
+container, duration, bitrate, per-stream codecs and dimensions, and the embedded
+TAGS.
+
+`sha256` is opt-in (`hash: true`) because it reads every byte. The counts are
+over the WHOLE file, streamed — a capped count is a wrong count, and "3062
+lines" of a 5904-line file is worse than no number.
+
+The media half is `ffprobe` when it is on the target host; everything else is
+stdlib, because `sandbox-fs.py` still has to run over ssh on a machine with
+nothing installed. Its output is projected down (`META_MAX_STREAMS`,
+`META_MAX_TAGS`) — a raw `-show_streams` on a video is hundreds of lines of side
+data, and the context budget is the point.
 
 ## Dropped-file attachments
 
