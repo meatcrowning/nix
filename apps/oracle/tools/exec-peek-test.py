@@ -105,9 +105,10 @@ def walk(it, want, out, depth=0):
 QMetaObject.invokeMethod(root, "loadTurns", Q_ARG("QVariant", "hug"),
                          Q_ARG("QVariant", "hug"),
                          Q_ARG("QVariant", json.dumps([
-                             {"isUser": True, "who": "you", "body": "k"},
+                             {"isUser": True, "who": "you", "body": "k",
+                              "ts": 1787452020},
                              {"isUser": False, "who": "a-model-with-a-long-name:35b",
-                              "body": "no"}])))
+                              "body": "no", "ts": 1787452080}])))
 spin()
 spin(200)
 bubbles = []
@@ -122,6 +123,19 @@ if len(bubbles) == 2:
           str([round(x) for x in w]))
     check("and the speaker's name does not hold it open",
           w[1] < 48, str(round(w[1])))
+
+# ---- the time under each bubble ------------------------------------------
+# 1787452020 / 1787452080 are 60s apart, so the two rows must read different
+# minutes — the local clock is whatever this machine is set to, which is why
+# the assertion is on the SHAPE and the gap, not on two literal strings.
+import re                                                          # noqa: E402
+stamps = [c.property("text") for c in
+          walk(win, lambda c: isinstance(c.property("text"), str)
+               and re.fullmatch(r"\d\d:\d\d", c.property("text") or ""), [])]
+stamps = sorted(set(stamps))
+check("every bubble carries the time it landed", len(stamps) == 2, repr(stamps))
+check("a row with no stamp gets no label",
+      all(t != "00:00" for t in stamps), repr(stamps))
 
 # ---- 2. the heading previews the last line -------------------------------
 QMetaObject.invokeMethod(root, "appendReplyRow", Q_ARG("QVariant", 1))

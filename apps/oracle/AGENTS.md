@@ -944,6 +944,16 @@ full cap (`turn.wide`). Harness: `tools/exec-peek-test.py` — a one-character
 prompt beside a long-named model's two-letter answer, measured on the rendered
 `Bubble`.
 
+### The time under each bubble
+
+Every message carries the time it landed, under its bubble and on its own side
+— dim, faded, the weight of the speaker caption above it (§9.1) [his,
+2026-08-23]. `win.timeLabel(ts)` is 24h `HH:mm`, the clock everything else on
+this desktop is written in; the DATE stays a once-a-day separator across the
+column (`opensNewDay`), so a session held in one sitting draws one date and a
+time per message. A row from before the store kept `ts` shows no time rather
+than a made-up one. Harness: `tools/exec-peek-test.py`.
+
 ### Successive rounds fold into one line
 
 One row per round fixed the "where did round 3 begin" problem and made a new

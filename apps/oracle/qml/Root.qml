@@ -112,6 +112,11 @@ Item {
     function dayLabel(ts) {
         return Qt.formatDate(new Date(ts * 1000), "dddd d MMMM").toLowerCase();
     }
+    // "14:07" — when a message landed, under its bubble. 24h, the same clock
+    // every other timestamp on this desktop is written in.
+    function timeLabel(ts) {
+        return Qt.formatTime(new Date(ts * 1000), "HH:mm");
+    }
 
     // ---- the finished rounds of a turn, folded into one line ---------------
     // A turn is one row PER TOOL ROUND (AGENTS.md "One bubble PER ROUND"), and
@@ -2923,6 +2928,22 @@ Item {
                                         }
 
                                     }
+                                }
+
+                                // WHEN it landed, under the bubble and on its
+                                // own side [his, 2026-08-23] — a caption, one
+                                // step dim and slightly faded, the same weight
+                                // the speaker's name above it carries
+                                // (docs/DESIGN.md §9.1). A row from before the
+                                // store kept times has no `ts` and gets none,
+                                // rather than a made-up one.
+                                PixelText {
+                                    id: stampText
+                                    x: isUser ? turnStack.width - width : 0
+                                    visible: ts > 0 && bubble.visible
+                                    text: visible ? win.timeLabel(ts) : ""
+                                    color: Theme.textDim
+                                    opacity: 0.7
                                 }
 
                             }
