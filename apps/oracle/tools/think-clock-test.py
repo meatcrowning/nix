@@ -158,6 +158,7 @@ def headings():
             if isinstance(t, str) and (t.startswith("waiting")
                                        or t.startswith("thinking")
                                        or t.startswith("thought")
+                                       or t.startswith("loading")
                                        or t.endswith("tokens ·") or t.endswith("token ·")):
                 out.append(t)
             walk(ch, d + 1)
@@ -197,6 +198,43 @@ check("the token count is beside it, on the left",
 check("no state text is left running",
       not any(x.startswith("waiting") or x.startswith("thinking") for x in h),
       repr(h))
+
+# ---- ONE STATE AT A TIME -------------------------------------------------
+# An empty bubble out on its first tool satisfied both the `loading` line and
+# the clock's `waiting…`, and drew them stacked on top of each other [his,
+# 2026-08-22]. `loading` owns a bubble with nothing in it; the clock takes over
+# once there is something to show.
+HOLD["tool"] = True
+QMetaObject.invokeMethod(root, "loadTurns", Q_ARG("QVariant", "clocktest2"),
+                         Q_ARG("QVariant", "clock test 2"),
+                         Q_ARG("QVariant", json.dumps([
+                             {"isUser": True, "who": "you", "body": "go look"},
+                             {"isUser": False, "who": "stub:latest", "body": "",
+                              "cutOff": True}])))
+spin(300)
+SEEN.clear()
+both = []
+
+
+def sample_pairs(ms):
+    """Sample the two states TOGETHER — the bug is them coexisting, which a
+    union of everything seen over time cannot tell apart from a handover."""
+    end = time.monotonic() + ms / 1000.0
+    while time.monotonic() < end:
+        app.processEvents()
+        h = headings()
+        if any(x.startswith("loading") for x in h) and \
+           any(x.startswith("waiting") for x in h):
+            both.append(list(h))
+        time.sleep(0.01)
+
+
+if not QMetaObject.invokeMethod(root, "continueReply", Q_ARG("QVariant", "")):
+    print("FAILED: continueReply did not accept the call")
+    sys.exit(1)
+sample_pairs(2500)
+check("an empty bubble never shows `loading` and `waiting` at once",
+      not both, repr(both[:2]))
 
 srv.shutdown()
 print("FAILED: " + ", ".join(fails) if fails else "OK")

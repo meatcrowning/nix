@@ -1694,7 +1694,12 @@ Item {
                             PixelText {
                                 id: whoText
                                 x: isUser ? turnStack.width - width : 0
-                                text: step > 1 ? who + " · round " + step : who
+                                // Just the speaker. The caption used to name
+                                // the round from 2 on ("model · round 2"); the
+                                // SPLIT is what he wanted, not a label on it
+                                // [his, 2026-08-22] — a new bubble already says
+                                // a new round began.
+                                text: who
                                 color: Theme.textDim
                             }
 
@@ -1742,8 +1747,16 @@ Item {
                                 // Shown whenever the clock ran at all: a turn
                                 // that only WAITED on tools reported nothing at
                                 // all before [his, 2026-08-22].
-                                visible: !isUser && (hasBody || thinkMs > 0
-                                                     || thinkStart > 0 || awaiting)
+                                // ...and NOT while the `loading` line above is
+                                // up. An empty bubble waiting on its first tool
+                                // satisfied both, so "loading…" and "waiting…"
+                                // stacked on top of each other [his,
+                                // 2026-08-22]. One state at a time: `loading`
+                                // owns a bubble with nothing in it yet, the
+                                // clock takes over once there is something.
+                                visible: !isUser && !waiting.visible
+                                         && (hasBody || thinkMs > 0
+                                             || thinkStart > 0 || awaiting)
                                 height: visible ? thinkToggle.height + thinkReveal.height : 0
 
                                 readonly property bool hasBody: thinking !== ""
