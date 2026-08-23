@@ -138,6 +138,40 @@ IMAGE_TOOL = {
 }
 IMAGE_TOOL_NAMES = {"fetch_image"}
 
+#: The LOCAL-IMAGE tool — the model LOOKS AT a picture on the machine, the same
+#: way it sees one he drags onto the window [his, 2026-08-22]. `read_file`
+#: reaches every file on the box but hands back TEXT, so an image was a wall:
+#: the model could find `holiday.jpg`, could not see a pixel of it, and said so
+#: only if it was honest. This closes that: the bytes come back through the same
+#: jailed executor (`sandbox-fs.py` op `image`, the WIDE read root, sniffed by
+#: magic and capped), are attached to the NEXT message of the tool loop as an
+#: ollama vision `images` block, and are drawn inline in the chat so he sees
+#: exactly what it was shown (docs/DESIGN.md §10 — nothing looked at in secret).
+VIEW_IMAGE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "view_image",
+        "description": (
+            "LOOK AT an image file on this machine — a photo, a screenshot, a "
+            "diagram — and see it for yourself. Use it whenever answering "
+            "involves what a local picture actually shows: he names a file, you "
+            "found one with find_files/list_dir, or he asks what is in an image. "
+            "read_file cannot do this: it returns text and an image is bytes. "
+            "Pass the path (absolute, or as list_dir gave it). The picture is "
+            "attached to your next turn — so after calling this, WAIT for it and "
+            "then describe or use what you see. It is also shown to him in the "
+            "chat, so you need not describe it unless he asks. Needs a "
+            "vision-capable model; png, jpeg, gif and webp, up to 8 MB."),
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string",
+                     "description": "Path of the image file to look at."},
+            "host": {"type": "string",
+                     "description": ("Which machine to read from: 'top' or "
+                                     "'book'. Defaults to this one.")}},
+            "required": ["path"]}},
+}
+VIEW_IMAGE_TOOL_NAMES = {"view_image"}
+
 #: The IMAGE-SEARCH tool. fetch_image can only GET a URL the model already has,
 #: and a model asked for "a picture of X" tends to GUESS a plausible-looking
 #: image URL that 404s — the fetch then honestly fails, but no picture shows.
@@ -1524,6 +1558,7 @@ class Ollama(QObject):
         self._messages = []      # the growing message list across a tool loop
         self._acc_content = ""   # assistant content accumulated in this sub-turn
         self._done_reason = ""   # ollama's reason the last frame was the last
+        self._pending_vision = []  # local images view_image is handing the model
         self._images_shown = set()
         self._md_images = {"n": 0}
         self._tool_calls = []    # tool calls accumulated in this sub-turn
@@ -1566,7 +1601,6 @@ class Ollama(QObject):
     def autoContinueMax(self):
         """How many times one prompt may be carried on without him."""
         return AUTO_CONTINUE_MAX
-
 
     def _set_busy(self, v):
         if v != self._busy:
@@ -1919,6 +1953,7 @@ class Ollama(QObject):
         self._rounds = 0
         self._images_shown = set()   # every image URL already fetched this turn
         self._md_images = {"n": 0}   # typed-markdown images still downloading
+        self._pending_vision = []    # local images view_image must hand the model
         self._no_tools = False       # not a wrap-up round
         self._resp_t0 = 0.0
         self._resp_tokens = 0
@@ -2029,6 +2064,7 @@ class Ollama(QObject):
         self._rounds = 0
         self._images_shown = set()
         self._md_images = {"n": 0}
+        self._pending_vision = []
         self._no_tools = False
         self._resp_t0 = 0.0
         self._resp_tokens = 0
@@ -2536,7 +2572,7 @@ class Ollama(QObject):
         puts in the payload, so `describe_self` reports exactly what the model
         can call (docs/DESIGN.md §10 — a true list, not a remembered one)."""
         tools = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, SELF_TOOL,
-                 IMAGE_TOOL, SEARCH_IMAGE_TOOL, FETCH_URL_TOOL,
+                 IMAGE_TOOL, SEARCH_IMAGE_TOOL, VIEW_IMAGE_TOOL, FETCH_URL_TOOL,
                  CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
                  + list(SESSION_TOOLS) + list(MEMORY_TOOLS)
                  + [t for t in [skill_tool()] if t])
@@ -2605,8 +2641,8 @@ class Ollama(QObject):
         # model.
         payload["tools"] = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL,
                             SELF_TOOL, IMAGE_TOOL, SEARCH_IMAGE_TOOL,
-                            FETCH_URL_TOOL, CALL_API_TOOL, EXEC_TOOL,
-                            BASH_TOOL]
+                            VIEW_IMAGE_TOOL, FETCH_URL_TOOL, CALL_API_TOOL,
+                            EXEC_TOOL, BASH_TOOL]
                             + list(SESSION_TOOLS) + list(MEMORY_TOOLS)
                             + [t for t in [skill_tool()] if t])
         body = json.dumps(payload).encode("utf-8")
@@ -2829,6 +2865,8 @@ class Ollama(QObject):
                 self._fetch_image(str(args.get("url", "")).strip(),
                                   str(args.get("alt", "")).strip(),
                                   i, remaining, calls)
+            elif name in VIEW_IMAGE_TOOL_NAMES:
+                self._view_image(args, i, remaining, calls)
             elif name in SEARCH_IMAGE_TOOL_NAMES:
                 self._search_images(str(args.get("query", "")).strip(),
                                     i, remaining, calls)
@@ -3315,6 +3353,15 @@ class Ollama(QObject):
         for tr in self._tool_results:
             if tr is not None:
                 self._messages.append(tr)
+        # Pictures `view_image` fetched this round: ollama carries image bytes
+        # on a message, not in a tool result, so they ride a user message of
+        # their own — the same `images` field a dropped attachment uses.
+        if self._pending_vision:
+            self._messages.append(
+                {"role": "user",
+                 "content": ("[the image(s) you asked to look at, attached]"),
+                 "images": self._pending_vision})
+            self._pending_vision = []
         # A new round: the segment just finished is closed and QML opens a
         # fresh bubble for what comes next (see `roundStarted`).
         self.roundStarted.emit(self._rounds + 1)
@@ -3545,6 +3592,93 @@ class Ollama(QObject):
         argv += [ssh_host, "python3", shlex.quote(FS_SCRIPT),
                  shlex.quote(WRITE_ROOT), shlex.quote(READ_ROOT)]
         return argv
+
+    # ---- view_image: a LOCAL picture, for the model to look at ----
+
+    def _view_image(self, args, idx, remaining, calls):
+        """Read a local image through the jailed executor and attach it.
+
+        Same executor, same wide READ root and same host branch as the read-only
+        file tools — so `view_image` reaches exactly what `read_file` reaches and
+        nothing more. The bytes never enter the tool RESULT (a base64 blob in the
+        transcript would be unreadable and enormous): they are held in
+        `_pending_vision` and go out as an ollama `images` block on a user
+        message that `_tool_done` appends before the next post, which is how a
+        dropped attachment reaches the model too.
+        """
+        path = str(args.get("path", "") or "").strip()
+        target_host = str(args.get("host", "") or "").strip().lower() or None
+        name = "view_image"
+
+        def fail(reason):
+            self._tool_results[idx] = {"role": "tool", "tool_name": name,
+                                       "content": json.dumps({"error": reason})}
+            self.fileToolDone.emit("view_image " + (path or "(no path)")
+                                   + " — " + reason, False)
+            self._tool_done(remaining, calls)
+
+        if not path:
+            self.fileToolStarted.emit("look at an image")
+            fail("no path given")
+            return
+        # A model with no vision cannot be handed pixels; say so rather than
+        # spending 8 MB of context on bytes it will ignore (§10).
+        if "vision" not in (self._caps or []) or self._ctx_model != self._model:
+            self.fileToolStarted.emit("look at " + os.path.basename(path))
+            fail("this model has no vision support, so it cannot look at "
+                 "images — tell him to pick a vision-capable model")
+            return
+        self.fileToolStarted.emit("look at " + os.path.basename(path))
+        argv = self._fs_argv(target_host)
+        proc = QProcess(self)
+        self._procs.append(proc)
+
+        def finished(*_):
+            if proc not in self._procs:
+                return
+            self._procs.remove(proc)
+            try:
+                out = bytes(proc.readAllStandardOutput())
+                err = bytes(proc.readAllStandardError())
+                rc = proc.exitCode()
+            except RuntimeError:
+                return
+            proc.deleteLater()
+            result = self._fs_result(out, err, rc)
+            b64 = result.pop("b64", "") if isinstance(result, dict) else ""
+            if "error" in result or not b64:
+                fail(result.get("error", "could not read the image"))
+                return
+            self._pending_vision.append(b64)
+            # Show him the same picture the model was handed. It is already on
+            # disk, so the entry points straight at it — no copy, no re-encode.
+            shown = os.path.abspath(os.path.expanduser(path))
+            # Real pixel dimensions, so the view never upscales a small picture
+            # to the column (ImageGallery sizes off w/h; 0 means "fill").
+            probe = QImage()
+            probe.loadFromData(base64.b64decode(b64))
+            self.imageFetchStarted.emit(shown)
+            self.imageFetchResult.emit(json.dumps(
+                {"ok": True, "url": "", "path": shown,
+                 "alt": os.path.basename(shown),
+                 "w": probe.width(), "h": probe.height()}))
+            self._tool_results[idx] = {
+                "role": "tool", "tool_name": name,
+                "content": json.dumps(
+                    {"ok": True, "path": result.get("path", path),
+                     "media": result.get("media", ""),
+                     "bytes": result.get("bytes", 0),
+                     "note": ("The image is attached to your next turn — look at "
+                              "it and answer from what you SEE. It is already "
+                              "shown to him in the chat.")})}
+            self.fileToolDone.emit("looked at " + os.path.basename(path), True)
+            self._tool_done(remaining, calls)
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(lambda *_: None)
+        proc.start(argv[0], argv[1:])
+        proc.write(json.dumps({"op": "image", "path": path}).encode("utf-8"))
+        proc.closeWriteChannel()
 
     def _run_fs_tool(self, name, args, idx, remaining, calls):
         """Run one file tool as an async QProcess, feeding the JSON result back
@@ -4443,6 +4577,22 @@ def run_selftest(app, shell, win, plasma, warnings):
         # nothing is written to the store (`saveCurrent` no-ops on an empty log).
         if os.environ.get("ORACLE_FAKE"):
             from PySide6.QtCore import Q_ARG, QMetaObject, QObject
+            from PySide6.QtGui import QImage, QPainter
+            # One generated picture, so a render shows where images sit in a
+            # bubble (the top) with their caption. Written beside the selftest's
+            # temp config, never into his image store.
+            shot_img = os.path.join(IMAGES_ROOT, "demo-picture.png")
+            try:
+                os.makedirs(IMAGES_ROOT, exist_ok=True)
+                pic = QImage(320, 180, QImage.Format.Format_RGB32)
+                pic.fill(0x2f4858)
+                pp = QPainter(pic)
+                pp.setPen(0xffffff)
+                pp.drawText(pic.rect(), 0x84, "demo picture")
+                pp.end()
+                pic.save(shot_img)
+            except (OSError, RuntimeError):
+                shot_img = ""
             demo = [
                 {"isUser": True, "who": "you", "body": "hi"},
                 {"isUser": False, "who": "qwen3.6:35b-a3b",
@@ -4460,6 +4610,12 @@ def run_selftest(app, shell, win, plasma, warnings):
                  "thinking": "The user wants a short answer. Keep it to a "
                              "definition plus two reasons.",
                  "thinkTokens": 24, "thinkMs": 12400},
+                {"isUser": True, "who": "you", "body": "show me that picture"},
+                {"isUser": False, "who": "qwen3.6:35b-a3b",
+                 "body": "here it is — the caption is the model's own alt text.",
+                 "images": json.dumps([{"ok": True, "url": "", "path": shot_img,
+                                        "alt": "a demo picture, 320x180",
+                                        "w": 320, "h": 180}]) if shot_img else "[]"},
                 {"isUser": False, "who": "qwen3.6:35b-a3b",
                  "body": "ollama: connection refused", "isError": True},
                 {"isUser": False, "who": "qwen3.6:35b-a3b",
@@ -4473,8 +4629,20 @@ def run_selftest(app, shell, win, plasma, warnings):
                                      Q_ARG("QVariant", "demo"),
                                      Q_ARG("QVariant", "Demo conversation"),
                                      Q_ARG("QVariant", json.dumps(demo)))
-            for _ in range(3):
+            # Long enough for the async Image loads to land: three
+            # processEvents grabbed the window before any picture had decoded,
+            # so a demo image rendered as its caption and nothing else.
+            _t0 = time.monotonic()
+            while time.monotonic() - _t0 < 0.8:
                 app.processEvents()
+                time.sleep(0.01)
+            # THE COMPOSE BUTTON'S THIRD STATE. The demo log ends on a finished
+            # assistant turn, so the button beside the prompt box must be
+            # offering `continue` [his, 2026-08-23] — and must go back to `send`
+            # the moment there is something typed to send, since a prompt he has
+            # written outranks carrying the last answer on. Both are printed
+            # rather than rendered: a label is text, and reading it is the check
+            # (tools/continue-button-test.py asserts on these two lines).
             target.setProperty("model", "demo:model")   # a model must be picked
             app.processEvents()
             _label = target.findChild(QObject, "sendLabel")

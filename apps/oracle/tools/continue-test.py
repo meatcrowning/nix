@@ -141,6 +141,58 @@ check("and the continue instruction follows it as a user turn",
       and "cut off" in msgs[-1]["content"],
       json.dumps(msgs[-1])[:120])
 
+# ---- view_image: a LOCAL picture, handed to the model ---------------------
+# Through the real jailed executor (tools/sandbox-fs.py), against a PNG in a
+# temp directory — the same path a model would take from find_files.
+import tempfile                                          # noqa: E402
+from PySide6.QtCore import QBuffer, QByteArray           # noqa: E402
+from PySide6.QtGui import QImage                         # noqa: E402
+
+img = QImage(8, 6, QImage.Format.Format_RGB32)
+img.fill(0x884422)
+pic_path = str(Path(tempfile.mkdtemp()) / "local.png")
+img.save(pic_path)
+
+entries = []
+o.imageFetchResult.connect(lambda j: entries.append(json.loads(j)))
+CHATS.clear()
+
+# A vision model, as far as the capability probe is concerned.
+o._model = "stub:latest"
+o._ctx_model = "stub:latest"
+o._caps = ["vision"]
+o._pending_vision = []
+o._tool_results = [None]
+o._set_busy(True)
+o._view_image({"path": pic_path}, 0, {"n": 1}, [None])
+pump(lambda: bool(CHATS))
+
+res = json.loads(o._tool_results[0]["content"])
+check("view_image reads the local file", res.get("ok") is True, json.dumps(res)[:140])
+check("the bytes are NOT in the tool result", "b64" not in res)
+check("the picture is shown to him too",
+      any(e.get("ok") and e.get("path") == pic_path for e in entries),
+      json.dumps(entries)[:160])
+vis = [m for m in CHATS[-1]["messages"] if m.get("images")]
+check("and handed to the model as a vision message", len(vis) == 1
+      and vis[0]["role"] == "user", json.dumps(vis)[:80])
+if vis:
+    import base64                                        # noqa: E402
+    check("the attached bytes are the file's",
+          base64.b64decode(vis[0]["images"][0]) == open(pic_path, "rb").read())
+
+# A model with no vision is told so, and no bytes are read.
+o._caps = []
+o._pending_vision = []
+o._tool_results = [None]
+o._set_busy(True)
+o._view_image({"path": pic_path}, 0, {"n": 1}, [None])
+pump(lambda: o._tool_results[0] is not None, 2000)
+res = json.loads(o._tool_results[0]["content"])
+check("a model with no vision is refused honestly",
+      "vision" in res.get("error", ""), json.dumps(res)[:120])
+check("and nothing was attached", not o._pending_vision)
+
 srv.shutdown()
 print("FAILED: " + ", ".join(fails) if fails else "OK")
 sys.exit(1 if fails else 0)

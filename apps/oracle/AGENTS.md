@@ -769,6 +769,27 @@ instead (copy `file_url` verbatim, or search again), which a bare 404 cannot; a
 `tools/typed-image-test.py` (offscreen, its own 127.0.0.1 image server, no
 network and no daemon).
 
+**Looking at a LOCAL picture — `view_image`** [his, 2026-08-22: *"give agents
+the ability to see the contents of my local files in the same way it sees images
+uploaded to the chat"*]. `read_file` reaches every file on the machine and hands
+back TEXT, so an image was a wall: the model could find `holiday.jpg` and not
+see a pixel of it. `VIEW_IMAGE_TOOL` reads the bytes through the **same jailed
+executor and the same wide READ root** as the read-only file tools
+(`sandbox-fs.py` op `image` — magic-sniffed, png/jpeg/gif/webp, 8 MB cap, `host`
+selects the machine exactly as `read_file` does), and then:
+
+- the base64 goes into `_pending_vision`, which `_tool_done` attaches to a
+  **user message carrying `images`** before the next post — the same field a
+  dropped attachment uses, because ollama carries image bytes on a message and
+  never in a tool result;
+- **the bytes never enter the tool result** (a base64 blob in the transcript is
+  unreadable and enormous) — the model gets `{ok, path, media, bytes, note}`;
+- the picture is **drawn inline in the chat as well**, so he sees exactly what
+  the model was shown (docs/DESIGN.md §10 — nothing looked at in secret);
+- a model with **no vision** is refused with a reason, and no bytes are read.
+
+Harness: `tools/continue-test.py` covers it against the real executor.
+
 **Finding a real URL first — `search_images`.** `fetch_image` only GETs a URL
 the model already holds, and a model asked for "a picture of X" tends to GUESS
 a plausible image URL that 404s (the fetch then fails honestly, but no picture
