@@ -124,7 +124,9 @@ class _Probe(oracle.Ollama):
 o = oracle.Ollama()
 o._nam = _FakeNam()
 o._busy = True
-o._tool_results = [None]
+# A tool ROUND is an object now (`Ollama._new_round`): `sink` is where the
+# result lands, so a subagent's round and the turn's own cannot collide.
+round_ = {"n": 1, "sink": [None]}
 errors = []
 o.webSearchError.connect(lambda a, b: errors.append((a, b)))
 
@@ -132,9 +134,9 @@ o.webSearchError.connect(lambda a, b: errors.append((a, b)))
 def build(args):
     built.clear()
     del errors[:]
-    o._tool_results = [None]
+    round_["n"], round_["sink"] = 1, [None]
     try:
-        o._call_api(args, 0, {"n": 1}, [])
+        o._call_api(args, 0, round_, [])
     except AttributeError:
         pass          # reply is None in the fake; the request is already built
     return built.get("req")
@@ -200,16 +202,16 @@ if "--live" in sys.argv:
                          ("safebooru", {"tags": "cat", "limit": 3}),
                          ("konachan", {"tags": "landscape", "limit": 3}),
                          ("yandere", {"tags": "landscape", "limit": 3})):
-        live._tool_results = [None]
         # n=2 on purpose: _tool_done must never reach zero here, or it would
         # POST the turn to the ollama daemon. We only want the one GET.
-        live._call_api({"site": site, "params": params}, 0, {"n": 2}, [])
+        live_round = {"n": 2, "sink": [None]}
+        live._call_api({"site": site, "params": params}, 0, live_round, [])
         deadline = QTimer()
         deadline.setSingleShot(True)
         deadline.start(25000)
-        while live._tool_results[0] is None and deadline.isActive():
+        while live_round["sink"][0] is None and deadline.isActive():
             app.processEvents()
-        got = live._tool_results[0]
+        got = live_round["sink"][0]
         if got is None:
             check(site + " answered", False, "timed out")
             continue

@@ -932,28 +932,12 @@ def _skill_read(path):
 
 def _skill_front(text):
     """`(description, body)` from a SKILL.md — the `description:` out of the
-    leading `---` frontmatter (continuation lines folded in), and the
-    instructions with that frontmatter stripped. No YAML parser: the shape is
-    fixed and stdlib-only is the rule for everything chatter shells out to."""
-    if not text.startswith("---"):
-        return ("", text)
-    end = text.find("\n---", 3)
-    if end < 0:
-        return ("", text)
-    head = text[3:end]
-    body = text[end + 4:].lstrip("\n")
-    desc, key = "", ""
-    for line in head.splitlines():
-        if re.match(r"^\s+\S", line) and key == "description":
-            desc += " " + line.strip()          # folded continuation
-            continue
-        m = re.match(r"^([A-Za-z_-]+):\s*(.*)$", line)
-        if not m:
-            continue
-        key, val = m.group(1), m.group(2).strip()
-        if key == "description":
-            desc = val
-    return (desc.strip(), body)
+    leading `---` frontmatter and the instructions with that block stripped.
+    `_front_matter` (below, shared with the agent definitions) does the
+    parsing; no YAML parser, the shape is fixed and stdlib-only is the rule for
+    everything chatter reads."""
+    fields, body = _front_matter(text)
+    return (fields.get("description", "").strip(), body)
 
 
 def skill_catalog():
@@ -1022,6 +1006,326 @@ def skills_note(catalog=None):
              "output contract:"]
     lines += ["- %s — %s" % (s["name"], s["description"]) for s in cat]
     return "\n".join(lines)
+
+# ---- subagents: definitions on disk, spawned with spawn_agent --------------
+#
+# A turn has ONE 32k window (CHAT_NUM_CTX) and MAX_TOOL_ROUNDS rounds to spend
+# in it, and the expensive tool results are the ones worth least afterwards: a
+# `search_text` over ~/nix or a `read_file` on a 260 KB source costs thousands
+# of tokens to establish one fact. A SUBAGENT is the fix — its own message
+# list, its own tool loop, its own context, and only its final answer comes
+# back. That is the point of it here: not a smarter model, a SEPARATE window.
+#
+# It runs on the SAME served model by default, deliberately. A different model
+# means ollama unloading the current weights and loading the other set — this
+# desktop runs `OLLAMA_MAX_LOADED_MODELS=1` and the two biggest models here do
+# not fit in RAM together — so a per-call model switch would pay two full
+# reloads for one delegation. A definition may still NAME a model when the swap
+# is worth it; nothing else does.
+
+#: Where agent definitions live. `~/.claude` syncs between both machines
+#: (home/srvs/claude-state.nix), exactly the reason the skills root points
+#: there: one set of definitions, readable on either host, none of it vendored
+#: into this public repo. Claude Code reads the same directory, so an agent
+#: written here is one it can use too (chatter ignores frontmatter it does not
+#: know, and a `tools:` list naming tools chatter does not have falls back to
+#: the default set rather than producing an agent that can do nothing).
+AGENTS_ROOT = os.path.expanduser(
+    os.environ.get("ORACLE_AGENTS", "~/.claude/agents"))
+#: One definition's prompt, capped like a skill's.
+AGENT_MAX_CHARS = 40000
+#: Rounds of tool calls ONE subagent may take before it has to answer. Lower
+#: than MAX_TOOL_ROUNDS: a subagent is a bounded errand, and the parent still
+#: has its own rounds left to spend on the answer.
+AGENT_MAX_ROUNDS = 12
+#: How much of the window a subagent may fill before it wraps up.
+AGENT_CTX_FRACTION = 0.7
+#: How much of a subagent's answer comes back. It exists to COMPRESS — an
+#: agent that returns 40k of pasted file is the problem it was spawned to
+#: solve — so the result is capped and says when it was cut.
+AGENT_RESULT_CHARS = 12000
+SPAWN_TOOL_NAMES = {"spawn_agent"}
+
+#: The tools a definition may hand a subagent, by group, so a definition can
+#: say `tools: read, exec` instead of naming ten. `all` is every one of them.
+AGENT_TOOL_GROUPS = {
+    "read": ["list_dir", "read_file", "find_files", "search_text", "show_tree"],
+    "write": ["write_file", "edit_file", "move_path", "delete_path", "make_dir"],
+    "exec": ["run_python", "run_bash"],
+    "web": ["web_search", "fetch_url", "call_api"],
+    "sessions": ["list_sessions", "read_session"],
+    "skills": ["use_skill"],
+    "time": ["get_current_time"],
+}
+#: What a subagent gets when its definition names no tools. Everything that
+#: does real work and nothing that touches the WINDOW: the image tools render
+#: into the transcript of the turn that spawned it and the memory tools write
+#: what the main agent recalls, so both stay with the main agent. `spawn_agent`
+#: is never in any set — subagents are one level deep, on purpose.
+AGENT_TOOLS_DEFAULT = (AGENT_TOOL_GROUPS["read"] + AGENT_TOOL_GROUPS["write"]
+                       + AGENT_TOOL_GROUPS["exec"] + AGENT_TOOL_GROUPS["web"]
+                       + AGENT_TOOL_GROUPS["skills"] + AGENT_TOOL_GROUPS["time"])
+
+#: Always present, whether or not anything is installed on disk — a spawn that
+#: names nothing still has to work, and an empty agents directory should not
+#: mean an empty menu (docs/DESIGN.md §10). A file of the same name in
+#: AGENTS_ROOT replaces the built-in outright, which is how he (or the model)
+#: edits one of these without touching this source.
+BUILTIN_AGENTS = [
+    {"name": "general",
+     "description": ("A capable all-rounder: files, shell, python and the web. "
+                     "Use it when no other agent fits."),
+     "tools": list(AGENT_TOOLS_DEFAULT),
+     "prompt": ("You are a capable general worker. Use the tools you have to "
+                "establish facts rather than assuming them, and report what "
+                "you actually found.")},
+    {"name": "explorer",
+     "description": ("Reads and searches the filesystem and reports back. "
+                     "Read-only — it cannot write, delete or run anything. Use "
+                     "it to answer 'where is X / how does Y work / which files "
+                     "do Z' without pulling every file into your own context."),
+     "tools": list(AGENT_TOOL_GROUPS["read"]),
+     "prompt": ("You are a code and filesystem explorer. Search widely, read "
+                "only the parts that matter, and come back with the ANSWER — "
+                "the file paths and line numbers that establish it, and a "
+                "short explanation. Quote only the lines that carry the point; "
+                "never paste a whole file back. If a tree has an AGENTS.md or "
+                "CLAUDE.md, read it: it states the rules of that tree.")},
+    {"name": "coder",
+     "description": ("Makes a scoped code change and verifies it: reads, "
+                     "edits, runs it. Give it one concrete change with enough "
+                     "context to act, not a whole project."),
+     "tools": (AGENT_TOOL_GROUPS["read"] + AGENT_TOOL_GROUPS["write"]
+               + AGENT_TOOL_GROUPS["exec"] + AGENT_TOOL_GROUPS["skills"]),
+     "prompt": ("You are a careful programmer. Read the file before you change "
+                "it and match the style around your edit. Prefer edit_file to "
+                "rewriting a file whole. After every change, CHECK it — run "
+                "it, import it, diff it — and report what the check actually "
+                "printed. Never delete or move anything you were not asked to. "
+                "If a tree has an AGENTS.md or CLAUDE.md, read it first and "
+                "follow it. Report what you changed, file by file, and say so "
+                "plainly if you could not finish.")},
+    {"name": "researcher",
+     "description": ("Searches the public web and reads the pages, then "
+                     "summarises with links. No filesystem, no shell."),
+     "tools": (AGENT_TOOL_GROUPS["web"] + AGENT_TOOL_GROUPS["time"]),
+     "prompt": ("You are a researcher. Search, then actually READ the promising "
+                "pages with fetch_url rather than answering off the snippets. "
+                "Come back with the answer, what is uncertain about it, and the "
+                "links that support it. Say when the sources disagree.")},
+]
+
+#: What every subagent is told before its own definition: what it is, who reads
+#: its answer, and that it cannot come back for a decision. A subagent asking a
+#: clarifying question is a wasted spawn — nobody is there to answer it.
+AGENT_SYSTEM_PREFIX = (
+    "You are a SUBAGENT. Another model — the one talking to the user — spawned "
+    "you to do one job and is waiting on the result; the user cannot see this "
+    "conversation and cannot answer you. So: do not ask questions, do not "
+    "offer to proceed, and do not describe a plan. Do the job with the tools "
+    "you have, in this turn, and then write your FINAL ANSWER as your whole "
+    "reply. That answer is the only thing that comes back, so make it "
+    "self-contained: the finding itself, the paths, numbers or commands that "
+    "establish it, and anything that went wrong. Be complete but compact — you "
+    "exist so the model that spawned you does not have to read everything you "
+    "read. If you could not do it, say exactly what stopped you.")
+
+
+def _front_matter(text):
+    """`(fields, body)` from a leading `---` YAML block: every `key: value` in
+    it (folded continuation lines joined), and the text with the block
+    stripped. No YAML parser — the shape is fixed and stdlib-only is the rule
+    for everything chatter reads (same reasoning as `_skill_front`, which is
+    now this)."""
+    if not text.startswith("---"):
+        return ({}, text)
+    end = text.find("\n---", 3)
+    if end < 0:
+        return ({}, text)
+    head = text[3:end]
+    body = text[end + 4:].lstrip("\n")
+    fields, key = {}, ""
+    for line in head.splitlines():
+        if re.match(r"^\s+\S", line) and key:
+            fields[key] = (fields[key] + " " + line.strip()).strip()
+            continue
+        m = re.match(r"^([A-Za-z_-]+):\s*(.*)$", line)
+        if not m:
+            continue
+        key, val = m.group(1), m.group(2).strip()
+        fields[key] = val
+    return (fields, body)
+
+
+def _agent_tool_names(spec_tools):
+    """A definition's `tools:` field -> a list of tool names chatter has.
+
+    Accepts group names (`read`, `exec`, …), individual tool names, `all`, and
+    anything else — a Claude Code definition naming ITS tool names, say — which
+    is ignored. An entry that resolves to nothing falls back to the default
+    set: an agent that can do nothing at all is never what was meant, and
+    silently producing one is exactly the affordance dishonesty docs/DESIGN.md
+    §10 forbids."""
+    if not spec_tools:
+        return list(AGENT_TOOLS_DEFAULT)
+    if isinstance(spec_tools, str):
+        parts = [p.strip() for p in re.split(r"[,\s]+", spec_tools) if p.strip()]
+    else:
+        parts = [str(p).strip() for p in spec_tools if str(p).strip()]
+    if any(p.lower() == "all" for p in parts):
+        return list(AGENT_TOOLS_DEFAULT)
+    out = []
+    for p in parts:
+        low = p.lower()
+        if low in AGENT_TOOL_GROUPS:
+            out += AGENT_TOOL_GROUPS[low]
+        elif p in _tool_registry():
+            out.append(p)
+    seen, uniq = set(), []
+    for n in out:
+        if n not in seen and n not in SPAWN_TOOL_NAMES:
+            seen.add(n)
+            uniq.append(n)
+    return uniq or list(AGENT_TOOLS_DEFAULT)
+
+
+def _tool_registry():
+    """`{name: schema}` for every tool a SUBAGENT could be given. Built from the
+    same objects the main payload carries, so the two cannot drift; spawn_agent
+    itself is absent, which is what keeps subagents one level deep."""
+    tools = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, FETCH_URL_TOOL,
+             CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
+             + list(SESSION_TOOLS) + [t for t in [skill_tool()] if t])
+    return {t["function"]["name"]: t for t in tools
+            if isinstance(t, dict) and isinstance(t.get("function"), dict)}
+
+
+def agent_files():
+    """Every readable `*.md` agent definition, sorted by name. Absent root -> []."""
+    try:
+        return sorted((f for f in Path(AGENTS_ROOT).iterdir()
+                       if f.is_file() and f.suffix == ".md"), key=lambda f: f.name)
+    except OSError:
+        return []
+
+
+def agent_catalog():
+    """Every agent that can be spawned: the built-ins, with any definition file
+    of the same name replacing one outright, plus every other file found.
+
+    A definition is `<name>.md` — optional `---` frontmatter (`description`,
+    `tools`, `model`) and then the body, which IS the agent's system prompt.
+    Nothing here is vendored and nothing is written by chatter: the directory
+    is his (and the model's) to edit with the file tools it already has."""
+    out = {a["name"]: dict(a) for a in BUILTIN_AGENTS}
+    order = [a["name"] for a in BUILTIN_AGENTS]
+    for f in agent_files():
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")[:AGENT_MAX_CHARS]
+        except OSError:
+            continue
+        fields, body = _front_matter(text)
+        name = (fields.get("name") or f.stem).strip()
+        if not name or not body.strip():
+            continue
+        if name not in out:
+            order.append(name)
+        out[name] = {
+            "name": name,
+            "description": (fields.get("description") or "").strip()
+                           or "A custom agent defined in " + str(f),
+            "tools": fields.get("tools", ""),
+            "model": (fields.get("model") or "").strip(),
+            "prompt": body.strip(),
+            "path": str(f),
+        }
+    return [out[n] for n in order]
+
+
+def agent_spec(name, catalog=None):
+    """One agent by name, with its tool names resolved. An unknown name (or
+    none) resolves to the first built-in rather than failing: the model asked
+    for help with a job, and refusing over a label helps nobody."""
+    cat = agent_catalog() if catalog is None else catalog
+    pick = next((a for a in cat if a["name"] == (name or "").strip()), None)
+    if pick is None:
+        pick = cat[0]
+    spec = dict(pick)
+    spec["tool_names"] = _agent_tool_names(spec.get("tools"))
+    return spec
+
+
+def spawn_agent_tool(catalog=None):
+    """The `spawn_agent` function tool, built from the agents actually present
+    — the `agent` enum names them, so the model cannot spawn one that is not
+    defined."""
+    cat = agent_catalog() if catalog is None else catalog
+    if not cat:
+        return None
+    listing = "; ".join("%s: %s" % (a["name"], a["description"]) for a in cat)
+    return {
+        "type": "function",
+        "function": {
+            "name": "spawn_agent",
+            "description": (
+                "Hand one self-contained job to a SUBAGENT and get back only "
+                "its answer. The subagent gets its own fresh context and its "
+                "own rounds of tool calls; everything it reads, greps and runs "
+                "stays in ITS context, and only the answer lands in yours. "
+                "Use it when the job would otherwise flood this conversation "
+                "with output you do not need to keep — searching a large tree, "
+                "reading several files to establish one fact, a long build or "
+                "test run — and when the job can be stated completely up "
+                "front, because the subagent cannot ask you anything. Do the "
+                "work yourself when it is small, when you need to see the raw "
+                "output, or when it needs the conversation you are in. Give "
+                "`task` everything it needs: absolute paths, the exact "
+                "question, and what a good answer looks like. Agents available "
+                "— " + listing),
+            "parameters": {"type": "object", "properties": {
+                "agent": {"type": "string",
+                          "enum": [a["name"] for a in cat],
+                          "description": "Which agent to spawn."},
+                "task": {"type": "string",
+                         "description": ("The whole job, stated so someone who "
+                                         "cannot see this conversation could do "
+                                         "it: what to do, where, and what to "
+                                         "report back.")},
+                "context": {"type": "string",
+                            "description": ("Optional: facts from this "
+                                            "conversation the subagent needs "
+                                            "and has no way to discover.")}},
+                "required": ["agent", "task"]}},
+    }
+
+
+def agents_note(catalog=None):
+    """The always-on listing of agents for the system prompt — the same reason
+    skills are named every turn: a model does not spawn something it was never
+    told about. It also says where the definitions LIVE and what shape they
+    are, because the file tools already reach that directory — writing one is
+    how the model gives itself, and the next agent, a new specialist [his,
+    2026-08-23: "make it easier for oracle agents to modify themselves and
+    future / other agents"]."""
+    cat = agent_catalog() if catalog is None else catalog
+    if not cat:
+        return ""
+    lines = ["Subagents you can spawn with the spawn_agent tool. Each one runs "
+             "in its OWN context and returns only its final answer, so use one "
+             "to keep bulky work out of this conversation:"]
+    lines += ["- %s — %s" % (a["name"], a["description"]) for a in cat]
+    lines.append(
+        "These are files: %s/<name>.md, with optional `---` frontmatter "
+        "(`description:` one line; `tools:` any of %s, individual tool names, "
+        "or `all`; `model:` an installed ollama model) and the body as that "
+        "agent's system prompt. You have file tools, so you can write one. Do "
+        "that when a job keeps recurring and none of the above fits it, or "
+        "when one of them keeps getting something wrong — edit its file and "
+        "the next spawn uses the new version. Say so when you do; do not "
+        "rewrite an agent he is relying on without telling him."
+        % (AGENTS_ROOT, ", ".join(sorted(AGENT_TOOL_GROUPS))))
+    return "\n".join(lines)
+
 
 #: How many tool rounds one turn may take before the wrap-up round makes it
 #: answer with what it has. This is a RUNAWAY guard, not a work budget: at 4 it
@@ -1129,7 +1433,10 @@ CAPABILITY_NOTE = (
     " (files he drags onto the window are staged for you too); read your "
     "past conversations; save, list and delete your own durable memories; load "
     "a SKILL (use_skill) — expert instructions for one job, listed for you "
-    "below; RUN Python code (run_python); and RUN BASH (run_bash) — a real "
+    "below; SPAWN A SUBAGENT (spawn_agent) to do a bulky job in its own "
+    "context and hand you back only the answer, and write or edit the agent "
+    "definitions those are built from; RUN Python code (run_python); and RUN "
+    "BASH (run_bash) — a real "
     "shell, so grep, find, sed, cp, mv, git and pipelines of them are how you "
     "do file work, not something you only describe. Both runners execute on the "
     "host as the user, with the network up, killed after a few seconds and "
@@ -2743,6 +3050,9 @@ class Ollama(QObject):
         skills = skills_note()
         if skills:
             base += "\n\n" + skills
+        agents = agents_note()
+        if agents:
+            base += "\n\n" + agents
         if research:
             base += "\n\n" + research
         # His chosen base (a preset or his own custom text) LEADS — the time
@@ -2832,16 +3142,28 @@ class Ollama(QObject):
         self._tool_done(remaining, calls)
 
     @staticmethod
+    def _all_tools():
+        """EVERY tool offered to the main agent this turn, built once.
+
+        `_post_chat` sends this and `describe_self` reports it, so the payload
+        and the list the model is told about cannot drift — they were written
+        out separately until 2026-08-23 and had already started to. The two
+        catalog-built tools (skills, subagents) are absent when nothing is
+        installed, so neither is ever offered as an affordance that is not
+        there (docs/DESIGN.md §10)."""
+        return (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, SELF_TOOL,
+                IMAGE_TOOL, SEARCH_IMAGE_TOOL, VIEW_IMAGE_TOOL, FETCH_URL_TOOL,
+                CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
+                + list(SESSION_TOOLS) + list(MEMORY_TOOLS)
+                + [t for t in [skill_tool(), spawn_agent_tool()] if t])
+
+    @staticmethod
     def _offered_tool_names():
-        """The names of every tool offered this turn — the same list `_post_chat`
-        puts in the payload, so `describe_self` reports exactly what the model
-        can call (docs/DESIGN.md §10 — a true list, not a remembered one)."""
-        tools = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, SELF_TOOL,
-                 IMAGE_TOOL, SEARCH_IMAGE_TOOL, VIEW_IMAGE_TOOL, FETCH_URL_TOOL,
-                 CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
-                 + list(SESSION_TOOLS) + list(MEMORY_TOOLS)
-                 + [t for t in [skill_tool()] if t])
-        names = [t.get("function", {}).get("name", "") for t in tools
+        """The names of every tool offered this turn — read off the same list
+        `_post_chat` puts in the payload, so `describe_self` reports exactly
+        what the model can call (docs/DESIGN.md §10 — a true list, not a
+        remembered one)."""
+        names = [t.get("function", {}).get("name", "") for t in Ollama._all_tools()
                  if isinstance(t, dict) and t.get("function")]
         return sorted(n for n in names if n)
 
@@ -2904,12 +3226,7 @@ class Ollama(QObject):
         # reject a request carrying tools — the tradeoff of always-on tools,
         # spelled out in apps/oracle/AGENTS.md; point oracle at a tool-capable
         # model.
-        payload["tools"] = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL,
-                            SELF_TOOL, IMAGE_TOOL, SEARCH_IMAGE_TOOL,
-                            VIEW_IMAGE_TOOL, FETCH_URL_TOOL, CALL_API_TOOL,
-                            EXEC_TOOL, BASH_TOOL]
-                            + list(SESSION_TOOLS) + list(MEMORY_TOOLS)
-                            + [t for t in [skill_tool()] if t])
+        payload["tools"] = self._all_tools()
         body = json.dumps(payload).encode("utf-8")
         self._send_chat(body)
 
@@ -3196,11 +3513,174 @@ class Ollama(QObject):
             self._run_memory_tool(name, args, i, remaining, calls)
         elif name in SKILL_TOOL_NAMES:
             self._run_skill_tool(args, i, remaining, calls)
+        elif name in SPAWN_TOOL_NAMES:
+            self._spawn_agent(args, i, remaining, calls)
         else:
             remaining["sink"][i] = {
                 "role": "tool", "tool_name": name,
                 "content": json.dumps({"error": "unknown tool: " + name})}
             self._tool_done(remaining, calls)
+
+
+    # ---- subagents (spawn_agent) -------------------------------------------
+
+    def _spawn_agent(self, args, idx, remaining, calls):
+        """Run one SUBAGENT to completion and return only its answer.
+
+        Its own message list, its own tool rounds, its own share of the window
+        — nothing it reads enters this turn's context. It reaches every tool
+        through `_dispatch_tool`, the same branch the main agent uses, so the
+        two cannot drift; what differs is only WHICH names its definition
+        allows. Non-streaming (`stream: false`): there is no bubble to fill,
+        the answer is a tool result, and one reply is far less machinery than
+        an NDJSON loop that nothing would render."""
+        task = str(args.get("task", "") or "").strip()
+        spec = agent_spec(str(args.get("agent", "") or ""))
+        if not task:
+            remaining["sink"][idx] = {
+                "role": "tool", "tool_name": "spawn_agent",
+                "content": json.dumps({"error": "spawn_agent needs a task: say "
+                                       "what the subagent should do, completely, "
+                                       "since it cannot ask you."})}
+            self.fileToolDone.emit("agent not spawned: no task given", False)
+            self._tool_done(remaining, calls)
+            return
+        context = str(args.get("context", "") or "").strip()
+        prompt = AGENT_SYSTEM_PREFIX + "\n\n" + spec["prompt"]
+        first = task if not context else (task + "\n\nContext you were given:\n"
+                                          + context)
+        run = {
+            "name": spec["name"],
+            "task": task,
+            "model": spec.get("model") or self._model,
+            "allowed": set(spec["tool_names"]),
+            "tools": [t for t in (_tool_registry().get(n)
+                                  for n in spec["tool_names"]) if t],
+            "messages": [{"role": "system", "content": prompt},
+                         {"role": "user", "content": first}],
+            "rounds": 0,
+            "ncalls": 0,
+            "wrap": False,
+            "idx": idx, "remaining": remaining, "calls": calls,
+        }
+        head = task if len(task) <= 70 else task[:69].rstrip() + "…"
+        self.fileToolStarted.emit("agent %s: %s" % (run["name"], head))
+        self._agent_post(run)
+
+    def _agent_post(self, run):
+        """POST one round of a subagent's conversation. The WRAP-UP round
+        carries no tools — the same lesson the main loop learned: a model still
+        calling tools when it is out of rounds, offered them again, answers
+        with nothing at all."""
+        payload = {"model": run["model"], "messages": run["messages"],
+                   "stream": False, "options": {"num_ctx": CHAT_NUM_CTX}}
+        if run["tools"] and not run["wrap"]:
+            payload["tools"] = run["tools"]
+        req = QNetworkRequest(QUrl(OLLAMA + "/api/chat"))
+        req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
+                      "application/json")
+        reply = self._nam.post(req, json.dumps(payload).encode("utf-8"))
+        reply.finished.connect(lambda: self._agent_reply(reply, run))
+
+    def _agent_reply(self, reply, run):
+        """One subagent round came back: run its tools, or finish."""
+        if not self._busy:              # the whole turn was cancelled
+            reply.deleteLater()
+            return
+        try:
+            data = bytes(reply.readAll().data())
+            err = reply.error()
+            err_str = reply.errorString()
+        finally:
+            reply.deleteLater()
+        if err != QNetworkReply.NetworkError.NoError:
+            self._agent_finish(run, "", error=err_str)
+            return
+        try:
+            obj = json.loads(data or b"{}")
+        except ValueError:
+            self._agent_finish(run, "", error="unreadable reply from ollama")
+            return
+        if obj.get("error"):
+            self._agent_finish(run, "", error=str(obj["error"]))
+            return
+        msg = obj.get("message") or {}
+        content = str(msg.get("content") or "")
+        tool_calls = msg.get("tool_calls") or []
+        if not tool_calls or run["wrap"]:
+            self._agent_finish(run, content)
+            return
+        # Another round. Past the cap or out of room, run THESE calls anyway
+        # and let the next post be the wrap-up: stopping on a frame that was
+        # all tool calls and no prose is what returns an empty answer.
+        run["rounds"] += 1
+        run["ncalls"] += len(tool_calls)
+        run["messages"].append({"role": "assistant", "content": content,
+                                "tool_calls": tool_calls})
+        if run["rounds"] >= AGENT_MAX_ROUNDS or not self._agent_room(run):
+            run["wrap"] = True
+        round_ = self._new_round(
+            tool_calls, done=lambda sink, r=run: self._agent_round_done(r, sink))
+        for i, call in enumerate(tool_calls):
+            name, cargs = self._call_parts(call)
+            self.toolCallStarted.emit("%s: %s" % (run["name"], name or "tool"))
+            if name not in run["allowed"]:
+                round_["sink"][i] = {
+                    "role": "tool", "tool_name": name,
+                    "content": json.dumps({"error": "you were not given the "
+                                           "tool %r; the tools you have are: %s"
+                                           % (name, ", ".join(sorted(run["allowed"])))})}
+                self._tool_done(round_, tool_calls)
+                continue
+            self._dispatch_tool(name, cargs, i, round_, tool_calls)
+
+    def _agent_round_done(self, run, results):
+        """A subagent's tool round is in: feed the results back and go again."""
+        if not self._busy:
+            return
+        run["messages"] += results
+        if run["wrap"]:
+            run["messages"].append({"role": "user", "content": self.TOOL_CAP_PROMPT})
+        self._agent_post(run)
+
+    @staticmethod
+    def _agent_room(run):
+        """Is there context left for another subagent round? Same four-chars-a-
+        token estimate `_ctx_room` uses, against the subagent's own list."""
+        chars = sum(len(str(m.get("content") or "")) for m in run["messages"])
+        return (chars / 4) < (CHAT_NUM_CTX * AGENT_CTX_FRACTION)
+
+    def _agent_finish(self, run, text, error=None):
+        """Hand the subagent's answer back as the spawn_agent tool result."""
+        answer = (text or "").strip()
+        if error:
+            result = {"agent": run["name"], "task": run["task"],
+                      "rounds": run["rounds"], "error": error}
+            if answer:
+                result["partial"] = answer[:AGENT_RESULT_CHARS]
+            outcome, ok = ("agent %s failed: %s" % (run["name"], error), False)
+        else:
+            result = {"agent": run["name"], "task": run["task"],
+                      "rounds": run["rounds"], "tool_calls": run["ncalls"],
+                      "result": answer[:AGENT_RESULT_CHARS]}
+            if len(answer) > AGENT_RESULT_CHARS:
+                result["truncated"] = True
+                result["note"] = ("the subagent's answer was longer than %d "
+                                  "characters and was cut here"
+                                  % AGENT_RESULT_CHARS)
+            if not answer:
+                result["result"] = ""
+                result["note"] = ("the subagent returned nothing — it may have "
+                                  "run out of rounds; try a narrower task")
+            outcome = ("agent %s finished, %d round%s" %
+                       (run["name"], run["rounds"],
+                        "" if run["rounds"] == 1 else "s"))
+            ok = bool(answer)
+        run["remaining"]["sink"][run["idx"]] = {
+            "role": "tool", "tool_name": "spawn_agent",
+            "content": json.dumps(result)}
+        self.fileToolDone.emit(outcome, ok)
+        self._tool_done(run["remaining"], run["calls"])
 
     def _tavily_search(self, query, idx, remaining, calls):
         key = tavily_key()
