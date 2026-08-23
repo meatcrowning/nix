@@ -403,11 +403,13 @@ in
   '';
 
   # Tahoma — proprietary Microsoft TrueType. This is the RENDERING rule only;
-  # the font binary itself is NOT installed here and cannot be: ~/nix is a
+  # the font binary is NOT installed here and cannot be: ~/nix is a
   # public repo and Tahoma is not in any free-redistributable pack (corefonts,
-  # vista-fonts). On `top` the user's own copy already sits at
-  # ~/.local/share/fonts/tahoma.ttf, so this rule takes effect there; on `book`
-  # it applies only once the file is placed by hand. Tahoma is superbly
+  # vista-fonts). The binary instead ships via a PRIVATE mechanism — the
+  # nix-fonts private repo + font-private-sync unit, see home/srvs/font-private.nix
+  # — which installs tahoma.ttf into ~/.local/share/fonts/ on BOTH machines.
+  # So this rule takes effect on `top` and `book` alike once that unit has run.
+  # Tahoma is superbly
   # bytecode-hinted, so use its NATIVE full hinting (autohint off, hintfull)
   # with grayscale AA and rgba=none — the classic ClearType-off look, matching
   # the desktop convention (§2.1). No weight pin: Tahoma has a real Bold; the
