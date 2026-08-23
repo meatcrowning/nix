@@ -801,6 +801,47 @@ EXEC_TOOL = {
 }
 EXEC_TOOL_NAMES = {"run_python"}
 
+#: The SHELL, offered every turn beside run_python — his call, 2026-08-22:
+#: "add bash tooling to agents in chatter, not just python stuff. give them the
+#: same abilities and tools you do when manipulating files". The file tools
+#: already reach the whole filesystem, but the work an agent actually does to
+#: files is shell work — `grep -rn`, `cp -a`, `git diff`, `find … -exec`, a
+#: for-loop over a directory — and writing each of those as a Python program was
+#: the one thing that still made this an assistant rather than an agent. It runs
+#: through the SAME tools/sandbox-exec.py as run_python (`lang: "bash"`), so the
+#: caps, the cwd rules and the disclosure are shared and cannot drift.
+BASH_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "run_bash",
+        "description": (
+            "Run a bash command (or a whole script) and get its stdout, stderr "
+            "and exit code back — this is your shell, and the right tool for "
+            "real file work: grep, find, sed, cp, mv, mkdir, diff, git, wc, "
+            "head, tar, and pipelines of them. It runs on the host as the user, "
+            "with the network up and the whole filesystem reachable, so it can "
+            "do real work — and real damage: look before you overwrite, prefer "
+            "a targeted edit to a wholesale replacement, and never delete or "
+            "move anything you did not create unless he asked for it. There is "
+            "no confirmation step and nothing is undone. `sudo` is not "
+            "available. The working directory is your scratch directory unless "
+            "you name `cwd`, and a command is killed after a few seconds, so "
+            "keep it non-interactive and bounded — never start a server, an "
+            "editor or anything that waits for input."),
+        "parameters": {"type": "object", "properties": {
+            "command": {"type": "string",
+                        "description": "The bash to run. Multiple lines are fine."},
+            "cwd": {"type": "string",
+                    "description": ("Optional working directory (absolute). "
+                                    "Default: your scratch directory.")},
+            "stdin": {"type": "string",
+                      "description": "Optional text fed to the command's stdin."},
+            "timeout": {"type": "integer",
+                        "description": "Wall-clock seconds to allow (default 10, max 30)."}},
+            "required": ["command"]}},
+}
+BASH_TOOL_NAMES = {"run_bash"}
+
 #: SKILLS — the reusable expert instructions Claude Code carries, reached here
 #: as a REAL TOOL rather than baked in as a persona (his call, 2026-08-22: the
 #: video-prompt skill used to be the `vidprompt` base prompt, which meant
@@ -991,13 +1032,16 @@ CAPABILITY_NOTE = (
     " (files he drags onto the window are staged for you too); read your "
     "past conversations; save, list and delete your own durable memories; load "
     "a SKILL (use_skill) — expert instructions for one job, listed for you "
-    "below; and RUN Python code (run_python) — real execution on the host, as "
-    "the user, with the network up, killed after a few seconds and capped in "
-    "CPU and memory. That reach is real and so is the damage it can do: read a "
-    "file before you overwrite it, prefer editing to replacing, never delete "
-    "or move anything you did not create unless he asked for it in this "
-    "conversation, and say what you changed. You do NOT have shell access, and "
-    "you cannot use root. Describe your abilities in these terms, and call "
+    "below; RUN Python code (run_python); and RUN BASH (run_bash) — a real "
+    "shell, so grep, find, sed, cp, mv, git and pipelines of them are how you "
+    "do file work, not something you only describe. Both runners execute on the "
+    "host as the user, with the network up, killed after a few seconds and "
+    "capped in CPU and memory. That reach is real and so is the damage it can "
+    "do: look at a file before you overwrite it, prefer editing to replacing, "
+    "never delete or move anything you did not create unless he asked for it in "
+    "this conversation, and say what you changed. Nothing you run is confirmed "
+    "first and nothing is undone. You cannot use root (there is no sudo). "
+    "Describe your abilities in these terms, and call "
     "describe_self for the exact live tool list — never claim a capability you "
     "do not have, and never deny one you do.")
 
@@ -2241,7 +2285,7 @@ class Ollama(QObject):
         can call (docs/DESIGN.md §10 — a true list, not a remembered one)."""
         tools = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, SELF_TOOL,
                  IMAGE_TOOL, SEARCH_IMAGE_TOOL, FETCH_URL_TOOL,
-                 CALL_API_TOOL, EXEC_TOOL]
+                 CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
                  + list(SESSION_TOOLS) + list(MEMORY_TOOLS)
                  + [t for t in [skill_tool()] if t])
         names = [t.get("function", {}).get("name", "") for t in tools
@@ -2291,7 +2335,8 @@ class Ollama(QObject):
         # model.
         payload["tools"] = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL,
                             SELF_TOOL, IMAGE_TOOL, SEARCH_IMAGE_TOOL,
-                            FETCH_URL_TOOL, CALL_API_TOOL, EXEC_TOOL]
+                            FETCH_URL_TOOL, CALL_API_TOOL, EXEC_TOOL,
+                            BASH_TOOL]
                             + list(SESSION_TOOLS) + list(MEMORY_TOOLS)
                             + [t for t in [skill_tool()] if t])
         body = json.dumps(payload).encode("utf-8")
@@ -2451,8 +2496,8 @@ class Ollama(QObject):
                 self._call_api(args, i, remaining, calls)
             elif name in FILE_TOOL_NAMES:
                 self._run_fs_tool(name, args, i, remaining, calls)
-            elif name in EXEC_TOOL_NAMES:
-                self._run_exec_tool(args, i, remaining, calls)
+            elif name in EXEC_TOOL_NAMES or name in BASH_TOOL_NAMES:
+                self._run_exec_tool(name, args, i, remaining, calls)
             elif name in SESSION_TOOL_NAMES:
                 self._run_session_tool(name, args, i, remaining, calls)
             elif name in MEMORY_TOOL_NAMES:
@@ -3148,21 +3193,28 @@ class Ollama(QObject):
             return argv
         return [sys.executable, EXEC_SCRIPT, SANDBOX_ROOT] + extra
 
-    def _run_exec_tool(self, args, idx, remaining, calls):
-        """run_python: execute a model-written program on the host and feed its
-        stdout/stderr/exit code back into the tool loop, async and concurrent
-        exactly like the file tools. tools/sandbox-exec.py is the runner — it
-        caps time, CPU, memory and output; since 2026-08-22 it no longer cuts
-        the network or confines the code (see WRITE_ROOT)."""
+    def _run_exec_tool(self, name, args, idx, remaining, calls):
+        """run_python / run_bash: execute a model-written program on the host and
+        feed its stdout/stderr/exit code back into the tool loop, async and
+        concurrent exactly like the file tools. tools/sandbox-exec.py is the one
+        runner behind both — the tool name picks `lang`, and it caps time, CPU,
+        memory and output; since 2026-08-22 it no longer cuts the network or
+        confines the code (see WRITE_ROOT)."""
         a = args if isinstance(args, dict) else {}
-        req = {"code": str(a.get("code", ""))}
+        bash = name in BASH_TOOL_NAMES
+        # bash takes `command`, python takes `code`; a model that mixes the two
+        # up gets what it meant rather than an empty-program error.
+        body = a.get("command") if bash else a.get("code")
+        if not body:
+            body = a.get("code") if bash else a.get("command")
+        req = {"code": str(body or ""), "lang": "bash" if bash else "python"}
         if a.get("stdin") is not None:
             req["stdin"] = str(a.get("stdin"))
         if a.get("timeout") is not None:
             req["timeout"] = a.get("timeout")
         if a.get("cwd"):
             req["cwd"] = str(a.get("cwd"))
-        self.fileToolStarted.emit("running python")
+        self.fileToolStarted.emit("running bash" if bash else "running python")
         proc = QProcess(self)
         self._procs.append(proc)
 
@@ -3178,9 +3230,9 @@ class Ollama(QObject):
                 return
             proc.deleteLater()
             result = self._fs_result(out, err, rc)
-            self._tool_results[idx] = {"role": "tool", "tool_name": "run_python",
+            self._tool_results[idx] = {"role": "tool", "tool_name": name,
                                        "content": json.dumps(result)}
-            self.fileToolDone.emit(self._exec_outcome(result),
+            self.fileToolDone.emit(self._exec_outcome(name, result),
                                    "error" not in result)
             self._tool_done(remaining, calls)
 
@@ -3191,14 +3243,16 @@ class Ollama(QObject):
         proc.closeWriteChannel()
 
     @staticmethod
-    def _exec_outcome(result):
-        """The one-line disclosure for a run_python call (the "files · N" block)."""
+    def _exec_outcome(name, result):
+        """The one-line disclosure for a run_python / run_bash call (the
+        "files · N" block). Named by the language, so he can see which ran."""
+        lang = "bash" if name in BASH_TOOL_NAMES else "python"
         if "error" in result:
-            return ("run_python: " + str(result["error"]))[:200]
+            return (name + ": " + str(result["error"]))[:200]
         if result.get("timed_out"):
-            return "python timed out after %gs" % result.get("timeout", 0)
+            return "%s timed out after %gs" % (lang, result.get("timeout", 0))
         rc = result.get("exit_code")
-        return "python exited %s" % (rc if rc is not None else "?")
+        return "%s exited %s" % (lang, rc if rc is not None else "?")
 
     @staticmethod
     def _fs_result(out, err, rc):
