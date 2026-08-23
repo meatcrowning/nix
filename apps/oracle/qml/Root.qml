@@ -126,10 +126,28 @@ Item {
     // of a turn is the answer; everything before it was working towards it. So
     // the live row is never folded (nothing follows it yet) and the fold closes
     // over a round the moment the next one opens.
+    //
+    // ...and ONLY IF IT SAID NOTHING [his, 2026-08-23]. What folds is the
+    // BOOKKEEPING — a round that only called tools. A round that produced
+    // something he can read or look at (prose, a picture, a video) is output,
+    // and output is never hidden: he asked for that image, and the round that
+    // fetched it went under the fold with everything else. So a speaking round
+    // stays drawn, its own tool disclosures shut as they always were, and it
+    // ends the run of folded rounds around it.
     function isRoundRow(i) {
         win.chatRev;                       // rows settle without notifying
         if (i < 0 || i + 1 >= chatLog.count) return false;
-        return !chatLog.get(i).isUser && !chatLog.get(i + 1).isUser;
+        var r = chatLog.get(i);
+        if (r.isUser || chatLog.get(i + 1).isUser) return false;
+        return win.roundIsSilent(r);
+    }
+    // Did this round leave anything on screen? Media is read off the ROW's own
+    // roles, never a child item's `visible` — the latch that hid a picture for
+    // good (see the bubble's `visible`).
+    function roundIsSilent(r) {
+        return !r.isError && (r.body || "") === ""
+               && (r.images || "[]") === "[]" && !r.imagesActive
+               && (r.videos || "[]") === "[]" && !r.videosActive;
     }
     // The first round row of the run `i` belongs to: the row that draws the
     // heading and holds the run's open/closed state. -1 if `i` is not in a run.
