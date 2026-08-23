@@ -369,8 +369,12 @@ PLAYER_TOOL = {
         "parameters": {"type": "object", "properties": {
             "action": {"type": "string",
                        "enum": ["status", "play", "pause", "play_pause", "next",
-                                "previous", "seek", "volume", "shuffle", "loop"],
-                       "description": "What to do. `status` changes nothing."},
+                                "previous", "seek", "volume", "shuffle", "loop",
+                                "play_these", "queue_these"],
+                       "description": ("What to do. `status` changes nothing; "
+                                       "`play_these` replaces the queue with "
+                                       "`paths` and starts it, `queue_these` "
+                                       "appends them.")},
             "seconds": {"type": "number",
                         "description": ("For `seek`: where to jump to, in "
                                         "seconds from the start — or how far to "
@@ -382,10 +386,62 @@ PLAYER_TOOL = {
                       "description": "For `volume`: 0-100."},
             "on": {"type": "boolean", "description": "For `shuffle`: on or off."},
             "mode": {"type": "string", "enum": ["none", "track", "playlist"],
-                     "description": "For `loop`: repeat nothing, this track, or the queue."}},
+                     "description": "For `loop`: repeat nothing, this track, or the queue."},
+            "paths": {"type": "array", "items": {"type": "string"},
+                      "description": ("For `play_these` / `queue_these`: track "
+                                      "file paths, as music_library returns "
+                                      "them. An album is its tracks in order.")}},
             "required": ["action"]}},
 }
 PLAYER_TOOL_NAMES = {"control_player"}
+
+#: THE LIBRARY, not just the transport [his, 2026-08-23: *"are agents able to
+#: easily browse and play music from my library?"*]. They were not: MPRIS
+#: carries the current track and nothing else, so `control_player` could skip
+#: and pause but could not answer "what have I got" or "put that album on".
+#: `apps/player/tools/library-ipc.py` is the other half — a READ-ONLY sqlite
+#: query against player's own library plus the two queue verbs on its socket —
+#: and it runs where the library is (top), reached exactly like the file
+#: executor.
+MUSIC_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "music_library",
+        "description": (
+            "Search his music library — 19,000-odd tracks, with their artists, "
+            "albums, ratings, favourites and play counts. `search` matches free "
+            "text against title, artist and album at once (how a person names "
+            "music), `albums` lists albums, `album_tracks` gives one album in "
+            "play order, `stats` sizes the library. Every track comes back with "
+            "its `path`, which is what control_player's play_these / "
+            "queue_these take — so 'put on X' is this tool and then that one. "
+            "Read-only: it never changes a rating, a tag or a play count."),
+        "parameters": {"type": "object", "properties": {
+            "action": {"type": "string",
+                       "enum": ["search", "albums", "album_tracks", "stats"],
+                       "description": "What to ask for. Default `search`."},
+            "query": {"type": "string",
+                      "description": "Free text: part of a title, artist or album."},
+            "artist": {"type": "string", "description": "Narrow to an artist."},
+            "album": {"type": "string",
+                      "description": "The album — required for `album_tracks`."},
+            "genre": {"type": "string", "description": "Narrow to a genre."},
+            "favorites_only": {"type": "boolean",
+                               "description": "Only tracks he has hearted."},
+            "min_rating": {"type": "integer",
+                           "description": "Only tracks rated at least this (1-5)."},
+            "sort": {"type": "string",
+                     "enum": ["artist", "album", "title", "rating", "plays",
+                              "recent", "played", "random"],
+                     "description": "Order. `random` is how you pick something new."},
+            "limit": {"type": "integer", "description": "Rows to return (max 60)."},
+            "offset": {"type": "integer", "description": "Skip this many, to page."}},
+            "required": []}},
+}
+MUSIC_TOOL_NAMES = {"music_library"}
+
+#: The library and the queue socket both live with the player, on `top`.
+MUSIC_SCRIPT = "/home/lam/nix/apps/player/tools/library-ipc.py"
 
 #: Which player, and what drives it. `playerctl` is the client (a real MPRIS
 #: implementation — QtDBus was the obvious route and is a dead end: PySide
@@ -1807,7 +1863,10 @@ CAPABILITY_NOTE = (
     "(show_video — a YouTube or other watch page, or a direct video "
     "file, streamed into the chat with a play button he presses); "
     "read the current time in any "
-    "timezone; SHOW him a picture that is already on the machine (show_image — "
+    "timezone; SEARCH HIS MUSIC LIBRARY and put something on (music_library "
+    "finds tracks and albums with their paths; control_player play_these / "
+    "queue_these plays or queues them); "
+    "SHOW him a picture that is already on the machine (show_image — "
     "for a chart you plotted or a file you found: it costs you nothing and "
     "needs no vision); GENERATE one (make_image, his own image backend); LOOK "
     "AT HIS SCREEN (screenshot); SEE AND CONTROL THE MUSIC (control_player — "
@@ -3574,6 +3633,7 @@ class Ollama(QObject):
         return (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, SELF_TOOL,
                 IMAGE_TOOL, SEARCH_IMAGE_TOOL, VIEW_IMAGE_TOOL, SHOW_IMAGE_TOOL,
                 SCREENSHOT_TOOL, MAKE_IMAGE_TOOL, VIDEO_TOOL, PLAYER_TOOL,
+                MUSIC_TOOL,
                 FETCH_URL_TOOL,
                 CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
                 + list(SESSION_TOOLS) + list(MEMORY_TOOLS)
@@ -3935,6 +3995,8 @@ class Ollama(QObject):
             self._screenshot(args, i, remaining, calls)
         elif name in VIEW_IMAGE_TOOL_NAMES:
             self._view_image(args, i, remaining, calls)
+        elif name in MUSIC_TOOL_NAMES:
+            self._run_music_tool(args, i, remaining, calls)
         elif name in PLAYER_TOOL_NAMES:
             self._run_player_tool(args, i, remaining, calls)
         elif name in VIDEO_TOOL_NAMES:
@@ -5028,6 +5090,117 @@ class Ollama(QObject):
             pass
         return out
 
+    @staticmethod
+    def _music_argv():
+        """The command that runs one library/queue op where the MUSIC is.
+
+        Same host branch as the file and code executors: local on `top`, over
+        the tunnel's ssh master from `book` — the library database and the
+        player's queue socket are both top's, and a book window driving its own
+        (absent) player would be a tool that silently does nothing.
+        `$ORACLE_MUSIC` replaces the script, which is how the harness drives a
+        fake library and a fake socket instead of his."""
+        script = os.environ.get("ORACLE_MUSIC", "").strip() or MUSIC_SCRIPT
+        if ON_BOOK:
+            host = os.environ.get("OLLAMA_SSH_HOST", "top")
+            ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+            argv = [ssh, "-o", "BatchMode=yes"]
+            ctl = os.environ.get("OLLAMA_SSH_CTL")
+            if ctl:
+                argv += ["-o", "ControlMaster=auto", "-o", "ControlPersist=30",
+                         "-o", "ControlPath=" + ctl]
+            return argv + [host, "python3", shlex.quote(script)]
+        return [sys.executable, script]
+
+    def _music_call(self, req, cb):
+        """One library op, async, feeding `cb(result)` the parsed answer."""
+        proc = QProcess(self)
+        self._procs.append(proc)
+
+        def finished(*_):
+            if proc not in self._procs:
+                return
+            self._procs.remove(proc)
+            try:
+                out = bytes(proc.readAllStandardOutput())
+                err = bytes(proc.readAllStandardError())
+                rc = proc.exitCode()
+            except RuntimeError:
+                return
+            proc.deleteLater()
+            cb(self._fs_result(out, err, rc))
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(lambda *_: None)   # surfaced through finished
+        argv = self._music_argv()
+        proc.start(argv[0], argv[1:])
+        proc.write(json.dumps(req).encode("utf-8"))
+        proc.closeWriteChannel()
+
+    def _run_music_tool(self, args, idx, remaining, calls):
+        """Search the library and hand back rows, each carrying its `path` —
+        which is the whole point: a path is what control_player can put on."""
+        a = args if isinstance(args, dict) else {}
+        action = str(a.get("action") or "search").strip().lower()
+        req = {"op": action,
+               "q": str(a.get("query") or ""),
+               "artist": str(a.get("artist") or ""),
+               "album": str(a.get("album") or ""),
+               "genre": str(a.get("genre") or ""),
+               "sort": str(a.get("sort") or ""),
+               "favorites_only": bool(a.get("favorites_only")),
+               "min_rating": a.get("min_rating") or 0,
+               "limit": a.get("limit") or 0,
+               "offset": a.get("offset") or 0}
+        head = a.get("query") or a.get("album") or a.get("artist") or action
+        self.fileToolStarted.emit("searching the library: " + str(head)[:60])
+
+        def done(result):
+            remaining["sink"][idx] = {"role": "tool", "tool_name": "music_library",
+                                       "content": json.dumps(result)}
+            n = result.get("count") if isinstance(result, dict) else None
+            self.fileToolDone.emit(
+                ("library: " + str(result.get("error")))[:200]
+                if "error" in result else
+                "library · %s %s" % ("" if n is None else n,
+                                     "albums" if action == "albums" else "tracks"),
+                "error" not in result)
+            self._tool_done(remaining, calls)
+
+        self._music_call(req, done)
+
+    def _player_put_on(self, action, args, idx, remaining, calls):
+        """play_these / queue_these — the queue verbs, over player's own socket.
+
+        Not MPRIS: `OpenUri` is a no-op in player's adapter and MPRIS has no
+        append at all, while that socket already carries both (OPEN and QUEUE —
+        apps/player/AGENTS.md, "The queue socket")."""
+        paths = args.get("paths") if isinstance(args, dict) else None
+        paths = ([str(p) for p in paths if str(p).strip()]
+                 if isinstance(paths, list) else [])
+        if not paths:
+            self._player_result({"error": "%s needs `paths` — search the "
+                                          "library first" % action},
+                                idx, remaining, calls)
+            return
+        self.fileToolStarted.emit(
+            ("playing " if action == "play_these" else "queueing ")
+            + ("%d tracks" % len(paths) if len(paths) > 1
+               else os.path.basename(paths[0])))
+
+        def done(result):
+            ok = isinstance(result, dict) and "error" not in result
+            if ok:
+                result = dict(result, did=action)
+            self._player_result(result, idx, remaining, calls)
+            self.fileToolDone.emit(
+                "%s %d track%s" % ("playing" if action == "play_these" else "queued",
+                                   len(paths), "" if len(paths) == 1 else "s")
+                if ok else ("player: " + str(result.get("error")))[:200], ok)
+
+        self._music_call({"op": "play" if action == "play_these" else "queue",
+                          "paths": paths}, done)
+
     def _run_player_tool(self, args, idx, remaining, calls):
         """Drive the music player, and answer with what actually happened.
 
@@ -5038,6 +5211,9 @@ class Ollama(QObject):
         has nothing to drive)."""
         a = args if isinstance(args, dict) else {}
         action = str(a.get("action") or "status").strip().lower()
+        if action in ("play_these", "queue_these"):
+            self._player_put_on(action, a, idx, remaining, calls)
+            return
         try:
             verb = self._player_verb(action, a)
         except ValueError as e:

@@ -1373,6 +1373,26 @@ limit rather than a hidden one: his library lives on `top`, so a book window
 finds nothing and the result says exactly that — "no music player is running on
 this machine" — for the model to relay instead of pretending.
 
+**Browsing the library is a different seam, and it had to be built** [his,
+2026-08-23: *"are agents able to easily browse and play music from my
+library?"*]. They were not: MPRIS carries the CURRENT track and nothing else, so
+`control_player` could skip and pause but could not answer "what have I got" or
+"put that album on" — and `OpenUri`, the one MPRIS verb that would play a file,
+is a no-op in player's adapter. `music_library` is the other half:
+`apps/player/tools/library-ipc.py` runs where the music is (top, over the same
+ssh master as the file executor) and does two things — a READ-ONLY sqlite query
+against player's own `library.db` (search / albums / album_tracks / stats, with
+ratings, favourites and play counts), and the queue verbs on player's socket.
+Every row carries its `path`, which is the whole point: search, then hand those
+paths to `control_player` `play_these` (replace the queue and start) or
+`queue_these` (append).
+
+**The queue verbs go over player's socket, not MPRIS** — `OPEN` was already
+there for a second launch's `%F`, and `QUEUE` is its new counterpart
+(`Player.queuePaths`, apps/player/AGENTS.md). Read-only on the database, always:
+the library is player's to write, and a second writer is how a library loses
+ratings.
+
 **A seek TO and a seek BY are different commands**: `position 90` versus
 playerctl's own `position 10+` / `15-`. Volume is 0-100 to the model, 0-1 on
 the wire, and clamped rather than passed through.

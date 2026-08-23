@@ -461,9 +461,20 @@ server -> client   {"index": n, "tracks":[{"title","artist","dur"}, ...],
                     "lyrics": {"source","synced","lines":[{t,line}],"text"} | null}
                    on connect, and on queueChanged / indexChanged / currentChanged
 client -> server   GOTO <index>        -> player.jumpTo(index)
+                   OPEN <enc> …        -> player.playPaths(...)  (replace + play)
+                   QUEUE <enc> …       -> player.queuePaths(...) (append only)
                    LYRICS <0|1>        -> subscribe this connection to lyrics
 ```
 
+- **`QUEUE` is `OPEN`'s counterpart, and it exists for the agents** [his,
+  2026-08-23]. chatter can search the library and put something on
+  (`apps/oracle` → `music_library`, `control_player play_these/queue_these`),
+  which needs both "replace the queue with this" and "put it on after what is
+  playing"; MPRIS has neither (`OpenUri` is a no-op here and there is no append
+  in the spec at all). Same percent-encoding, same snapshot answer, and
+  `Player.queuePaths` is `playPaths` with `queueTracks` at the end — including
+  its "empty is a no-op" rule, so a request whose paths the library does not
+  know leaves the queue exactly as it was.
 - **Push, not poll**: the panel is animating this, and a file it had to re-read
   on a timer would be both later and more work.
 - Only the three fields the drawer draws are sent. The panel has no library and

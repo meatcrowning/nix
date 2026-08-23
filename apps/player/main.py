@@ -2246,6 +2246,17 @@ class Player(QObject):
         if ids:
             self.playTracks(ids, 0)
 
+    def queuePaths(self, paths):
+        """APPEND files named by path to the queue, playing nothing new.
+
+        playPaths' counterpart, and the other half of what a caller outside this
+        process can ask for (the queue socket's QUEUE verb, chatter's
+        `control_player`). Same "empty is a no-op" rule: a request whose paths
+        were all unknown to the library must leave the queue as it was."""
+        ids = self._library.ids_for_paths([str(p) for p in paths])
+        if ids:
+            self.queueTracks(ids)
+
     @Slot(int, int)
     def playAlbum(self, album_id, start=0):
         rows = self._library.album_tracks(album_id)
@@ -3430,6 +3441,7 @@ def start_queue_server(player, app, lyrics=None):
                            TOGGLE_FAV  — flip favourite on the current track
                            LYRICS <0|1>     — "I am showing a lyrics box"
                            OPEN <enc> [<enc> …]  — play these files now
+                           QUEUE <enc> [<enc> …] — append them to the queue
 
     OPEN is not the panel's; it is how a SECOND launch hands its `%F` arguments
     to the player that is already running and exits (`handoff_paths`). It is
@@ -3584,6 +3596,16 @@ def start_queue_server(player, app, lyrics=None):
                     print("queue server: bad OPEN:", e, flush=True)
                 # Answer, so the launcher that sent this knows it was taken and
                 # can exit instead of guessing at a timeout.
+                c.write(snapshot(c in want))
+                c.flush()
+            elif len(parts) >= 2 and parts[0] == "QUEUE":
+                # OPEN's counterpart: append, play nothing. This is what an
+                # agent asking for "put this album on after what's playing"
+                # lands in (apps/oracle: control_player queue_these).
+                try:
+                    player.queuePaths([urllib.parse.unquote(p) for p in parts[1:]])
+                except Exception as e:
+                    print("queue server: bad QUEUE:", e, flush=True)
                 c.write(snapshot(c in want))
                 c.flush()
             elif len(parts) == 2 and parts[0] == "LYRICS":
