@@ -162,12 +162,14 @@ o._model = "stub:latest"
 o._ctx_model = "stub:latest"
 o._caps = ["vision"]
 o._pending_vision = []
-o._tool_results = [None]
+# A tool ROUND is an object now (`Ollama._new_round`): its `sink` is where the
+# result lands, so a subagent's round cannot overwrite the turn's own.
+vround = {"n": 1, "sink": [None]}
 o._set_busy(True)
-o._view_image({"path": pic_path}, 0, {"n": 1}, [None])
+o._view_image({"path": pic_path}, 0, vround, [None])
 pump(lambda: bool(CHATS))
 
-res = json.loads(o._tool_results[0]["content"])
+res = json.loads(vround["sink"][0]["content"])
 check("view_image reads the local file", res.get("ok") is True, json.dumps(res)[:140])
 check("the bytes are NOT in the tool result", "b64" not in res)
 check("the picture is shown to him too",
@@ -184,11 +186,11 @@ if vis:
 # A model with no vision is told so, and no bytes are read.
 o._caps = []
 o._pending_vision = []
-o._tool_results = [None]
+nround = {"n": 1, "sink": [None]}
 o._set_busy(True)
-o._view_image({"path": pic_path}, 0, {"n": 1}, [None])
-pump(lambda: o._tool_results[0] is not None, 2000)
-res = json.loads(o._tool_results[0]["content"])
+o._view_image({"path": pic_path}, 0, nround, [None])
+pump(lambda: nround["sink"][0] is not None, 2000)
+res = json.loads(nround["sink"][0]["content"])
 check("a model with no vision is refused honestly",
       "vision" in res.get("error", ""), json.dumps(res)[:120])
 check("and nothing was attached", not o._pending_vision)

@@ -340,6 +340,83 @@ no code change at all.
   against the skill's own files, so a crafted path cannot escape the skill
   directory — the jail shape `sessions-store.py` uses for a session id.
 
+## Subagents (spawn_agent)
+
+`spawn_agent` (`spawn_agent_tool()`, offered every turn, dispatched
+`_spawn_agent`) hands one self-contained job to a **subagent** — its own
+message list, its own tool rounds, its own share of the window — and returns
+**only its final answer** to the turn that spawned it.
+
+**It is a second CONTEXT, not a second model** [his, 2026-08-23: *"would it be
+worth giving agents the ability to spawn qwen3-coder (or similar)
+subagents?"*]. A turn has one 32k window (`CHAT_NUM_CTX`) and
+`MAX_TOOL_ROUNDS` rounds to spend in it, and the expensive tool results are the
+ones worth least afterwards: a `search_text` over `~/nix` or a `read_file` on a
+260 KB source costs thousands of tokens to establish one fact that fits in a
+line. A subagent reads all of that in ITS context and hands back the line.
+
+**So the default model is the parent's, deliberately.** Spawning
+`qwen3-coder:30b` from a `qwen3.6:35b-a3b` turn means ollama unloading 22.3 GiB
+and loading 17.3 — `top` runs `OLLAMA_MAX_LOADED_MODELS=1` (`sys/ai/ollama.nix`)
+and those two do not fit in 30 GiB together — so a per-call model switch pays
+two full reloads for one delegation. A definition may still name a `model:` when
+that swap is worth it; nothing else does it.
+
+- **Definitions are files**, `AGENTS_ROOT/<name>.md` (`~/.claude/agents`,
+  override `$ORACLE_AGENTS`): optional `---` frontmatter (`description:`,
+  `tools:`, `model:`) and a body that IS that agent's system prompt. Same root
+  reasoning as the skills: `~/.claude` syncs to both hosts
+  (`home/srvs/claude-state.nix`), Claude Code reads the same directory, and
+  none of it lands in this public repo.
+- **Four built-ins are always there** (`BUILTIN_AGENTS`: `general`, `explorer`,
+  `coder`, `researcher`), so an empty directory is not an empty menu — and a
+  file of the same name **replaces** one outright, which is how either of you
+  edits a built-in without touching `main.py`.
+- **The model can write one, and is told so.** `agents_note()` lists the agents
+  every turn (a model does not spawn what it was never told about — the same
+  reason `skills_note()` exists) and names the directory, the frontmatter and
+  the tool groups. It already has the file tools, so authoring a new specialist
+  or fixing one that keeps getting something wrong is a `write_file`, not a
+  code change [his, 2026-08-23: *"make it easier for oracle agents to modify
+  themselves and future / other agents"*]. The note also tells it to SAY when
+  it rewrites one he relies on.
+- **`tools:` takes GROUPS** (`read`, `write`, `exec`, `web`, `sessions`,
+  `skills`, `time`), individual tool names, or `all`. A name chatter does not
+  have is **ignored** rather than fatal — a Claude Code definition naming
+  `Read, Grep` is still a usable chatter agent — and a list that resolves to
+  nothing falls back to the default set, because an agent that can do nothing
+  is never what was meant (docs/DESIGN.md §10).
+- **What a subagent never gets**: `spawn_agent` itself (it is absent from
+  `_tool_registry()`, so subagents are one level deep by construction, not by
+  a check that could be forgotten); the **image tools**, which render into the
+  transcript of the turn that spawned it; and the **memory tools**, which write
+  what the MAIN agent recalls.
+- **A tool round is an object now** — `_new_round()` returns `{n, sink, done}`
+  and every tool method writes into `remaining["sink"][idx]` instead of a
+  single `self._tool_results`. That is what lets a subagent's round and the
+  turn's own run at the same time without overwriting each other, and it is why
+  `_spawn_agent` reaches every tool through `_dispatch_tool` — the same branch
+  the main agent uses, rather than a second copy of it that would drift.
+- **Non-streaming** (`stream: false`): there is no bubble to fill, the answer is
+  a tool result. It still surfaces — its own tools appear in the transcript as
+  `<agent>: <tool>` and the spawn itself as a file-disclosure line (`agent
+  explorer finished, 4 rounds`), so nothing it did is silent (docs/DESIGN.md
+  §9.1, §10).
+- **Bounded**: `AGENT_MAX_ROUNDS` (12), `AGENT_CTX_FRACTION` (0.7) and the same
+  **wrap-up round** the main loop learned to do — a subagent out of rounds is
+  re-posted with no tools rather than allowed to return a frame that is all
+  tool calls and no prose. `AGENT_RESULT_CHARS` (12000) caps the answer and
+  says when it was cut: an agent that returns 40k of pasted file is the problem
+  it was spawned to solve.
+- **One list for the payload and `describe_self`** — `Ollama._all_tools()`.
+  Those were written out twice and had already started to drift.
+- **Harness**: `tools/subagent-test.py` — drives a real spawn through the real
+  window (offscreen) against a stub ollama and reads all four request bodies:
+  the subagent gets its own system prompt and its own restricted tool list, it
+  carries none of the main conversation, and **the bulk it read never enters
+  the main context**. Plus the definition rules (fallbacks, group resolution,
+  a file replacing a built-in).
+
 ## Sessions
 
 Every conversation is a **session**: a named transcript that persists and can be
