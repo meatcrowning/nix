@@ -176,7 +176,15 @@ QMetaObject.invokeMethod(root, "loadTurns", Q_ARG("QVariant", "clocktest"),
                               "body": "let me check", "cutOff": True}])))
 spin(300)
 root.setProperty("model", "stub:latest")
-QMetaObject.invokeMethod(root, "continueReply")
+# THE ARGUMENT IS NOT OPTIONAL FROM HERE. `continueReply(forced)` grew that
+# parameter with the resume/extend split (2026-08-23), and `invokeMethod` with
+# no args does not match a QML function that declares one — it returns False and
+# does NOTHING, which read as "the clock never showed a state" and failed all
+# four checks. Empty string is the falsy `forced`, i.e. decide the mode from the
+# row, exactly what the button does.
+if not QMetaObject.invokeMethod(root, "continueReply", Q_ARG("QVariant", "")):
+    print("FAILED: continueReply did not accept the call")
+    sys.exit(1)
 spin(2500)
 check("a tool round in flight reads `waiting…`",
       any(x.startswith("waiting") for x in SEEN), repr(SEEN))
