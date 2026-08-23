@@ -126,6 +126,10 @@ exactly what it always was.
   It auto-follows the newest text to the bottom
   only while he is already at the bottom (see *The model selector* §streaming) —
   scroll up mid-stream and it stops yanking. A model's
+  **Before the model has said anything** — no answer, no reasoning — the turn
+  shows **`loading…`** with the same animated ellipsis, on its own line OUTSIDE
+  the bubble [his, 2026-08-22]; it used to be a static `…` inside an otherwise
+  empty bubble, which read as a message rather than as a wait.
   A turn's message sits in **`qml/Bubble.qml` — a BUTTON frame** [his,
   2026-08-22], not a tinted slab; it draws no hover or pressed state in either
   face, since the log is selectable text and nothing in it is clickable. A model's
@@ -133,12 +137,14 @@ exactly what it always was.
   subordinated) that sits **OUTSIDE the bubble** [his, 2026-08-22] — as do the
   tool, web-search and file disclosures, all four between the speaker caption
   and the bubble, full width, so the bubble carries only the answer itself, whose heading reports progress: while the reasoning streams it
-  reads **`thinking for 12s`** (one brightness step up), settling to **`thought
-  for 12s`** when the answer starts [his, 2026-08-22] — the clock runs from the
-  first reasoning delta to the first content one, is kept in the row as
-  `thinkMs` and is PERSISTED with the session, so a reloaded transcript still
-  says how long each answer was thought about. Beside it are a **live token
-  count** and an **animated ellipsis** (dim, §9.1) — the count is the running frame
+  reads **`thinking for 12s…`** (one brightness step up, the ellipsis animated),
+  settling to **`thought for 12s`** when the answer starts [his, 2026-08-22] —
+  the clock runs from the first reasoning delta to the first content one, is
+  kept in the row as `thinkMs` and is PERSISTED with the session, so a reloaded
+  transcript still says how long each answer was thought about. Beside it, still
+  and named, is the **token count** — `240 tokens`, `1.2k tokens` past a
+  thousand (`win.fmtCount`); the animated ellipsis rides the TIME, never the
+  count, since the time is the part still running (dim, §9.1) — the count is the running frame
   count `Ollama` emits on `replyThinkTokens` (ollama streams one token per NDJSON
   frame), the ellipsis cycles 0–3 dots at one roll beat each (§6.2, static under
   reduceMotion). The token count PERSISTS in the heading once counted (the
@@ -556,6 +562,25 @@ every turn) is the same GET with the three missing pieces, and nothing more.
   keyring at a throwaway file), with `--live` for read-only GETs against the
   four boorus that answer anonymously. Re-run it after touching the registry,
   the projection or the keyring.
+
+## A reply that stopped short — `continue`
+
+**An answer cut off mid-sentence offers the way on** [his, 2026-08-22]. Two
+things end a reply early: the model hits its generation ceiling (ollama's final
+frame says `done_reason: "length"`, which `Ollama` surfaces as `replyTruncated`)
+or he presses stop. Either marks the row `cutOff`, and a **`continue`** control
+appears under that bubble — only on the LAST row, since continuing one further
+up would write into the middle of the conversation, and only while nothing is
+streaming (docs/DESIGN.md §10.2: a control appears when it can act).
+
+`Ollama.continueReply(model, history, partial)` re-posts the chat with every
+earlier turn, then the partial as an `assistant` message, then `CONTINUE_PROMPT`
+as a user turn — a user turn rather than a bare assistant prefix because no model
+is reliable about not starting over when asked that way. QML points
+`win.activeIndex` at the existing row first, so the continuation streams onto the
+END of it: a cut-off answer becomes one whole answer, not two bubbles that have
+to be read together. Harness: `tools/continue-test.py` (offscreen, a stub ollama
+on 127.0.0.1 — his daemon is never touched and no model is ever loaded).
 
 ## Web images (fetch_image)
 

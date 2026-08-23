@@ -141,6 +141,12 @@ Item {
         }
         // The live reasoning-token count, written into the active row so the
         // collapsed heading shows it climbing while the model thinks.
+        // The reply hit the model's length ceiling mid-sentence. Mark the row
+        // so it offers `continue` (§10 — a dead end is never left silent).
+        function onReplyTruncated(reason) {
+            if (win.activeIndex < 0) return;
+            chatLog.setProperty(win.activeIndex, "cutOff", true);
+        }
         function onReplyThinkTokens(n) {
             if (win.activeIndex < 0) return;
             chatLog.setProperty(win.activeIndex, "thinkTokens", n);
@@ -299,7 +305,7 @@ Item {
             var t = chatLog.get(j);
             turns.push({ isUser: t.isUser, who: t.who, body: t.body,
                          thinking: t.thinking, thinkTokens: t.thinkTokens,
-                         thinkMs: t.thinkMs,
+                         thinkMs: t.thinkMs, cutOff: t.cutOff,
                          sources: t.sources, searchCount: t.searchCount,
                          files: t.files, fileCount: t.fileCount,
                          images: t.images,
@@ -349,6 +355,7 @@ Item {
                              thinking: t.thinking || "", thinkingActive: false,
                              thinkTokens: t.thinkTokens || 0,
                              thinkStart: 0, thinkMs: t.thinkMs || 0,
+                             cutOff: !!t.cutOff,
                              sources: t.sources || "", searchCount: t.searchCount || 0,
                              searching: false,
                              files: t.files || "", fileCount: t.fileCount || 0,
@@ -418,7 +425,7 @@ Item {
         // are left untouched — the log grows downward (docs/DESIGN.md §14).
         chatLog.append({ isUser: true, who: "you", body: shownBody,
                          thinking: "", thinkingActive: false, thinkTokens: 0,
-                         thinkStart: 0, thinkMs: 0,
+                         thinkStart: 0, thinkMs: 0, cutOff: false,
                          sources: "", searchCount: 0, searching: false,
                          files: "", fileCount: 0, filesActive: false, filesPending: 0,
                          images: "[]", imagesActive: false, imagesPending: 0,
@@ -426,7 +433,7 @@ Item {
                          streaming:false, isError: false });
         chatLog.append({ isUser: false, who: win.model, body: "",
                          thinking: "", thinkingActive: false, thinkTokens: 0,
-                         thinkStart: 0, thinkMs: 0,
+                         thinkStart: 0, thinkMs: 0, cutOff: false,
                          sources: "", searchCount: 0, searching: false,
                          files: "", fileCount: 0, filesActive: false, filesPending: 0,
                          images: "[]", imagesActive: false, imagesPending: 0,
@@ -577,6 +584,29 @@ Item {
     readonly property string windowTitle:
         win.sessionTitle !== "" ? "chatter — " + win.sessionTitle : "chatter"
 
+    // Pick up an answer that stopped short — the model hit its length ceiling,
+    // or he pressed stop. The continuation streams into the SAME row, so a
+    // cut-off answer ends up one whole answer rather than two bubbles that have
+    // to be read together [his, 2026-08-22]. Only ever the last row: continuing
+    // one further up would write into the middle of the conversation.
+    function continueReply() {
+        var i = chatLog.count - 1;
+        if (i < 0 || win.model === "") return;
+        var row = chatLog.get(i);
+        if (row.isUser || row.streaming || row.body.trim() === "") return;
+        var history = [];
+        for (var k = 0; k < i; k++) {
+            var h = chatLog.get(k);
+            if (h.isError || h.body.trim() === "")
+                continue;
+            history.push({ role: h.isUser ? "user" : "assistant", content: h.body });
+        }
+        chatLog.setProperty(i, "cutOff", false);
+        chatLog.setProperty(i, "streaming", true);
+        win.activeIndex = i;
+        Ollama.continueReply(win.model, JSON.stringify(history), row.body);
+    }
+
     // The reasoning clock. `thinkStart` is set at the first reasoning delta and
     // cleared here, leaving `thinkMs` — how long the model thought for — in the
     // row, so the heading reads "thought for 12s" ever after, session reload
@@ -588,6 +618,15 @@ Item {
             chatLog.setProperty(i, "thinkMs", Date.now() - r.thinkStart);
             chatLog.setProperty(i, "thinkStart", 0);
         }
+    }
+
+    // "240", "1.2k" — a count, shortened once it stops being readable at a
+    // glance [his, 2026-08-22]. One decimal, and no "1.0k" (that is just 1k).
+    function fmtCount(n) {
+        if (n < 1000) return "" + n;
+        var k = n / 1000;
+        var one = Math.round(k * 10) / 10;
+        return (one === Math.floor(one) ? one : one.toFixed(1)) + "k";
     }
 
     // "12s", "1m 30s" — the reasoning duration, in the shortest honest form
@@ -608,6 +647,9 @@ Item {
         Ollama.cancel();
         if (win.activeIndex >= 0) {
             win.stopThinkClock(win.activeIndex);
+            // A stopped answer is a cut-off answer: offer the way on.
+            if (chatLog.get(win.activeIndex).body !== "")
+                chatLog.setProperty(win.activeIndex, "cutOff", true);
             chatLog.setProperty(win.activeIndex, "streaming", false);
             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
             chatLog.setProperty(win.activeIndex, "searching", false);
@@ -1610,6 +1652,36 @@ Item {
                                 color: Theme.textDim
                             }
 
+                            // Before the model has said ANYTHING — no answer, no
+                            // reasoning — the wait is a line of its own, outside
+                            // the bubble, with the same animated ellipsis every
+                            // other in-flight heading here carries [his,
+                            // 2026-08-22]. It used to be a static "…" inside an
+                            // otherwise empty bubble, which read as a message
+                            // rather than as a wait (§10 — the state is shown,
+                            // and it is honest about being a state).
+                            Item {
+                                id: waiting
+                                width: parent.width
+                                visible: !isUser && !isError && body === ""
+                                         && thinking === "" && streaming
+                                height: visible ? Theme.lineHeight : 0
+
+                                property int dotPhase: 0
+                                Timer {
+                                    interval: motion.ms(motion.slideMs)
+                                    running: waiting.visible && !motion.reduceMotion
+                                    repeat: true
+                                    onTriggered: waiting.dotPhase = (waiting.dotPhase + 1) % 4
+                                }
+                                PixelText {
+                                    anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                                    text: "loading" + (motion.reduceMotion ? "…"
+                                          : "...".substring(0, waiting.dotPhase))
+                                    color: Theme.text
+                                }
+                            }
+
                             // The reasoning, a COLLAPSIBLE disclosure that starts
                             // folded. Its heading reports progress: "thinking…"
                             // (one step brighter) while the reasoning streams, and
@@ -1665,31 +1737,35 @@ Item {
                                         // "thought for 12s" once it has [his,
                                         // 2026-08-22] — the duration is the one
                                         // reading a folded block still gives.
+                                        // The ellipsis rides the TIME, not the
+                                        // token count [his, 2026-08-22]: it is
+                                        // the part that is still running.
                                         PixelText {
                                             text: {
                                                 var d = win.fmtDur(thinkingActive
                                                                    ? think.elapsed
                                                                    : thinkMs);
                                                 if (thinkingActive)
-                                                    return d !== "" ? "thinking for " + d
-                                                                    : "thinking";
+                                                    return (d !== "" ? "thinking for " + d
+                                                                     : "thinking")
+                                                           + thinkToggle.dots;
                                                 return d !== "" ? "thought for " + d
                                                                 : "thought";
                                             }
                                             color: thinkingActive ? Theme.text : Theme.textDim
                                         }
-                                        // The reasoning-token count, and — while
-                                        // active — an animated ellipsis. The count
-                                        // PERSISTS once counted, so a COLLAPSED block
-                                        // still reports its size after the answer
-                                        // starts (the header is all he sees when it
-                                        // is folded); the ellipsis is the only part
-                                        // that ends with the thinking (§9.1
-                                        // subordinated — one step dim, never accent).
+                                        // The reasoning-token count, named and
+                                        // still: "240 tokens", "1.2k tokens"
+                                        // [his, 2026-08-22]. It PERSISTS once
+                                        // counted, so a COLLAPSED block still
+                                        // reports its size after the answer
+                                        // starts — the heading is all he sees
+                                        // when it is folded (§9.1 subordinated —
+                                        // one step dim, never accent).
                                         PixelText {
-                                            visible: thinkTokens > 0 || thinkingActive
-                                            text: (thinkTokens > 0 ? "· " + thinkTokens : "")
-                                                  + (thinkingActive ? " " + thinkToggle.dots : "")
+                                            visible: thinkTokens > 0
+                                            text: "· " + win.fmtCount(thinkTokens)
+                                                  + " tokens"
                                             color: Theme.textDim
                                         }
                                     }
@@ -1963,11 +2039,11 @@ Item {
                             Bubble {
                                 id: bubble
                                 // Nothing to box when the turn has no text yet —
-                                // the reasoning above carries the wait, so an
-                                // empty slab under it would be a second, blank
-                                // bubble (§10 — never a control with no reading).
+                                // the `loading…` line and the reasoning above
+                                // carry the wait, so an empty slab under them
+                                // would be a second, blank bubble (§10 — never a
+                                // control with no reading).
                                 visible: body !== "" || imageCol.visible
-                                         || (!isUser && streaming && thinking === "")
                                 user: isUser
                                 isError: model.isError
                                 x: isUser ? turnStack.width - width : 0
@@ -2014,15 +2090,6 @@ Item {
                                         text: body
                                         color: isError ? Theme.crit : Theme.text
                                     }
-                                    PixelText {
-                                        width: parent.width
-                                        wrapMode: Text.Wrap
-                                        visible: !isUser && !isError && body === "" && streaming
-                                                 && thinking === ""
-                                        text: "…"
-                                        color: Theme.text
-                                    }
-
                                     // The model's answer, rendered as Markdown (the reply
                                     // comes back in it — docs/DESIGN.md §2). Only the
                                     // assistant body; user text and errors above stay plain.
@@ -2085,6 +2152,41 @@ Item {
                                             text: "fetching an image…"
                                             color: Theme.text
                                         }
+                                    }
+                                }
+                            }
+
+                            // "continue" — the way on from an answer that stopped
+                            // mid-sentence (§10.2: the control appears only when
+                            // it can actually do something, and only on the last
+                            // row, which is the only one it could extend).
+                            Item {
+                                width: parent.width
+                                visible: !isUser && cutOff && !streaming
+                                         && index === chatLog.count - 1 && !Ollama.busy
+                                height: visible ? contBtn.height + 4 : 0
+
+                                Rectangle {
+                                    id: contBtn
+                                    y: 4
+                                    width: contLabel.implicitWidth + 16
+                                    height: 20
+                                    radius: Theme.rounding
+                                    border.width: Theme.ctrlBorder
+                                    border.color: Theme.border
+                                    color: contMouse.containsMouse ? Theme.highlight : Theme.bg
+                                    PixelText {
+                                        id: contLabel
+                                        anchors.centerIn: parent
+                                        text: "continue"
+                                        color: Theme.accent
+                                    }
+                                    MouseArea {
+                                        id: contMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: win.continueReply()
                                     }
                                 }
                             }

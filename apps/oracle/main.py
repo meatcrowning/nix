@@ -1396,6 +1396,11 @@ class Ollama(QObject):
     replyThinking = Signal(str)   # a "thinking" model's reasoning deltas
     replyThinkTokens = Signal(int)  # running count of reasoning tokens this turn
     replyDone = Signal()
+    #: The reply STOPPED SHORT — ollama's own `done_reason`, so far only
+    #: "length" (the model hit its token ceiling mid-sentence). QML draws a
+    #: `continue` on that row rather than leaving him a half-sentence with no
+    #: way on (docs/DESIGN.md §10 — the state is shown, and it is actionable).
+    replyTruncated = Signal(str)
     replyError = Signal(str)
 
     # The web_search tool-call loop, surfaced so QML can draw a subordinated
@@ -1459,6 +1464,7 @@ class Ollama(QObject):
         self._model = ""         # the model for the current turn
         self._messages = []      # the growing message list across a tool loop
         self._acc_content = ""   # assistant content accumulated in this sub-turn
+        self._done_reason = ""   # ollama's reason the last frame was the last
         self._images_shown = set()
         self._md_images = {"n": 0}
         self._tool_calls = []    # tool calls accumulated in this sub-turn
@@ -1859,6 +1865,61 @@ class Ollama(QObject):
         # either frees painter's weights (its own toast says so) or refuses,
         # and a refusal is DRAWN rather than swallowed (docs/DESIGN.md §10).
         # Anything wrong with the warden itself calls back ok, always.
+        def _go(ok, reason):
+            if not ok:
+                self._set_busy(False)
+                self.replyError.emit(reason)
+                return
+            self._post_chat()
+
+        self._warden.reserve("ollama", model=model, cb=_go)
+
+    #: What `continueReply` says to a model whose answer stopped mid-sentence.
+    #: A user turn, not an assistant prefix: ollama will happily generate from a
+    #: trailing assistant message, but no model is reliable about NOT starting
+    #: over when asked that way, and the partial is right there above it.
+    CONTINUE_PROMPT = (
+        "Your previous message was cut off mid-way because you hit the "
+        "generation length limit. Carry on from exactly where it stopped — "
+        "continue the very next character, mid-sentence and mid-word if that is "
+        "where it ended. Do not repeat any of it, do not summarise it, do not "
+        "start over, and do not add a preamble like \"continuing\".")
+
+    @Slot(str, str, str)
+    def continueReply(self, model, history_json, partial):
+        """Resume a reply that stopped short, into the SAME message.
+
+        `history_json` is every turn BEFORE the truncated one; `partial` is what
+        that turn managed to say. The model is handed both plus
+        `CONTINUE_PROMPT`, and QML streams the answer onto the end of the row it
+        already has — so a cut-off answer becomes one whole answer, not two
+        bubbles that have to be read together [his, 2026-08-22].
+
+        Everything else is `send`'s machinery unchanged: same tools, same warden
+        reservation, same streaming path.
+        """
+        if not model or not partial.strip():
+            return
+        self.cancel()
+        self._model = model
+        budget = self._research_budget(partial[-2000:])
+        self._max_results = budget["max_results"]
+        self._messages = ([{"role": "system",
+                            "content": self._system_prompt(budget["guidance"])}]
+                          + self._parse_history(history_json)
+                          + [{"role": "assistant", "content": partial},
+                             {"role": "user", "content": self.CONTINUE_PROMPT}])
+        self._think_tokens = 0
+        self._rounds = 0
+        self._images_shown = set()
+        self._md_images = {"n": 0}
+        self._resp_t0 = 0.0
+        self._resp_tokens = 0
+        self._set_tps(0.0)
+        self.refreshModelInfo(model)
+        self._set_busy(True)
+        self.replyStarted.emit()
+
         def _go(ok, reason):
             if not ok:
                 self._set_busy(False)
@@ -2404,6 +2465,7 @@ class Ollama(QObject):
         self._buf = b""
         self._acc_content = ""
         self._tool_calls = []
+        self._done_reason = ""
         reply = self._nam.post(req, body)
         self._reply = reply
         reply.readyRead.connect(lambda: self._on_stream(reply))
@@ -2471,6 +2533,7 @@ class Ollama(QObject):
             # The final frame carries ollama's own token accounting — the exact
             # generation rate, which replaces the running estimate.
             if obj.get("done"):
+                self._done_reason = str(obj.get("done_reason") or "")
                 ec = obj.get("eval_count")
                 ed = obj.get("eval_duration")     # nanoseconds
                 if isinstance(ec, (int, float)) and isinstance(ed, (int, float)) \
@@ -2517,6 +2580,8 @@ class Ollama(QObject):
         if self._attach_typed_images():
             return
         self._set_busy(False)
+        if self._done_reason == "length":
+            self.replyTruncated.emit(self._done_reason)
         self.replyDone.emit()
 
     #: How many `![](…)` images one reply may pull in on its own. A model
@@ -2561,6 +2626,8 @@ class Ollama(QObject):
         if remaining["n"] > 0 or not self._busy:
             return
         self._set_busy(False)
+        if self._done_reason == "length":
+            self.replyTruncated.emit(self._done_reason)
         self.replyDone.emit()
 
     # ---- the web_search tool loop ----
@@ -4219,6 +4286,8 @@ def run_selftest(app, shell, win, plasma, warnings):
                  "thinkTokens": 24, "thinkMs": 12400},
                 {"isUser": False, "who": "qwen3.6:35b-a3b",
                  "body": "ollama: connection refused", "isError": True},
+                {"isUser": False, "who": "qwen3.6:35b-a3b",
+                 "body": "and this one stopped mid-sen", "cutOff": True},
             ]
             # Under Hyprland the QML root is the WINDOW; `loadTurns` lives on
             # the `Root` item inside it, and invoking it on the Window is a
