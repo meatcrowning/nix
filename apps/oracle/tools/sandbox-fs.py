@@ -2,7 +2,8 @@
 """oracle's jailed filesystem executor — the muscle behind its file tools.
 
 oracle offers the local ollama model a set of file tools (list/read/write/edit/
-move/delete/mkdir, plus the search ops glob/grep/tree; see apps/oracle/main.py
+move/delete/mkdir, plus the search ops glob/grep/tree and `image`, which hands a
+local picture back base64 for a vision model to LOOK at; see apps/oracle/main.py
 `FILE_TOOLS`). Every one of them runs
 THROUGH this script, and this script is the jail: it takes a WRITE root as
 argv[1] and refuses to write, edit, move or delete anything outside it, symlinks
@@ -188,6 +189,58 @@ def op_read(root, req):
             "end_line": end, "total_lines": total,
             "truncated": end < total or cut_bytes,
             "next_offset": end if end < total else None}
+
+
+#: The biggest image the `view_image` tool will hand back, in BYTES before
+#: base64. It rides the same ceiling a dropped attachment gets (main.py
+#: ATTACH_IMAGE_MAX): past this the model is told the size rather than the
+#: window spending 30 MB of context on one picture.
+IMAGE_MAX_BYTES = 8 * 1024 * 1024
+
+#: The raster types a vision model accepts, by MAGIC BYTES — never the
+#: extension (main.py `_sniff_image` carries the same table for dropped files).
+IMAGE_MAGIC = ((b"\x89PNG\r\n\x1a\n", "image/png"),
+               (b"\xff\xd8\xff", "image/jpeg"),
+               (b"GIF87a", "image/gif"),
+               (b"GIF89a", "image/gif"))
+
+
+def op_image(root, req):
+    """Read an IMAGE file and hand it back base64, for the model to look at.
+
+    The same read jail as every other read op, so `view_image` can reach
+    anything the model could already `read_file` and nothing more. Only real
+    raster images come back (sniffed, never trusted to the extension), and only
+    up to IMAGE_MAX_BYTES — the point is a picture the model can see, not a
+    channel for arbitrary bytes.
+    """
+    p = resolve(root, req.get("path", ""), must_exist=True)
+    if os.path.isdir(p):
+        fail("is a directory: " + req.get("path", ""))
+    try:
+        size = os.path.getsize(p)
+    except OSError as e:
+        fail("cannot read: " + str(e))
+    if size > IMAGE_MAX_BYTES:
+        fail("image is %d MB, over the %d MB limit"
+             % (size // (1024 * 1024), IMAGE_MAX_BYTES // (1024 * 1024)))
+    try:
+        raw = open(p, "rb").read()
+    except OSError as e:
+        fail("cannot read: " + str(e))
+    media = ""
+    for magic, mt in IMAGE_MAGIC:
+        if raw.startswith(magic):
+            media = mt
+            break
+    if not media and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        media = "image/webp"
+    if not media:
+        fail("not an image this model can look at (png, jpeg, gif or webp): "
+             + req.get("path", ""))
+    return {"ok": True, "path": rel_to_root(root, p), "media": media,
+            "bytes": len(raw),
+            "b64": base64.b64encode(raw).decode("ascii")}
 
 
 def op_write(root, req):
@@ -457,7 +510,8 @@ def op_tree(root, req):
 
 OPS = {"list": op_list, "read": op_read, "write": op_write, "edit": op_edit,
        "move": op_move, "delete": op_delete, "mkdir": op_mkdir, "put": op_put,
-       "glob": op_glob, "grep": op_grep, "tree": op_tree}
+       "glob": op_glob, "grep": op_grep, "tree": op_tree,
+       "image": op_image}
 
 # The READ-ONLY ops. They may reach a WIDER root than the mutating ops: the
 # model gets read access to the whole filesystem, root '/' (his ask,
@@ -466,7 +520,7 @@ OPS = {"list": op_list, "read": op_read, "write": op_write, "edit": op_edit,
 # Absent argv[2], read ops fall back to the write root — so an older executor
 # over ssh (the OTHER host not yet pulled) just keeps the old jailed-both
 # behaviour rather than breaking.
-READ_OPS = {"list", "read", "glob", "grep", "tree"}
+READ_OPS = {"list", "read", "glob", "grep", "tree", "image"}
 
 
 def main():
