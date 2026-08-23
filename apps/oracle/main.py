@@ -34,7 +34,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import shlex
 from html.parser import HTMLParser
 
-from PySide6.QtCore import (QObject, Slot, Signal, Property, QUrl,
+from PySide6.QtCore import (QObject, Slot, Signal, Property, QUrl, QUrlQuery,
                             QFileSystemWatcher, QProcess, QProcessEnvironment,
                             QTimer)
 from PySide6.QtGui import QGuiApplication, QColor, QImage
@@ -193,6 +193,207 @@ FETCH_URL_TOOL_NAMES = {"fetch_url"}
 #: hands back (his rule 5 — a tool result must never blow the context window).
 FETCH_URL_MAX_BYTES = 4 * 1024 * 1024
 FETCH_URL_CHARS = 20000
+
+
+#: ---- call_api: a JSON web API as a tool ------------------------------------
+#: `fetch_url` already GETs a JSON endpoint, but it hands the model the RAW
+#: body against a 20k character cap — a Danbooru `posts.json` spends that whole
+#: budget on ~8 posts of metadata nobody asked for, and it can send no
+#: credentials at all. This tool is the same GET with the three things that
+#: were missing: a KEYRING (so a key never enters the transcript), FIELD
+#: PROJECTION applied before the cap (20 rows of id/file_url/tags instead of 8
+#: whole posts), and a small REGISTRY of sites whose endpoint shape the model
+#: would otherwise have to guess. Read-only by construction (his call): GET and
+#: HEAD only, so a tool-calling model holding his keys cannot favourite, upload
+#: or delete anything on a remote account.
+#:
+#: The registry is a convenience, not the surface — `url` reaches any http(s)
+#: JSON API, with `auth` naming a keyring entry for its headers.
+API_SITES = {
+    "danbooru": {
+        "base": "https://danbooru.donmai.us", "path": "/posts.json",
+        "params": {"limit": 20},
+        "fields": ["id", "file_url", "preview_file_url", "tag_string",
+                   "rating", "score", "source"],
+        "note": "tags= is space-separated; 2 tags max without an account",
+    },
+    "safebooru": {
+        "base": "https://safebooru.donmai.us", "path": "/posts.json",
+        "params": {"limit": 20},
+        "fields": ["id", "file_url", "preview_file_url", "tag_string",
+                   "rating", "score", "source"],
+        "note": "danbooru's safe-rating mirror, same API",
+    },
+    "e621": {
+        "base": "https://e621.net", "path": "/posts.json",
+        "params": {"limit": 20}, "select": "posts",
+        "fields": ["id", "file.url", "preview.url", "tags.general", "rating",
+                   "score.total", "sources"],
+        "auth": {"basic": ["username", "api_key"]},
+        "note": ("tags= is space-separated; answers anonymous requests with "
+                 "403, so it needs a keyring entry"),
+    },
+    "gelbooru": {
+        "base": "https://gelbooru.com", "path": "/index.php",
+        "params": {"page": "dapi", "s": "post", "q": "index", "json": "1",
+                   "limit": 20},
+        "select": "post",
+        "fields": ["id", "file_url", "preview_url", "tags", "rating", "score",
+                   "source"],
+        "auth": {"params": ["api_key", "user_id"]},
+        "note": ("tags= is space-separated; answers anonymous requests with "
+                 "401, so it needs a keyring entry"),
+    },
+    "rule34": {
+        "base": "https://api.rule34.xxx", "path": "/index.php",
+        "params": {"page": "dapi", "s": "post", "q": "index", "json": "1",
+                   "limit": 20},
+        "fields": ["id", "file_url", "preview_url", "tags", "rating", "score",
+                   "source"],
+        "auth": {"params": ["api_key", "user_id"]},
+        "note": ("tags= is space-separated; answers anonymous requests with a "
+                 "\"missing authentication\" body, so it needs a keyring entry"),
+    },
+    "yandere": {
+        "base": "https://yande.re", "path": "/post.json",
+        "params": {"limit": 20},
+        "fields": ["id", "file_url", "preview_url", "tags", "rating", "score",
+                   "source"],
+        "note": "moebooru; tags= is space-separated, no key needed",
+    },
+    "konachan": {
+        "base": "https://konachan.com", "path": "/post.json",
+        "params": {"limit": 20},
+        "fields": ["id", "file_url", "preview_url", "tags", "rating", "score",
+                   "source"],
+        "note": "moebooru; tags= is space-separated, no key needed",
+    },
+}
+#: The client identity every call carries unless its site names its own. NOT
+#: fetch_url's browser UA: danbooru 403s that string and 200s this one, and
+#: e621's terms ask for a named client outright.
+API_USER_AGENT = b"chatter/1.0 (oracle desktop client)"
+#: Caps, his rule 5: a tool result must never blow the context window.
+API_MAX_BYTES = 4 * 1024 * 1024
+API_CHARS = 16000
+API_MAX_ROWS = 100
+#: Query parameters whose VALUE is a credential. Stripped from every URL that
+#: reaches the model, the transcript or the disclosure line — the point of the
+#: keyring is that a key is never written down where a session file can keep it.
+API_SECRET_PARAMS = {"api_key", "apikey", "key", "login", "user_id", "username",
+                     "password", "token", "access_token", "pw"}
+#: The keyring: `~/.config/oracle/api-keys.json` (override $ORACLE_API_KEYS), a
+#: dict of entry-name -> {"params": {...}, "headers": {...}, "basic": [u, p]}.
+#: Read on every call, so adding a key needs no restart. Absent file -> {}.
+API_KEYS_PATH = os.path.expanduser(
+    os.environ.get("ORACLE_API_KEYS", "~/.config/oracle/api-keys.json"))
+
+
+def api_credentials(name):
+    """The keyring entry for `name`, or {} — never raises, never logged."""
+    try:
+        with open(API_KEYS_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        entry = data.get(name)
+        return entry if isinstance(entry, dict) else {}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def _api_sites_blurb():
+    """The registry as one line per site, built from the table so the tool
+    description cannot drift from what the code actually sends."""
+    return "\n".join(
+        "  " + k + " — " + v["base"] + v["path"] + "; " + v.get("note", "")
+        + (" (a key is configured)" if v.get("auth") and api_credentials(k)
+           else "")
+        for k, v in sorted(API_SITES.items()))
+
+
+CALL_API_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "call_api",
+        "description": (
+            "Query a JSON web API and get back only the fields you asked for. "
+            "Use this instead of fetch_url whenever the target is an API "
+            "rather than a page: it parses the JSON, pulls out the list of "
+            "results and projects each row down to the fields you name, so a "
+            "search returns twenty usable rows instead of eight posts of "
+            "metadata. Read-only — GET and HEAD only, it cannot post, upload "
+            "or delete.\n"
+            "Name a `site` for one of the image boards below and you need only "
+            "give `params` (their search parameter is `tags`, space-separated, "
+            "e.g. {\"tags\": \"cat_girl rating:general\", \"limit\": 10}); the "
+            "endpoint, the result list and a sensible default field set are "
+            "already known — and a row's `file_url` goes straight to "
+            "fetch_image when he wants to SEE one. For anything else give an "
+            "absolute `url` and, if "
+            "it needs credentials, the name of a keyring entry in `auth`. "
+            "Known sites:\n" + _api_sites_blurb()),
+        "parameters": {"type": "object", "properties": {
+            "site": {"type": "string", "enum": sorted(API_SITES),
+                     "description": "One of the known sites. Omit and give `url` for any other API."},
+            "url": {"type": "string",
+                    "description": ("Absolute http(s) URL of the endpoint, for an API "
+                                    "that is not in the site list. Ignored when `site` is given.")},
+            "path": {"type": "string",
+                     "description": "Override the site's default endpoint path (e.g. /tags.json)."},
+            "params": {"type": "object",
+                       "description": ("Query parameters as a flat object, e.g. "
+                                       "{\"tags\": \"fox rating:general\", \"limit\": 10}.")},
+            "fields": {"type": "array", "items": {"type": "string"},
+                       "description": ("Fields to keep from each result row; dotted paths "
+                                       "reach into nested objects (\"file.url\"). Omit for the "
+                                       "site's defaults, or pass [\"*\"] to keep whole rows.")},
+            "select": {"type": "string",
+                       "description": ("Dotted path to the list inside the response, when the "
+                                       "API wraps it (e.g. \"posts\"). Omit when the response "
+                                       "is a bare array or the site is known.")},
+            "auth": {"type": "string",
+                     "description": ("Name of a keyring entry whose headers/params to send. "
+                                     "Only for `url` calls; a known site uses its own entry.")},
+            "offset": {"type": "integer",
+                       "description": "0-based row offset into the result list; use next_offset to page."},
+            "method": {"type": "string", "enum": ["GET", "HEAD"],
+                       "description": "Default GET."}},
+            "required": []}},
+}
+CALL_API_TOOL_NAMES = {"call_api"}
+
+
+def _api_dig(obj, path):
+    """`obj` walked by a dotted path; None if any step is missing. List indices
+    may appear as a numeric step ("sources.0")."""
+    cur = obj
+    for part in str(path).split("."):
+        if isinstance(cur, list):
+            try:
+                cur = cur[int(part)]
+            except (ValueError, IndexError):
+                return None
+        elif isinstance(cur, dict):
+            if part not in cur:
+                return None
+            cur = cur[part]
+        else:
+            return None
+    return cur
+
+
+def _api_safe_url(url):
+    """`url` with every credential parameter's value replaced by a marker, so a
+    key cannot reach the model, the transcript or the disclosure line."""
+    u = QUrl(url)
+    q = QUrlQuery(u)
+    items = q.queryItems()
+    if not any(k.lower() in API_SECRET_PARAMS for k, _ in items):
+        return url
+    out = QUrlQuery()
+    for k, v in items:
+        out.addQueryItem(k, "(set)" if k.lower() in API_SECRET_PARAMS else v)
+    u.setQuery(out)
+    return u.toString()
 
 
 class _PageText(HTMLParser):
@@ -2039,7 +2240,8 @@ class Ollama(QObject):
         puts in the payload, so `describe_self` reports exactly what the model
         can call (docs/DESIGN.md §10 — a true list, not a remembered one)."""
         tools = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, SELF_TOOL,
-                 IMAGE_TOOL, SEARCH_IMAGE_TOOL, FETCH_URL_TOOL, EXEC_TOOL]
+                 IMAGE_TOOL, SEARCH_IMAGE_TOOL, FETCH_URL_TOOL,
+                 CALL_API_TOOL, EXEC_TOOL]
                  + list(SESSION_TOOLS) + list(MEMORY_TOOLS)
                  + [t for t in [skill_tool()] if t])
         names = [t.get("function", {}).get("name", "") for t in tools
@@ -2089,7 +2291,7 @@ class Ollama(QObject):
         # model.
         payload["tools"] = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL,
                             SELF_TOOL, IMAGE_TOOL, SEARCH_IMAGE_TOOL,
-                            FETCH_URL_TOOL, EXEC_TOOL]
+                            FETCH_URL_TOOL, CALL_API_TOOL, EXEC_TOOL]
                             + list(SESSION_TOOLS) + list(MEMORY_TOOLS)
                             + [t for t in [skill_tool()] if t])
         body = json.dumps(payload).encode("utf-8")
@@ -2245,6 +2447,8 @@ class Ollama(QObject):
             elif name in FETCH_URL_TOOL_NAMES:
                 self._fetch_url(str(args.get("url", "")).strip(),
                                 args.get("offset", 0), i, remaining, calls)
+            elif name in CALL_API_TOOL_NAMES:
+                self._call_api(args, i, remaining, calls)
             elif name in FILE_TOOL_NAMES:
                 self._run_fs_tool(name, args, i, remaining, calls)
             elif name in EXEC_TOOL_NAMES:
@@ -2503,6 +2707,218 @@ class Ollama(QObject):
         finally:
             reply.deleteLater()
             self._tool_done(remaining, calls)
+
+    def _call_api(self, args, idx, remaining, calls):
+        """Query a JSON API and hand back projected rows. The same in-process
+        GET fetch_url uses (shared QNetworkAccessManager, Qt6 follows
+        redirects), so it runs wherever the window is — no executor, no host
+        branch — and it is surfaced through the web-search disclosure."""
+        def fail(label, msg):
+            self.webSearchError.emit(label or "call_api", msg)
+            self._tool_results[idx] = {
+                "role": "tool", "tool_name": "call_api",
+                "content": json.dumps({"error": msg})}
+            self._tool_done(remaining, calls)
+
+        site = str(args.get("site", "") or "").strip().lower()
+        method = str(args.get("method", "GET") or "GET").strip().upper()
+        if method not in ("GET", "HEAD"):
+            fail(site, "call_api is read-only: GET and HEAD only, not " + method)
+            return
+        if site and site not in API_SITES:
+            fail(site, "unknown site: " + site + " — known sites are "
+                 + ", ".join(sorted(API_SITES)) + ", or give an absolute url")
+            return
+        spec = API_SITES.get(site, {})
+        params = args.get("params")
+        params = dict(params) if isinstance(params, dict) else {}
+        fields = args.get("fields")
+        fields = list(fields) if isinstance(fields, list) else spec.get("fields")
+        select = args.get("select") or spec.get("select") or ""
+        try:
+            row_offset = max(0, int(args.get("offset") or 0))
+        except (TypeError, ValueError):
+            row_offset = 0
+
+        if site:
+            path = str(args.get("path", "") or spec["path"])
+            if not path.startswith("/"):
+                path = "/" + path
+            u = QUrl(spec["base"] + path)
+            merged = dict(spec.get("params", {}))
+            merged.update(params)
+            params = merged
+            creds = api_credentials(site)
+            # A site KNOWN to refuse anonymous requests is refused here rather
+            # than by its own 401/403 — the round trip buys nothing, and the
+            # model gets the thing it can act on: what to put where.
+            if spec.get("auth") and not creds:
+                want = spec["auth"].get("params") or spec["auth"].get("basic") or []
+                fail(site, site + " needs credentials: put {\"" + site
+                     + "\": {\"" + ("params" if spec["auth"].get("params")
+                                    else "basic") + "\": "
+                     + json.dumps(want) + "}} in " + API_KEYS_PATH
+                     + " (values, not these placeholders) — tell him that, do "
+                       "not guess a key")
+                return
+        else:
+            raw = str(args.get("url", "") or "").strip()
+            u = QUrl(raw)
+            if u.scheme().lower() not in ("http", "https") or not u.host():
+                fail(raw, "call_api takes a known `site` or an absolute "
+                          "http:// or https:// `url`")
+                return
+            creds = api_credentials(str(args.get("auth", "") or "").strip()) \
+                if args.get("auth") else {}
+
+        q = QUrlQuery(u)
+        for k, v in params.items():
+            if v is None:
+                continue
+            q.removeAllQueryItems(str(k))
+            q.addQueryItem(str(k), str(v))
+        for k, v in (creds.get("params") or {}).items():
+            q.removeAllQueryItems(str(k))
+            q.addQueryItem(str(k), str(v))
+        u.setQuery(q)
+        safe = _api_safe_url(u.toString())
+
+        req = QNetworkRequest(u)
+        req.setRawHeader(b"Accept", b"application/json,text/plain;q=0.8,*/*;q=0.5")
+        for k, v in (spec.get("headers") or {}).items():
+            req.setRawHeader(str(k).encode(), str(v).encode())
+        if not (spec.get("headers") or {}).get("User-Agent"):
+            # NOT fetch_url's browser UA — the opposite rule holds here.
+            # Measured 2026-08-22: danbooru's JSON API answers that Chrome
+            # string with 403 and this one with 200. An API wants a named
+            # client; a page wants a browser.
+            req.setRawHeader(b"User-Agent", API_USER_AGENT)
+        for k, v in (creds.get("headers") or {}).items():
+            req.setRawHeader(str(k).encode(), str(v).encode())
+        basic = creds.get("basic")
+        if isinstance(basic, (list, tuple)) and len(basic) == 2:
+            token = base64.b64encode(
+                (str(basic[0]) + ":" + str(basic[1])).encode()).decode()
+            req.setRawHeader(b"Authorization", b"Basic " + token.encode())
+
+        self.webSearchStarted.emit((site + ": " if site else "") + safe)
+        reply = self._nam.head(req) if method == "HEAD" else self._nam.get(req)
+        reply.finished.connect(
+            lambda: self._on_call_api(reply, safe, site, fields, select,
+                                      row_offset, method, idx, remaining, calls))
+
+    def _on_call_api(self, reply, safe, site, fields, select, row_offset,
+                     method, idx, remaining, calls):
+        if not self._busy:              # turn was cancelled mid-call
+            reply.deleteLater()
+            return
+        try:
+            data = bytes(reply.readAll().data())
+            status = reply.attribute(
+                QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+            if reply.error() != QNetworkReply.NetworkError.NoError:
+                msg = reply.errorString()
+                # A booru answers an auth failure with a 401/403 body, and
+                # "which key is missing" is the one thing worth naming.
+                extra = ""
+                if status in (401, 403) and site and not api_credentials(site):
+                    extra = (" — no keyring entry for " + site + " in "
+                             + API_KEYS_PATH)
+                self.webSearchError.emit(safe, msg)
+                self._tool_results[idx] = {
+                    "role": "tool", "tool_name": "call_api",
+                    "content": json.dumps({"error": "request failed: " + msg + extra,
+                                           "status": status, "url": safe})}
+                return
+            ctype = str(reply.header(
+                QNetworkRequest.KnownHeaders.ContentTypeHeader) or "")
+            if method == "HEAD":
+                result = {"url": safe, "status": status,
+                          "content_type": ctype or "unknown"}
+                self.webSearchDone.emit(safe, "- [" + safe + "](" + safe + ")", 1)
+                self._tool_results[idx] = {"role": "tool", "tool_name": "call_api",
+                                           "content": json.dumps(result)}
+                return
+            if len(data) > API_MAX_BYTES:
+                data = data[:API_MAX_BYTES]
+            body = data.decode("utf-8", "replace").strip()
+            low = ctype.lower()
+            if low.startswith(("image/", "audio/", "video/", "font/")):
+                result = {"error": "not JSON: " + ctype, "url": safe}
+                self.webSearchError.emit(safe, "not JSON (" + ctype + ")")
+            else:
+                try:
+                    doc = json.loads(body) \
+                        if ("json" in low or body[:1] in "{[") else None
+                except ValueError:
+                    doc = None
+                if doc is None:
+                    # Not JSON at all — hand back the capped text rather than
+                    # pretending (docs/DESIGN.md §10), and say what it was.
+                    result = {"url": safe, "content_type": ctype or "unknown",
+                              "note": "the response was not JSON; raw text follows",
+                              "text": body[:API_CHARS]}
+                    if len(body) > API_CHARS:
+                        result["truncated"] = True
+                else:
+                    result = self._api_project(doc, safe, ctype, fields, select,
+                                               row_offset)
+                self.webSearchDone.emit(safe, "- [" + (site or safe) + "]("
+                                        + safe + ")", 1)
+            self._tool_results[idx] = {"role": "tool", "tool_name": "call_api",
+                                       "content": json.dumps(result)}
+        except (ValueError, TypeError) as e:
+            self.webSearchError.emit(safe, str(e))
+            self._tool_results[idx] = {
+                "role": "tool", "tool_name": "call_api",
+                "content": json.dumps({"error": str(e), "url": safe})}
+        finally:
+            reply.deleteLater()
+            self._tool_done(remaining, calls)
+
+    @staticmethod
+    def _api_project(doc, safe, ctype, fields, select, row_offset):
+        """The parsed response reduced to what was asked for: the result LIST
+        located, each row projected to `fields`, and the whole thing capped by
+        DROPPING ROWS rather than by cutting a JSON document in half — a
+        half-serialized row is unreadable to the model, a short list is not."""
+        rows = _api_dig(doc, select) if select else doc
+        if rows is None and select:
+            return {"url": safe, "error": "no list at select path: " + select,
+                    "keys": sorted(doc)[:40] if isinstance(doc, dict) else None}
+        if not isinstance(rows, list):
+            text = json.dumps(rows if rows is not None else doc,
+                              ensure_ascii=False)
+            out = {"url": safe, "content_type": ctype or "unknown",
+                   "json": text[:API_CHARS]}
+            if len(text) > API_CHARS:
+                out["truncated"] = True
+                out["note"] = ("the response is not a list, so it could not be "
+                               "paged — name `select` or `fields` to narrow it")
+            return out
+        total = len(rows)
+        window = rows[row_offset:row_offset + API_MAX_ROWS]
+        keep = None if (not fields or "*" in fields) else fields
+        picked = []
+        for row in window:
+            if keep is None or not isinstance(row, dict):
+                picked.append(row)
+            else:
+                picked.append({f: _api_dig(row, f) for f in keep})
+        # Cap by dropping whole rows off the end.
+        while picked and len(json.dumps(picked, ensure_ascii=False)) > API_CHARS:
+            picked.pop()
+        out = {"url": safe, "count_returned": len(picked), "count_total": total,
+               "offset": row_offset, "rows": picked}
+        if not picked and window:
+            out["error"] = ("even one row is over the size cap — ask for fewer "
+                            "`fields`")
+        if row_offset + len(picked) < total:
+            out["truncated"] = True
+            out["next_offset"] = row_offset + len(picked)
+        if keep is not None:
+            out["fields"] = keep
+        return out
 
     def _tool_done(self, remaining, calls):
         remaining["n"] -= 1
