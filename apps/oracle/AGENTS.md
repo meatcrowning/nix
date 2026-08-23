@@ -1031,15 +1031,21 @@ everything seen over time cannot tell coexistence from a handover.
 ### It presses `continue` for him
 
 Even with `PERSISTENCE_NOTE` on every prompt, gemma4 ends a turn by ANNOUNCING
-its next step — "I'd like to proceed with…", "Shall I?", "I'll now grep for…" —
-and he was pressing `continue` over and over to get one task done [his,
-2026-08-23]. So the app presses it:
+its next step — "I'd like to proceed with…", "I'll now grep for…" — and he was
+pressing `continue` over and over to get one task done [his, 2026-08-23]. So the
+app presses it:
 
 - `Ollama.looksUnfinished(text)` reads the last 400 characters of a finished
   answer against `UNFINISHED_PATTERNS` — announcements of the model's own next
-  action, and permission-asks for work he already asked for. An answer that just
-  ENDS matches nothing, and a real question to him ("which of the two?") is not
-  an announcement.
+  action. An answer that just ENDS matches nothing.
+- **A tail that ends in `?` is never carried on**, whatever else it says. It is
+  his turn, and the press answers with `proceed` — so an unanswered question
+  gets answered for him. That is exactly what happened on 2026-08-23: a `hello`
+  drew "would you like me to play one of these tracks?", the app said yes twice,
+  and the turn ended with a track queued he never asked for. `shall i`,
+  `would you like me to` and `should i proceed` were patterns in that list and
+  are gone; a permission-ask now costs him one press, which is cheaper than an
+  action he did not ask for.
 - QML's `autoContinue()` runs off `onReplyDone`: at most
   `AUTO_CONTINUE_MAX` (3) presses per prompt, `continueReply("proceed")` each
   time, streaming into the same row. `PROCEED_PROMPT` tells the model to act
