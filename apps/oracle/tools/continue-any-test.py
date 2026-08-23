@@ -208,15 +208,21 @@ check("and it still ends in words",
 # QML asks before pressing it for him.
 ANNOUNCES = [
     "I'd like to proceed with the final step: using `edit_file` to inject it.",
-    "Shall I proceed with inspecting `AGENTS.md`?",
     "I'm going to use `grep` to find the class and the prompt methods.",
     "I'll now run the test suite and report the failures.",
 ]
+# A QUESTION IS HIS TURN. Answering one for him with `proceed` is what turned a
+# `hello` into five tool rounds that queued a track [his, 2026-08-23] — so a
+# tail that ends in `?` is never carried on, announcement in it or not.
 FINISHES = [
     "Done — I edited main.py and re-read it to check the change landed.",
     "Yes, I do. I have access to a real bash shell via the run_bash tool.",
     "The trip from Juneau takes about 15-20 minutes by floatplane.",
     "Which of the two directories do you want me to use?",
+    "Shall I proceed with inspecting `AGENTS.md`?",
+    "Would you like me to play one of these tracks, or help with something else?",
+    "I found 15 tracks. Should I go ahead and queue one?",
+    "I'll search the library next. Would you like me to?",
 ]
 for t in ANNOUNCES:
     check("announced work is unfinished: %r" % t[:34], o.looksUnfinished(t))

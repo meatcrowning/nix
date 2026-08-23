@@ -1968,17 +1968,20 @@ PERSISTENCE_NOTE = (
 AUTO_CONTINUE_MAX = 3
 
 #: A reply that ANNOUNCES work rather than doing it. Matched against the tail of
-#: a finished answer: "I'll now grep for…", "Shall I proceed?", "The next step
-#: is…". Deliberately narrow — an answer that simply ENDS matches nothing here,
-#: and a genuine question to him ("which of these two do you want?") is not an
-#: announcement of the model's own next action.
+#: a finished answer: "I'll now grep for…", "The next step is…". Deliberately
+#: narrow — an answer that simply ENDS matches nothing here, and a genuine
+#: question to him ("which of these two do you want?") is not an announcement of
+#: the model's own next action.
+#:
+#: `shall i` / `would you like me to` / `should i proceed` used to be in this
+#: list, and they are the reason a `hello` turned into five rounds that queued a
+#: track he never asked for [his, 2026-08-23]. Those are not announcements, they
+#: are the model WAITING ON HIM, and the app answered them for him with
+#: `proceed`. A question is never carried on: see `looksUnfinished`.
 UNFINISHED_PATTERNS = [
     r"\b(i'?ll|i will|i'?m going to|i am going to|let me|i'?d like to)\b"
     r"[^.?!\n]{0,90}\b(now|next|then|proceed|start|begin|run|execute|check|"
     r"verify|read|edit|write|create|search|grep|look|inspect|apply|use)\b",
-    r"\bshall i\b",
-    r"\bwould you like me to\b",
-    r"\bshould i (go ahead|proceed|continue|start)\b",
     r"\bproceed(ing)? (with|to)\b",
     r"\bthe (next|final) step\b",
     r"\bstand by\b",
@@ -3122,9 +3125,18 @@ class Ollama(QObject):
         TAIL is read — the last couple of sentences are where a model says what
         it is about to do — so a long answer that merely mentions a plan in
         passing and then finishes the work does not match.
+
+        AN ANSWER THAT ENDS IN A QUESTION IS WAITING ON HIM, whatever else the
+        tail says. It is his turn, and pressing `continue` on his behalf answers
+        his own question with `proceed` — which is how "hello" became five tool
+        rounds ending in a track queued for him [his, 2026-08-23]. The model
+        announcing its next step and then asking anyway costs him one press;
+        answering for him costs him actions he never asked for.
         """
         tail = (text or "")[-400:].lower()
         if not tail.strip():
+            return False
+        if tail.rstrip().endswith("?"):
             return False
         return any(re.search(p, tail) for p in UNFINISHED_PATTERNS)
 
