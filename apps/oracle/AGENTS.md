@@ -562,6 +562,21 @@ with the caption under it, and each failure as a crit line. `imageFetchStarted`/
 `imagesActive` drive the in-flight line. The model also gets a text tool result
 (`{ok, note}` or `{error}`) so it knows the outcome.
 
+**Two or more pictures are a GALLERY, and one opens over the window** [his,
+2026-08-23]: they used to stack full-width, one on top of the other, so seeing
+the third meant scrolling past the first two. `qml/ImageGallery.qml` draws one
+picture exactly as before and two or more as a tiled grid — balanced rows,
+justified to the full width, gapless from the shared edge, square crops, the
+caption inside the artwork on hover (docs/DESIGN.md §5.1). A tile opens
+`qml/Lightbox.qml`, a scene-level overlay in `Root.qml` (z:300, above the drop
+overlay): the picture fitted but never upscaled past native, Escape or a click
+on the ground to close, arrows or a click on the picture to step, and focus
+handed back to the reply area on close. Both are drawn once and serve both
+faces, since `Root.qml` is the shared Item. Failures keep their crit line
+whatever the count. Render them with `tools/gallery-shot.py [N]` — offscreen,
+its own generated pictures, no daemon and no turn — which also checks the
+overlay's keyboard.
+
 **Finding a real URL first — `search_images`.** `fetch_image` only GETs a URL
 the model already holds, and a model asked for "a picture of X" tends to GUESS
 a plausible image URL that 404s (the fetch then fails honestly, but no picture

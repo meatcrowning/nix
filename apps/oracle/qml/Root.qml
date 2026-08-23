@@ -1994,65 +1994,18 @@ Item {
                                         spacing: 6
                                         visible: !isUser && (images !== "[]" || imagesActive)
 
-                                        Repeater {
-                                            model: {
+                                        // ONE picture is one picture; two or
+                                        // more are a tiled grid, and a tile
+                                        // opens the Lightbox over the whole
+                                        // window [his, 2026-08-23]. Both live
+                                        // in ImageGallery.qml.
+                                        ImageGallery {
+                                            width: imageCol.width
+                                            entries: {
                                                 try { return JSON.parse(images); }
                                                 catch (e) { return []; }
                                             }
-                                            delegate: Column {
-                                                width: imageCol.width
-                                                spacing: 2
-
-                                                Rectangle {
-                                                    visible: !!modelData.ok
-                                                    width: pic.width + 2
-                                                    height: pic.height + 2
-                                                    color: Theme.bgAlt
-                                                    radius: Theme.rounding
-                                                    border.width: Theme.ctrlBorder
-                                                    border.color: Theme.border
-                                                    Image {
-                                                        id: pic
-                                                        x: 1; y: 1
-                                                        // sourceSize.width caps the decode
-                                                        // to the column and, set alone,
-                                                        // scales height by the real aspect
-                                                        // — and never upscales past native.
-                                                        readonly property real natW:
-                                                            (modelData.w && modelData.w > 0)
-                                                            ? modelData.w : (imageCol.width - 2)
-                                                        sourceSize.width:
-                                                            Math.min(imageCol.width - 2, natW)
-                                                        fillMode: Image.PreserveAspectFit
-                                                        asynchronous: true
-                                                        source: modelData.ok
-                                                                ? "file://" + modelData.path : ""
-                                                    }
-                                                }
-                                                // The caption (the model's alt text),
-                                                // subordinated (§9.1 — one step dim).
-                                                PixelText {
-                                                    visible: !!modelData.ok
-                                                             && !!modelData.alt && modelData.alt !== ""
-                                                    width: imageCol.width
-                                                    wrapMode: Text.Wrap
-                                                    text: modelData.alt || ""
-                                                    color: Theme.textDim
-                                                }
-                                                // The honest failure: a refused/failed
-                                                // fetch, or a saved file that will not
-                                                // load (§10 — say so, never a blank).
-                                                PixelText {
-                                                    visible: !modelData.ok || pic.status === Image.Error
-                                                    width: imageCol.width
-                                                    wrapMode: Text.Wrap
-                                                    text: "image: "
-                                                          + (modelData.error ? modelData.error
-                                                                             : "could not display")
-                                                          + (modelData.url ? " (" + modelData.url + ")" : "")
-                                                    color: Theme.crit
-                                                }
-                                            }
+                                            onEnlarge: (i) => lightbox.openAt(oks, i)
                                         }
 
                                         // A fetch still in flight (§10 — the wait is shown).
@@ -2138,6 +2091,16 @@ Item {
             text: "drop files to attach"
             color: Theme.accent
         }
+    }
+
+    // ----------------------------------------------------------- the lightbox
+    // A picture from a reply, enlarged over the conversation [his, 2026-08-23].
+    // Last in the tree and z:300 so it covers the drop overlay too; focus goes
+    // back to the reply area on close, exactly where Escape in the compose box
+    // sends it.
+    Lightbox {
+        id: lightbox
+        onClosed: replyFlick.forceActiveFocus()
     }
 
     // --------------------------------------------------------- the prompt box
