@@ -8,8 +8,12 @@
 #   * air: nixpkgs' Qt/Mesa can't create a GPU context on Apple Silicon, so
 #     exec the SYSTEM python3 with Fedora's python3-pyside6.
 #   * top: a plain wrapper over nixpkgs' python3 + PySide6, wrapped with the Qt
-#     env. oracle draws only text and talks to a loopback HTTP daemon — no image
-#     or media plugins are needed; QtNetwork ships with pyside6.
+#     env. Beyond QtNetwork (which ships with pyside6) it needs qtmultimedia:
+#     `show_video` plays a video inline in a reply, and the QML MediaPlayer +
+#     its FFmpeg backend live in that module. yt-dlp is on PATH for the same
+#     tool — it is what turns a YouTube (or other) watch page into the stream
+#     URL the player pulls; without it only a DIRECT video file URL resolves,
+#     which the tool then says (docs/DESIGN.md §10).
 #
 # Both run the LIVE source at ~/nix/apps/oracle/main.py, so QML/Python edits need
 # no rebuild — only changing the runtime deps does.
@@ -60,6 +64,7 @@ let
         buildInputs = [
           pyEnv
           pkgs.qt6.qtdeclarative
+          pkgs.qt6.qtmultimedia   # MediaPlayer/VideoOutput for show_video
 
           # THE PLASMA FACE (apps/pylib/kdeshell.py). In a Plasma session
           # chatter is a real QMainWindow — menubar, a toolbar carrying the
@@ -86,6 +91,8 @@ let
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/oracle \
             --add-flags /home/lam/nix/apps/oracle/main.py \
+            --prefix PATH : ${pkgs.yt-dlp}/bin \
+            --set-default QT_FFMPEG_DECODING_HW_DEVICE_TYPES cuda \
             --prefix XDG_DATA_DIRS : ${lib.concatStringsSep ":" [
               "${pkgs.kdePackages.oxygen-icons}/share"
               "${pkgs.kdePackages.breeze-icons}/share"

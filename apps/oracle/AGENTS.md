@@ -1119,6 +1119,71 @@ saved file that will not load draws its own crit line. All three reach both the
 user (a visible line) and the model (a tool error). The saved `path` persists in
 the session transcript, so a reloaded conversation still shows its images.
 
+## Video (show_video)
+
+**A reply can play a video where it says it** [his, 2026-08-23: *"are inline
+youtube video displays possible in oracle? like the youtube video displays in
+the bubble? or any video pulled from the internet?"*]. `VIDEO_TOOL`
+(`show_video`, offered every turn) takes a URL and an optional caption, and
+unlike `fetch_image` it accepts a **web PAGE**: a YouTube or Vimeo watch link
+resolves, and so does a direct `.mp4`/`.webm`/`.mkv`.
+
+**Nothing is downloaded.** What the tool produces is a STREAM url the QML
+`MediaPlayer` pulls off the network itself, so a 200 MB video costs no disk and
+no wait; the only local file is the poster frame, saved through the same
+`_save_image` the pictures use. The contract is `videoResult`, one JSON entry —
+`{ok:true, url, src, title, alt, w, h, duration, poster, live}` or
+`{ok:false, url, error}` — which QML appends to the row's `videos` array
+(a JSON-string field beside `images`) and `VideoDeck.qml` draws as one card per
+video. `videoStarted`/`videosActive` carry the in-flight line, which matters
+more here than for an image: resolving a watch page is the slow part.
+
+**Two routes, cheap one first.** A URL that names a media file is HEADed; if the
+server confirms it is video, that URL IS the stream and no subprocess runs.
+Everything else — a watch page, a shortener, and a media-looking URL the server
+would not confirm — goes to **yt-dlp**, async on the file tools' `QProcess`
+idiom, killed at `VIDEO_RESOLVE_MS` (45s) so a hung resolver fails the tool
+instead of stranding the turn.
+
+**`-f b` and NO protocol sort**, measured on a YouTube watch page 2026-08-23.
+`-f b` asks for the best SINGLE file (a video+audio pair would have to be
+downloaded and merged before anything could play). The tempting `-S proto:https`
+picks the progressive mp4 (itag 18) over the HLS manifest — and that URL answers
+**403 to everyone but yt-dlp**: with yt-dlp's own User-Agent, same IP, seconds
+later, curl still got 403 and Qt's player got `ResourceError / Could not open
+file`. The manifest `-f b` chooses on its own needs no headers: ffprobe reads
+it, and the real player reached `PlayingState` with 213s of duration first try.
+Take what yt-dlp ranks best; do not second-guess the protocol.
+
+**It never autoplays, and the decoder is built on the click.** The card sits on
+its poster under a drawn play marker (the staircase of §2.3, not a `▶` two of
+the three pixel fonts lack) until he presses it — he listens to music while he
+works, and a chat window that starts making noise because a model said something
+has taken his speakers. The `MediaPlayer` lives behind a `Loader` that only the
+click activates: viewer measured the process's FIRST QtMultimedia object at
+~460ms, and a transcript holding six videos he never played must not pay for
+six. The transport strip (elapsed clock in a fixed slot, scrub track, duration)
+sits INSIDE the artwork on hover, seeks with the pointer and no easing (§6.4),
+and is absent for a live stream, which has nothing to scrub.
+
+**Failure is drawn** (docs/DESIGN.md §10): a non-http URL is refused before any
+request, a resolve that fails reports yt-dlp's own last line, a resolve that
+produced no single stream says so, a missing yt-dlp names itself and the limit
+it leaves ("only a DIRECT video file URL"), and a stream the decoder rejects
+puts `can't play this stream` on the card rather than leaving a black box.
+Each reaches both audiences — a crit line in the chat, an error the model can
+act on — and the model's success result says the video does NOT start on its
+own, so it tells him it is there instead of narrating it as watched.
+
+**Packaging**: `home/prog/oracle.nix` adds `qt6.qtmultimedia` (the QML
+MediaPlayer/VideoOutput and its FFmpeg backend), puts `yt-dlp` on the wrapper's
+PATH, and sets `QT_FFMPEG_DECODING_HW_DEVICE_TYPES=cuda` on `top` for the same
+reason viewer does — Qt's ffmpeg backend probes VAAPI first, and VAAPI on
+`top`'s render node is NVIDIA's shim, which cannot export a surface at all.
+book keeps Qt's default. Harness: `tools/video-test.py` (offscreen; a stub
+resolver and a 127.0.0.1 server, so it reaches neither his screen nor the
+network), `--shot` for a PNG of the card.
+
 ## Dropped-file attachments
 
 Drag files from the file manager onto the window and they attach to the **next**
