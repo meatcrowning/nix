@@ -169,6 +169,104 @@ Item {
 
         Rectangle { width: parent.width; height: 1; color: Theme.border }
 
+        // ---- last.fm ----
+        // The whole section is honest about what it can do (docs/DESIGN.md
+        // §10): with no API key there is nothing to click, only the one
+        // command that puts one there; with an account linked the two
+        // switches are what he actually decides. `connect` opens the approval
+        // page in his browser and finishes by itself once he says yes — there
+        // is no second button to press too early.
+        Column {
+            width: parent.width
+            spacing: 4
+
+            Item {
+                width: parent.width
+                height: 20
+                PixelText {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "last.fm"
+                    color: root.fgText
+                }
+                HeaderButton {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: Lastfm.hasKeys
+                    label: Lastfm.connected ? "disconnect"
+                                            : (Lastfm.connecting ? "waiting..." : "connect")
+                    iconName: Lastfm.connected ? "network-disconnect" : "network-connect"
+                    fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
+                    lit: Lastfm.connecting
+                    onClicked: {
+                        if (Lastfm.connected) Lastfm.disconnectAccount();
+                        else if (!Lastfm.connecting) Lastfm.beginConnect();
+                    }
+                }
+            }
+
+            PixelText {
+                width: parent.width
+                wrapMode: Text.Wrap
+                color: root.fgDim
+                text: !Lastfm.hasKeys
+                      ? "no api key. tools/lastfm-connect.py --keys KEY SECRET"
+                      : (Lastfm.connecting
+                         ? "approve it in the browser"
+                         : (Lastfm.connected
+                            ? Lastfm.username + (Lastfm.queued > 0
+                                 ? " \u00b7 " + Lastfm.queued + " waiting to send" : "")
+                            : "not connected"))
+            }
+
+            PixelText {
+                width: parent.width
+                visible: Lastfm.lastError !== ""
+                wrapMode: Text.Wrap
+                color: Theme.crit
+                text: Lastfm.lastError
+            }
+
+            Item {
+                width: parent.width
+                height: 20
+                visible: Lastfm.connected
+                PixelText {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "scrobble plays"
+                    color: root.fgText
+                }
+                HeaderButton {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    label: Lastfm.scrobbling ? "on" : "off"
+                    fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
+                    lit: Lastfm.scrobbling
+                    onClicked: Lastfm.setScrobbling(!Lastfm.scrobbling)
+                }
+            }
+
+            Item {
+                width: parent.width
+                height: 20
+                visible: Lastfm.connected
+                PixelText {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "love favourites"
+                    color: root.fgText
+                }
+                HeaderButton {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    label: Lastfm.loveOnFavorite ? "on" : "off"
+                    fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
+                    lit: Lastfm.loveOnFavorite
+                    onClicked: Lastfm.setLoveOnFavorite(!Lastfm.loveOnFavorite)
+                }
+            }
+        }
+
+        Rectangle { width: parent.width; height: 1; color: Theme.border }
+
         // ---- library ----
         Item {
             width: parent.width

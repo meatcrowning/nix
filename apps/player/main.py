@@ -56,7 +56,7 @@ from PySide6.QtCore import (QObject, QProcess, Qt, QThread, QTimer, QUrl, Signal
                             Slot, Property, QFileSystemWatcher, QMetaObject,
                             Q_ARG)
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QProcessEnvironment
-from PySide6.QtGui import QColor, QGuiApplication, QImage
+from PySide6.QtGui import QColor, QDesktopServices, QGuiApplication, QImage
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 # Imported for its side effect as much as for the name: without QtQuick
 # loaded, PySide has no binding for the `Window` QML root and wraps it as a
@@ -77,6 +77,7 @@ from glyphs import Glyphs  # noqa: E402  (pylib; docs/DESIGN.md 2.3 display-site
 
 import atomicsave  # noqa: E402  (sibling module; also used by lyrics.py)
 import lyrics as lyricslib  # noqa: E402  (sibling module; also used by tools/)
+from scrobble import Scrobbler  # noqa: E402  (sibling module; Last.fm, off the GUI thread)
 import trackmatch  # noqa: E402  (pylib; the one artist/title normaliser)
 import mutagen  # noqa: E402
 from mutagen.flac import FLAC, Picture  # noqa: E402
@@ -1354,6 +1355,7 @@ class Library(QObject):
 
     def __init__(self, tagwriter, parent=None):
         super().__init__(parent)
+        self._scrobbler = None      # set by main.py; None everywhere else
         self._con = open_db()
         # Unicode-correct casefolding for the smart playlists' text rules.
         # SQLite's own lower()/upper() are ASCII-only, which in this library
@@ -1642,6 +1644,12 @@ class Library(QObject):
             self._tagwriter.enqueue(t["path"], rating=val)
         self.trackChanged.emit(track_id)
 
+    def set_scrobbler(self, scrobbler):
+        """Last.fm, wired in after construction by main.py. A heart here is a
+        love there — but the DB and the tag are written first and
+        unconditionally, so an outage costs the love, not the favourite."""
+        self._scrobbler = scrobbler
+
     @Slot(int, bool)
     def setFavorite(self, track_id, fav):
         self._con.execute("UPDATE tracks SET favorite=?, meta_mtime=? WHERE id=?",
@@ -1650,6 +1658,8 @@ class Library(QObject):
         t = self._track(track_id)
         if t:
             self._tagwriter.enqueue(t["path"], favorite=bool(fav))
+            if self._scrobbler is not None:
+                self._scrobbler.setLoved(dict(t), bool(fav))
         self.trackChanged.emit(track_id)
 
     def bump_playcount(self, track_id):
@@ -1865,6 +1875,8 @@ class Player(QObject):
         self._loop = self.LOOP_NONE
         self._listened = 0.0    # accumulated seconds actually heard, per track
         self._counted = False
+        self._started_at = 0.0  # wall clock this track began — a scrobble's timestamp
+        self._scrobbler = None  # set by main.py; None everywhere else
         self._mpv_paused = False
         self._idle = True
 
@@ -1957,6 +1969,19 @@ class Player(QObject):
             self._duration = dur
             self.durationChanged.emit()
 
+    def set_scrobbler(self, scrobbler):
+        """Wire Last.fm in after construction (main.py). Set late and by
+        hand so the player still builds with no account, no `scrobble.py` and
+        no network — every harness in tools/ constructs it that way."""
+        self._scrobbler = scrobbler
+
+    def _announce(self):
+        """Tell Last.fm what is playing. On every start AND every resume: a
+        now-playing entry expires by itself, so an unpause has to re-assert it
+        or the site shows him as listening to nothing."""
+        if self._scrobbler is not None and self._playing:
+            self._scrobbler.nowPlaying(self.currentTrackDict())
+
     def _update_playing(self):
         """`playing` is derived — mpv's pause flag alone misses the transitions
         where pause never changes (track start, playlist ran out)."""
@@ -1964,6 +1989,8 @@ class Player(QObject):
         if playing != self._playing:
             self._playing = playing
             self.playingChanged.emit()
+            if playing:
+                self._announce()
 
     def _on_pause(self, paused):
         self._mpv_paused = paused
@@ -1993,6 +2020,13 @@ class Player(QObject):
         if dur and self._listened >= min(dur / 2.0, 240.0):
             self._counted = True
             self._library.bump_playcount(t["id"])
+            # ONE listen, one of each. The library's play count and the Last.fm
+            # scrobble are the same event, decided here once, so the two counts
+            # cannot drift into telling him different stories about the same
+            # play. The scrobble's timestamp is when the track STARTED, which
+            # is what Last.fm orders a history by.
+            if self._scrobbler is not None:
+                self._scrobbler.submit(t, self._started_at)
 
     # ---- queue plumbing ----
 
@@ -2000,10 +2034,12 @@ class Player(QObject):
         self._index = idx
         self._listened = 0.0
         self._counted = False
+        self._started_at = time.time()
         self._position = 0.0
         self.indexChanged.emit()
         self.currentChanged.emit()
         self.positionChanged.emit()
+        self._announce()      # already playing: the transition never fires
 
     # ---- ReplayGain ----
     #
@@ -4045,6 +4081,16 @@ def main():
     tagwriter = TagWriter(prefs)
     library = Library(tagwriter)
     player = Player(library, prefs)
+    # Last.fm. Wired in rather than constructed into either, so both still
+    # build with no account and every harness in tools/ is unaffected. A
+    # scrobble is decided by Player._maybe_count (one listen, one play count,
+    # one scrobble) and a love by Library.setFavorite.
+    scrobbler = Scrobbler(prefs)
+    player.set_scrobbler(scrobbler)
+    library.set_scrobbler(scrobbler)
+    # The approval page opens in his browser — the one moment this app opens
+    # anything, and only because he clicked `connect` a moment before.
+    scrobbler.authUrlReady.connect(lambda u: QDesktopServices.openUrl(QUrl(u)))
     lyrics = LyricsProvider(prefs)
     bridge = Bridge(library, player, lyrics)
     autoscan = AutoScanner(library, app)
@@ -4086,6 +4132,7 @@ def main():
     ctx.setContextProperty("Library", bridge)
     ctx.setContextProperty("Player", player)
     ctx.setContextProperty("Lyrics", lyrics)
+    ctx.setContextProperty("Lastfm", scrobbler)
     ctx.setContextProperty("AlbumsModel", bridge.albumsModel)
     ctx.setContextProperty("AlbumTracksModel", bridge.albumTracksModel)
     ctx.setContextProperty("PlaylistModel", bridge.playlistModel)
