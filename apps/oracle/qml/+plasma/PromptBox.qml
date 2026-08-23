@@ -27,36 +27,38 @@ Item {
     // prompt [his, 2026-08-22]; the Frame's own padding is the only spare room
     // there should be, and `implicitHeight` on a TextArea is already one line
     // when it is empty. It grows with what he types, to a cap.
-    height: Math.min(180, area.implicitHeight + frame.topPadding + frame.bottomPadding)
+    height: Math.min(180, Math.max(area.implicitHeight, 34))
 
-    Frame {
+    // THE STYLE'S OWN TEXT INPUT, not a Frame around one. Oxygen draws an input
+    // as a recessed hole — a dark View-coloured fill inside a rounded inset
+    // frame — while a `Frame` is a group box's relief: the window colour behind
+    // a flat outline. Wrapping the TextArea in a Frame and blanking the
+    // TextArea's own background therefore drew the one thing this face is for
+    // (a real KDE control) as the one thing it is not [his, 2026-08-22: the
+    // compose row "isnt in style for oxygen"]. A `ScrollView` holding a
+    // `TextArea` with the background the style gives it IS the multi-line input
+    // every KDE program uses.
+    ScrollView {
         id: frame
         anchors { top: parent.top; bottom: parent.bottom
                   left: parent.left; right: sendBtn.left; rightMargin: 6 }
+        clip: true
 
-        ScrollView {
-            anchors.fill: parent
-            clip: true
+        TextArea {
+            id: area
+            wrapMode: TextArea.Wrap
+            placeholderText: "ask the model…  (Enter to send, Shift+Enter for a newline)"
+            persistentSelection: true
+            focus: true
 
-            TextArea {
-                id: area
-                wrapMode: TextArea.Wrap
-                // The frame is the Frame's; a second one inside it is the
-                // "one odd window" seam this face exists to close.
-                background: null
-                placeholderText: "ask the model…  (Enter to send, Shift+Enter for a newline)"
-                persistentSelection: true
-                focus: true
-
-                Keys.onPressed: function (e) {
-                    if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter)
-                        && !(e.modifiers & Qt.ShiftModifier)) {
-                        root.submitted();
-                        e.accepted = true;
-                    } else if (e.key === Qt.Key_Escape) {
-                        root.escaped();
-                        e.accepted = true;
-                    }
+            Keys.onPressed: function (e) {
+                if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter)
+                    && !(e.modifiers & Qt.ShiftModifier)) {
+                    root.submitted();
+                    e.accepted = true;
+                } else if (e.key === Qt.Key_Escape) {
+                    root.escaped();
+                    e.accepted = true;
                 }
             }
         }

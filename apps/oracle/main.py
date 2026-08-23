@@ -1505,6 +1505,84 @@ class Clip(QObject):
         return True
 
 
+class MdFormat(QObject):
+    """Make a rendered reply's CODE BLOCKS sit inside the bubble.
+
+    Qt's markdown reader gives every fenced block `NonBreakableLines`, so a long
+    line does not wrap — it lays out past the item's width and paints across
+    whatever is beside it, straight out of the bubble [his, 2026-08-22]. Nothing
+    in QML reaches that flag: it is on the QTextDocument's block formats, which
+    is why this lives here rather than in `MarkdownText.qml`.
+
+    So the same document the item is already drawing is walked once and each
+    code block is (a) allowed to wrap and (b) given the background and the
+    margins that make it read as an embedded block rather than as loose
+    monospace. The TEXT is untouched — no re-wrapping of the source, no inserted
+    newlines — so `Clip.copyMarkdown` still hands over exactly what the model
+    wrote.
+
+    It is idempotent and reports whether it CHANGED anything, which is what
+    keeps a `textChanged` handler from looping on its own edits.
+    """
+
+    #: Our own durable mark on a block we have already unwrapped — the flag Qt
+    #: set is gone by then, and nothing else on a QTextBlockFormat says "this
+    #: was fenced". QTextFormat.UserProperty + 7 is ours; Qt uses none of it.
+    CODE_MARK = 0x100000 + 7
+
+    @Slot(QObject, result=str)
+    def styleCode(self, quick_doc):
+        """Let every fenced block wrap, and say WHERE the blocks are.
+
+        Returns a JSON array of `{start, end}` character positions, one entry
+        per run of code lines, so the item can draw a panel behind each one —
+        the tint cannot be done here. Qt Quick's text nodes paint a CHARACTER
+        format's background and ignore a BLOCK format's (measured: a block
+        background drew nothing), and a char background stops at the end of each
+        line, which leaves a ragged strip rather than an embedded block.
+
+        Idempotent: the flag is cleared on the first pass and the RANGES are
+        found by the monospace family Qt gives a code block, which survives it.
+        """
+        from PySide6.QtGui import QTextCursor
+        if quick_doc is None:
+            return "[]"
+        doc = quick_doc.textDocument()
+        if doc is None:
+            return "[]"
+        runs = []
+        block = doc.begin()
+        while block.isValid():
+            fmt = block.blockFormat()
+            # A FENCED block, by the flag Qt itself sets on one — and by our own
+            # mark once that flag is gone, since clearing it is the point.
+            #
+            # NOT by the monospace family: a paragraph that merely BEGINS with
+            # an inline `code` span reports monospace as its block char format,
+            # which drew a whole prose line as an embedded code panel (measured
+            # against the demo transcript).
+            code = fmt.hasProperty(self.CODE_MARK) or fmt.nonBreakableLines()
+            if code:
+                if fmt.nonBreakableLines() or not fmt.hasProperty(self.CODE_MARK):
+                    fmt.setNonBreakableLines(False)
+                    fmt.setProperty(self.CODE_MARK, True)
+                    fmt.setLeftMargin(6)
+                    fmt.setRightMargin(6)
+                    QTextCursor(block).setBlockFormat(fmt)
+                start = block.position()
+                end = block.position() + block.length() - 1
+                if runs and runs[-1]["endBlock"] == block.blockNumber() - 1:
+                    runs[-1]["end"] = end
+                    runs[-1]["endBlock"] = block.blockNumber()
+                else:
+                    runs.append({"start": start, "end": end,
+                                 "endBlock": block.blockNumber()})
+            block = block.next()
+        for r in runs:
+            r.pop("endBlock", None)
+        return json.dumps(runs)
+
+
 class Titlebar(QObject):
     """hyprvtb app-button bridge — oracle draws no chrome of its own, so the
     compositor draws the titlebar (docs/DESIGN.md §12). oracle has no history and
@@ -1622,9 +1700,10 @@ class Ollama(QObject):
         self._done_reason = ""   # ollama's reason the last frame was the last
         self._pending_vision = []  # local images view_image is handing the model
         self._images_shown = set()
+        self._image_entries = {}   # url -> the entry we already drew, this turn
+        self._row_urls = set()     # …and which of them are on the CURRENT bubble
         self._md_images = {"n": 0}
         self._tool_calls = []    # tool calls accumulated in this sub-turn
-        self._tool_results = []  # results being gathered for the current round
         self._rounds = 0         # tool rounds taken this turn (MAX_TOOL_ROUNDS cap)
         self._no_tools = False   # the wrap-up round: answer, do not call tools
         self._prior = []         # the LAST finished turn's messages, tool rounds
@@ -2035,6 +2114,8 @@ class Ollama(QObject):
         self._think_tokens = 0
         self._rounds = 0
         self._images_shown = set()   # every image URL already fetched this turn
+        self._image_entries = {}     # …and the entry each one produced, to redraw
+        self._row_urls = set()       # what is already on the bubble being written
         self._md_images = {"n": 0}   # typed-markdown images still downloading
         self._pending_vision = []    # local images view_image must hand the model
         self._no_tools = False       # not a wrap-up round
@@ -2173,6 +2254,8 @@ class Ollama(QObject):
         self._think_tokens = 0
         self._rounds = 0
         self._images_shown = set()
+        self._image_entries = {}
+        self._row_urls = set()
         self._md_images = {"n": 0}
         self._pending_vision = []
         self._no_tools = False
@@ -2688,7 +2771,7 @@ class Ollama(QObject):
                       "utc": now.isoformat()}
         except (ZoneInfoNotFoundError, ValueError):
             result = {"error": "unknown timezone: " + tz_name}
-        self._tool_results[idx] = {"role": "tool", "tool_name": "get_current_time",
+        remaining["sink"][idx] = {"role": "tool", "tool_name": "get_current_time",
                                    "content": json.dumps(result)}
         self._tool_done(remaining, calls)
 
@@ -2744,7 +2827,7 @@ class Ollama(QObject):
             "sampling": {"num_ctx": CHAT_NUM_CTX,
                          "temperature": "model default (chatter does not override)"},
         }
-        self._tool_results[idx] = {"role": "tool", "tool_name": "describe_self",
+        remaining["sink"][idx] = {"role": "tool", "tool_name": "describe_self",
                                    "content": json.dumps(result)}
         self._tool_done(remaining, calls)
 
@@ -2995,10 +3078,23 @@ class Ollama(QObject):
         found = []
         for m in re.finditer(r"!\[([^\]]*)\]\(\s*(https?://[^\s)]+)", self._acc_content):
             url = m.group(2).rstrip(")")
+            alt = m.group(1).strip()
             if url in self._images_shown:
+                # ALREADY FETCHED THIS TURN — so DRAW IT HERE TOO, rather than
+                # skipping it [his, 2026-08-22]. A turn that gathers pictures
+                # over several rounds and then writes them up ends with a list
+                # naming eleven of them and a bubble holding none: the pictures
+                # are up-thread, on the round bubbles that fetched them, and the
+                # summary's own markdown is demoted to links (MarkdownText.qml).
+                # The file is already on disk, so this is a redraw, not a second
+                # download — and `_row_urls` keeps one bubble from showing the
+                # same picture twice.
+                entry = self._image_entries.get(url)
+                if entry and url not in self._row_urls:
+                    self._emit_image(dict(entry, alt=alt or entry.get("alt", "")))
                 continue
             self._images_shown.add(url)
-            found.append((url, m.group(1).strip()))
+            found.append((url, alt))
             if len(found) >= self.MD_IMAGE_MAX:
                 break
         if not found:
@@ -3021,65 +3117,96 @@ class Ollama(QObject):
 
     # ---- the web_search tool loop ----
 
+    @staticmethod
+    def _new_round(calls, done=None):
+        """One tool round, as an OBJECT rather than instance state.
+
+        `sink` is where this round's results land, `n` counts the calls still
+        outstanding, and `done` — when set — is what runs instead of the chat
+        loop once they are all in. Every tool method already took `remaining`;
+        making it carry the sink is what lets a SUBAGENT reuse the same tool
+        implementations concurrently with the turn that spawned it, instead of
+        the two rounds overwriting one shared list."""
+        n = len(calls)
+        r = {"n": n, "sink": [None] * n}
+        if done is not None:
+            r["done"] = done
+        return r
+
+    @staticmethod
+    def _call_parts(call):
+        """`(name, args)` from one ollama tool call; a string `arguments` (some
+        models send JSON text) is decoded, and anything unparseable is {}."""
+        fn = call.get("function") or {}
+        name = fn.get("name", "")
+        args = fn.get("arguments") or {}
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except ValueError:
+                args = {}
+        return name, args
+
     def _run_tool_calls(self, calls):
         """Dispatch each tool call; when the last result is in, re-post the
         chat with the tool messages appended. Calls run concurrently."""
-        self._tool_results = [None] * len(calls)
-        remaining = {"n": len(calls)}
+        remaining = self._new_round(calls)
         for i, call in enumerate(calls):
-            fn = call.get("function") or {}
-            name = fn.get("name", "")
-            args = fn.get("arguments") or {}
-            if isinstance(args, str):
-                try:
-                    args = json.loads(args)
-                except ValueError:
-                    args = {}
+            name, args = self._call_parts(call)
             # Name every call in the transcript, whatever it is — the generic
             # indicator, so a tool with no richer disclosure is never silent.
             self.toolCallStarted.emit(name or "tool")
-            if name == "web_search":
-                self._tavily_search(str(args.get("query", "")).strip(),
-                                    i, remaining, calls)
-            elif name == "get_current_time":
-                self._time_now(str(args.get("timezone", "")), i, remaining, calls)
-            elif name == "describe_self":
-                self._describe_self(i, remaining, calls)
-            elif name in IMAGE_TOOL_NAMES:
-                self._fetch_image(str(args.get("url", "")).strip(),
-                                  str(args.get("alt", "")).strip(),
-                                  i, remaining, calls)
-            elif name in VIEW_IMAGE_TOOL_NAMES:
-                self._view_image(args, i, remaining, calls)
-            elif name in SEARCH_IMAGE_TOOL_NAMES:
-                self._search_images(str(args.get("query", "")).strip(),
-                                    i, remaining, calls)
-            elif name in FETCH_URL_TOOL_NAMES:
-                self._fetch_url(str(args.get("url", "")).strip(),
-                                args.get("offset", 0), i, remaining, calls)
-            elif name in CALL_API_TOOL_NAMES:
-                self._call_api(args, i, remaining, calls)
-            elif name in FILE_TOOL_NAMES:
-                self._run_fs_tool(name, args, i, remaining, calls)
-            elif name in EXEC_TOOL_NAMES or name in BASH_TOOL_NAMES:
-                self._run_exec_tool(name, args, i, remaining, calls)
-            elif name in SESSION_TOOL_NAMES:
-                self._run_session_tool(name, args, i, remaining, calls)
-            elif name in MEMORY_TOOL_NAMES:
-                self._run_memory_tool(name, args, i, remaining, calls)
-            elif name in SKILL_TOOL_NAMES:
-                self._run_skill_tool(args, i, remaining, calls)
-            else:
-                self._tool_results[i] = {
-                    "role": "tool", "tool_name": name,
-                    "content": json.dumps({"error": "unknown tool: " + name})}
-                self._tool_done(remaining, calls)
+            self._dispatch_tool(name, args, i, remaining, calls)
+
+    def _dispatch_tool(self, name, args, i, remaining, calls):
+        """Run ONE tool call into `remaining`'s sink at index `i`.
+
+        Split out of `_run_tool_calls` so the subagent loop (`_spawn_agent`)
+        reaches every tool through the same branch rather than a second copy of
+        it that could drift — the caller decides which names it offers, this
+        decides what each one does."""
+        if name == "web_search":
+            self._tavily_search(str(args.get("query", "")).strip(),
+                                i, remaining, calls)
+        elif name == "get_current_time":
+            self._time_now(str(args.get("timezone", "")), i, remaining, calls)
+        elif name == "describe_self":
+            self._describe_self(i, remaining, calls)
+        elif name in IMAGE_TOOL_NAMES:
+            self._fetch_image(str(args.get("url", "")).strip(),
+                              str(args.get("alt", "")).strip(),
+                              i, remaining, calls)
+        elif name in VIEW_IMAGE_TOOL_NAMES:
+            self._view_image(args, i, remaining, calls)
+        elif name in SEARCH_IMAGE_TOOL_NAMES:
+            self._search_images(str(args.get("query", "")).strip(),
+                                i, remaining, calls)
+        elif name in FETCH_URL_TOOL_NAMES:
+            self._fetch_url(str(args.get("url", "")).strip(),
+                            args.get("offset", 0), i, remaining, calls)
+        elif name in CALL_API_TOOL_NAMES:
+            self._call_api(args, i, remaining, calls)
+        elif name in FILE_TOOL_NAMES:
+            self._run_fs_tool(name, args, i, remaining, calls)
+        elif name in EXEC_TOOL_NAMES or name in BASH_TOOL_NAMES:
+            self._run_exec_tool(name, args, i, remaining, calls)
+        elif name in SESSION_TOOL_NAMES:
+            self._run_session_tool(name, args, i, remaining, calls)
+        elif name in MEMORY_TOOL_NAMES:
+            self._run_memory_tool(name, args, i, remaining, calls)
+        elif name in SKILL_TOOL_NAMES:
+            self._run_skill_tool(args, i, remaining, calls)
+        else:
+            remaining["sink"][i] = {
+                "role": "tool", "tool_name": name,
+                "content": json.dumps({"error": "unknown tool: " + name})}
+            self._tool_done(remaining, calls)
 
     def _tavily_search(self, query, idx, remaining, calls):
         key = tavily_key()
         if not key:
             self.webSearchError.emit(query, "no Tavily API key configured")
-            self._tool_results[idx] = {
+            remaining["sink"][idx] = {
                 "role": "tool", "tool_name": "web_search",
                 "content": json.dumps({"error": "web search unavailable: no "
                                        "Tavily API key configured"})}
@@ -3115,7 +3242,7 @@ class Ollama(QObject):
                 except ValueError:
                     pass
                 self.webSearchError.emit(query, msg)
-                self._tool_results[idx] = {
+                remaining["sink"][idx] = {
                     "role": "tool", "tool_name": "web_search",
                     "content": json.dumps({"error": "web search failed: " + msg})}
                 return
@@ -3123,7 +3250,7 @@ class Ollama(QObject):
             answer = obj.get("answer") or ""
             results = obj.get("results") or []
             # Fed back to the model to summarize and cite.
-            self._tool_results[idx] = {"role": "tool", "tool_name": "web_search",
+            remaining["sink"][idx] = {"role": "tool", "tool_name": "web_search",
                                        "content": json.dumps({
                 "query": query, "answer": answer,
                 "results": [{"title": r.get("title", ""), "url": r.get("url", ""),
@@ -3133,7 +3260,7 @@ class Ollama(QObject):
                                     len(results))
         except (ValueError, TypeError) as e:
             self.webSearchError.emit(query, str(e))
-            self._tool_results[idx] = {
+            remaining["sink"][idx] = {
                 "role": "tool", "tool_name": "web_search",
                 "content": json.dumps({"error": str(e)})}
         finally:
@@ -3147,7 +3274,7 @@ class Ollama(QObject):
         key = tavily_key()
         if not key:
             self.webSearchError.emit(query, "no Tavily API key configured")
-            self._tool_results[idx] = {
+            remaining["sink"][idx] = {
                 "role": "tool", "tool_name": "search_images",
                 "content": json.dumps({"error": "image search unavailable: no "
                                        "Tavily API key configured"})}
@@ -3185,7 +3312,7 @@ class Ollama(QObject):
                 except ValueError:
                     pass
                 self.webSearchError.emit(query, msg)
-                self._tool_results[idx] = {
+                remaining["sink"][idx] = {
                     "role": "tool", "tool_name": "search_images",
                     "content": json.dumps({"error": "image search failed: " + msg})}
                 return
@@ -3199,7 +3326,7 @@ class Ollama(QObject):
                     url, desc = str(im).strip(), ""
                 if url:
                     images.append({"url": url, "description": desc})
-            self._tool_results[idx] = {
+            remaining["sink"][idx] = {
                 "role": "tool", "tool_name": "search_images",
                 "content": json.dumps({"query": query, "images": images})
                 if images else json.dumps(
@@ -3211,7 +3338,7 @@ class Ollama(QObject):
             self.webSearchDone.emit(query, md, len(images))
         except (ValueError, TypeError) as e:
             self.webSearchError.emit(query, str(e))
-            self._tool_results[idx] = {
+            remaining["sink"][idx] = {
                 "role": "tool", "tool_name": "search_images",
                 "content": json.dumps({"error": str(e)})}
         finally:
@@ -3230,7 +3357,7 @@ class Ollama(QObject):
         u = QUrl(url)
         if u.scheme().lower() not in ("http", "https") or not u.host():
             self.webSearchError.emit(url or "(no url)", "not an http(s) URL")
-            self._tool_results[idx] = {
+            remaining["sink"][idx] = {
                 "role": "tool", "tool_name": "fetch_url",
                 "content": json.dumps({"error": "fetch_url takes an absolute "
                                        "http:// or https:// URL"})}
@@ -3258,7 +3385,7 @@ class Ollama(QObject):
             if reply.error() != QNetworkReply.NetworkError.NoError:
                 msg = reply.errorString()
                 self.webSearchError.emit(url, msg)
-                self._tool_results[idx] = {
+                remaining["sink"][idx] = {
                     "role": "tool", "tool_name": "fetch_url",
                     "content": json.dumps({"error": "fetch failed: " + msg,
                                            "url": url})}
@@ -3307,11 +3434,11 @@ class Ollama(QObject):
                     result["next_offset"] = offset + len(page)
                 self.webSearchDone.emit(
                     url, "- [" + (title or final) + "](" + final + ")", 1)
-            self._tool_results[idx] = {"role": "tool", "tool_name": "fetch_url",
+            remaining["sink"][idx] = {"role": "tool", "tool_name": "fetch_url",
                                        "content": json.dumps(result)}
         except (ValueError, TypeError) as e:
             self.webSearchError.emit(url, str(e))
-            self._tool_results[idx] = {
+            remaining["sink"][idx] = {
                 "role": "tool", "tool_name": "fetch_url",
                 "content": json.dumps({"error": str(e), "url": url})}
         finally:
@@ -3325,7 +3452,7 @@ class Ollama(QObject):
         branch — and it is surfaced through the web-search disclosure."""
         def fail(label, msg):
             self.webSearchError.emit(label or "call_api", msg)
-            self._tool_results[idx] = {
+            remaining["sink"][idx] = {
                 "role": "tool", "tool_name": "call_api",
                 "content": json.dumps({"error": msg})}
             self._tool_done(remaining, calls)
@@ -3435,7 +3562,7 @@ class Ollama(QObject):
                     extra = (" — no keyring entry for " + site + " in "
                              + API_KEYS_PATH)
                 self.webSearchError.emit(safe, msg)
-                self._tool_results[idx] = {
+                remaining["sink"][idx] = {
                     "role": "tool", "tool_name": "call_api",
                     "content": json.dumps({"error": "request failed: " + msg + extra,
                                            "status": status, "url": safe})}
@@ -3446,7 +3573,7 @@ class Ollama(QObject):
                 result = {"url": safe, "status": status,
                           "content_type": ctype or "unknown"}
                 self.webSearchDone.emit(safe, "- [" + safe + "](" + safe + ")", 1)
-                self._tool_results[idx] = {"role": "tool", "tool_name": "call_api",
+                remaining["sink"][idx] = {"role": "tool", "tool_name": "call_api",
                                            "content": json.dumps(result)}
                 return
             if len(data) > API_MAX_BYTES:
@@ -3475,11 +3602,11 @@ class Ollama(QObject):
                                                row_offset)
                 self.webSearchDone.emit(safe, "- [" + (site or safe) + "]("
                                         + safe + ")", 1)
-            self._tool_results[idx] = {"role": "tool", "tool_name": "call_api",
+            remaining["sink"][idx] = {"role": "tool", "tool_name": "call_api",
                                        "content": json.dumps(result)}
         except (ValueError, TypeError) as e:
             self.webSearchError.emit(safe, str(e))
-            self._tool_results[idx] = {
+            remaining["sink"][idx] = {
                 "role": "tool", "tool_name": "call_api",
                 "content": json.dumps({"error": str(e), "url": safe})}
         finally:
@@ -3531,10 +3658,17 @@ class Ollama(QObject):
         return out
 
     def _tool_done(self, remaining, calls):
+        """One call of a round finished. When the LAST one does, the round is
+        handed on: to whatever spawned it if it set `done` (a subagent's inner
+        loop), otherwise to the chat loop below."""
         remaining["n"] -= 1
         if remaining["n"] > 0 or not self._busy:
             return
-        for tr in self._tool_results:
+        finish = remaining.get("done")
+        if finish is not None:
+            finish([tr for tr in remaining["sink"] if tr is not None])
+            return
+        for tr in remaining["sink"]:
             if tr is not None:
                 self._messages.append(tr)
         # Pictures `view_image` fetched this round: ollama carries image bytes
@@ -3548,6 +3682,7 @@ class Ollama(QObject):
             self._pending_vision = []
         # A new round: the segment just finished is closed and QML opens a
         # fresh bubble for what comes next (see `roundStarted`).
+        self._row_urls = set()          # a fresh bubble carries no pictures yet
         self.roundStarted.emit(self._rounds + 1)
         # The wrap-up round (see `_on_finished`): say why there are no tools.
         if self._no_tools:
@@ -3615,14 +3750,31 @@ class Ollama(QObject):
                    "" if re.fullmatch(r"[0-9a-f]+", tok, re.I)
                    else " and not hexadecimal"))
 
+    def _emit_image(self, entry):
+        """Hand ONE picture to QML, and remember it.
+
+        Every entry goes through here so two ledgers stay true: `_image_entries`
+        (what this turn has already downloaded, by URL) and `_row_urls` (what is
+        already on the bubble being written). `_attach_typed_images` needs both
+        to put a picture the model NAMES under the words that name it, without
+        fetching it twice or drawing it twice on one bubble.
+        """
+        if isinstance(entry, dict):
+            url = str(entry.get("url") or "")
+            if url:
+                self._row_urls.add(url)
+                if entry.get("ok"):
+                    self._image_entries[url] = entry
+        self.imageFetchResult.emit(json.dumps(entry))
+
     def _image_failed(self, url, reason, idx, remaining, calls):
         """Fail one image the same way for both audiences, tool or not."""
         entry, result = self._image_error(url, reason)
-        self.imageFetchResult.emit(json.dumps(entry))
+        self._emit_image(entry)
         if idx is None:
             self._typed_image_done(remaining)
             return
-        self._tool_results[idx] = {"role": "tool", "tool_name": "fetch_image",
+        remaining["sink"][idx] = {"role": "tool", "tool_name": "fetch_image",
                                    "content": json.dumps(result)}
         self._tool_done(remaining, calls)
 
@@ -3711,11 +3863,11 @@ class Ollama(QObject):
             entry, result = self._image_error(url, str(e))
         finally:
             reply.deleteLater()
-        self.imageFetchResult.emit(json.dumps(entry))
+        self._emit_image(entry)
         if idx is None:
             self._typed_image_done(remaining)
             return
-        self._tool_results[idx] = {"role": "tool", "tool_name": "fetch_image",
+        remaining["sink"][idx] = {"role": "tool", "tool_name": "fetch_image",
                                    "content": json.dumps(result)}
         self._tool_done(remaining, calls)
 
@@ -3795,7 +3947,7 @@ class Ollama(QObject):
         name = "view_image"
 
         def fail(reason):
-            self._tool_results[idx] = {"role": "tool", "tool_name": name,
+            remaining["sink"][idx] = {"role": "tool", "tool_name": name,
                                        "content": json.dumps({"error": reason})}
             self.fileToolDone.emit("view_image " + (path or "(no path)")
                                    + " — " + reason, False)
@@ -3842,11 +3994,10 @@ class Ollama(QObject):
             probe = QImage()
             probe.loadFromData(base64.b64decode(b64))
             self.imageFetchStarted.emit(shown)
-            self.imageFetchResult.emit(json.dumps(
-                {"ok": True, "url": "", "path": shown,
-                 "alt": os.path.basename(shown),
-                 "w": probe.width(), "h": probe.height()}))
-            self._tool_results[idx] = {
+            self._emit_image({"ok": True, "url": "", "path": shown,
+                              "alt": os.path.basename(shown),
+                              "w": probe.width(), "h": probe.height()})
+            remaining["sink"][idx] = {
                 "role": "tool", "tool_name": name,
                 "content": json.dumps(
                     {"ok": True, "path": result.get("path", path),
@@ -3940,7 +4091,7 @@ class Ollama(QObject):
                     args.get("path") if isinstance(args, dict) else "")
                 if guide:
                     result["guide"] = guide
-            self._tool_results[idx] = {"role": "tool", "tool_name": name,
+            remaining["sink"][idx] = {"role": "tool", "tool_name": name,
                                        "content": json.dumps(result)}
             self.fileToolDone.emit(self._fs_outcome(name, args, result),
                                    "error" not in result)
@@ -4013,7 +4164,7 @@ class Ollama(QObject):
                 return
             proc.deleteLater()
             result = self._fs_result(out, err, rc)
-            self._tool_results[idx] = {"role": "tool", "tool_name": name,
+            remaining["sink"][idx] = {"role": "tool", "tool_name": name,
                                        "content": json.dumps(result)}
             self.fileToolDone.emit(self._exec_outcome(name, result),
                                    "error" not in result)
@@ -4173,7 +4324,7 @@ class Ollama(QObject):
                 return
             proc.deleteLater()
             result = self._fs_result(out, err, rc)
-            self._tool_results[idx] = {"role": "tool", "tool_name": name,
+            remaining["sink"][idx] = {"role": "tool", "tool_name": name,
                                        "content": json.dumps(result)}
             self.fileToolDone.emit(self._session_outcome(name, a, result),
                                    "error" not in result)
@@ -4273,7 +4424,7 @@ class Ollama(QObject):
         self.fileToolStarted.emit(heading)
 
         def done(result):
-            self._tool_results[idx] = {"role": "tool", "tool_name": name,
+            remaining["sink"][idx] = {"role": "tool", "tool_name": name,
                                        "content": json.dumps(result)}
             if name in ("save_memory", "delete_memory") and "error" not in result:
                 self.refreshMemories()    # keep the injected cache current
@@ -4371,7 +4522,7 @@ class Ollama(QObject):
         return out
 
     def _skill_done(self, result, outcome, idx, remaining, calls):
-        self._tool_results[idx] = {"role": "tool", "tool_name": "use_skill",
+        remaining["sink"][idx] = {"role": "tool", "tool_name": "use_skill",
                                    "content": json.dumps(result)}
         self.fileToolDone.emit(outcome[:200], "error" not in result)
         self._tool_done(remaining, calls)
@@ -4715,6 +4866,7 @@ def main():
     backend = Backend()
     sessions = Sessions()
     clip = Clip()
+    mdfmt = MdFormat()
 
     # TWO ROOFS, ONE APP (docs/DESIGN.md §7.6). Under Hyprland the QML tree IS
     # the window and the compositor draws the titlebar. Under Plasma the same
@@ -4742,6 +4894,7 @@ def main():
     ctx.setContextProperty("Sessions", sessions)
     ctx.setContextProperty("ollamaHost", OLLAMA)
     ctx.setContextProperty("Clip", clip)
+    ctx.setContextProperty("Md", mdfmt)
 
     warnings = []
     engine.warnings.connect(

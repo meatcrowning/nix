@@ -53,8 +53,14 @@ exactly what it always was.
   a `QToolBar` has no alignment of its own, so an expanding blank `QWidget` in
   front of them takes every pixel the action buttons leave.
 - **Seven components have `+plasma` twins**, swapped by the file selector with
-  the same API either way: `PromptBox` (the compose box as a
-  `Frame`/`TextArea`/`Button`), `Chip` (the attachment chip as a flat `Button`),
+  the same API either way: `PromptBox` (the compose box as the STYLE'S OWN
+  INPUT — a `ScrollView` holding a `TextArea` that keeps the background
+  qqc2-desktop-style gives it, beside a real `Button`. It was a `Frame` around a
+  background-less TextArea until 2026-08-22, and that is a group box's relief:
+  the window colour behind a flat outline, where Oxygen draws an input as a
+  recessed hole — a dark View-coloured fill in a rounded inset frame. [his] *"is
+  the bottom prompt section in style for oxygen? i feel like it's not"* — it was
+  not), `Chip` (the attachment chip as a flat `Button`),
   `Bubble` (a message as a real KStyle `Button` frame — `enabled: false` so it
   takes no hover, press or focus, with the message's own selectable text drawn
   above it), and, from the Oxygen audit of 2026-08-22 [his] *"the scroll bar is
@@ -782,6 +788,50 @@ asserts the log comes out as three reply rows with the prose and the tool on the
 round that made them. It rides on `ORACLE_SEND` (send this prompt, then print
 the chat log as JSON via `Root.rowsJson()`), which is the only way to see what
 the ROWS became.
+
+### A picture the write-up names is drawn where it names it
+
+A turn that gathers pictures over several rounds and then writes them up used to
+end with a list naming eleven of them and a bubble holding NONE [his,
+2026-08-22]. Two rules met badly: a picture is attached to the ROUND bubble that
+fetched it, and `_attach_typed_images` skips a `![](url)` whose URL this turn
+already fetched (`_images_shown`) — so the write-up's own markdown was demoted
+to plain links and nothing was drawn under it, while the pictures sat further up
+the transcript.
+
+Now a named picture that is already on disk is DRAWN AGAIN on the bubble that
+names it: `_image_entries` keeps the entry each URL produced this turn, and
+`_emit_image` is the one door every picture goes through so that ledger and
+`_row_urls` (what is already on the bubble being written) both stay true. It is
+a redraw, not a second download, and `_row_urls` stops one bubble showing the
+same picture twice. Harness: `tools/typed-image-test.py`, case 5.
+
+### Code blocks stay inside the bubble
+
+Qt's markdown reader marks every fenced block `NonBreakableLines`, so a long
+line does not wrap: it lays out past the item's width and paints across whatever
+is beside it — code spilling out of the bubble [his, 2026-08-22]. That flag is
+on the QTextDocument's block formats, which QML cannot reach, so `MdFormat`
+(`Md.styleCode`, main.py) walks the document `MarkdownText.qml` is already
+drawing, clears the flag, gives each block a margin, and returns the CHARACTER
+RANGES of each run of code lines. The item draws the embedded panel behind those
+ranges itself (`positionToRectangle`, `z: -1`).
+
+- **The tint cannot be done in the document.** Qt Quick's text nodes paint a
+  CHARACTER format's background and ignore a BLOCK format's (measured: a block
+  background drew nothing at all), and a char background stops at the end of
+  each line — a ragged strip, not an embedded block.
+- **A block is recognised by Qt's flag, then by our own mark**
+  (`MdFormat.CODE_MARK`), because clearing the flag is the point and nothing
+  else on a block format remembers. NOT by the monospace family: a paragraph
+  that merely BEGINS with an inline `code` span reports monospace as its block
+  char format, and drew a whole prose line as a code panel.
+- **The text is never rewritten** — no re-wrapping of the source, no inserted
+  newlines — so `Clip.copyMarkdown` still hands over exactly what the model
+  wrote.
+- Debounced (60 ms) because a streaming reply rebuilds the document on every
+  delta and each rebuild brings the flag back. Harness:
+  `tools/code-block-test.py`.
 
 ### One state at a time in an unfinished bubble
 
