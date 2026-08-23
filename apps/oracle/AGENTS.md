@@ -113,6 +113,16 @@ exactly what it always was.
   twin of `PixelText`), so only trusted-shape strings are ever interpreted. Both
   selectable types pin the face as a whole `Theme.editorFont` QFont (an editable
   item ignores `antialiasing:false`, §2.2) and carry no `lineHeight` (Text-only).
+  **Ctrl+C on a reply copies the MARKDOWN, not the flattened render** [his,
+  2026-08-22]: Qt's own copy hands over the rendered document as plain text,
+  which drops the blank line between paragraphs and every list marker, so a
+  video prompt pasted into another program arrived as one run-on block. The key
+  goes to `Clip.copyMarkdown` (main.py) instead — a whole-message selection
+  copies the source verbatim, a partial one is re-serialised out of the document
+  fragment and unescaped (Qt writes `\<Picture 1>` for `<Picture 1>`). `text` is
+  NOT the source on a `MarkdownText` TextEdit — reading it back re-serialises the
+  parsed document — so the call site sets `text` and `source` from one
+  expression.
   It auto-follows the newest text to the bottom
   only while he is already at the bottom (see *The model selector* §streaming) —
   scroll up mid-stream and it stops yanking. A model's
@@ -123,8 +133,12 @@ exactly what it always was.
   subordinated) that sits **OUTSIDE the bubble** [his, 2026-08-22] — as do the
   tool, web-search and file disclosures, all four between the speaker caption
   and the bubble, full width, so the bubble carries only the answer itself, whose heading reports progress: while the reasoning streams it
-  reads `thinking` (one brightness step up) with a **live token count** and an
-  **animated ellipsis** beside it (dim, §9.1) — the count is the running frame
+  reads **`thinking for 12s`** (one brightness step up), settling to **`thought
+  for 12s`** when the answer starts [his, 2026-08-22] — the clock runs from the
+  first reasoning delta to the first content one, is kept in the row as
+  `thinkMs` and is PERSISTED with the session, so a reloaded transcript still
+  says how long each answer was thought about. Beside it are a **live token
+  count** and an **animated ellipsis** (dim, §9.1) — the count is the running frame
   count `Ollama` emits on `replyThinkTokens` (ollama streams one token per NDJSON
   frame), the ellipsis cycles 0–3 dots at one roll beat each (§6.2, static under
   reduceMotion). The token count PERSISTS in the heading once counted (the
@@ -576,6 +590,28 @@ faces, since `Root.qml` is the shared Item. Failures keep their crit line
 whatever the count. Render them with `tools/gallery-shot.py [N]` — offscreen,
 its own generated pictures, no daemon and no turn — which also checks the
 overlay's keyboard.
+
+**A model that TYPES the image gets it attached anyway** [his, 2026-08-22:
+*"see how it failed to attached some images"*]. gemma4 reliably answers "show
+me pictures of X" by writing `![alt](url)` into the reply instead of calling
+`fetch_image`, however plainly the tool says otherwise — and `MarkdownText`
+DEMOTES image markdown to a link on purpose (Qt would fetch it on render, at its
+own pixel size), so the picture simply never appeared. `_attach_typed_images`
+closes that at the other end: when a reply finishes with no more tool rounds,
+its `![](http…)` URLs go through the same `_fetch_image` (capped at
+`MD_IMAGE_MAX`, 4 per reply, deduped against everything already fetched this
+turn), and `replyDone` waits for them. `_fetch_image`'s `idx` is `None` for
+those — there is no tool call to answer, only the picture.
+
+**A mistyped booru md5 is refused before the request.** The same session's other
+failure was the model RETYPING a URL from memory: `12a90ec8d770cc4898c17bece1ee561`
+(31 chars) and `45bf9a3erm88cd10126904ca995c7` (not hex) both went out and both
+404'd. Boorus address a file by its md5, so the shape is checkable —
+`_booru_url_fault` fails those instantly with a message that says what to do
+instead (copy `file_url` verbatim, or search again), which a bare 404 cannot; a
+404 from anywhere else gets the same nudge appended to the tool result. Harness:
+`tools/typed-image-test.py` (offscreen, its own 127.0.0.1 image server, no
+network and no daemon).
 
 **Finding a real URL first — `search_images`.** `fetch_image` only GETs a URL
 the model already holds, and a model asked for "a picture of X" tends to GUESS
