@@ -138,13 +138,20 @@ exactly what it always was.
   tool, web-search and file disclosures, all four between the speaker caption
   and the bubble, full width, so the bubble carries only the answer itself, whose heading reports progress: while the reasoning streams it
   reads **`thinking for 12s…`** (one brightness step up, the ellipsis animated),
-  settling to **`thought for 12s`** when the answer starts [his, 2026-08-22] —
-  the clock runs from the first reasoning delta to the first content one, is
-  kept in the row as `thinkMs` and is PERSISTED with the session, so a reloaded
-  transcript still says how long each answer was thought about. Beside it, still
+  **`waiting…`** while a tool call is out, and settles to **`thought for 12s`**
+  [his, 2026-08-22]. **The clock counts reasoning AND tool waits** — it accrues
+  while `thinkingActive || awaiting` and pauses while the answer itself streams,
+  so a turn that thought, searched and thought again reports the sum of the
+  three rather than the wall clock of the whole turn (`win.accrueThink`, called
+  after every flag change; `awaiting` is set by `toolCallStarted` and cleared by
+  the next delta of any kind). Only the total `thinkMs` is saved, so a reloaded
+  transcript still says how long each answer was worked on. To its LEFT, still
   and named, is the **token count** — `240 tokens`, `1.2k tokens` past a
-  thousand (`win.fmtCount`); the animated ellipsis rides the TIME, never the
-  count, since the time is the part still running (dim, §9.1) — the count is the running frame
+  thousand (`win.fmtCount`); the animated ellipsis rides the STATE, never the
+  count (dim, §9.1). A turn that only waited on tools still gets the heading,
+  with no toggle on it — there is nothing to unfold. Harness:
+  `tools/think-clock-test.py`, which drives the real `Root.qml` against a stub
+  ollama and asserts the heading text the delegate actually renders — the count is the running frame
   count `Ollama` emits on `replyThinkTokens` (ollama streams one token per NDJSON
   frame), the ellipsis cycles 0–3 dots at one roll beat each (§6.2, static under
   reduceMotion). The token count PERSISTS in the heading once counted (the

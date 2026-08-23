@@ -116,28 +116,23 @@ Item {
         // The turns are appended by send() before the stream opens; these deltas
         // only ever write into the active assistant row. The first content delta
         // is also what SETTLES the thinking heading from "thinking…" to "thinking".
+        // Any delta — reasoning or content — means the model is talking again,
+        // so it is no longer waiting on a tool.
         function onReplyChunk(piece) {
             if (win.activeIndex < 0) return;
             var cur = chatLog.get(win.activeIndex);
             chatLog.setProperty(win.activeIndex, "body", cur.body + piece);
-            if (cur.thinkingActive) {
-                chatLog.setProperty(win.activeIndex, "thinkingActive", false);
-                win.stopThinkClock(win.activeIndex);
-            }
+            chatLog.setProperty(win.activeIndex, "thinkingActive", false);
+            chatLog.setProperty(win.activeIndex, "awaiting", false);
+            win.accrueThink(win.activeIndex);
         }
         function onReplyThinking(piece) {
             if (win.activeIndex < 0) return;
             var cur = chatLog.get(win.activeIndex);
             chatLog.setProperty(win.activeIndex, "thinking", cur.thinking + piece);
-            if (!cur.thinkingActive) {
-                chatLog.setProperty(win.activeIndex, "thinkingActive", true);
-                // The clock the heading counts: started at the FIRST reasoning
-                // delta, stopped at the first content one (or at the end of the
-                // turn), and kept in the row so a reloaded session still says
-                // how long it thought for.
-                if (cur.thinkStart === 0)
-                    chatLog.setProperty(win.activeIndex, "thinkStart", Date.now());
-            }
+            chatLog.setProperty(win.activeIndex, "thinkingActive", true);
+            chatLog.setProperty(win.activeIndex, "awaiting", false);
+            win.accrueThink(win.activeIndex);
         }
         // The live reasoning-token count, written into the active row so the
         // collapsed heading shows it climbing while the model thinks.
@@ -205,6 +200,10 @@ Item {
             chatLog.setProperty(win.activeIndex, "tools", prefix + name);
             chatLog.setProperty(win.activeIndex, "toolCount", cur.toolCount + 1);
             chatLog.setProperty(win.activeIndex, "toolsActive", true);
+            // The turn is now WAITING on that tool — until the next delta of any
+            // kind arrives. That wait counts as thinking time [his, 2026-08-22].
+            chatLog.setProperty(win.activeIndex, "awaiting", true);
+            win.accrueThink(win.activeIndex);
         }
         // The image-fetch tool: the model asked for an image, and one entry came
         // back — either a fetched picture (rendered inline) or a failure line
@@ -237,6 +236,7 @@ Item {
             win.stopThinkClock(win.activeIndex);
             chatLog.setProperty(win.activeIndex, "streaming", false);
             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
+            chatLog.setProperty(win.activeIndex, "awaiting", false);
             chatLog.setProperty(win.activeIndex, "searching", false);
             chatLog.setProperty(win.activeIndex, "filesActive", false);
             chatLog.setProperty(win.activeIndex, "imagesActive", false);
@@ -250,6 +250,7 @@ Item {
             win.stopThinkClock(win.activeIndex);
             chatLog.setProperty(win.activeIndex, "streaming", false);
             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
+            chatLog.setProperty(win.activeIndex, "awaiting", false);
             chatLog.setProperty(win.activeIndex, "searching", false);
             chatLog.setProperty(win.activeIndex, "filesActive", false);
             chatLog.setProperty(win.activeIndex, "imagesActive", false);
@@ -355,7 +356,7 @@ Item {
                              thinking: t.thinking || "", thinkingActive: false,
                              thinkTokens: t.thinkTokens || 0,
                              thinkStart: 0, thinkMs: t.thinkMs || 0,
-                             cutOff: !!t.cutOff,
+                             awaiting: false, cutOff: !!t.cutOff,
                              sources: t.sources || "", searchCount: t.searchCount || 0,
                              searching: false,
                              files: t.files || "", fileCount: t.fileCount || 0,
@@ -425,7 +426,7 @@ Item {
         // are left untouched — the log grows downward (docs/DESIGN.md §14).
         chatLog.append({ isUser: true, who: "you", body: shownBody,
                          thinking: "", thinkingActive: false, thinkTokens: 0,
-                         thinkStart: 0, thinkMs: 0, cutOff: false,
+                         thinkStart: 0, thinkMs: 0, awaiting: false, cutOff: false,
                          sources: "", searchCount: 0, searching: false,
                          files: "", fileCount: 0, filesActive: false, filesPending: 0,
                          images: "[]", imagesActive: false, imagesPending: 0,
@@ -433,7 +434,7 @@ Item {
                          streaming:false, isError: false });
         chatLog.append({ isUser: false, who: win.model, body: "",
                          thinking: "", thinkingActive: false, thinkTokens: 0,
-                         thinkStart: 0, thinkMs: 0, cutOff: false,
+                         thinkStart: 0, thinkMs: 0, awaiting: false, cutOff: false,
                          sources: "", searchCount: 0, searching: false,
                          files: "", fileCount: 0, filesActive: false, filesPending: 0,
                          images: "[]", imagesActive: false, imagesPending: 0,
@@ -607,15 +608,32 @@ Item {
         Ollama.continueReply(win.model, JSON.stringify(history), row.body);
     }
 
-    // The reasoning clock. `thinkStart` is set at the first reasoning delta and
-    // cleared here, leaving `thinkMs` — how long the model thought for — in the
-    // row, so the heading reads "thought for 12s" ever after, session reload
-    // included (§10.6 — a finished block reports what actually happened).
+    // The reasoning clock. It accrues while the model is REASONING or WAITING ON
+    // A TOOL [his, 2026-08-22 — "thinking time should include waiting for
+    // toolcalls and such"], and pauses while the answer itself streams: a turn
+    // that thought, searched, thought again and then wrote reports the sum of
+    // the three, not the wall clock of the whole turn. `thinkStart` is the open
+    // interval, `thinkMs` the total closed so far, and only `thinkMs` is saved —
+    // so a reloaded session still says how long each answer was worked on
+    // (§10.6 — a finished block reports what actually happened).
+    //
+    // Call this after ANY change to the flags it reads; it is idempotent.
+    function accrueThink(i) {
+        if (i < 0 || i >= chatLog.count) return;
+        var r = chatLog.get(i);
+        var on = r.streaming && (r.thinkingActive || r.awaiting);
+        if (on && r.thinkStart === 0)
+            chatLog.setProperty(i, "thinkStart", Date.now());
+        else if (!on && r.thinkStart > 0)
+            win.stopThinkClock(i);
+    }
+
+    // Close the open interval, whatever the flags say — the turn is over.
     function stopThinkClock(i) {
         if (i < 0 || i >= chatLog.count) return;
         var r = chatLog.get(i);
         if (r.thinkStart > 0) {
-            chatLog.setProperty(i, "thinkMs", Date.now() - r.thinkStart);
+            chatLog.setProperty(i, "thinkMs", r.thinkMs + (Date.now() - r.thinkStart));
             chatLog.setProperty(i, "thinkStart", 0);
         }
     }
@@ -652,6 +670,7 @@ Item {
                 chatLog.setProperty(win.activeIndex, "cutOff", true);
             chatLog.setProperty(win.activeIndex, "streaming", false);
             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
+            chatLog.setProperty(win.activeIndex, "awaiting", false);
             chatLog.setProperty(win.activeIndex, "searching", false);
             chatLog.setProperty(win.activeIndex, "filesActive", false);
             chatLog.setProperty(win.activeIndex, "imagesActive", false);
@@ -1693,19 +1712,24 @@ Item {
                             Item {
                                 id: think
                                 width: parent.width
-                                visible: !isUser && thinking !== ""
+                                // Shown whenever the clock ran at all: a turn
+                                // that only WAITED on tools reported nothing at
+                                // all before [his, 2026-08-22].
+                                visible: !isUser && (hasBody || thinkMs > 0
+                                                     || thinkStart > 0 || awaiting)
                                 height: visible ? thinkToggle.height + thinkReveal.height : 0
 
-                                readonly property bool expanded: turn.userSet ? turn.userOpen
-                                                                              : false
+                                readonly property bool hasBody: thinking !== ""
+                                readonly property bool expanded: hasBody && turn.userSet
+                                                                 ? turn.userOpen : false
 
                                 // The live count for the heading, ticked half a
-                                // second at a time while the model thinks (a
+                                // second at a time while the clock runs (a
                                 // binding on Date.now() would never re-evaluate).
                                 property int elapsed: 0
                                 Timer {
                                     interval: 500
-                                    running: thinkingActive && thinkStart > 0
+                                    running: thinkStart > 0
                                     repeat: true
                                     triggeredOnStart: true
                                     onTriggered: think.elapsed = Date.now() - thinkStart
@@ -1725,26 +1749,53 @@ Item {
                                         motion.reduceMotion ? "…" : "...".substring(0, dotPhase)
                                     Timer {
                                         interval: motion.ms(motion.slideMs)
-                                        running: thinkingActive && !motion.reduceMotion
+                                        running: (thinkingActive || awaiting)
+                                                 && !motion.reduceMotion
                                         repeat: true
                                         onTriggered: thinkToggle.dotPhase = (thinkToggle.dotPhase + 1) % 4
                                     }
                                     Row {
                                         anchors { left: parent.left; verticalCenter: parent.verticalCenter }
                                         spacing: 6
-                                        PixelText { text: think.expanded ? "-" : "+"; color: Theme.textDim }
-                                        // "thinking for 12s" while it runs,
-                                        // "thought for 12s" once it has [his,
-                                        // 2026-08-22] — the duration is the one
-                                        // reading a folded block still gives.
-                                        // The ellipsis rides the TIME, not the
-                                        // token count [his, 2026-08-22]: it is
-                                        // the part that is still running.
+                                        // No toggle when there is no reasoning to
+                                        // unfold — a turn can spend its whole
+                                        // clock waiting on tools (§10.2: never a
+                                        // control that opens nothing).
+                                        PixelText {
+                                            visible: think.hasBody
+                                            text: think.expanded ? "-" : "+"
+                                            color: Theme.textDim
+                                        }
+                                        // The reasoning-token count, named and
+                                        // still, to the LEFT of the time [his,
+                                        // 2026-08-22]: "240 tokens", "1.2k
+                                        // tokens". It PERSISTS once counted, so a
+                                        // COLLAPSED block still reports its size
+                                        // after the answer starts — the heading is
+                                        // all he sees when it is folded (§9.1
+                                        // subordinated — one step dim, never
+                                        // accent).
+                                        PixelText {
+                                            visible: thinkTokens > 0
+                                            text: win.fmtCount(thinkTokens)
+                                                  + (thinkTokens === 1 ? " token ·"
+                                                                       : " tokens ·")
+                                            color: Theme.textDim
+                                        }
+                                        // The state, and the ellipsis rides it
+                                        // because it is the part still running:
+                                        // "waiting…" while a tool is out,
+                                        // "thinking for 12s…" while it reasons,
+                                        // and the TOTAL of both as "thought for
+                                        // 12s" once the turn settles.
                                         PixelText {
                                             text: {
-                                                var d = win.fmtDur(thinkingActive
-                                                                   ? think.elapsed
-                                                                   : thinkMs);
+                                                if (awaiting)
+                                                    return "waiting" + thinkToggle.dots;
+                                                var live = thinkMs + (thinkStart > 0
+                                                                      ? think.elapsed : 0);
+                                                var d = win.fmtDur(thinkingActive ? live
+                                                                                  : thinkMs);
                                                 if (thinkingActive)
                                                     return (d !== "" ? "thinking for " + d
                                                                      : "thinking")
@@ -1752,25 +1803,13 @@ Item {
                                                 return d !== "" ? "thought for " + d
                                                                 : "thought";
                                             }
-                                            color: thinkingActive ? Theme.text : Theme.textDim
-                                        }
-                                        // The reasoning-token count, named and
-                                        // still: "240 tokens", "1.2k tokens"
-                                        // [his, 2026-08-22]. It PERSISTS once
-                                        // counted, so a COLLAPSED block still
-                                        // reports its size after the answer
-                                        // starts — the heading is all he sees
-                                        // when it is folded (§9.1 subordinated —
-                                        // one step dim, never accent).
-                                        PixelText {
-                                            visible: thinkTokens > 0
-                                            text: "· " + win.fmtCount(thinkTokens)
-                                                  + " tokens"
-                                            color: Theme.textDim
+                                            color: (thinkingActive || awaiting) ? Theme.text
+                                                                                : Theme.textDim
                                         }
                                     }
                                     MouseArea {
                                         anchors.fill: parent
+                                        enabled: think.hasBody
                                         cursorShape: Qt.PointingHandCursor
                                         onClicked: { turn.userOpen = !think.expanded; turn.userSet = true; }
                                     }
