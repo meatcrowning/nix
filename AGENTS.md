@@ -540,6 +540,43 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   manager *and* the D-Bus activation store (what an activated
   `xdg-desktop-portal-hyprland` reads, which unit wrapping cannot reach) and is
   called by all three nested harnesses on teardown.
+- `home/srvs/ai-warden.nix` + `ai-warden-files/ai-warden.py` — **the referee
+  between chatter's ollama and painter's ComfyUI**, `top` only. They share 31
+  GiB and each wants most of it: measured 2026-08-22 with nothing unusual
+  running, ollama alone held **24.7 GiB** for one `qwen3.6:35b-a3b`, and a
+  painter render landing on top of that does not fail, it **livelocks** the box
+  (mechanism in `sys/oomd.nix`). `tools/heavy-gate.sh` already refereed a
+  *rebuild* against these two; nothing refereed them against **each other**.
+  This does, by **admission control** rather than by reacting to pressure —
+  reacting is too late, the spike IS the load. Both apps call `/reserve` before
+  they load or queue (`apps/pylib/warden.py`), and the warden **frees, never
+  stops** (ollama takes a zero `keep_alive`, comfy takes `POST /free`; both
+  daemons stay up), **never interrupts work in flight** (a busy other side is a
+  refusal with a reason, not a cut render), and **acts on its own judgement and
+  says so** (a toast naming what went — his call, 2026-08-22; a question per
+  turn would be intolerable). A watchdog on `MemAvailable` + PSI is the net
+  behind it, for memory admission control cannot see coming.
+    - **Read the cgroup, not `/api/ps`.** Measured: ollama's endpoint returned
+      `{"models":[]}` while `llama-server` already held 14.4 GiB RSS and 10.7
+      GiB of VRAM — it is blind for the whole duration of a load, which is
+      exactly the window a freeze happens in. `memory.current` was correct
+      throughout, so every footprint is `max(API, cgroup)`.
+    - **RAM refuses; VRAM only tidies.** A VRAM shortfall degrades a job
+      (ollama offloads, comfy errors); only RAM takes the desktop with it.
+    - **Two floors, on purpose.** `RAM_FLOOR` (6G) decides whether to *free* —
+      generous, because freeing is cheap. `HARD_FLOOR` (2.5G) is the only one a
+      *refusal* is measured against, because a refusal is chatter telling him
+      no; measuring his own 23.9 GiB model against the 6G floor would have
+      banned it outright.
+    - **Fail open everywhere.** Kill switch `~/.local/state/ai-warden/off`; a
+      dead or wedged daemon is an immediate yes. Log `~/.cache/ai-warden.log`,
+      `ai-warden status` for the picture, harness `tools/ai-warden-test.py`.
+    - `sys/ai/ollama.nix` carries the other half: `sys/oomd.nix` arms oomd on
+      the **user** slices only, so ollama — a **system** unit and the biggest
+      memory holder on the box — had nothing watching it at all. It now has a
+      `MemoryHigh` throttle and a `ManagedOOMMemoryPressure` policy, plus
+      `OLLAMA_MAX_LOADED_MODELS=1` / `OLLAMA_NUM_PARALLEL=1` so one chat cannot
+      cost two sets of weights and N KV caches.
 - `home/srvs/board-watch.nix` + `board-watch-files/` — **acts on his answers to
   this host's board (`docs/board.<hostname>.md`) without waiting to be told
   about them.** A `path` unit on the

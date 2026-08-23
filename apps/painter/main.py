@@ -55,6 +55,7 @@ from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font set
 from kdetheme import theme_source, is_plasma  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
 import kdeshell  # noqa: E402  (pylib; the Plasma session's real QtWidgets window)
 from spellcheck import SpellCheck  # noqa: E402  (pylib; the prompt boxes' spelling)
+from warden import Warden  # noqa: E402  (pylib; the AI-backend memory arbiter)
 # The QBuffer-safe encoder (see its docstring for the SEGV that shape avoids);
 # collage.py already pulls it in, so this costs nothing new.
 import imgfit  # noqa: E402
@@ -893,6 +894,11 @@ class Painter(QObject):
                                           # yet (persisted across a relaunch)
 
         self.reg = None
+        # The memory arbiter (home/srvs/ai-warden.nix). A batch asks for room
+        # before it is queued, because a ComfyUI load landing on top of a 24 GiB
+        # ollama model livelocks the machine rather than failing. Fail-open by
+        # construction: no warden, no gate. See apps/pylib/warden.py.
+        self.warden = Warden(self)
         self.client = C.ComfyClient()
         self.client.statusChanged.connect(self._on_queue)
         self.client.jobStarted.connect(self._on_started)
@@ -1850,7 +1856,36 @@ class Painter(QObject):
 
         self.client.upload_image(path, uploaded)
 
-    def _start_jobs(self, entry, params, count):
+    def _weight_bytes(self, entry, params):
+        """What this batch is about to pull off disk, in bytes — the checkpoint
+        plus every enabled LoRA. Deliberately the RAW figure and nothing else:
+        the warden adds its own overhead for the encoder, the VAE and the
+        sampler's working tensors, and it is the one that knows how much of the
+        machine there is (apps/pylib/warden.py). 0 means "no idea", which the
+        warden reads as a big family."""
+        total = int(getattr(entry, "size", 0) or 0)
+        for row in self.loras.active():
+            lora = self.reg.find(row.get("name", "")) if self.reg else None
+            total += int(getattr(lora, "size", 0) or 0)
+        return total
+
+    def _start_jobs(self, entry, params, count, reserved=False):
+        # ASK FOR THE MEMORY FIRST. Everything that generates funnels through
+        # here, so this is the one place the question has to be asked. A refusal
+        # is DRAWN and the batch does not start (docs/DESIGN.md §10 — never
+        # silently do nothing); the warden raises its own toast when it frees
+        # chatter's weights, so there is nothing to announce on this side.
+        if not reserved:
+            def _go(ok, reason):
+                if not ok:
+                    self.toast.emit(reason, True)
+                    return
+                self._start_jobs(entry, params, count, True)
+
+            self.warden.reserve("comfy",
+                                nbytes=self._weight_bytes(entry, params), cb=_go)
+            return
+
         if self._jobs == 0:
             # A fresh batch. Its clock starts HERE and not at the last job's own
             # start: four images asked for in one press are one wait to the
@@ -1904,6 +1939,7 @@ class Painter(QObject):
     def cancel(self):
         self.client.cancel_all()
         self._jobs = 0
+        self.warden.done("comfy")
         # A cancelled batch has nothing to announce, and nothing of its may
         # leak into the next one's toast.
         self._batch_toasted = True
@@ -2044,6 +2080,9 @@ class Painter(QObject):
         self._jobs = max(0, self._jobs - 1)
         if self._jobs == 0:
             self._busy = False
+            # The batch is over — hand the lease back so chatter can
+            # have the memory without waiting it out.
+            self.warden.done("comfy")
             self._clock.stop()
             self._progress = 0.0
             self._current = ""
@@ -2068,6 +2107,9 @@ class Painter(QObject):
         self._jobs = max(0, self._jobs - 1)
         if self._jobs == 0:
             self._busy = False
+            # The batch is over — hand the lease back so chatter can
+            # have the memory without waiting it out.
+            self.warden.done("comfy")
             self._clock.stop()
             self.previewChanged.emit()
             self.busyChanged.emit()

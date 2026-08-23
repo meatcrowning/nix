@@ -46,8 +46,10 @@ QML = HERE / "qml"
 
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
+from warden import Warden  # noqa: E402  (same)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
-from kdetheme import theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+from kdetheme import theme_source, is_plasma  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+import kdeshell  # noqa: E402  (pylib; the Plasma session's real QtWidgets window)
 
 #: The local ollama daemon. Loopback-pinned like everything else that speaks to
 #: a local backend here — never a new listener (root AGENTS.md → the tailnet).
@@ -937,6 +939,11 @@ class Ollama(QObject):
         self._suggested = self._load_suggested()    # agent-recommended, ranked first
         self._suggested_count = 0                   # how many of _models are suggested
         self._busy = False
+        # The memory arbiter (home/srvs/ai-warden.nix). A 24 GiB model landing
+        # on top of a painter render is what livelocks the box, so a turn asks
+        # for room before it is sent. Fail-open by construction: no warden, no
+        # gate. See apps/pylib/warden.py.
+        self._warden = Warden(self)
         self._reply = None       # the in-flight chat QNetworkReply, if any
         self._buf = b""          # partial NDJSON line carried between reads
         self._think_tokens = 0   # reasoning tokens seen this turn (one per delta)
@@ -981,6 +988,10 @@ class Ollama(QObject):
     def _set_busy(self, v):
         if v != self._busy:
             self._busy = v
+            # The turn is over however it ended — hand the memory back so
+            # painter can have it. Every exit (done, error, cancel) is here.
+            if not v:
+                self._warden.done("ollama")
             self.busyChanged.emit()
 
     # ---- the last-picked model, and the agent-suggested ranking ----
@@ -1329,7 +1340,20 @@ class Ollama(QObject):
         self.refreshModelInfo(model)   # keep the context stat matched to the turn
         self._set_busy(True)
         self.replyStarted.emit()
-        self._post_chat()
+
+        # ASK FOR THE MEMORY FIRST. Loading a 24 GiB model beside a ComfyUI
+        # render is not a slow turn, it is a frozen desktop — so the warden
+        # either frees painter's weights (its own toast says so) or refuses,
+        # and a refusal is DRAWN rather than swallowed (docs/DESIGN.md §10).
+        # Anything wrong with the warden itself calls back ok, always.
+        def _go(ok, reason):
+            if not ok:
+                self._set_busy(False)
+                self.replyError.emit(reason)
+                return
+            self._post_chat()
+
+        self._warden.reserve("ollama", model=model, cb=_go)
 
     @Slot(str, result="QVariant")
     def localFileInfo(self, url):

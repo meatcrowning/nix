@@ -359,6 +359,18 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
   painter's `ui-test.py` → `test_selection_and_collage`.
 - **`kitty-vtb.py`** — kitty's vtb integration, run from the live repo, stdlib
   only.
+- **`warden.py`** — **the memory arbiter's client, and the reason chatter and
+  painter can be open at once.** They share one 31 GiB machine and each backend
+  wants most of it (ollama measured at 24.7 GiB for one model, 2026-08-22), and
+  the collision does not fail an allocation — it livelocks the desktop. So
+  before an app loads or queues anything it calls
+  `warden.reserve(backend, …, cb)`, and the daemon (`home/srvs/ai-warden.nix`)
+  either frees the other backend's weights or refuses with a reason; `done()`
+  hands the lease back when the work ends. **Draw a refusal, never swallow it**
+  (docs/DESIGN.md §10) — and never toast the freeing, which the warden
+  announces itself. **Fail-open by construction**: no warden, a timeout or a
+  wedged daemon all call back `ok`, because a supervisor that becomes the reason
+  he cannot send a message has failed at its job.
 - **`clipfile.py`** — **THE way to put a FILE on the clipboard here.** Run as a
   program (`python3 clipfile.py [--image] FILE…`), not imported: it forks and
   stays alive as the selection's owner, because a Wayland selection dies with
