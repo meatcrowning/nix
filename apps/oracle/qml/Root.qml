@@ -418,6 +418,7 @@ Item {
             var r = chatLog.get(i);
             a.push({ isUser: r.isUser, who: r.who, step: r.step,
                      body: r.body, tools: r.tools, toolCount: r.toolCount,
+                     images: r.images, imagesActive: r.imagesActive,
                      streaming: r.streaming, isError: r.isError });
         }
         return JSON.stringify(a);
