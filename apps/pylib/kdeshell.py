@@ -340,6 +340,35 @@ class KdeShell:
     """
 
 
+def _palette_watcher(views):
+    """An application-level filter that re-dresses every QQuickWidget when the
+    desktop's colour scheme changes.
+
+    A QQuickWidget does NOT inherit `QApplication`'s palette on its own (see
+    the comment in `KdeShell.__init__`), so each one is handed it explicitly at
+    construction — and that is a snapshot. The scheme is not fixed for the life
+    of the process, so the snapshot goes stale and the window ends up
+    half-dressed: real widgets in the new colours, the QML in the old ones.
+    The returned object must be kept alive by the caller, or Qt drops the
+    filter with it."""
+    from PySide6.QtCore import QObject, QEvent
+    from PySide6.QtWidgets import QApplication
+
+    class _PaletteWatch(QObject):
+        def eventFilter(self, obj, ev):
+            if ev.type() == QEvent.ApplicationPaletteChange:
+                pal = QApplication.palette()
+                for view in list(views):
+                    try:
+                        view.setPalette(pal)
+                        view.setClearColor(pal.window().color())
+                    except RuntimeError:      # the view is gone; forget it
+                        views.remove(view)
+            return False
+
+    return _PaletteWatch()
+
+
 def _build_background_classes():
     """The style's window background, as something QML can draw.
 
@@ -350,22 +379,48 @@ def _build_background_classes():
     change produces a new URL and the old one is never served from cache.
     """
     from PySide6.QtCore import QObject, QPoint, QRect, Property, Signal, QEvent
-    from PySide6.QtGui import QImage, QRegion
+    from PySide6.QtGui import QImage, QPalette, QRegion
     from PySide6.QtQuick import QQuickImageProvider
-    from PySide6.QtWidgets import QWidget
+    from PySide6.QtWidgets import QApplication, QWidget
+
+    def _group_palette(group):
+        """The app palette with `group`'s colours copied into every group.
+
+        THE PROXY IS NEVER A WINDOW ON SCREEN, so Qt decides its colour group
+        (Active or Inactive) on its own, and it decided differently from the
+        REAL window: with his colour scheme's inactive effect on
+        (`[ColorEffects:Inactive] Enable=true`, Window 43,35,23 active vs
+        46,34,0 inactive) the chrome the style paints and the crop the QML
+        draws came from two different tones the moment the window lost focus —
+        which is the state a "select window" screenshot captures, and why the
+        titlebar looked disconnected from the window in one [his, 2026-08-23].
+        Flattening the palette is what makes the answer independent of what Qt
+        guesses about a widget nobody can see."""
+        src = QApplication.palette()
+        out = QPalette(src)
+        for role in QPalette.ColorRole:
+            if role == QPalette.NColorRoles:
+                continue
+            colour = src.color(group, role)
+            for g in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
+                out.setColor(g, role, colour)
+        return out
 
     class _BgProvider(QQuickImageProvider):
         def __init__(self):
             super().__init__(QQuickImageProvider.Image)
 
         def requestImage(self, path, size, requested):
-            # "winW,winH,offX,offY,viewW,viewH,dpr#serial"
+            # "winW,winH,offX,offY,viewW,viewH,dpr,a|i#serial" — the last field
+            # is the window's activation state (see `_group_palette`).
             try:
                 head = str(path).split("#")[0]
+                fields = head.split(",")
                 win_w, win_h, off_x, off_y, vw, vh, dpr = (
-                    float(p) for p in head.split(",")[:7])
+                    float(p) for p in fields[:7])
             except (ValueError, IndexError):
                 return QImage()
+            active = (fields[7] if len(fields) > 7 else "a") != "i"
             win_w, win_h = max(1, int(win_w)), max(1, int(win_h))
             vw, vh = max(1, int(vw)), max(1, int(vh))
             dpr = dpr if dpr > 0 else 1.0
@@ -375,6 +430,8 @@ def _build_background_classes():
             # Qt::Window) — which this is, whether or not it is on screen.
             proxy = QWidget()
             proxy.setAttribute(Qt.WA_StyledBackground, True)
+            proxy.setPalette(_group_palette(QPalette.Active if active
+                                            else QPalette.Inactive))
             proxy.resize(win_w, win_h)
 
             img = QImage(int(win_w * dpr), int(win_h * dpr),
@@ -407,9 +464,23 @@ def _build_background_classes():
             view.installEventFilter(self)
             window.installEventFilter(self)
 
+        # Every event that can make the rendered image wrong: the geometry
+        # moved, the palette or the style changed under it — or the window
+        # gained or lost focus, which repaints the chrome in the OTHER colour
+        # group and used to leave this crop in the old one.
+        #: …plus the two that only exist on some Qt builds: the view moving to
+        #: a screen with another scale changes the DPR in the URL, and nothing
+        #: else would notice (`getattr`, because naming an enum a build does
+        #: not have is an AttributeError at import).
+        _EXTRA = tuple(e for e in (getattr(QEvent, "DevicePixelRatioChange", None),
+                                   getattr(QEvent, "ScreenChangeInternal", None))
+                       if e is not None)
+
         def eventFilter(self, obj, ev):
             if ev.type() in (QEvent.Resize, QEvent.Move, QEvent.PaletteChange,
-                             QEvent.ApplicationPaletteChange, QEvent.StyleChange):
+                             QEvent.ApplicationPaletteChange, QEvent.StyleChange,
+                             QEvent.ActivationChange, QEvent.WindowActivate,
+                             QEvent.WindowDeactivate) + self._EXTRA:
                 self.refresh()
             return False
 
@@ -424,7 +495,8 @@ def _build_background_classes():
             off = view.mapTo(win, QPoint(0, 0))
             dpr = view.devicePixelRatioF() or 1.0
             return (f"image://kdebg/{win.width()},{win.height()},"
-                    f"{off.x()},{off.y()},{view.width()},{view.height()},{dpr}"
+                    f"{off.x()},{off.y()},{view.width()},{view.height()},{dpr},"
+                    f"{'a' if win.isActiveWindow() else 'i'}"
                     f"#{self._serial}")
 
     return _BgProvider, _StyledBackground
@@ -525,6 +597,18 @@ def _build_shell_class():
             self.view.engine().addImageProvider("kdebg", provider_cls())
             self.background = bg_cls(self.view, self.window)
             self.view.rootContext().setContextProperty("KdeBackground", self.background)
+
+            # AND THE VIEW'S OWN PALETTE FOLLOWS THE DESKTOP'S. The two lines
+            # above set it once, at construction — but the scheme is not fixed
+            # for the life of the process: `wal-set.sh` rewrites `kdeglobals`
+            # on every wallpaper change and the KDE platform theme pushes that
+            # into a running app. Without this the widgets around the view
+            # would restyle and the QML inside it would keep the old palette,
+            # which is the same class of half-updated window as the background
+            # crop above [his, 2026-08-23: "it might fail to render properly"].
+            self._views = [self.view]
+            self._palette_watch = _palette_watcher(self._views)
+            QApplication.instance().installEventFilter(self._palette_watch)
 
             self._toolbar = None
             self._status = None
@@ -1523,6 +1607,7 @@ def _build_shell_class():
             view.setResizeMode(QQuickWidget.SizeRootObjectToView)
             view.setPalette(QApplication.palette())
             view.setClearColor(QApplication.palette().window().color())
+            self._views.append(view)     # so a scheme change re-dresses it too
 
             ctx = QQmlContext(self.view.engine().rootContext(), view)
             _, bg_cls = _build_background_classes()
@@ -1703,6 +1788,7 @@ def _build_shell_class():
             view.setResizeMode(QQuickWidget.SizeRootObjectToView)
             view.setPalette(QApplication.palette())
             view.setClearColor(QApplication.palette().window().color())
+            self._views.append(view)     # so a scheme change re-dresses it too
 
             ctx = QQmlContext(self.view.engine().rootContext(), view)
             _, bg_cls = _build_background_classes()
