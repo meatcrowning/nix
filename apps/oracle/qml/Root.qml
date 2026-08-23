@@ -314,6 +314,31 @@ Item {
             chatLog.setProperty(win.activeIndex, "imagesPending", pending);
             chatLog.setProperty(win.activeIndex, "imagesActive", pending > 0);
         }
+        // The video tool: one entry per call, the same contract the images
+        // use one step along — a resolved stream (drawn as a card) or an honest
+        // failure line. `videosActive` is the in-flight line while yt-dlp is
+        // still turning a watch page into a stream, which is the slow part.
+        function onVideoStarted(url) {
+            if (win.activeIndex < 0) return;
+            var cur = chatLog.get(win.activeIndex);
+            chatLog.setProperty(win.activeIndex, "videosPending", cur.videosPending + 1);
+            chatLog.setProperty(win.activeIndex, "videosActive", true);
+        }
+        function onVideoResult(entryJson) {
+            if (win.activeIndex < 0) return;
+            var cur = chatLog.get(win.activeIndex);
+            var arr;
+            try { arr = JSON.parse(cur.videos); } catch (e) { arr = []; }
+            var entry;
+            try { entry = JSON.parse(entryJson); } catch (e2) { entry = null; }
+            if (entry) {
+                arr.push(entry);
+                chatLog.setProperty(win.activeIndex, "videos", JSON.stringify(arr));
+            }
+            var pending = Math.max(0, cur.videosPending - 1);
+            chatLog.setProperty(win.activeIndex, "videosPending", pending);
+            chatLog.setProperty(win.activeIndex, "videosActive", pending > 0);
+        }
         function onReplyDone() {
             if (win.activeIndex < 0) return;
             win.stopThinkClock(win.activeIndex);
@@ -323,6 +348,7 @@ Item {
             chatLog.setProperty(win.activeIndex, "searching", false);
             chatLog.setProperty(win.activeIndex, "filesActive", false);
             chatLog.setProperty(win.activeIndex, "imagesActive", false);
+            chatLog.setProperty(win.activeIndex, "videosActive", false);
             chatLog.setProperty(win.activeIndex, "toolsActive", false);
             chatLog.setProperty(win.activeIndex, "agentsActive", false);
             chatLog.setProperty(win.activeIndex, "agentsPending", 0);
@@ -341,6 +367,7 @@ Item {
             chatLog.setProperty(win.activeIndex, "searching", false);
             chatLog.setProperty(win.activeIndex, "filesActive", false);
             chatLog.setProperty(win.activeIndex, "imagesActive", false);
+            chatLog.setProperty(win.activeIndex, "videosActive", false);
             chatLog.setProperty(win.activeIndex, "toolsActive", false);
             chatLog.setProperty(win.activeIndex, "agentsActive", false);
             chatLog.setProperty(win.activeIndex, "agentsPending", 0);
@@ -402,7 +429,7 @@ Item {
                          files: t.files, fileCount: t.fileCount,
                          agents: t.agents, agentCount: t.agentCount,
                          agentsBad: t.agentsBad,
-                         images: t.images,
+                         images: t.images, videos: t.videos,
                          tools: t.tools, toolCount: t.toolCount,
                          isError: t.isError });
         }
@@ -507,6 +534,7 @@ Item {
                          agents: "", agentCount: 0, agentsActive: false,
                          agentsPending: 0, agentHead: "", agentsBad: false,
                          images: "[]", imagesActive: false, imagesPending: 0,
+                         videos: "[]", videosActive: false, videosPending: 0,
                          tools: "", toolCount: 0, toolsActive: false,
                          streaming: true, isError: false });
         win.activeIndex = chatLog.count - 1;
@@ -526,6 +554,7 @@ Item {
                      body: r.body, tools: r.tools, toolCount: r.toolCount,
                      agents: r.agents, agentCount: r.agentCount,
                      images: r.images, imagesActive: r.imagesActive,
+                     videos: r.videos, videosActive: r.videosActive,
                      streaming: r.streaming, isError: r.isError });
         }
         return JSON.stringify(a);
@@ -557,6 +586,7 @@ Item {
                              agentsActive: false, agentsPending: 0, agentHead: "",
                              agentsBad: !!t.agentsBad,
                              images: t.images || "[]", imagesActive: false, imagesPending: 0,
+                             videos: t.videos || "[]", videosActive: false, videosPending: 0,
                              tools: t.tools || "", toolCount: t.toolCount || 0, toolsActive: false,
                              streaming: false, isError: !!t.isError,
                              step: t.step || 0, ts: t.ts || 0 });
@@ -630,6 +660,7 @@ Item {
                          agents: "", agentCount: 0, agentsActive: false,
                          agentsPending: 0, agentHead: "", agentsBad: false,
                          images: "[]", imagesActive: false, imagesPending: 0,
+                         videos: "[]", videosActive: false, videosPending: 0,
                          tools: "", toolCount: 0, toolsActive: false,
                          streaming:false, isError: false, step: 0 });
         win.appendReplyRow(1);
@@ -956,6 +987,7 @@ Item {
             chatLog.setProperty(win.activeIndex, "searching", false);
             chatLog.setProperty(win.activeIndex, "filesActive", false);
             chatLog.setProperty(win.activeIndex, "imagesActive", false);
+            chatLog.setProperty(win.activeIndex, "videosActive", false);
             win.chatRev++;
             win.saveCurrent();   // keep the partial turn in the session
         }
@@ -1825,7 +1857,8 @@ Item {
                         // disclosures no longer count — they sit OUTSIDE the
                         // bubble now [his, 2026-08-22].
                         readonly property bool wide:
-                            !isUser && (images !== "[]" || imagesActive)
+                            !isUser && (images !== "[]" || imagesActive
+                                        || videos !== "[]" || videosActive)
 
                         Column {
                             id: turnStack
@@ -2366,6 +2399,7 @@ Item {
                                 // would be a second, blank bubble (§10 — never a
                                 // control with no reading).
                                 visible: body !== "" || imageCol.visible
+                                         || videoCol.visible
                                 user: isUser
                                 isError: model.isError
                                 x: isUser ? turnStack.width - width : 0
@@ -2433,6 +2467,36 @@ Item {
                                         PixelText {
                                             visible: imagesActive
                                             text: "fetching an image…"
+                                            color: Theme.text
+                                        }
+                                    }
+
+                                    // The videos a reply carries, under the pictures and
+                                    // still above the words [his, 2026-08-23 — "are inline
+                                    // youtube video displays possible … like the youtube
+                                    // video displays in the bubble?"]. One card per video,
+                                    // playing a STREAM the resolver found — nothing is
+                                    // downloaded, and nothing starts until he clicks it.
+                                    // VideoDeck.qml / VideoCard.qml.
+                                    Column {
+                                        id: videoCol
+                                        width: parent.width
+                                        spacing: 6
+                                        visible: !isUser && (videos !== "[]" || videosActive)
+
+                                        VideoDeck {
+                                            width: videoCol.width
+                                            entries: {
+                                                try { return JSON.parse(videos); }
+                                                catch (e) { return []; }
+                                            }
+                                        }
+
+                                        // Resolving a watch page takes seconds, so the
+                                        // wait is shown (§10) rather than left blank.
+                                        PixelText {
+                                            visible: videosActive
+                                            text: "finding the video…"
                                             color: Theme.text
                                         }
                                     }
