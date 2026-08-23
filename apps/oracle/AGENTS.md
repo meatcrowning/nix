@@ -265,8 +265,9 @@ no code change at all.
   guides in `references/`. **Nothing is vendored here** — `~/.claude` syncs to
   both hosts (`home/srvs/claude-state.nix`), so chatter and Claude Code read
   ONE source of truth and none of it lands in this public repo. Today:
-  `video-prompt`, `flux-klein-edit` (the painter edit-mode instruction) and
-  `krea-prompt` (the positive/negative image pair).
+  `video-prompt`, `flux-klein-edit` (the painter edit-mode instruction),
+  `krea-prompt` (the positive/negative image pair) and `anima-prompt` (the
+  same pair in Danbooru tags, for painter's anime mode).
 - **`use_skill(name)`** returns that skill's `description`, its `instructions`
   (the SKILL.md with frontmatter stripped) and the names of its `guides`;
   **`use_skill(name, guide=…)`** returns one guide **in full**, in ONE call —
