@@ -1957,6 +1957,19 @@ class Ollama(QObject):
     # inline images) remain the DETAIL view for the tools that have one.
     toolCallStarted = Signal(str)           # the tool name
 
+    # DELEGATION, drawn as its own disclosure rather than folded into the file
+    # block it used to borrow (docs/DESIGN.md §9.1, §10). A spawn is not a file
+    # op: it is a second context doing minutes of work whose only visible trace
+    # was one line saying it had finished. So: it announces itself with the task
+    # and, when the definition names one, the model it is about to make ollama
+    # swap in; it reports every round and every tool the subagent calls, so the
+    # wait is not silent and the main agent's own tool count stays honest; and
+    # what it ANSWERED is shown, that being the one thing that says whether the
+    # delegation was worth it.
+    agentStarted = Signal(str, str, str)    # agent name, task, model if it differs
+    agentProgress = Signal(str, int, str)   # agent name, round, the tool it called
+    agentDone = Signal(str, bool, str)      # agent name, ok, the block to draw
+
     #: A NEW TOOL ROUND is about to generate. Emitted after a round's results
     #: are back and before the next POST, so QML can close the row that round
     #: wrote into and open a fresh one: one bubble per round, instead of every
@@ -3542,7 +3555,9 @@ class Ollama(QObject):
                 "content": json.dumps({"error": "spawn_agent needs a task: say "
                                        "what the subagent should do, completely, "
                                        "since it cannot ask you."})}
-            self.fileToolDone.emit("agent not spawned: no task given", False)
+            self.agentStarted.emit(spec["name"], "", "")
+            self.agentDone.emit(spec["name"], False,
+                                "%s — not spawned: no task given" % spec["name"])
             self._tool_done(remaining, calls)
             return
         context = str(args.get("context", "") or "").strip()
@@ -3560,11 +3575,15 @@ class Ollama(QObject):
                          {"role": "user", "content": first}],
             "rounds": 0,
             "ncalls": 0,
+            "used": [],
             "wrap": False,
             "idx": idx, "remaining": remaining, "calls": calls,
         }
-        head = task if len(task) <= 70 else task[:69].rstrip() + "…"
-        self.fileToolStarted.emit("agent %s: %s" % (run["name"], head))
+        # The model is named only when it is NOT the parent's: a definition with
+        # its own `model:` costs ollama a full unload and load (OLLAMA_MAX_LOADED
+        # _MODELS=1), which is minutes of fans and nothing on screen otherwise.
+        swap = run["model"] if run["model"] != self._model else ""
+        self.agentStarted.emit(run["name"], task, swap)
         self._agent_post(run)
 
     def _agent_post(self, run):
@@ -3623,7 +3642,12 @@ class Ollama(QObject):
             tool_calls, done=lambda sink, r=run: self._agent_round_done(r, sink))
         for i, call in enumerate(tool_calls):
             name, cargs = self._call_parts(call)
-            self.toolCallStarted.emit("%s: %s" % (run["name"], name or "tool"))
+            # Into the AGENT's disclosure, not the turn's own tool list — a
+            # subagent's fourteen reads are not fourteen tools the main agent
+            # called, and counting them there made "tools · N" a lie about the
+            # turn.
+            run["used"].append(name or "tool")
+            self.agentProgress.emit(run["name"], run["rounds"], name or "tool")
             if name not in run["allowed"]:
                 round_["sink"][i] = {
                     "role": "tool", "tool_name": name,
@@ -3658,7 +3682,8 @@ class Ollama(QObject):
                       "rounds": run["rounds"], "error": error}
             if answer:
                 result["partial"] = answer[:AGENT_RESULT_CHARS]
-            outcome, ok = ("agent %s failed: %s" % (run["name"], error), False)
+            outcome, ok = (self._agent_block(run, "failed: " + error,
+                                             answer[:AGENT_RESULT_CHARS]), False)
         else:
             result = {"agent": run["name"], "task": run["task"],
                       "rounds": run["rounds"], "tool_calls": run["ncalls"],
@@ -3672,15 +3697,39 @@ class Ollama(QObject):
                 result["result"] = ""
                 result["note"] = ("the subagent returned nothing — it may have "
                                   "run out of rounds; try a narrower task")
-            outcome = ("agent %s finished, %d round%s" %
-                       (run["name"], run["rounds"],
-                        "" if run["rounds"] == 1 else "s"))
+            cut = " (cut)" if result.get("truncated") else ""
+            outcome = self._agent_block(
+                run, ("answered%s:" % cut) if answer else "returned nothing:",
+                result["result"] or result.get("note", ""))
             ok = bool(answer)
         run["remaining"]["sink"][run["idx"]] = {
             "role": "tool", "tool_name": "spawn_agent",
             "content": json.dumps(result)}
-        self.fileToolDone.emit(outcome, ok)
+        self.agentDone.emit(run["name"], ok, outcome)
         self._tool_done(run["remaining"], run["calls"])
+
+    def _agent_block(self, run, verdict, body):
+        """What a finished subagent LOOKS like in the transcript: who it was,
+        what it was asked, what it cost, and what it came back with. The answer
+        is in there because it is the only thing that says whether delegating
+        was worth the minutes — before this the whole visible trace of a spawn
+        was `agent explorer finished, 4 rounds`."""
+        head = run["name"]
+        if run["model"] != self._model:
+            head += " · " + run["model"]
+        used = []
+        for t in run["used"]:                       # in call order, deduped
+            if t not in used:
+                used.append(t)
+        cost = "%d round%s · %d tool call%s" % (
+            run["rounds"], "" if run["rounds"] == 1 else "s",
+            run["ncalls"], "" if run["ncalls"] == 1 else "s")
+        if used:
+            cost += " · " + ", ".join(used)
+        lines = [head, "task: " + run["task"], cost, verdict]
+        if body:
+            lines.append(body)
+        return "\n".join(lines)
 
     def _tavily_search(self, query, idx, remaining, calls):
         key = tavily_key()

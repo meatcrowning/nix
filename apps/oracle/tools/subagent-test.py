@@ -173,6 +173,20 @@ if back:
     check("holding the subagent's answer", payload.get("result") == SUMMARY,
           str(payload)[:200])
     check("and the agent it ran", payload.get("agent") == "explorer")
+# --- and the DELEGATION is visible, not folded into the file block ---------
+rows = json.loads(re.search(r"^rows: (.*)$", txt, re.M).group(1))
+blocks = [r.get("agents", "") for r in rows if r.get("agents")]
+check("the transcript shows a block for the agent that ran", len(blocks) == 1,
+      str(len(blocks)))
+if blocks:
+    b = blocks[0]
+    check("naming the agent", b.split("\n")[0] == "explorer", b.split("\n")[0])
+    check("the task it was given", "task: read note.txt and report" in b)
+    check("what it cost", "1 round · 1 tool call · read_file" in b)
+    check("and what it answered", SUMMARY in b)
+check("the main agent's own tool count does not swallow the subagent's",
+      all("read_file" not in (r.get("tools") or "") for r in rows))
+
 check("the bulk the subagent read never enters the main context",
       not any(BULK in str(m.get("content")) for m in msgs(main_next)))
 
