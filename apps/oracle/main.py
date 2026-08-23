@@ -4370,6 +4370,22 @@ def run_selftest(app, shell, win, plasma, warnings):
                                      Q_ARG("QVariant", json.dumps(demo)))
             for _ in range(3):
                 app.processEvents()
+            target.setProperty("model", "demo:model")   # a model must be picked
+            app.processEvents()
+            _label = target.findChild(QObject, "sendLabel")
+            _box = target.findChild(QObject, "promptBox")
+            print("compose: canContinue=%s label=%r"
+                  % (bool(target.property("canContinue")),
+                     _label.property("text") if _label else None))
+            print("compose face: %s" % (_box.property("face") if _box else None))
+            if _box is not None:
+                _box.setProperty("text", "a new question")
+                app.processEvents()
+                print("compose typed: canSend=%s label=%r"
+                      % (bool(target.property("canSend")),
+                         _label.property("text") if _label else None))
+                _box.setProperty("text", "")
+                app.processEvents()
         # ORACLE_POKE: fire the menu rows themselves, which is the only check
         # that the ids in `actions` and the ones `tbAction` answers are the same
         # set — a typo in either is silent (the row is there, the click does

@@ -241,6 +241,7 @@ Item {
             chatLog.setProperty(win.activeIndex, "filesActive", false);
             chatLog.setProperty(win.activeIndex, "imagesActive", false);
             chatLog.setProperty(win.activeIndex, "toolsActive", false);
+            win.chatRev++;              // the compose button can offer `continue`
             win.saveCurrent();          // the finished turn persists to the session
         }
         function onReplyError(reason) {
@@ -255,6 +256,7 @@ Item {
             chatLog.setProperty(win.activeIndex, "filesActive", false);
             chatLog.setProperty(win.activeIndex, "imagesActive", false);
             chatLog.setProperty(win.activeIndex, "toolsActive", false);
+            win.chatRev++;
             win.saveCurrent();
         }
         function onModelsError(reason) { win.status = "no models: " + reason; }
@@ -487,12 +489,16 @@ Item {
         // Send is Enter in the prompt box in both sessions; this is the same
         // verb with a name on it, and the one control that reports a stream is
         // running — it becomes Stop while it is (§10.6).
+        var sends = win.canSend || !win.canContinue;
         out.push({ id: "send", menu: "chat",
-                   menuText: Ollama.busy ? "Stop Generating" : "Send",
-                   tip: Ollama.busy ? "stop the reply" : "send the prompt",
-                   icon: Ollama.busy ? "process-stop" : "document-send",
+                   menuText: Ollama.busy ? "Stop Generating"
+                             : (sends ? "Send" : "Continue"),
+                   tip: Ollama.busy ? "stop the reply"
+                        : (sends ? "send the prompt" : "carry the last reply on"),
+                   icon: Ollama.busy ? "process-stop"
+                         : (sends ? "document-send" : "media-playback-start"),
                    bar: true, shortcut: "Ctrl+Return",
-                   state: (Ollama.busy || win.canSend) ? 0 : 2 });
+                   state: (Ollama.busy || win.canSend || win.canContinue) ? 0 : 2 });
         out.push("-");
         out.push({ id: "attach", menu: "chat", menuText: "Attach Files…",
                    tip: "attach files to the next message",
@@ -533,6 +539,24 @@ Item {
         win.model !== "" && !Ollama.busy
         && (promptBox.text.trim() !== "" || attachments.count > 0)
 
+    // Is there a finished reply at the bottom to carry on? The compose box's
+    // button reads this — `continue` lives on the button beside the box, not
+    // under the bubble [his, 2026-08-23]. Only the LAST row: continuing one
+    // further up would write into the middle of the conversation.
+    //
+    // `chatRev` is the dependency a ListModel does not give us: `count` has a
+    // notify, the per-row `streaming` flag does not, and `busy` flips BEFORE
+    // the handler clears it — so every place that settles a row bumps this.
+    property int chatRev: 0
+    readonly property bool canContinue: {
+        win.chatRev;                       // re-evaluate when a row settles
+        if (win.model === "" || Ollama.busy) return false;
+        var i = chatLog.count - 1;
+        if (i < 0) return false;
+        var r = chatLog.get(i);
+        return !r.isUser && !r.isError && !r.streaming;
+    }
+
     // ONE handler, both chromes — the menubar and the toolbar click these ids.
     function tbAction(id) {
         if (id.indexOf("session:") === 0) {
@@ -550,7 +574,10 @@ Item {
         switch (id) {
         case "new-session":    win.newSession();                break;
         case "delete-session": win.deleteCurrentSession();      break;
-        case "send":           if (Ollama.busy) win.stopReply(); else win.send(); break;
+        case "send":           if (Ollama.busy) win.stopReply();
+                               else if (win.canSend || !win.canContinue) win.send();
+                               else win.continueReply();
+                               break;
         case "attach":         attachDialog.open();             break;
         case "detach":         win.clearAttachments();          break;
         case "refresh-models": Ollama.refreshModels();          break;
@@ -612,6 +639,7 @@ Item {
         }
         chatLog.setProperty(i, "cutOff", false);
         chatLog.setProperty(i, "streaming", true);
+        win.chatRev++;
         win.activeIndex = i;
         Ollama.continueReply(win.model, JSON.stringify(history), row.body, mode);
     }
@@ -682,6 +710,7 @@ Item {
             chatLog.setProperty(win.activeIndex, "searching", false);
             chatLog.setProperty(win.activeIndex, "filesActive", false);
             chatLog.setProperty(win.activeIndex, "imagesActive", false);
+            win.chatRev++;
             win.saveCurrent();   // keep the partial turn in the session
         }
     }
@@ -2203,42 +2232,6 @@ Item {
                                 }
                             }
 
-                            // "continue" — the way on from ANY finished answer
-                            // [his, 2026-08-23]: the way past one that stopped
-                            // mid-sentence, and the way to more of one that did
-                            // not (§10.2: the control appears only when it can
-                            // actually do something, and only on the last row,
-                            // which is the only one it could extend).
-                            Item {
-                                width: parent.width
-                                visible: !isUser && !isError && !streaming
-                                         && index === chatLog.count - 1 && !Ollama.busy
-                                height: visible ? contBtn.height + 4 : 0
-
-                                Rectangle {
-                                    id: contBtn
-                                    y: 4
-                                    width: contLabel.implicitWidth + 16
-                                    height: 20
-                                    radius: Theme.rounding
-                                    border.width: Theme.ctrlBorder
-                                    border.color: Theme.border
-                                    color: contMouse.containsMouse ? Theme.highlight : Theme.bg
-                                    PixelText {
-                                        id: contLabel
-                                        anchors.centerIn: parent
-                                        text: "continue"
-                                        color: Theme.accent
-                                    }
-                                    MouseArea {
-                                        id: contMouse
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: win.continueReply()
-                                    }
-                                }
-                            }
                         }
                     }
                 }
@@ -2332,6 +2325,7 @@ Item {
     // the file selector, apps/AGENTS.md → kdeshell.select_plasma_files).
     PromptBox {
         id: promptBox
+        objectName: "promptBox"
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom
                   leftMargin: 10; rightMargin: 10
                   // Under Plasma the status bar is already a band below this;
@@ -2339,8 +2333,10 @@ Item {
                   bottomMargin: win.plasma ? 4 : 10 }
         busy: Ollama.busy
         armed: win.canSend
+        canContinue: win.canContinue
         onSubmitted: win.send()
         onStopped: win.stopReply()
+        onContinued: win.continueReply()
         onEscaped: replyFlick.forceActiveFocus()
     }
 }

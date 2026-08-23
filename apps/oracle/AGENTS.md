@@ -572,15 +572,37 @@ every turn) is the same GET with the three missing pieces, and nothing more.
 
 ## A reply that stopped short — `continue`
 
-**Any finished answer offers `continue`** [his, 2026-08-23] — it started as the
-way on from one cut off mid-sentence [his, 2026-08-22] and is now offered on the
-last reply whatever ended it. Three things end a reply: the model hits its
-generation ceiling (ollama's final frame says `done_reason: "length"`, which
-`Ollama` surfaces as `replyTruncated`), he presses stop — either marks the row
-`cutOff` — or it simply finishes. The **`continue`** control appears under the
-bubble in all three cases, only on the LAST row, since continuing one further up
-would write into the middle of the conversation, and only while nothing is
-streaming (docs/DESIGN.md §10.2: a control appears when it can act).
+**Any finished answer offers `continue`, and it lives on the SEND BUTTON**
+[his, 2026-08-23] — not under the bubble, which is where it started as the way
+on from an answer cut off mid-sentence [his, 2026-08-22]. Three things end a
+reply: the model hits its generation ceiling (ollama's final frame says
+`done_reason: "length"`, which `Ollama` surfaces as `replyTruncated`), he
+presses stop — either marks the row `cutOff` — or it simply finishes. All three
+are continuable.
+
+So the one button beside the prompt box has three states, in this precedence
+(docs/DESIGN.md §10.2 — one control, one place, and it says what it will do):
+
+| state | when |
+|---|---|
+| `stop` | a reply is streaming (`busy`) |
+| `send` | there is something typed or attached (`canSend`) — a prompt he wrote outranks carrying the last answer on |
+| `continue` | neither, and `canContinue` |
+
+`PromptBox` takes `canContinue` and emits `continued()`; both faces implement it
+(`qml/PromptBox.qml` and `qml/+plasma/PromptBox.qml`, where the states are
+`Stop`/`Send`/`Continue` on a real KStyle Button). The menubar/toolbar `send`
+action carries the same three verbs, since it is the same verb with a name on
+it. `win.canContinue` is true when a model is picked, nothing is streaming, and
+the LAST row is a finished non-error assistant turn — only the last, since
+continuing one further up would write into the middle of the conversation.
+
+**`chatRev` is why that binding is live.** A `ListModel` notifies on `count`,
+never on a per-row `setProperty`, and `Ollama.busy` flips to false BEFORE the
+QML handler clears the row's `streaming` flag — so a binding on `busy` alone
+re-evaluates one step too early and the button never offers `continue`. Every
+place that settles a row (`onReplyDone`, `onReplyError`, `stopReply`,
+`continueReply`) bumps `chatRev`, which the binding reads first.
 
 `Ollama.continueReply(model, history, partial, mode)` re-posts the chat with
 every earlier turn, then the partial as an `assistant` message, then one
@@ -601,7 +623,11 @@ streams onto the END of it: a continued answer stays ONE answer, not two bubbles
 that have to be read together. Harnesses: `tools/continue-test.py` (the cut-off
 half) and `tools/continue-any-test.py` (extend, the empty turn, and the wrap-up
 round below) — both offscreen against a stub ollama on 127.0.0.1, so his daemon
-is never touched and no model is ever loaded.
+is never touched and no model is ever loaded — plus
+`tools/continue-button-test.py`, which drives the real window offscreen in BOTH
+faces (`--selftest` with `ORACLE_FAKE`, whose demo log ends on a finished turn)
+and reads the button's label back: `continue` with nothing typed, `send` the
+moment there is.
 
 ### The wrap-up round — why replies came back EMPTY
 

@@ -15,8 +15,10 @@ Item {
     property alias text: area.text
     property bool busy: false
     property bool armed: false
+    property bool canContinue: false   // see ../PromptBox.qml
     signal submitted()
     signal stopped()
+    signal continued()
     signal escaped()
 
     function clear() { area.clear(); }
@@ -62,12 +64,16 @@ Item {
 
     Button {
         id: sendBtn
+        objectName: "sendLabel"        // same handle as ../PromptBox.qml's
         anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-        text: root.busy ? "Stop" : "Send"
-        icon.name: root.busy ? "process-stop" : "document-send"
+        readonly property bool sends: root.armed || !root.canContinue
+        text: root.busy ? "Stop" : (sends ? "Send" : "Continue")
+        icon.name: root.busy ? "process-stop"
+                   : (sends ? "document-send" : "media-playback-start")
         // §10.2: a button with nothing to act on is disabled, never silently
         // inert. Stopping is always available while a reply is streaming.
-        enabled: root.busy || root.armed
-        onClicked: root.busy ? root.stopped() : root.submitted()
+        enabled: root.busy || root.armed || root.canContinue
+        onClicked: root.busy ? root.stopped()
+                   : (sends ? root.submitted() : root.continued())
     }
 }
