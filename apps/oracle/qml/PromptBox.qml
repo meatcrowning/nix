@@ -14,11 +14,21 @@ Rectangle {
     property alias text: input.text
     property bool busy: false        // a reply is streaming: the button stops it
     property bool armed: false       // there is something to send
+    // Nothing typed, and the last reply can be carried on: the SAME button
+    // says `continue` [his, 2026-08-23 — it belongs on the button beside the
+    // box, not under the bubble]. One button, one place, three states: stop
+    // while a reply streams, send the moment there is something to send, and
+    // continue when there is not (docs/DESIGN.md §10.2).
+    property bool canContinue: false
     signal submitted()
     signal stopped()
+    signal continued()
     signal escaped()
 
     function clear() { input.clear(); }
+
+    // Which of the three the button is right now.
+    readonly property bool acts: root.busy || root.armed || root.canContinue
 
     // Hug the text: the floor is the send button plus the box's own padding,
     // not a round 48 that left a dead band under a one-line prompt.
@@ -81,26 +91,31 @@ Rectangle {
         id: sendBtn
         anchors { right: parent.right; rightMargin: 8
                   verticalCenter: parent.verticalCenter }
-        width: 56
+        // 56 fits `send` and `stop`; `continue` is wider, so the button grows
+        // to its own label rather than clipping it.
+        width: Math.max(56, sendLabel.implicitWidth + 16)
         height: 24
         radius: Theme.rounding
         border.width: Theme.ctrlBorder
         border.color: Theme.border
-        color: sendMouse.containsMouse && (root.armed || root.busy)
-               ? Theme.highlight : Theme.bg
+        color: sendMouse.containsMouse && root.acts ? Theme.highlight : Theme.bg
         PixelText {
+            id: sendLabel
+            objectName: "sendLabel"     // what the harness reads the state off
             anchors.centerIn: parent
-            text: root.busy ? "stop" : "send"
+            text: root.busy ? "stop" : (root.armed || !root.canContinue
+                                        ? "send" : "continue")
             color: root.busy ? Theme.warn
-                   : (root.armed ? Theme.accent : Theme.dim)
+                   : (root.acts ? Theme.accent : Theme.dim)
         }
         MouseArea {
             id: sendMouse
             anchors.fill: parent
             hoverEnabled: true
-            cursorShape: (root.armed || root.busy)
-                         ? Qt.PointingHandCursor : Qt.ArrowCursor
-            onClicked: root.busy ? root.stopped() : root.submitted()
+            cursorShape: root.acts ? Qt.PointingHandCursor : Qt.ArrowCursor
+            onClicked: root.busy ? root.stopped()
+                       : (root.armed || !root.canContinue ? root.submitted()
+                                                          : root.continued())
         }
     }
 }
