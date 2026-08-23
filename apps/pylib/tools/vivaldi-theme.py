@@ -9,13 +9,19 @@ no source to build even if one wanted to. Two surfaces, written here:
     --ui      ~/.local/share/vivaldi-ui/custom.css
               The colour ladder, Oxygen's relief on the surfaces that have one
               (header, toolbar, tabs, address field, buttons) and the page
-              scrollbar sheet, in one file. Enable it once at
-              `vivaldi://experiments` -> "Allow for using CSS modifications",
-              then Settings > Appearance > Custom UI Modifications -> that
-              FOLDER. Read at startup: a change shows at the next launch, and
-              the `vivaldi-ui-css` path unit keeps it current in the meantime.
+              scrollbar sheet, in one file. Read at startup: a change shows at
+              the next launch, and the `vivaldi-ui-css` path unit keeps it
+              current in the meantime.
 
-    --prefs   the theme entry in ~/.config/vivaldi/Default/Preferences
+    --prefs   the theme entry in ~/.config/vivaldi/Default/Preferences, AND
+              the setting that points Vivaldi at the folder above.
+
+              **`~` IS NOT EXPANDED.** `css_ui_mods_directory` is handed to the
+              filesystem verbatim, so a path typed into Settings as
+              `~/.local/share/vivaldi-ui` silently resolves to nothing and the
+              css never loads — no error, no complaint, just a browser that
+              looks untouched. That is why this writes the setting itself, as
+              an absolute path, rather than telling anyone to type it.
               Vivaldi decides for itself whether its UI is light or dark from
               the THEME's colours — which sets icon polarity and a few things
               no stylesheet reaches — so the theme has to agree with the
@@ -92,17 +98,36 @@ def write_ui(source=None, style=None, directory=UI_DIR):
     return path, prov, True
 
 
-def vivaldi_running() -> bool:
+def vivaldi_running(prefs=PREFS) -> bool:
+    """Is the browser holding THIS profile open?
+
+    Chromium's own answer, not a process name: `SingletonLock` in the user-data
+    dir is a symlink to `<host>-<pid>` while an instance owns the profile. A
+    bare `pgrep vivaldi-bin` says yes to any Vivaldi on the box — including the
+    isolated one `tools/vivaldi-probe.py` runs, which is how this first refused
+    to write a profile nothing was using.
+    """
+    lock = prefs.parent.parent / "SingletonLock"
     try:
-        return subprocess.run(["pgrep", "-x", "vivaldi-bin"],
-                              stdout=subprocess.DEVNULL).returncode == 0
+        target = os.readlink(lock)
     except OSError:
         return False
+    try:
+        pid = int(target.rsplit("-", 1)[1])
+    except (IndexError, ValueError):
+        return True                       # a lock we cannot parse is still a lock
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False                      # stale lock from a crash
+    except PermissionError:
+        return True
 
 
-def write_prefs(source=None, prefs=PREFS, force=False):
+def write_prefs(source=None, prefs=PREFS, force=False, ui_dir=UI_DIR):
     """Install the generated theme and make it current. Returns (path, changed)."""
-    if vivaldi_running() and not force:
+    if vivaldi_running(prefs) and not force:
         raise SystemExit("vivaldi is running — it rewrites Preferences on exit, so this "
                          "write would be discarded. Close it and re-run (or --force).")
     try:
@@ -120,6 +145,12 @@ def write_prefs(source=None, prefs=PREFS, force=False):
            else chansource.panel_palette())
     if not pal:
         raise SystemExit("no palette to build a theme from")
+
+    # The setting that makes custom.css load at all — absolute, because a
+    # tilde is not expanded and fails silently.
+    appearance = data.setdefault("vivaldi", {}).setdefault("appearance", {})
+    was_dir = appearance.get("css_ui_mods_directory")
+    appearance["css_ui_mods_directory"] = str(ui_dir.resolve())
 
     entry = vivaldichrome.theme(pal.__getitem__)
     entry["id"] = THEME_ID
@@ -148,11 +179,23 @@ def write_prefs(source=None, prefs=PREFS, force=False):
                          "scheduling off in Settings > Themes, or pick %r there yourself."
                          % THEME_ID)
     was_map = dict(schedule.get("o_s") or {})
+    # His previous light/dark mapping is unused while scheduling is off, but it
+    # is his — keep a copy beside the css so putting it back is a file, not a
+    # reconstruction.
+    if was_map and was_map != {"dark": THEME_ID, "light": THEME_ID}:
+        try:
+            ui_dir.mkdir(parents=True, exist_ok=True)
+            (ui_dir / "previous-theme-schedule.json").write_text(
+                json.dumps({"o_s": was_map, "current": was_current}, indent=1),
+                encoding="utf-8")
+        except OSError:
+            pass
     schedule["enabled"] = 0
     schedule["o_s"] = {"dark": THEME_ID, "light": THEME_ID}
     changed = (before != json.dumps([entry], sort_keys=True)
                or was_current != THEME_ID
-               or was_map != schedule["o_s"])
+               or was_map != schedule["o_s"]
+               or was_dir != appearance["css_ui_mods_directory"])
     if changed:
         prefs.write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
     return prefs, changed
@@ -178,17 +221,17 @@ def main():
     both = not (a.ui or a.prefs)
     if a.ui or both:
         path, prov, changed = write_ui(a.source, a.style, a.dir)
-        print("%s\n  %s — %s\n  vivaldi://experiments -> allow CSS modifications, then"
-              " Settings > Appearance > Custom UI Modifications = %s"
-              % (path, "rewritten" if changed else "unchanged", prov, path.parent))
+        print("%s\n  %s — %s" % (path, "rewritten" if changed else "unchanged", prov))
     if a.prefs or both:
-        if both and vivaldi_running():
+        if both and vivaldi_running(PREFS):
             print("Preferences: skipped, vivaldi is running (it would be overwritten "
                   "on exit). Close it and run: vivaldi-theme --prefs")
         else:
-            path, changed = write_prefs(a.source, force=a.force)
-            print("%s\n  theme %r %s and made current"
-                  % (path, THEME_ID, "written" if changed else "already installed"))
+            path, changed = write_prefs(a.source, force=a.force, ui_dir=a.dir)
+            print("%s\n  theme %r %s, made current, and custom UI modifications"
+                  " pointed at %s"
+                  % (path, THEME_ID, "written" if changed else "already installed",
+                     a.dir.resolve()))
     return 0
 
 

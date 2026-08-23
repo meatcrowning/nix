@@ -123,8 +123,9 @@ def fresh(schedule_enabled=0, current="Vivaldi1"):
         }}), encoding="utf-8")
 
 
+(TMP / "vivaldi-ui").mkdir(exist_ok=True)
 fresh()
-path, changed = gen.write_prefs("hypr", prefs=prefs, force=True)
+path, changed = gen.write_prefs("hypr", prefs=prefs, force=True, ui_dir=TMP / "vivaldi-ui")
 data = json.loads(prefs.read_text())
 themes = data["vivaldi"]["themes"]
 check("the theme is installed and made current", changed and themes["current"] == gen.THEME_ID)
@@ -137,11 +138,19 @@ sched = data["vivaldi"]["theme"]["schedule"]
 check("the schedule map names it for both light and dark",
       sched["o_s"] == {"dark": gen.THEME_ID, "light": gen.THEME_ID})
 check("and scheduling stays OFF", sched["enabled"] == 0)
-check("a second run changes nothing", gen.write_prefs("hypr", prefs=prefs, force=True)[1] is False)
+# The setting that makes custom.css load at all. A tilde here is handed to the
+# filesystem verbatim and fails SILENTLY — that is how the first attempt at
+# this shipped a browser that looked untouched.
+mods = data["vivaldi"]["appearance"]["css_ui_mods_directory"]
+check("custom UI modifications are pointed at the folder", mods.endswith("vivaldi-ui"))
+check("as an ABSOLUTE path — a tilde is never expanded",
+      mods.startswith("/") and "~" not in mods)
+check("a second run changes nothing",
+      gen.write_prefs("hypr", prefs=prefs, force=True, ui_dir=TMP / "vivaldi-ui")[1] is False)
 
 fresh(schedule_enabled=1)
 try:
-    gen.write_prefs("hypr", prefs=prefs, force=True)
+    gen.write_prefs("hypr", prefs=prefs, force=True, ui_dir=TMP / "vivaldi-ui")
     check("a schedule he switched ON is refused, not overwritten", False)
 except SystemExit as e:
     check("a schedule he switched ON is refused, not overwritten", "SCHEDULE" in str(e))
