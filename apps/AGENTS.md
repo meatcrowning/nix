@@ -819,6 +819,30 @@ proxy `WA_StyledBackground` window and crops to the view's rectangle
 (pixel-exact against a real window, 0.76 ms). Put it at the back of the app's
 root item; it is invisible in the Hyprland session.
 
+**That crop wears the WINDOW's colour group, not the proxy's guess** [his,
+2026-08-23]. The proxy is never a window on screen, so Qt picks Active or
+Inactive for it on its own — and it picked differently from the real window the
+moment the window lost focus. With an inactive colour effect on
+(`[ColorEffects:Inactive] Enable=true`, which his scheme has: Window 43,35,23
+active against 46,34,0 inactive) the chrome the style painted and the crop the
+QML drew came from two different tones, so the titlebar read as disconnected
+from the window. It only showed in a **"select window" screenshot**, because
+that is the one place you see the window while something else holds focus — a
+region capture of the same pixels was correct, which is what put the blame on
+the capture tool for a while. Fixed by putting the state in the image URL
+(`…,dpr,a|i#serial`), dressing the proxy in that group's colours for every role,
+and refreshing on `WindowActivate`/`WindowDeactivate` (plus the DPR/screen
+events, where the Qt build has them).
+
+**And every `QQuickWidget`'s palette follows the desktop's.** A QQuickWidget
+does not inherit `QApplication`'s palette on its own, so each is handed it at
+construction — a snapshot, and `wal-set.sh` rewrites `kdeglobals` on every
+wallpaper change. `_palette_watcher` re-dresses all of them (central view, dock
+panes, dialogs) on `ApplicationPaletteChange`, or the window ends up
+half-dressed: real widgets in the new colours, QML in the old. Harness for both:
+`apps/pylib/tools/kdebg-state-test.py`, which sets its own palettes so it means
+the same thing whatever the machine is themed with.
+
 Adopting it in an app's `main.py`:
 
 ```python
