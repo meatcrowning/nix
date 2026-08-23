@@ -572,22 +572,53 @@ every turn) is the same GET with the three missing pieces, and nothing more.
 
 ## A reply that stopped short — `continue`
 
-**An answer cut off mid-sentence offers the way on** [his, 2026-08-22]. Two
-things end a reply early: the model hits its generation ceiling (ollama's final
-frame says `done_reason: "length"`, which `Ollama` surfaces as `replyTruncated`)
-or he presses stop. Either marks the row `cutOff`, and a **`continue`** control
-appears under that bubble — only on the LAST row, since continuing one further
-up would write into the middle of the conversation, and only while nothing is
+**Any finished answer offers `continue`** [his, 2026-08-23] — it started as the
+way on from one cut off mid-sentence [his, 2026-08-22] and is now offered on the
+last reply whatever ended it. Three things end a reply: the model hits its
+generation ceiling (ollama's final frame says `done_reason: "length"`, which
+`Ollama` surfaces as `replyTruncated`), he presses stop — either marks the row
+`cutOff` — or it simply finishes. The **`continue`** control appears under the
+bubble in all three cases, only on the LAST row, since continuing one further up
+would write into the middle of the conversation, and only while nothing is
 streaming (docs/DESIGN.md §10.2: a control appears when it can act).
 
-`Ollama.continueReply(model, history, partial)` re-posts the chat with every
-earlier turn, then the partial as an `assistant` message, then `CONTINUE_PROMPT`
-as a user turn — a user turn rather than a bare assistant prefix because no model
-is reliable about not starting over when asked that way. QML points
-`win.activeIndex` at the existing row first, so the continuation streams onto the
-END of it: a cut-off answer becomes one whole answer, not two bubbles that have
-to be read together. Harness: `tools/continue-test.py` (offscreen, a stub ollama
-on 127.0.0.1 — his daemon is never touched and no model is ever loaded).
+`Ollama.continueReply(model, history, partial, mode)` re-posts the chat with
+every earlier turn, then the partial as an `assistant` message, then one
+instruction as a user turn — a user turn rather than a bare assistant prefix
+because no model is reliable about not starting over when asked that way. `mode`
+picks the instruction, and QML picks `mode` off `cutOff`:
+
+- `resume` → `CONTINUE_PROMPT`: carry on from the very next character.
+- `extend` → `EXTEND_PROMPT`: the sentence ENDED, so ask for what comes next
+  rather than a mid-word resume. QML appends a blank line to the row first, so
+  the extension is its own paragraph.
+- an empty `partial`, either mode → `ANSWER_PROMPT`, with no assistant message
+  at all: the turn spent itself on tools and never wrote, so there is nothing to
+  carry on from.
+
+QML points `win.activeIndex` at the existing row first, so the continuation
+streams onto the END of it: a continued answer stays ONE answer, not two bubbles
+that have to be read together. Harnesses: `tools/continue-test.py` (the cut-off
+half) and `tools/continue-any-test.py` (extend, the empty turn, and the wrap-up
+round below) — both offscreen against a stub ollama on 127.0.0.1, so his daemon
+is never touched and no model is ever loaded.
+
+### The wrap-up round — why replies came back EMPTY
+
+`MAX_TOOL_ROUNDS` (4) caps the tool loop. Until 2026-08-23 hitting it just
+stopped the loop and "took the answer as-is" — but a model that is still calling
+tools at the cap has written NO prose in that frame, so what he got was an
+**empty message**: observed twice in a row on 2026-08-22, gemma4 spending four
+`run_bash` rounds hunting for a directory and then saying nothing at all, with
+no `cutOff` either (ollama's `done_reason` was `stop`, not `length`) so not even
+a `continue` to press.
+
+So the cap now takes one more round instead of dropping the turn: the last
+round's tool calls still run, and the follow-up POST carries **no `tools` key at
+all** plus `TOOL_CAP_PROMPT` as a user turn — leaving the model nothing to do
+but answer with what it found. `_no_tools` is the one-shot flag (`_post_chat`
+drops the tool list, `_tool_done` appends the prompt); it is cleared by `send`
+and `continueReply`, so the next turn gets the full loop back.
 
 ## Web images (fetch_image)
 

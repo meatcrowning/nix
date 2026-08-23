@@ -585,16 +585,24 @@ Item {
     readonly property string windowTitle:
         win.sessionTitle !== "" ? "chatter — " + win.sessionTitle : "chatter"
 
-    // Pick up an answer that stopped short — the model hit its length ceiling,
-    // or he pressed stop. The continuation streams into the SAME row, so a
-    // cut-off answer ends up one whole answer rather than two bubbles that have
-    // to be read together [his, 2026-08-22]. Only ever the last row: continuing
-    // one further up would write into the middle of the conversation.
+    // Carry the last answer on. Two cases, one control: an answer that stopped
+    // SHORT (the length ceiling, or he pressed stop) is resumed mid-sentence,
+    // and a FINISHED answer is extended — "continue" is offered on any reply,
+    // not only a truncated one [his, 2026-08-23]. Either way the continuation
+    // streams into the SAME row, so it ends up one whole answer rather than two
+    // bubbles that have to be read together [his, 2026-08-22]. Only ever the
+    // last row: continuing one further up would write into the middle of the
+    // conversation.
     function continueReply() {
         var i = chatLog.count - 1;
         if (i < 0 || win.model === "") return;
         var row = chatLog.get(i);
-        if (row.isUser || row.streaming || row.body.trim() === "") return;
+        if (row.isUser || row.streaming || row.isError) return;
+        var mode = row.cutOff ? "resume" : "extend";
+        // An extension is its own paragraph; a resume picks the sentence back
+        // up where it broke, so nothing may come between the two halves.
+        if (mode === "extend" && row.body.trim() !== "")
+            chatLog.setProperty(i, "body", row.body + "\n\n");
         var history = [];
         for (var k = 0; k < i; k++) {
             var h = chatLog.get(k);
@@ -605,7 +613,7 @@ Item {
         chatLog.setProperty(i, "cutOff", false);
         chatLog.setProperty(i, "streaming", true);
         win.activeIndex = i;
-        Ollama.continueReply(win.model, JSON.stringify(history), row.body);
+        Ollama.continueReply(win.model, JSON.stringify(history), row.body, mode);
     }
 
     // The reasoning clock. It accrues while the model is REASONING or WAITING ON
@@ -2195,13 +2203,15 @@ Item {
                                 }
                             }
 
-                            // "continue" — the way on from an answer that stopped
-                            // mid-sentence (§10.2: the control appears only when
-                            // it can actually do something, and only on the last
-                            // row, which is the only one it could extend).
+                            // "continue" — the way on from ANY finished answer
+                            // [his, 2026-08-23]: the way past one that stopped
+                            // mid-sentence, and the way to more of one that did
+                            // not (§10.2: the control appears only when it can
+                            // actually do something, and only on the last row,
+                            // which is the only one it could extend).
                             Item {
                                 width: parent.width
-                                visible: !isUser && cutOff && !streaming
+                                visible: !isUser && !isError && !streaming
                                          && index === chatLog.count - 1 && !Ollama.busy
                                 height: visible ? contBtn.height + 4 : 0
 

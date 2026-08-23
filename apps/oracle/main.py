@@ -1470,6 +1470,7 @@ class Ollama(QObject):
         self._tool_calls = []    # tool calls accumulated in this sub-turn
         self._tool_results = []  # results being gathered for the current round
         self._rounds = 0         # tool rounds taken this turn (MAX_TOOL_ROUNDS cap)
+        self._no_tools = False   # the wrap-up round: answer, do not call tools
         self._max_results = RESEARCH_MAX  # per-search source cap for this turn (set in send)
         self._procs = []         # live file-tool QProcesses, so none is GC'd mid-run
         self._memories = []      # oracle's own durable memories, injected each turn
@@ -1853,6 +1854,7 @@ class Ollama(QObject):
         self._rounds = 0
         self._images_shown = set()   # every image URL already fetched this turn
         self._md_images = {"n": 0}   # typed-markdown images still downloading
+        self._no_tools = False       # not a wrap-up round
         self._resp_t0 = 0.0
         self._resp_tokens = 0
         self._set_tps(0.0)
@@ -1885,34 +1887,75 @@ class Ollama(QObject):
         "where it ended. Do not repeat any of it, do not summarise it, do not "
         "start over, and do not add a preamble like \"continuing\".")
 
-    @Slot(str, str, str)
-    def continueReply(self, model, history_json, partial):
-        """Resume a reply that stopped short, into the SAME message.
+    #: What the wrap-up round says to a model that has used every tool round.
+    #: A user turn for the same reason CONTINUE_PROMPT is one.
+    TOOL_CAP_PROMPT = (
+        "You have used all the tool calls available for this turn, so there "
+        "are no tools on this message. Answer him now, in words, with what you "
+        "have already found — say what you learned and what you could not "
+        "establish. Do not describe another command you would like to run.")
 
-        `history_json` is every turn BEFORE the truncated one; `partial` is what
-        that turn managed to say. The model is handed both plus
-        `CONTINUE_PROMPT`, and QML streams the answer onto the end of the row it
-        already has — so a cut-off answer becomes one whole answer, not two
-        bubbles that have to be read together [his, 2026-08-22].
+    #: What `continueReply` says to a model whose answer FINISHED and which he
+    #: has asked to keep going anyway — the plain "go on" any reply can take,
+    #: not a resume. Mid-word continuation would be wrong here: the sentence
+    #: ended, so this one asks for what comes NEXT.
+    EXTEND_PROMPT = (
+        "Carry on from where your previous message ended: say what comes next "
+        "— the part you did not get to, in more depth, or the next step. Do "
+        "not repeat or summarise what you already said, and do not open with a "
+        "preamble like \"continuing\" or \"sure\".")
+
+    #: What it says when the previous turn produced NO words at all (it spent
+    #: the turn on tools and never wrote). There is nothing to carry on from.
+    ANSWER_PROMPT = (
+        "Your previous turn used its tools but never wrote an answer. Answer "
+        "now, in words, with what you found.")
+
+    @Slot(str, str, str)
+    @Slot(str, str, str, str)
+    def continueReply(self, model, history_json, partial, mode="resume"):
+        """Carry a reply on, into the SAME message.
+
+        `history_json` is every turn BEFORE this one; `partial` is what that
+        turn said. The model is handed both plus one of three instructions and
+        QML streams the answer onto the end of the row it already has — so a
+        continued answer stays ONE answer, not two bubbles that have to be read
+        together [his, 2026-08-22].
+
+        `mode` picks the instruction: `resume` for an answer that stopped
+        mid-sentence (the length ceiling, or he pressed stop), `extend` for a
+        finished answer he wants more of [his, 2026-08-23 — continue is offered
+        on any reply, not only a truncated one], and either one with an empty
+        `partial` becomes ANSWER_PROMPT, the turn that spent itself on tools
+        and never wrote.
 
         Everything else is `send`'s machinery unchanged: same tools, same warden
         reservation, same streaming path.
         """
-        if not model or not partial.strip():
+        if not model:
             return
         self.cancel()
         self._model = model
         budget = self._research_budget(partial[-2000:])
         self._max_results = budget["max_results"]
+        if not partial.strip():
+            instruction = self.ANSWER_PROMPT
+        elif mode == "extend":
+            instruction = self.EXTEND_PROMPT
+        else:
+            instruction = self.CONTINUE_PROMPT
+        prior = ([{"role": "assistant", "content": partial}]
+                 if partial.strip() else [])
         self._messages = ([{"role": "system",
                             "content": self._system_prompt(budget["guidance"])}]
                           + self._parse_history(history_json)
-                          + [{"role": "assistant", "content": partial},
-                             {"role": "user", "content": self.CONTINUE_PROMPT}])
+                          + prior
+                          + [{"role": "user", "content": instruction}])
         self._think_tokens = 0
         self._rounds = 0
         self._images_shown = set()
         self._md_images = {"n": 0}
+        self._no_tools = False
         self._resp_t0 = 0.0
         self._resp_tokens = 0
         self._set_tps(0.0)
@@ -2447,6 +2490,13 @@ class Ollama(QObject):
             "stream": True,
             "options": {"num_ctx": CHAT_NUM_CTX},
         }
+        # The WRAP-UP round carries no tools at all: `_on_finished` sets
+        # `_no_tools` when the model is still calling tools at MAX_TOOL_ROUNDS,
+        # and a request with no `tools` key leaves it nothing to do but write
+        # the answer. Offering them again is what produced an EMPTY reply.
+        if self._no_tools:
+            body = json.dumps(payload).encode("utf-8")
+            return self._send_chat(body)
         # ALL tools are offered on EVERY turn (his call — no per-tool toggle):
         # the file tools and web_search alike. A model with no tool support will
         # reject a request carrying tools — the tradeoff of always-on tools,
@@ -2459,6 +2509,10 @@ class Ollama(QObject):
                             + list(SESSION_TOOLS) + list(MEMORY_TOOLS)
                             + [t for t in [skill_tool()] if t])
         body = json.dumps(payload).encode("utf-8")
+        self._send_chat(body)
+
+    def _send_chat(self, body):
+        """POST one already-built /api/chat body and wire the stream up."""
         req = QNetworkRequest(QUrl(OLLAMA + "/api/chat"))
         req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
                       "application/json")
@@ -2569,6 +2623,19 @@ class Ollama(QObject):
         # continue. Past the cap, stop looping and take the answer as-is.
         if self._tool_calls and self._rounds < MAX_TOOL_ROUNDS:
             self._rounds += 1
+            self._messages.append({"role": "assistant",
+                                   "content": self._acc_content,
+                                   "tool_calls": self._tool_calls})
+            self._run_tool_calls(self._tool_calls)
+            return
+        # AT the cap and STILL calling tools. Stopping here is what handed him
+        # an EMPTY message (observed 2026-08-22: four run_bash rounds hunting
+        # for a directory, then nothing at all, twice in a row) — the model's
+        # last frame was tool calls and no prose, so there was no answer to
+        # take "as-is". So run this round's calls too and re-post ONCE with no
+        # tools and TOOL_CAP_PROMPT, which leaves it nothing to do but answer.
+        if self._tool_calls and not self._no_tools:
+            self._no_tools = True
             self._messages.append({"role": "assistant",
                                    "content": self._acc_content,
                                    "tool_calls": self._tool_calls})
@@ -3146,6 +3213,10 @@ class Ollama(QObject):
         for tr in self._tool_results:
             if tr is not None:
                 self._messages.append(tr)
+        # The wrap-up round (see `_on_finished`): say why there are no tools.
+        if self._no_tools:
+            self._messages.append({"role": "user",
+                                   "content": self.TOOL_CAP_PROMPT})
         self._post_chat()
 
     @staticmethod
