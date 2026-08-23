@@ -350,11 +350,43 @@ Item {
         sessionPicker.open = false;
     }
 
+    // THE MESSAGE MENU. Right-clicking a message is how every other program on
+    // this desktop offers to copy a piece of text, and the log had no way in at
+    // all: Ctrl+C only, on a selection made with the mouse. The rows are the
+    // three a read-only transcript can honestly offer (docs/DESIGN.md §10.2 —
+    // "copy" is dead while nothing is selected rather than quietly copying
+    // something else). `md` is true for a model's reply, which is Markdown and
+    // must be copied AS Markdown (main.py → Clip; the rendered document
+    // flattens to one run-on block).
+    //
+    // The words follow the session: the KDE menu around it says Copy and Select
+    // All, this desktop's own menus are lowercase (docs/agents/his-voice.md).
+    function textMenu(item, md) {
+        return [
+            { label: win.plasma ? "Copy" : "copy",
+              enabled: item.selectedText !== "",
+              trigger: function () {
+                  if (md && Clip.copyMarkdown(item.textDocument,
+                                              item.selectionStart,
+                                              item.selectionEnd, item.source))
+                      return;
+                  item.copy();
+              } },
+            { label: win.plasma ? "Copy Message" : "copy message",
+              trigger: function () {
+                  Clip.copyText(md ? item.source : item.text);
+              } },
+            { separator: true },
+            { label: win.plasma ? "Select All" : "select all",
+              trigger: function () { item.forceActiveFocus(); item.selectAll(); } }
+        ];
+    }
+
     // Open the custom-prompt editor (from the picker's "custom…" or the "edit"
     // button), prefilled with his saved custom text.
     function openPromptEditor() {
         promptPicker.open = false;
-        promptEditor.load();
+        promptEditor.load(Ollama.customPrompt);
     }
 
     // ONE assistant row, appended and made the active one. `step` is the round
@@ -1221,29 +1253,22 @@ Item {
             color: Theme.textDim
         }
 
-        // The fill bar: a track with a proportional fill, animated (docs/DESIGN.md
-        // §9 meter, §4 corners, §6 motion). Warns as it approaches full.
-        Rectangle {
+        // The fill bar (`Meter.qml`): a track with a proportional fill,
+        // animated (docs/DESIGN.md §9 meter, §4 corners, §6 motion). Warns as
+        // it approaches full.
+        //
+        // NO PLASMA TWIN, deliberately — the one control here that keeps its
+        // own drawing in a KDE window. A `ProgressBar` from the style paints
+        // NOTHING inside our QQuickWidget (measured 2026-08-22: blank in the
+        // app and blank in a standalone qqc2-desktop-style harness, while a
+        // Button in the same harness drew fine), and a KStyle progress bar is a
+        // ~20px control in a 16px text row besides. This is a data readout in
+        // the app's own content, like the picture frames in a reply — not
+        // chrome pretending to be a widget.
+        Meter {
             visible: statsRow.hasFill
             anchors.verticalCenter: parent.verticalCenter
-            width: 88
-            height: 6
-            radius: Theme.rounding
-            color: Theme.bgAlt
-            border.width: Theme.ctrlBorder
-            border.color: Theme.border
-            Rectangle {
-                anchors { left: parent.left; top: parent.top; bottom: parent.bottom
-                          margins: 1 }
-                width: Math.max(0, (parent.width - 2) * statsRow.fillFrac)
-                radius: Theme.rounding
-                color: statsRow.fillFrac > 0.9 ? Theme.crit
-                       : statsRow.fillFrac > 0.75 ? Theme.warn : Theme.accent
-                Behavior on width {
-                    NumberAnimation { duration: motion.ms(motion.slideMs)
-                                      easing.type: motion.slideEasing }
-                }
-            }
+            frac: statsRow.fillFrac
         }
         // The percentage, beside the bar.
         PixelText {
@@ -1290,20 +1315,10 @@ Item {
 
         Repeater {
             model: Ollama.capabilities
-            delegate: Rectangle {
+            // CapChip.qml, and the KStyle's own frame under Plasma.
+            delegate: CapChip {
                 required property string modelData
-                height: capLabelText.implicitHeight + 4
-                width: capLabelText.implicitWidth + 10
-                radius: 3
-                color: Theme.bgAlt
-                border.width: Theme.ctrlBorder
-                border.color: Theme.border
-                PixelText {
-                    id: capLabelText
-                    anchors.centerIn: parent
-                    text: capsRow.capLabel(parent.modelData)
-                    color: Theme.textDim
-                }
+                label: capsRow.capLabel(modelData)
             }
         }
     }
@@ -1546,124 +1561,26 @@ Item {
         }
     }
 
-    // The custom-prompt editor — a floating panel over the reply area with a
-    // TextEdit for his own base text and Save / Cancel (docs/DESIGN.md §10:
-    // Save applies it; Cancel discards, nothing changes silently). Selecting
-    // "custom…" in the dropdown, or the "edit" button, opens it.
-    Rectangle {
+    // The custom-prompt editor — a floating panel over the conversation, in
+    // this session's own face: `PromptEditor.qml` under Hyprland, the KStyle's
+    // Frame/TextArea/DialogButtonBox under Plasma (`+plasma/PromptEditor.qml`).
+    // It reports what he chose and this file decides what that MEANS.
+    PromptEditor {
         id: promptEditor
-        visible: false
         anchors { left: parent.left; right: parent.right
                   leftMargin: 20; rightMargin: 20
-                  top: promptRow.bottom; topMargin: 8 }
-        height: 220
+                  // Under Hyprland it hangs off the base-prompt row it belongs
+                  // to; that row is zero-height in a Plasma window (the base
+                  // prompt is a menu there), so it takes the top of the view.
+                  top: win.plasma ? replyBox.top : promptRow.bottom
+                  topMargin: win.plasma ? 16 : 8 }
+        height: implicitHeight
         z: 60
-        color: Theme.bgAlt
-        radius: Theme.rounding
-        border.width: Theme.ctrlBorder
-        border.color: Theme.accent
-
-        function load() {
-            editorArea.text = Ollama.customPrompt;
-            promptEditor.visible = true;
-            editorArea.forceActiveFocus();
-        }
-
-        PixelText {
-            id: editorHeading
-            anchors { top: parent.top; left: parent.left; right: parent.right
-                      margins: 10 }
-            text: "your custom system prompt"
-            color: Theme.textDim
-            wrapMode: Text.NoWrap
-            elide: Text.ElideRight
-        }
-
-        Rectangle {
-            anchors { top: editorHeading.bottom; topMargin: 8
-                      left: parent.left; right: parent.right
-                      bottom: editorButtons.top; bottomMargin: 8
-                      leftMargin: 10; rightMargin: 10 }
-            color: Theme.bg
-            radius: Theme.rounding
-            border.width: Theme.ctrlBorder
-            border.color: editorArea.activeFocus ? Theme.accent : Theme.border
-
-            KineticFlickable {
-                id: editorFlick
-                anchors { fill: parent; margins: 8 }
-                contentWidth: width
-                contentHeight: editorArea.implicitHeight
-                clip: true
-                TextEdit {
-                    id: editorArea
-                    width: editorFlick.width
-                    font: Theme.editorFont
-                    renderType: Text.NativeRendering
-                    color: Theme.text
-                    selectionColor: Theme.accent
-                    selectedTextColor: Theme.bg
-                    wrapMode: TextEdit.Wrap
-                    persistentSelection: true
-                    Keys.onPressed: function (e) {
-                        if (e.key === Qt.Key_Escape) {
-                            promptEditor.visible = false;
-                            e.accepted = true;
-                        }
-                    }
-                    PixelText {
-                        anchors { left: parent.left; verticalCenter: parent.top
-                                  verticalCenterOffset: parent.implicitHeight / 2 }
-                        visible: editorArea.text === "" && !editorArea.activeFocus
-                        text: "write the base instructions the model gets every turn…"
-                        color: Theme.textDim
-                    }
-                }
-            }
-        }
-
-        Row {
-            id: editorButtons
-            anchors { bottom: parent.bottom; right: parent.right; margins: 10 }
-            spacing: 8
-
-            Rectangle {
-                width: 64; height: 24
-                radius: Theme.rounding
-                border.width: Theme.ctrlBorder
-                border.color: Theme.border
-                color: cancelMouse.containsMouse ? Theme.highlight : Theme.bg
-                PixelText { anchors.centerIn: parent; text: "cancel"; color: Theme.textDim }
-                MouseArea {
-                    id: cancelMouse
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: promptEditor.visible = false
-                }
-            }
-            Rectangle {
-                width: 64; height: 24
-                radius: Theme.rounding
-                border.width: Theme.ctrlBorder
-                border.color: Theme.border
-                color: saveMouse.containsMouse ? Theme.highlight : Theme.bg
-                PixelText { anchors.centerIn: parent; text: "save"; color: Theme.accent }
-                MouseArea {
-                    id: saveMouse
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    // Persist the text AND select custom as the active base, so
-                    // saving is also applying it (docs/DESIGN.md §10 — the button
-                    // does what it says).
-                    onClicked: {
-                        Ollama.setCustomPrompt(editorArea.text);
-                        Ollama.setPromptChoice("custom");
-                        promptEditor.visible = false;
-                    }
-                }
-            }
+        // Persist the text AND select custom as the active base, so saving is
+        // also applying it (docs/DESIGN.md §10 — the button does what it says).
+        onSaved: (text) => {
+            Ollama.setCustomPrompt(text);
+            Ollama.setPromptChoice("custom");
         }
     }
 
@@ -1677,20 +1594,20 @@ Item {
     }
 
     // --------------------------------------------------------- the reply area
-    Rectangle {
+    // The surround is the session's own: our 1px bgAlt box under Hyprland, the
+    // KStyle's Frame under Plasma (`+plasma/ViewFrame.qml`), which is what puts
+    // the view and the compose box under it in the same hand. The inset is the
+    // frame's (`pad`), so the content just fills what it is given.
+    ViewFrame {
         id: replyBox
         anchors { top: statsRow.bottom; topMargin: 10
                   left: parent.left; right: parent.right
                   bottom: attachBar.top
                   leftMargin: 10; rightMargin: 10; bottomMargin: 10 }
-        color: Theme.bgAlt
-        radius: Theme.rounding
-        border.width: Theme.ctrlBorder
-        border.color: Theme.border
 
         KineticFlickable {
             id: replyFlick
-            anchors { fill: parent; margins: 8 }
+            anchors.fill: parent
             contentWidth: width
             contentHeight: replyCol.height
             clip: true
@@ -2278,6 +2195,20 @@ Item {
                                         visible: (isUser || isError) && body !== ""
                                         text: body
                                         color: isError ? Theme.crit : Theme.text
+
+                                        // Right-click only: every other button
+                                        // falls through to the TextEdit under
+                                        // it, so selecting and dragging are
+                                        // untouched.
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            acceptedButtons: Qt.RightButton
+                                            onClicked: function (m) {
+                                                var p = mapToItem(win, m.x, m.y);
+                                                ctxMenu.open(p.x, p.y,
+                                                    win.textMenu(plainBody, false));
+                                            }
+                                        }
                                     }
                                     // The model's answer, rendered as Markdown (the reply
                                     // comes back in it — docs/DESIGN.md §2). Only the
@@ -2295,6 +2226,9 @@ Item {
                                     // — nothing hidden), just not auto-fetched or upscaled.
                                     MarkdownText {
                                         id: mdBody
+                                        // The selftest's handle on a reply, for
+                                        // rendering the message menu over it.
+                                        objectName: "mdBody"
                                         width: parent.width
                                         visible: !isUser && !isError && body !== ""
                                         // One expression, both properties: `text`
@@ -2304,6 +2238,16 @@ Item {
                                             body.replace(/!\[([^\]]*)\]\(/g, "[$1](")
                                         text: md
                                         source: md
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            acceptedButtons: Qt.RightButton
+                                            onClicked: function (m) {
+                                                var p = mapToItem(win, m.x, m.y);
+                                                ctxMenu.open(p.x, p.y,
+                                                    win.textMenu(mdBody, true));
+                                            }
+                                        }
                                     }
 
                                 }
@@ -2394,6 +2338,11 @@ Item {
         id: lightbox
         onClosed: replyFlick.forceActiveFocus()
     }
+
+    // The right-click menu for the log, ours under Hyprland and the style's own
+    // popup under Plasma (`+plasma/CtxMenu.qml`). Last but one in the tree and
+    // z:3000 (its own default), so it covers the lightbox and the drop overlay.
+    CtxMenu { id: ctxMenu; objectName: "ctxMenu"; anchors.fill: parent }
 
     // --------------------------------------------------------- the prompt box
     // The compose box: the framed input and the send/stop button, as ONE

@@ -1442,6 +1442,19 @@ class Clip(QObject):
         QGuiApplication.clipboard().setText(text)
         return True
 
+    @Slot(str, result=bool)
+    def copyText(self, text):
+        """A whole message, verbatim — the log's right-click "copy message".
+
+        Deliberately not `copyMarkdown` with a full range: the caller already
+        HAS the source string (a reply's markdown, a prompt's plain text), so
+        there is no document to re-serialise and nothing to get wrong.
+        """
+        if not text:
+            return False
+        QGuiApplication.clipboard().setText(text)
+        return True
+
 
 class Titlebar(QObject):
     """hyprvtb app-button bridge — oracle draws no chrome of its own, so the
@@ -4693,14 +4706,78 @@ def run_selftest(app, shell, win, plasma, warnings):
                 app.processEvents()
                 time.sleep(0.01)
             print("rows: %s" % _rows())
+        # ORACLE_MENU: open the log's right-click menu over the first reply,
+        # which no other render can show — a menu is not on screen until it is
+        # opened, and this one has no action, no id and no keyboard route. The
+        # labels are printed (they differ per session: KDE's Copy vs ours) and
+        # the window is left with the menu UP for the shot.
+        if os.environ.get("ORACLE_MENU"):
+            from PySide6.QtCore import Q_ARG, Q_RETURN_ARG, QMetaObject, QObject
+            target = shell.root if plasma else win.findChild(QObject, "content")
+            # The VISUAL tree, not the QObject one: a Repeater's delegates
+            # keep their QObject parent where it was, so `findChild` never
+            # reaches a message (the same reason ORACLE_FACES walks childItems).
+            def _named(it, want, depth=0):
+                if it is None or depth > 16:
+                    return None
+                kids = (it.childItems() if hasattr(it, "childItems")
+                        else it.children())
+                for ch in kids:
+                    if ch.objectName() == want:
+                        return ch
+                    hit = _named(ch, want, depth + 1)
+                    if hit is not None:
+                        return hit
+                return None
+
+            body = _named(target, "mdBody")
+            menu = _named(target, "ctxMenu")
+            if body is None or menu is None:
+                print("menu: no mdBody/ctxMenu (needs ORACLE_FAKE)",
+                      file=sys.stderr)
+                rc[0] = 1
+            else:
+                rows = QMetaObject.invokeMethod(
+                    target, "textMenu", Q_RETURN_ARG("QVariant"),
+                    Q_ARG("QVariant", body), Q_ARG("QVariant", True))
+                # A QML function returns a QJSValue, not a Python list: convert
+                # it once here rather than at every use below.
+                if hasattr(rows, "toVariant"):
+                    rows = rows.toVariant()
+                print("menu rows: %s"
+                      % [r.get("label", "---") for r in (rows or [])])
+                QMetaObject.invokeMethod(menu, "open", Q_ARG("QVariant", 40),
+                                         Q_ARG("QVariant", 120),
+                                         Q_ARG("QVariant", rows))
+                _t0 = time.monotonic()
+                while time.monotonic() - _t0 < 0.8:
+                    app.processEvents()
+                    time.sleep(0.01)
         # ORACLE_POKE: fire the menu rows themselves, which is the only check
         # that the ids in `actions` and the ones `tbAction` answers are the same
         # set — a typo in either is silent (the row is there, the click does
         # nothing). Every one of them is state-free here: nothing is sent, no
         # session exists to delete, and the daemon is not touched.
-        if plasma and os.environ.get("ORACLE_POKE"):
-            for bid in ("new-session", "prompt:concise", "detach",
-                        "refresh-models"):
+        # A row whose id is NAMED instead — `ORACLE_POKE=edit-prompt,new-session`
+        # — so a render can show what a menu row PUT ON SCREEN, which is the
+        # only way to check a panel that has no other way in (the base-prompt
+        # editor is reachable from a menu and nothing else).
+        if os.environ.get("ORACLE_POKE"):
+            _ids = os.environ["ORACLE_POKE"]
+            for bid in (_ids.split(",") if _ids not in ("1", "") else
+                        ("new-session", "prompt:concise", "detach",
+                         "refresh-models")):
+                if not plasma:
+                    # Under Hyprland there are no QActions — the same ids go
+                    # through the QML side's own `tbAction`, so a named poke
+                    # renders that face of the same state.
+                    from PySide6.QtCore import Q_ARG, QMetaObject, QObject
+                    _root = win.findChild(QObject, "content")
+                    QMetaObject.invokeMethod(_root, "tbAction",
+                                             Q_ARG("QVariant", bid))
+                    app.processEvents()
+                    print(f"poke {bid}: ok")
+                    continue
                 act = shell._actions.get(bid)
                 if act is None:
                     print(f"poke {bid}: NO ACTION", file=sys.stderr)
@@ -4709,11 +4786,20 @@ def run_selftest(app, shell, win, plasma, warnings):
                 act.trigger()
                 app.processEvents()
                 print(f"poke {bid}: ok")
+            # A QQuickWidget's `grab()` returns its LAST RENDERED frame, and
+            # `processEvents()` alone does not force a new one — a poke that
+            # opened a panel photographed as if it had not (measured: byte-for-
+            # byte the unpoked window). Let the render thread catch up.
+            _t0 = time.monotonic()
+            while time.monotonic() - _t0 < 0.8:
+                app.processEvents()
+                time.sleep(0.01)
             # ...and that the poke LANDED: the base-prompt radio set is the
             # one whose new state comes back through the table.
-            lit = [i for i, a in shell._actions.items()
-                   if i.startswith("prompt:") and a.isChecked()]
-            print("prompt set now = %r" % lit)
+            if plasma:
+                lit = [i for i, a in shell._actions.items()
+                       if i.startswith("prompt:") and a.isChecked()]
+                print("prompt set now = %r" % lit)
         if plasma and os.environ.get("ORACLE_CHROME"):
             print(shell.dump_chrome())
         if os.environ.get("ORACLE_TREE"):

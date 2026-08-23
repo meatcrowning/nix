@@ -52,12 +52,48 @@ exactly what it always was.
 - **The two pickers sit at the RIGHT end of the toolbar** [his, 2026-08-22] —
   a `QToolBar` has no alignment of its own, so an expanding blank `QWidget` in
   front of them takes every pixel the action buttons leave.
-- **`qml/PromptBox.qml`, `qml/Chip.qml` and `qml/Bubble.qml` have `+plasma`
-  twins** (the compose box as a `Frame`/`TextArea`/`Button`, the attachment chip
-  as a flat `Button`, a message bubble as a real KStyle `Button` frame —
-  `enabled: false` so it takes no hover, press or focus, with the message's own
-  selectable text drawn above it), swapped by the file selector with the same
-  API either way.
+- **Seven components have `+plasma` twins**, swapped by the file selector with
+  the same API either way: `PromptBox` (the compose box as a
+  `Frame`/`TextArea`/`Button`), `Chip` (the attachment chip as a flat `Button`),
+  `Bubble` (a message as a real KStyle `Button` frame — `enabled: false` so it
+  takes no hover, press or focus, with the message's own selectable text drawn
+  above it), and, from the Oxygen audit of 2026-08-22 [his] *"the scroll bar is
+  not properly themed, but im sure there are other things as well"*:
+    - **`ViewFrame`** — the conversation's surround. Ours was a 1px rounded
+      Rectangle sitting directly above the compose box's real `Frame`: two
+      surrounds, two reliefs, one window. The twin is that same `Frame`, and the
+      content's inset is the frame's own `pad`.
+    - **`PromptEditor`** — the custom-prompt panel (Settings ▸ Edit Custom
+      Prompt…), which in that session was an accent-bordered aero box with
+      lowercase pixel `cancel` / `save` inches from the toolbar's real buttons.
+      The twin is a `Frame` + `ScrollView`/`TextArea` + `DialogButtonBox`, so
+      the words, the icons and the button ORDER are the platform's. It is a
+      component now rather than markup in `Root.qml`: `load(text)` fills and
+      shows it, `saved(text)` / `cancelled()` report the choice, and Root.qml
+      still decides what saving MEANS (it writes `Ollama`).
+    - **`CapChip`** — a capability indicator, as the KStyle's button frame with
+      the label above it, the same non-interactive treatment `Bubble` uses.
+      **Not `flat`**: a flat KStyle button draws no relief until it is hovered,
+      and these never are, so flat left three bare words with nothing boxing
+      them.
+    - **`CtxMenu`** — the log's right-click menu (below), ours under Hyprland
+      and the style's own popup under Plasma. Copied verbatim from player's
+      pair; it is generic by design.
+  `qmlcommon/+plasma/VScroll.qml` is the fifth fix and lives one level up,
+  since every app shares it (apps/AGENTS.md → oxygenstyle).
+- **`Meter.qml` and the picture frames in a reply keep OUR drawing on purpose.**
+  A KStyle `ProgressBar` paints nothing inside the `QQuickWidget` (measured
+  2026-08-22: blank in the app and blank in a standalone qqc2-desktop-style
+  harness where a `Button` drew fine), and it is a ~20px control in a 16px text
+  row besides. Both are readouts in the CONTENT, not chrome — the line the
+  audit drew.
+- **The transcript has a right-click menu** — Copy (dead while nothing is
+  selected), Copy Message, Select All — because Ctrl+C on a mouse selection was
+  the only way to get text out of it, and every other program on this desktop
+  offers the menu. `win.textMenu(item, isMarkdown)` builds the rows; a reply is
+  copied AS markdown (`Clip.copyMarkdown`, or `Clip.copyText` for the whole
+  message), never as the flattened render. The labels follow the session: KDE's
+  Copy / Select All there, lowercase here.
 - **The harness renders it**, offscreen and never on his screen:
 
   ```
@@ -72,6 +108,21 @@ exactly what it always was.
   `ORACLE_CONFIG` and `ORACLE_SESSIONS` at a temp directory — poking Settings
   calls `setPromptChoice`, which persists, and a run without that override
   rewrote his own base prompt.
+
+  Three things that make a render show STATE, not just the resting window:
+
+  - **`ORACLE_POKE=edit-prompt,new-session`** names the rows instead of firing
+    the default four, and works in BOTH sessions (under Hyprland the same ids
+    go through the QML side's `tbAction`). It is the only way to photograph a
+    panel with no other way in — the base-prompt editor opens from a menu row
+    and nothing else.
+  - **`ORACLE_MENU=1`** opens the log's right-click menu over the first reply
+    and prints its labels. Needs `ORACLE_FAKE` for a reply to exist.
+  - **A QQuickWidget's `grab()` returns its LAST RENDERED frame**, and
+    `processEvents()` alone does not force a new one: a poke that opened a
+    panel photographed byte-for-byte as the unpoked window until the harness
+    started spinning the loop for ~0.8s afterwards. If a change you made does
+    not appear in a shot, suspect this before suspecting the change.
 
 ## Shape
 
