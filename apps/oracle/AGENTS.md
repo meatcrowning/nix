@@ -49,9 +49,15 @@ exactly what it always was.
   something of his, with no undo in the store. A constructed `QMessageBox` with
   `DontUseNativeDialog`, shown modelessly: the static helpers segfault this
   stack (apps/AGENTS.md).
-- **`qml/PromptBox.qml` and `qml/Chip.qml` have `+plasma` twins** (the compose
-  box as a `Frame`/`TextArea`/`Button`, the attachment chip as a flat `Button`),
-  swapped by the file selector with the same API either way.
+- **The two pickers sit at the RIGHT end of the toolbar** [his, 2026-08-22] —
+  a `QToolBar` has no alignment of its own, so an expanding blank `QWidget` in
+  front of them takes every pixel the action buttons leave.
+- **`qml/PromptBox.qml`, `qml/Chip.qml` and `qml/Bubble.qml` have `+plasma`
+  twins** (the compose box as a `Frame`/`TextArea`/`Button`, the attachment chip
+  as a flat `Button`, a message bubble as a real KStyle `Button` frame —
+  `enabled: false` so it takes no hover, press or focus, with the message's own
+  selectable text drawn above it), swapped by the file selector with the same
+  API either way.
 - **The harness renders it**, offscreen and never on his screen:
 
   ```
@@ -110,6 +116,9 @@ exactly what it always was.
   It auto-follows the newest text to the bottom
   only while he is already at the bottom (see *The model selector* §streaming) —
   scroll up mid-stream and it stops yanking. A model's
+  A turn's message sits in **`qml/Bubble.qml` — a BUTTON frame** [his,
+  2026-08-22], not a tinted slab; it draws no hover or pressed state in either
+  face, since the log is selectable text and nothing in it is clickable. A model's
   reasoning is a **collapsible disclosure, folded by default** (§9.1
   subordinated) that sits **OUTSIDE the bubble** [his, 2026-08-22] — as do the
   tool, web-search and file disclosures, all four between the speaker caption

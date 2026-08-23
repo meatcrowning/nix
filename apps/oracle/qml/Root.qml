@@ -1892,7 +1892,10 @@ Item {
                                 }
                             }
 
-                            Rectangle {
+                            // The message itself, in a BUTTON frame
+                            // (`Bubble.qml`, and the KStyle's own button under
+                            // Plasma) [his, 2026-08-22].
+                            Bubble {
                                 id: bubble
                                 // Nothing to box when the turn has no text yet —
                                 // the reasoning above carries the wait, so an
@@ -1900,24 +1903,13 @@ Item {
                                 // bubble (§10 — never a control with no reading).
                                 visible: body !== "" || imageCol.visible
                                          || (!isUser && streaming && thinking === "")
+                                user: isUser
+                                isError: model.isError
                                 x: isUser ? turnStack.width - width : 0
                                 width: turn.wide ? turn.bubbleMax
                                        : Math.min(turn.bubbleMax,
                                                   Math.max(72, turnCol.natural + 2 * turn.pad))
                                 height: visible ? turnCol.height + 2 * turn.pad : 0
-                                // A BUTTON, not a tinted slab [his, 2026-08-22]:
-                                // the desktop's own button spec — `Theme.bg` on
-                                // the `bgAlt` reply panel, `Theme.ctrlBorder` at
-                                // `Theme.border`, `Theme.rounding` (docs/DESIGN.md
-                                // §4, §7.2). No hover fill: the log is selectable
-                                // text and nothing here is clickable, and a fill
-                                // that answers the pointer would promise a press
-                                // that never happens (§10.2).
-                                radius: Theme.rounding
-                                border.width: Theme.ctrlBorder
-                                color: Theme.bg
-                                border.color: isError ? Theme.crit
-                                              : (isUser ? Theme.accent : Theme.border)
 
                                 Column {
                                     id: turnCol
