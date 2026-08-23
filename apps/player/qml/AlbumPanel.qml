@@ -158,16 +158,19 @@ Item {
             spacing: 10
             HeaderButton {
                 label: "> play"
+                plainLabel: "play"; iconName: "media-playback-start"
                 fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                 onClicked: Player.playAlbum(root.albumId, -1)  // -1: nothing pinned under shuffle
             }
             HeaderButton {
                 label: "+ queue"
+                plainLabel: "queue"; iconName: "list-add"
                 fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                 onClicked: Player.queueAlbum(root.albumId)
             }
             HeaderButton {
                 label: "x close"
+                plainLabel: "close"; iconName: "window-close"
                 fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                 onClicked: root.closed()
             }

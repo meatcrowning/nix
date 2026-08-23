@@ -107,12 +107,56 @@ before touching any of it; only what is player-specific is here.
   the roof says how much room the rows get from the edge.
 - **`qml/+plasma/` swaps the controls**, through the file selector, with no
   branch at any call site: `HeaderButton` is a flat `Button`, `SelectButton` a
-  `Button` with the style's indicator, `Slider` a QQC2 `Slider` (re-applied
+  real `ComboBox`, `Slider` a QQC2 `Slider` (re-applied
   through a `Binding`, since a QQC2 Slider owns its value and a plain binding
-  would break on the first drag), and `CtxMenu` the style's own `Menu`. Each
+  would break on the first drag), `CtxMenu` the style's own `Menu`, `EditField`
+  a `TextField` and `SheetFrame` a `Pane`. Each
   carries `property string face: "plasma"`, which is the only way to prove the
   selector took — an unowned `QQmlFileSelector` is collected moments after it is
   made and every component then loads its unselected file, silently.
+    - **A glyph is not a label on a real button.** `HeaderButton`'s `label` is
+      written for the pixel face, where an affordance IS a character — `> play`,
+      `+ queue`, `x close`, a bare `x`. On the styled Button the twin draws,
+      that is the hyprvtb titlebar's vocabulary leaking into a session with a
+      whole icon theme for it, so a call site with a glyph states `plainLabel`
+      and `iconName` (or `iconOnly` for the wordless ones) beside it and the
+      twin draws THOSE. All three are inert in the sibling, so the Hyprland
+      button is byte-for-byte what it was — verified by rendering both views
+      offscreen against `HEAD` and comparing the PNGs. `tools/plasma-chrome-test.py`
+      asserts it over the SOURCE, not a render: a button on a page nobody opened
+      in that run is exactly the one a render misses.
+    - **`SelectButton`'s choices are DECLARED** (`options`, `chose(value)`),
+      not built inside an `onPicked` handler. That is what lets the twin be a
+      ComboBox at all — the KStyle's popup needs a model — and the Hyprland
+      sibling still opens the pane's one shared `CtxMenu`, from an items array
+      the button hands it. It was a `Button` with a hand-drawn `▾` in a `Text`
+      indicator until 2026-08-23, under a comment claiming the style drew the
+      arrow; no QQC2 primitive hands out Oxygen's arrow on its own, because
+      Oxygen draws it as part of the whole combo.
+    - **`EditField` is THE one-line text entry**, and `SheetFrame` the surface a
+      modal sheet sits on. Both exist because the rule editor was the last place
+      in this app drawing a KDE widget by hand: three `bgAlt` rectangles with a
+      `TextInput` in them, inside a box wearing a window frame of ours. The
+      editor's row heights come off the twins' own `implicitHeight`
+      (`SmartEditor.ctrlH`, 0 outside Plasma), because Oxygen's field and combo
+      are taller than the pixel face's 24 and a row pinned to 24 crops the frame
+      it is drawing. `EditField`'s focus helper is `focusInput()` and NOT
+      `forceActiveFocus`: a function declared over an Item method loads with no
+      error and then behaves as if the body calling it had stopped running.
+    - **A separator in the Plasma `CtxMenu` is a `MenuSeparator`.** An
+      `Instantiator` makes one delegate type, so it used to arrive as a disabled
+      empty `MenuItem` 8px tall — a gap where Oxygen draws an etched line. The
+      menu is built imperatively from two components now. Same fix in chatter's
+      and painter's copies.
+- **The search results overlay binds `Theme.windowFill`, not `Theme.bg`.** It
+  covers the whole content area, so a flat fill of the scheme's window colour
+  was a patch laid over Oxygen's gradient — the one break in the surface that
+  runs unbroken from the titlebar down. It still has to OCCLUDE the pages under
+  it, so `qmlcommon/StyledBackground.qml` is drawn behind it instead, put back
+  at the VIEW origin (`x: -root.x`) and cut by the overlay's own clip: the
+  provider crops the style's render to the view's rectangle and pads from the
+  item's top-left, so an overlay inset from the top would otherwise restart the
+  gradient at its own edge.
 - **The QML `Shortcut`s all stand down under Plasma** (`enabled: !win.plasma`),
   except Escape: the sequences are on the QActions there, and two owners of one
   sequence in one window is an ambiguous shortcut, which Qt answers by firing
@@ -139,7 +183,12 @@ before touching any of it; only what is player-specific is here.
   chrome as text (a menu is not on screen until it is opened, so no render can
   show what is in one), `PLAYER_FACES` proves the selector took, `PLAYER_SHOT`
   writes a PNG, `PLAYER_DIALOG` grabs Configure player…, `PLAYER_TREE` dumps
-  item geometry, `PLAYER_VIEW` picks the page without persisting it, and
+  item geometry, `PLAYER_VIEW` picks the page without persisting it (on the
+  Hyprland side it reaches the Root INSIDE `Main.qml`'s Window — set on the
+  window it invented a property nothing read, so the flag silently did
+  nothing in that session), `PLAYER_SMARTEDIT` opens the smart-playlist
+  editor over the playlists page (`1` for a new list, else a list name to
+  edit; an in-window sheet, so `PLAYER_SHOT` does contain it), and
   `PLAYER_STATEPOKE=1,2,3` (+ `PLAYER_STATEPOKE_PLAYING=1`) puts a queue under
   the app with nothing decoding a byte — mpv is his audio device — so a harness
   can watch the chrome follow the app's state. That poke happens LAST, just

@@ -6,6 +6,20 @@ import QtQuick
 Item {
     id: root
     property string label: ""
+    // THE SAME BUTTON, SPELT FOR A REAL KDE TOOLBAR (apps/AGENTS.md -> kdeshell).
+    // `label` carries this desktop's two-character affordance glyphs ("> play",
+    // "x close") because the pixel face has no icons and the titlebar column is
+    // where that vocabulary comes from. On a styled Button those prefixes are
+    // exactly the imitation the Plasma face exists to drop, so a call site that
+    // has one states the plain words and a freedesktop icon name beside it and
+    // `+plasma/HeaderButton.qml` uses those instead. Both are INERT here — the
+    // Hyprland button is byte-for-byte what it was.
+    property string plainLabel: ""
+    property string iconName: ""
+    // The pixel face's bare glyph buttons ("x", "-", "+") have no words at all:
+    // there, the character IS the affordance. On a KDE button the icon is, so
+    // the row says so rather than the twin guessing from an empty `plainLabel`.
+    property bool iconOnly: false
     property bool lit: false
     // The three foreground tones, handed in already faded by whatever pane owns
     // this button (docs/DESIGN.md §3.1.1). A button must not know whether the

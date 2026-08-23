@@ -87,6 +87,12 @@ Item {
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     label: "x"
+                    // Inert here — this drawer is the Hyprland roof and is
+                    // never built in a Plasma session (the rows go into a real
+                    // dialog there). Stated anyway, so the rule holds for every
+                    // glyph button in the app rather than for the ones that
+                    // happen to be reachable.
+                    iconName: "window-close"; iconOnly: true
                     fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                     onClicked: root.closeRequested()
                 }

@@ -142,7 +142,12 @@ Item {
                     anchors.margins: 1
                     width: Math.max(0, Math.round((parent.width - 2) * root.fraction))
                     color: root.tint
-                    Behavior on width { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                    // The desktop's motion, not a literal of its own
+                    // (qmlcommon/Motion.qml): this was a hardcoded 120ms, so
+                    // reduceMotion and the animSpeed slider did not reach it —
+                    // and in a Plasma session with Oxygen's animations switched
+                    // off it was the one thing in the window still travelling.
+                    Behavior on width { NumberAnimation { duration: motion.ms(motion.slideMs); easing.type: motion.slideEasing } }
                 }
             }
         }

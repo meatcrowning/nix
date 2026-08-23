@@ -217,6 +217,7 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             visible: root.lyricsData.source === "instrumental-user"
             label: "search anyway"
+            iconName: "edit-find"
             fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
             onClicked: {
                 Library.setInstrumental(root.trackId, false);
@@ -228,6 +229,7 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             visible: parent.isMiss
             label: "mark instrumental"
+            iconName: "audio-x-generic"
             fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
             onClicked: {
                 Library.setInstrumental(root.trackId, true);

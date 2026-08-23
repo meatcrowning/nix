@@ -4256,10 +4256,14 @@ def _selftest(app, shell, win, plasma, warnings, player=None, library=None):
     # rather than through `setView`, so it persists nothing — a harness must not
     # hand him back a different page than the one he left the app on.
     want_view = os.environ.get("PLAYER_VIEW")
-    if want_view and shell is not None:
-        shell.root.setProperty("view", want_view)
-    elif want_view and win is not None:
-        win.setProperty("view", want_view)
+    # Under Hyprland `win` is Main.qml's Window and `view` belongs to the Root
+    # INSIDE it, so setting the property on the window only invented a new one
+    # that nothing read — the flag silently did nothing in that session and
+    # every shot came out on whichever page the app was left on.
+    view_owner = shell.root if shell is not None else (
+        win.property("contentItem").childItems()[0] if win is not None else None)
+    if want_view and view_owner is not None:
+        view_owner.setProperty("view", want_view)
 
     # PLAYER_STATEPOKE: put a queue under the app WITHOUT playing anything, so
     # a harness can see the chrome follow the app's state. This is the case that
@@ -4295,6 +4299,35 @@ def _selftest(app, shell, win, plasma, warnings, player=None, library=None):
         # this is the only check the KDE menu structure gets.
         if plasma and os.environ.get("PLAYER_MENUS"):
             print(shell.dump_chrome())
+        # PLAYER_SMARTEDIT: open the smart-playlist editor over the playlists
+        # page. Unlike Configure player… it is an in-window sheet, so
+        # PLAYER_SHOT does contain it — there was simply no way to ask for it
+        # open, and it is the one surface in this app a Plasma face is easy to
+        # get wrong on (SmartEditor.qml). The value is a list name to EDIT, or
+        # `1` for a new one.
+        if os.environ.get("PLAYER_SMARTEDIT"):
+            root_item = shell.root if shell is not None else win
+            ed = root_item.findChild(QObject, "smartEditor") if root_item else None
+            want = os.environ["PLAYER_SMARTEDIT"]
+            if ed is not None:
+                from PySide6.QtCore import QMetaObject, Q_ARG
+                # invokeMethod, not `ed.createNew()`: a QML-declared function is
+                # a meta-method on the item, and calling it as a Python
+                # attribute is a silent no-op — the editor simply never opened
+                # and nothing said so.
+                if want in ("1", "new", ""):
+                    QMetaObject.invokeMethod(ed, "createNew")
+                else:
+                    QMetaObject.invokeMethod(ed, "edit", Q_ARG("QVariant", want))
+                # A GENEROUS SETTLE. The sheet is a Repeater of rule rows over
+                # a Flickable, and at six passes it was `visible` and still
+                # unpainted — a shot of a window with nothing in it, which reads
+                # as the feature being broken rather than the harness being
+                # early.
+                for _ in range(40):
+                    app.processEvents()
+            else:
+                print("selftest: no smart editor in the tree", file=sys.stderr)
         # PLAYER_DIALOG: build and grab Configure player…, which no shot of the
         # main window can contain — it is its own window.
         if plasma and os.environ.get("PLAYER_DIALOG"):

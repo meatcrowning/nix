@@ -129,6 +129,7 @@ Item {
                     x: 6
                     anchors.verticalCenter: parent.verticalCenter
                     label: "+ new"
+                    plainLabel: "new"; iconName: "list-add"
                     fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                     onClicked: editor.createNew()
                 }
@@ -180,11 +181,13 @@ Item {
             }
             HeaderButton {
                 label: "> play all"
+                plainLabel: "play all"; iconName: "media-playback-start"
                 fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                 onClicked: Player.playSmart(root.current)
             }
             HeaderButton {
                 label: "edit rules"
+                iconName: "document-edit"
                 fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                 onClicked: editor.edit(root.current)
             }

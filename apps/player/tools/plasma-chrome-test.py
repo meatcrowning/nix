@@ -200,7 +200,8 @@ for row in ("Show &Toolbar", "Show Transport Bar", "Show Status&bar"):
 # failure is detectable at all (kdeshell.select_plasma_files).
 faces = dict(ln[5:].split(" = ", 1) for ln in plasma.splitlines()
              if ln.startswith("face ") and " = " in ln)
-for comp in ("HeaderButton", "SelectButton", "Slider", "CtxMenu"):
+for comp in ("HeaderButton", "SelectButton", "Slider", "CtxMenu",
+             "EditField", "SheetFrame"):
     check(f"{comp} is the KDE variant under Plasma",
           faces.get(comp) == "plasma", str(faces))
 check("...and nothing is swapped under Hyprland",
@@ -211,6 +212,28 @@ check("...and nothing is swapped under Hyprland",
 check("a Hyprland session builds no KDE chrome at all",
       "toolbar[transport]" not in hypr and "&Playback" not in hypr,
       hypr.strip().splitlines()[-1:] and hypr.strip().splitlines()[-1])
+
+# ---- no titlebar glyph reaches a real KDE button ------------------------
+# `HeaderButton`'s label is written for the pixel face, where an affordance IS a
+# character ("> play", "x close", a bare "x"). On the styled Button the Plasma
+# twin draws, that vocabulary is the imitation the whole face exists to drop, so
+# a glyph label has to state `plainLabel`/`iconName` (or `iconOnly`) beside it.
+# Checked in the SOURCE rather than in a render: a button on a page nobody
+# opened in this run is exactly the one that would be missed.
+GLYPHS = ("> ", "+ ", "x ", "< ")
+for qml in sorted((APP / "qml").glob("*.qml")):
+    body = qml.read_text(encoding="utf-8")
+    lines = body.splitlines()
+    for i, ln in enumerate(lines):
+        s = ln.strip()
+        if not s.startswith("label: \""):
+            continue
+        lit = s[8:].split("\"")[0]
+        if not (lit.startswith(GLYPHS) or lit in ("x", "-", "+")):
+            continue
+        near = " ".join(lines[max(0, i - 1):i + 4])
+        check(f"{qml.name}: {lit!r} says what a KDE button should read",
+              "plainLabel:" in near or "iconOnly:" in near, near.strip())
 
 print(("FAILED: " + ", ".join(fails)) if fails else "all ok")
 sys.exit(1 if fails else 0)
