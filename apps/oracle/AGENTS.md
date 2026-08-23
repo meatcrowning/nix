@@ -768,8 +768,10 @@ and before the next POST. QML settles the row that round wrote into — its pros
 and the tools, sources, files and images IT called, stay on it — and
 `appendReplyRow(n)` opens a fresh one. `step` is the round a row belongs to: 1
 for the row his prompt opens, 2 and up for each round after it, persisted with
-the turn and rendered in the caption from 2 on (`model · round 2`). An old
-session has no `step`, reads 0, and shows no label.
+the turn — and NOT drawn anywhere. The caption used to read `model · round 2`
+from 2 on; he had it taken out [his, 2026-08-22]: the split is the point, and a
+new bubble already says a new round began. `step` stays in the store and in
+`rowsJson` (the harness asserts on it), it just has no label.
 
 Everything keyed on "the last row" still means the ANSWER row, since that is the
 last one: `continue`, the auto-press, `canContinue`.
@@ -780,6 +782,16 @@ asserts the log comes out as three reply rows with the prose and the tool on the
 round that made them. It rides on `ORACLE_SEND` (send this prompt, then print
 the chat log as JSON via `Root.rowsJson()`), which is the only way to see what
 the ROWS became.
+
+### One state at a time in an unfinished bubble
+
+A model row that has said nothing yet draws a `loading…` line of its own; the
+reasoning clock beside it draws `waiting…` while a tool is out. An empty bubble
+on its FIRST tool round satisfied both and stacked them [his, 2026-08-22]. The
+clock block is now hidden while that loading line is up, so `loading` owns a
+bubble with nothing in it and the clock takes over the moment there is something
+to show. `tools/think-clock-test.py` samples the two together — a union of
+everything seen over time cannot tell coexistence from a handover.
 
 ### It presses `continue` for him
 

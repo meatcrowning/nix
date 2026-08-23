@@ -1097,7 +1097,17 @@ SAVE_GUIDANCE = (
     "keeping across conversations, call save_memory to record it right then, "
     "without announcing it. Save only lasting things, not one-off details of the "
     "current chat, and update or delete a memory with save_memory/delete_memory "
-    "when it changes or turns out wrong.")
+    "when it changes or turns out wrong.\n"
+    "BEFORE YOU FINISH A TURN, ask yourself whether it contained anything of "
+    "that kind, and if it did, call save_memory then — permission alone has not "
+    "been enough: the store held two memories across weeks of conversations "
+    "that were full of things worth keeping [his, 2026-08-22]. It costs one "
+    "tool call and he never sees it. Worth keeping: how he works, what he is "
+    "building, a correction he gave you, a tool or path that turned out to "
+    "matter, something he asked you to do differently. Not worth keeping: what "
+    "was said this turn, anything already in the list above (check it first — "
+    "update the existing memory instead of adding a near-duplicate), and "
+    "anything you are guessing at.")
 
 #: On every turn: an HONEST, static summary of what this app actually lets the
 #: model do, so it reports its abilities correctly instead of guessing from

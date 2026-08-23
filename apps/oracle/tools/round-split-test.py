@@ -9,8 +9,8 @@ and reads the chat rows back:
 
     row 0  you           the prompt
     row 1  model          round 1's prose + the tool it called
-    row 2  model · round 2 round 2's prose + its tool
-    row 3  model · round 3 the answer
+    row 2  model         round 2's prose + its tool
+    row 3  model         the answer
 
 His daemon is never touched, no model is loaded, nothing reaches his screen.
 """
