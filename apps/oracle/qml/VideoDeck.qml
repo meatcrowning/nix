@@ -13,6 +13,8 @@ Column {
 
     // The turn's `videos` array, already parsed.
     property var entries: []
+    // Passed through to every card: the one scene-level VideoStage.
+    property Item stage: null
 
     spacing: 6
 
@@ -22,6 +24,7 @@ Column {
             required property int index
             width: deck.width
             entry: deck.entries[index]
+            stage: deck.stage
         }
     }
 }

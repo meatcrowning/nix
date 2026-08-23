@@ -28,6 +28,11 @@ Column {
     // One `videoResult` entry: {ok, url, src, title, alt, w, h, duration,
     // poster, live} or {ok:false, url, error}.
     property var entry: null
+    // Where a fullscreen video goes: the scene-level VideoStage in Root.qml.
+    // The stage builds no second player — it BORROWS this one, pointing its own
+    // surface at it and handing it back on the way out, so going full and
+    // coming back neither restarts the stream nor loses the position.
+    property Item stage: null
     readonly property bool ok: !!entry && entry.ok === true
     readonly property string src: ok ? (entry.src || "") : ""
     readonly property string poster: (ok && entry.poster) ? entry.poster : ""
@@ -47,14 +52,21 @@ Column {
 
     spacing: 2
 
-    // m:ss, in the fixed slots §5.4 asks for, so the clock does not shuffle the
-    // scrub track sideways every second.
-    function clock(ms) {
-        if (!(ms > 0)) return "0:00";
-        var t = Math.floor(ms / 1000);
-        var m = Math.floor(t / 60);
-        var s = t % 60;
-        return m + ":" + (s < 10 ? "0" : "") + s;
+    // The duration in ms: the player's own once it knows it, else what the
+    // resolver said — so the clock is not 0:00 for the first second of a stream.
+    readonly property real dur: {
+        if (video.item !== null && video.item.player.duration > 0)
+            return video.item.player.duration;
+        return (ok && entry.duration > 0) ? entry.duration * 1000 : 0;
+    }
+    readonly property bool full:
+        !!stage && video.item !== null && stage.playing === video.item.player
+
+    // Hand this card's player to the stage, or take it back.
+    function toggleFull() {
+        if (!stage || video.item === null) return;
+        if (full) stage.close();
+        else stage.open(video.item.player, video.item.out, card);
     }
 
     // ---- the failure line ---------------------------------------------------
@@ -84,7 +96,9 @@ Column {
         Image {
             id: posterImg
             anchors { fill: parent; margins: 1 }
-            visible: card.poster !== "" && !video.playing
+            // Back on view while the picture is away on the stage — a card
+            // showing a black rectangle would read as broken.
+            visible: card.poster !== "" && (!video.playing || card.full)
             fillMode: Image.PreserveAspectFit
             asynchronous: true
             sourceSize.width: Math.max(1, frame.width - 2)
@@ -103,17 +117,13 @@ Column {
             readonly property bool failed:
                 item !== null && item.player.error !== MediaPlayer.NoError
             readonly property real pos: item !== null ? item.player.position : 0
-            readonly property real dur: {
-                if (item !== null && item.player.duration > 0)
-                    return item.player.duration;
-                return card.ok && entry.duration > 0 ? entry.duration * 1000 : 0;
-            }
         }
 
         Component {
             id: playerComp
             Item {
                 property alias player: player
+                property alias out: videoOut
                 AudioOutput { id: audioOut }
                 MediaPlayer {
                     id: player
@@ -139,7 +149,7 @@ Column {
             anchors.centerIn: parent
             width: 28
             height: 28
-            visible: !video.playing && !video.failed
+            visible: (!video.playing || card.full) && !video.failed
             color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.72)
             radius: Theme.rounding
             border.width: Theme.ctrlBorder
@@ -148,9 +158,8 @@ Column {
                 anchors.centerIn: parent
                 width: 13
                 height: 13
-                // Paused mid-clip, the marker is a play mark again; only the
-                // rows differ, so one Repeater draws both (§5.4: one shape, two
-                // states, never two widgets).
+                // Rows 0..12 widen 1,3,5,7,5,3,1 — a symmetric arrowhead
+                // pointing right, centred on the middle row.
                 Repeater {
                     model: 13
                     Rectangle {
@@ -194,72 +203,19 @@ Column {
         }
 
         // ---- the transport strip -------------------------------------------
-        // Inside the artwork, on hover or while it plays (§5.1: a label moves
-        // INTO the picture rather than claiming a strip of its own), and gone
-        // entirely for a live stream, which has nothing to scrub.
-        Rectangle {
-            id: transport
-            visible: frame.started && !card.live && (hover.containsMouse || !video.playing)
+        // Inside the artwork, on hover or while it is paused (§5.1: a label
+        // moves INTO the picture rather than claiming a strip of its own), and
+        // absent for a live stream, which has nothing to scrub. The same strip
+        // the fullscreen stage wears — VideoTransport.qml.
+        VideoTransport {
+            visible: frame.started && !card.live
+                     && (hover.containsMouse || !video.playing)
             anchors { left: parent.left; right: parent.right; bottom: parent.bottom
                       margins: 1 }
-            height: Theme.lineHeight + 8
-            color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.82)
-
-            Row {
-                anchors { fill: parent; leftMargin: 6; rightMargin: 6 }
-                spacing: 6
-
-                PixelText {
-                    anchors.verticalCenter: parent.verticalCenter
-                    // Fixed slots: the elapsed clock must not resize the track
-                    // under the pointer every second (§5.4).
-                    width: 34
-                    text: card.clock(video.pos)
-                    color: Theme.text
-                }
-                // The scrub track. A direct manipulation: the fill follows the
-                // pointer with no easing and the seek happens as it moves
-                // (§6.4), so the picture is where the finger is.
-                Rectangle {
-                    id: track
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: Math.max(20, parent.width - 12 - 34 - 34 - 12)
-                    height: 6
-                    radius: Theme.rounding
-                    color: Theme.bgAlt
-                    border.width: Theme.ctrlBorder
-                    border.color: Theme.border
-
-                    Rectangle {
-                        anchors { left: parent.left; top: parent.top; bottom: parent.bottom
-                                  margins: 1 }
-                        width: video.dur > 0
-                               ? Math.max(0, (track.width - 2) * (video.pos / video.dur))
-                               : 0
-                        radius: Theme.rounding
-                        color: Theme.accent
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        anchors.margins: -6      // the hit band exceeds the ink (§5.3)
-                        preventStealing: true
-                        function seek(x) {
-                            if (video.item === null || video.dur <= 0) return;
-                            var f = Math.max(0, Math.min(1, x / track.width));
-                            video.item.player.position = Math.round(f * video.dur);
-                        }
-                        onPressed: (m) => seek(m.x)
-                        onPositionChanged: (m) => { if (pressed) seek(m.x); }
-                    }
-                }
-                PixelText {
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 34
-                    horizontalAlignment: Text.AlignRight
-                    text: card.clock(video.dur)
-                    color: Theme.textDim
-                }
-            }
+            player: video.item !== null ? video.item.player : null
+            dur: card.dur
+            full: card.full
+            onToggleFull: card.toggleFull()
         }
     }
 
