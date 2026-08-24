@@ -282,9 +282,8 @@ model's **context ceiling** and the reply's **generation rate**, both true
 numbers not guesses (docs/DESIGN.md §10). `contextMax` is read from ollama's
 `/api/show` — the model's own `<arch>.context_length` in `model_info`, keyed off
 `general.architecture`, never the filename (`refreshModelInfo`, run on every
-model change and every send; 0/hidden when unknown) — but that ceiling is now
-the DIM figure beside the readout, not the readout: see *The window is the real
-one* below. `tokensPerSec` is a running
+model change and every send; 0/hidden when unknown) — but that ceiling is no
+longer what the readout shows: see *The window is the real one* below. `tokensPerSec` is a running
 estimate while a reply streams (one content frame ≈ one token, clocked from the
 first frame) that settles to ollama's exact `eval_count / eval_duration` on the
 final `done` frame. **`contextUsed`** is how full the context is — ollama's own
@@ -299,9 +298,11 @@ nothing until at least one stat exists.
 ceiling** [his, 2026-08-23: *"can you make the context indicator represent the
 REAL amount of context i have based on my system specs for the given model?"*].
 It read 262144 for qwen3.6:35b-a3b while every turn it ever sent ran in 32768 —
-a true number about the model, and a lie about him. The trained ceiling is still
-drawn, one step dimmer, as `of 256K` (docs/DESIGN.md §9.1), and only when it is
-bigger than the window.
+a true number about the model, and a lie about him. The trained ceiling is
+`contextTrained`, kept for `describe_self` and the harness but **not drawn**: it
+was there for one afternoon as a dim `of 256K` beside the readout and he had it
+out again the same day — the second half of `used/window` is already the
+ceiling that matters, and a third number reads as a repeat.
 
 - **Loaded beats computed.** Once ollama has the model resident, `/api/ps`
   reports the `context_length` it was loaded in; that is the number, measured.
@@ -356,6 +357,49 @@ be read before it is chosen, not picked blind from a label.
   is kept even while a preset is active. `setPromptChoice`/`setCustomPrompt`
   (slots) write it; `promptPresets`/`promptChoice`/`customPrompt` (properties)
   feed the UI. Malformed/absent → the `default` preset.
+
+## What is on the wire — the core tools, and the index
+
+**A turn carries 16 tool schemas, not 39** [his, 2026-08-23, after an agent in
+chatter told him the schemas were context bloat: *"go for it"*]. Measured the
+same day: the full set is **39,948 characters, ~13k tokens**, sent on every
+round — against the 32k window that was most of the room, and it is why a
+music-library turn had nothing left to answer with.
+
+| | tokens |
+|---|---|
+| every schema, as it was | ~13,100 |
+| `CORE_TOOL_NAMES`, on the wire now | ~4,630 |
+| `tools_note()`, the one-line index | ~815 |
+| **saved, every round** | **~7,650** |
+
+- **`CORE_TOOL_NAMES` is what a turn reaches for unprompted**: the file six,
+  the two runners, `web_search`/`fetch_url`, the clock, memory's two, and the
+  three doors to everything else — `use_skill`, `spawn_agent`, `get_tools`.
+- **`tools_note()` names every other tool in one line each** — name plus first
+  sentence, capped at 90 characters. Same shape and the same reason as
+  `skills_note()`: a model does not reach for a door it was never told about.
+  This is the whole reason the saving is safe.
+- **`get_tools(names)` attaches by name or by group** (`AGENT_TOOL_GROUPS` plus
+  `EXTRA_TOOL_GROUPS` — the sets a subagent never gets) **and returns the full
+  schemas in the same result**, so the model can call correctly on the very
+  next round rather than guessing argument names. Attachments last the turn;
+  every turn starts lean again.
+- **A tool called straight off the index still RUNS.** `_dispatch_tool`
+  resolves by name, not by what the payload happened to offer — it always did,
+  which is what makes this cheap — and `_run_tool_calls` then attaches it for
+  the rest of the turn, so no round is spent asking for a tool it has already
+  used correctly. That self-attach lives in `_run_tool_calls`, NOT in
+  `_dispatch_tool`, because subagents share the dispatcher and their tool sets
+  are their own.
+- **`describe_self` reports both**: `tools_available` is everything reachable
+  (the registry), `tools_attached_now` is what this message carries. Neither is
+  a remembered list; both are read off the same objects the payload is built
+  from (docs/DESIGN.md §10).
+- **Subagents are untouched** — their sets were already curated per definition,
+  which is the same idea one level down.
+
+Harness: `tools/lazy-tools-test.py`.
 
 ## Skills (Claude Code's own, as a real tool)
 
