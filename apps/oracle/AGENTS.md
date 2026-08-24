@@ -1867,6 +1867,16 @@ and not to say where it is: the same turn told him it "should be showing inline
 above" while the picture sat below, which is the model narrating a layout it
 cannot see.
 
+**A CAPTION IS ONE ELIDED LINE, ON the picture** (`CaptionStrip.qml`, used by
+the gallery's solo picture and its tiles, and by `InlineImage`; `VideoCard`
+keeps its two lines under the clip, where the transport does not own the space,
+and elides them the same way). An Anima prompt is forty tags, and wrapped under
+the picture it was a slab taller than some replies [his, 2026-08-24]. The
+caption's job in the log is to say WHICH picture this is; the whole of it is one
+click away in the Lightbox, which wraps it in full. **And the picture is centred
+in the bubble** — a portrait one is narrower than the column (the height cap
+above) and left-aligned it read as a mistake.
+
 **A generated picture says what made it.** The caption is the prompt the GRAPH
 ran — the generator reports it in `::result`, so it is the transformed spelling
 with the NegPip negative folded in, not the argument the tool was handed [his,

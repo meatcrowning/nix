@@ -44,13 +44,16 @@ Item {
     readonly property real dispH: Math.max(1, Math.round(natH * scaleFit))
 
     width: Math.max(1, Math.round(maxWidth))
-    height: dispH + 2 + (caption.visible ? caption.height + 2 : 0)
+    height: dispH + 2
     visible: e !== null
 
     // The frame: a hairline around the picture, and the fill is TRANSPARENT so
     // the alpha of a transparent PNG shows the bubble behind it (docs/DESIGN.md
     // §4, and transparency [his, 2026-08-23]) rather than a second slab.
     Rectangle {
+        // Centred, like the gallery's — a portrait picture is narrower than the
+        // bubble and left-aligned it reads as a mistake [his, 2026-08-24].
+        anchors.horizontalCenter: parent.horizontalCenter
         width: inl.dispW + 2
         height: inl.dispH + 2
         color: "transparent"
@@ -71,6 +74,13 @@ Item {
             asynchronous: true
             source: inl.e ? "file://" + inl.e.path : ""
         }
+        // One elided line on the picture; the whole of it is in the Lightbox
+        // (CaptionStrip.qml).
+        CaptionStrip {
+            anchors.margins: 1
+            caption: inl.e ? (inl.e.alt || "") : ""
+            meta: inl.e ? (inl.e.meta || "") : ""
+        }
         MouseArea {
             anchors.fill: parent
             cursorShape: Qt.PointingHandCursor
@@ -87,17 +97,6 @@ Item {
         }
     }
 
-    // The model's alt text, under the picture (docs/DESIGN.md §9.1 — a caption,
-    // one step dim).
-    PixelText {
-        id: caption
-        y: inl.dispH + 4
-        width: inl.width
-        wrapMode: Text.Wrap
-        visible: inl.e && !!inl.e.alt
-        text: (inl.e && inl.e.alt) ? inl.e.alt : ""
-        color: Theme.textDim
-    }
 
     // A file that saved but will not decode (§10 — say so, never a blank).
     PixelText {
