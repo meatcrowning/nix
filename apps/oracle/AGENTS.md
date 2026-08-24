@@ -1217,12 +1217,22 @@ new bubble already says a new round began. `step` stays in the store and in
 Everything keyed on "the last row" still means the ANSWER row, since that is the
 last one: `continue`, the auto-press, `canContinue`.
 
+**One deliberate exception: a media-only round does NOT open a fresh bubble.**
+When the row a round leaves behind holds a picture (or a video) and no words,
+`onRoundStarted` keeps the same row streaming and lets the next round's text
+land on it — so the image and the answer it accompanies read as one message
+instead of a detached picture floating above a separate text bubble [his,
+2026-08-23]. Once a row HAS words, the rounds split again exactly as above. The
+merge decision is made off the row's `images`/`videos` roles, never a child
+item's `visible` (the latch in the bubble's `visible`).
+
 Harness: `tools/round-split-test.py` — it drives one real prompt through the
 real window offscreen against a stub ollama that asks for two tool rounds, and
 asserts the log comes out as three reply rows with the prose and the tool on the
-round that made them. It rides on `ORACLE_SEND` (send this prompt, then print
-the chat log as JSON via `Root.rowsJson()`), which is the only way to see what
-the ROWS became.
+round that made them; a second scenario (MODE=media, a `show_image` round then
+an answer) asserts the picture and the following text land on ONE row. It rides
+on `ORACLE_SEND` (send this prompt, then print the chat log as JSON via
+`Root.rowsJson()`), which is the only way to see what the ROWS became.
 
 ### A bubble hugs its text, with no floor
 
