@@ -1791,16 +1791,28 @@ and is not persisted: what the program MEANT is in the reply.
 It used to spring open on its own while a program ran — live output nobody can
 see is not live output — but a build or a download prints hundreds of lines and
 the block became the flood it was there to contain. So `execPeek` puts the LAST
-line of the tail on the heading, elided to one line, beside `working with
-files…`, and disappears when he opens the block (where the whole tail is drawn
-anyway). His own click still wins in both directions.
+line of the tail **on its own line under** `working with files…`, elided so it
+stays one line however long the program's is. Not beside the heading [his,
+2026-08-23]: a path or a progress bar sharing that line leaves neither half
+room to read, so `fileToggle` is two rows tall while it shows.
+
+It is drawn **only while the program runs** (`execRunning`), and goes the
+moment it stops [his, 2026-08-23] — a finished console has nothing live to
+preview, and its last line left sitting under the heading reads as still
+going. It also goes when he opens the block, where the whole tail is drawn
+anyway. His own click still wins in both directions.
 
 - **`win.lastLine()` splits on `\r` as well as `\n`.** A download or a build
   redraws ONE line with carriage returns, so splitting on newlines alone hands
   back the whole progress bar's history as a single enormous line — and the
   line being redrawn is exactly the one worth previewing.
 - Harness: `tools/exec-peek-test.py`, which drives `execOutput` with a
-  carriage-return progress bar and reads the heading the delegate rendered.
+  carriage-return progress bar, then asserts on the rendered items that the
+  preview sits BELOW the heading and is gone once `execFinished` lands. It
+  holds a Python reference to every `setContextProperty` object: dropped, they
+  are garbage-collected, `DeskStyle` reads as undefined and `Theme.lineHeight`
+  falls to 0 — which is not an error but a layout, every row collapsing to
+  nothing under an assertion that then measures the collapse.
 
 ## Branching: edit and resend, ask again
 

@@ -2780,7 +2780,11 @@ Item {
                                         Item {
                                             id: fileToggle
                                             width: parent.width
+                                            // Two lines while a program is printing:
+                                            // the heading, and the line it printed last
+                                            // under it.
                                             height: Theme.lineHeight
+                                                    + (execPeek.visible ? Theme.lineHeight : 0)
                                             property int dotPhase: 0
                                             readonly property string dots:
                                                 motion.reduceMotion ? "…" : "...".substring(0, dotPhase)
@@ -2792,11 +2796,12 @@ Item {
                                             }
                                             Row {
                                                 id: fileHead
-                                                anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                                                anchors { left: parent.left; top: parent.top }
+                                                height: Theme.lineHeight
                                                 spacing: 6
                                                 PixelText { text: fileAct.expanded ? "-" : "+"; color: Theme.textDim }
                                                 PixelText {
-                                                    text: turn.agg.filesActive ? "working with turn.agg.files"
+                                                    text: turn.agg.filesActive ? "working with files"
                                                                       : "files · " + turn.agg.fileCount
                                                     color: turn.agg.filesActive ? Theme.text : Theme.textDim
                                                 }
@@ -2806,27 +2811,42 @@ Item {
                                                     color: Theme.textDim
                                                 }
                                             }
-                                            // What the program printed LAST, on the
+                                            // What the program printed LAST, UNDER the
                                             // heading, while the block is shut [his,
                                             // 2026-08-23]: the tool is usually a
                                             // download or a build, and the one line
                                             // that matters is the one it is redrawing
-                                            // right now. Elided rather than wrapped —
-                                            // a heading is one line — and gone the
-                                            // moment the block is open, where the whole
-                                            // tail is already drawn.
+                                            // right now. Its own line rather than
+                                            // trailing "working with files…" on the
+                                            // same one — a path or a progress bar
+                                            // beside a heading leaves neither room to
+                                            // read. Elided rather than wrapped, so it
+                                            // stays exactly one line however long the
+                                            // program's is.
+                                            //
+                                            // Only while the program RUNS. A finished
+                                            // console has nothing live to preview and
+                                            // its last line lingering under the
+                                            // heading reads as still going [his,
+                                            // 2026-08-23]; the whole tail is in the
+                                            // block for anyone who opens it. Gone too
+                                            // the moment the block IS open, where it
+                                            // is already drawn in full.
                                             Text {
                                                 id: execPeek
-                                                anchors { left: fileHead.right; leftMargin: 8
+                                                anchors { left: parent.left; leftMargin: 12
                                                           right: parent.right
-                                                          verticalCenter: parent.verticalCenter }
-                                                visible: !fileAct.expanded && turn.agg.execTail !== ""
+                                                          top: fileHead.bottom }
+                                                height: visible ? Theme.lineHeight : 0
+                                                verticalAlignment: Text.AlignVCenter
+                                                visible: !fileAct.expanded && turn.agg.execRunning
+                                                         && win.lastLine(turn.agg.execTail) !== ""
                                                 font: Theme.editorFont
                                                 renderType: Text.NativeRendering
                                                 textFormat: Text.PlainText
                                                 elide: Text.ElideRight
                                                 text: win.lastLine(turn.agg.execTail)
-                                                color: turn.agg.execRunning ? Theme.text : Theme.textDim
+                                                color: Theme.text
                                             }
                                             MouseArea {
                                                 anchors.fill: parent

@@ -57,14 +57,19 @@ app = QGuiApplication([])
 engine = QQmlApplicationEngine()
 ctx = engine.rootContext()
 ollama = oracle.Ollama()
-ctx.setContextProperty("WalPalette",
-                       oracle.Palette(oracle.theme_source(oracle.PANEL_THEME)))
-ctx.setContextProperty("DeskStyle", oracle.DeskStyle())
-ctx.setContextProperty("Titlebar", oracle.Titlebar())
+# Held in a list, not passed inline: a QObject handed to setContextProperty and
+# then dropped is garbage-collected, the context property goes null, and QML
+# reads it as undefined — here that took `Theme.lineHeight` to 0 and collapsed
+# every text row to nothing, which is a layout, not an error.
+keep = [oracle.Palette(oracle.theme_source(oracle.PANEL_THEME)), oracle.DeskStyle(),
+        oracle.Titlebar(), oracle.Backend(), oracle.Sessions(), oracle.Clip()]
+ctx.setContextProperty("WalPalette", keep[0])
+ctx.setContextProperty("DeskStyle", keep[1])
+ctx.setContextProperty("Titlebar", keep[2])
 ctx.setContextProperty("Ollama", ollama)
-ctx.setContextProperty("Backend", oracle.Backend())
-ctx.setContextProperty("Sessions", oracle.Sessions())
-ctx.setContextProperty("Clip", oracle.Clip())
+ctx.setContextProperty("Backend", keep[3])
+ctx.setContextProperty("Sessions", keep[4])
+ctx.setContextProperty("Clip", keep[5])
 ctx.setContextProperty("ollamaHost", oracle.OLLAMA)
 theme_c = QQmlComponent(engine, QUrl.fromLocalFile(str(oracle.QML / "theme" / "Theme.qml")))
 theme = theme_c.create()
@@ -160,6 +165,38 @@ check("and only that line, not the whole progress history",
 check("the last line is what lastLine() picks",
       QMetaObject.invokeMethod(root, "lastLine", Q_RETURN_ARG("QVariant"),
                                Q_ARG("QVariant", "a\r\nb\rc  \r\n")) == "c")
+
+
+def peek_items():
+    """The one-line preview, wherever it is in the tree."""
+    return [c for c in walk(win, lambda c: isinstance(c.property("text"), str)
+                            and c.property("text") == "94% [=======> ]", [])]
+
+
+# ---- 3. it sits UNDER the heading, not beside it --------------------------
+# His, 2026-08-23: a path or a progress bar trailing "working with files…" on
+# the same line leaves neither half room to read.
+heads = walk(win, lambda c: c.property("text") == "working with files", [])
+check("the heading says what it is working with", bool(heads),
+      repr([c.property("text") for c in
+            walk(win, lambda c: isinstance(c.property("text"), str)
+                 and "working with" in c.property("text"), [])]))
+pk = peek_items()
+if heads and pk:
+    hy = heads[0].mapToItem(None, 0, 0).y()
+    py = pk[0].mapToItem(None, 0, 0).y()
+    check("the last line is drawn under the heading, on its own line",
+          py >= hy + heads[0].property("height") - 1,
+          "head y=%.0f h=%.0f peek y=%.0f" % (hy, heads[0].property("height"), py))
+
+# ---- 4. and it goes when the program does ---------------------------------
+# A finished console has nothing live to preview, and its last line left under
+# the heading reads as still going [his, 2026-08-23]. The whole tail stays in
+# the block for anyone who opens it.
+ollama.execFinished.emit()
+spin()
+check("the preview disappears when the console finishes", not peek_items(),
+      repr([c.property("text") for c in peek_items()]))
 
 srv.shutdown()
 print("FAILED: " + ", ".join(fails) if fails else "OK")
