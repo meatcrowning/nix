@@ -46,7 +46,7 @@ cases = [
     ("by the window, a cat sits", "by the window, a cat sits"),   # prose
     ("1girl,   multi\nline", "1girl, multi line"),
     ("(lowres, low_quality:-1.0), 1girl", "(lowres, low quality:-1.0), 1girl"),
-    ("a girl (smiling:1.2) in the rain", "a girl (smiling:1.2) in the rain"),
+    ("a girl (smile:1.2) in the rain", "a girl (smile:1.2) in the rain"),
     ("", ""),
 ]
 for src, want in cases:
@@ -78,6 +78,26 @@ check("...and leaves prose alone",
       "She sits on the sill." not in got["unknown"], str(got))
 check("a weight and an @ do not hide a real tag",
       "lowres" in got["known"] and "@toi8" in got["known"], str(got))
+
+print("\nthe near-misses a model writes")
+for src, want in [("one girl", "1girl"), ("two girls", "2girls"),
+                  ("amber eyes", "yellow eyes"),
+                  ("looking_at_viewer", "looking at viewer")]:
+    got = G.danbooru_prompt(src)
+    check("%r -> %r" % (src, want), got == want, "got %r" % got)
+check("a name the site does not have is left alone",
+      G.danbooru_prompt("iwakura lain, smiling softly")
+      == "iwakura lain, smiling softly", G.danbooru_prompt("iwakura lain, smiling softly"))
+check("and prose is still prose",
+      G.danbooru_prompt("She sits in the dark.") == "She sits in the dark.")
+hits = [h["tag"] for h in B.search("lain", limit=6)]
+check("a character search surfaces the whole-word match",
+      "iwakura_lain" in hits and "serial_experiments_lain" in hits, str(hits))
+got = B.check("safe, newest, year:2005, lain from serial experiments lain, one girl")
+check("a character written as a phrase is flagged",
+      got["suspect"] == ["lain from serial experiments lain"], str(got))
+check("...and Anima's own meta vocabulary is not called invented",
+      got["unknown"] == [], str(got))
 
 print("\nthe negative, on a NegPip family")
 tmp = Path(tempfile.mkdtemp(prefix="anima-test-"))

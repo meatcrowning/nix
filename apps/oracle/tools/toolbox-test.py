@@ -191,6 +191,20 @@ check("...and hands the model no pixels",
 r = run_tool("show_image", {"path": str(_TMP / "nope.png")})
 check("a missing picture is an error, not an empty frame",
       bool(r) and "error" in r, json.dumps(r)[:120])
+# ONE PICTURE, DRAWN ONCE. A turn that generated one and then show_image'd the
+# same path twice put it in the chat three times and told him two had been made
+# [his, 2026-08-24]. The file is the identity; a second request is answered
+# with where it is, not with another copy.
+o._paths_shown = set()
+r = run_tool("show_image", {"path": str(PIC)})
+first = len(shown)
+r2 = run_tool("show_image", {"path": str(PIC)})
+check("the same picture is not drawn a second time",
+      first == 1 and len(shown) == 0, "first=%d again=%d" % (first, len(shown)))
+check("...and the model is told it is already there, not that it failed",
+      bool(r2) and r2.get("ok") and r2.get("already_shown")
+      and "not two" in (r2.get("note") or ""), json.dumps(r2)[:200])
+o._paths_shown = set()
 
 # 2. screenshot: through a stub capture, drawn AND attached
 cap = script(_TMP / "shot.sh",
@@ -214,7 +228,10 @@ check("a capture that fails says so", bool(r) and "error" in r,
       json.dumps(r)[:140])
 os.environ["ORACLE_SHOT_CMD"] = str(cap)
 
-# 3. make_image: painter's generator, stubbed — the parse and the display
+# 3. make_image: painter's generator, stubbed — the parse and the display.
+# `_paths_shown` is per TURN in the app (reset in `send`); the harness calls
+# tools directly, so each section that draws the same file clears it itself.
+o._paths_shown = set()
 made = _TMP / "made.png"
 img.save(str(made))
 os.environ["ORACLE_PAINTER"] = str(script(
@@ -354,9 +371,11 @@ os.environ["ORACLE_PAINTER"] = str(script(
     'echo "::progress 0.85 decoding"\n'
     'echo "  saved %s (1234 bytes)"\n'
     'echo \'::result {"model":"anima-base-v1.0.safetensors","seed":7,'
-    '"steps":50,"sampler":"euler_cfg_pp","scheduler":"beta","width":1152,'
+    '"positive":"1girl, (bad hands:-1.0)","steps":50,'
+    '"sampler":"euler_cfg_pp","scheduler":"beta","width":1152,'
     '"height":1728,"cfg":0.7}\'' % str(made)))
 seen.clear()
+o._paths_shown = set()
 r = run_tool("make_image", {"prompt": "a red cube"}, ms=20000)
 check("a render reports where it is, as it runs",
       any(abs(f - 0.85) < 0.001 for _l, f in seen)
@@ -366,8 +385,9 @@ check("...and the caption says what made it",
       and "1152x1728" in shown[0]["meta"] and "50 steps" in shown[0]["meta"]
       and "euler_cfg_pp/beta" in shown[0]["meta"]
       and "seed 7" in shown[0]["meta"], json.dumps(shown)[:260])
-check("...without repeating the prompt, which is the caption",
-      bool(shown) and shown[0].get("alt") == "a red cube", json.dumps(shown)[:160])
+check("the caption is the prompt the GRAPH ran, folded negative and all",
+      bool(shown) and shown[0].get("alt") == "1girl, (bad hands:-1.0)",
+      json.dumps(shown)[:200])
 
 WARDEN_CALLS.clear()
 wardenmod.WARDEN = "http://127.0.0.1:1"          # dead again: fail open

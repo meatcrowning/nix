@@ -56,7 +56,9 @@ Column {
     // bleed rule is about stills, and a cropped video loses the shot).
     readonly property real aspect:
         (ok && entry.w > 0 && entry.h > 0) ? (entry.h / entry.w) : (9 / 16)
-    readonly property int maxH: 420
+    // The gallery's ceiling for a still, so a portrait clip and a portrait
+    // picture take the same room in a reply (ImageGallery.qml).
+    readonly property int maxH: 320
 
     spacing: 2
 

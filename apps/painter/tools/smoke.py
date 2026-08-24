@@ -454,6 +454,12 @@ def main(argv=None):
         # and never appeared as a flag.
         emit(1.0, "done")
         print("::result " + json.dumps({
+            # The prompt the GRAPH ran, not the one it was handed: transformed,
+            # and with the negative folded in where NegPip took it. That is what
+            # the caption in the chat should say [his, 2026-08-24 — "i dont see
+            # the negpip negative text anywhere in the caption of that image"].
+            "positive": p.get("positive", ""),
+            "negative": p.get("negative", ""),
             "model": entry.name, "kind": kind, "seed": p.get("seed"),
             "steps": p.get("steps"), "cfg": p.get("cfg"),
             "sampler": p.get("sampler_name"), "scheduler": p.get("scheduler"),

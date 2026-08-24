@@ -218,9 +218,9 @@ settle()
 gals = [g for g in find("ImageGallery") if g.property("visible")]
 tall = gals[-1].property("height") if gals else 0
 check("a portrait picture is capped, not drawn at column width",
-      0 < tall <= 470, "tall=%s wide=%s" % (tall, wide))
-check("...and is no more than twice a landscape one",
-      0 < wide and tall <= wide * 2.0, "tall=%s wide=%s" % (tall, wide))
+      0 < tall <= 360, "tall=%s wide=%s" % (tall, wide))
+check("...and is not much taller than a landscape one",
+      0 < wide and tall <= wide * 1.4, "tall=%s wide=%s" % (tall, wide))
 check("...while a landscape one still fills the column",
       wide > 200, "wide=%s" % wide)
 

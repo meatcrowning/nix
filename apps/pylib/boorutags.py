@@ -30,14 +30,20 @@ from __future__ import annotations
 
 import csv
 import gzip
-import io
 import os
+import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "data", "danbooru-tags.csv.gz")
 
 CATEGORIES = {0: "general", 1: "artist", 3: "copyright", 4: "character",
               5: "meta"}
+
+#: Anima's OWN caption vocabulary, which is not on Danbooru's tag list and must
+#: not be reported as invented: the ratings, the era buckets and the `year:N`
+#: form the captions use.
+ANIMA_META = {"safe", "sensitive", "nsfw", "explicit", "questionable",
+              "newest", "recent", "mid", "early", "old", "oldest"}
 
 _ROWS = None            # [(name, category, count, [aliases])], count-descending
 _BY_NAME = None         # name or alias -> index into _ROWS
@@ -71,6 +77,12 @@ def _load():
     return _ROWS, _BY_NAME
 
 
+def _words(name):
+    """A tag's words, for a whole-word match: `iwakura_lain` is two, and the
+    parenthesised qualifier of `rebecca_(cyberpunk)` is one of its own."""
+    return set(re.split(r"[_()\s]+", name))
+
+
 def _entry(i, rows):
     name, cat, count, aliases = rows[i]
     return {"tag": name, "category": CATEGORIES.get(cat, str(cat)),
@@ -82,6 +94,41 @@ def resolve(tag):
     rows, by_name = _load()
     i = by_name.get(_norm(tag))
     return _entry(i, rows) if i is not None else None
+
+
+#: The counting words a model reaches for instead of the tag. Danbooru's counts
+#: are `1girl`/`2girls`/`1boy`, never "one girl" — and "one girl" is not an
+#: alias of anything, so it resolves to nothing and does nothing in the picture.
+#: This is the one class of near-miss common enough to be worth a table [his,
+#: 2026-08-24, after a prompt went out with "one girl" in it].
+#: `a`/`an` are deliberately NOT here: "a girl" is how a sentence starts, and
+#: rewriting it to `1girl` mangles the natural-language clause Anima is also
+#: prompted with.
+_NUMBER_WORD = {"one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+                "six": "6"}
+
+
+def canonical(tag):
+    """The tag Danbooru actually has for what was written, or None.
+
+    Beyond `resolve`'s exact-or-alias lookup it tries the near-misses that are
+    mechanical: a spelled-out count (`one girl` -> `1girl`), and the same with
+    the space closed up. Anything it cannot land on a real tag comes back None
+    rather than a guess — a wrong tag is worse than an unknown one, because it
+    fires something.
+    """
+    got = resolve(tag)
+    if got:
+        return got
+    parts = _norm(tag).split("_")
+    if len(parts) >= 2 and parts[0] in _NUMBER_WORD:
+        digit = _NUMBER_WORD[parts[0]]
+        rest = "_".join(parts[1:])
+        for candidate in (digit + rest, digit + "_" + rest):
+            got = resolve(candidate)
+            if got:
+                return got
+    return None
 
 
 def search(query, category="", limit=25):
@@ -100,7 +147,14 @@ def search(query, category="", limit=25):
         if str(category).strip().lower() in (label, str(num)):
             want = label
             break
-    exact, prefix, inside = [], [], []
+    # WORD BOUNDARY BEATS PREFIX. Danbooru's names are underscore-separated, so
+    # "lain" is a whole word in `iwakura_lain` and a fragment inside
+    # `cu_chulainn_(fate)` — and ranking prefixes above everything buried the
+    # character he actually meant under six matches he did not [his,
+    # 2026-08-24: it invented Lain's appearance rather than tagging her].
+    # Buckets, each count-ordered because `rows` is: exact, whole word, prefix,
+    # substring.
+    exact, word, prefix, inside = [], [], [], []
     seen = set()
     hit = by_name.get(q)
     if hit is not None:
@@ -111,13 +165,17 @@ def search(query, category="", limit=25):
             continue
         if want and CATEGORIES.get(cat, "") != want:
             continue
-        if name.startswith(q) or any(a.startswith(q) for a in aliases):
+        names = [name] + aliases
+        if any(q in _words(n) for n in names):
+            word.append(i)
+        elif any(n.startswith(q) for n in names):
             prefix.append(i)
-        elif q in name or any(q in a for a in aliases):
+        elif any(q in n for n in names):
             inside.append(i)
-        if len(prefix) >= limit * 3:
+        if len(word) + len(prefix) >= limit * 4:
             break
-    out = [_entry(i, rows) for i in (exact + prefix + inside)[:max(1, int(limit))]]
+    out = [_entry(i, rows) for i in
+           (exact + word + prefix + inside)[:max(1, int(limit))]]
     return out
 
 
@@ -126,10 +184,15 @@ def check(prompt):
 
     Only the comma-separated pieces that LOOK like tags are judged — a natural
     language clause is part of how Anima is prompted and is not a misspelling,
-    so anything with more than four words, or ending in a full stop, is left
+    so anything ending in a full stop, or longer than eight words, is left
     alone. Weights and `@artist` marks are stripped before the lookup.
+
+    Three buckets out: `unknown` (short and not a tag — invented), `suspect`
+    (five to eight words with no full stop, which is usually a character or a
+    series written as a phrase instead of as its tag), and `renamed` (real, but
+    written the way the site does not).
     """
-    known, unknown, renamed = [], [], []
+    known, unknown, renamed, suspect = [], [], [], []
     for raw in str(prompt or "").split(","):
         piece = raw.strip()
         if not piece:
@@ -141,22 +204,36 @@ def check(prompt):
         if ":" in body:
             head, _, tail = body.rpartition(":")
             try:
-                float(tail)
-                body = head.strip()
+                # A WEIGHT, not any number: `year:2005` is a tag Anima was
+                # captioned with, and treating its 2005 as a weight left it
+                # looking like the invented tag `year`.
+                if -4.0 <= float(tail) <= 4.0:
+                    body = head.strip()
             except ValueError:
                 pass
         at = body.startswith("@")
         body = body.lstrip("@").strip()
         if not body:
             continue
-        if body.endswith(".") or len(body.split()) > 4:
+        if _norm(body) in ANIMA_META or re.match(r"^year[:_ ]\d{4}$", _norm(body)):
+            known.append(body)
+            continue
+        words = len(body.split())
+        if body.endswith(".") or words > 8:
             continue                      # prose, not a tag
-        got = resolve(body)
+        got = canonical(body)
         if got is None:
-            unknown.append(piece)
+            # 5-8 words with no full stop, sitting in a tag run, is usually a
+            # character written as a phrase — "lain from serial experiments
+            # lain" instead of the tag `iwakura lain` [his, 2026-08-24]. It is
+            # reported apart from the short ones because it MIGHT be a
+            # deliberate clause, and the fix is different: look the character
+            # up, do not delete the words.
+            (suspect if words > 4 else unknown).append(piece)
         elif got["tag"] != _norm(body):
             renamed.append({"wrote": piece, "tag": got["tag"],
                             "category": got["category"]})
         else:
             known.append(got["tag"] if not at else "@" + got["tag"])
-    return {"known": known, "renamed": renamed, "unknown": unknown}
+    return {"known": known, "renamed": renamed, "unknown": unknown,
+            "suspect": suspect}

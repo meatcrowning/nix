@@ -63,6 +63,25 @@ _ARTIST = re.compile(r"^(?:artist:\s*(.+)|by\s+([^\s,]+))$", re.I)
 _WEIGHTED = re.compile(r"^(.*?):\s*(-?\d*\.?\d+)$", re.S)
 
 
+def _vocab():
+    """`pylib/boorutags`, if this process can see it. Optional by design: the
+    transform must still work in a checkout where only `painter/` is on the
+    path (`tools/validate-graphs.py`), and a missing vocabulary means no
+    canonicalisation, never an import error."""
+    global _VOCAB
+    if _VOCAB is _UNSET:
+        try:
+            import boorutags
+            _VOCAB = boorutags
+        except ImportError:
+            _VOCAB = None
+    return _VOCAB
+
+
+_UNSET = object()
+_VOCAB = _UNSET
+
+
 def _danbooru_tag(tag: str) -> str:
     """One tag, spelled the way Anima was captioned."""
     tag = tag.strip()
@@ -76,6 +95,24 @@ def _danbooru_tag(tag: str) -> str:
     if not (_SCORE.match(body) or _EMOTICON.match(body)):
         body = body.replace("_", " ")
     body = _WS.sub(" ", body).strip()
+    # THE TAG DANBOORU ACTUALLY HAS, when what was written is a near-miss for
+    # one: `one girl` -> `1girl`, `amber eyes` -> `yellow eyes` [his,
+    # 2026-08-24, after a prompt went out with "one girl" in it]. A near-miss
+    # is not a weaker version of the tag — it fires nothing at all. Only for
+    # things that LOOK like tags (an artist handle, a sentence and a name the
+    # site has never heard of are all left exactly as written), and only when
+    # the vocabulary lands on something: `canonical` returns None rather than a
+    # guess, because a wrong tag is worse than an unknown one.
+    if body and not at and len(body.split()) <= 4 and not body.endswith("."):
+        vocab = _vocab()
+        if vocab is not None:
+            got = vocab.canonical(body)
+            if got and got["category"] == "general":
+                name = got["tag"]
+                # The canonical form gets the same underscore rule as anything
+                # else, or `^_^` comes back as `^ ^`.
+                body = (name if (_SCORE.match(name) or _EMOTICON.match(name))
+                        else name.replace("_", " "))
     return ("@" + body) if at and body else body
 
 
