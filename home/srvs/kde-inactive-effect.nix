@@ -3,14 +3,18 @@
 # Hold `[ColorEffects:Inactive] Enable=false` in `~/.config/kdeglobals`.
 #
 # The colour-scheme inactive effect is the WRONG half of the desktop doing the
-# dimming. It desaturates an unfocused window's colours (his scheme:
-# ColorEffect 1, ColorAmount -0.9), and the two halves of one window read that
-# state from different places: KWin's deco knows when it deactivated the
-# window, while the client only knows whether IT still holds wl_keyboard focus.
-# A Spectacle grab separates the two — measured 2026-08-24, the captured
-# titlebar came out desaturated (54,63,84 at the seam) over a client still in
-# full colour (44,62,97) — so every screenshot of a focused window looked
-# broken at the titlebar seam. Reported three times.
+# dimming. It gives an unfocused window a second set of colours (his scheme:
+# ColorEffect 1, ColorAmount -0.9), and the two halves of one window decide
+# which set to use from different places: KWin's deco from the window it
+# considers active, the client from whether Qt still holds keyboard focus.
+# A Spectacle grab separates them — Qt deactivates while KWin's deco does not.
+#
+# Measured on `top` 2026-08-24, off a capture of a FOCUSED chatter: the client
+# rendered (44,62,97) at the top of the menubar and the deco (54,63,84) at the
+# bottom of the titlebar, which are Oxygen's window background rendered in the
+# INACTIVE and the ACTIVE colour group respectively — a hard seam where the one
+# gradient the two halves share is supposed to run through. Reported three
+# times.
 #
 # `home/plasma.nix` turns KWin's **Dim Inactive** effect on in its place: one
 # compositor scrim over deco and client together, which cannot disagree with
