@@ -2246,7 +2246,40 @@ RESEARCH_MAX = 8
 #: only a handful of tokens left to generate. Asking for a much larger window
 #: costs little (the KV cache for this model is ~80 MiB at 4096, so 32768 is
 #: still well under a gigabyte) and turns a hard cutoff into headroom.
+#:
+#: It is now the FLOOR and the fallback, not the answer: `CtxFit` sizes the
+#: window per model against the memory this machine actually has (see below).
 CHAT_NUM_CTX = 32768
+
+#: The most any turn may ask for, however much memory is free. The KV cache is
+#: allocated up front and ollama honours an oversized `num_ctx` by spilling
+#: model layers to RAM rather than by shrinking the window (measured 2026-08-23:
+#: qwen3.5:4b at 262144 went from 3.1 GB resident to 13.7 GB, half of it off the
+#: GPU) — so the ceiling is a deliberate number, not the hardware's limit.
+CHAT_NUM_CTX_CAP = 131072
+
+#: The windows that may actually be asked for. Steps, because changing
+#: `num_ctx` makes ollama reload the model — see `CtxFit.numCtx`.
+CTX_LADDER = (32768, 65536, 131072)
+
+#: How much of the free memory a KV cache may claim. Half: the other half is the
+#: turn's own growth, whatever the warden has not seen yet, and the fact that
+#: `MemAvailable` is a forecast rather than a promise.
+CTX_FIT_SAFETY = 0.5
+
+#: Left on the GPU whatever happens — the compositor and every other client draw
+#: out of the same VRAM.
+VRAM_HEADROOM = 512 * 1024 * 1024
+
+#: The floor the warden frees at (`home/srvs/ai-warden.nix`). A window is never
+#: sized into it: this app asking for 128k is not a reason for the desktop to
+#: start swapping.
+CTX_RAM_FLOOR = 6 * 1024 * 1024 * 1024
+
+#: What `CtxFit` has learned, per model: bytes of KV cache per token, measured
+#: from ollama's own load. Small enough to rewrite whole.
+CTX_FIT_STORE = os.path.expanduser(
+    os.environ.get("ORACLE_CTXFIT", "~/.local/share/oracle/ctxfit.json"))
 
 #: The file tools' JAIL. Every file op runs against this one directory and
 #: cannot escape it (tools/sandbox-fs.py enforces it, symlinks included). It is
@@ -2672,6 +2705,171 @@ class Titlebar(QObject):
         self._client.set_footer(text)
 
 
+class CtxFit(QObject):
+    """How big a context window THIS machine can actually give THIS model.
+
+    The window used to be a flat `CHAT_NUM_CTX` for every model on either
+    machine, and the stat line showed the model's TRAINED ceiling beside it —
+    262144 for qwen3.6:35b-a3b, when what it was running in was 32768 [his,
+    2026-08-23: *"can you make the context indicator represent the REAL amount
+    of context i have based on my system specs for the given model?"*].
+
+    **The KV cache is the only thing that scales with the window**, and its size
+    per token is not derivable from `/api/show`: a hybrid-attention model
+    reports `head_count_kv: null` and gives no count of which of its layers
+    actually hold KV (qwen3.6 keeps 10 of 40, so every metadata estimate is 4x
+    out — in the direction that would have SHRUNK his window to ~9k). So it is
+    not estimated. **It is read from ollama's own load**, which prints the
+    figure exactly:
+
+        llama_kv_cache: size = 640.00 MiB ( 32768 cells, 10 layers, 1/1 seqs)
+
+    — 20 KiB per token for that model. One measurement per model, cached in
+    `CTX_FIT_STORE`, and a model never yet measured simply gets `CHAT_NUM_CTX`,
+    which is what every model got before this existed. Nothing here can make the
+    window smaller than it used to be.
+
+    On `book` there is no local `ollama.service` to read a journal from (the
+    daemon runs on `top`, over the tunnel), so calibration never happens there
+    and the fallback is the whole behaviour.
+    """
+
+    #: ollama's KV line: total size, then the cell count it covers.
+    KV_LINE = re.compile(
+        r"llama_kv_cache:\s+size\s*=\s*([\d.]+)\s*MiB\s*\(\s*(\d+)\s*cells")
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._kv = self._load()      # model -> bytes of KV per token
+        self._procs = []             # live journalctl QProcesses
+        self._asked = set()          # models a calibration has been tried for
+
+    # ---- the store ----
+
+    def _load(self):
+        try:
+            with open(CTX_FIT_STORE, encoding="utf-8") as f:
+                obj = json.load(f)
+            return {str(k): float(v) for k, v in obj.items()
+                    if isinstance(v, (int, float)) and v > 0}
+        except (OSError, ValueError, TypeError, AttributeError):
+            return {}
+
+    def _save(self):
+        try:
+            os.makedirs(os.path.dirname(CTX_FIT_STORE), exist_ok=True)
+            with open(CTX_FIT_STORE, "w", encoding="utf-8") as f:
+                json.dump(self._kv, f, indent=1)
+        except OSError:
+            pass
+
+    # ---- what the machine has free ----
+
+    @staticmethod
+    def _mem_available():
+        try:
+            with open("/proc/meminfo", encoding="ascii") as f:
+                for line in f:
+                    if line.startswith("MemAvailable:"):
+                        return int(line.split()[1]) * 1024
+        except (OSError, ValueError, IndexError):
+            pass
+        return 0
+
+    @staticmethod
+    def _vram_free():
+        """Free VRAM in bytes, or 0 when there is no NVIDIA GPU to ask (book).
+
+        Synchronous on purpose — it runs once per turn, next to a chat request
+        that takes seconds, and `nvidia-smi` answers in tens of milliseconds.
+        """
+        if not shutil.which("nvidia-smi"):
+            return 0
+        proc = QProcess()
+        proc.start("nvidia-smi", ["--query-gpu=memory.free",
+                                  "--format=csv,noheader,nounits"])
+        if not proc.waitForFinished(4000) or proc.exitCode() != 0:
+            return 0
+        try:
+            out = bytes(proc.readAllStandardOutput().data()).decode(
+                "utf-8", "replace")
+            return int(out.strip().split("\n")[0].strip()) * 1024 * 1024
+        except (ValueError, IndexError, RuntimeError):
+            return 0
+
+    # ---- the answer ----
+
+    def numCtx(self, model, trained=0, loaded=False, weights=0):
+        """The window to ask for, in tokens.
+
+        `trained` is the model's own ceiling (`/api/show`), `loaded` says
+        whether its weights are already resident — an unloaded model has to pay
+        for them out of the same budget — and `weights` is its file size.
+        """
+        kv = self._kv.get(str(model or ""), 0.0)
+        if kv <= 0:
+            fit = CHAT_NUM_CTX               # never measured: as it always was
+        else:
+            budget = self._vram_free() - VRAM_HEADROOM
+            budget += max(0, self._mem_available() - CTX_RAM_FLOOR)
+            if not loaded:
+                budget -= max(0, int(weights))
+            fit = int(max(0, budget) * CTX_FIT_SAFETY / kv)
+            # A LADDER, NOT A MEASUREMENT, is what gets asked for: ollama
+            # RELOADS the model whenever `num_ctx` changes, so a window that
+            # tracked free memory exactly would reload 24 GB of weights every
+            # time a browser tab closed. Doubling steps are far apart compared
+            # with that jitter.
+            fit = max((r for r in CTX_LADDER if r <= fit), default=0)
+        fit = max(CHAT_NUM_CTX, min(fit, CHAT_NUM_CTX_CAP))
+        if trained > 0:
+            fit = min(fit, int(trained))
+        return fit
+
+    def known(self, model):
+        return self._kv.get(str(model or ""), 0.0) > 0
+
+    # ---- the measurement ----
+
+    @Slot(str, int)
+    def calibrate(self, model, context_length):
+        """Learn this model's bytes-per-token from ollama's own load log.
+
+        Only ever called for a model that IS loaded, with the window `/api/ps`
+        says it was loaded in — the cell count in the log line has to match it,
+        which is what keeps a stale line from an earlier load (or another
+        model's) from being read as this one's.
+        """
+        model = str(model or "")
+        cells = int(context_length or 0)
+        if not model or cells <= 0 or self.known(model) or model in self._asked:
+            return
+        if ON_BOOK or not shutil.which("journalctl"):
+            return
+        self._asked.add(model)
+        proc = QProcess(self)
+        self._procs.append(proc)
+
+        def done():
+            try:
+                text = bytes(proc.readAllStandardOutput().data()).decode(
+                    "utf-8", "replace")
+            except (RuntimeError, ValueError):
+                text = ""
+            for m in reversed(self.KV_LINE.findall(text)):
+                mib, n = float(m[0]), int(m[1])
+                if n == cells and mib > 0:
+                    self._kv[model] = mib * 1024 * 1024 / n
+                    self._save()
+                    break
+            if proc in self._procs:
+                self._procs.remove(proc)
+
+        proc.finished.connect(done)
+        proc.start("journalctl", ["-u", "ollama.service", "-n", "3000",
+                                  "--no-pager", "-o", "cat"])
+
+
 class Ollama(QObject):
     """The whole ollama seam: the model list and one streamed chat turn.
 
@@ -2827,8 +3025,13 @@ class Ollama(QObject):
         self._procs = []         # live file-tool QProcesses, so none is GC'd mid-run
         self._memories = []      # oracle's own durable memories, injected each turn
         self._prompt_choice, self._custom_prompt = self._load_prompt_config()
-        self._ctx_max = 0        # selected model's context ceiling (0 = unknown)
-        self._ctx_model = ""     # which model _ctx_max was read for
+        self._ctx_max = 0        # the window actually in force (0 = unknown)
+        self._ctx_train = 0      # …and the model's own trained ceiling
+        self._ctx_model = ""     # which model those two were read for
+        self._num_ctx = CHAT_NUM_CTX   # the window THIS turn asks ollama for
+        self._ctx_fit = CtxFit(self)   # what this machine can actually give
+        self._model_sizes = {}   # model -> weights on disk, from /api/tags
+        self._loaded_ctx = {}    # model -> the window it is LOADED in (/api/ps)
         self._caps = []          # selected model's native capabilities (/api/show)
         self._tps = 0.0          # generation rate of the current/last reply
         self._resp_t0 = 0.0      # monotonic start of the reply's content stream
@@ -3007,8 +3210,22 @@ class Ollama(QObject):
 
     @Property(int, notify=contextMaxChanged)
     def contextMax(self):
-        """The selected model's context window in tokens, 0 while unknown."""
+        """The window ACTUALLY IN FORCE for the selected model, in tokens.
+
+        Not the model's trained ceiling, which is what this said until
+        2026-08-23 and which nothing on this machine was ever going to give him
+        — qwen3.6 reads 262144 there while every turn ran in 32768. It is
+        ollama's own `context_length` from `/api/ps` once the model is loaded
+        (measured), and until then the window the next turn will ask for
+        (`CtxFit`). 0 while unknown."""
         return self._ctx_max
+
+    @Property(int, notify=contextMaxChanged)
+    def contextTrained(self):
+        """The model's own trained ceiling — the number `contextMax` used to
+        show. Drawn dim beside it, so nothing is hidden: it is what he COULD
+        have with more memory, not what he has."""
+        return self._ctx_train
 
     @Property("QStringList", notify=capabilitiesChanged)
     def capabilities(self):
@@ -3043,16 +3260,68 @@ class Ollama(QObject):
             self._tps = v
             self.tokensPerSecChanged.emit()
 
+    def _set_window(self, model):
+        """Recompute the window in force for `model`, and publish it.
+
+        Ground truth first: if ollama has the model LOADED, `/api/ps` says the
+        window it was loaded in and that is the number, whatever this app would
+        have asked for. Otherwise it is what the next turn WILL ask for — the
+        `CtxFit` number, capped by the model's trained ceiling.
+        """
+        model = (model or "").strip()
+        fit = self._ctx_fit.numCtx(
+            model, trained=self._ctx_train,
+            loaded=model in self._loaded_ctx,
+            weights=self._model_sizes.get(model, 0))
+        live = int(self._loaded_ctx.get(model, 0))
+        # A LOADED MODEL KEEPS THE WINDOW IT WAS LOADED IN. Asking for a
+        # different one costs a full reload — 24 GB of weights off the disk,
+        # mid-conversation — so a newly measured fit applies at the next load
+        # (ollama drops the model after its keep_alive), never under him.
+        self._num_ctx = live if live > 0 else fit
+        eff = live if live > 0 else fit
+        if not model:
+            eff = 0
+        if eff != self._ctx_max:
+            self._ctx_max = eff
+            self.contextMaxChanged.emit()
+
+    @Slot(str)
+    def notePs(self, ps_json):
+        """What `/api/ps` last said, handed over by `Backend`'s 3s poll.
+
+        Two things come out of it: the window each loaded model is ACTUALLY
+        running in (the stat line's ground truth), and the chance to measure
+        that model's KV cost once, which is what lets `CtxFit` size the next
+        one. Never its own poll — the daemon is already being asked.
+        """
+        try:
+            obj = json.loads(ps_json or "{}")
+            models = obj.get("models") or []
+        except (ValueError, TypeError):
+            return
+        seen = {}
+        for m in models:
+            name, ctx = m.get("name"), m.get("context_length")
+            if name and isinstance(ctx, (int, float)) and ctx > 0:
+                seen[str(name)] = int(ctx)
+                self._ctx_fit.calibrate(str(name), int(ctx))
+        if seen != self._loaded_ctx:
+            self._loaded_ctx = seen
+            self._set_window(self._ctx_model)
+
     @Slot(str)
     def refreshModelInfo(self, model):
-        """Read the model's real context ceiling from ollama's /api/show —
-        `<arch>.context_length` in `model_info`, the model's own trained window,
-        not a filename guess (docs/DESIGN.md §10: a shown number is a true one).
-        Async; leaves the stat at 0/unknown on any failure rather than inventing
-        a value."""
+        """Read the model's trained ceiling from ollama's /api/show —
+        `<arch>.context_length` in `model_info`, the model's own window, not a
+        filename guess (docs/DESIGN.md §10: a shown number is a true one) — and
+        recompute the window actually in force from it (`_set_window`).
+        Async; leaves the stats at 0/unknown on any failure rather than
+        inventing a value."""
         model = (model or "").strip()
         if not model:
             self._ctx_model = ""
+            self._ctx_train = 0
             if self._ctx_max:
                 self._ctx_max = 0
                 self.contextMaxChanged.emit()
@@ -3060,9 +3329,11 @@ class Ollama(QObject):
                 self._caps = []
                 self.capabilitiesChanged.emit()
             return
-        if model == self._ctx_model and self._ctx_max:
-            return                          # already known for this model
+        if model == self._ctx_model and self._ctx_train:
+            self._set_window(model)         # memory moves; the ceiling does not
+            return
         self._ctx_model = model
+        self._set_window(model)             # a first answer, before /api/show
         req = QNetworkRequest(QUrl(OLLAMA + "/api/show"))
         req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
                       "application/json")
@@ -3082,9 +3353,10 @@ class Ollama(QObject):
             reply.deleteLater()
             if model != self._ctx_model:
                 return                      # a newer selection superseded this
-            if ctx != self._ctx_max:
-                self._ctx_max = ctx
+            if ctx != self._ctx_train:
+                self._ctx_train = ctx
                 self.contextMaxChanged.emit()
+            self._set_window(model)
             if caps != self._caps:
                 self._caps = caps
                 self.capabilitiesChanged.emit()
@@ -3141,6 +3413,9 @@ class Ollama(QObject):
             # writes suggested.json while oracle runs is honoured on the next
             # daemon poll, with no relaunch.
             self._suggested = self._load_suggested()
+            for m in obj.get("models", []):
+                if m.get("name") and isinstance(m.get("size"), (int, float)):
+                    self._model_sizes[str(m["name"])] = int(m["size"])
             names = self._order([m.get("name", "") for m in obj.get("models", [])
                                  if m.get("name")])
             if names != self._models:
@@ -3931,9 +4206,10 @@ class Ollama(QObject):
             "memory_total": self._mem_total(),
             "python": platform.python_version(),
             "context": {
-                "ceiling_tokens": self._ctx_max or "unknown",
+                "window_tokens": self._ctx_max or "unknown",
+                "model_trained_ceiling": self._ctx_train or "unknown",
                 "used_tokens": self._ctx_used,
-                "num_ctx_requested": CHAT_NUM_CTX,
+                "num_ctx_requested": self._num_ctx,
             },
             "last_tokens_per_sec": round(self._tps, 1) if self._tps else 0,
             "native_capabilities": self._caps,
@@ -3948,7 +4224,7 @@ class Ollama(QObject):
             "conversation": {"your_prompts": user_turns,
                              "your_replies_so_far": asst_turns},
             "tools_available": self._offered_tool_names(),
-            "sampling": {"num_ctx": CHAT_NUM_CTX,
+            "sampling": {"num_ctx": self._num_ctx,
                          "temperature": "model default (chatter does not override)"},
         }
         remaining["sink"][idx] = {"role": "tool", "tool_name": "describe_self",
@@ -4027,7 +4303,7 @@ class Ollama(QObject):
         every tool result so far — because that is what the next POST carries.
         """
         chars = sum(len(str(m.get("content") or "")) for m in self._messages)
-        return (chars / 4) < (CHAT_NUM_CTX * TOOL_CTX_FRACTION)
+        return (chars / 4) < (self._num_ctx * TOOL_CTX_FRACTION)
 
     def _post_chat(self):
         """POST the current message list, streaming, offering every tool.
@@ -4036,7 +4312,7 @@ class Ollama(QObject):
             "model": self._model,
             "messages": self._messages,
             "stream": True,
-            "options": {"num_ctx": CHAT_NUM_CTX},
+            "options": {"num_ctx": self._num_ctx},
         }
         # The WRAP-UP round carries no tools at all: `_on_finished` sets
         # `_no_tools` when the model is still calling tools at MAX_TOOL_ROUNDS,
@@ -4154,7 +4430,7 @@ class Ollama(QObject):
                     # ordinary `done_reason` of "stop". Remember that the turn
                     # was squeezed; `_truncation_reason` is what does something
                     # about it.
-                    if used >= CHAT_NUM_CTX * CTX_FULL_FRACTION:
+                    if used >= self._num_ctx * CTX_FULL_FRACTION:
                         self._squeezed = True
 
     #: Characters an answer can legitimately END on: sentence punctuation, a
@@ -4489,7 +4765,7 @@ class Ollama(QObject):
         calling tools when it is out of rounds, offered them again, answers
         with nothing at all."""
         payload = {"model": run["model"], "messages": run["messages"],
-                   "stream": False, "options": {"num_ctx": CHAT_NUM_CTX}}
+                   "stream": False, "options": {"num_ctx": self._num_ctx}}
         if run["tools"] and not run["wrap"]:
             payload["tools"] = run["tools"]
         req = QNetworkRequest(QUrl(OLLAMA + "/api/chat"))
@@ -4564,12 +4840,11 @@ class Ollama(QObject):
             run["messages"].append({"role": "user", "content": self.TOOL_CAP_PROMPT})
         self._agent_post(run)
 
-    @staticmethod
-    def _agent_room(run):
+    def _agent_room(self, run):
         """Is there context left for another subagent round? Same four-chars-a-
         token estimate `_ctx_room` uses, against the subagent's own list."""
         chars = sum(len(str(m.get("content") or "")) for m in run["messages"])
-        return (chars / 4) < (CHAT_NUM_CTX * AGENT_CTX_FRACTION)
+        return (chars / 4) < (self._num_ctx * AGENT_CTX_FRACTION)
 
     def _agent_finish(self, run, text, error=None):
         """Hand the subagent's answer back as the spawn_agent tool result."""
@@ -7640,6 +7915,7 @@ class Backend(QObject):
     UNIT = "ollama.service"
 
     statusChanged = Signal()      # serverUp and/or the loaded-model list changed
+    psSnapshot = Signal(str)      # the raw /api/ps body, for `Ollama.notePs`
     busyChanged = Signal()        # a start/stop is in flight
     note = Signal(str)            # a one-line result of an action, drawn as status
 
@@ -7685,10 +7961,13 @@ class Backend(QObject):
             up = reply.error() == QNetworkReply.NetworkError.NoError
             loaded = []
             if up:
+                raw = bytes(reply.readAll().data())
                 try:
-                    obj = json.loads(bytes(reply.readAll().data()) or b"{}")
+                    obj = json.loads(raw or b"{}")
                     loaded = sorted((m.get("name", "") for m in obj.get("models", [])
                                      if m.get("name")), key=str.lower)
+                    # The same body carries the window each model is loaded in.
+                    self.psSnapshot.emit(raw.decode("utf-8", "replace"))
                 except (ValueError, TypeError):
                     up = False
             if up != self._up or loaded != self._loaded:
@@ -7952,6 +8231,9 @@ def main():
     titlebar = Titlebar()
     ollama = Ollama()
     backend = Backend()
+    # One poll, two readers: the server controls light from /api/ps, and the
+    # context stat reads the window each loaded model is really running in.
+    backend.psSnapshot.connect(ollama.notePs)
     sessions = Sessions()
     clip = Clip()
     mdfmt = MdFormat()

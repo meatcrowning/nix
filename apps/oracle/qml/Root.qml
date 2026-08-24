@@ -1697,7 +1697,10 @@ Item {
             return "" + n;
         }
 
-        // "ctx used/ceiling" (or just the ceiling before a turn has run).
+        // "ctx used/window" (or just the window before a turn has run). The
+        // window is what he ACTUALLY has — ollama's own number once the model
+        // is loaded, the computed fit before that — not the model's trained
+        // ceiling, which is the dim figure after it.
         PixelText {
             visible: statsRow.hasCtx
             anchors.verticalCenter: parent.verticalCenter
@@ -1706,6 +1709,18 @@ Item {
                               + statsRow.fmtTok(Ollama.contextMax)
                             : statsRow.fmtTok(Ollama.contextMax) + " tok")
             color: Theme.textDim
+        }
+
+        // The model's trained ceiling, one step further down (docs/DESIGN.md
+        // §9.1). Only when it is actually bigger than the window in force —
+        // "of 32K" beside "ctx 32K" is noise.
+        PixelText {
+            visible: statsRow.hasCtx
+                     && Ollama.contextTrained > Ollama.contextMax
+            anchors.verticalCenter: parent.verticalCenter
+            text: "of " + statsRow.fmtTok(Ollama.contextTrained)
+            color: Theme.textDim
+            opacity: 0.7
         }
 
         // The fill bar (`Meter.qml`): a track with a proportional fill,

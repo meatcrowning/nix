@@ -282,7 +282,9 @@ model's **context ceiling** and the reply's **generation rate**, both true
 numbers not guesses (docs/DESIGN.md §10). `contextMax` is read from ollama's
 `/api/show` — the model's own `<arch>.context_length` in `model_info`, keyed off
 `general.architecture`, never the filename (`refreshModelInfo`, run on every
-model change and every send; 0/hidden when unknown). `tokensPerSec` is a running
+model change and every send; 0/hidden when unknown) — but that ceiling is now
+the DIM figure beside the readout, not the readout: see *The window is the real
+one* below. `tokensPerSec` is a running
 estimate while a reply streams (one content frame ≈ one token, clocked from the
 first frame) that settles to ollama's exact `eval_count / eval_duration` on the
 final `done` frame. **`contextUsed`** is how full the context is — ollama's own
@@ -290,6 +292,45 @@ final `done` frame. **`contextUsed`** is how full the context is — ollama's ow
 percentage, and a proportional **fill bar** (docs/DESIGN.md §9 meter; accent,
 `warn` past 75%, `crit` past 90%; width animated §6). The row collapses to
 nothing until at least one stat exists.
+
+### The window is the real one
+
+**`contextMax` is the window ACTUALLY IN FORCE, not the model's trained
+ceiling** [his, 2026-08-23: *"can you make the context indicator represent the
+REAL amount of context i have based on my system specs for the given model?"*].
+It read 262144 for qwen3.6:35b-a3b while every turn it ever sent ran in 32768 —
+a true number about the model, and a lie about him. The trained ceiling is still
+drawn, one step dimmer, as `of 256K` (docs/DESIGN.md §9.1), and only when it is
+bigger than the window.
+
+- **Loaded beats computed.** Once ollama has the model resident, `/api/ps`
+  reports the `context_length` it was loaded in; that is the number, measured.
+  `Backend`'s existing 3s poll hands the raw body to `Ollama.notePs` — one poll,
+  two readers, rather than a second timer.
+- **`CtxFit` sizes what has not loaded yet**, from free VRAM (`nvidia-smi`) plus
+  `MemAvailable` over `CTX_RAM_FLOOR`, minus the weights when they are not
+  already resident, halved (`CTX_FIT_SAFETY`), over the model's KV cost per
+  token — capped by `CHAT_NUM_CTX_CAP` and by what the model was trained for.
+- **The KV cost is MEASURED, never estimated.** `/api/show` cannot give it: a
+  hybrid-attention model reports `head_count_kv: null` and does not say which of
+  its layers hold KV (qwen3.6 keeps 10 of 40, so the metadata estimate is 4x
+  out — in the direction that would have cut his window to ~9k). ollama prints
+  the truth at load — `llama_kv_cache: size = 640.00 MiB ( 32768 cells, …)`,
+  20 KiB a token — so `CtxFit.calibrate` reads that line out of
+  `journalctl -u ollama.service`, once per model, and only when its cell count
+  matches the window `/api/ps` reports. Cached in `CTX_FIT_STORE`.
+- **A model never measured gets `CHAT_NUM_CTX`** — exactly what every model got
+  before this existed. Nothing here can make a window smaller than it was.
+- **The ladder, and the sticky window, both exist because `num_ctx` forces a
+  RELOAD.** Only `CTX_LADDER` values are ever asked for, so free-memory jitter
+  cannot bounce the window; and a model already loaded is asked for the window
+  it is already in, so a newly measured fit applies at its next load rather than
+  dropping 24 GB of weights mid-conversation.
+- **`book` has no local `ollama.service`** (the daemon is on `top`, over the
+  tunnel), so nothing calibrates there and the fallback is the whole behaviour.
+
+Harness: `tools/ctx-fit-test.py`, with a stub ollama, a fake `journalctl` and a
+fake `nvidia-smi` — it never reads the real journal or loads a model.
 
 ## The base prompt
 
