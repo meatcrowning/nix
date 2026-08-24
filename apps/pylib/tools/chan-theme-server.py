@@ -132,7 +132,8 @@ class Handler(BaseHTTPRequestHandler):
         except (ConnectionResetError, BrokenPipeError):
             self.close_connection = True
 
-    def _send(self, code, body=b"", ctype="text/plain; charset=utf-8", extra=()):
+    def _send(self, code, body=b"", ctype="text/plain; charset=utf-8", extra=(),
+              head=False):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
@@ -141,7 +142,7 @@ class Handler(BaseHTTPRequestHandler):
         for k, v in extra:
             self.send_header(k, v)
         self.end_headers()
-        if body:
+        if body and not head:
             self.wfile.write(body)
 
     # path -> (builder, content type). Every one rebuilds from the live palette
@@ -172,12 +173,32 @@ class Handler(BaseHTTPRequestHandler):
             scrollbar_script.build(src)[0]), "meta"), JS),
     }
 
-    def do_GET(self):
+    # A browser extension asking for a cross-origin URL with headers of its own
+    # sends a CORS PREFLIGHT first, and `BaseHTTPRequestHandler` answers any
+    # method it has no handler for with 501 — which is what Tampermonkey's
+    # "Install from URL" reported as *unable to load script from url*, on a
+    # server that answered a plain `curl` perfectly. HEAD is answered for the
+    # same reason: something checking a URL before fetching it must not meet a
+    # 501 either.
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers",
+                         self.headers.get("Access-Control-Request-Headers", "*"))
+        self.send_header("Access-Control-Max-Age", "600")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def do_HEAD(self):
+        self.do_GET(head=True)
+
+    def do_GET(self, head=False):
         refresh_session_env()
         path = self.path.split("?", 1)[0]
         route = self.ROUTES.get(path)
         if route is None and path != "/version":
-            self._send(404, b"chan-theme: /chan.css, /scrollbar.css, "
+            self._send(404, head=head, body=b"chan-theme: /chan.css, /scrollbar.css, "
                             b"/chan.user.js, /scrollbar.user.js, /chan.meta.js, "
                             b"/scrollbar.meta.js or /version\n")
             return
@@ -190,15 +211,17 @@ class Handler(BaseHTTPRequestHandler):
                                    "scrollbarStamp": chansource.stamp(bar),
                                    "scrollbarProvenance": barprov}).encode("utf-8")
                 self._send(200, body, "application/json",
-                           [("ETag", '"%s"' % chansource.stamp(css + bar))])
+                           [("ETag", '"%s"' % chansource.stamp(css + bar))],
+                           head=head)
                 return
             build, ctype = route
             css, _prov = build(self.source)
         except SystemExit as e:
-            self._send(503, str(e).encode("utf-8"))
+            self._send(503, str(e).encode("utf-8"), head=head)
             return
         except Exception as e:                                  # noqa: BLE001
-            self._send(500, ("%s: %s" % (type(e).__name__, e)).encode("utf-8"))
+            self._send(500, ("%s: %s" % (type(e).__name__, e)).encode("utf-8"),
+                       head=head)
             return
         tag = '"%s"' % chansource.stamp(css)
         if self.headers.get("If-None-Match") == tag:
@@ -208,7 +231,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             return
-        self._send(200, css.encode("utf-8"), ctype, [("ETag", tag)])
+        self._send(200, css.encode("utf-8"), ctype, [("ETag", tag)], head=head)
 
 
 def main():

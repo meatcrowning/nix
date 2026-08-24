@@ -209,6 +209,22 @@ try:
               re.search(r"@version\s+(\S+)", meta).group(1)
               == re.search(r"@version\s+(\S+)", body).group(1))
 
+    # An extension asking cross-origin sends a preflight first, and the stdlib
+    # answers an unhandled method with 501 — which is what Tampermonkey's
+    # "Install from URL" showed as *unable to load script from url*.
+    pre = urllib.request.Request(base + "/scrollbar.user.js", method="OPTIONS",
+                                 headers={"Origin": "chrome-extension://tm",
+                                          "Access-Control-Request-Method": "GET"})
+    with urllib.request.urlopen(pre, timeout=5) as r:
+        check("a CORS preflight is answered, not 501", r.status == 204)
+        check("  naming GET as allowed",
+              "GET" in (r.headers.get("Access-Control-Allow-Methods") or ""))
+    hreq = urllib.request.Request(base + "/scrollbar.user.js", method="HEAD")
+    with urllib.request.urlopen(hreq, timeout=5) as r:
+        check("a HEAD gets the headers and no body",
+              r.status == 200 and r.read() == b""
+              and int(r.headers.get("Content-Length") or 0) > 0)
+
     with urllib.request.urlopen(base + "/version", timeout=5) as r:
         ver = json.loads(r.read().decode("utf-8"))
     check("/version names the stamp and the provenance",
