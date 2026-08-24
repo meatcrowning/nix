@@ -1466,19 +1466,29 @@ never hits the latch, only one the picture ARRIVES on. Harness:
 `tools/media-row-test.py`, which drives the live order (empty row, then the
 signal) for both a picture and a video.
 
-**Pictures sit at the TOP of the bubble** [his, 2026-08-22] — before the words,
-the way a message with a photo in it reads everywhere else — and **their
-captions are always drawn, not only on hover**: a caption you have to go looking
-for with the pointer is not a caption. On a tile the caption stays INSIDE the
-artwork (§5.1) and its wash goes one step more opaque as the pointer arrives; a
-solo picture keeps its caption under it.
+**A picture the model writes into its prose is drawn AT that spot — in with the
+text, not hoisted to the top of the bubble** [his, 2026-08-23: *"all images
+must be at top of message ... allow them to be put in line i.e. in with the
+text, AND support transparancy"*]. A reply used to carry every picture in a
+strip above the words; now `Ollama.replyRuns` splits the markdown at each
+`![alt](url)` and the bubble lays it out as a FLOW of runs — text runs render
+as `MarkdownText`, an image run renders `qml/InlineImage.qml` at that spot.
+An inline picture is capped to the column, never upscaled past native, its
+frame's fill is TRANSPARENT so a PNG's alpha shows the bubble behind it rather
+than a solid slab, and one click opens the Lightbox. A failed fetch names
+itself with a crit line where the picture was meant to be (docs/DESIGN.md §10 —
+surfaced, never vanished). A markdown image that was NOT fetched this turn is
+still demoted to a plain link in its run — MarkdownText would fetch the URL on
+render at its own pixel size — but a fetched one is drawn, alpha intact.
 
-**Two or more pictures are a GALLERY, and one opens over the window** [his,
-2026-08-23]: they used to stack full-width, one on top of the other, so seeing
-the third meant scrolling past the first two. `qml/ImageGallery.qml` draws one
-picture exactly as before and two or more as a tiled grid — balanced rows,
-justified to the full width, gapless from the shared edge, square crops, the
-caption inside the artwork on hover (docs/DESIGN.md §5.1). A tile opens
+**Two or more pictures not tied to a word are a GALLERY, and one opens over the
+window** [his, 2026-08-23]: they used to stack full-width, one on top of the
+other, so seeing the third meant scrolling past the first two. The gallery is
+now the NET for a fetched picture the reply never referenced inline (a
+`view_image` has no url to tie to a word, so it always lands here). `qml/ImageGallery.qml`
+draws one picture exactly as before and two or more as a tiled grid — balanced
+rows, justified to the full width, gapless from the shared edge, square crops,
+the caption inside the artwork on hover (docs/DESIGN.md §5.1). A tile opens
 `qml/Lightbox.qml`, a scene-level overlay in `Root.qml` (z:300, above the drop
 overlay): the picture fitted but never upscaled past native, Escape or a click
 on the ground to close, arrows or a click on the picture to step, and focus
@@ -1488,17 +1498,20 @@ whatever the count. Render them with `tools/gallery-shot.py [N]` — offscreen,
 its own generated pictures, no daemon and no turn — which also checks the
 overlay's keyboard.
 
-**A model that TYPES the image gets it attached anyway** [his, 2026-08-22:
-*"see how it failed to attached some images"*]. gemma4 reliably answers "show
-me pictures of X" by writing `![alt](url)` into the reply instead of calling
-`fetch_image`, however plainly the tool says otherwise — and `MarkdownText`
-DEMOTES image markdown to a link on purpose (Qt would fetch it on render, at its
-own pixel size), so the picture simply never appeared. `_attach_typed_images`
-closes that at the other end: when a reply finishes with no more tool rounds,
-its `![](http…)` URLs go through the same `_fetch_image` (capped at
-`MD_IMAGE_MAX`, 4 per reply, deduped against everything already fetched this
-turn), and `replyDone` waits for them. `_fetch_image`'s `idx` is `None` for
-those — there is no tool call to answer, only the picture.
+**A model that TYPES the image gets it attached anyway, and drawn inline** [his,
+2026-08-22: *"see how it failed to attached some images"*]. gemma4 reliably
+answers "show me pictures of X" by writing `![alt](url)` into the reply instead
+of calling `fetch_image`, however plainly the tool says otherwise — and
+`MarkdownText` DEMOTES image markdown to a link on purpose (Qt would fetch it
+on render, at its own pixel size), so the picture simply never appeared.
+`_attach_typed_images` closes that at the other end: when a reply finishes with
+no more tool rounds, its `![](http…)` URLs go through the same `_fetch_image`
+(capped at `MD_IMAGE_MAX`, 4 per reply, deduped against everything already
+fetched this turn), and `replyDone` waits for them. Because the split
+(`Ollama.replyRuns`) keys each inline image to the row's fetched files by URL,
+a typed image that lands mid-turn renders INLINE where the model wrote it.
+`_fetch_image`'s `idx` is `None` for those — there is no tool call to answer,
+only the picture.
 
 **A mistyped booru md5 is refused before the request.** The same session's other
 failure was the model RETYPING a URL from memory: `12a90ec8d770cc4898c17bece1ee561`

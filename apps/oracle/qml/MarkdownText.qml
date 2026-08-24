@@ -13,8 +13,10 @@ import QtQuick
 // MarkdownText. It is scoped to assistant `body` text (the delegate keeps user
 // prompts and error lines on the plain SelectableText), and the reply comes off
 // a local ollama daemon the user chose to run — an adversarial `![](url)` could
-// still cause a remote fetch on render, which is why Main.qml DEMOTES image
-// markdown to a link before it reaches this type.
+// still cause a remote fetch on render, which is why `Ollama.replyRuns`
+// (main.py) DEMOTES an image the turn never fetched to a link before a reply
+// reaches this type; a fetched picture is drawn INLINE at its own spot by the
+// run delegate instead (qml/InlineImage.qml).
 //
 // A TextEdit, not a Text, so the reply is selectable. An editable item ignores
 // `antialiasing:false`/`renderType` and would grey-fringe the pixel font, so the
