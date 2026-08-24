@@ -709,6 +709,64 @@ the tunnel's ssh master from `book` (`ssh top python3 sandbox-exec.py
 installed. **Because it runs on top, top's checkout needs `sandbox-exec.py`**
 — a `book` edit is inert until top pulls (same caveat the `put` op carries).
 
+## Background jobs (run_job, and the tray)
+
+**The work he actually wants an agent doing on his music library does not fit
+in a tool call** [his, 2026-08-23: *"the goal here is to allow oracle agents to
+help me build maintain clean etc my music library"*]. `sandbox-exec.py` caps a
+run at **30 seconds** (`TIMEOUT_MAX`), which is right for a program written to
+answer a question and useless for fingerprinting 19,000 tracks, fetching an
+album or a replaygain pass. So a long command becomes a **job**.
+
+**A job is a DIRECTORY, not a process handle** (`tools/job-run.py`):
+`<ORACLE_JOBS>/<id>/` holding `spec.json` (what was asked for), `status.json`
+(state, pid, exit, times) and `log` (stdout and stderr, interleaved, live).
+That shape is what makes a job outlive the turn, the window and a relaunch —
+chatter re-reads the directory and picks the running ones back up — and what
+lets `book` drive jobs on `top` over the same ssh every other executor here
+uses, with no daemon and no port. The runner is detached in its own session,
+so `stop` can take the whole process group down rather than a shell.
+
+- **Verbs**: `job-run.py start|list|stop|clear|run <root>`. `list` is the only
+  one the window calls on a timer (2s while anything runs, 6s otherwise), and
+  it returns each job's tail as well as its state, so one poll draws everything.
+- **A job whose runner died is not "running" for ever** — `list` checks the pid,
+  never the file alone (a reboot or an OOM leaves a stale status behind).
+- **Two limits protect the machine, not the job**: `MAX_SECONDS_DEFAULT` (12h)
+  and a 20 MB log cap, both killing the process group with a line in the log
+  saying which one it was. `/` on top runs above 80% full; a runaway `find /`
+  must not be able to fill it.
+- **The model gets four tools**: `run_job` (on every turn — a model does not
+  background what it was never told it could), and `job_status` / `job_log` /
+  `job_stop` in the index, which attach themselves the moment one is called.
+  All four go through the same `Jobs` object the tray draws from, so what the
+  model is told and what he sees are one read of one directory (§10).
+- **`Jobs.notify`** raises a desktop notification when a job ends while chatter
+  is not the active window — a job runs for an hour, and the row going still is
+  only visible to someone watching it. `--` before the positionals: notify-send
+  parses a summary starting with `-` as an option.
+
+**The tray** (`qml/JobsTray.qml` + `qml/JobRow.qml`, both with `+plasma`
+twins) sits between the conversation and the compose box, and collapses to
+nothing when there are no jobs (§5.2). A row is: a state dot that pulses only
+while the job runs, the label, the state in words with the exit code on a
+failure, a **reserved** clock slot so nothing shifts when a job ends (§5.4),
+and two verbs — `log`/`hide` plus `stop` while running, `clear` once finished
+(the verb that does not apply is not drawn, §10.2). The log is folded away
+until asked for (§9.1) and opens at the bottom, where a running job is writing.
+Under Plasma the same row is the KStyle's `Frame`, real `Button`s and the
+style's `ScrollView`+`TextArea` well (§7.6), and the running count leads the
+status bar's right-hand fact.
+
+**A harness never touches his daemon**: `Backend._systemctl` refuses under
+`--selftest`. The offscreen selftest pokes every chrome id it can find, and
+Tools ▸ Stop Server is one of them — measured 2026-08-23, a test run stopped
+the ollama he was using. The refusal lives in the app so a new harness cannot
+reintroduce it.
+
+Harness: `tools/jobs-test.py` — the runner, the four tools, and the tray in
+both faces, against a throwaway jobs root and a stub daemon.
+
 ## Talking to ollama
 
 `OLLAMA` defaults to `http://127.0.0.1:11434` (override with `$OLLAMA_HOST`).
