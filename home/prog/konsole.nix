@@ -17,9 +17,12 @@
 #
 # The path unit is what makes it dynamic: `kdeglobals` moves when he picks a
 # colour scheme in System Settings, `Theme.qml` moves when wal-set.sh recolours
-# the desktop from a new wallpaper. Either one repaints Konsole. A window that
-# is already open may keep the old colours (Konsole caches a scheme by name for
-# the life of the process); a new window always has the new ones.
+# the desktop from a new wallpaper. Either one repaints Konsole — including
+# every window that is already open, which the file alone could never do
+# (Konsole caches a colour scheme by name for the life of the process, so a
+# rewritten `.colorscheme` reached only the next window). Live sessions are
+# recoloured with the xterm dynamic-colour escapes instead, written to each
+# session's pty; a new window still gets the file.
 {
   home.packages = [
     (pkgs.writeShellScriptBin "konsole-theme" ''
