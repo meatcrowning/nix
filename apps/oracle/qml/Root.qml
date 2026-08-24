@@ -886,6 +886,59 @@ Item {
         sessionPicker.open = false;
     }
 
+    // ---- the mini-player ---------------------------------------------------
+    // When a video is playing whose bubble is not in view, a compact bar at the
+    // top of the message view carries its transport so he always has scrub /
+    // play-pause / stop [his, 2026-08-23]. The cards register themselves with
+    // `videoCardActive` when a player is built (VideoCard's Loader.onLoaded)
+    // and with `videoCardGone` when they are destroyed; a small timer, running
+    // only while any card is registered, opens the bar for the first registered
+    // card that has scrolled out of view and closes it when that card is back.
+    property var miniCards: []
+    // The card whose bar he dismissed — that one stays closed until it comes
+    // back into view, so a dismissed bar is not reopened 200ms later.
+    property var miniDismissed: null
+    function videoCardActive(card) {
+        if (miniCards.indexOf(card) < 0) miniCards.push(card);
+        miniTimer.restart();
+    }
+    function videoCardGone(card) {
+        var i = miniCards.indexOf(card);
+        if (i >= 0) miniCards.splice(i, 1);
+        if (miniDismissed === card) miniDismissed = null;
+        if (miniPlayer.card === card) miniPlayer.close();
+        if (miniCards.length === 0) miniTimer.stop();
+    }
+    function updateMini() {
+        try {
+            // Drop cards that died without announcing it (a reload can race the
+            // destruction handler), then pick the first one out of view.
+            for (var i = 0; i < miniCards.length; i++) {
+                var c = miniCards[i];
+                if (!c || !c.video || c.video.item === null) {
+                    miniCards.splice(i, 1); i--;
+                    continue;
+                }
+                var p = c.mapToItem(replyFlick, 0, 0);
+                var inView = (p.y + c.height >= 0) && (p.y <= replyFlick.height);
+                if (inView) {
+                    if (miniDismissed === c) miniDismissed = null;
+                    continue;
+                }
+                if (miniDismissed !== c && miniPlayer.card !== c)
+                    miniPlayer.open(c.video.item.player, c.video.item.out, c);
+                return;
+            }
+            if (miniPlayer.opened) miniPlayer.close();
+        } catch (e) { /* a card died mid-tick — the next tick will drop it */ }
+    }
+    Timer {
+        id: miniTimer
+        interval: 200
+        repeat: true
+        onTriggered: win.updateMini()
+    }
+
     Connections {
         target: Sessions
         function onLoaded(id, title, turnsJson) { win.loadTurns(id, title, turnsJson); }
@@ -3041,6 +3094,7 @@ Item {
                                             VideoDeck {
                                                 width: videoCol.width
                                                 stage: videoStage
+                                                host: win
                                                 entries: {
                                                     try { return JSON.parse(videos); }
                                                     catch (e) { return []; }
@@ -3186,6 +3240,18 @@ Item {
             }
 
             ScrollBar.vertical: VScroll { id: replyScroll }
+        }
+
+        // The mini-player, floating over the top of the conversation while a
+        // video's bubble is out of view (see the tracking block above). A later
+        // sibling, so it draws over the flick. Its strip sits at the top edge
+        // with a little breathing room; the bar's own height is content-driven.
+        MiniPlayer {
+            id: miniPlayer
+            anchors { left: parent.left; right: parent.right; top: parent.top
+                      leftMargin: 6; rightMargin: 6; topMargin: 6 }
+            z: 20
+            onDismissedCard: (card) => win.miniDismissed = card
         }
     }
 

@@ -33,6 +33,10 @@ Column {
     // surface at it and handing it back on the way out, so going full and
     // coming back neither restarts the stream nor loses the position.
     property Item stage: null
+    // Root, for the mini-player: the card tells it when a player is built (so
+    // it can show the transport when this card's bubble is off-screen) and
+    // when the card is destroyed. Nullable, so the card still works bare.
+    property var host: null
     readonly property bool ok: !!entry && entry.ok === true
     readonly property string src: ok ? (entry.src || "") : ""
     readonly property string poster: (ok && entry.poster) ? entry.poster : ""
@@ -117,6 +121,9 @@ Column {
             readonly property bool failed:
                 item !== null && item.player.error !== MediaPlayer.NoError
             readonly property real pos: item !== null ? item.player.position : 0
+            // A player was built: tell the mini-player it exists to follow.
+            onLoaded: if (card.host && card.host.videoCardActive)
+                card.host.videoCardActive(card)
         }
 
         Component {
@@ -207,9 +214,18 @@ Column {
         // moves INTO the picture rather than claiming a strip of its own), and
         // absent for a live stream, which has nothing to scrub. The same strip
         // the fullscreen stage wears — VideoTransport.qml.
+        //
+        // The visibility ORs the transport's own `pointerHere` into `hover`
+        // (see VideoTransport's header comment): without it, moving the pointer
+        // onto the strip's controls steals `hover.containsMouse` from the
+        // whole-frame tracker below, the strip's condition goes false, it
+        // hides under the pointer, and the mouse is handed back — the
+        // pop-in-and-out glitch while manipulating it.
         VideoTransport {
+            id: videoTransport
             visible: frame.started && !card.live
-                     && (hover.containsMouse || !video.playing)
+                     && (hover.containsMouse || videoTransport.pointerHere
+                         || !video.playing)
             anchors { left: parent.left; right: parent.right; bottom: parent.bottom
                       margins: 1 }
             player: video.item !== null ? video.item.player : null
@@ -218,6 +234,11 @@ Column {
             onToggleFull: card.toggleFull()
         }
     }
+
+    // The player it built is being torn down (a session switch or a reload) —
+    // tell the mini-player so it stops following a card that no longer exists.
+    Component.onDestruction: if (host && host.videoCardGone)
+        host.videoCardGone(card)
 
     // ---- the caption --------------------------------------------------------
     PixelText {

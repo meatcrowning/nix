@@ -1646,6 +1646,33 @@ position, which a second player and a reparented card would each cost. The strip
 itself is one file (`VideoTransport.qml`) worn by both, because the scrub is
 exactly the control that must not differ between them (§0.1).
 
+**The strip gained its OWN play/pause and stop, and the mini-player exists**
+[his, 2026-08-23]. The transport used to be driven only by clicking the picture;
+now `VideoTransport` also carries play/pause and stop (pause + seek 0), so a
+video can be driven from anywhere the strip shows. And when a video is playing
+whose bubble is NOT in view, a compact `MiniPlayer.qml` bar floats at the top of
+the message view carrying that strip — so scrub/play-pause/stop are always
+reachable [his: *\"when a video is playing and its chat bubble is not in view, can
+it show a little playing preview thing at the top of the message box?\"*]. It
+BORROWS the card's player the same way the stage does (one videoOutput at a
+time; fullscreen from the bar hands the picture back to the card first, then
+throws it to the stage). Root tracks started cards via `VideoCard.host`
+(`videoCardActive` on the Loader's `onLoaded`, `videoCardGone` on
+`Component.onDestruction`), and a 200ms timer (`miniTimer`, running only while
+any card is registered) opens the bar for the first registered card out of view
+and closes it when that card is back. Dismissing the bar remembers that card
+(`miniDismissed`) until it returns to view, so a dismissed bar is not reopened
+200ms later.
+
+**The strip's visibility fixes a hover-steal glitch.** The card shows the strip
+on `hover.containsMouse || !video.playing`. `containsMouse` on the whole-frame
+tracker goes FALSE the instant the pointer lands on the strip's own controls —
+they're on top and take the mouse — so a playing strip vanished under the
+pointer it just appeared under, then came back when the mouse was handed back:
+the pop-in-and-out glitch. The card now ORs `VideoTransport.pointerHere` (the
+OR of every control's `containsMouse`) into that condition, so the strip stays
+while the pointer is on any part of it.
+
 **Failure is drawn** (docs/DESIGN.md §10): a non-http URL is refused before any
 request, a resolve that fails reports yt-dlp's own last line, a resolve that
 produced no single stream says so, a missing yt-dlp names itself and the limit

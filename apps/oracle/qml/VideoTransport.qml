@@ -4,9 +4,20 @@ import QtMultimedia
 // The strip along the bottom of a playing video: elapsed clock, scrub track,
 // duration, and the button that throws it full-window.
 //
-// One file because the card and the fullscreen stage wear the SAME strip — a
-// second copy would be two implementations of one control, and the scrub is the
-// part that must not differ between them (docs/DESIGN.md §0.1).
+// One file because the card, the fullscreen stage and the mini-player wear the
+// SAME strip — a second copy would be two implementations of one control, and
+// the scrub is the part that must not differ between them (docs/DESIGN.md
+// §0.1). Since 2026-08-23 it also carries the transport's OWN play/pause and
+// stop buttons, so a video can be driven from anywhere the strip shows, not
+// just by clicking the picture.
+//
+// `pointerHere` is the OR of every interactive MouseArea's containsMouse. It
+// exists because the strip's visibility can't read `hover.containsMouse`
+// alone: the instant the pointer lands on the strip's own controls they steal
+// the mouse from the card's whole-frame hover tracker, so a strip shown "on
+// hover" hides under the pointer it just appeared under — the pop-in/pop-out
+// glitch. The card ORs `pointerHere` into its visibility so the strip stays
+// while the pointer is on any part of it.
 Rectangle {
     id: bar
 
@@ -21,7 +32,14 @@ Rectangle {
 
     signal toggleFull()
 
+    readonly property bool playing: player ? player.playbackState === MediaPlayer.PlayingState : false
     readonly property real pos: player ? player.position : 0
+    // True while the pointer is over ANY of the strip's own controls — the
+    // card's hover logic reads this so the strip does not vanish under the
+    // pointer that is trying to use it (see the header comment).
+    readonly property bool pointerHere:
+        track.containsMouse || fsHit.containsMouse
+        || ppHit.containsMouse || stopHit.containsMouse
 
     height: Theme.lineHeight + 8
     color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.82)
@@ -40,6 +58,90 @@ Rectangle {
         anchors { fill: parent; leftMargin: 6; rightMargin: 6 }
         spacing: 6
 
+        // PLAY / PAUSE — the one control the strip did not have, and the reason
+        // the mini-player exists [his, 2026-08-23: the controls must be
+        // reachable when the video's bubble is off-screen]. DRAWN, not lettered:
+        // ▶ is U+25B6 and ⏸/⏹ are outside the pixel fonts' cmap (§2.3). Play is
+        // the right-pointing arrowhead the card's marker wears; pause is two
+        // bars; the state says which is drawn.
+        Item {
+            id: ppBtn
+            anchors.verticalCenter: parent.verticalCenter
+            width: 24
+            height: 24
+            Item {
+                anchors.centerIn: parent
+                width: 12
+                height: 12
+                // Pause: two vertical bars.
+                Row {
+                    visible: bar.playing
+                    anchors.centerIn: parent
+                    spacing: 3
+                    Repeater {
+                        model: 2
+                        Rectangle {
+                            width: 2
+                            height: 12
+                            color: ppHit.containsMouse ? Theme.accent : Theme.text
+                        }
+                    }
+                }
+                // Play: the symmetric right-pointing arrowhead (rows widen then
+                // narrow), same drawing as the card's start marker.
+                Repeater {
+                    visible: !bar.playing
+                    model: 12
+                    Rectangle {
+                        required property int index
+                        y: index
+                        height: 1
+                        x: 0
+                        width: 1 + Math.min(index, 11 - index)
+                        color: ppHit.containsMouse ? Theme.accent : Theme.text
+                    }
+                }
+            }
+            MouseArea {
+                id: ppHit
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    if (!bar.player) return;
+                    if (bar.playing) bar.player.pause();
+                    else bar.player.play();
+                }
+            }
+        }
+
+        // STOP — pause and return to the start (§4 of transport grammar). The
+        // player keeps its source; a later play restarts it.
+        Item {
+            id: stopBtn
+            anchors.verticalCenter: parent.verticalCenter
+            width: 24
+            height: 24
+            Rectangle {
+                anchors.centerIn: parent
+                width: 10
+                height: 10
+                radius: Theme.rounding
+                color: stopHit.containsMouse ? Theme.accent : Theme.text
+            }
+            MouseArea {
+                id: stopHit
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    if (!bar.player) return;
+                    bar.player.pause();
+                    bar.player.position = 0;
+                }
+            }
+        }
+
         PixelText {
             anchors.verticalCenter: parent.verticalCenter
             width: 34
@@ -52,7 +154,7 @@ Rectangle {
         Rectangle {
             id: track
             anchors.verticalCenter: parent.verticalCenter
-            width: Math.max(20, parent.width - 12 - 34 - 34 - 24 - 3 * 6)
+            width: Math.max(20, parent.width - 12 - 24 - 24 - 34 - 34 - 24 - 5 * 6)
             height: 6
             radius: Theme.rounding
             color: Theme.bgAlt

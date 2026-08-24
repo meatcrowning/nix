@@ -15,6 +15,8 @@ Column {
     property var entries: []
     // Passed through to every card: the one scene-level VideoStage.
     property Item stage: null
+    // Passed through too: Root, so a card can register with the mini-player.
+    property var host: null
 
     spacing: 6
 
@@ -25,6 +27,7 @@ Column {
             width: deck.width
             entry: deck.entries[index]
             stage: deck.stage
+            host: deck.host
         }
     }
 }
