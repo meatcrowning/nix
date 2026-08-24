@@ -837,9 +837,22 @@ events, where the Qt build has them).
 **And every `QQuickWidget`'s palette follows the desktop's.** A QQuickWidget
 does not inherit `QApplication`'s palette on its own, so each is handed it at
 construction — a snapshot, and `wal-set.sh` rewrites `kdeglobals` on every
-wallpaper change. `_palette_watcher` re-dresses all of them (central view, dock
-panes, dialogs) on `ApplicationPaletteChange`, or the window ends up
-half-dressed: real widgets in the new colours, QML in the old. Harness for both:
+wallpaper change. `_redress_palette_views` re-dresses all of them (central view,
+dock panes, dialogs) on `ApplicationPaletteChange`, or the window ends up
+half-dressed: real widgets in the new colours, QML in the old.
+
+**NEVER `installEventFilter` on the QApplication to hear that** — which is what
+this did for four hours on 2026-08-23, and it broke both apps that wear this
+shell. An app-wide filter runs a PYTHON function for every event in the
+program, including the `QChildEvent` a QObject sends from inside its own
+constructor, and PySide has to build a wrapper for that half-constructed object
+and tear it down again: chatter **segfaulted** in `PyObject_ClearWeakRefs` doing
+it while QML instantiated a `Layout` attached property, so clicking the prompt
+box killed the window, and player never finished loading its QML at all —
+100% of a core, >2 min and still going where the same load now takes 2.3 s.
+`make_app`'s `_PlasmaApp.event` sees only what is sent TO the app object, which
+is the one event this needs and nothing on the QML creation path. Harness for
+both:
 `apps/pylib/tools/kdebg-state-test.py`, which sets its own palettes so it means
 the same thing whatever the machine is themed with.
 
