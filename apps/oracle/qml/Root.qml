@@ -1118,9 +1118,15 @@ Item {
     // No honest fraction: a reply has no known length. The line says it instead.
     readonly property real statusProgress: -1
     readonly property string statusRight: {
-        if (!Backend.serverUp) return "ollama down";
-        return Backend.loadedModels.length > 0
-               ? "ollama · " + Backend.loadedModels.join(", ") : "ollama idle";
+        // A running job is the standing fact that outranks the daemon's state:
+        // it is the thing the machine is doing FOR HIM, it survives this window,
+        // and the tray below may be scrolled past (docs/DESIGN.md §10).
+        var jobs = Jobs.runningCount > 0
+                 ? (Jobs.runningCount === 1 ? "1 job · " : Jobs.runningCount + " jobs · ")
+                 : "";
+        if (!Backend.serverUp) return jobs + "ollama down";
+        return jobs + (Backend.loadedModels.length > 0
+               ? "ollama · " + Backend.loadedModels.join(", ") : "ollama idle");
     }
     // The taskbar entry says which conversation this is (kdeshell.bind_title).
     readonly property string windowTitle:
@@ -2063,7 +2069,7 @@ Item {
         id: replyBox
         anchors { top: statsRow.bottom; topMargin: 10
                   left: parent.left; right: parent.right
-                  bottom: attachBar.top
+                  bottom: jobsTray.top
                   leftMargin: 10; rightMargin: 10; bottomMargin: 10 }
 
         KineticFlickable {
@@ -3145,6 +3151,19 @@ Item {
     // component with two implementations — ours here, and the KStyle's own
     // Frame/TextArea/Button under Plasma (`+plasma/PromptBox.qml`, chosen by
     // the file selector, apps/AGENTS.md → kdeshell.select_plasma_files).
+    // The background jobs (`JobsTray.qml`, with its Plasma twin). Between the
+    // conversation and what he is about to send: the work the window has in
+    // flight belongs next to the window's own state, not inside a turn — a job
+    // outlives the turn that started it (docs/DESIGN.md §10). Collapsed to zero
+    // height when there are none, so nothing is reserved for nothing (§5.2).
+    JobsTray {
+        id: jobsTray
+        objectName: "jobsTray"
+        anchors { left: parent.left; right: parent.right; bottom: attachBar.top
+                  leftMargin: 10; rightMargin: 10
+                  bottomMargin: visible ? 8 : 0 }
+    }
+
     PromptBox {
         id: promptBox
         objectName: "promptBox"

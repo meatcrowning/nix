@@ -57,6 +57,10 @@ QML = HERE / "qml"
 # no override rewrote his own base prompt (root AGENTS.md → "Testing without
 # interfering with the user"). Both stores go somewhere disposable unless the
 # caller has already said where.
+#: A harness is driving this window offscreen — see `Backend._systemctl`, and
+#: `run_selftest` at the bottom of this file.
+SELFTEST = "--selftest" in sys.argv
+
 if "--selftest" in sys.argv:
     _tmp = Path(os.environ.get("TMPDIR", "/tmp")) / "oracle-selftest"
     os.environ.setdefault("ORACLE_CONFIG", str(_tmp / "config"))
@@ -1474,6 +1478,63 @@ def skills_note(catalog=None):
     lines += ["- %s — %s" % (s["name"], s["description"]) for s in cat]
     return "\n".join(lines)
 
+#: THE LONG WORK. `run_bash` is capped at 30 seconds by `sandbox-exec.py` —
+#: right for a program that answers a question, useless for a job that maintains
+#: his music library, which is what these exist for [his, 2026-08-23]. The four
+#: are deliberately small in the schema: `run_job` is carried on every turn, the
+#: other three are in the index and attach themselves the moment one is called.
+JOB_TOOLS = [
+    {"type": "function",
+     "function": {
+         "name": "run_job",
+         "description": (
+             "Run a long command in the BACKGROUND and get a job id back at "
+             "once. Use this for anything that takes more than a few seconds — "
+             "a library scan, a download, a transcode, a fingerprint pass — "
+             "since run_bash is killed at 30 seconds. The job keeps running "
+             "after this turn ends and after the window closes; check it with "
+             "job_status and read it with job_log. Say the job id to him."),
+         "parameters": {
+             "type": "object",
+             "properties": {
+                 "command": {"type": "string",
+                             "description": "The shell command to run."},
+                 "label": {"type": "string",
+                           "description": ("A few words naming the job, shown "
+                                           "to him — e.g. 'fingerprint aud'.")},
+                 "cwd": {"type": "string",
+                         "description": "Directory to run in. Optional."},
+                 "lang": {"type": "string", "enum": ["bash", "python"],
+                          "description": "Default bash."}},
+             "required": ["command", "label"]}}},
+    {"type": "function",
+     "function": {
+         "name": "job_status",
+         "description": ("How the background jobs are doing: state, exit code, "
+                         "how long, and the last few lines of each. Pass an id "
+                         "for one job, nothing for all of them."),
+         "parameters": {"type": "object",
+                        "properties": {"id": {"type": "string"}},
+                        "required": []}}},
+    {"type": "function",
+     "function": {
+         "name": "job_log",
+         "description": ("Read a background job's output — the last `lines` of "
+                         "it (default 80, max 400)."),
+         "parameters": {"type": "object",
+                        "properties": {"id": {"type": "string"},
+                                       "lines": {"type": "integer"}},
+                        "required": ["id"]}}},
+    {"type": "function",
+     "function": {
+         "name": "job_stop",
+         "description": "Stop a running background job by id.",
+         "parameters": {"type": "object",
+                        "properties": {"id": {"type": "string"}},
+                        "required": ["id"]}}},
+]
+JOB_TOOL_NAMES = {t["function"]["name"] for t in JOB_TOOLS}
+
 #: The tool that hands the model a tool. Its own schema is small on purpose —
 #: it is paid for on every turn.
 GET_TOOLS_TOOL = {
@@ -1680,6 +1741,7 @@ AGENT_TOOL_GROUPS = {
     "skills": ["use_skill"],
     "author": ["make_tool", "make_skill", "make_agent"],
     "time": ["get_current_time"],
+    "jobs": ["run_job", "job_status", "job_log", "job_stop"],
 }
 #: THE TOOLS EVERY TURN CARRIES. The other two dozen are named in a one-line
 #: index in the system prompt (`tools_note`) and attached on demand
@@ -1696,12 +1758,13 @@ CORE_TOOL_NAMES = [
     "get_current_time",
     "use_skill", "spawn_agent",
     "save_memory", "list_memories",
-    "get_tools",
+    "get_tools", "run_job",
 ]
 
 #: Tool groups for `get_tools`, over and above `AGENT_TOOL_GROUPS`: the ones a
 #: subagent never gets and so has no group of its own.
 EXTRA_TOOL_GROUPS = {
+    "jobs": ["run_job", "job_status", "job_log", "job_stop"],
     "images": ["fetch_image", "search_images", "view_image", "show_image",
                "make_image", "screenshot"],
     "video": ["show_video"],
@@ -2402,6 +2465,22 @@ SESSIONS_ROOT = os.path.expanduser(
     os.environ.get("ORACLE_SESSIONS", "~/.local/share/oracle/sessions"))
 SESSIONS_SCRIPT = str(HERE / "tools" / "sessions-store.py")
 
+#: BACKGROUND JOBS — the work that outlives the turn (tools/job-run.py). Same
+#: place and the same host rule as the sandbox: it lives on TOP, where oracle's
+#: compute is, run locally there and over the tunnel's ssh from `book`.
+JOBS_ROOT = os.path.expanduser(
+    os.environ.get("ORACLE_JOBS", "~/.local/share/oracle/jobs"))
+JOBS_SCRIPT = str(HERE / "tools" / "job-run.py")
+
+#: How often the window re-reads the job directory. Two seconds is a readout
+#: that keeps up with a running log without being a poll anyone notices; a
+#: window with no jobs in it asks a third as often.
+JOBS_POLL_MS = 2000
+JOBS_IDLE_POLL_MS = 6000
+
+#: Lines of a job's log kept on its row.
+JOBS_TAIL = 12
+
 #: oracle's OWN memory store — the durable facts it manages itself (MEMORY_TOOLS
 #: above). One `memories.json` under this root, driven through
 #: tools/memory-store.py exactly like the session store, and living in the same
@@ -2787,6 +2866,196 @@ class Titlebar(QObject):
         self._client.set_footer(text)
 
 
+class Jobs(QObject):
+    """The background jobs, as the window sees them.
+
+    Everything real lives in `tools/job-run.py` and in the job directory it
+    writes (see that file); this is a readout over it — a poll, a list QML
+    draws, and four verbs. Nothing here holds a process: a job survives this
+    window closing, and a relaunch picks the running ones back up because it
+    reads the same directory.
+
+    The host branch is the one every executor here uses: local on `top`, over
+    the tunnel's ssh master from `book`, so the work always runs where the
+    library and the compute are.
+    """
+
+    rowsChanged = Signal()
+    jobFinished = Signal(str, str, int)   # label, state, exit code
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._rows = []
+        self._states = {}          # id -> the state we last told anyone about
+        self._proc = None          # the live `list` poll
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self.refresh)
+        self.jobFinished.connect(self.notify)
+        self._timer.start(JOBS_IDLE_POLL_MS)
+        self.refresh()
+
+    # ---- the argv, host-branched exactly like the file and exec tools ----
+
+    @staticmethod
+    def _argv(*args):
+        if ON_BOOK:
+            host = os.environ.get("OLLAMA_SSH_HOST", "top")
+            ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+            argv = [ssh, "-o", "BatchMode=yes"]
+            ctl = os.environ.get("OLLAMA_SSH_CTL")
+            if ctl:
+                argv += ["-o", "ControlMaster=auto", "-o", "ControlPersist=30",
+                         "-o", "ControlPath=" + ctl]
+            return argv + [host, "python3", shlex.quote(JOBS_SCRIPT)] + \
+                [shlex.quote(str(a)) for a in args]
+        return [sys.executable, JOBS_SCRIPT] + [str(a) for a in args]
+
+    def _run(self, *args, timeout=15000):
+        """One job-run.py call, synchronously. Milliseconds locally; the only
+        caller that could feel an ssh round trip is a tool, which is already
+        waiting on a model."""
+        proc = QProcess()
+        argv = self._argv(*args)
+        proc.start(argv[0], argv[1:])
+        if not proc.waitForFinished(timeout):
+            proc.kill()
+            return {"error": "job command timed out"}
+        out = bytes(proc.readAllStandardOutput().data()).decode("utf-8",
+                                                               "replace")
+        try:
+            return json.loads(out or "{}")
+        except ValueError:
+            err = bytes(proc.readAllStandardError().data()).decode(
+                "utf-8", "replace").strip()
+            return {"error": (err or out or "job command failed")[:400]}
+
+    # ---- the poll ----
+
+    @Slot()
+    def refresh(self):
+        if self._proc is not None:
+            return                              # one in flight is enough
+        proc = QProcess(self)
+        self._proc = proc
+        argv = self._argv("list", JOBS_ROOT, "--tail", JOBS_TAIL)
+        proc.finished.connect(lambda *_: self._on_list(proc))
+        proc.start(argv[0], argv[1:])
+
+    def _on_list(self, proc):
+        if proc is not self._proc:
+            return                    # a duplicate `finished`, or a torn-down app
+        self._proc = None
+        # RuntimeError: the app is being torn down and the C++ QProcess is
+        # already gone. A poll landing during teardown is not an error worth
+        # printing at him.
+        try:
+            out = bytes(proc.readAllStandardOutput().data()).decode(
+                "utf-8", "replace")
+            rows = json.loads(out or "{}").get("jobs") or []
+        except (ValueError, RuntimeError):
+            rows = self._rows
+        try:
+            proc.deleteLater()
+        except RuntimeError:
+            pass
+        # SAY WHEN ONE ENDS. A job runs for an hour; the row going quiet is not
+        # enough on its own (docs/DESIGN.md §10 — the state is shown, and the
+        # end of a long wait is the state that matters most).
+        for r in rows:
+            was = self._states.get(r["id"])
+            now = r.get("state")
+            if was and was != now and now in ("done", "failed", "stopped",
+                                              "timeout"):
+                self.jobFinished.emit(r.get("label") or "job", now,
+                                      int(r.get("exit") or 0))
+        self._states = {r["id"]: r.get("state") for r in rows}
+        running = any(r.get("state") in ("running", "starting") for r in rows)
+        try:
+            self._timer.setInterval(JOBS_POLL_MS if running
+                                    else JOBS_IDLE_POLL_MS)
+        except RuntimeError:
+            return                    # the app is going away underneath us
+        if rows != self._rows:
+            self._rows = rows
+            self.rowsChanged.emit()
+
+    # ---- a finished job says so, when the window cannot ----
+
+    @Slot(str, str, int)
+    def notify(self, label, state, code):
+        """A desktop notification for a job that ended while he was elsewhere.
+
+        A job runs for an hour — the window it started in may be behind three
+        others by the time it finishes, and the tray row going still is only
+        visible to someone looking at it (docs/DESIGN.md §10). Skipped when
+        chatter is the active window, because then the row IS the notification.
+
+        `--` before the positionals: notify-send parses a summary starting with
+        `-` as an option and exits 1 with no id, which reads exactly like a
+        missing notification daemon.
+        """
+        if QGuiApplication.applicationState() == Qt.ApplicationState.ApplicationActive:
+            return
+        if not shutil.which("notify-send"):
+            return
+        body = {"done": "finished", "failed": "failed (exit %d)" % code,
+                "stopped": "stopped", "timeout": "hit its time limit"}.get(
+                    state, state)
+        urgency = "normal" if state == "done" else "critical"
+        proc = QProcess(self)
+        proc.startDetached("notify-send",
+                           ["-a", "chatter", "-u", urgency,
+                            "-i", "media-playlist-repeat", "--",
+                            "job " + body, str(label)])
+
+    # ---- what QML draws ----
+
+    @Property("QVariantList", notify=rowsChanged)
+    def rows(self):
+        return self._rows
+
+    @Property(int, notify=rowsChanged)
+    def runningCount(self):
+        return sum(1 for r in self._rows
+                   if r.get("state") in ("running", "starting"))
+
+    # ---- the verbs (QML and the tools use the same four) ----
+
+    def start(self, command, lang="bash", cwd="", label="", max_seconds=0):
+        args = ["start", JOBS_ROOT, "--command", command,
+                "--lang", "python" if lang == "python" else "bash",
+                "--label", label or "job"]
+        if cwd:
+            args += ["--cwd", cwd]
+        if max_seconds:
+            args += ["--max-seconds", int(max_seconds)]
+        out = self._run(*args)
+        self.refresh()
+        return out
+
+    def status(self, job_id="", tail=JOBS_TAIL):
+        args = ["list", JOBS_ROOT, "--tail", int(tail)]
+        if job_id:
+            args += ["--id", job_id]
+        return self._run(*args)
+
+    @Slot(str, result="QVariant")
+    def stop(self, job_id):
+        out = self._run("stop", JOBS_ROOT, "--id", job_id)
+        self.refresh()
+        return out
+
+    @Slot(str, result="QVariant")
+    @Slot(result="QVariant")
+    def clear(self, job_id=""):
+        args = ["clear", JOBS_ROOT]
+        if job_id:
+            args += ["--id", job_id]
+        out = self._run(*args)
+        self.refresh()
+        return out
+
+
 class CtxFit(QObject):
     """How big a context window THIS machine can actually give THIS model.
 
@@ -3113,6 +3382,8 @@ class Ollama(QObject):
         self._ctx_model = ""     # which model those two were read for
         self._num_ctx = CHAT_NUM_CTX   # the window THIS turn asks ollama for
         self._ctx_fit = CtxFit(self)   # what this machine can actually give
+        self._jobs = None        # the Jobs object, set in main(); the job tools
+                                 # and the tray read the same one
         self._model_sizes = {}   # model -> weights on disk, from /api/tags
         self._loaded_ctx = {}    # model -> the window it is LOADED in (/api/ps)
         self._caps = []          # selected model's native capabilities (/api/show)
@@ -4240,6 +4511,40 @@ class Ollama(QObject):
             base = lead + "\n\n" + base
         return base
 
+    def _run_job_tool(self, name, args, idx, remaining, calls):
+        """run_job / job_status / job_log / job_stop, through the one `Jobs`
+        object the window draws from — so what the model is told and what he
+        sees in the tray are the same read of the same directory, never two
+        (docs/DESIGN.md §10)."""
+        a = args if isinstance(args, dict) else {}
+        jobs = self._jobs
+        if jobs is None:
+            result = {"error": "background jobs are not available"}
+        elif name == "run_job":
+            command = str(a.get("command") or a.get("code") or "").strip()
+            if not command:
+                result = {"error": "run_job needs a command"}
+            else:
+                result = jobs.start(command,
+                                    lang=str(a.get("lang") or "bash"),
+                                    cwd=str(a.get("cwd") or ""),
+                                    label=str(a.get("label") or "job"))
+                result.setdefault("note", "it is running in the background; "
+                                  "come back to it with job_status")
+        elif name == "job_status":
+            result = jobs.status(str(a.get("id") or ""))
+        elif name == "job_log":
+            try:
+                lines = int(a.get("lines") or 80)
+            except (TypeError, ValueError):
+                lines = 80
+            result = jobs.status(str(a.get("id") or ""), tail=max(1, lines))
+        else:
+            result = jobs.stop(str(a.get("id") or ""))
+        remaining["sink"][idx] = {"role": "tool", "tool_name": name,
+                                  "content": json.dumps(result)}
+        self._tool_done(remaining, calls)
+
     def _run_get_tools(self, args, idx, remaining, calls):
         """Attach tools by name or group, and hand their schemas back.
 
@@ -4374,7 +4679,7 @@ class Ollama(QObject):
                 FETCH_URL_TOOL,
                 CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
                 + list(SESSION_TOOLS) + list(MEMORY_TOOLS) + list(AUTHOR_TOOLS)
-                + [GET_TOOLS_TOOL]
+                + [GET_TOOLS_TOOL] + list(JOB_TOOLS)
                 + [t for t in [skill_tool(), spawn_agent_tool()] if t])
 
     @staticmethod
@@ -4859,6 +5164,8 @@ class Ollama(QObject):
             self._run_skill_tool(args, i, remaining, calls)
         elif name in AUTHOR_TOOL_NAMES:
             self._run_author_tool(name, args, i, remaining, calls)
+        elif name in JOB_TOOL_NAMES:
+            self._run_job_tool(name, args, i, remaining, calls)
         elif name in GET_TOOLS_TOOL_NAMES:
             self._run_get_tools(args, i, remaining, calls)
         elif name in SPAWN_TOOL_NAMES:
@@ -8170,6 +8477,16 @@ class Backend(QObject):
     # ---- start / stop the SYSTEM unit, through the askpass dialog ----
 
     def _systemctl(self, verb):
+        # A HARNESS NEVER TOUCHES HIS DAEMON. The offscreen selftest pokes every
+        # chrome id it can find, and Tools ▸ Stop Server is one of them —
+        # measured 2026-08-23, a test run stopped the ollama he was using
+        # (`sudo systemctl stop ollama.service` in the journal, from a poke).
+        # The refusal is here rather than in the harnesses so a NEW harness
+        # cannot reintroduce it (root AGENTS.md — a test that reaches the live
+        # session is a bug in the test).
+        if SELFTEST:
+            self.note.emit("selftest: refusing to " + verb + " the server")
+            return
         if ON_BOOK:
             # No local unit here; drive top's over the same ssh the tunnel uses.
             # `sudo -n` (no tty over ssh) relies on top's NOPASSWD rule for
@@ -8394,6 +8711,8 @@ def main():
     style = DeskStyle()
     titlebar = Titlebar()
     ollama = Ollama()
+    jobs = Jobs()
+    ollama._jobs = jobs          # the tools and the tray read one Jobs
     backend = Backend()
     # One poll, two readers: the server controls light from /api/ps, and the
     # context stat reads the window each loaded model is really running in.
@@ -8424,6 +8743,7 @@ def main():
     ctx.setContextProperty("DeskStyle", style)
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Ollama", ollama)
+    ctx.setContextProperty("Jobs", jobs)
     ctx.setContextProperty("Backend", backend)
     ctx.setContextProperty("Sessions", sessions)
     ctx.setContextProperty("ollamaHost", OLLAMA)
@@ -8800,6 +9120,71 @@ def run_selftest(app, shell, win, plasma, warnings):
                 lit = [i for i, a in shell._actions.items()
                        if i.startswith("prompt:") and a.isChecked()]
                 print("prompt set now = %r" % lit)
+        # THE JOBS TRAY, as text — tools/jobs-test.py asserts on these lines,
+        # in both faces. A row is only there when ORACLE_JOBS points at a
+        # directory with jobs in it, which is how that harness feeds it without
+        # starting a single process of his. It reads AFTER the render catch-up
+        # above: a ListView has no delegates until something polishes it.
+        from PySide6.QtCore import QMetaObject
+        _root = shell.root if plasma else win.findChild(QObject, "content")
+        _tray = _root.findChild(QObject, "jobsTray") if _root else None
+        if _tray is not None:
+            # The rows are ListView delegates: they exist one layout pass
+            # after the model does, so a read without this counts zero.
+            # A ListView builds its delegates on a polish pass, and
+            # `processEvents()` alone does not get one — the same catch-up
+            # the render below needs (measured: rows=0 without it).
+            _t = time.monotonic()
+            while time.monotonic() - _t < 0.4:
+                app.processEvents()
+                time.sleep(0.01)
+            QMetaObject.invokeMethod(_tray, "layoutNow")
+            app.processEvents()
+            # VISUAL children, not QObject children: a ListView delegate keeps
+            # its QObject parent where the delegate was defined, so
+            # `findChildren` sees none of them (the tree dump below walks the
+            # same way for the same reason).
+            def _job_rows(it, depth=0):
+                out = []
+                if it is None or depth > 8:
+                    return out
+                kids = (it.childItems() if hasattr(it, "childItems")
+                        else it.children())
+                for ch in kids:
+                    if ch.objectName() == "jobRow":
+                        out.append(ch)
+                    else:
+                        out += _job_rows(ch, depth + 1)
+                return out
+
+            def _verbs(row, depth=0):
+                """The verbs actually DRAWN on a row — the one that does not
+                apply to its state is not there (docs/DESIGN.md §10.2)."""
+                out = []
+                if row is None or depth > 6:
+                    return out
+                kids = (row.childItems() if hasattr(row, "childItems")
+                        else row.children())
+                for ch in kids:
+                    if ch.property("label") is not None \
+                            and ch.property("face") is not None:
+                        if bool(ch.property("visible")):
+                            out.append(ch)
+                    else:
+                        out += _verbs(ch, depth + 1)
+                return out
+
+            _rows = _job_rows(_tray)
+            print("jobs tray: face=%s visible=%s height=%d rows=%d"
+                  % (_tray.property("face"), bool(_tray.property("visible")),
+                     int(_tray.property("height") or 0), len(_rows)))
+            for _r in _rows:
+                _j = _r.property("job") or {}
+                print("jobs row: face=%s state=%s label=%r verbs=%d"
+                      % (_r.property("face"), _r.property("state_"),
+                         _j.get("label"),
+                         len(_verbs(_r))))
+            print("jobs status right: %r" % target.property("statusRight"))
         if plasma and os.environ.get("ORACLE_CHROME"):
             print(shell.dump_chrome())
         if os.environ.get("ORACLE_TREE"):

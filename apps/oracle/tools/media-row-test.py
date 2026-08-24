@@ -60,7 +60,10 @@ parts = {"WalPalette": oracle.Palette(oracle.theme_source(oracle.PANEL_THEME)),
          "DeskStyle": oracle.DeskStyle(), "Titlebar": oracle.Titlebar(),
          "Ollama": oracle.Ollama(), "Backend": oracle.Backend(),
          "Sessions": oracle.Sessions(), "Clip": oracle.Clip(),
-         "Md": oracle.MdFormat()}
+         "Md": oracle.MdFormat(),
+         # The jobs tray reads `Jobs`; without it the window loads with a
+         # ReferenceError rather than an empty tray.
+         "Jobs": oracle.Jobs()}
 for key, obj in parts.items():
     obj.setParent(app)                 # or PySide GCs it out from under QML
     ctx.setContextProperty(key, obj)
