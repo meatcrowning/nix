@@ -267,7 +267,11 @@ MAKE_IMAGE_TOOL = {
             "and lighting; commas, not sentences. Pass his own tags through "
             "VERBATIM — never rewrite a danbooru-style tag list. Give "
             "input_images to EDIT those pictures instead of generating a fresh "
-            "one (that switches to the edit model on its own). This takes "
+            "one (that switches to the edit model on its own). PASS ONLY WHAT "
+            "HE ASKED FOR: every argument you leave out falls back to what he "
+            "himself set in painter for that model — size, steps, sampler, his "
+            "own negative prompt — which is what he wants unless he says "
+            "otherwise. This takes "
             "anywhere from twenty seconds to a few minutes, so call it ONCE and "
             "wait. He sees the picture; you do not, unless you view_image it "
             "afterwards."),
@@ -335,7 +339,9 @@ MAKE_VIDEO_TOOL = {
             "made) to animate FROM that picture, which is the usual case; give "
             "last_frame as well to make the clip land on a second picture; give "
             "neither for text-to-video. Write the prompt as motion: what moves, "
-            "how the camera moves, what changes over the clip. This is SLOW — "
+            "how the camera moves, what changes over the clip. PASS ONLY WHAT "
+            "HE ASKED FOR: every argument you leave out falls back to what he "
+            "himself set in painter — length, size, steps, sampler. This is SLOW — "
             "many minutes for a few seconds of video — so call it ONCE, wait, "
             "and do not offer to do it again while it runs. He sees the clip; "
             "you do not."),

@@ -31,6 +31,7 @@ import graph as G  # noqa: E402
 import mp4meta  # noqa: E402
 import pngmeta  # noqa: E402
 import registry as R  # noqa: E402
+import userprefs as UP  # noqa: E402
 
 OUT_DIR = os.path.expanduser("~/Pictures/painter/out")
 VIDEO_SUFFIXES = {".mp4", ".webm", ".mkv", ".mov"}
@@ -99,14 +100,16 @@ def main(argv=None):
     ap.add_argument("--sampler")
     ap.add_argument("--scheduler")
     ap.add_argument("--denoise", type=float)
-    ap.add_argument("--seed", type=int, default=12345)
+    ap.add_argument("--seed", type=int,
+                    help="fixed seed. Default: whatever his painter settings "
+                         "imply (random, reuse, or the one in the box)")
     ap.add_argument("--width", type=int)
     ap.add_argument("--height", type=int)
     ap.add_argument("--aspect", help="W:H — sized against --megapixels")
     ap.add_argument("--megapixels", type=float,
                     help="pixel budget: the frame for t2i/t2v, the output size "
                          "for an edit")
-    ap.add_argument("--batch", type=int, default=1)
+    ap.add_argument("--batch", type=int)
     ap.add_argument("--edit", action="store_true",
                     help="edit the --image(s) instead of generating fresh")
     ap.add_argument("--image", action="append", default=[], metavar="PATH",
@@ -124,6 +127,8 @@ def main(argv=None):
     ap.add_argument("--no-model-sampling", dest="ms", action="store_false")
     ap.add_argument("--out-dir", default=OUT_DIR)
     ap.add_argument("--dump-graph", metavar="PATH")
+    ap.add_argument("--no-prefs", dest="prefs", action="store_false", default=True,
+                    help="ignore what he last set in painter for this model")
     ap.add_argument("--dry-run", action="store_true",
                     help="build the graph and print the plan; submit nothing "
                          "(and upload nothing — an --image is taken by name)")
@@ -163,8 +168,28 @@ def main(argv=None):
     refs = [ref_of(p) for p in args.image]
     last_ref = ref_of(args.last_frame) if args.last_frame else ""
 
-    params = {"positive": args.prompt, "negative": args.negative, "seed": args.seed,
-              "batch_size": args.batch, "loras": loras}
+    # HIS OWN SETTINGS ARE THE FLOOR (userprefs.py). painter remembers a whole
+    # block per model — steps, cfg, sampler, the negative prompt, the
+    # resolution, the clip length — and a generation started from anywhere else
+    # should land on the same picture pressing generate would have. Everything
+    # named on this command line is laid OVER it, so a caller only has to say
+    # what differs.
+    kind = "edit" if edit else ("video" if video else "image")
+    saved = UP.params_for(entry.name, kind) if args.prefs else {}
+    if args.prefs and not args.lora:
+        loras = UP.loras_for(reg, entry)
+    params = dict(saved)
+    params.update({"positive": args.prompt, "loras": loras})
+    if args.negative:
+        params["negative"] = args.negative
+    elif kind != "edit":
+        params.setdefault("negative", "")
+    seed = args.seed if args.seed is not None else UP.seed_for(
+        UP.saved_for(entry.name) if args.prefs else {})
+    params["seed"] = 12345 if seed is None else int(seed)
+    if args.batch is not None:
+        params["batch_size"] = args.batch
+    params.setdefault("batch_size", 1)
     for key, val in (("steps", args.steps), ("cfg", args.cfg),
                      ("sampler_name", args.sampler), ("scheduler", args.scheduler),
                      ("denoise", args.denoise),
@@ -181,12 +206,19 @@ def main(argv=None):
     mp = args.megapixels
     if not edit and not (video and (refs or last_ref)):
         if not args.width and not args.height and (args.aspect or mp):
+            # An aspect or a budget named here REPLACES the remembered
+            # width/height — he asked for this shape, not the last one.
             w, h = R.calc_dims(args.aspect or res.get("aspect", "1:1"),
-                               mp or res.get("megapixels", 1.0),
+                               mp or params.get("megapixels")
+                               or res.get("megapixels", 1.0),
                                res.get("multiple", 32 if video else 64))
             params["width"], params["height"] = w, h
     if mp:
         params["megapixels"] = mp
+    if args.seconds is not None:
+        params["duration"] = args.seconds
+    if args.fps is not None:
+        params["fps"] = args.fps
 
     if edit:
         params["edit"] = True
@@ -204,16 +236,12 @@ def main(argv=None):
         if last_ref:
             params["use_last_frame"] = True
             params["last_image"] = last_ref
-        if args.seconds is not None:
-            params["duration"] = args.seconds
-        if args.fps is not None:
-            params["fps"] = args.fps
         params.setdefault("filename_prefix", "video/painter")
     elif refs:
         raise SystemExit(f"{fam.get('label', entry.family)} takes no input image "
                          "— use --edit, or a video model")
 
-    toggles = {}
+    toggles = dict(params.get("toggles") or {})
     if args.negpip is not None:
         toggles["negpip"] = args.negpip
     if args.ms is not None:
@@ -239,14 +267,18 @@ def main(argv=None):
         raise SystemExit(f"cannot build: {exc}")
 
     pairing = built["pairing"]
-    kind = "edit" if edit else ("video" if video else "image")
-    print(f"mode     {kind}")
+    print(f"mode     {kind}"
+          + ("" if args.prefs else "  (his painter settings ignored)"))
     print(f"model    {entry.name}  [{entry.family}, {entry.loader or 'checkpoint'}]")
     print(f"encoder  {getattr(pairing['encoder'], 'name', '(bundled)')}")
     print(f"vae      {getattr(pairing['vae'], 'name', '(bundled)')}")
     p = built["params"]
-    size = (f"{p['width']}x{p['height']}" if p.get("width") and p.get("height")
-            else "sized by the input image")
+    # A dropped frame or an edit subject DECIDES the size, so a width/height
+    # left in the params from his saved settings is not what will be rendered.
+    by_image = edit or (video and (refs or last_ref))
+    size = ("sized by the input image" if by_image
+            else (f"{p['width']}x{p['height']}"
+                  if p.get("width") and p.get("height") else "family default"))
     print(f"sampling {p.get('steps')} steps, cfg {p.get('cfg')}, "
           f"{p.get('sampler_name')}/{p.get('scheduler')}, {size}, "
           f"seed {p.get('seed')}")
