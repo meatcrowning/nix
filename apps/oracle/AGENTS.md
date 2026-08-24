@@ -1188,6 +1188,15 @@ memory of using them.
 - **It is in RAM, per running app.** Restart chatter, or switch away and back,
   and the conversation is still whole (the store has every turn) but the tool
   memory of it is gone. That is the honest limit of this version.
+- **What a turn left on DISK survives that**, since 2026-08-24. `mediaNote(h)`
+  in Root.qml puts one `[image in this chat: /path · WxH]` line (and the same
+  for a clip) into the history content of any row carrying media, and a row with
+  media but no words is no longer skipped as empty. It is a dozen tokens and it
+  is only text in the log, so it comes back with the session. Without it he
+  generated a picture, restarted, reopened that conversation and asked for a
+  video from it — and the model, holding no path, made a text-to-video from
+  nothing: square, unrelated, `"input_image": ""` in the clip's own metadata
+  (session `sess-1787611635857`).
 
 Harness: `tools/memory-carry-test.py` — two prompts through the real window
 against a stub daemon, asserting on the REQUEST BODIES that turn 2 still carries
@@ -1709,9 +1718,29 @@ on `hover.containsMouse || !video.playing`. `containsMouse` on the whole-frame
 tracker goes FALSE the instant the pointer lands on the strip's own controls —
 they're on top and take the mouse — so a playing strip vanished under the
 pointer it just appeared under, then came back when the mouse was handed back:
-the pop-in-and-out glitch. The card now ORs `VideoTransport.pointerHere` (the
-OR of every control's `containsMouse`) into that condition, so the strip stays
-while the pointer is on any part of it.
+the pop-in-and-out glitch. The card ORs `VideoTransport.pointerHere` into that
+condition, so the strip stays while the pointer is on any part of it.
+
+Two more things had to be true before that actually held [his, 2026-08-24: the
+bar "flips constantly from being visible to invisible" with the pointer on the
+scrub track]:
+
+- **The Plasma twin had no `pointerHere` at all** — the card read `undefined`
+  there, so under the KDE face the whole mechanism above was inert while a
+  `Slider` and a `Button` took the mouse. It has the property now, over the
+  same NoButton area plus the two controls' `hovered`. Anything the sibling
+  publishes, the twin publishes.
+- **`pointerHere` covers the WHOLE strip**, not four buttons. `track.containsMouse`
+  read a property a `Rectangle` does not have — undefined, so the two thirds of
+  the strip that are not a button reported nothing. There is now a `NoButton`
+  hover area over the whole bar (`barHit`) and a hover-enabled `trackHit`, both
+  ORed in.
+- **The pointer only turns the strip ON.** Hover alone is a feedback loop: the
+  strip appears under the pointer, anything about that appearance costs the
+  frame tracker its `containsMouse`, and the condition that showed it hides it.
+  `frame.stripShown` latches true on hover and is cleared by `stripLinger`
+  (900ms) once the pointer has actually gone, so nothing in the loop can flip
+  faster than that timer.
 
 **Failure is drawn** (docs/DESIGN.md §10): a non-http URL is refused before any
 request, a resolve that fails reports yt-dlp's own last line, a resolve that
@@ -1839,6 +1868,19 @@ land on the turn as `genLabel`/`genFrac`/`genRunning`/`genDone`, and QML draws a
 `Meter` under the tool disclosure's heading — open or shut, since the point is
 that the wait is visible. Transient like `execTail`: what it MADE is the
 picture, so nothing about the bar is persisted.
+
+**Stop stops the RENDER, not just the stream.** `cancel()` used to abort the
+ollama reply and leave the backend sampling for another twenty minutes for
+nobody. It now terminates the generator processes it is holding (`_gen_procs`),
+and two things make that reach the GPU: `_painter_argv` **`exec`s** the
+generator so the signal lands on python rather than on a bash waiting in front
+of it, and `smoke.py` traps `TERM`/`INT`/`HUP` to DELETE what it queued and POST
+`/interrupt` before it goes (blocking urllib — the client's own POSTs are
+asynchronous and never fly from a handler that ends in `_exit`). On book the
+generator is at the far end of an ssh and terminating the local ssh does not
+signal it, so a render started from there runs to its own end. Harness: the
+`3a-stop` block of `tools/toolbox-test.py`, whose stub traps `TERM` and leaves a
+breadcrumb — the assertion that the signal reached the generator itself.
 
 Two rules on top of that, both his, 2026-08-24:
 

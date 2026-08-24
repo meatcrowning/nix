@@ -3677,6 +3677,7 @@ class Ollama(QObject):
         self._house_seen = set()  # guides already named this conversation
         self._max_results = RESEARCH_MAX  # per-search source cap for this turn (set in send)
         self._procs = []         # live file-tool QProcesses, so none is GC'd mid-run
+        self._gen_procs = []     # the generator ones among them — Stop kills these
         self._memories = []      # oracle's own durable memories, injected each turn
         self._prompt_choice, self._custom_prompt = self._load_prompt_config()
         self._ctx_max = 0        # the window actually in force (0 = unknown)
@@ -5228,12 +5229,40 @@ class Ollama(QObject):
         # Drops the whole turn: a pending tool fetch checks `busy` and bails, so
         # a search still in flight never re-posts to a cancelled turn.
         self._set_busy(False)
+        self._stop_generating()
         if self._reply is not None:
             r, self._reply = self._reply, None
             r.readyRead.disconnect()
             r.finished.disconnect()
             r.abort()
             r.deleteLater()
+
+    def _stop_generating(self):
+        """Kill any render this turn started, backend and all [his, 2026-08-24].
+
+        The generator handles SIGTERM by interrupting ComfyUI and deleting what
+        it queued (apps/painter/tools/smoke.py), which is the half that matters:
+        killing the script alone leaves the GPU sampling a clip nobody is
+        waiting for. The command is `exec`d by its shell so the signal lands on
+        python and not on a bash that is only waiting for it. On book the
+        generator is at the far end of an ssh, and terminating the local ssh
+        does NOT signal it — the render there runs to its own end.
+        """
+        procs, self._gen_procs = list(self._gen_procs), []
+        for proc in procs:
+            try:
+                if proc.state() == QProcess.ProcessState.NotRunning:
+                    continue
+                proc.terminate()
+                # It has the interrupt to POST before it goes; SIGKILL only if
+                # it is still there after that.
+                QTimer.singleShot(6000, lambda p=proc: (
+                    p.kill() if p.state() != QProcess.ProcessState.NotRunning
+                    else None))
+            except RuntimeError:
+                continue
+        if procs:
+            self.genFinished.emit(False)
 
     def _on_stream(self, reply):
         if reply is not self._reply:
@@ -8132,8 +8161,11 @@ class Ollama(QObject):
                   % (shlex.quote(cls.PAINTER_IN_DIR),
                      shlex.quote(cls.PAINTER_IN_DIR),
                      shlex.quote(cls.PAINTER_IN_DIR))) if stdin else ""
-        script = "mkdir -p %s; %s%s%s" % (shlex.quote(MAKE_IMAGE_DIR), unpack,
-                                          wake, cmd)
+        # `exec`: the terminate() Stop sends must land on the GENERATOR, not on
+        # a bash sitting in front of it — a shell that is only waiting dies and
+        # leaves its child rendering (see `_stop_generating`).
+        script = "mkdir -p %s; %s%sexec %s" % (shlex.quote(MAKE_IMAGE_DIR),
+                                               unpack, wake, cmd)
         if ON_BOOK:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
             ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
@@ -8277,6 +8309,10 @@ class Ollama(QObject):
             return
         proc = QProcess(self)
         self._procs.append(proc)
+        # STOP MEANS STOP THE RENDER TOO [his, 2026-08-24]. `cancel()` used to
+        # abort the ollama stream and leave the backend sampling for another
+        # twenty minutes with nobody waiting for it.
+        self._gen_procs.append(proc)
         state = {"done": False, "timeout": False, "out": "", "meta": {}}
 
         # READ IT AS IT RUNS, not at the end. A render is minutes long, and the
@@ -8336,6 +8372,8 @@ class Ollama(QObject):
             state["done"] = True
             if proc in self._procs:
                 self._procs.remove(proc)
+            if proc in self._gen_procs:
+                self._gen_procs.remove(proc)
             drained()
             try:
                 err = bytes(proc.readAllStandardError()).decode("utf-8", "replace")
@@ -8400,6 +8438,8 @@ class Ollama(QObject):
             state["done"] = True
             if proc in self._procs:
                 self._procs.remove(proc)
+            if proc in self._gen_procs:
+                self._gen_procs.remove(proc)
             proc.deleteLater()
             release()
             self.genFinished.emit(False)

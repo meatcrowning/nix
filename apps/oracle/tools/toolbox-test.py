@@ -112,6 +112,7 @@ _srv = http.server.HTTPServer(("127.0.0.1", 0), _Ollama)
 threading.Thread(target=_srv.serve_forever, daemon=True).start()
 os.environ["OLLAMA_HOST"] = "http://127.0.0.1:%d" % _srv.server_address[1]
 
+from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtCore import (QMetaObject, QObject, Q_ARG, QTimer,   # noqa: E402
                             QUrl)
 from PySide6.QtGui import QGuiApplication, QImage                  # noqa: E402
@@ -255,6 +256,37 @@ r = run_tool("make_image", {"prompt": "a red cube"}, ms=20000)
 check("a backend that will not generate is reported",
       bool(r) and "error" in r and "unreachable" in r["error"],
       json.dumps(r)[:200])
+
+# 3a-stop. STOP TAKES THE RENDER WITH IT [his, 2026-08-24]. `cancel()` used to
+# abort the ollama stream only, leaving the backend sampling for another twenty
+# minutes for nobody. The stub traps TERM and writes a breadcrumb, which is the
+# assertion that the signal reached the GENERATOR and not just the shell in
+# front of it (the `exec` in _painter_argv).
+trapped = _TMP / "trapped"
+os.environ["ORACLE_PAINTER"] = str(script(
+    _TMP / "genslow.sh",
+    'trap \'touch %s; exit 130\' TERM\n'
+    'sleep 60 &\nwait' % trapped))
+remaining = {"n": 1, "sink": [None]}
+o._dispatch_tool("make_image", {"prompt": "a red cube"}, 0, remaining, [{}])
+QTest.qWait(1500)
+live = [pr for pr in o._gen_procs
+        if pr.state() != oracle.QProcess.ProcessState.NotRunning]
+check("a render is a process the app is holding", len(live) == 1, str(len(live)))
+o.cancel()
+for _ in range(60):
+    QTest.qWait(50)
+    if trapped.exists():
+        break
+check("stop reaches the generator itself, not just its shell", trapped.exists())
+def _dead(pr):
+    try:
+        return pr.state() == oracle.QProcess.ProcessState.NotRunning
+    except RuntimeError:
+        return True          # deleteLater already took it: gone is gone
+check("...and the render process is gone", all(_dead(pr) for pr in live))
+os.environ.pop("ORACLE_PAINTER", None)
+o._set_busy(True)          # cancel() dropped it; the sections below need it
 
 # 3b. every knob reaches the generator's command line, and an input picture
 # turns the same tool into an EDIT.

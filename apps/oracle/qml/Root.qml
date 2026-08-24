@@ -98,6 +98,34 @@ Item {
                + h.body;
     }
 
+    // WHAT A TURN LEFT ON DISK, as one line the next turn can read [his,
+    // 2026-08-24]. The message list handed to the model is rebuilt from the
+    // chat log's TEXT (`_parse_history` keeps nothing else), and the working
+    // memory that carries tool RESULTS is in-process only — a switched or
+    // reopened session fails its match on purpose. So after a restart the
+    // picture a turn made was still on screen and its path was gone, and asked
+    // to animate "that image" the model had nothing to put in `first_frame`:
+    // it made a text-to-video instead, square, from nothing (session
+    // sess-1787611635857, `"input_image": ""` in the clip's own metadata).
+    // One `[image in this chat: /path]` line per piece of media costs a dozen
+    // tokens and survives everything, because it is just text in the log.
+    function mediaNote(h) {
+        var out = [];
+        function add(js, kind) {
+            var arr = [];
+            try { arr = JSON.parse(js || "[]"); } catch (e) { return; }
+            for (var i = 0; i < arr.length; i++) {
+                var m = arr[i];
+                if (!m || m.ok === false || !m.path) continue;
+                out.push("[" + kind + " in this chat: " + m.path
+                         + (m.w && m.h ? " · " + m.w + "x" + m.h : "") + "]");
+            }
+        }
+        add(h.images, "image");
+        add(h.videos, "video");
+        return out.length > 0 ? "\n" + out.join("\n") : "";
+    }
+
     // A row that opens a new calendar day gets a date above it; rows on the
     // same day get nothing, so a conversation held in one sitting is unchanged
     // (docs/DESIGN.md §9.1 — subordinated, and never noise for its own sake).
@@ -1139,10 +1167,13 @@ Item {
         var history = [];
         for (var i = 0; i < chatLog.count; i++) {
             var h = chatLog.get(i);
-            if (h.isError || h.body.trim() === "")
+            var note = win.mediaNote(h);
+            // A row with no words but a picture in it is NOT empty — dropping
+            // it took the one line naming that picture with it.
+            if (h.isError || (h.body.trim() === "" && note === ""))
                 continue;
             history.push({ role: h.isUser ? "user" : "assistant",
-                           content: win.stampedBody(h) });
+                           content: win.stampedBody(h) + note });
         }
         // Append the pair now, then stream into the assistant row. Prior turns
         // are left untouched — the log grows downward (docs/DESIGN.md §14).
@@ -1423,10 +1454,11 @@ Item {
         var history = [];
         for (var k = 0; k < i; k++) {
             var h = chatLog.get(k);
-            if (h.isError || h.body.trim() === "")
+            var note = win.mediaNote(h);
+            if (h.isError || (h.body.trim() === "" && note === ""))
                 continue;
             history.push({ role: h.isUser ? "user" : "assistant",
-                           content: win.stampedBody(h) });
+                           content: win.stampedBody(h) + note });
         }
         chatLog.setProperty(i, "cutOff", false);
         chatLog.setProperty(i, "streaming", true);
