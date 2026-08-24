@@ -52,6 +52,9 @@ from PySide6.QtQuick import QQuickWindow  # noqa: F401
 
 HERE = Path(__file__).resolve().parent
 QML = HERE / "qml"
+#: Files onto the Wayland clipboard, as files — see `Clip.copyImage` for why a
+#: subprocess and never QClipboard (apps/pylib/clipfile.py).
+CLIPFILE = HERE.parent / "pylib" / "clipfile.py"
 
 # HIS FILES ARE NOT THE HARNESS'S, and this has to happen before the store paths
 # below are computed — hence up here rather than in `main()`. Poking the
@@ -77,6 +80,7 @@ from kdetheme import theme_source, is_plasma  # noqa: E402  (pylib; the KDE glob
 import kdeshell  # noqa: E402  (pylib; the Plasma session's real QtWidgets window)
 import lastfm as lastfmlib  # noqa: E402  (pylib; his Last.fm account, shared with player)
 import genshort  # noqa: E402  (his generation shorthand -> make_image/make_video args)
+import boorutags  # noqa: E402  (pylib; the Danbooru vocabulary anima was captioned with)
 
 #: The local ollama daemon. Loopback-pinned like everything else that speaks to
 #: a local backend here — never a new listener (root AGENTS.md → the tailnet).
@@ -267,7 +271,12 @@ MAKE_IMAGE_TOOL = {
             "and lighting; commas, not sentences. Pass his own tags through "
             "VERBATIM — never rewrite a danbooru-style tag list. Give "
             "input_images to EDIT those pictures instead of generating a fresh "
-            "one (that switches to the edit model on its own). PASS ONLY WHAT "
+            "one (that switches to the edit model on its own). For the ANIME "
+            "model (anima) look tags up with booru_tags before you write "
+            "them — an invented tag does nothing — write them with spaces and "
+            "an artist as @name, and just pass `negative` normally: on that "
+            "model it is folded into the positive as an inline negative weight "
+            "for you, and its own box left empty. PASS ONLY WHAT "
             "HE ASKED FOR: every argument you leave out falls back to what he "
             "himself set in painter for that model — size, steps, sampler, his "
             "own negative prompt — which is what he wants unless he says "
@@ -378,6 +387,45 @@ MAKE_VIDEO_TOOL = {
             "required": ["prompt"]}},
 }
 MAKE_VIDEO_TOOL_NAMES = {"make_video"}
+
+#: THE DANBOORU VOCABULARY, as a tool [his, 2026-08-24: "give it a list of all
+#: danbooru tags to draw from when prompting with anima"]. Anima was captioned
+#: with Danbooru's tags, and a tag the site does not have does nothing — it is
+#: not a weaker version of the tag you meant, it is noise the model has never
+#: seen. A model writing from memory invents plausible ones at a steady rate, so
+#: the 91k-tag list ships with the apps (`pylib/boorutags.py`) and is SEARCHED
+#: rather than pasted: a whole vocabulary in the context would be 2 MB and still
+#: not tell it which tag is the used one.
+BOORU_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "booru_tags",
+        "description": (
+            "Look up real Danbooru tags — the vocabulary the anime model "
+            "(anima) was trained on. Use it whenever you write an anime/anima "
+            "prompt: search for the tag you mean before you write it, because "
+            "a tag that is not on the list does NOTHING in the picture, and "
+            "check a prompt you have drafted to catch the ones you invented. "
+            "It also resolves what he half-remembered — 'sole female' comes "
+            "back as '1girl'. Answers carry the tag's category: an ARTIST is "
+            "written '@name' in the prompt, a CHARACTER wants its series "
+            "beside it. Write tags with spaces, not underscores."),
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string",
+                      "description": ("What to look for, e.g. 'windowsill', "
+                                      "'looking at viewer', 'toi8'.")},
+            "check": {"type": "string",
+                      "description": ("A whole draft prompt to check instead — "
+                                      "returns which tags are real, which were "
+                                      "renamed, and which do not exist.")},
+            "category": {"type": "string",
+                         "description": ("Narrow a search: general, artist, "
+                                         "character, copyright, meta.")},
+            "limit": {"type": "integer",
+                      "description": "How many to return (default 25)."}},
+            "required": []}},
+}
+BOORU_TOOL_NAMES = {"booru_tags"}
 
 #: The IMAGE-SEARCH tool. fetch_image can only GET a URL the model already has,
 #: and a model asked for "a picture of X" tends to GUESS a plausible-looking
@@ -1895,7 +1943,7 @@ CORE_TOOL_NAMES = [
 EXTRA_TOOL_GROUPS = {
     "jobs": ["run_job", "job_status", "job_log", "job_stop"],
     "images": ["fetch_image", "search_images", "view_image", "show_image",
-               "make_image", "make_video", "screenshot"],
+               "make_image", "make_video", "screenshot", "booru_tags"],
     "video": ["show_video", "make_video"],
     "memory": ["save_memory", "list_memories", "delete_memory"],
     "models": ["manage_models"],
@@ -2835,7 +2883,8 @@ class Palette(QObject):
 
 
 class Clip(QObject):
-    """Copy out of the chat log with the MARKDOWN still on it.
+    """Copy out of the chat log — text with its MARKDOWN still on it, and the
+    pictures and clips in it as real files.
 
     A reply is drawn through `MarkdownText.qml`, so what Qt puts on the
     clipboard for Ctrl+C is the RENDERED document flattened to plain text: the
@@ -2855,6 +2904,10 @@ class Clip(QObject):
     It is the clipboard proper, not the primary selection: a middle-click paste
     still gets whatever the item's own selection handling put there.
     """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._procs = set()       # a QProcess with no Python ref is collected
 
     @Slot(QObject, int, int, str, result=bool)
     def copyMarkdown(self, quick_doc, start, end, source):
@@ -2898,6 +2951,69 @@ class Clip(QObject):
             return False
         QGuiApplication.clipboard().setText(text)
         return True
+
+    # ---- a picture or a clip, OUT of the chat -----------------------------
+    #
+    # He asked to be able to copy what is in the log and paste it elsewhere, the
+    # generated ones above all [his, 2026-08-24]. Both go through
+    # `pylib/clipfile.py`, never QClipboard, for the two reasons the rest of
+    # this desktop already pays for (apps/AGENTS.md → `pylib/`):
+    #
+    #   * A Wayland selection DIES WITH THE PROCESS that offered it. Copy a
+    #     picture, close chatter, paste — nothing. clipfile forks a holder that
+    #     outlives us and lets go when something else takes the clipboard.
+    #   * `QClipboard.setMimeData` hands Qt's global-static clipboard a
+    #     Python-built QMimeData it frees AFTER the interpreter is gone — a
+    #     SIGSEGV on exit from any run that copied.
+    #
+    # `--image` additionally offers the file's own bytes under its image mime,
+    # so a paste lands as the picture in an editor and as the file (with its
+    # name) anywhere that understands one. A VIDEO gets the file offer alone —
+    # there is no "the picture" to hand over.
+
+    copied = Signal(str, bool)     # message for the toast, and whether it failed
+
+    @Slot(str)
+    def copyImage(self, path):
+        self._copy_file(path, True)
+
+    @Slot(str)
+    def copyFile(self, path):
+        self._copy_file(path, False)
+
+    def _copy_file(self, path, as_image):
+        raw = str(path or "")
+        if raw.startswith("file://"):
+            raw = QUrl(raw).toLocalFile()
+        src = os.path.abspath(os.path.expanduser(raw)) if raw else ""
+        name = os.path.basename(src) or "it"
+        if not src or not os.path.exists(src):
+            self.copied.emit("can't copy " + name + ": it is gone", True)
+            return
+        argv = ([sys.executable, str(CLIPFILE)]
+                + (["--image"] if as_image else []) + [src])
+        proc = QProcess(self)
+        self._procs.add(proc)
+
+        def finished(code, _status):
+            err = bytes(proc.readAllStandardError()).decode("utf-8", "replace").strip()
+            if code == 0:
+                self.copied.emit("copied " + name, False)
+            else:
+                self.copied.emit("copy failed: " + (err.splitlines()[-1] if err
+                                                    else "exit %d" % code), True)
+            self._procs.discard(proc)
+            proc.deleteLater()
+
+        def failed(_e):
+            if proc in self._procs:
+                self.copied.emit("copy failed: cannot run clipfile", True)
+                self._procs.discard(proc)
+                proc.deleteLater()
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(failed)
+        proc.start(argv[0], argv[1:])
 
 
 class MdFormat(QObject):
@@ -3485,6 +3601,14 @@ class Ollama(QObject):
     execOutput = Signal(str)                # one chunk of live output
     execStarted = Signal(str)               # the language, as a heading
     execFinished = Signal()                 # that program stopped running
+
+    # A GENERATION, AS IT RUNS. A render is minutes long and until now the chat
+    # showed one motionless "making a picture…" for all of it, which reads as
+    # stalled [his, 2026-08-24]. painter's generator prints `::progress FRAC
+    # LABEL` for us (`--progress`), and QML draws it as a small bar under the
+    # tool disclosure — the same place the reasoning and the file lines live.
+    genProgress = Signal(str, float)        # label, 0..1
+    genFinished = Signal()                  # …and that render stopped
 
     # The player tool's result, as JSON — for a harness to read what one call
     # actually produced without a bus of its own.
@@ -4959,7 +5083,7 @@ class Ollama(QObject):
         decided against this list, not against a hand-kept copy of it."""
         return (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, SELF_TOOL,
                 IMAGE_TOOL, SEARCH_IMAGE_TOOL, VIEW_IMAGE_TOOL, SHOW_IMAGE_TOOL,
-                SCREENSHOT_TOOL, MAKE_IMAGE_TOOL, MAKE_VIDEO_TOOL,
+                SCREENSHOT_TOOL, MAKE_IMAGE_TOOL, MAKE_VIDEO_TOOL, BOORU_TOOL,
                 VIDEO_TOOL, PLAYER_TOOL,
                 MUSIC_TOOL, LASTFM_TOOL, MODEL_TOOL,
                 FETCH_URL_TOOL,
@@ -5491,6 +5615,8 @@ class Ollama(QObject):
             self._make_image(args, i, remaining, calls)
         elif name in MAKE_VIDEO_TOOL_NAMES:
             self._make_video(args, i, remaining, calls)
+        elif name in BOORU_TOOL_NAMES:
+            self._booru_tags(args, i, remaining, calls)
         elif name in SCREENSHOT_TOOL_NAMES:
             self._screenshot(args, i, remaining, calls)
         elif name in VIEW_IMAGE_TOOL_NAMES:
@@ -7768,7 +7894,7 @@ class Ollama(QObject):
         self.fileToolStarted.emit("show " + os.path.basename(path))
         self._display_image(path, caption, target_host, answer)
 
-    def _display_image(self, path, caption, target_host, answer):
+    def _display_image(self, path, caption, target_host, answer, meta=""):
         """Draw one picture in the chat, wherever the file is.
 
         Local is the fast path and the honest one: a QML `Image` loads a local
@@ -7785,6 +7911,7 @@ class Ollama(QObject):
                 self.imageFetchStarted.emit(here)
                 self._emit_image({"ok": True, "url": "", "path": here,
                                   "alt": caption or os.path.basename(here),
+                                  "meta": meta,
                                   "w": probe.width(), "h": probe.height()})
                 answer({"ok": True, "path": here, "width": probe.width(),
                         "height": probe.height(),
@@ -7833,6 +7960,7 @@ class Ollama(QObject):
             self.imageFetchStarted.emit(saved)
             self._emit_image({"ok": True, "url": "", "path": saved,
                               "alt": caption or os.path.basename(here),
+                              "meta": meta,
                               "w": probe.width(), "h": probe.height()})
             answer({"ok": True, "path": path, "width": probe.width(),
                     "height": probe.height(),
@@ -7967,6 +8095,7 @@ class Ollama(QObject):
             cmd += flag("--seconds", "seconds", float)
         cmd += " --timeout %d" % ((MAKE_VIDEO_MS if kind == "video"
                                    else MAKE_IMAGE_MS) // 1000 - 60)
+        cmd += " --progress"
         # The BACKEND preamble is skipped for a stub: a test that starts
         # comfy-painter is a test that changed his machine, and this one did —
         # it left the daemon up and 1.1G held after a run [2026-08-23].
@@ -7991,6 +8120,51 @@ class Ollama(QObject):
                          "-o", "ControlPath=" + ctl]
             return argv + [host, "bash -lc " + shlex.quote(script)], stdin, ""
         return ["bash", "-lc", script], stdin, ""
+
+    def _booru_tags(self, args, idx, remaining, calls):
+        """The tag vocabulary, searched or a draft checked (`pylib/boorutags`).
+
+        Local, synchronous and small: it is a lookup in a 91k-row table, not a
+        network call, and the answer is a handful of rows rather than a
+        vocabulary dump."""
+        a = args if isinstance(args, dict) else {}
+        draft = str(a.get("check") or "").strip()
+        query = str(a.get("query") or "").strip()
+        self.fileToolStarted.emit("tags: " + (draft or query or "?")[:50])
+
+        def answer(result, ok=True, line=""):
+            remaining["sink"][idx] = {"role": "tool", "tool_name": "booru_tags",
+                                       "content": json.dumps(result)}
+            self.fileToolDone.emit(line or ("booru_tags — "
+                                            + str(result.get("error", ""))), ok)
+            self._tool_done(remaining, calls)
+
+        try:
+            if draft:
+                got = boorutags.check(draft)
+                answer({"ok": True, **got,
+                        "note": ("`unknown` tags are not on Danbooru and will "
+                                 "do nothing — replace or drop them. `renamed` "
+                                 "are real but written the wrong way; use the "
+                                 "`tag` given.")}, True,
+                       "tags · %d ok, %d unknown" % (len(got["known"]),
+                                                     len(got["unknown"])))
+                return
+            if not query:
+                answer({"error": "booru_tags needs a query or a draft to check"},
+                       False)
+                return
+            hits = boorutags.search(query, str(a.get("category") or ""),
+                                    int(a.get("limit") or 25))
+        except (ValueError, TypeError, OSError) as e:
+            answer({"error": str(e)}, False)
+            return
+        answer({"ok": True, "query": query, "count": len(hits), "tags": hits,
+                "note": ("Ordered by how many pictures carry the tag — the "
+                         "first is the one the model saw most. Write them with "
+                         "spaces, and an artist as @name.")
+               if hits else "No tag on Danbooru matches that."},
+               True, "tags · %d for %s" % (len(hits), query[:40]))
 
     def _make_image(self, args, idx, remaining, calls):
         self._make_media(args, idx, remaining, calls, "image")
@@ -8035,6 +8209,7 @@ class Ollama(QObject):
                 # The lease is back on, so the rest of the turn is still
                 # chatter's; it never got as far as freeing anything.
                 self._warden.reserve("ollama", model=self._model)
+                self.genFinished.emit()
                 answer({"error": ("no room to generate right now — " +
                                   str(reason or "memory") + ". The " + noun +
                                   " cannot be made while this much of the "
@@ -8072,7 +8247,41 @@ class Ollama(QObject):
             return
         proc = QProcess(self)
         self._procs.append(proc)
-        state = {"done": False, "timeout": False}
+        state = {"done": False, "timeout": False, "out": "", "meta": {}}
+
+        # READ IT AS IT RUNS, not at the end. A render is minutes long, and the
+        # generator prints `::progress FRAC LABEL` throughout (`--progress`) —
+        # so the chat can draw a bar instead of one motionless line that reads
+        # as stalled [his, 2026-08-24]. The whole of stdout is accumulated here
+        # because `readAllStandardOutput` hands back only what has not been
+        # read, and `finished` still needs the `saved …` lines.
+        def drained():
+            try:
+                chunk = bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")
+            except RuntimeError:
+                return
+            if not chunk:
+                return
+            state["out"] += chunk
+            for line in chunk.splitlines():
+                line = line.strip()
+                if line.startswith("::progress "):
+                    bits = line[11:].split(" ", 1)
+                    try:
+                        frac = float(bits[0])
+                    except (ValueError, IndexError):
+                        continue
+                    self.genProgress.emit(bits[1] if len(bits) > 1 else "", frac)
+                elif line.startswith("::result "):
+                    try:
+                        got = json.loads(line[9:])
+                    except ValueError:
+                        continue
+                    if isinstance(got, dict):
+                        state["meta"] = got
+
+        proc.readyReadStandardOutput.connect(drained)
+        self.genProgress.emit("starting the backend", 0.0)
         # STILL WORKING. Waking the backend and loading 20 GB of weights can
         # outlast the reservation on its own, and a lapsed lease is the other
         # side taking the memory out from under a render (or worse, loading
@@ -8097,14 +8306,16 @@ class Ollama(QObject):
             state["done"] = True
             if proc in self._procs:
                 self._procs.remove(proc)
+            drained()
             try:
-                out = bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")
                 err = bytes(proc.readAllStandardError()).decode("utf-8", "replace")
                 rc = proc.exitCode()
             except RuntimeError:
                 return
+            out = state["out"]
             proc.deleteLater()
             release()
+            self.genFinished.emit()
             if state["timeout"]:
                 answer({"error": "the generation ran past %d minutes and was "
                                  "stopped" % (limit_ms // 60000)}, False,
@@ -8123,8 +8334,10 @@ class Ollama(QObject):
                 return
             path = made[-1]
             caption = str(args.get("prompt") or "")
+            meta = self._gen_meta(state["meta"])
             if kind == "video":
-                self._display_clip(path, caption, args, answer)
+                self._display_clip(path, caption, args, answer, meta,
+                                   state["meta"])
                 return
 
             def shown(result, ok=True):
@@ -8138,7 +8351,7 @@ class Ollama(QObject):
                        "made " + os.path.basename(path))
 
             self._display_image(path, caption,
-                                "top" if ON_BOOK else None, shown)
+                                "top" if ON_BOOK else None, shown, meta)
 
         def failed(e):
             if state["done"] or e != QProcess.ProcessError.FailedToStart:
@@ -8148,6 +8361,7 @@ class Ollama(QObject):
                 self._procs.remove(proc)
             proc.deleteLater()
             release()
+            self.genFinished.emit()
             answer({"error": "could not start the image backend command"}, False)
 
         def expire():
@@ -8167,7 +8381,42 @@ class Ollama(QObject):
             proc.write(stdin)
         proc.closeWriteChannel()
 
-    def _display_clip(self, path, caption, args, answer):
+    @staticmethod
+    def _gen_meta(got):
+        """WHAT MADE IT, as one dim line under the caption [his, 2026-08-24].
+
+        The picture's own caption is his prompt; this is the rest of the answer
+        to "what is this" — the model, the size, the sampling and the seed,
+        which is what he needs to make the same picture again. Read off the
+        graph the generator actually ran (`::result`), not off the tool call, so
+        everything that came from his painter settings and never appeared as an
+        argument is in it too. Nothing to report is an empty line, not a row of
+        `None`s."""
+        if not isinstance(got, dict) or not got:
+            return ""
+        bits = []
+        model = str(got.get("model") or "")
+        if model:
+            bits.append(re.sub(r"\.(safetensors|gguf|ckpt|pt)$", "", model))
+        if got.get("seconds") and got.get("fps"):
+            bits.append("%gs @ %g fps" % (got["seconds"], got["fps"]))
+        if got.get("sized_by_image"):
+            bits.append("sized by the input")
+        elif got.get("width") and got.get("height"):
+            bits.append("%dx%d" % (got["width"], got["height"]))
+        if got.get("steps"):
+            bits.append("%d steps" % int(got["steps"]))
+        samp = "/".join(str(got[k]) for k in ("sampler", "scheduler")
+                        if got.get(k) and str(got[k]).lower() != "none")
+        if samp:
+            bits.append(samp)
+        if got.get("cfg") is not None:
+            bits.append("cfg %g" % float(got["cfg"]))
+        if got.get("seed") is not None:
+            bits.append("seed %d" % int(got["seed"]))
+        return " · ".join(bits)
+
+    def _display_clip(self, path, caption, args, answer, meta="", got=None):
         """Put a generated clip in the chat, on its own poster frame.
 
         A VideoCard streams whatever `src` names, and a local file is a source
@@ -8186,10 +8435,14 @@ class Ollama(QObject):
                 w, h = probe.width(), probe.height()
             else:
                 shot, w, h = "", 0, 0
-            entry = {"ok": True, "url": "file://" + here, "src": "file://" + here,
-                     "alt": caption, "title": os.path.basename(here),
+            entry = {"ok": True, "url": "file://" + here,
+                     "src": "file://" + here,
+                     "path": here, "alt": caption, "meta": meta,
+                     "title": os.path.basename(here),
                      "w": w, "h": h, "poster": shot,
-                     "duration": float(args.get("seconds") or 0), "live": False}
+                     "duration": float((got or {}).get("seconds")
+                                       or args.get("seconds") or 0),
+                     "live": False}
             self.videoResult.emit(json.dumps(entry))
             answer({"ok": True, "path": here,
                     "note": ("Generated and placed in the chat as a video he "

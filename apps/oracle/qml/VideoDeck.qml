@@ -17,6 +17,8 @@ Column {
     property Item stage: null
     // Passed through too: Root, so a card can register with the mini-player.
     property var host: null
+    // Forwarded from whichever card was right-clicked (see VideoCard.qml).
+    signal contextRequested(string path, real x, real y)
 
     spacing: 6
 
@@ -28,6 +30,7 @@ Column {
             entry: deck.entries[index]
             stage: deck.stage
             host: deck.host
+            onContextRequested: (p, x, y) => deck.contextRequested(p, x, y)
         }
     }
 }

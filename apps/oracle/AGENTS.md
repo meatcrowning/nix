@@ -1812,6 +1812,47 @@ as far as freeing anything. Harness: the recording-warden section of
 `tools/toolbox-test.py`, and `~/nix/tools/ai-warden-test.py` for the decision
 table behind it.
 
+**A render is minutes; the chat shows where it is.** Until 2026-08-24 the whole
+of one was a single motionless "making a picture…", which reads as stalled. The
+generator reports its position (`--progress`) and chatter reads stdout AS IT
+RUNS — `readyReadStandardOutput`, accumulating the whole of it, because
+`finished` still needs the `saved …` lines and `readAllStandardOutput` hands
+back only what has not been read. `genProgress(label, frac)` / `genFinished()`
+land on the turn as `genLabel`/`genFrac`/`genRunning`, and QML draws a `Meter`
+under the tool disclosure's heading — open or shut, since the point is that the
+wait is visible. Transient like `execTail`: what it MADE is the picture, so
+nothing about the bar is persisted.
+
+**A generated picture says what made it.** The caption is his prompt; a second,
+dimmer line under it (`entry.meta`, drawn where a fetched picture's host goes)
+carries the model, the size, the steps, the sampler/scheduler, the cfg and the
+seed — the rest of the answer to "what is this", and the seed is what makes the
+same picture again [his, 2026-08-24]. `_gen_meta` builds it from the generator's
+`::result`, i.e. off the graph that actually ran, so everything that came from
+his painter settings and never appeared as a tool argument is in it too.
+
+**A picture or a clip can LEAVE the window.** Right-click anything in the log —
+inline picture, gallery tile, lightbox, video card — and `Clip.copyImage` /
+`copyFile` put it on the clipboard through `pylib/clipfile.py`, never
+QClipboard: a Wayland selection dies with the process that offered it, and
+`setMimeData` hands Qt's global-static clipboard a Python-built QMimeData it
+frees after the interpreter is gone (a SIGSEGV on exit from any run that
+copied). The components own no menu — each has a `contextRequested(path, x, y)`
+signal and Root, which holds the one `ctxMenu`, puts the rows on it. The outcome
+is TOASTED (§10): chatter had no transient surface at all, so painter's toast
+came over verbatim — a copy that silently did nothing looks exactly like one
+that worked, right up until the paste.
+
+**`booru_tags` — the vocabulary, searched, not remembered.** Anima was captioned
+with Danbooru's tags, and a tag the site does not have does nothing at all — it
+is not a weaker version of the tag you meant. A model writing from memory
+invents plausible ones at a steady rate, so the 91k-tag list ships with the apps
+(`pylib/boorutags.py`) and the tool searches it, resolves aliases
+(`sole female` → `1girl`), names each tag's category (an artist is written
+`@name`) and CHECKS a drafted prompt for the invented ones. Pasting a whole
+vocabulary into the context would be 2 MB and still not say which tag is the
+used one.
+
 **His shorthand is parsed HERE, not by the model** (`genshort.py`). `anima. 2:3
 x1 1girl, solo, …` and `video. first frame: [pasted image]. 6s i2v. …` are jobs
 with numbers in them, and a local model asked to infer them gets the aspect

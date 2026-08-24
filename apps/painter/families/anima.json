@@ -1,7 +1,7 @@
 {
   "graph": "universal.json",
   "loader_shape": "unet",
-  "prompt_transform": "single_line",
+  "prompt_transform": "danbooru",
   "latent_class": "EmptyLatentImage",
   "toggles": {
     "negpip": true,

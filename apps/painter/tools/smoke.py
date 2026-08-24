@@ -36,6 +36,21 @@ import userprefs as UP  # noqa: E402
 OUT_DIR = os.path.expanduser("~/Pictures/painter/out")
 VIDEO_SUFFIXES = {".mp4", ".webm", ".mkv", ".mov"}
 
+#: Where each node of the graph sits on a 0..1 bar, and what to call it. Only
+#: the roles worth naming — anything else lands on a small default, since a bar
+#: that jumps backwards is worse than one that pauses.
+NODE_FRAC = {"loader": 0.04, "clip": 0.06, "vae": 0.07, "encode_pos": 0.08,
+             "encode_neg": 0.09, "load_image": 0.05, "scale_image": 0.06,
+             "sampler": 0.10, "decode": 0.88, "create_video": 0.94,
+             "save": 0.97}
+NODE_LABEL = {"loader": "loading the model", "clip": "loading the encoder",
+              "vae": "loading the VAE", "encode_pos": "reading the prompt",
+              "encode_neg": "reading the negative",
+              "load_image": "reading the picture",
+              "scale_image": "sizing the picture", "sampler": "sampling",
+              "decode": "decoding", "create_video": "encoding the video",
+              "save": "saving"}
+
 
 def pick(reg, wanted, mode=""):
     """The model this run generates with.
@@ -127,6 +142,14 @@ def main(argv=None):
     ap.add_argument("--no-model-sampling", dest="ms", action="store_false")
     ap.add_argument("--out-dir", default=OUT_DIR)
     ap.add_argument("--dump-graph", metavar="PATH")
+    ap.add_argument("--progress", action="store_true",
+                    help="also print machine-readable `::progress FRAC LABEL` "
+                         "and a final `::result JSON` line, for a caller "
+                         "drawing this somewhere else")
+    ap.add_argument("--no-negpip-fold", dest="fold", action="store_false",
+                    default=True,
+                    help="keep the negative in its own box even on a NegPip "
+                         "family (by default it is folded into the positive)")
     ap.add_argument("--no-prefs", dest="prefs", action="store_false", default=True,
                     help="ignore what he last set in painter for this model")
     ap.add_argument("--dry-run", action="store_true",
@@ -249,6 +272,30 @@ def main(argv=None):
     if toggles:
         params["toggles"] = toggles
 
+    # NEGPIP: THE NEGATIVE GOES IN THE POSITIVE, and the negative box is left
+    # empty [his, 2026-08-24]. `CLIPNegPip` is what makes a NEGATIVE WEIGHT work
+    # inside the positive prompt — `(lowres, low quality:-1.0)` pushes those
+    # away — and on a family that has it on, that is the stronger control: it
+    # rides the same patched CLIP the positive does, while the negative box is
+    # encoded through the RAW one. So the caller writes a prompt and a negative
+    # like anywhere else and this does the spelling, rather than every caller
+    # having to remember the syntax (and the sign — a POSITIVE weight there
+    # emphasises the very thing it was meant to remove).
+    #
+    # Only when the toggle is actually on for this run, only when there is a
+    # negative to move, and never for a family without the node.
+    fold_w = float((fam.get("negpip") or {}).get("weight", -1.0)
+                   if isinstance(fam.get("negpip"), dict) else -1.0)
+    negpip_on = bool((toggles or fam.get("toggles") or {}).get("negpip"))
+    folded = False
+    neg = str(params.get("negative") or "").strip()
+    if args.fold and negpip_on and neg and not edit and not video:
+        params["positive"] = ("%s, (%s:%s)"
+                              % (str(params.get("positive") or "").strip().rstrip(","),
+                                 neg.strip().rstrip(","), ("%g" % fold_w))).lstrip(", ")
+        params["negative"] = ""
+        folded = True
+
     oi = None
     if not args.dry_run:
         try:
@@ -289,6 +336,8 @@ def main(argv=None):
     if edit:
         print(f"editing  {', '.join(p.get('input_images') or [])}")
     print(f"toggles  {p.get('toggles')}  loras={[l['name'] for l in loras]}")
+    if folded:
+        print(f"negpip   the negative is inline at {fold_w:g}, its own box empty")
 
     if args.dump_graph:
         with open(args.dump_graph, "w", encoding="utf-8") as fh:
@@ -299,7 +348,45 @@ def main(argv=None):
         return 0
 
     client.logged.connect(lambda m: print(f"[ws] {m}"))
-    client.jobNode.connect(lambda _j, role: print(f"  .. {role}"))
+
+    # MACHINE-READABLE PROGRESS, for a caller drawing this somewhere else —
+    # chatter puts it under the tool disclosure as a bar, because a render is
+    # minutes long and a chat with nothing moving in it reads as stalled. One
+    # line, `::progress FRAC LABEL`, flushed as it happens: a fraction the
+    # caller can draw without knowing anything about samplers, and a label that
+    # says which part of the graph is running. The prose lines below stay
+    # exactly as they were for a person watching the terminal.
+    # MONOTONIC, always. ComfyUI reports a `0/1 … 1/1` for EVERY node, not just
+    # the sampler, and it does not walk the graph in the order the bar is drawn
+    # in — so an unguarded mapping runs backwards several times a render, which
+    # reads worse than no bar at all. The high-water mark is the whole fix.
+    seen_frac = [0.0]
+    seen_last = [None]
+
+    def emit(frac, label):
+        if not args.progress:
+            return
+        frac = max(0.0, min(1.0, frac))
+        if frac < seen_frac[0]:
+            frac = seen_frac[0]
+        # The socket repeats a step, and a node that reports `0/1 … 1/1` after
+        # the sampler has finished contributes nothing but noise on the pipe.
+        if seen_last[0] == (frac, label):
+            return
+        seen_frac[0] = frac
+        seen_last[0] = (frac, label)
+        print("::progress %.4f %s" % (frac, label), flush=True)
+
+    role_now = [""]
+
+    def on_node(_j, role):
+        print(f"  .. {role}")
+        role_now[0] = role
+        # Sampling is nearly all of the wall clock, so the stages around it get
+        # the ends of the bar rather than an equal share of it.
+        emit(NODE_FRAC.get(role, 0.05), NODE_LABEL.get(role, role))
+
+    client.jobNode.connect(on_node)
 
     last = [0.0]
 
@@ -308,8 +395,15 @@ def main(argv=None):
         if maximum and (now - last[0] > 1.0 or value >= maximum):
             last[0] = now
             print(f"  {value}/{maximum}")
+        # Only the SAMPLER's steps move the bar: every other node's progress is
+        # a one-tick `0/1 … 1/1` that says nothing about the wait.
+        if maximum and role_now[0] == "sampler":
+            # The sampler owns 10%..85% of the bar; the rest is load and decode.
+            emit(0.10 + 0.75 * (float(value) / float(maximum)),
+                 "sampling %d/%d" % (value, maximum))
 
     client.jobProgress.connect(on_prog)
+    emit(0.02, "loading the model")
 
     jobs = C.run_jobs(client, lambda c: [c.submit(built["prompt"], built["params"])],
                       timeout=args.timeout)
@@ -353,6 +447,22 @@ def main(argv=None):
     print(f"\nprompt_id {job.prompt_id}  in {job.duration:.1f}s")
     for s in saved:
         print(f"  saved {s} ({os.path.getsize(s)} bytes)")
+    if args.progress:
+        # WHAT MADE IT, for the caption the caller writes. Read off the built
+        # params rather than the command line, so it is what the graph actually
+        # ran with — including everything that came from his painter settings
+        # and never appeared as a flag.
+        emit(1.0, "done")
+        print("::result " + json.dumps({
+            "model": entry.name, "kind": kind, "seed": p.get("seed"),
+            "steps": p.get("steps"), "cfg": p.get("cfg"),
+            "sampler": p.get("sampler_name"), "scheduler": p.get("scheduler"),
+            "width": p.get("width"), "height": p.get("height"),
+            "frames": p.get("frames"), "fps": p.get("fps"),
+            "sized_by_image": bool(by_image),
+            "seconds": round(float(p["frames"]) / float(p["fps"]), 2)
+                       if p.get("frames") and p.get("fps") else None,
+            "files": saved}), flush=True)
     return 0 if saved else 1
 
 

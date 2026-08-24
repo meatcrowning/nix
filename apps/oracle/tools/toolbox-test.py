@@ -342,6 +342,33 @@ check("...and hands it back, then takes the turn's lease again",
       paths[-2:] == ["/done", "/reserve"]
       and WARDEN_CALLS[-2][1].get("backend") == "comfy"
       and WARDEN_CALLS[-1][1].get("backend") == "ollama", str(WARDEN_CALLS)[:300])
+
+# 3e. THE WAIT IS SHOWN, and the picture says what made it. A render is minutes
+# long; the generator reports where it is (`::progress`) and what it ran
+# (`::result`), and neither may be read only at the end.
+seen = []
+o.genProgress.connect(lambda label, frac: seen.append((label, frac)))
+os.environ["ORACLE_PAINTER"] = str(script(
+    _TMP / "genmeta.sh",
+    'echo "::progress 0.10 sampling 1/50"\n'
+    'echo "::progress 0.85 decoding"\n'
+    'echo "  saved %s (1234 bytes)"\n'
+    'echo \'::result {"model":"anima-base-v1.0.safetensors","seed":7,'
+    '"steps":50,"sampler":"euler_cfg_pp","scheduler":"beta","width":1152,'
+    '"height":1728,"cfg":0.7}\'' % str(made)))
+seen.clear()
+r = run_tool("make_image", {"prompt": "a red cube"}, ms=20000)
+check("a render reports where it is, as it runs",
+      any(abs(f - 0.85) < 0.001 for _l, f in seen)
+      and any(l.startswith("sampling") for l, _f in seen), str(seen)[:200])
+check("...and the caption says what made it",
+      len(shown) == 1 and "anima-base-v1.0" in (shown[0].get("meta") or "")
+      and "1152x1728" in shown[0]["meta"] and "50 steps" in shown[0]["meta"]
+      and "euler_cfg_pp/beta" in shown[0]["meta"]
+      and "seed 7" in shown[0]["meta"], json.dumps(shown)[:260])
+check("...without repeating the prompt, which is the caption",
+      bool(shown) and shown[0].get("alt") == "a red cube", json.dumps(shown)[:160])
+
 WARDEN_CALLS.clear()
 wardenmod.WARDEN = "http://127.0.0.1:1"          # dead again: fail open
 o._warden = wardenmod.Warden(o)

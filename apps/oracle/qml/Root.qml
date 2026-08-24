@@ -202,7 +202,8 @@ Item {
                   agentHead: "", agentsBad: false,
                   sources: "", searchCount: 0, searching: false,
                   files: "", fileCount: 0, filesActive: false,
-                  execTail: "", execRunning: false, loading: false };
+                  execTail: "", execRunning: false, loading: false,
+                  genLabel: "", genFrac: 0, genRunning: false };
         if (head < 0 || head >= chatLog.count) return a;
         for (var i = head; i < chatLog.count && !chatLog.get(i).isUser; i++) {
             var r = chatLog.get(i);
@@ -236,6 +237,12 @@ Item {
             if ((r.execTail || "") !== "") {
                 a.execTail = r.execTail;
                 a.execRunning = !!r.execRunning;
+            }
+            // A render's bar belongs to whichever row is generating now.
+            if (r.genRunning) {
+                a.genRunning = true;
+                a.genLabel = r.genLabel || "";
+                a.genFrac = r.genFrac || 0;
             }
             // Nothing said and nothing thought while a row still streams: the
             // turn is waiting on its first anything, and that is a line of its
@@ -535,6 +542,25 @@ Item {
             if (win.activeIndex < 0) return;
             chatLog.setProperty(win.activeIndex, "execRunning", false);
         }
+        // A RENDER, AS IT RUNS [his, 2026-08-24]. A picture is minutes and a
+        // clip is tens of them, and until now the whole of it was one
+        // motionless "making a picture…" — which reads as stalled. painter's
+        // generator reports where it is; this puts it under the tool
+        // disclosure as a labelled bar, the same place the reasoning and the
+        // file lines live. Transient, like `execTail`: what it MADE is the
+        // picture in the reply, so nothing here is persisted.
+        function onGenProgress(label, frac) {
+            if (win.activeIndex < 0) return;
+            chatLog.setProperty(win.activeIndex, "genLabel", label);
+            chatLog.setProperty(win.activeIndex, "genFrac", frac);
+            chatLog.setProperty(win.activeIndex, "genRunning", true);
+        }
+        function onGenFinished() {
+            if (win.activeIndex < 0) return;
+            chatLog.setProperty(win.activeIndex, "genRunning", false);
+            chatLog.setProperty(win.activeIndex, "genFrac", 0);
+            chatLog.setProperty(win.activeIndex, "genLabel", "");
+        }
         function onReplyDone() {
             if (win.activeIndex < 0) return;
             win.stopThinkClock(win.activeIndex);
@@ -546,6 +572,7 @@ Item {
             chatLog.setProperty(win.activeIndex, "imagesActive", false);
             chatLog.setProperty(win.activeIndex, "videosActive", false);
             chatLog.setProperty(win.activeIndex, "execRunning", false);
+            chatLog.setProperty(win.activeIndex, "genRunning", false);
             chatLog.setProperty(win.activeIndex, "toolsActive", false);
             chatLog.setProperty(win.activeIndex, "agentsActive", false);
             chatLog.setProperty(win.activeIndex, "agentsPending", 0);
@@ -566,6 +593,7 @@ Item {
             chatLog.setProperty(win.activeIndex, "imagesActive", false);
             chatLog.setProperty(win.activeIndex, "videosActive", false);
             chatLog.setProperty(win.activeIndex, "execRunning", false);
+            chatLog.setProperty(win.activeIndex, "genRunning", false);
             chatLog.setProperty(win.activeIndex, "toolsActive", false);
             chatLog.setProperty(win.activeIndex, "agentsActive", false);
             chatLog.setProperty(win.activeIndex, "agentsPending", 0);
@@ -781,6 +809,33 @@ Item {
         return rows;
     }
 
+    // WHAT CAN BE DONE WITH A PICTURE OR A CLIP IN THE LOG [his, 2026-08-24].
+    // Copying is the point: a generated picture he likes has to be able to
+    // leave the window, and until now nothing in the chat could. `copy image`
+    // offers the pixels AND the file, so a paste lands as the picture in an
+    // editor and as a named file everywhere else; `copy file` is the file
+    // alone, which is all a video has to give (pylib/clipfile.py). Both report
+    // (§10) — a copy that silently did nothing looks exactly like one that
+    // worked, right up until the paste.
+    function mediaMenu(path, isVideo) {
+        var rows = [];
+        if (!isVideo)
+            rows.push({ label: win.plasma ? "Copy Image" : "copy image",
+                        trigger: function () { Clip.copyImage(path); } });
+        rows.push({ label: win.plasma ? "Copy File" : "copy file",
+                    trigger: function () { Clip.copyFile(path); } });
+        rows.push({ separator: true });
+        rows.push({ label: win.plasma ? "Copy Path" : "copy path",
+                    trigger: function () { Clip.copyText(path); } });
+        return rows;
+    }
+
+    // One right-click on a picture or a clip, wherever in the log it was.
+    function openMediaMenu(path, x, y, isVideo) {
+        if (!path || path === "") return;
+        ctxMenu.open(x, y, win.mediaMenu(path, isVideo === true));
+    }
+
     // Open the custom-prompt editor (from the picker's "custom…" or the "edit"
     // button), prefilled with his saved custom text.
     function openPromptEditor() {
@@ -805,6 +860,7 @@ Item {
                          images: "[]", imagesActive: false, imagesPending: 0,
                          videos: "[]", videosActive: false, videosPending: 0,
                          execTail: "", execRunning: false,
+                         genLabel: "", genFrac: 0, genRunning: false,
                          tools: "", toolCount: 0, toolsActive: false,
                          streaming: true, isError: false });
         win.activeIndex = chatLog.count - 1;
@@ -879,6 +935,7 @@ Item {
                              images: t.images || "[]", imagesActive: false, imagesPending: 0,
                              videos: t.videos || "[]", videosActive: false, videosPending: 0,
                              execTail: "", execRunning: false,
+                             genLabel: "", genFrac: 0, genRunning: false,
                              tools: t.tools || "", toolCount: t.toolCount || 0, toolsActive: false,
                              streaming: false, isError: !!t.isError,
                              step: t.step || 0, ts: t.ts || 0 });
@@ -1007,6 +1064,7 @@ Item {
                          images: "[]", imagesActive: false, imagesPending: 0,
                          videos: "[]", videosActive: false, videosPending: 0,
                          execTail: "", execRunning: false,
+                         genLabel: "", genFrac: 0, genRunning: false,
                          tools: "", toolCount: 0, toolsActive: false,
                          streaming:false, isError: false, step: 0 });
         win.appendReplyRow(1);
@@ -1399,6 +1457,7 @@ Item {
             chatLog.setProperty(win.activeIndex, "imagesActive", false);
             chatLog.setProperty(win.activeIndex, "videosActive", false);
             chatLog.setProperty(win.activeIndex, "execRunning", false);
+            chatLog.setProperty(win.activeIndex, "genRunning", false);
             win.chatRev++;
             win.saveCurrent();   // keep the partial turn in the session
         }
@@ -2890,9 +2949,11 @@ Item {
                                             width: parent.width
                                             // Two lines while a program is printing:
                                             // the heading, and the line it printed last
-                                            // under it.
+                                            // under it. A render adds its bar the same
+                                            // way, below both.
                                             height: Theme.lineHeight
                                                     + (execPeek.visible ? Theme.lineHeight : 0)
+                                                    + (genRow.visible ? Theme.lineHeight : 0)
                                             property int dotPhase: 0
                                             readonly property string dots:
                                                 motion.reduceMotion ? "…" : "...".substring(0, dotPhase)
@@ -2955,6 +3016,40 @@ Item {
                                                 elide: Text.ElideRight
                                                 text: win.lastLine(turn.agg.execTail)
                                                 color: Theme.text
+                                            }
+                                            // A RENDER'S PROGRESS, under the
+                                            // heading and always visible —
+                                            // open or shut, because the whole
+                                            // point is that a minutes-long
+                                            // wait does not look like a
+                                            // stalled one [his, 2026-08-24].
+                                            // The label says which part is
+                                            // running; the bar is the same
+                                            // Meter the context readout uses,
+                                            // so there is one progress shape
+                                            // in this window and not two.
+                                            Row {
+                                                id: genRow
+                                                anchors { left: parent.left; leftMargin: 12
+                                                          top: execPeek.visible ? execPeek.bottom
+                                                                                : fileHead.bottom }
+                                                height: visible ? Theme.lineHeight : 0
+                                                spacing: 8
+                                                visible: turn.agg.genRunning
+                                                Meter {
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    width: 120
+                                                    frac: turn.agg.genFrac
+                                                }
+                                                PixelText {
+                                                    text: turn.agg.genLabel
+                                                    color: Theme.textDim
+                                                }
+                                                PixelText {
+                                                    text: Math.round(turn.agg.genFrac * 100) + "%"
+                                                    color: Theme.textDim
+                                                    opacity: 0.6
+                                                }
                                             }
                                             MouseArea {
                                                 anchors.fill: parent
@@ -3156,6 +3251,7 @@ Item {
                                                         maxWidth: replyFlow.width
                                                         onEnlarge:
                                                             lightbox.openAt([parent.modelData], 0)
+                                                        onContextRequested: (p, x, y) => win.openMediaMenu(p, x, y, false)
                                                     }
 
                                                     // A fetch that failed, where the picture was meant
@@ -3182,6 +3278,7 @@ Item {
                                                 visible: turn.leftoverImages.length > 0
                                                 entries: turn.leftoverImages
                                                 onEnlarge: (i) => lightbox.openAt(turn.leftoverOks, i)
+                                                onContextRequested: (p, x, y) => win.openMediaMenu(p, x, y, false)
                                             }
 
                                             // A typed/fetched image still landing (§10 — wait shown).
@@ -3211,6 +3308,7 @@ Item {
                                                         try { return JSON.parse(videos); }
                                                         catch (e) { return []; }
                                                     }
+                                                    onContextRequested: (p, x, y) => win.openMediaMenu(p, x, y, true)
                                                 }
 
                                                 // Resolving a watch page takes seconds, so the wait
@@ -3386,6 +3484,7 @@ Item {
     Lightbox {
         id: lightbox
         onClosed: replyFlick.forceActiveFocus()
+        onContextRequested: (p, x, y) => win.openMediaMenu(p, x, y, false)
     }
 
     // ------------------------------------------------------- the video stage
@@ -3397,6 +3496,55 @@ Item {
     VideoStage {
         id: videoStage
         onClosed: replyFlick.forceActiveFocus()
+    }
+
+    // A COPY THAT FAILED HAS TO SAY SO (§10). Chatter had no transient surface
+    // at all — `win.status` is drawn only on an empty log — so this is
+    // painter's toast, verbatim: bottom-centre, three seconds, crit border when
+    // it is bad news. A copy that WORKED says so too, because the clipboard
+    // gives back no other sign until the paste.
+    Rectangle {
+        id: toast
+        z: 2900
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 40
+        width: Math.min(toastMsg.implicitWidth + 24, win.width - 60)
+        height: 30
+        opacity: 0
+        color: Theme.bgAlt
+        radius: Theme.rounding
+        border.color: error ? Theme.crit : Theme.border
+        border.width: Theme.ctrlBorder
+        property bool error: false
+
+        function show(text, isError) {
+            toastMsg.text = text;
+            error = isError === true;
+            toastFade.restart();
+        }
+
+        PixelText {
+            id: toastMsg
+            anchors.centerIn: parent
+            width: parent.width - 20
+            elide: Text.ElideRight
+            color: parent.error ? Theme.crit : Theme.text
+        }
+
+        // The PAUSE deliberately does not scale with animSpeed: it is how long
+        // the message is READABLE, not motion, and under reduceMotion `ms()`
+        // returns 0 — which would blink the report out of existence.
+        SequentialAnimation {
+            id: toastFade
+            NumberAnimation { target: toast; property: "opacity"; to: 1; duration: motion.ms(120) }
+            PauseAnimation { duration: 3200 }
+            NumberAnimation { target: toast; property: "opacity"; to: 0; duration: motion.ms(400) }
+        }
+        Connections {
+            target: Clip
+            function onCopied(message, bad) { toast.show(message, bad); }
+        }
     }
 
     // The right-click menu for the log, ours under Hyprland and the style's own

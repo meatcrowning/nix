@@ -29,6 +29,8 @@ Item {
     readonly property int count: entries ? entries.length : 0
 
     signal closed()
+    // Right-click on the enlarged picture — Root puts the rows on it.
+    signal contextRequested(string path, real x, real y)
 
     function openAt(list, i) {
         entries = list || [];
@@ -131,6 +133,15 @@ Item {
             cursorShape: Qt.PointingHandCursor
             onClicked: box.step(1)
         }
+        MouseArea {
+            anchors.fill: big
+            acceptedButtons: Qt.RightButton
+            onClicked: function (m) {
+                var p = mapToItem(null, m.x, m.y);
+                box.contextRequested(
+                    box.current ? (box.current.path || "") : "", p.x, p.y);
+            }
+        }
     }
 
     // The caption band: the model's alt text, and the position in the set.
@@ -145,7 +156,12 @@ Item {
             anchors { left: parent.left; right: posText.left
                       rightMargin: 10; verticalCenter: parent.verticalCenter }
             wrapMode: Text.Wrap
-            text: (box.current && box.current.alt) ? box.current.alt : ""
+            text: {
+                if (!box.current) return "";
+                var a = box.current.alt || "";
+                var m = box.current.meta || "";
+                return m === "" ? a : (a === "" ? m : a + "\n" + m);
+            }
             color: Theme.text
         }
         PixelText {

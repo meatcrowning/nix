@@ -37,6 +37,10 @@ Column {
     // it can show the transport when this card's bubble is off-screen) and
     // when the card is destroyed. Nullable, so the card still works bare.
     property var host: null
+    // Right-click, so the clip can leave the window [his, 2026-08-24]. The card
+    // owns no menu — Root does, along with the Clip object; a RightButton-only
+    // area over the frame leaves every left click to the transport under it.
+    signal contextRequested(string path, real x, real y)
     readonly property bool ok: !!entry && entry.ok === true
     readonly property string src: ok ? (entry.src || "") : ""
     readonly property string poster: (ok && entry.poster) ? entry.poster : ""
@@ -190,6 +194,16 @@ Column {
             wrapMode: Text.Wrap
             text: "can't play this stream"
             color: Theme.crit
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.RightButton
+            onClicked: function (m) {
+                var p = mapToItem(null, m.x, m.y);
+                var f = card.ok ? (card.entry.path || "") : "";
+                if (f !== "") card.contextRequested(f, p.x, p.y);
+            }
         }
 
         // Click the picture: start it, then play/pause it.

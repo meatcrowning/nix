@@ -893,6 +893,15 @@ than just text-to-image:
 - `--dry-run` builds the graph, prints the plan and submits nothing — no
   backend, no upload, no weights. That is how the parameter surface is checked
   without a render.
+- `--progress` adds two MACHINE-READABLE lines to the prose: `::progress FRAC
+  LABEL` as it runs, and one `::result JSON` at the end naming the model, seed,
+  size, steps and sampler the graph ACTUALLY ran with. chatter draws the first
+  as a bar and writes the second under the picture as its caption, and neither
+  may be read only at the end (`readyReadStandardOutput`, not `finished`). The
+  bar is a **high-water mark**: ComfyUI reports a `0/1 … 1/1` for every node,
+  not just the sampler, and does not walk the graph in the order a bar is drawn
+  in, so an unguarded mapping runs backwards several times a render. Only the
+  sampler's own steps move it (10%–85%); everything else is a fixed station.
 
 **HIS OWN SETTINGS ARE THE FLOOR** (`userprefs.py`, his 2026-08-24 rule: use
 what he set in painter as the reference, and something else only when he says
@@ -1224,10 +1233,34 @@ replaces with `distilled_guidance_layer`, and enabling it aborts the sampler.
 
 ## Per-family prompt transforms
 
-Anima's prompts are flattened to a single line on the way out
-(`prompt_transform: single_line`) while the editor keeps your line breaks;
-everything else is passed through verbatim (Krea 2's `<think>…</think>` prose
-must not be touched). The string actually sent is what gets recorded in the PNG.
+Anima's prompts are flattened to a single line on the way out and **spelled the
+way Danbooru spells them** (`prompt_transform: danbooru`) while the editor keeps
+your line breaks; everything else is passed through verbatim (Krea 2's
+`<think>…</think>` prose must not be touched). The string actually sent is what
+gets recorded in the PNG.
+
+`danbooru` is `single_line` plus the two things a model writing the prompt gets
+wrong most often, both mechanical [his, 2026-08-24]: **underscores become
+spaces**, and an artist becomes **`@name`** (`artist:x`, and `by x` when x is
+one token — "by the window" is a sentence, and this transform must never
+rewrite his prose). It normalises SPELLING and edits nothing else. Three things
+keep their underscores because they are not word separators: `score_*`, the
+emoticon tags (`^_^`, `>_<` — one character either side and nothing else), and
+whatever is inside a weight group, which is normalised tag by tag with the
+weight untouched, so `(lowres, low_quality:-1.0)` stays a weight group.
+
+## NegPip: the negative goes IN the positive
+
+`CLIPNegPip` is what makes a NEGATIVE weight work inside the positive prompt,
+and on a family that has it on that is the stronger control — it rides the same
+patched CLIP the positive does, while the negative box is encoded through the
+raw one. So `smoke.py` **folds** the negative into the positive as
+`(…:-1.0)` and leaves the negative box empty, for image jobs on a NegPip
+family, unless `--no-negpip-fold`. The caller writes a prompt and a negative
+like anywhere else; the syntax — and the SIGN, since a positive weight there
+emphasises the very thing it was meant to remove — is done here rather than
+asked for. **painter's own window is unchanged**: the fold is the headless
+path's, so the two boxes on screen still mean what they always did.
 
 ## Adding a family
 
