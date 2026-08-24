@@ -373,6 +373,46 @@ def prune_empty_dirs(dl_dir, src):
     return removed
 
 
+# Cover-ish names the player's folder_art()/FOLDER_ART_RE trusts, so a cover
+# carried into an album dir is actually picked up by the player.
+COVER_RE = re.compile(r"^(cover|folder|front|albumart.*)\.(jpe?g|png|webp|gif|bmp)$", re.I)
+
+
+def carry_cover(dl_dir, dest_dir, dry_run=False):
+    """Move a cover image downloaded beside the audio into the album dir, if
+    the album lacks one and the downloads folder holds one.
+
+    player-add.py moves only AUDIO files, so a cover.jpg slskd grabbed with the
+    album is otherwise orphaned in the downloads dir and the player shows no
+    art. Call after the move loop for each album's dest_dir."""
+    if dest_dir is None or not dest_dir.is_dir():
+        return False
+    # Already has a cover the player would trust? nothing to do.
+    if any(f.is_file() and COVER_RE.match(f.name)
+           for f in dest_dir.iterdir()):
+        return False
+    # Look for an orphaned cover in the downloads dir (same relative folder).
+    d = str(dest_dir)
+    for root, _dirs, files in os.walk(dl_dir):
+        if os.path.basename(root) == NEEDS_ATTENTION:
+            continue
+        for name in files:
+            if COVER_RE.match(name):
+                src = Path(root) / name
+                dest = dest_dir / safe_file(name)
+                if dry_run:
+                    print(f"  would carry cover {name} -> {dest}")
+                    return True
+                try:
+                    shutil.move(str(src), str(dest))
+                    print(f"  carried cover    {name} -> {dest_dir.name}/")
+                    return True
+                except OSError:
+                    pass
+    return False
+
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -397,6 +437,7 @@ def main():
     skipped = 0
     parked = 0
     failed = 0
+    moved_dest_dirs = set()
 
     for src in sorted(find_download_files(dl_dir)):
         t = P.read_tags(str(src))
@@ -465,6 +506,7 @@ def main():
             try:
                 dest_dir.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(src), str(dest))
+                moved_dest_dirs.add(dest_dir)
             except OSError as e:
                 # one unmovable file must not starve the rest of the batch
                 failed += 1
@@ -474,6 +516,11 @@ def main():
                 print(f"  pruned empty    {dl_dir.name}/{p.relative_to(dl_dir)}")
             print(f"  moved           {src.name} -> {root.name}/{safe_name(artist, 'Unknown Artist')}/{safe_name(album, 'Unknown Album')}/")
         moved += 1
+
+    # Carry each album's cover art into place — audio moves but the cover.jpg
+    # slskd grabbed beside it is otherwise orphaned (and the player shows no art).
+    for dest_dir in sorted(moved_dest_dirs):
+        carry_cover(dl_dir, dest_dir, dry_run=args.dry_run)
 
     print(f"\n{moved} download(s) imported into {root}" + ("" if args.dry_run else f"; skipped {skipped} already present" if skipped else "") + (f"; {failed} failed" if failed else ""))
     if parked:
