@@ -139,6 +139,11 @@ LEASE_DEFAULT = {"ollama": 900, "comfy": 120}
 STATE_DIR = Path.home() / ".local" / "state" / "ai-warden"
 OFF = STATE_DIR / "off"
 LOG = Path.home() / ".cache" / "ai-warden.log"
+#: Where the watchdog dumps a top-N RSS snapshot when the box is in trouble.
+#: Deliberately separate from LOG (which trims to 4 MiB) and bounded at 8 MiB,
+#: so a balloon that outlives the OOM-killed processes leaves a trace we can
+#: read after the fact. See pressure_capture().
+PRESSURE_LOG = STATE_DIR / "pressure.log"
 
 BACKENDS = ("ollama", "comfy")
 NICE = {"ollama": "chatter", "comfy": "painter"}
@@ -280,6 +285,60 @@ def hogs_note():
         if len(named) == 3:
             break
     return (" — " + ", ".join(named) + " are holding it") if named else ""
+
+
+def top_memory(limit=20):
+    """Top-N processes by RSS as a compact table, with PIDs and anon+swap.
+    Used by pressure_capture() to leave a trace when the box is dying; unlike
+    hogs_note() this keeps the PIDs and the swap, because the OOM killer's own
+    table is the one thing a dead boot does NOT persist for us to re-read."""
+    try:
+        out = subprocess.run(
+            ["ps", "-eo", "rss=,comm=", "--sort=-rss"],
+            capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return "(ps unavailable under pressure)"
+    rows = []
+    for line in out.splitlines()[:limit]:
+        try:
+            rss, comm = line.split(None, 1)
+            rows.append("%8s  %s" % (gb(int(rss) * 1024), comm.strip()[:28]))
+        except ValueError:
+            continue
+    return "\n".join(rows) or "(no processes)"
+
+
+def pressure_capture():
+    """Snapshot the machine's top memory consumers to PRESSURE_LOG, with a
+    timestamp, available RAM and PSI. The watchdog calls this the instant it
+    trips so a runaway session leaves a record even if the OOM killer takes
+    everything down (which is exactly what happened 2026-08-23 20:33 — the
+    OOM process table was the ONLY surviving trace, and it had no PIDs we
+    could map back to what was running). Bounded like the main log."""
+    avail = mem_available()
+    psi = psi_some_avg10()
+    try:
+        sw = open("/proc/meminfo").read()
+        swt = swf = 0
+        for line in sw.splitlines():
+            if line.startswith("SwapTotal:"):
+                swt = int(line.split()[1]) * 1024
+            elif line.startswith("SwapFree:"):
+                swf = int(line.split()[1]) * 1024
+        swap_used = gb(swt - swf) + " of " + gb(swt) if swt else "n/a"
+    except (OSError, ValueError):
+        swap_used = "n/a"
+    block = ("\n==== %s  avail=%s  psi=%.1f  swap %s ====\n%s\n"
+             % (time.strftime("%Y-%m-%d %H:%M:%S"), gb(avail), psi,
+                swap_used, top_memory()))
+    try:
+        with PRESSURE_LOG.open("a") as f:
+            f.write(block)
+        if PRESSURE_LOG.exists() and PRESSURE_LOG.stat().st_size > 8 * 1024 * 1024:
+            tail = PRESSURE_LOG.read_text(errors="replace").splitlines()[-1500:]
+            PRESSURE_LOG.write_text("\n".join(tail) + "\n")
+    except OSError:
+        pass
 
 
 def vram():
@@ -610,7 +669,9 @@ class Warden:
     def watchdog(self):
         """For the memory admission control cannot see coming — an agent's nix
         build, a browser, cte. Frees the idle backend when the machine is
-        already in trouble; never touches a busy one."""
+        already in trouble; never touches a busy one. Snapshots the top memory
+        consumers on every trip so a runaway that outlives the OOM killer
+        leaves a trace (pressure_capture -> PRESSURE_LOG)."""
         if OFF.exists():
             return
         avail, psi = mem_available(), psi_some_avg10()
@@ -618,6 +679,8 @@ class Warden:
             return
         if time.time() - self.last_watchdog < 120:
             return
+        self.last_watchdog = time.time()
+        pressure_capture()
         cands = []
         # "Hard pressure" is the watchdog's own trip — past CRIT_FLOOR or past
         # the PSI trip — never the HARD_FLOOR byte count. The 2026-08-22 freeze
