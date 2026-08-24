@@ -446,12 +446,16 @@ no code change at all.
   Seed both machines explicitly if that matters. Today:
   `video-prompt`, `flux-klein-edit` (the painter edit-mode instruction),
   `krea-prompt` (the positive/negative image pair), `anima-prompt` (the same
-  pair in Danbooru tags, for painter's anime mode), and the machine-runbook
-  set translated into chatter's vocabulary: `music-library`,
+  pair in Danbooru tags, for painter's anime mode), the machine-runbook set
+  translated into chatter's vocabulary (`music-library`,
   `soulseek-acquisition`, `music-library-curation`, `goetia-board-agents`,
   `comfyui`, `media-library-organization`, and the four hardware-triage skills
-  (`nixos-hard-freeze-triage`, `nvidia-gpu-fault-triage`,
-  `memory-corruption-diagnosis`, `linux-data-integrity-triage`).
+  `nixos-hard-freeze-triage`, `nvidia-gpu-fault-triage`,
+  `memory-corruption-diagnosis`, `linux-data-integrity-triage`), and the
+  useful generic Hermes defaults ported in (`humanizer`, `systematic-debugging`,
+  `youtube-content`). Seed book's copy with
+  `~/.local/share/oracle/seed-skills-to-book.sh` (the runtime dir is
+  machine-local; the seed excludes the machine-built youtube-content venv).
 - **`use_skill(name)`** returns that skill's `description`, its `instructions`
   (the SKILL.md with frontmatter stripped) and the names of its `guides`;
   **`use_skill(name, guide=…)`** returns one guide **in full**, in ONE call —
