@@ -1105,6 +1105,20 @@ Item {
         }
     }
 
+    // How many tool calls this conversation has made, and how many durable
+    // memories the model is carrying [his, 2026-08-23]. Both are STANDING FACTS
+    // about the chat on screen rather than about the turn in flight, which is
+    // why they sit with the context readout and in the status bar rather than
+    // in a bubble. `chatRev` is the dependency: ListModel rows settle without
+    // notifying, so every writer bumps it (see `accrueThink`).
+    readonly property int toolCallCount: {
+        win.chatRev;
+        var n = 0;
+        for (var i = 0; i < chatLog.count; i++)
+            n += chatLog.get(i).toolCount || 0;
+        return n;
+    }
+
     // ---- the KDE status bar ------------------------------------------------
     // Dolphin's shape: what is HAPPENING on the left, the standing fact on the
     // right. Under Hyprland nothing reads these — the same two readouts are
@@ -1124,8 +1138,14 @@ Item {
         var jobs = Jobs.runningCount > 0
                  ? (Jobs.runningCount === 1 ? "1 job · " : Jobs.runningCount + " jobs · ")
                  : "";
-        if (!Backend.serverUp) return jobs + "ollama down";
-        return jobs + (Backend.loadedModels.length > 0
+        var counts = (win.toolCallCount > 0
+                      ? win.toolCallCount + (win.toolCallCount === 1
+                                             ? " tool call · " : " tool calls · ")
+                      : "")
+                   + (Ollama.memoryCount > 0
+                      ? Ollama.memoryCount + " mem · " : "");
+        if (!Backend.serverUp) return jobs + counts + "ollama down";
+        return jobs + counts + (Backend.loadedModels.length > 0
                ? "ollama · " + Backend.loadedModels.join(", ") : "ollama idle");
     }
     // The taskbar entry says which conversation this is (kdeshell.bind_title).
@@ -1693,7 +1713,8 @@ Item {
         readonly property bool hasFill: hasCtx && Ollama.contextUsed > 0
         readonly property real fillFrac: hasFill
             ? Math.min(1, Ollama.contextUsed / Ollama.contextMax) : 0
-        visible: hasCtx || hasTps
+        visible: hasCtx || hasTps || win.toolCallCount > 0
+                 || Ollama.memoryCount > 0
         height: visible ? Theme.lineHeight : 0
 
         // Compact token formatter: 8192 → "8K", 8000 → "7.8K", 512 → "512".
@@ -1749,6 +1770,25 @@ Item {
             visible: statsRow.hasTps
             anchors.verticalCenter: parent.verticalCenter
             text: Ollama.tokensPerSec.toFixed(1) + " tok/s"
+            color: Theme.textDim
+        }
+
+        // The two counts, in the session that has no status bar to put them in
+        // (§7.6 — one source, two roofs; under Plasma these same two numbers
+        // are the status bar's standing facts). Each appears only once it is
+        // non-zero: a fresh chat says nothing about nothing (§5.2).
+        PixelText {
+            visible: win.toolCallCount > 0
+            anchors.verticalCenter: parent.verticalCenter
+            text: win.toolCallCount + (win.toolCallCount === 1
+                                       ? " tool call" : " tool calls")
+            color: Theme.textDim
+        }
+
+        PixelText {
+            visible: Ollama.memoryCount > 0
+            anchors.verticalCenter: parent.verticalCenter
+            text: Ollama.memoryCount + " mem"
             color: Theme.textDim
         }
     }

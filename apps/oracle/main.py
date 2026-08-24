@@ -2994,6 +2994,13 @@ class Jobs(QObject):
         `-` as an option and exits 1 with no id, which reads exactly like a
         missing notification daemon.
         """
+        # A HARNESS NEVER NOTIFIES HIM. `tools/jobs-test.py` starts real jobs
+        # and finishes them; on 2026-08-23 that put "job stopped · sleeper" and
+        # "job failed · orphan" toasts on his screen while he was working —
+        # a test reaching the live session, which is a bug in the test path,
+        # not the price of testing (root AGENTS.md).
+        if SELFTEST or os.environ.get("ORACLE_NO_NOTIFY"):
+            return
         if QGuiApplication.applicationState() == Qt.ApplicationState.ApplicationActive:
             return
         if not shutil.which("notify-send"):
@@ -3332,6 +3339,7 @@ class Ollama(QObject):
     contextMaxChanged = Signal()
     tokensPerSecChanged = Signal()
     contextUsedChanged = Signal()   # tokens in play as of the last turn (prompt+gen)
+    memoriesChanged = Signal()      # how many durable memories it is carrying
     capabilitiesChanged = Signal()  # the model's native capabilities (/api/show)
 
     def __init__(self, parent=None):
@@ -8022,7 +8030,16 @@ class Ollama(QObject):
         def done(obj):
             if isinstance(obj, dict) and "error" not in obj:
                 self._memories = obj.get("memories", []) or []
+                self.memoriesChanged.emit()
         self._memory_store({"op": "list"}, done)
+
+    @Property(int, notify=memoriesChanged)
+    def memoryCount(self):
+        """How many durable memories it is carrying — the standing fact behind
+        `save_memory`, which otherwise only ever shows up inside a tool result
+        [his, 2026-08-23]. Read off the same cache the system prompt injects, so
+        the number and what the model actually knows are one thing."""
+        return len(self._memories or [])
 
     def _run_memory_tool(self, name, args, idx, remaining, calls):
         """save_memory / list_memories / delete_memory: oracle managing its own
@@ -9125,7 +9142,7 @@ def run_selftest(app, shell, win, plasma, warnings):
         # directory with jobs in it, which is how that harness feeds it without
         # starting a single process of his. It reads AFTER the render catch-up
         # above: a ListView has no delegates until something polishes it.
-        from PySide6.QtCore import QMetaObject
+        from PySide6.QtCore import QMetaObject, QObject
         _root = shell.root if plasma else win.findChild(QObject, "content")
         _tray = _root.findChild(QObject, "jobsTray") if _root else None
         if _tray is not None:
@@ -9184,7 +9201,7 @@ def run_selftest(app, shell, win, plasma, warnings):
                       % (_r.property("face"), _r.property("state_"),
                          _j.get("label"),
                          len(_verbs(_r))))
-            print("jobs status right: %r" % target.property("statusRight"))
+            print("jobs status right: %r" % _root.property("statusRight"))
         if plasma and os.environ.get("ORACLE_CHROME"):
             print(shell.dump_chrome())
         if os.environ.get("ORACLE_TREE"):

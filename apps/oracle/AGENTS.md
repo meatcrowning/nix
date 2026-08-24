@@ -289,8 +289,16 @@ first frame) that settles to ollama's exact `eval_count / eval_duration` on the
 final `done` frame. **`contextUsed`** is how full the context is — ollama's own
 `prompt_eval_count + eval_count` from the last turn — drawn as `used/ceiling`, a
 percentage, and a proportional **fill bar** (docs/DESIGN.md §9 meter; accent,
-`warn` past 75%, `crit` past 90%; width animated §6). The row collapses to
-nothing until at least one stat exists.
+`warn` past 75%, `crit` past 90%; width animated §6). The row also carries **how many tool calls this conversation has made** and
+**how many durable memories the model is carrying** [his, 2026-08-23] — both
+standing facts about the chat on screen rather than about the turn in flight,
+each drawn only once it is non-zero (§5.2). `toolCallCount` sums the rows'
+`toolCount` and depends on `chatRev`, because a ListModel row settles without
+notifying; `Ollama.memoryCount` is the length of the same cache the system
+prompt injects, so the number and what the model actually knows are one thing.
+Under Plasma those two are the **status bar's** standing facts instead, beside
+the job count and the daemon (§7.6 — one source, two roofs). The row collapses
+to nothing until at least one stat exists.
 
 ### The window is the real one
 
