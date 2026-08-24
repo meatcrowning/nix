@@ -74,6 +74,17 @@ Column {
     readonly property bool full:
         !!stage && video.item !== null && stage.playing === video.item.player
 
+    // ONE VOLUME FOR EVERY CLIP [his, 2026-08-24]. The card holds none of its
+    // own: it reads Root's and writes back through it, so a level set on any
+    // card in the log is the level of every other card — the ones above it and
+    // the ones not generated yet — and it survives the app being closed
+    // (`Ollama.rememberVideoVolume`). Bare (no host), a card is simply loud.
+    readonly property real volume:
+        (host && host.clipVolume !== undefined) ? host.clipVolume : 1
+    function setVolume(v) {
+        if (host && host.setClipVolume) host.setClipVolume(v);
+    }
+
     // Hand this card's player to the stage, or take it back.
     function toggleFull() {
         if (!stage || video.item === null) return;
@@ -139,7 +150,7 @@ Column {
             Item {
                 property alias player: player
                 property alias out: videoOut
-                AudioOutput { id: audioOut }
+                AudioOutput { id: audioOut; volume: card.volume }
                 MediaPlayer {
                     id: player
                     source: card.src
@@ -267,6 +278,8 @@ Column {
             player: video.item !== null ? video.item.player : null
             dur: card.dur
             full: card.full
+            volume: card.volume
+            onVolumeSet: (v) => card.setVolume(v)
             onToggleFull: card.toggleFull()
         }
     }

@@ -126,6 +126,20 @@ Item {
         return out.length > 0 ? "\n" + out.join("\n") : "";
     }
 
+    // HOW LOUD A CLIP PLAYS — one number for all of them [his, 2026-08-24: "if
+    // the user sets the volume of one clip it sets the same volume for every
+    // other past and future clip"]. Every card, the fullscreen stage and the
+    // mini-player read this one property and write back through `setClipVolume`,
+    // so there is no per-card level to get out of step, and it is remembered
+    // across launches (`~/.config/oracle/video-volume`).
+    property real clipVolume: Ollama.videoVolume()
+    function setClipVolume(v) {
+        var x = Math.max(0, Math.min(1, v));
+        if (Math.abs(x - win.clipVolume) < 0.0005) return;
+        win.clipVolume = x;
+        Ollama.rememberVideoVolume(x);
+    }
+
     // A row that opens a new calendar day gets a date above it; rows on the
     // same day get nothing, so a conversation held in one sitting is unchanged
     // (docs/DESIGN.md §9.1 — subordinated, and never noise for its own sake).
@@ -894,6 +908,14 @@ Item {
                         trigger: function () { Clip.copyImage(path); } });
         rows.push({ label: win.plasma ? "Copy File" : "copy file",
                     trigger: function () { Clip.copyFile(path); } });
+        // A CLIP GOES OUT SILENT if he asks for it, the way painter has offered
+        // since 2026-08-06 [his, 2026-08-24]. The video models generate sound
+        // with the picture and a clip dropped into a browser or a chat is a
+        // page that starts making noise. `<name>-muted.mp4`, remuxed beside the
+        // original and reused if it is already there.
+        if (isVideo)
+            rows.push({ label: win.plasma ? "Copy Muted Copy" : "copy muted copy",
+                        trigger: function () { Clip.copyMutedVideo(path); } });
         rows.push({ separator: true });
         rows.push({ label: win.plasma ? "Copy Path" : "copy path",
                     trigger: function () { Clip.copyText(path); } });

@@ -33,6 +33,14 @@ Rectangle {
 
     signal toggleFull()
 
+    // HOW LOUD, for every clip at once [his, 2026-08-24: "if the user sets the
+    // volume of one clip it sets the same volume for every other past and
+    // future clip"]. The strip never owns it — it draws what it is handed and
+    // reports a change up, so the card three replies above changes with this
+    // one and the next generation opens at the same level. 0..1.
+    property real volume: 1
+    signal volumeSet(real v)
+
     readonly property bool playing: player ? player.playbackState === MediaPlayer.PlayingState : false
     readonly property real pos: player ? player.position : 0
     // True while the pointer is over ANY of the strip's own controls — the
@@ -41,6 +49,7 @@ Rectangle {
     readonly property bool pointerHere:
         barHit.containsMouse || trackHit.containsMouse || fsHit.containsMouse
         || ppHit.containsMouse || stopHit.containsMouse
+        || volHit.containsMouse || volTrackHit.containsMouse
 
     height: Theme.lineHeight + 8
     color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.82)
@@ -169,7 +178,11 @@ Rectangle {
         Rectangle {
             id: track
             anchors.verticalCenter: parent.verticalCenter
-            width: Math.max(20, parent.width - 12 - 24 - 24 - 34 - 34 - 24 - 5 * 6)
+            // What is left once the eight fixed slots and the seven gaps
+            // between them are taken: play, stop, elapsed, THIS, duration,
+            // speaker, level, fullscreen.
+            width: Math.max(20, parent.width - 12
+                                - (24 + 24 + 34 + 34 + 24 + 40 + 24) - 7 * 6)
             height: 6
             radius: Theme.rounding
             color: Theme.bgAlt
@@ -207,6 +220,103 @@ Rectangle {
             text: bar.clock(bar.dur)
             color: Theme.textDim
         }
+        // THE VOLUME ROCKER — a speaker that mutes, and a level beside it.
+        // DRAWN like everything else here (§2.3: the glyphs are in no pixel
+        // font): a box, a cone widening away from it, and a slash across the
+        // whole when it is silent. Muting is remembering: `preMute` is the
+        // level to come back to, so the click is reversible rather than a
+        // level he has to find again.
+        Item {
+            id: volBtn
+            anchors.verticalCenter: parent.verticalCenter
+            width: 24
+            height: 24
+            property real preMute: 1
+            readonly property bool muted: bar.volume <= 0.001
+            Item {
+                anchors.centerIn: parent
+                width: 12
+                height: 12
+                // The box, then the cone: row `i` is as wide as its distance
+                // from the middle, right-aligned, so the shape opens outward.
+                Rectangle {
+                    x: 0
+                    y: 4
+                    width: 3
+                    height: 4
+                    color: volHit.containsMouse ? Theme.accent : Theme.text
+                }
+                Repeater {
+                    model: 12
+                    Rectangle {
+                        required property int index
+                        readonly property int w:
+                            Math.max(1, Math.round(Math.abs(index - 5.5)))
+                        y: index
+                        height: 1
+                        x: 3 + (6 - w)
+                        width: w
+                        color: volHit.containsMouse ? Theme.accent : Theme.text
+                    }
+                }
+                // Silent: struck through, corner to corner (§5.4 — one shape
+                // saying the opposite thing, not a second icon).
+                Rectangle {
+                    visible: volBtn.muted
+                    anchors.centerIn: parent
+                    width: 15
+                    height: 1
+                    rotation: -45
+                    color: volHit.containsMouse ? Theme.accent : Theme.crit
+                }
+            }
+            MouseArea {
+                id: volHit
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    if (volBtn.muted) bar.volumeSet(volBtn.preMute > 0.01
+                                                    ? volBtn.preMute : 1);
+                    else { volBtn.preMute = bar.volume; bar.volumeSet(0); }
+                }
+            }
+        }
+
+        // The level. The same drawing as the scrub track and the same direct
+        // manipulation — the fill follows the pointer and the sound changes as
+        // it moves, no easing, no commit on release (§6.4).
+        Rectangle {
+            id: volTrack
+            anchors.verticalCenter: parent.verticalCenter
+            width: 40
+            height: 6
+            radius: Theme.rounding
+            color: Theme.bgAlt
+            border.width: Theme.ctrlBorder
+            border.color: Theme.border
+
+            Rectangle {
+                anchors { left: parent.left; top: parent.top; bottom: parent.bottom
+                          margins: 1 }
+                width: Math.max(0, (volTrack.width - 2) * bar.volume)
+                radius: Theme.rounding
+                color: Theme.accent
+            }
+            MouseArea {
+                id: volTrackHit
+                anchors.fill: parent
+                anchors.margins: -6      // the hit band exceeds the ink (§5.3)
+                hoverEnabled: true
+                preventStealing: true
+                function set(x) {
+                    bar.volumeSet(Math.max(0, Math.min(1, x / volTrack.width)));
+                }
+                onPressed: (m) => set(m.x)
+                onPositionChanged: (m) => { if (pressed) set(m.x); }
+            }
+        }
+
         // FULLSCREEN [his, 2026-08-23: "can you add a fullscreen button to
         // videos?"]. DRAWN, not lettered — the corner-bracket mark is four
         // 1px-thick L's, exact at any size and in no font's cmap (§2.3), and it

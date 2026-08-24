@@ -250,6 +250,15 @@ check("...and tells the model it has not seen it",
 check("...and not to say where it is or make it twice",
       bool(r) and "where it is" in (r.get("note") or "")
       and "again" in (r.get("note") or ""), json.dumps(r)[:260])
+# ONE RENDER OF EACH KIND PER TURN is a real rule now (main.py `_make_media`),
+# and `send` is what clears the record. The harness calls the dispatcher
+# directly, so each section that generates again clears it itself — exactly like
+# `_paths_shown` above.
+r = run_tool("make_image", {"prompt": "a second cube"}, ms=20000)
+check("a second picture in the same turn is refused, with the first's path",
+      bool(r) and "already made" in (r.get("error") or "")
+      and r.get("path") == str(made), json.dumps(r)[:200])
+o._made_this_turn = {}
 os.environ["ORACLE_PAINTER"] = str(script(
     _TMP / "genfail.sh", 'echo "backend unreachable at 127.0.0.1:8188" >&2; exit 1'))
 r = run_tool("make_image", {"prompt": "a red cube"}, ms=20000)
@@ -262,6 +271,7 @@ check("a backend that will not generate is reported",
 # minutes for nobody. The stub traps TERM and writes a breadcrumb, which is the
 # assertion that the signal reached the GENERATOR and not just the shell in
 # front of it (the `exec` in _painter_argv).
+o._made_this_turn = {}
 trapped = _TMP / "trapped"
 os.environ["ORACLE_PAINTER"] = str(script(
     _TMP / "genslow.sh",
@@ -413,6 +423,7 @@ os.environ["ORACLE_PAINTER"] = str(script(
     '}\'' % str(made)))
 seen.clear()
 o._paths_shown = set()
+o._made_this_turn = {}          # a fresh turn (see 3a-stop)
 r = run_tool("make_image", {"prompt": "a red cube"}, ms=20000)
 check("a render reports where it is, as it runs",
       any(abs(f - 0.85) < 0.001 for _l, f in seen)

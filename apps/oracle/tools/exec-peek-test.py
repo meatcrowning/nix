@@ -252,6 +252,40 @@ check("a turn with no media adds nothing",
                                Q_ARG("QVariant", {"images": "[]",
                                                   "videos": "[]"})) == "")
 
+# ---- 7. one volume for every clip, and it is remembered -------------------
+QMetaObject.invokeMethod(root, "setClipVolume", Q_ARG("QVariant", 0.42))
+spin()
+check("setting the level moves the ONE property every card reads",
+      abs((root.property("clipVolume") or 0) - 0.42) < 0.001,
+      str(root.property("clipVolume")))
+check("...and it is on disk for the next launch",
+      abs(ollama.videoVolume() - 0.42) < 0.001, str(ollama.videoVolume()))
+QMetaObject.invokeMethod(root, "setClipVolume", Q_ARG("QVariant", 1.0))
+
+# ---- 8. a clip can leave the window silent --------------------------------
+def _labels(v):
+    """The `label` of every row of a QML array, whatever wrapper it came back
+    in (a QJSValue here, a list under other builds)."""
+    try:
+        v = v.toVariant()
+    except AttributeError:
+        pass
+    return [r.get("label") for r in (v or []) if isinstance(r, dict)]
+
+
+rows = QMetaObject.invokeMethod(root, "mediaMenu", Q_RETURN_ARG("QVariant"),
+                                Q_ARG("QVariant", "/tmp/x.mp4"),
+                                Q_ARG("QVariant", True))
+labels = _labels(rows)
+check("a clip's menu offers a muted copy", any("muted" in (l or "").lower()
+                                               for l in labels), repr(labels))
+rows = QMetaObject.invokeMethod(root, "mediaMenu", Q_RETURN_ARG("QVariant"),
+                                Q_ARG("QVariant", "/tmp/x.png"),
+                                Q_ARG("QVariant", False))
+labels = _labels(rows)
+check("...and a picture's does not", not any("muted" in (l or "").lower()
+                                             for l in labels), repr(labels))
+
 srv.shutdown()
 print("FAILED: " + ", ".join(fails) if fails else "OK")
 sys.exit(1 if fails else 0)
