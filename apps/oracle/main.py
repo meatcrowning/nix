@@ -3613,7 +3613,7 @@ class Ollama(QObject):
     # LABEL` for us (`--progress`), and QML draws it as a small bar under the
     # tool disclosure — the same place the reasoning and the file lines live.
     genProgress = Signal(str, float)        # label, 0..1
-    genFinished = Signal()                  # …and that render stopped
+    genFinished = Signal(bool)              # …and that render stopped (ok?)
 
     # The player tool's result, as JSON — for a harness to read what one call
     # actually produced without a bus of its own.
@@ -8239,7 +8239,7 @@ class Ollama(QObject):
                 # The lease is back on, so the rest of the turn is still
                 # chatter's; it never got as far as freeing anything.
                 self._warden.reserve("ollama", model=self._model)
-                self.genFinished.emit()
+                self.genFinished.emit(False)
                 answer({"error": ("no room to generate right now — " +
                                   str(reason or "memory") + ". The " + noun +
                                   " cannot be made while this much of the "
@@ -8345,7 +8345,7 @@ class Ollama(QObject):
             out = state["out"]
             proc.deleteLater()
             release()
-            self.genFinished.emit()
+            self.genFinished.emit(not state["timeout"] and rc == 0)
             if state["timeout"]:
                 answer({"error": "the generation ran past %d minutes and was "
                                  "stopped" % (limit_ms // 60000)}, False,
@@ -8402,7 +8402,7 @@ class Ollama(QObject):
                 self._procs.remove(proc)
             proc.deleteLater()
             release()
-            self.genFinished.emit()
+            self.genFinished.emit(False)
             answer({"error": "could not start the image backend command"}, False)
 
         def expire():
