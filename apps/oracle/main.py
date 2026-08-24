@@ -1474,6 +1474,59 @@ def skills_note(catalog=None):
     lines += ["- %s — %s" % (s["name"], s["description"]) for s in cat]
     return "\n".join(lines)
 
+#: The tool that hands the model a tool. Its own schema is small on purpose —
+#: it is paid for on every turn.
+GET_TOOLS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "get_tools",
+        "description": (
+            "Attach one or more of the tools listed in 'Other tools' so you can "
+            "call them, and get their full argument schemas back. Pass names "
+            "(comma-separated) or a group. Do this the moment a job needs one; "
+            "it costs one step and nothing else."),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "names": {"type": "string",
+                          "description": ("Tool names or groups, comma-separated "
+                                          "— e.g. 'lastfm, music_library' or "
+                                          "'images'.")}},
+            "required": ["names"]}}}
+GET_TOOLS_TOOL_NAMES = {"get_tools"}
+
+
+def tools_note(registry=None):
+    """The ONE-LINE INDEX of every tool that is not in `CORE_TOOL_NAMES`.
+
+    Same shape, and the same reason, as `skills_note`: a model does not reach
+    for a door it was never told about, so every tool is named on every turn —
+    but only its name and its first sentence, which is a few hundred tokens
+    against the ~8.4k the full schemas cost. `get_tools` fetches the schema when
+    one is actually wanted, and calling a listed tool directly works too:
+    `_dispatch_tool` resolves by NAME, not by what the payload happened to
+    offer, so a model that guesses the arguments right is not punished for it.
+    """
+    reg = Ollama._main_registry() if registry is None else registry
+    rows = []
+    for name in sorted(reg):
+        if name in CORE_TOOL_NAMES:
+            continue
+        desc = str(reg[name].get("function", {}).get("description", "")).strip()
+        line = re.split(r"(?<=[.!?])\s", desc)[0] if desc else ""
+        line = " ".join(line.split())
+        if len(line) > 90:
+            line = line[:87].rstrip() + "…"
+        rows.append("- %s — %s" % (name, line) if line else "- " + name)
+    if not rows:
+        return ""
+    groups = sorted(set(AGENT_TOOL_GROUPS) | set(EXTRA_TOOL_GROUPS))
+    return ("Other tools you have, not attached to this message. Call "
+            "get_tools with the names (or a group: %s) to attach them and read "
+            "their arguments — one step, then use them normally:\n%s"
+            % (", ".join(groups), "\n".join(rows)))
+
+
 # ---- subagents: definitions on disk, spawned with spawn_agent --------------
 #
 # A turn has ONE 32k window (CHAT_NUM_CTX) and MAX_TOOL_ROUNDS rounds to spend
@@ -1628,6 +1681,35 @@ AGENT_TOOL_GROUPS = {
     "author": ["make_tool", "make_skill", "make_agent"],
     "time": ["get_current_time"],
 }
+#: THE TOOLS EVERY TURN CARRIES. The other two dozen are named in a one-line
+#: index in the system prompt (`tools_note`) and attached on demand
+#: (`get_tools`) — measured 2026-08-23: 39 schemas are 39,433 characters, 12.9k
+#: tokens of a window that was 32k, which is most of why a music-library turn
+#: ran out of room mid-answer. This set is what a turn reaches for without
+#: being asked: the files, the shell, the web, the clock, and the two doors to
+#: everything else (a skill, a subagent).
+CORE_TOOL_NAMES = [
+    "list_dir", "read_file", "find_files", "search_text",
+    "write_file", "edit_file",
+    "run_bash", "run_python",
+    "web_search", "fetch_url",
+    "get_current_time",
+    "use_skill", "spawn_agent",
+    "save_memory", "list_memories",
+    "get_tools",
+]
+
+#: Tool groups for `get_tools`, over and above `AGENT_TOOL_GROUPS`: the ones a
+#: subagent never gets and so has no group of its own.
+EXTRA_TOOL_GROUPS = {
+    "images": ["fetch_image", "search_images", "view_image", "show_image",
+               "make_image", "screenshot"],
+    "video": ["show_video"],
+    "memory": ["save_memory", "list_memories", "delete_memory"],
+    "models": ["manage_models"],
+    "self": ["describe_self"],
+}
+
 #: What a subagent gets when its definition names no tools. Everything that
 #: does real work and nothing that touches the WINDOW: the image tools render
 #: into the transcript of the turn that spawned it and the memory tools write
@@ -3013,6 +3095,7 @@ class Ollama(QObject):
         self._no_tools = False   # the wrap-up round: answer, do not call tools
         self._squeezed = False   # this turn wrote its answer UNDER DURESS — see
                                  # `_truncation_reason`
+        self._extra_tools = set()  # tools `get_tools` attached THIS turn
         self._prior = []         # the LAST finished turn's messages, tool rounds
                                  # and all — see `_carry` (working memory)
         self._prior_users = []   # the RAW prompts behind it, for the match
@@ -3504,6 +3587,7 @@ class Ollama(QObject):
         self._pending_vision = []    # local images view_image must hand the model
         self._no_tools = False       # not a wrap-up round
         self._squeezed = False       # …and nothing has squeezed it yet
+        self._extra_tools = set()    # a fresh turn attaches its own tools
         self._resp_t0 = 0.0
         self._resp_tokens = 0
         self._set_tps(0.0)
@@ -3645,6 +3729,7 @@ class Ollama(QObject):
         self._pending_vision = []
         self._no_tools = False
         self._squeezed = False
+        self._extra_tools = set()
         self._resp_t0 = 0.0
         self._resp_tokens = 0
         self._set_tps(0.0)
@@ -4135,6 +4220,9 @@ class Ollama(QObject):
         base += "\n\n" + SAVE_GUIDANCE
         base += "\n\n" + CAPABILITY_NOTE
         base += "\n\n" + PERSISTENCE_NOTE
+        tools = tools_note()
+        if tools:
+            base += "\n\n" + tools
         skills = skills_note()
         if skills:
             base += "\n\n" + skills
@@ -4151,6 +4239,47 @@ class Ollama(QObject):
         if lead:
             base = lead + "\n\n" + base
         return base
+
+    def _run_get_tools(self, args, idx, remaining, calls):
+        """Attach tools by name or group, and hand their schemas back.
+
+        Synchronous: it reads two dicts. The result carries the FULL schema of
+        everything it attached, so the model can call correctly in the very
+        next round rather than guessing argument names — that is the half of
+        this that makes one extra step enough."""
+        raw = str(args.get("names", "") or args.get("name", "") or "")
+        parts = [p.strip() for p in re.split(r"[,\s]+", raw) if p.strip()]
+        reg = self._main_registry()
+        wanted, unknown = [], []
+        for p in parts:
+            low = p.lower()
+            if low in EXTRA_TOOL_GROUPS:
+                wanted += EXTRA_TOOL_GROUPS[low]
+            elif low in AGENT_TOOL_GROUPS:
+                wanted += AGENT_TOOL_GROUPS[low]
+            elif low == "all":
+                wanted += list(reg)
+            elif p in reg:
+                wanted.append(p)
+            else:
+                unknown.append(p)
+        attached, schemas = [], []
+        for n in wanted:
+            if n in reg and n not in attached:
+                attached.append(n)
+                schemas.append(reg[n])
+        self._extra_tools.update(attached)
+        result = {"attached": attached, "schemas": schemas}
+        if unknown:
+            result["not_found"] = unknown
+            result["available"] = sorted(n for n in reg
+                                         if n not in CORE_TOOL_NAMES)
+        if not attached and not unknown:
+            result["error"] = ("get_tools needs names — see the 'Other tools' "
+                               "list in your instructions.")
+        remaining["sink"][idx] = {"role": "tool", "tool_name": "get_tools",
+                                  "content": json.dumps(result)}
+        self._tool_done(remaining, calls)
 
     def _time_now(self, tz_name, idx, remaining, calls):
         """Resolve the current time in an IANA zone through zoneinfo (real DST
@@ -4224,6 +4353,8 @@ class Ollama(QObject):
             "conversation": {"your_prompts": user_turns,
                              "your_replies_so_far": asst_turns},
             "tools_available": self._offered_tool_names(),
+            "tools_attached_now": sorted(
+                t["function"]["name"] for t in self._offered_tools()),
             "sampling": {"num_ctx": self._num_ctx,
                          "temperature": "model default (chatter does not override)"},
         }
@@ -4243,6 +4374,7 @@ class Ollama(QObject):
                 FETCH_URL_TOOL,
                 CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
                 + list(SESSION_TOOLS) + list(MEMORY_TOOLS) + list(AUTHOR_TOOLS)
+                + [GET_TOOLS_TOOL]
                 + [t for t in [skill_tool(), spawn_agent_tool()] if t])
 
     @staticmethod
@@ -4258,11 +4390,34 @@ class Ollama(QObject):
         return Ollama._builtin_tools() + custom_tool_defs()
 
     @staticmethod
+    def _main_registry():
+        """`{name: schema}` for every tool the MAIN agent can reach, attached or
+        not. `tools_note` indexes it and `get_tools` attaches out of it."""
+        reg = {}
+        for t in Ollama._all_tools():
+            if isinstance(t, dict) and isinstance(t.get("function"), dict):
+                name = t["function"].get("name")
+                if name:
+                    reg[str(name)] = t
+        return reg
+
+    def _offered_tools(self):
+        """What goes in THIS request's `tools`: the core set, plus whatever
+        `get_tools` has attached this turn. Everything else is in the index in
+        the system prompt (`tools_note`) — and reachable regardless, since
+        `_dispatch_tool` goes by name."""
+        reg = self._main_registry()
+        want = list(CORE_TOOL_NAMES) + [n for n in self._extra_tools
+                                        if n not in CORE_TOOL_NAMES]
+        return [reg[n] for n in want if n in reg]
+
+    @staticmethod
     def _offered_tool_names():
-        """The names of every tool offered this turn — read off the same list
-        `_post_chat` puts in the payload, so `describe_self` reports exactly
-        what the model can call (docs/DESIGN.md §10 — a true list, not a
-        remembered one)."""
+        """Every tool the main agent can REACH — the whole registry, not just
+        what is attached to the current message. `_dispatch_tool` resolves by
+        name, so this is the true answer to "what can you call" (docs/DESIGN.md
+        §10 — a true list, not a remembered one); `tools_attached_now` beside it
+        in `describe_self` is the smaller list carried on the wire."""
         names = [t.get("function", {}).get("name", "") for t in Ollama._all_tools()
                  if isinstance(t, dict) and t.get("function")]
         return sorted(n for n in names if n)
@@ -4326,7 +4481,7 @@ class Ollama(QObject):
         # reject a request carrying tools — the tradeoff of always-on tools,
         # spelled out in apps/oracle/AGENTS.md; point oracle at a tool-capable
         # model.
-        payload["tools"] = self._all_tools()
+        payload["tools"] = self._offered_tools()
         body = json.dumps(payload).encode("utf-8")
         self._send_chat(body)
 
@@ -4632,8 +4787,15 @@ class Ollama(QObject):
         """Dispatch each tool call; when the last result is in, re-post the
         chat with the tool messages appended. Calls run concurrently."""
         remaining = self._new_round(calls)
+        reg = self._main_registry()
         for i, call in enumerate(calls):
             name, args = self._call_parts(call)
+            # IT CALLED SOMETHING OFF THE INDEX. `_dispatch_tool` runs it by
+            # name whether or not the schema was on the wire, so the only thing
+            # missing is for the rest of the turn to keep it — no round wasted
+            # on a `get_tools` for a tool it has already used correctly.
+            if name in reg and name not in CORE_TOOL_NAMES:
+                self._extra_tools.add(name)
             # Name every call in the transcript, whatever it is — the generic
             # indicator, so a tool with no richer disclosure is never silent.
             self.toolCallStarted.emit(name or "tool")
@@ -4697,6 +4859,8 @@ class Ollama(QObject):
             self._run_skill_tool(args, i, remaining, calls)
         elif name in AUTHOR_TOOL_NAMES:
             self._run_author_tool(name, args, i, remaining, calls)
+        elif name in GET_TOOLS_TOOL_NAMES:
+            self._run_get_tools(args, i, remaining, calls)
         elif name in SPAWN_TOOL_NAMES:
             self._spawn_agent(args, i, remaining, calls)
         elif name in custom_tools():
