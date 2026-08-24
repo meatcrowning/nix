@@ -223,6 +223,24 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
   the GUI thread. **Growing `moov` moves the media data**, so `upsert_tags`
   patches every `stco`/`co64` chunk offset past it — a writer that skips that
   step leaves a file whose pictures decode to nothing.
+- **`boorutags.py` + `data/danbooru-tags.csv.gz`** — the Danbooru tag
+  vocabulary Anima was captioned with: 91,357 tags (everything with 50 posts or
+  more), with category, post count and aliases, ~1 MB compressed, read lazily
+  and once per process. It is here rather than in one app because both sides of
+  a prompt want it — chatter's `booru_tags` tool searches it while WRITING a
+  prompt, and painter is where the prompt is spelled. **A tag the site does not
+  have does nothing at all** — it is not a weaker version of the tag you meant —
+  which is why a model writing from memory must look them up. Underscores are
+  the STORAGE spelling and spaces are the PROMPT spelling; `graph.py`'s
+  `danbooru` transform does that conversion at generation time, so lookups here
+  take either and answer in the site's form. Harness:
+  `apps/painter/tools/anima-test.py`.
+- **`clipfile.py`** — files onto the Wayland clipboard, AS FILES (and with
+  `--image`, the picture too). Four callers now — viewer, filer, painter and
+  chatter's log — and the module docstring is the authoritative statement of
+  why it is a subprocess speaking `zwlr_data_control_manager_v1` rather than
+  `QClipboard`: a Wayland selection dies with the process that offered it, and
+  `setMimeData` frees a Python-built QMimeData after the interpreter is gone.
 - **`deskstyle.py`** — **THE channel for every desktop-wide appearance setting
   that has to reach the apps. Add a key here; never build a second pipe.**
   Today: `fontFamily` / `fontSize`, the two motion settings `reduceMotion` /

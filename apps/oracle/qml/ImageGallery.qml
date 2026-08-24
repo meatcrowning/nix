@@ -28,6 +28,11 @@ Column {
     property var entries: []
     // Asked to open the lightbox at `i` of `oks`.
     signal enlarge(int index)
+    // RIGHT-CLICK ON A PICTURE, so it can leave the window [his, 2026-08-24].
+    // The gallery does not own a menu — it says which picture was clicked and
+    // where, and Root (which has the one `ctxMenu` and the Clip object) puts
+    // the rows on it. Same shape as `enlarge`.
+    signal contextRequested(string path, real x, real y)
 
     readonly property var oks: {
         var out = [];
@@ -82,7 +87,16 @@ Column {
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
-                onClicked: gal.enlarge(0)
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                onClicked: function (m) {
+                    if (m.button === Qt.RightButton) {
+                        var p = mapToItem(null, m.x, m.y);
+                        gal.contextRequested(solo.e ? (solo.e.path || "") : "",
+                                             p.x, p.y);
+                    } else {
+                        gal.enlarge(0);
+                    }
+                }
             }
         }
         // The caption (the model's alt text), subordinated (§9.1).
@@ -93,13 +107,18 @@ Column {
             text: gal.oks.length === 1 ? (gal.oks[0].alt || "") : ""
             color: Theme.textDim
         }
-        // The source, one step dimmer — a small caption naming where the
-        // picture came from, under the model's caption [his, 2026-08-23].
+        // One step dimmer: where the picture CAME FROM — the host for a
+        // fetched one, and for a generated one what made it (the model, the
+        // size, the sampling, the seed) [his, 2026-08-24]. It is the rest of
+        // the answer to "what is this", and the seed is what makes the same
+        // picture again.
         PixelText {
-            visible: gal.oks.length === 1 && !!gal.oks[0].url
+            visible: gal.oks.length === 1
+                     && (!!gal.oks[0].meta || !!gal.oks[0].url)
             width: gal.width
             wrapMode: Text.Wrap
-            text: gal.oks.length === 1 ? hostOf(gal.oks[0].url) : ""
+            text: gal.oks.length !== 1 ? ""
+                  : (gal.oks[0].meta || hostOf(gal.oks[0].url))
             color: Theme.textDim
             opacity: 0.6
         }
@@ -188,7 +207,16 @@ Column {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: gal.enlarge(index)
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        onClicked: function (m) {
+                            if (m.button === Qt.RightButton) {
+                                var p = mapToItem(null, m.x, m.y);
+                                gal.contextRequested(
+                                    tile.e ? (tile.e.path || "") : "", p.x, p.y);
+                            } else {
+                                gal.enlarge(index);
+                            }
+                        }
                     }
                     // Hover: the accent wash the drop overlay already uses
                     // (§3 — an alpha of an existing token, no new colour)...
@@ -211,7 +239,8 @@ Column {
                         anchors { left: parent.left; right: parent.right
                                   bottom: parent.bottom }
                         height: tileCap.height + 4
-                        visible: !!tile.e && (!!tile.e.alt || !!tile.e.url)
+                        visible: !!tile.e && (!!tile.e.alt || !!tile.e.url
+                                              || !!tile.e.meta)
                         color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b,
                                        hover.containsMouse ? 0.92 : 0.72)
                         Column {
@@ -229,9 +258,9 @@ Column {
                             }
                             PixelText {
                                 width: tileCap.width
-                                visible: !!tile.e && !!tile.e.url
-                                text: (tile.e && tile.e.url)
-                                      ? gal.hostOf(tile.e.url) : ""
+                                visible: !!tile.e && (!!tile.e.url || !!tile.e.meta)
+                                text: !tile.e ? ""
+                                      : (tile.e.meta || gal.hostOf(tile.e.url))
                                 elide: Text.ElideRight
                                 color: Theme.text
                                 opacity: 0.6

@@ -43,6 +43,51 @@ def load_template(name: str) -> dict:
 
 _WS = re.compile(r"\s+")
 
+#: A DANBOORU EMOTICON keeps its underscore: `^_^`, `>_<`, `o_o`, `-_-`, `;_;`
+#: are tags in their own right, and "^ ^" is not one of them. One character
+#: either side of the underscore and nothing else — which is every emoticon tag
+#: on the site and no real tag, since the shortest of those (`bra`, `hat`) have
+#: no underscore at all.
+_EMOTICON = re.compile(r"^[\w^><=+;@.|\\/*-]_[\w^><=+;@.|\\/*-]$")
+#: The one family of real tags that keeps underscores: the PonyV7-style
+#: aesthetic scores (`score_9`, `score_7_up`).
+_SCORE = re.compile(r"^score_\d(?:_up)?$", re.I)
+#: How an artist gets named when it was not written as `@name` already. Anima
+#: was captioned with the `@` form, so `artist:toi8` and `by toi8` are the same
+#: intent spelled the way every OTHER model wants it.
+#: `by X` only when X is ONE token: "by hito_komoru" is an artist, "by the
+#: window" is a sentence, and this transform must never rewrite his prose.
+_ARTIST = re.compile(r"^(?:artist:\s*(.+)|by\s+([^\s,]+))$", re.I)
+#: `(tag, tag:-1.0)` — a weight group. The weight is preserved verbatim; only
+#: the tags inside are normalised.
+_WEIGHTED = re.compile(r"^(.*?):\s*(-?\d*\.?\d+)$", re.S)
+
+
+def _danbooru_tag(tag: str) -> str:
+    """One tag, spelled the way Anima was captioned."""
+    tag = tag.strip()
+    if not tag:
+        return ""
+    at = tag.startswith("@")
+    body = tag[1:].strip() if at else tag
+    m = _ARTIST.match(body)
+    if m:
+        at, body = True, (m.group(1) or m.group(2)).strip()
+    if not (_SCORE.match(body) or _EMOTICON.match(body)):
+        body = body.replace("_", " ")
+    body = _WS.sub(" ", body).strip()
+    return ("@" + body) if at and body else body
+
+
+def _danbooru_group(text: str) -> str:
+    """A comma-separated run of tags, weight suffix and all."""
+    m = _WEIGHTED.match(text)
+    weight = ""
+    if m:
+        text, weight = m.group(1), ":" + m.group(2)
+    tags = [t for t in (_danbooru_tag(p) for p in text.split(",")) if t]
+    return ", ".join(tags) + weight
+
 
 def apply_prompt_transform(text: str, transform: str | None) -> str:
     """Anima wants one line; other families take the prompt verbatim."""
@@ -50,9 +95,61 @@ def apply_prompt_transform(text: str, transform: str | None) -> str:
         return text
     if transform == "single_line":
         return _WS.sub(" ", text).strip()
+    if transform == "danbooru":
+        return danbooru_prompt(text)
     if transform == "strip":
         return text.strip()
     raise GraphError(f"unknown prompt transform {transform!r}")
+
+
+def danbooru_prompt(text: str) -> str:
+    """`single_line`, plus the spelling the tags were captioned with.
+
+    Anima's vocabulary is Danbooru's, written with **spaces and not
+    underscores**, and an artist is `@name` — the two things a model writing
+    the prompt gets wrong most often, and both are mechanical, so they are done
+    here rather than asked for [his, 2026-08-24]. Everything else is left
+    exactly as written: this normalises SPELLING, it does not edit his prompt.
+
+    Three things keep their underscores because they are not word separators:
+    the `score_*` aesthetic tags, the emoticon tags (`^_^`, `>_<`), and anything
+    inside a weight group is handled tag by tag with the weight untouched, so
+    `(lowres, low_quality:-1.0)` comes out `(lowres, low quality:-1.0)` and
+    still means what it meant.
+    """
+    out, buf, depth = [], [], 0
+
+    def flush_text(chunk):
+        """A run of plain tags, with whatever separated it from the group next
+        to it left exactly as written — a weight group inline in a SENTENCE
+        must not come back wearing commas it never had."""
+        if not chunk:
+            return
+        m = re.match(r"^([\s,]*)(.*?)([\s,]*)$", chunk, re.S)
+        core = _danbooru_group(m.group(2))
+        out.append(m.group(1) + core + m.group(3) if core
+                   else m.group(1) + m.group(3))
+
+    for ch in _WS.sub(" ", text):
+        if ch == "(":
+            if depth == 0:
+                flush_text("".join(buf))
+                buf = []
+            depth += 1
+            buf.append(ch)
+        elif ch == ")" and depth:
+            buf.append(ch)
+            depth -= 1
+            if depth == 0:
+                out.append("(" + _danbooru_group("".join(buf)[1:-1]) + ")")
+                buf = []
+        else:
+            buf.append(ch)
+    if depth:
+        out.append("".join(buf))           # an unclosed group: leave it alone
+    else:
+        flush_text("".join(buf))
+    return _WS.sub(" ", "".join(out)).strip().strip(",").strip()
 
 
 # ---------------------------------------------------------------------------

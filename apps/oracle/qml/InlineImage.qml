@@ -26,6 +26,8 @@ Item {
     // The bubble's inner width; the image caps to this and never exceeds it.
     property real maxWidth: 480
     signal enlarge()
+    // Right-click, so the picture can leave the window — Root owns the menu.
+    signal contextRequested(string path, real x, real y)
 
     readonly property var e: (entry && entry.path) ? entry : null
     readonly property real natW: (e && e.w > 0) ? e.w : maxWidth
@@ -67,7 +69,16 @@ Item {
         MouseArea {
             anchors.fill: parent
             cursorShape: Qt.PointingHandCursor
-            onClicked: inl.enlarge()
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            onClicked: function (m) {
+                if (m.button === Qt.RightButton) {
+                    var p = mapToItem(null, m.x, m.y);
+                    inl.contextRequested(inl.e ? (inl.e.path || "") : "",
+                                         p.x, p.y);
+                } else {
+                    inl.enlarge();
+                }
+            }
         }
     }
 
