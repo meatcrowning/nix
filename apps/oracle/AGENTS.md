@@ -1739,14 +1739,56 @@ copy, no re-encode. `_display_image` is the shared half; a file on the OTHER
 machine comes back through the same jailed executor and is saved locally,
 because QML cannot load a path that is not here.
 
-**`make_image` — painter's backend, not a second one.** `apps/painter/tools/
-smoke.py` is painter's OWN registry/graph/client path with the GUI taken off, so
-chatter runs THAT, on `top`, where the weights and the GPU are; it builds no
-graph and knows nothing about models, which is what keeps the two from drifting.
-One shell does three things because they are one act: start `comfy-painter` if
-it is down (a user unit, `start` on a running one is a no-op), wait for
-`/system_stats` to answer, then generate. The result is drawn through
-`_display_image`, so a book window shows a picture made on top.
+**`make_image` / `make_video` — painter's backend, not a second one.**
+`apps/painter/tools/smoke.py` is painter's OWN registry/graph/client path with
+the GUI taken off, so chatter runs THAT, on `top`, where the weights and the GPU
+are; it builds no graph and knows nothing about models, which is what keeps the
+two from drifting. One shell does four things because they are one act: put any
+input pictures where the backend can see them, start `comfy-painter` if it is
+down (a user unit, `start` on a running one is a no-op), wait for
+`/system_stats` to answer, then generate. `_painter_argv` is the whole command
+for both tools and `_make_media` the whole body — the family, the clock and how
+the result is DRAWN are the only differences, and two copies of the warden dance
+is what splitting them would cost.
+
+- **Everything painter can do, chatter can ask for.** Text-to-image on any
+  installed family (`model` is a substring — 'anima', 'krea', 'chroma',
+  'z_image', …), an EDIT when `input_images` are given (which selects the edit
+  model on its own), and a clip from `make_video` with a first frame, a last
+  frame, both, or neither. `aspect` + `megapixels` are converted by the
+  registry's own `calc_dims`, so his shorthand and painter's sliders land on the
+  same width and height.
+- **An input picture has to BE on the machine the backend is on.** On top the
+  path is passed straight through; from book the files travel as a tar on the
+  command's stdin (`_painter_input_payload`, capped at `PAINTER_INPUT_MAX`) and
+  are unpacked into `/tmp/oracle-painter-in`, because the ssh master is the only
+  thing the two machines share. A path that is not there is refused BEFORE the
+  backend is woken.
+- **A still is drawn through `_display_image`; a clip is a VideoCard pointed at
+  the local file** (`_display_clip`), on a poster frame lifted with one ffmpeg
+  frame — a card with no poster is a black box wearing a play marker. A clip
+  made from book is NOT shown, because QtMultimedia cannot stream a path that is
+  not there; the tool says where it is instead (docs/DESIGN.md §10).
+- **A clip's clock is not a picture's.** `MAKE_VIDEO_MS` is an hour against
+  `MAKE_IMAGE_MS`'s fifteen minutes: MiniMax H3 samples every frame, so six
+  seconds is tens of minutes on this GPU.
+
+**His shorthand is parsed HERE, not by the model** (`genshort.py`). `anima. 2:3
+x1 1girl, solo, …` and `video. first frame: [pasted image]. 6s i2v. …` are jobs
+with numbers in them, and a local model asked to infer them gets the aspect
+backwards and "improves" his danbooru tag list. So `send` parses the message
+into the exact tool arguments, appends them to the turn as an instruction
+(`hint_for`), and attaches the generator to that turn so no `get_tools` round is
+spent on it. The parse is deliberately conservative — a message that does not
+open with a model or a mode word produces nothing at all — and the prompt is
+whatever is left after the settings, verbatim. Attached pictures fill the
+frames of a clip and the subject of an edit, which is what attaching one to a
+generation means. Harness: `tools/shorthand-test.py`.
+
+**An attachment's PATH is part of the note the model gets**, whether the model
+has vision or not: an attached picture is also the thing `make_image` edits and
+the frame `make_video` animates from, and neither needs vision. Without the path
+the model has a picture it cannot name to a tool.
 
 **The warden goes first, and its refusal is the honest answer** (`apps/pylib/
 warden.py`). ollama and ComfyUI share 31 GiB, and a collision does not fail an
