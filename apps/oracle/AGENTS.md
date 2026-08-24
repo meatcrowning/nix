@@ -1778,6 +1778,39 @@ is what splitting them would cost.
 - **A clip's clock is not a picture's.** `MAKE_VIDEO_MS` is an hour against
   `MAKE_IMAGE_MS`'s fifteen minutes: MiniMax H3 samples every frame, so six
   seconds is tens of minutes on this GPU.
+- **Both are CORE tools** (`CORE_TOOL_NAMES`), unlike the rest of the image
+  group. "make me a picture" is a thing he asks in plain words, and an
+  unattached tool is one the model has to go looking for — on 2026-08-24 it went
+  looking, read the `comfyui` skill, curled the backend, and told him the daemon
+  did not exist and painter was not installed, with both sitting right there.
+
+**The memory dance, and why chatter gives its OWN weights back first.** The
+warden never interrupts work in flight, and chatter's `send` lease is still live
+while a tool runs — so with a 22 GiB model resident it would (correctly) refuse
+every generation chatter itself asked for. But chatter is not a third party
+here: between rounds it is generating nothing, and its weights are exactly the
+room the render needs. So `_make_media` does what he asked for in so many words
+[2026-08-24] — *unload to make room, reload to carry on*:
+
+1. `done("ollama")` — drop its own lease, so the warden sees an idle ollama and
+   frees it (`keep_alive=0`; the daemon stays up).
+2. `reserve("comfy", lease=WARDEN_LEASE_S)` — a SHORT lease, not the job's
+   ceiling.
+3. `renew("comfy")` every `WARDEN_BEAT_MS` while the process runs. Waking the
+   backend and loading 20 GB can outlast a reservation on its own, and comfy's
+   queue only becomes the busy signal once the graph is submitted — the far end
+   of exactly that window. A re-`reserve` would be the wrong heartbeat: it
+   re-runs admission, unloading the other side and toasting it once per beat.
+   Short + renewed means a chatter that dies mid-render costs painter two
+   minutes, not an hour.
+4. `done("comfy")` then `reserve("ollama")` at the end, in that order — so the
+   model reloading for the rest of the reply cannot land on top of a render, and
+   comfy's weights go back before it does.
+
+A refusal still puts the ollama lease back before it answers, since it never got
+as far as freeing anything. Harness: the recording-warden section of
+`tools/toolbox-test.py`, and `~/nix/tools/ai-warden-test.py` for the decision
+table behind it.
 
 **His shorthand is parsed HERE, not by the model** (`genshort.py`). `anima. 2:3
 x1 1girl, solo, …` and `video. first frame: [pasted image]. 6s i2v. …` are jobs

@@ -659,6 +659,28 @@ class Warden:
             with self.lock:
                 self.leases[backend] = time.time() + secs
 
+    def renew(self, backend, lease=None):
+        """Extend a lease that is ALREADY held. Never takes one.
+
+        A long job — chatter's video generation is up to an hour — has to keep
+        saying it is still working, or its lease expires and the other side
+        takes the memory out from under it mid-load. Re-`reserve` is the wrong
+        tool for that: it re-runs ADMISSION, so a heartbeat would decide all
+        over again whether to unload the other backend — doing it, and toasting
+        that it did, once per beat — and on a tight box it can refuse, which is
+        exactly when the lease must not lapse. This only ever pushes an existing
+        deadline out. That is what lets the lease be SHORT and renewed often
+        rather than long and taken once: the heartbeat interval, not the job's
+        ceiling, is what a caller that dies mid-render costs the other side."""
+        if backend not in BACKENDS:
+            return {"ok": False, "reason": "unknown backend %r" % backend}
+        with self.lock:
+            if self.leases.get(backend, 0) <= time.time():
+                return {"ok": False, "reason": "no lease to renew"}
+            secs = LEASE_DEFAULT.get(backend, 300) if lease is None else int(lease)
+            self.leases[backend] = time.time() + max(1, secs)
+            return {"ok": True, "lease_s": secs}
+
     def done(self, backend):
         with self.lock:
             self.leases.pop(backend, None)
@@ -766,6 +788,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(WARDEN.reserve(backend, str(doc.get("model") or ""),
                                       int(doc.get("bytes") or 0),
                                       doc.get("lease")))
+        elif path == "/renew":
+            self._send(WARDEN.renew(backend, doc.get("lease")))
         elif path == "/done":
             self._send(WARDEN.done(backend))
         elif path == "/free":

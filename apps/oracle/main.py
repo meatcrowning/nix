@@ -323,6 +323,13 @@ MAKE_VIDEO_MS = 60 * 60 * 1000
 #: its own output from a still the same graph also saved.
 VIDEO_SUFFIXES = (".mp4", ".webm", ".mkv", ".mov")
 
+#: The memory reservation a generation holds, and how often it says it is still
+#: working (home/srvs/ai-warden-files/ai-warden.py). Short + renewed, never long
+#: + taken once: the interval is what a chatter that dies mid-render costs the
+#: other side, and the ceiling would otherwise be an hour of blocked painter.
+WARDEN_LEASE_S = 300
+WARDEN_BEAT_MS = 120 * 1000
+
 #: The VIDEO-GENERATION tool. Same backend, same warden, same generator script
 #: as `make_image` — what differs is the model family (a video one), the clock
 #: above, and that the result is drawn as a VideoCard rather than an image.
@@ -1874,6 +1881,13 @@ CORE_TOOL_NAMES = [
     "use_skill", "spawn_agent",
     "save_memory", "list_memories",
     "get_tools", "run_job",
+    # THE GENERATORS ARE CORE, on his machine, because "make me a picture" is
+    # a thing he asks in plain words and an unattached tool is one the model
+    # has to go LOOKING for. On 2026-08-24 it went looking: it read the comfyui
+    # skill, curled the backend, and told him the daemon did not exist and
+    # painter was not installed — with both sitting right there. A tool that is
+    # attached cannot be reasoned away.
+    "make_image", "make_video",
 ]
 
 #: Tool groups for `get_tools`, over and above `AGENT_TOOL_GROUPS`: the ones a
@@ -8018,6 +8032,9 @@ class Ollama(QObject):
 
         def go(ok, reason):
             if not ok:
+                # The lease is back on, so the rest of the turn is still
+                # chatter's; it never got as far as freeing anything.
+                self._warden.reserve("ollama", model=self._model)
                 answer({"error": ("no room to generate right now — " +
                                   str(reason or "memory") + ". The " + noun +
                                   " cannot be made while this much of the "
@@ -8027,9 +8044,23 @@ class Ollama(QObject):
                 return
             self._make_media_run(a, answer, kind)
 
+        # CHATTER GIVES ITS OWN WEIGHTS BACK FIRST. Its `send` lease is still
+        # live — the turn is not over — and the warden never interrupts work in
+        # flight, so with a 22 GiB model resident it would (correctly) refuse
+        # every generation chatter itself asked for. But chatter is not a third
+        # party here: it is between rounds, generating nothing, and its weights
+        # are exactly the room the render needs. Dropping the lease lets the
+        # warden see an idle ollama and free it, which is what he asked for —
+        # unload to make room, reload to carry on — and `release()` takes the
+        # lease back afterwards. [his, 2026-08-24]
+        self._warden.done("ollama")
         # nbytes 0 — "a big family, size unknown", which is what the warden
-        # reads it as; painter knows its weights, chatter does not.
-        self._warden.reserve("comfy", nbytes=0, cb=go)
+        # reads it as; painter knows its weights, chatter does not. The lease is
+        # SHORT and heartbeat-renewed rather than long and taken once, so a
+        # chatter that dies mid-render costs painter two minutes, not an hour
+        # (apps/pylib/warden.py: renew — which extends a lease and cannot free
+        # or admit anything, unlike the re-reserve it replaces).
+        self._warden.reserve("comfy", nbytes=0, cb=go, lease=WARDEN_LEASE_S)
 
     def _make_media_run(self, args, answer, kind):
         name = "make_video" if kind == "video" else "make_image"
@@ -8042,9 +8073,23 @@ class Ollama(QObject):
         proc = QProcess(self)
         self._procs.append(proc)
         state = {"done": False, "timeout": False}
+        # STILL WORKING. Waking the backend and loading 20 GB of weights can
+        # outlast the reservation on its own, and a lapsed lease is the other
+        # side taking the memory out from under a render (or worse, loading
+        # beside it). The queue only becomes the busy signal once the graph is
+        # submitted, which is the far end of exactly that window.
+        beat = QTimer(self)
+        beat.setInterval(WARDEN_BEAT_MS)
+        beat.timeout.connect(lambda: self._warden.renew("comfy", WARDEN_LEASE_S))
+        beat.start()
 
         def release():
+            beat.stop()
             self._warden.done("comfy")
+            # The turn is chatter's again: take the lease back so a render
+            # started from painter cannot land on top of the model reloading
+            # for the rest of this reply.
+            self._warden.reserve("ollama", model=self._model)
 
         def finished(*_):
             if state["done"]:

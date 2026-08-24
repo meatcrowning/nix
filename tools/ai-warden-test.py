@@ -247,6 +247,29 @@ w = world.install()
 w.watchdog()
 check("freed on pressure alone", world.freed == ["ollama"], str(world.freed))
 
+print("\na long render keeps its lease alive by saying so, and only that way")
+world = World(avail_gb=6, comfy_gb=20)
+w = world.install()
+check("renewing what is not held takes nothing",
+      not w.renew("comfy")["ok"] and "comfy" not in w.leases, str(w.leases))
+w.leases["comfy"] = W.time.time() + 10
+check("a held lease is pushed out", w.renew("comfy", 300)["ok"]
+      and w.leases["comfy"] - W.time.time() > 200, str(w.leases))
+# The whole point: a heartbeat must not re-run ADMISSION. A re-reserve every
+# couple of minutes decides all over again whether to free the other side —
+# unloading it, and toasting that it did, once per beat — and can refuse, which
+# would let the lease lapse under a render in flight.
+world = World(avail_gb=6, ollama_gb=24, comfy_gb=20,
+              ollama_models=[("big:35b", 24.0)], tags={"big:35b": 24.0})
+w = world.install()
+w.leases["comfy"] = W.time.time() + 10
+check("a heartbeat frees nothing", w.renew("comfy", 300)["ok"]
+      and world.freed == [], str(world.freed))
+w.reserve("comfy", hint=int(14 * GiB))
+check("...where a re-reserve would have unloaded the other side",
+      world.freed == ["ollama"], str(world.freed))
+check("an unknown backend cannot be renewed", not w.renew("nope")["ok"])
+
 print("\nan unknown backend is not gated at all")
 w = World().install()
 check("passes through", w.reserve("something-else")["ok"])

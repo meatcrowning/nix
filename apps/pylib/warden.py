@@ -71,16 +71,34 @@ class Warden(QObject):
         finally:
             reply.deleteLater()
 
-    def reserve(self, backend, model="", nbytes=0, cb=None):
+    def reserve(self, backend, model="", nbytes=0, cb=None, lease=0):
         """Ask for room before loading. `backend` is "ollama" or "comfy";
         `model` lets the warden size an ollama turn from its own catalogue,
-        `nbytes` is painter's own weights figure."""
+        `nbytes` is painter's own weights figure. `lease` (seconds) overrides
+        how long the reservation counts as busy without a `/done` — pass one
+        when the work is longer than the default and pair it with `renew`."""
         body = {"backend": backend}
         if model:
             body["model"] = model
         if nbytes:
             body["bytes"] = int(nbytes)
+        if lease:
+            body["lease"] = int(lease)
         self._post("/reserve", body, cb or (lambda ok, why: None))
+
+    def renew(self, backend, lease=0):
+        """Still working — push the lease deadline out.
+
+        Only extends a lease already held; it never takes one, so it cannot
+        admit anything, free anything or raise a toast. That is what makes it
+        the right heartbeat for a long job: a re-`reserve` re-runs admission
+        every beat, and would unload the other backend (and say so) once per
+        beat. Keep the lease short and call this often — the interval, not the
+        job's ceiling, is what a caller that dies mid-job costs the other side."""
+        body = {"backend": backend}
+        if lease:
+            body["lease"] = int(lease)
+        self._post("/renew", body)
 
     def done(self, backend):
         """The work is over — release the lease so the other app can have the
