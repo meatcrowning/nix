@@ -1891,6 +1891,17 @@ def _build_shell_class():
                 self._status_label.text() if self._status_label is not None else "",
                 self._status_right.text() if self._status_right is not None else "",
                 "" if st is not None and st.isVisible() else " (hidden)"))
+            # The icon a row is WEARING, by button id. A row's text and its
+            # check state are already above; the icon is the third thing a
+            # button says and the only one nothing here could see — an app that
+            # swaps the glyph for a mode (player's repeat) had no way to be
+            # checked. Its own section, so no existing parser of the rows above
+            # changes shape.
+            out.append("icons")
+            for bid, act in sorted(self._actions.items()):
+                name = act.property("_iconName")
+                if name:
+                    out.append("    %s: %s" % (bid, name))
             return "\n".join(out)
 
         @staticmethod
