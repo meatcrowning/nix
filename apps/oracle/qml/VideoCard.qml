@@ -49,6 +49,8 @@ Column {
     // title — never both, and never the raw URL, which is not a caption.
     readonly property string caption:
         ok ? ((entry.alt || "") !== "" ? entry.alt : (entry.title || "")) : ""
+    // What MADE it, when the generator said — the same dim line a still gets.
+    readonly property string meta: (ok && entry.meta) ? entry.meta : ""
 
     // The frame's aspect: the real one when the resolver knew it, else 16:9.
     // Capped in height so a portrait clip cannot make one reply three screens
@@ -257,11 +259,23 @@ Column {
         host.videoCardGone(card)
 
     // ---- the caption --------------------------------------------------------
+    // ONE LINE, truncated, like every other caption in the log [his,
+    // 2026-08-24]. It stays UNDER the clip rather than on it — the transport
+    // owns the bottom of the frame — but it no longer wraps a forty-tag prompt
+    // into a paragraph taller than the reply.
     PixelText {
-        visible: card.ok && card.caption !== ""
+        visible: card.ok && (card.caption !== "" || card.meta !== "")
         width: card.width
-        wrapMode: Text.Wrap
+        elide: Text.ElideRight
         text: card.caption
         color: Theme.textDim
+    }
+    PixelText {
+        visible: card.ok && card.meta !== ""
+        width: card.width
+        elide: Text.ElideRight
+        text: card.meta
+        color: Theme.textDim
+        opacity: 0.6
     }
 }

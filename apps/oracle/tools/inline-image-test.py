@@ -234,6 +234,39 @@ crit = [c for c in find("PixelText") if c.property("visible")
 check("a failed fetch is named inline (not silently dropped)",
       len(crit) >= 1, "crit=%d" % len(crit))
 
+# ---- 4b. a long caption is ONE elided line ON the picture, not a paragraph --
+# An Anima prompt is forty tags; wrapped under the picture it was a slab taller
+# than some replies [his, 2026-08-24]. The whole of it lives in the Lightbox.
+LONG_ALT = ", ".join(["a very long danbooru style tag"] * 12)
+reply_row(7)
+emit_image({"ok": True, "url": "", "path": str(TALL), "alt": LONG_ALT,
+            "meta": "anima-base-v1.0 · 1088x1856 · 50 steps · seed 12345",
+            "w": 1088, "h": 1856})
+settle()
+gals = [g for g in find("ImageGallery") if g.property("visible")]
+h = gals[-1].property("height") if gals else 0
+check("a forty-tag caption does not make the picture a paragraph taller",
+      0 < h <= 360, "height=%s" % h)
+strips = [c for c in find("CaptionStrip") if c.property("visible")]
+check("...it is a strip on the picture", len(strips) >= 1, "n=%d" % len(strips))
+if strips:
+    check("...one line for the caption and one for what made it",
+          strips[-1].property("height") <= 40,
+          "strip=%s" % strips[-1].property("height"))
+# CENTRED: a portrait picture is narrower than the column it sits in, and the
+# dead space belongs on BOTH sides of it.
+pics = [i for i in find("Image") if i.property("visible")
+        and i.property("width") > 40]
+last = pics[-1] if pics else None
+if last is not None and gals:
+    left = last.mapToItem(gals[-1], 0, 0).x()
+    right = gals[-1].property("width") - (left + last.property("width"))
+    check("a portrait picture is centred in the bubble",
+          left > 2 and abs(left - right) <= 3,
+          "left=%.0f right=%.0f w=%.0f" % (left, right, last.property("width")))
+else:
+    check("a portrait picture is centred in the bubble", False, "no image found")
+
 # ---- 5. the lightbox walks the WHOLE conversation, and takes the log with it
 # Three rows have carried a picture by now. Opening the last one must offer all
 # of them, and stepping must scroll the reply to the row the picture is on.
@@ -241,8 +274,7 @@ box = [b for b in find("Lightbox")]
 check("the window has a lightbox", len(box) == 1, "n=%d" % len(box))
 if box:
     QMetaObject.invokeMethod(content, "openPicture",
-                             Q_ARG("QVariant", {"path": str(TALL),
-                                                "url": "https://x/tall.png"}))
+                             Q_ARG("QVariant", {"path": str(TALL), "url": ""}))
     settle()
     n = box[0].property("count")
     check("it offers every picture in the conversation, not just the row's",

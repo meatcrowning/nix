@@ -73,6 +73,12 @@ Column {
         visible: gal.oks.length === 1
 
         Rectangle {
+            // CENTRED IN THE BUBBLE [his, 2026-08-24]. A portrait picture is
+            // narrower than the column it sits in (the height cap below), and
+            // left-aligned it read as a mistake — a tall picture with a column
+            // of dead space beside it. A landscape one fills the width and the
+            // anchor costs it nothing.
+            anchors.horizontalCenter: parent.horizontalCenter
             width: solo.width + 2
             height: solo.height + 2
             // A PORTRAIT PICTURE IS CAPPED BY ITS HEIGHT, not only by the
@@ -103,6 +109,13 @@ Column {
                 asynchronous: true
                 source: e ? "file://" + e.path : ""
             }
+            // The caption, ON the picture and elided — the full text is one
+            // click away in the Lightbox (CaptionStrip.qml).
+            CaptionStrip {
+                anchors.margins: 1
+                caption: solo.e ? (solo.e.alt || "") : ""
+                meta: solo.e ? (solo.e.meta || gal.hostOf(solo.e.url)) : ""
+            }
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
@@ -117,29 +130,6 @@ Column {
                     }
                 }
             }
-        }
-        // The caption (the model's alt text), subordinated (§9.1).
-        PixelText {
-            visible: gal.oks.length === 1 && !!gal.oks[0].alt
-            width: gal.width
-            wrapMode: Text.Wrap
-            text: gal.oks.length === 1 ? (gal.oks[0].alt || "") : ""
-            color: Theme.textDim
-        }
-        // One step dimmer: where the picture CAME FROM — the host for a
-        // fetched one, and for a generated one what made it (the model, the
-        // size, the sampling, the seed) [his, 2026-08-24]. It is the rest of
-        // the answer to "what is this", and the seed is what makes the same
-        // picture again.
-        PixelText {
-            visible: gal.oks.length === 1
-                     && (!!gal.oks[0].meta || !!gal.oks[0].url)
-            width: gal.width
-            wrapMode: Text.Wrap
-            text: gal.oks.length !== 1 ? ""
-                  : (gal.oks[0].meta || hostOf(gal.oks[0].url))
-            color: Theme.textDim
-            opacity: 0.6
         }
         // A file that saved but will not decode (§10 — say so, never a blank).
         PixelText {
@@ -254,37 +244,11 @@ Column {
                     // busy crop without hiding the picture the rest of the time.
                     // The source host joins the alt line beneath it [his,
                     // 2026-08-23] — the strip names where the tile came from.
-                    Rectangle {
-                        anchors { left: parent.left; right: parent.right
-                                  bottom: parent.bottom }
-                        height: tileCap.height + 4
-                        visible: !!tile.e && (!!tile.e.alt || !!tile.e.url
-                                              || !!tile.e.meta)
-                        color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b,
-                                       hover.containsMouse ? 0.92 : 0.72)
-                        Column {
-                            id: tileCap
-                            anchors { left: parent.left; right: parent.right
-                                      verticalCenter: parent.verticalCenter
-                                      leftMargin: 3; rightMargin: 3 }
-                            spacing: 0
-                            PixelText {
-                                width: tileCap.width
-                                visible: !!tile.e && !!tile.e.alt
-                                text: (tile.e && tile.e.alt) ? tile.e.alt : ""
-                                elide: Text.ElideRight
-                                color: Theme.text
-                            }
-                            PixelText {
-                                width: tileCap.width
-                                visible: !!tile.e && (!!tile.e.url || !!tile.e.meta)
-                                text: !tile.e ? ""
-                                      : (tile.e.meta || gal.hostOf(tile.e.url))
-                                elide: Text.ElideRight
-                                color: Theme.text
-                                opacity: 0.6
-                            }
-                        }
+                    CaptionStrip {
+                        caption: (tile.e && tile.e.alt) ? tile.e.alt : ""
+                        meta: !tile.e ? ""
+                              : (tile.e.meta || gal.hostOf(tile.e.url))
+                        wash: hover.containsMouse ? 0.92 : 0.72
                     }
                 }
             }
