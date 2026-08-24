@@ -150,6 +150,16 @@
       katerc.filetree.showToolbar = true;
       katerc.filetree.viewShade = "211,190,222";
       kded5rc.Module-device_automounter.autoload = false;
+      # The inactive colour effect, OFF. It dulls an unfocused window's whole
+      # surface (his scheme: ColorAmount -0.9), and the titlebar half of that
+      # surface is drawn by KWin while the menubar and client half is drawn by
+      # Qt. A Spectacle window grab makes them disagree — the picker takes
+      # KWin's active window away, but the app keeps wl_keyboard focus, so the
+      # deco repaints dull while the client stays bright and Oxygen's one
+      # gradient steps at the titlebar seam. Nothing app-side can see the
+      # deco's opinion (apps/pylib/kdeshell.py), so the fix is to make the two
+      # states look the same. Focus is still marked by the border and shadow.
+      kdeglobals."ColorEffects:Inactive".Enable = false;
       kdeglobals."KFileDialog Settings"."Automatically select filename extension" = true;
       kdeglobals."KFileDialog Settings"."Breadcrumb Navigation" = true;
       kdeglobals."KFileDialog Settings"."Show Inline Previews" = true;
