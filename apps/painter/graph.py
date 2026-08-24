@@ -107,12 +107,20 @@ def _danbooru_tag(tag: str) -> str:
         vocab = _vocab()
         if vocab is not None:
             got = vocab.canonical(body)
-            if got and got["category"] == "general":
+            if got and got["category"] in ("general", "character", "copyright",
+                                           "artist"):
                 name = got["tag"]
                 # The canonical form gets the same underscore rule as anything
                 # else, or `^_^` comes back as `^ ^`.
                 body = (name if (_SCORE.match(name) or _EMOTICON.match(name))
                         else name.replace("_", " "))
+                # AN ARTIST IS `@name`, and a bare handle in a prompt is one
+                # the model will not recognise as an artist at all — it is the
+                # single most common way an artist tag does nothing [his,
+                # 2026-08-24: `artist: abe yoshitoshi, mocha` went out
+                # unmarked]. The vocabulary knows which names are artists, so
+                # this does not have to be guessed.
+                at = at or got["category"] == "artist"
     return ("@" + body) if at and body else body
 
 

@@ -1857,6 +1857,16 @@ already on screen is answered `ok` with `already_shown`, no second card, and a
 note saying there is one of it and not two. The file is the identity here, not
 the URL, because a generated picture has no URL at all.
 
+**And it says which of its tags DID NOTHING.** A model that cannot see the
+picture has no other way to learn it invented half the prompt: it wrote `lain
+igarashi` for a character named Iwakura, and `artist: abe yoshitoshi` where the
+tag is `@abe yoshitoshi`, and nothing anywhere said so [his, 2026-08-24]. The
+generator runs `boorutags.check` on the prompt it actually ran (Danbooru-tagged
+families only) and `tag_problems` comes back with the result. The transform
+fixes what is mechanical first — a near-miss to the real tag, and an `@` on any
+name the vocabulary knows is an ARTIST — so what is left is what only a lookup
+could have caught.
+
 **The tool result carries the FACTS back, not just "it exists"** (`_gen_facts`).
 Seed, model, size, steps, sampler/scheduler, cfg and the final prompt go to the
 model as fields, because otherwise it cannot answer "lock that seed and change
@@ -1867,10 +1877,12 @@ and not to say where it is: the same turn told him it "should be showing inline
 above" while the picture sat below, which is the model narrating a layout it
 cannot see.
 
-**A CAPTION IS ONE ELIDED LINE, ON the picture** (`CaptionStrip.qml`, used by
-the gallery's solo picture and its tiles, and by `InlineImage`; `VideoCard`
-keeps its two lines under the clip, where the transport does not own the space,
-and elides them the same way). An Anima prompt is forty tags, and wrapped under
+**A CAPTION IS ONE ELIDED LINE, UNDER the picture** (`CaptionStrip.qml`, used by
+the gallery's solo picture, its tiles, `InlineImage` and `VideoCard`). It sat ON
+the artwork for an hour and he had it moved [2026-08-24]: over the picture it
+covers the bottom of the very thing it is captioning. `over: true` puts it back
+inside the frame for the one call site that has no room under each cell — the
+gallery TILES, where it has always been a wash on the crop. An Anima prompt is forty tags, and wrapped under
 the picture it was a slab taller than some replies [his, 2026-08-24]. The
 caption's job in the log is to say WHICH picture this is; the whole of it is one
 click away in the Lightbox, which wraps it in full. **And the picture is centred

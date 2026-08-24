@@ -246,9 +246,9 @@ settle()
 gals = [g for g in find("ImageGallery") if g.property("visible")]
 h = gals[-1].property("height") if gals else 0
 check("a forty-tag caption does not make the picture a paragraph taller",
-      0 < h <= 360, "height=%s" % h)
+      0 < h <= 400, "height=%s" % h)
 strips = [c for c in find("CaptionStrip") if c.property("visible")]
-check("...it is a strip on the picture", len(strips) >= 1, "n=%d" % len(strips))
+check("...it is a strip under the picture", len(strips) >= 1, "n=%d" % len(strips))
 if strips:
     check("...one line for the caption and one for what made it",
           strips[-1].property("height") <= 40,

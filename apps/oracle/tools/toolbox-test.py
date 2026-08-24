@@ -376,7 +376,9 @@ os.environ["ORACLE_PAINTER"] = str(script(
     'echo \'::result {"model":"anima-base-v1.0.safetensors","seed":7,'
     '"positive":"1girl, (bad hands:-1.0)","steps":50,'
     '"sampler":"euler_cfg_pp","scheduler":"beta","width":1152,'
-    '"height":1728,"cfg":0.7}\'' % str(made)))
+    '"height":1728,"cfg":0.7,"tags":{"unknown":["smiling softly"],'
+    '"suspect":["lain igarashi from serial experiments lain"],"renamed":[]}'
+    '}\'' % str(made)))
 seen.clear()
 o._paths_shown = set()
 r = run_tool("make_image", {"prompt": "a red cube"}, ms=20000)
@@ -391,6 +393,10 @@ check("...and the caption says what made it",
 check("the seed comes back to the model, so it can lock it",
       bool(r) and r.get("seed") == 7 and r.get("sampler") == "euler_cfg_pp"
       and r.get("width") == 1152, json.dumps(r)[:260])
+check("the tags that did nothing come back, so it can stop inventing them",
+      bool(r) and (r.get("tag_problems") or {}).get("unknown") == ["smiling softly"]
+      and "never spell a character" in (r.get("tag_note") or ""),
+      json.dumps(r)[:300])
 check("the caption is the prompt the GRAPH ran, folded negative and all",
       bool(shown) and shown[0].get("alt") == "1girl, (bad hands:-1.0)",
       json.dumps(shown)[:200])

@@ -272,7 +272,8 @@ MAKE_IMAGE_TOOL = {
             "VERBATIM — never rewrite a danbooru-style tag list. Give "
             "input_images to EDIT those pictures instead of generating a fresh "
             "one (that switches to the edit model on its own). For the ANIME "
-            "model (anima) use the anima-prompt skill, look tags up with "
+            "model (anima) ALWAYS call use_skill('anima-prompt') first — once "
+            "per conversation is enough — and look tags up with "
             "booru_tags before you write them — an invented tag does nothing — "
             "write them with spaces and an artist as @name, and NEVER open with "
             "'masterpiece, best quality' or a score_ tag: he does not prompt "
@@ -8436,7 +8437,26 @@ class Ollama(QObject):
         keep = ("seed", "model", "steps", "cfg", "sampler", "scheduler",
                 "width", "height", "frames", "fps", "seconds", "positive",
                 "negative")
-        return {k: got[k] for k in keep if got.get(k) not in (None, "")}
+        out = {k: got[k] for k in keep if got.get(k) not in (None, "")}
+        # WHICH OF ITS TAGS DID NOTHING. A model that cannot see the picture has
+        # no other way to learn that it invented half the prompt — it wrote
+        # `lain igarashi` for a character named Iwakura and nothing said so
+        # [his, 2026-08-24]. Only the misses are worth the tokens.
+        tags = got.get("tags")
+        if isinstance(tags, dict):
+            bad = {k: tags[k] for k in ("unknown", "suspect", "renamed")
+                   if tags.get(k)}
+            if bad:
+                out["tag_problems"] = bad
+                out["tag_note"] = (
+                    "These pieces of your prompt are NOT Danbooru tags, so they "
+                    "did nothing in the picture: `unknown` is invented, "
+                    "`suspect` is usually a character or series written as a "
+                    "phrase instead of as its tag, and `renamed` was fixed for "
+                    "you. Look them up with booru_tags before you prompt this "
+                    "model again, and never spell a character's name from "
+                    "memory.")
+        return out
 
     @staticmethod
     def _gen_meta(got):

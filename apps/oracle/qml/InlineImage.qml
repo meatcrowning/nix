@@ -44,7 +44,7 @@ Item {
     readonly property real dispH: Math.max(1, Math.round(natH * scaleFit))
 
     width: Math.max(1, Math.round(maxWidth))
-    height: dispH + 2
+    height: dispH + 2 + (capStrip.visible ? capStrip.height + 4 : 0)
     visible: e !== null
 
     // The frame: a hairline around the picture, and the fill is TRANSPARENT so
@@ -74,13 +74,6 @@ Item {
             asynchronous: true
             source: inl.e ? "file://" + inl.e.path : ""
         }
-        // One elided line on the picture; the whole of it is in the Lightbox
-        // (CaptionStrip.qml).
-        CaptionStrip {
-            anchors.margins: 1
-            caption: inl.e ? (inl.e.alt || "") : ""
-            meta: inl.e ? (inl.e.meta || "") : ""
-        }
         MouseArea {
             anchors.fill: parent
             cursorShape: Qt.PointingHandCursor
@@ -97,6 +90,16 @@ Item {
         }
     }
 
+
+    // One elided line UNDER the picture; the whole of it is in the Lightbox
+    // (CaptionStrip.qml).
+    CaptionStrip {
+        id: capStrip
+        y: inl.dispH + 4
+        width: inl.width
+        caption: inl.e ? (inl.e.alt || "") : ""
+        meta: inl.e ? (inl.e.meta || "") : ""
+    }
 
     // A file that saved but will not decode (§10 — say so, never a blank).
     PixelText {

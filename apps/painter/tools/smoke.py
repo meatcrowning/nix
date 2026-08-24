@@ -33,6 +33,11 @@ import pngmeta  # noqa: E402
 import registry as R  # noqa: E402
 import userprefs as UP  # noqa: E402
 
+try:
+    import boorutags as BT          # the vocabulary, for the tag report below
+except ImportError:                 # a checkout without pylib on the path
+    BT = None
+
 OUT_DIR = os.path.expanduser("~/Pictures/painter/out")
 VIDEO_SUFFIXES = {".mp4", ".webm", ".mkv", ".mov"}
 
@@ -466,6 +471,15 @@ def main(argv=None):
             "width": p.get("width"), "height": p.get("height"),
             "frames": p.get("frames"), "fps": p.get("fps"),
             "sized_by_image": bool(by_image),
+            # WHICH TAGS DID NOTHING. A caller that cannot see the picture has
+            # no other way to learn that half its prompt was invented — on
+            # 2026-08-24 a model wrote `lain igarashi`, which is not the
+            # character, and nothing anywhere said so. Only for families
+            # prompted in Danbooru tags; `check` judges only the pieces that
+            # look like tags (apps/pylib/boorutags.py).
+            "tags": (BT.check(p.get("positive", ""))
+                     if (BT is not None
+                         and fam.get("prompt_transform") == "danbooru") else None),
             "seconds": round(float(p["frames"]) / float(p["fps"]), 2)
                        if p.get("frames") and p.get("fps") else None,
             "files": saved}), flush=True)
