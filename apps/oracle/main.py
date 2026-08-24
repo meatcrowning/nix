@@ -28,6 +28,7 @@ import shutil
 import socket
 import sys
 import time
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -2052,6 +2053,12 @@ MAX_TOOL_ROUNDS = 24
 #: writing the answer than on one more tool call whose result will not fit.
 TOOL_CTX_FRACTION = 0.75
 
+#: How full `CHAT_NUM_CTX` has to get before a round counts as having hit the
+#: ceiling (`_truncation_reason`). ollama's own accounting is prompt + generated
+#: tokens, so the last round before the wall lands a hair under it rather than
+#: exactly on it — 98% is "there was no room left", not a guess at one.
+CTX_FULL_FRACTION = 0.98
+
 #: How many characters of PAST turns' tool output the next turn may carry.
 #:
 #: Until 2026-08-22 the answer was zero, and it is what wrecked a real session
@@ -2806,6 +2813,8 @@ class Ollama(QObject):
         self._tool_calls = []    # tool calls accumulated in this sub-turn
         self._rounds = 0         # tool rounds taken this turn (MAX_TOOL_ROUNDS cap)
         self._no_tools = False   # the wrap-up round: answer, do not call tools
+        self._squeezed = False   # this turn wrote its answer UNDER DURESS — see
+                                 # `_truncation_reason`
         self._prior = []         # the LAST finished turn's messages, tool rounds
                                  # and all — see `_carry` (working memory)
         self._prior_users = []   # the RAW prompts behind it, for the match
@@ -3219,6 +3228,7 @@ class Ollama(QObject):
         self._md_images = {"n": 0}   # typed-markdown images still downloading
         self._pending_vision = []    # local images view_image must hand the model
         self._no_tools = False       # not a wrap-up round
+        self._squeezed = False       # …and nothing has squeezed it yet
         self._resp_t0 = 0.0
         self._resp_tokens = 0
         self._set_tps(0.0)
@@ -3245,8 +3255,8 @@ class Ollama(QObject):
     #: trailing assistant message, but no model is reliable about NOT starting
     #: over when asked that way, and the partial is right there above it.
     CONTINUE_PROMPT = (
-        "Your previous message was cut off mid-way because you hit the "
-        "generation length limit. Carry on from exactly where it stopped — "
+        "Your previous message was cut off mid-way — you ran out of room, "
+        "either tokens or context. Carry on from exactly where it stopped — "
         "continue the very next character, mid-sentence and mid-word if that is "
         "where it ended. Do not repeat any of it, do not summarise it, do not "
         "start over, and do not add a preamble like \"continuing\".")
@@ -3359,6 +3369,7 @@ class Ollama(QObject):
         self._md_images = {"n": 0}
         self._pending_vision = []
         self._no_tools = False
+        self._squeezed = False
         self._resp_t0 = 0.0
         self._resp_tokens = 0
         self._set_tps(0.0)
@@ -4136,6 +4147,65 @@ class Ollama(QObject):
                     used += int(ec)
                 if used > 0:
                     self._set_ctx_used(used)
+                    # THE WINDOW FILLED IN THIS ROUND. ollama shifts the
+                    # context rather than failing, so the round after it reads
+                    # a prompt it no longer entirely has — and the answer that
+                    # comes out can simply stop mid-sentence with a perfectly
+                    # ordinary `done_reason` of "stop". Remember that the turn
+                    # was squeezed; `_truncation_reason` is what does something
+                    # about it.
+                    if used >= CHAT_NUM_CTX * CTX_FULL_FRACTION:
+                        self._squeezed = True
+
+    #: Characters an answer can legitimately END on: sentence punctuation, a
+    #: closed markdown span, a table row, a link, a symbol or an emoji. A reply
+    #: whose last line ends on anything else stopped in the middle of a word or
+    #: a clause.
+    _CLOSERS = ".!?…:;)]}>\"'`*_~|"
+
+    @classmethod
+    def _ends_abruptly(cls, text):
+        """Does this answer stop mid-sentence?
+
+        SHAPE ALONE IS NOT ENOUGH TO ACT ON — measured across his saved
+        sessions, one finished reply in nine ends on a bare word (a bullet
+        list, a heading, a trailing link), so treating that as truncation would
+        put a `continue` on answers that are complete. It is only ever read
+        beside `_squeezed`, in `_truncation_reason`.
+        """
+        s = (text or "").rstrip()
+        if not s:
+            return False
+        if s.count("```") % 2:          # a code fence that never closed
+            return True
+        last = [ln for ln in s.split("\n") if ln.strip()][-1].rstrip()
+        end = last[-1]
+        if end in cls._CLOSERS:
+            return False
+        # An emoji or any other standalone symbol is a deliberate ending.
+        return unicodedata.category(end) not in ("So", "Sk", "Sm", "Sc")
+
+    def _truncation_reason(self):
+        """Why this answer stopped short, or "" if it did not.
+
+        Two ways a reply ends in the middle of a sentence, and only one of them
+        announces itself:
+
+        * `"length"` — ollama's own `done_reason`, the model's token ceiling.
+        * `"context"` — the TURN ran out of window (a round filled
+          `CHAT_NUM_CTX`, or the tool loop was cut short into its wrap-up
+          round) and the answer it then wrote stops mid-sentence. ollama calls
+          that an ordinary `"stop"`: it shifted the context, generated, and
+          finished normally as far as the server is concerned. Observed
+          2026-08-23 — a music-library turn spent its window on tool rounds and
+          handed him a table that breaks off mid-row with no way on, because
+          nothing in the app knew the turn had been squeezed.
+        """
+        if self._done_reason == "length":
+            return "length"
+        if self._squeezed and self._ends_abruptly(self._acc_content):
+            return "context"
+        return ""
 
     def _on_finished(self, reply):
         if reply is not self._reply:
@@ -4169,6 +4239,9 @@ class Ollama(QObject):
         # tools and TOOL_CAP_PROMPT, which leaves it nothing to do but answer.
         if self._tool_calls and not self._no_tools:
             self._no_tools = True
+            self._squeezed = True    # it is answering because it ran out, not
+                                     # because it was finished looking
+
             self._messages.append({"role": "assistant",
                                    "content": self._acc_content,
                                    "tool_calls": self._tool_calls})
@@ -4181,8 +4254,9 @@ class Ollama(QObject):
             return
         self._remember_turn()
         self._set_busy(False)
-        if self._done_reason == "length":
-            self.replyTruncated.emit(self._done_reason)
+        reason = self._truncation_reason()
+        if reason:
+            self.replyTruncated.emit(reason)
         self.replyDone.emit()
 
     #: How many `![](…)` images one reply may pull in on its own. A model
@@ -4241,8 +4315,9 @@ class Ollama(QObject):
             return
         self._remember_turn()
         self._set_busy(False)
-        if self._done_reason == "length":
-            self.replyTruncated.emit(self._done_reason)
+        reason = self._truncation_reason()
+        if reason:
+            self.replyTruncated.emit(reason)
         self.replyDone.emit()
 
     # ---- the web_search tool loop ----

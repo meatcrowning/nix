@@ -309,6 +309,12 @@ Item {
         function onReplyTruncated(reason) {
             if (win.activeIndex < 0) return;
             chatLog.setProperty(win.activeIndex, "cutOff", true);
+            // Say WHICH wall it hit — "context" means the turn spent its window
+            // on tool rounds, which is the one he can do something about (a
+            // fresh conversation), so it is not left as a bare `continue`.
+            win.status = reason === "context"
+                       ? "it ran out of context mid-answer — press continue"
+                       : "it hit the length limit — press continue";
         }
         function onReplyThinkTokens(n) {
             if (win.activeIndex < 0) return;
