@@ -1912,7 +1912,7 @@ def _tool_registry():
     itself is absent, which is what keeps subagents one level deep."""
     tools = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, FETCH_URL_TOOL,
              CALL_API_TOOL, EXEC_TOOL, BASH_TOOL, SHOW_IMAGE_TOOL,
-             MUSIC_TOOL, LASTFM_TOOL]
+             MUSIC_TOOL, LASTFM_TOOL] + list(JOB_TOOLS)
              + list(SESSION_TOOLS) + list(AUTHOR_TOOLS)
              + [t for t in [skill_tool()] if t]
              + custom_tool_defs())
