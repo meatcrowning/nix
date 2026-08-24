@@ -1,0 +1,15 @@
+# Managed by home/srvs/oracle-skills.nix; edits here are overwritten.
+#
+# A skill is a STORE with unattended writers, not a document somebody owns:
+# chatter itself writes one with `make_skill`, on either machine, and an
+# unresolved conflict here does not merely flag that file — it aborts the tick
+# and stops the whole base syncing in either direction until someone notices.
+# So every markdown file gets the same policy the boards get: the real 3-way
+# merge FIRST (so two edits to different sections both survive), and only a
+# genuine collision falls back to the more recent side, whole. Symmetric —
+# neither host is privileged. Losing sides stay reachable in history.
+#
+# Requires merge.recentwins.driver, which oracle-skills-setup.sh registers on
+# every tick. Without that registration these lines are INERT and git falls
+# back to the default merge — i.e. back to the wedged sync.
+*.md merge=recentwins
