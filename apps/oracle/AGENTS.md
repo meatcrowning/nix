@@ -764,6 +764,16 @@ Tools ▸ Stop Server is one of them — measured 2026-08-23, a test run stopped
 the ollama he was using. The refusal lives in the app so a new harness cannot
 reintroduce it.
 
+**The library work this exists for** has two more pieces, both files rather
+than code, both under `~/.claude` (so they sync to book and stay out of the
+public repo): the **`music-library` skill** — where the library is, what
+`apps/player/tools/` already does (reorg, curate, the fingerprint audit,
+soulseek, replaygain, dbsync) and the rules that keep a pass from destroying
+his ratings or his audio — and the **`librarian` subagent**, which reads that
+skill first and runs the long passes as jobs in its own context. Neither is
+code: he or the model can edit them with the file tools, and the next spawn
+uses the new version.
+
 Harness: `tools/jobs-test.py` — the runner, the four tools, and the tray in
 both faces, against a throwaway jobs root and a stub daemon.
 
