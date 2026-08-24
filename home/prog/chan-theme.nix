@@ -16,6 +16,12 @@
 # when the SHEET (`apps/pylib/chantheme.py`) or the generator changes — NOT
 # after a colour-scheme or wallpaper change, which now needs nothing.
 #
+# And the installed script then updates ITSELF: the courier serves it too, at
+# `http://127.0.0.1:8791/chan.user.js`, which it carries as its `@updateURL`.
+# Tampermonkey refuses to update from a `file://` URL, so a copy installed by
+# hand sat at its install-time version for good — install once from that URL
+# instead; the file this writes is the offline copy and the fallback.
+#
 # Live source at apps/pylib/tools/chan-userscript.py (absolute path, valid on
 # both machines); a rebuild is only needed to change THIS wrapper. Plain
 # python3 — the generator is deliberately Qt-free, which is also why the sheet
