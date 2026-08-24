@@ -19,6 +19,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -28,6 +29,7 @@ TMP = Path(tempfile.mkdtemp(prefix="chan-userscript-"))
 os.environ["DESK_SESSION"] = "hypr"          # nothing here may read his session
 
 import chansource                                                   # noqa: E402
+import userscript                                                   # noqa: E402
 import chantheme                                                    # noqa: E402
 import kdetheme                                                     # noqa: E402
 sys.path.insert(0, str(HERE))
@@ -117,15 +119,30 @@ check("it re-polls on an interval rather than once",
 check("the baked sheet is still applied first, as the courier-down fallback",
       "apply(CSS);" in text)
 
-# Version: content-derived, so regenerating an unchanged palette does not churn
-# Tampermonkey's update check, and a colour change always moves it.
+# Version: derived from the script's OWN sources, so it steps forward when the
+# script changes and stands still for a palette change — which needs no
+# reinstall at all, the installed script polls the courier for it. It must
+# never go backwards: Tampermonkey silently refuses a same-or-older version,
+# which a content hash (no order) would have caused half the time.
 v1 = re.search(r"@version\s+(\S+)", text).group(1)
 v2 = re.search(r"@version\s+(\S+)", gen.build("plasma", TMP / "out.user.js")[0]).group(1)
 os.environ["DESK_KDEGLOBALS"] = scheme("breeze")
 v3text, v3prov = gen.build("plasma", TMP / "out.user.js")
 v3 = re.search(r"@version\s+(\S+)", v3text).group(1)
 check("the version is stable across an unchanged regeneration", v1 == v2)
-check("the version moves when the sheet does", v1 != v3)
+check("a palette change does NOT churn it — the script is unchanged", v1 == v3)
+# An hour on, not "now": the version has minute resolution, so a source edited
+# in this same minute reads as unchanged.
+later = TMP / "newer.py"
+later.write_text("# a source edited after the real ones\n")
+os.utime(later, (time.time() + 3600, time.time() + 3600))
+check("it moves when a source of the script does",
+      userscript.source_version([later], major=3) > v1)
+check("and it sorts as a version, newest last",
+      sorted(["3.20260101.0000", v1, "3.19700101.0000"])[-1] == v1)
+check("the updater is pointed at the courier, not file:// (which it refuses)",
+      "@updateURL    http://127.0.0.1:%d/chan.meta.js" % chansource.PORT in text
+      and "@downloadURL  http://127.0.0.1:%d/chan.user.js" % chansource.PORT in text)
 check("plasma + breeze: a flat KStyle bakes no gradient",
       "linear-gradient(to bottom" not in v3text)
 
@@ -173,6 +190,40 @@ try:
         moved, etag2 = r.read().decode("utf-8"), r.headers.get("ETag")
     check("a palette change is picked up with nothing restarted", moved != served)
     check("and moves the ETag, so an open tab re-adopts", etag2 != etag)
+
+    # The update seat: Tampermonkey's updater fetches the SCRIPT over http,
+    # never file://, so the courier has to hand out the script itself.
+    for name in ("chan", "scrollbar"):
+        with urllib.request.urlopen(base + "/%s.user.js" % name, timeout=5) as r:
+            body, jtype = r.read().decode("utf-8"), r.headers.get("Content-Type")
+        check("the courier serves /%s.user.js" % name, "==UserScript==" in body)
+        check("  as javascript", "javascript" in (jtype or ""))
+        check("  pointing its updater back here",
+              ("@updateURL    http://127.0.0.1:%d/%s.meta.js"
+               % (chansource.PORT, name)) in body)
+        with urllib.request.urlopen(base + "/%s.meta.js" % name, timeout=5) as r:
+            meta = r.read().decode("utf-8")
+        check("  and the check itself is metadata only, not the whole sheet",
+              meta.endswith("// ==/UserScript==\n") and len(meta) < len(body) / 4)
+        check("  carrying the same version the script does",
+              re.search(r"@version\s+(\S+)", meta).group(1)
+              == re.search(r"@version\s+(\S+)", body).group(1))
+
+    # An extension asking cross-origin sends a preflight first, and the stdlib
+    # answers an unhandled method with 501 — which is what Tampermonkey's
+    # "Install from URL" showed as *unable to load script from url*.
+    pre = urllib.request.Request(base + "/scrollbar.user.js", method="OPTIONS",
+                                 headers={"Origin": "chrome-extension://tm",
+                                          "Access-Control-Request-Method": "GET"})
+    with urllib.request.urlopen(pre, timeout=5) as r:
+        check("a CORS preflight is answered, not 501", r.status == 204)
+        check("  naming GET as allowed",
+              "GET" in (r.headers.get("Access-Control-Allow-Methods") or ""))
+    hreq = urllib.request.Request(base + "/scrollbar.user.js", method="HEAD")
+    with urllib.request.urlopen(hreq, timeout=5) as r:
+        check("a HEAD gets the headers and no body",
+              r.status == 200 and r.read() == b""
+              and int(r.headers.get("Content-Length") or 0) > 0)
 
     with urllib.request.urlopen(base + "/version", timeout=5) as r:
         ver = json.loads(r.read().decode("utf-8"))

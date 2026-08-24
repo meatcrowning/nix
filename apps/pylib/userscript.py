@@ -24,6 +24,8 @@ everywhere.
 from __future__ import annotations
 
 import json
+import time
+from pathlib import Path
 
 # Long enough that an idle tab is doing nothing measurable, short enough that a
 # palette change lands while he is still looking at the result.
@@ -40,8 +42,8 @@ HEADER = """\
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
 // @connect      localhost
-// @downloadURL  file://%(path)s
-// @updateURL    file://%(path)s
+// @downloadURL  %(downloadURL)s
+// @updateURL    %(updateURL)s
 // ==/UserScript==
 """
 
@@ -132,12 +134,48 @@ BODY = r"""
 """
 
 
+def source_version(sources, major=1):
+    """A version that MOVES when the script does, and never goes backwards.
+
+    Tampermonkey refuses an update whose version is not strictly newer, so a
+    content hash cannot be used here: crc stamps have no order, and half of a
+    palette change would read as a downgrade and be skipped in silence. This is
+    the newest mtime of the files the script is built OUT of, in UTC, so it
+    steps forward on an edit to the sheet, the generator or the runtime — and
+    stands still for a palette change, which needs no reinstall (the script
+    polls the courier for that).
+    """
+    stamps = [Path(p).stat().st_mtime for p in sources if Path(p).exists()]
+    t = time.gmtime(max(stamps) if stamps else 0)
+    return "%d.%s.%s" % (major, time.strftime("%Y%m%d", t), time.strftime("%H%M", t))
+
+
+def metadata_block(script):
+    """Just the `==UserScript==` header of a built script.
+
+    What an updater actually needs: Greasyfork points `@updateURL` at a
+    `.meta.js` and `@downloadURL` at the `.user.js` for exactly this reason —
+    the daily check then costs a few hundred bytes instead of the whole sheet.
+    """
+    end = script.find("// ==/UserScript==")
+    return script[:end + len("// ==/UserScript==")] + "\n" if end >= 0 else script
+
+
 def build(*, name, description, matches, css, version, url, key, style_id,
-          path, tool, gate=None):
+          path, tool, gate=None, update_url=None, download_url=None):
     """The whole `.user.js` for one sheet."""
+    # Tampermonkey never updates from a `file://` URL — the extension has no
+    # file access and its updater refuses the scheme outright, which is why
+    # this script sat at whatever version was installed by hand. The courier
+    # already serves the sheet; it serves the SCRIPT from the same loopback
+    # port, and the updater is a background fetch, so no mixed-content rule
+    # applies to it.
+    download_url = download_url or update_url or ("file://%s" % path)
+    update_url = update_url or download_url
     header = HEADER % {
         "name": name, "description": description, "version": version,
-        "tool": tool, "path": path,
+        "tool": tool, "path": path, "downloadURL": download_url,
+        "updateURL": update_url,
         "matches": "".join("// @match        %s\n" % m for m in matches),
     }
     return header + BODY % {
