@@ -418,7 +418,7 @@ music-library turn had nothing left to answer with.
 
 Harness: `tools/lazy-tools-test.py`.
 
-## Skills (Claude Code's own, as a real tool)
+## Skills (chatter's own, as a real tool)
 
 `use_skill` (`skill_tool()`, offered every turn, dispatched `_run_skill_tool`)
 loads a **skill** — a set of expert instructions for one job — mid-turn, and
@@ -493,12 +493,14 @@ and those two do not fit in 30 GiB together — so a per-call model switch pays
 two full reloads for one delegation. A definition may still name a `model:` when
 that swap is worth it; nothing else does it.
 
-- **Definitions are files**, `AGENTS_ROOT/<name>.md` (`~/.claude/agents`,
+- **Definitions are files**, `AGENTS_ROOT/<name>.md` (`~/.local/share/oracle/agents`,
   override `$ORACLE_AGENTS`): optional `---` frontmatter (`description:`,
-  `tools:`, `model:`) and a body that IS that agent's system prompt. Same root
-  reasoning as the skills: `~/.claude` syncs to both hosts
-  (`home/srvs/claude-state.nix`), Claude Code reads the same directory, and
-  none of it lands in this public repo.
+  `tools:`, `model:`) and a body that IS that agent's system prompt. Like the
+  skills root, this is chatter's **own** dir — not `~/.claude/agents`, which
+  belongs to Claude Code. The two sets are deliberately separate and
+  machine-local, so they do NOT sync to book via claude-state; seed book's copy
+  with `~/.local/share/oracle/seed-skills-to-book.sh`. None of it lands in this
+  public repo.
 - **Four built-ins are always there** (`BUILTIN_AGENTS`: `general`, `explorer`,
   `coder`, `researcher`), so an empty directory is not an empty menu — and a
   file of the same name **replaces** one outright, which is how either of you
@@ -878,8 +880,8 @@ the ollama he was using. The refusal lives in the app so a new harness cannot
 reintroduce it.
 
 **The library work this exists for** has two more pieces, both files rather
-than code, both under `~/.claude` (so they sync to book and stay out of the
-public repo): the **`music-library` skill** — where the library is, what
+than code, both under chatter's own runtime dirs (machine-local, so seed book's
+copy): the **`music-library` skill** — where the library is, what
 `apps/player/tools/` already does (reorg, curate, the fingerprint audit,
 soulseek, replaygain, dbsync) and the rules that keep a pass from destroying
 his ratings or his audio — and the **`librarian` subagent**, which reads that

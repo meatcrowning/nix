@@ -1400,14 +1400,14 @@ BASH_TOOL_NAMES = {"run_bash"}
 #: as a REAL TOOL rather than baked in as a persona (his call, 2026-08-22: the
 #: video-prompt skill used to be the `vidprompt` base prompt, which meant
 #: switching persona for one message and switching back afterwards, and only
-#: ever covered the one skill). A skill is a directory under ~/.claude/skills:
-#: `SKILL.md` (YAML frontmatter with `name`/`description`, then the
+#: ever covered the one skill). A skill is a directory under the skills root
+#: (`~/.local/share/oracle/skills`, ORACLE_SKILLS): `SKILL.md` (YAML
+#: frontmatter with `name`/`description`, then the
 #: instructions) plus optional reference guides beside it. Nothing is vendored
-#: — `~/.claude` syncs to both hosts (home/srvs/claude-state.nix), so chatter
-#: and Claude Code read ONE source of truth and none of it lands in this
-#: public repo. Read in-process off the host the window runs on: it is a plain
-#: file read, so unlike the sandbox/session/memory stores it needs no ssh
-#: branch to `top`.
+#: and nothing lands in this public repo — the runtime dir is machine-local,
+#: existing on each host chatter runs on. Read in-process off the host the
+#: window runs on: it is a plain file read, so unlike the sandbox/session/
+#: memory stores it needs no ssh branch to `top`.
 SKILLS_ROOT = os.path.expanduser(
     os.environ.get("ORACLE_SKILLS", "~/.local/share/oracle/skills"))
 #: One skill file's text, capped so a huge guide cannot swallow the context
@@ -1636,13 +1636,12 @@ def tools_note(registry=None):
 # reloads for one delegation. A definition may still NAME a model when the swap
 # is worth it; nothing else does.
 
-#: Where agent definitions live. `~/.claude` syncs between both machines
-#: (home/srvs/claude-state.nix), exactly the reason the skills root points
-#: there: one set of definitions, readable on either host, none of it vendored
-#: into this public repo. Claude Code reads the same directory, so an agent
-#: written here is one it can use too (chatter ignores frontmatter it does not
-#: know, and a `tools:` list naming tools chatter does not have falls back to
-#: the default set rather than producing an agent that can do nothing).
+#: Where agent definitions live. chatter's canonical base is its OWN runtime
+#: dir (`~/.local/share/oracle/agents`, override `$ORACLE_AGENTS`), like the
+#: skills root — not `~/.claude/agents`, which belongs to Claude Code. The two
+#: sets are deliberately separate. A definition file `<name>.md` REPLACES a
+#: built-in of the same name, which is how he (or the model) edits a built-in
+#: without touching main.py. Nothing here is vendored into this public repo.
 #: TOOLS AS FILES [his, 2026-08-23]. Chatter's own answer, when he asked it
 #: whether it could make its own tools, was "no — those are defined by the
 #: framework I run in". This is that door: a directory of MANIFESTS, each naming
@@ -1746,7 +1745,7 @@ BUILT_BY_HIM = (" (A tool HE wrote and installed, not one of the app's own. If "
 
 
 AGENTS_ROOT = os.path.expanduser(
-    os.environ.get("ORACLE_AGENTS", "~/.claude/agents"))
+    os.environ.get("ORACLE_AGENTS", "~/.local/share/oracle/agents"))
 #: One definition's prompt, capped like a skill's.
 AGENT_MAX_CHARS = 40000
 #: Rounds of tool calls ONE subagent may take before it has to answer. Lower
@@ -8600,7 +8599,8 @@ class Ollama(QObject):
     def _run_skill_tool(self, args, idx, remaining, calls):
         """use_skill: hand the model one skill's instructions, or one of that
         skill's reference guides in full. Synchronous — a local file read, no
-        subprocess and no host branch (`~/.claude` is on both machines). A
+        subprocess and no host branch (the skills root exists on each machine
+        chatter runs on). A
         whole guide comes back in ONE call rather than the model paging it
         through read_file, which is the point of it being a tool."""
         a = args if isinstance(args, dict) else {}
