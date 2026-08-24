@@ -109,13 +109,6 @@ Column {
                 asynchronous: true
                 source: e ? "file://" + e.path : ""
             }
-            // The caption, ON the picture and elided — the full text is one
-            // click away in the Lightbox (CaptionStrip.qml).
-            CaptionStrip {
-                anchors.margins: 1
-                caption: solo.e ? (solo.e.alt || "") : ""
-                meta: solo.e ? (solo.e.meta || gal.hostOf(solo.e.url)) : ""
-            }
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
@@ -130,6 +123,14 @@ Column {
                     }
                 }
             }
+        }
+        // The caption, UNDER the picture and elided — the full text is one
+        // click away in the Lightbox (CaptionStrip.qml).
+        CaptionStrip {
+            width: gal.width
+            caption: (gal.oks.length === 1 && gal.oks[0].alt) ? gal.oks[0].alt : ""
+            meta: gal.oks.length !== 1 ? ""
+                  : (gal.oks[0].meta || gal.hostOf(gal.oks[0].url))
         }
         // A file that saved but will not decode (§10 — say so, never a blank).
         PixelText {
@@ -245,6 +246,9 @@ Column {
                     // The source host joins the alt line beneath it [his,
                     // 2026-08-23] — the strip names where the tile came from.
                     CaptionStrip {
+                        anchors { left: parent.left; right: parent.right
+                                  bottom: parent.bottom }
+                        over: true
                         caption: (tile.e && tile.e.alt) ? tile.e.alt : ""
                         meta: !tile.e ? ""
                               : (tile.e.meta || gal.hostOf(tile.e.url))
