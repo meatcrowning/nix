@@ -150,15 +150,13 @@
       katerc.filetree.showToolbar = true;
       katerc.filetree.viewShade = "211,190,222";
       kded5rc.Module-device_automounter.autoload = false;
-      # An unfocused window dims WHOLE — docs/DESIGN.md §3.1.1, the same rule
-      # the Hyprland session gets from `decoration:dim_inactive`. KWin's Dim
-      # Inactive effect is a compositor scrim over deco AND client, so the two
-      # halves of a window cannot disagree about focus; the colour scheme's own
-      # inactive effect, which they read from different places, is held OFF by
-      # home/srvs/kde-inactive-effect.nix (why, and what it measured, is there).
-      # Strength is Hyprland's dim_strength 0.5, in KWin's 0-100.
-      kwinrc.Plugins.diminactiveEnabled = true;
-      kwinrc."Effect-diminactive".Strength = 50;
+      # NOTHING dims an unfocused window in a Plasma session — his call,
+      # 2026-08-24, after trying KWin's Dim Inactive scrim for an evening
+      # (*"i dont want it to just dim all inactive windows"*). Focus is marked
+      # by the border and the shadow. The colour scheme's own inactive effect
+      # stays OFF, which is the half that matters: the deco and the client read
+      # focus from different places and a Spectacle grab splits them — see
+      # home/srvs/kde-inactive-effect.nix for the measurement.
       kdeglobals."ColorEffects:Inactive".Enable = false;
       kdeglobals."KFileDialog Settings"."Automatically select filename extension" = true;
       kdeglobals."KFileDialog Settings"."Breadcrumb Navigation" = true;
