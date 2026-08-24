@@ -2504,6 +2504,15 @@ class Player(QObject):
         was rather than stop the music."""
         ids = self._library.ids_for_paths([str(p) for p in paths])
         if ids:
+            # An explicit ordered list handed to the player (OPEN — chatter's
+            # play_these, the file manager, a second launch) is an ORDER
+            # statement: play these in the order given. A standing shuffle mode
+            # would reorder them (`playTracks` reshuffles whenever `_shuffle`
+            # is on), so an explicit list turns shuffle off — "play shuffled"
+            # stays a deliberate, separate action that sets shuffle on itself.
+            if self._shuffle:
+                self._shuffle = False
+                self.shuffleChanged.emit()
             self.playTracks(ids, 0)
 
     def queuePaths(self, paths):
