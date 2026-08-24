@@ -456,9 +456,18 @@ no code change at all.
   plus reference guides in `references/`. **chatter's canonical base is its
   OWN runtime dir**, not `~/.claude/skills` — that dir belongs to Claude Code,
   and the two sets drifted apart (chatter reads its own, Claude Code its own).
-  The old default (`~/.claude/skills`) and its claude-state sync are gone; the
-  runtime dir is machine-local, so skills created here do NOT auto-reach book.
-  Seed both machines explicitly if that matters. Today:
+  The old default (`~/.claude/skills`) and its claude-state sync are gone.
+  **Since 2026-08-23 the runtime dir syncs BOTH WAYS between `top` and `book`
+  on its own** (`home/srvs/oracle-skills.nix`, 5-minute timer, private remote
+  `meatcrowning/oracle-skills`): a skill or agent written on either machine
+  reaches the other with nothing to run by hand. The repo root is the whole
+  runtime dir, so its `.gitignore` is an ALLOWLIST — only `skills/` and
+  `agents/` are tracked, and `sessions/`, `memory/`, `jobs/`, `sandbox/` and
+  `images/` can never be pushed. `*.md` merges by the recency driver the boards
+  use (real 3-way first, newest side whole on a genuine collision), because an
+  unresolved conflict would wedge the sync for everything else. Log
+  `~/.cache/oracle-skills-sync.log`; force a run with
+  `systemctl --user start oracle-skills-sync.service`. Today:
   `video-prompt`, `flux-klein-edit` (the painter edit-mode instruction),
   `krea-prompt` (the positive/negative image pair), `anima-prompt` (the same
   pair in Danbooru tags, for painter's anime mode), the machine-runbook set
@@ -468,9 +477,10 @@ no code change at all.
   `nixos-hard-freeze-triage`, `nvidia-gpu-fault-triage`,
   `memory-corruption-diagnosis`, `linux-data-integrity-triage`), and the
   useful generic Hermes defaults ported in (`humanizer`, `systematic-debugging`,
-  `youtube-content`). Seed book's copy with
-  `~/.local/share/oracle/seed-skills-to-book.sh` (the runtime dir is
-  machine-local; the seed excludes the machine-built youtube-content venv).
+  `youtube-content`). `~/.local/share/oracle/seed-skills-to-book.sh` is the
+  superseded one-way push; the timer does this now. The
+  machine-built `youtube-content` venv is excluded from both — book's first use
+  of that skill rebuilds it from the skill's own setup block.
 - **`use_skill(name)`** returns that skill's `description`, its `instructions`
   (the SKILL.md with frontmatter stripped) and the names of its `guides`;
   **`use_skill(name, guide=…)`** returns one guide **in full**, in ONE call —
@@ -512,9 +522,9 @@ that swap is worth it; nothing else does it.
   override `$ORACLE_AGENTS`): optional `---` frontmatter (`description:`,
   `tools:`, `model:`) and a body that IS that agent's system prompt. Like the
   skills root, this is chatter's **own** dir — not `~/.claude/agents`, which
-  belongs to Claude Code. The two sets are deliberately separate and
-  machine-local, so they do NOT sync to book via claude-state; seed book's copy
-  with `~/.local/share/oracle/seed-skills-to-book.sh`. None of it lands in this
+  belongs to Claude Code. The two sets are deliberately separate, and this one
+  rides the same `oracle-skills-sync` timer the skills root does — both ways
+  between `top` and `book`, not via claude-state. None of it lands in this
   public repo.
 - **Four built-ins are always there** (`BUILTIN_AGENTS`: `general`, `explorer`,
   `coder`, `researcher`), so an empty directory is not an empty menu — and a
