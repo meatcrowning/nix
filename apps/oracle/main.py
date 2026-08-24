@@ -2370,7 +2370,12 @@ PERSISTENCE_NOTE = (
     "actually done: look, act, then CHECK what you did. Do not stop to announce "
     "a plan, to ask whether to proceed with something he already asked for, or "
     "to say what you would do next; do it. Come back early only if you "
-    "genuinely need a decision from him, or the job is done." % MAX_TOOL_ROUNDS)
+    "genuinely need a decision from him, or the job is done. "
+    "And do not narrate your work as you go: write NO prose before a tool "
+    "call \u2014 just make the call \u2014 and give ONE final message at the "
+    "end covering the result. A preamble restating your plan is a whole bubble "
+    "he has to read that the answer then repeats; the tool activity is already "
+    "shown to him separately." % MAX_TOOL_ROUNDS)
 
 #: How many times a turn may carry ITSELF on before it has to hand back. A
 #: model that announces its next step instead of taking it is the single reason
