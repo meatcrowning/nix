@@ -291,6 +291,61 @@ r = run_tool("make_video", {"prompt": "x"}, ms=20000)
 check("a clip that cannot be built is reported",
       bool(r) and "error" in r, json.dumps(r)[:200])
 
+# 3d. THE MEMORY DANCE, against a recording warden. What he asked for is that a
+# generation never meets a loaded model: chatter gives its OWN weights back
+# first (its send lease is still live, and the warden never interrupts work in
+# flight, so without this every generation chatter itself asked for would be
+# refused), holds a SHORT lease it keeps renewing, and takes the lease back at
+# the end so the reload cannot land on top of a render.
+WARDEN_CALLS = []
+
+
+class _Warden(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        try:
+            doc = json.loads(self.rfile.read(n).decode() or "{}")
+        except ValueError:
+            doc = {}
+        WARDEN_CALLS.append((self.path.rstrip("/"), doc))
+        body = json.dumps({"ok": True}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+_wsrv = http.server.HTTPServer(("127.0.0.1", 0), _Warden)
+threading.Thread(target=_wsrv.serve_forever, daemon=True).start()
+import warden as wardenmod                                        # noqa: E402
+wardenmod.WARDEN = "http://127.0.0.1:%d" % _wsrv.server_address[1]
+o._warden = wardenmod.Warden(o)
+o._model = "big:35b"
+os.environ["ORACLE_PAINTER"] = str(script(
+    _TMP / "genslow.sh",
+    'echo "  saved %s (1234 bytes)"' % str(made)))
+WARDEN_CALLS.clear()
+r = run_tool("make_image", {"prompt": "a red cube"}, ms=20000)
+paths = [c[0] for c in WARDEN_CALLS]
+check("chatter gives its own weights back before asking for room",
+      paths[:2] == ["/done", "/reserve"]
+      and WARDEN_CALLS[0][1].get("backend") == "ollama"
+      and WARDEN_CALLS[1][1].get("backend") == "comfy", str(WARDEN_CALLS)[:300])
+check("...on a short lease, not an open-ended one",
+      0 < int(WARDEN_CALLS[1][1].get("lease") or 0) <= 600,
+      str(WARDEN_CALLS[1][1]))
+check("...and hands it back, then takes the turn's lease again",
+      paths[-2:] == ["/done", "/reserve"]
+      and WARDEN_CALLS[-2][1].get("backend") == "comfy"
+      and WARDEN_CALLS[-1][1].get("backend") == "ollama", str(WARDEN_CALLS)[:300])
+WARDEN_CALLS.clear()
+wardenmod.WARDEN = "http://127.0.0.1:1"          # dead again: fail open
+o._warden = wardenmod.Warden(o)
+
 # 4. tools as files
 script(_TMP / "tools" / "weather", 'read -r a; echo "{\\"ok\\":true,\\"said\\":$a}"')
 (_TMP / "tools" / "weather.json").write_text(json.dumps({

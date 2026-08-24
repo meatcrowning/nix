@@ -607,6 +607,15 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
       *refusal* is measured against, because a refusal is chatter telling him
       no; measuring his own 23.9 GiB model against the 6G floor would have
       banned it outright.
+    - **A long job says it is still working; it does not ask again.** `/renew`
+      extends a lease already held and can never take, free or toast — which is
+      what lets a lease be SHORT and heartbeat-renewed rather than long and
+      taken once, so a caller that dies mid-render costs the other side its
+      beat interval and not its ceiling. chatter's video generation is up to an
+      hour and uses it (`apps/oracle/main.py`, `_make_media`), and it also
+      gives its OWN weights back before asking for room — the warden never
+      interrupts work in flight, so without that a chatter holding 22 GiB would
+      refuse every generation it asked for itself.
     - **Fail open everywhere.** Kill switch `~/.local/state/ai-warden/off`; a
       dead or wedged daemon is an immediate yes. Log `~/.cache/ai-warden.log`,
       `ai-warden status` for the picture, harness `tools/ai-warden-test.py`.
