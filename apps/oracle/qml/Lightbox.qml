@@ -32,8 +32,18 @@ Item {
     // Right-click on the enlarged picture — Root puts the rows on it.
     signal contextRequested(string path, real x, real y)
 
-    function openAt(list, i) {
+    // Which chat row each entry lives on, parallel to `entries`. The lightbox
+    // walks the WHOLE conversation now [his, 2026-08-24], so stepping through
+    // it also has to take the log with it — Root reads this on `index` and
+    // scrolls the reply to the picture being looked at, so closing the
+    // lightbox leaves him where the picture is rather than where he opened it.
+    property var rows: []
+    readonly property int currentRow:
+        (rows && index >= 0 && index < rows.length) ? rows[index] : -1
+
+    function openAt(list, i, rowList) {
         entries = list || [];
+        rows = rowList || [];
         index = Math.max(0, Math.min(i, (list ? list.length : 1) - 1));
         opened = true;
         forceActiveFocus();

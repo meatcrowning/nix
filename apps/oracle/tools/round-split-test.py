@@ -107,9 +107,11 @@ class Stub(http.server.BaseHTTPRequestHandler):
                           {"done": True, "done_reason": "stop"}]
         else:
             if i <= 2:
-                # Round 1 says NOTHING and only calls a tool — the bookkeeping that
-                # folds. Round 2 speaks, which is output and must stay drawn.
-                frames = [{"message": {"content": "" if i == 1 else "looking at round 2.",
+                # Round 1 says NOTHING and only calls a tool — the bookkeeping
+                # that folds. Round 2 speaks at LENGTH, which is content and
+                # must stay drawn; a short line there would be a preamble and
+                # would be dropped (see MODE=preamble).
+                frames = [{"message": {"content": "" if i == 1 else LONG_ROUND2,
                                        "tool_calls": [
                                            {"function": {"name": "get_current_time",
                                                          "arguments": {}}}]},
@@ -127,6 +129,10 @@ class Stub(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, *a):
         pass
+
+
+#: Long enough to be content rather than an announcement (Root's `preambleMax`).
+LONG_ROUND2 = ('round 2 has something real to say about what it just read, at enough length that it is content and not an announcement of the next tool call, so it must stay drawn exactly where it was written.')
 
 
 def check(name, cond, extra=""):
@@ -177,7 +183,7 @@ if len(replies) == 3:
           str([r["step"] for r in replies]))
     check("each round's prose stays on its own row",
           replies[0]["body"].strip() == ""
-          and replies[1]["body"].strip() == "looking at round 2."
+          and replies[1]["body"].strip() == LONG_ROUND2
           and replies[2]["body"].strip() == "and here is the answer.",
           json.dumps([r["body"] for r in replies]))
     check("and so does the tool it called",

@@ -244,8 +244,11 @@ check("make_image shows what the backend saved",
       len(shown) == 1 and shown[0].get("ok")
       and shown[0].get("path") == str(made), json.dumps(shown)[:160])
 check("...and tells the model it has not seen it",
-      bool(r) and r.get("ok") and "not seen" in (r.get("note") or ""),
+      bool(r) and r.get("ok") and "NOT seen" in (r.get("note") or ""),
       json.dumps(r)[:200])
+check("...and not to say where it is or make it twice",
+      bool(r) and "where it is" in (r.get("note") or "")
+      and "again" in (r.get("note") or ""), json.dumps(r)[:260])
 os.environ["ORACLE_PAINTER"] = str(script(
     _TMP / "genfail.sh", 'echo "backend unreachable at 127.0.0.1:8188" >&2; exit 1'))
 r = run_tool("make_image", {"prompt": "a red cube"}, ms=20000)
@@ -385,6 +388,9 @@ check("...and the caption says what made it",
       and "1152x1728" in shown[0]["meta"] and "50 steps" in shown[0]["meta"]
       and "euler_cfg_pp/beta" in shown[0]["meta"]
       and "seed 7" in shown[0]["meta"], json.dumps(shown)[:260])
+check("the seed comes back to the model, so it can lock it",
+      bool(r) and r.get("seed") == 7 and r.get("sampler") == "euler_cfg_pp"
+      and r.get("width") == 1152, json.dumps(r)[:260])
 check("the caption is the prompt the GRAPH ran, folded negative and all",
       bool(shown) and shown[0].get("alt") == "1girl, (bad hands:-1.0)",
       json.dumps(shown)[:200])

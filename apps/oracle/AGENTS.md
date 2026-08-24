@@ -1236,15 +1236,18 @@ instead of a detached picture floating above a separate text bubble [his,
 merge decision is made off the row's `images`/`videos` roles, never a child
 item's `visible` (the latch in the bubble's `visible`).
 
-**And a SHORT line in front of a picture counts as no words at all.** He watched
+**And a SHORT line on a round that called a tool counts as no words at all.** He watched
 a turn draw "Here's your Lain image:" with the picture under it and then a
 second bubble saying "Here you go — here's Lain:" with nothing in it
 [2026-08-24]. The row that called the tool wrote before it had seen the result —
 which `PERSISTENCE_NOTE` already forbids and models do anyway — and the round
-after it says the same thing again. So a media row whose body is at most
-`preambleMax` (140) characters AND that called a tool has its body cleared and
-merges like a wordless one: one picture, one bubble, one sentence. Longer prose
-is left alone and still splits — that is content, and losing it would be worse
+after it says the same thing again. And it is not only the picture rows: one
+request put NINE bubbles between it and the result — "Seed locked: …", "Found
+shirow_masamune. Let me find one more." — each its own slab, none of them the
+answer. So ANY row whose body is at most `preambleMax` (140) characters AND that
+called a tool has its body cleared; if it also carries media it merges like a
+wordless one, and otherwise it is drawn as its tool block, which is where that
+work belongs. Longer prose is left alone and still splits — that is content, and losing it would be worse
 than repeating it. Only the DISPLAY is trimmed; the model's own context still
 holds what it wrote.
 
@@ -1854,6 +1857,16 @@ already on screen is answered `ok` with `already_shown`, no second card, and a
 note saying there is one of it and not two. The file is the identity here, not
 the URL, because a generated picture has no URL at all.
 
+**The tool result carries the FACTS back, not just "it exists"** (`_gen_facts`).
+Seed, model, size, steps, sampler/scheduler, cfg and the final prompt go to the
+model as fields, because otherwise it cannot answer "lock that seed and change
+one thing" at all: on 2026-08-24 it spent five tool rounds — `file_metadata`,
+`find_files`, three `run_bash` — digging its own seed back out of the PNG it had
+just written. The note with them says the picture is MADE (do not call again),
+and not to say where it is: the same turn told him it "should be showing inline
+above" while the picture sat below, which is the model narrating a layout it
+cannot see.
+
 **A generated picture says what made it.** The caption is the prompt the GRAPH
 ran — the generator reports it in `::result`, so it is the transformed spelling
 with the NegPip negative folded in, not the argument the tool was handed [his,
@@ -1865,6 +1878,14 @@ seed — the rest of the answer to "what is this", and the seed is what makes th
 same picture again [his, 2026-08-24]. `_gen_meta` builds it from the generator's
 `::result`, i.e. off the graph that actually ran, so everything that came from
 his painter settings and never appeared as a tool argument is in it too.
+
+**The lightbox walks the WHOLE conversation, and takes the log with it.** It
+used to open on the pictures of ONE reply, which made the arrows useless for the
+thing he wanted them for [his, 2026-08-24]. `conversationImages()` collects
+every drawn picture in order with the row it sits on; `openPicture(entry)` finds
+the clicked one inside that run; and `Lightbox.currentRow` — the row parallel to
+the current entry — scrolls the reply as he steps, so closing it leaves him
+where the picture is rather than where he opened it.
 
 **A picture or a clip can LEAVE the window.** Right-click anything in the log —
 inline picture, gallery tile, lightbox, video card — and `Clip.copyImage` /

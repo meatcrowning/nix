@@ -457,8 +457,16 @@ Item {
             // picture and the one real sentence end up in the same bubble.
             // Long prose is left alone and still splits: that is content, not
             // a preamble, and losing it would be worse than repeating it.
+            // A SHORT LINE ON A ROUND THAT CALLED A TOOL IS A PREAMBLE,
+            // media or not. He watched one request put nine bubbles between it
+            // and the picture — "Seed locked: …", "Found shirow_masamune. Let
+            // me find one more." — each its own slab, none of them the answer
+            // [2026-08-24]. The model wrote them before it had seen the
+            // result, which PERSISTENCE_NOTE already forbids. Dropping the
+            // words leaves the round drawn as its tool block, which is where
+            // that work belongs; a round with real prose in it is untouched.
             var body = (cur.body || "");
-            var preamble = hasMedia && body !== "" && body.length <= win.preambleMax
+            var preamble = body !== "" && body.length <= win.preambleMax
                            && (cur.toolCount || 0) > 0;
             if (preamble)
                 chatLog.setProperty(win.activeIndex, "body", "");
@@ -845,6 +853,54 @@ Item {
         rows.push({ label: win.plasma ? "Copy Path" : "copy path",
                     trigger: function () { Clip.copyText(path); } });
         return rows;
+    }
+
+    // EVERY PICTURE IN THE CONVERSATION, in the order it arrived, with the row
+    // each one sits on [his, 2026-08-24: "when they flip to them, the scroll of
+    // the chat moves to where that output is"]. A lightbox that could only walk
+    // the pictures of ONE reply made the arrows useless for the thing he
+    // actually wanted them for — going back through the session's output.
+    function conversationImages() {
+        win.chatRev;                     // recompute as the log grows
+        var out = [];
+        for (var i = 0; i < chatLog.count; i++) {
+            var r = chatLog.get(i);
+            if (r.isUser) continue;
+            var arr;
+            try { arr = JSON.parse(r.images || "[]"); } catch (e) { continue; }
+            for (var j = 0; j < arr.length; j++)
+                if (arr[j] && arr[j].ok)
+                    out.push({ e: arr[j], row: i });
+        }
+        return out;
+    }
+
+    // Open the lightbox on `entry`, inside the whole conversation's run of
+    // pictures. Falls back to the one picture when it cannot be placed (a
+    // fetch still settling, a row not yet written).
+    function openPicture(entry) {
+        if (!entry) return;
+        var all = win.conversationImages();
+        var idx = -1;
+        for (var i = 0; i < all.length; i++) {
+            var e = all[i].e;
+            if ((e.path || "") === (entry.path || "")
+                    && (e.url || "") === (entry.url || "")) { idx = i; break; }
+        }
+        if (idx < 0) { lightbox.openAt([entry], 0, []); return; }
+        lightbox.openAt(all.map(function (x) { return x.e; }), idx,
+                        all.map(function (x) { return x.row; }));
+    }
+
+    // Put a row of the log on screen. Used by the lightbox as it steps, so the
+    // conversation ends up where the picture he is looking at came from.
+    function scrollToRow(i) {
+        if (i < 0 || i >= chatLog.count) return;
+        var item = turnRepeater.itemAt(i);
+        if (!item) return;
+        var top = Math.max(0, item.y - 12);
+        var max = Math.max(0, replyFlick.contentHeight - replyFlick.height);
+        replyFlick.contentY = Math.min(top, max);
     }
 
     // One right-click on a picture or a clip, wherever in the log it was.
@@ -2342,6 +2398,7 @@ Item {
                 // One row per turn — user prompts and model answers alike stay in
                 // the log as it grows (docs/DESIGN.md §14).
                 Repeater {
+                    id: turnRepeater
                     model: chatLog
                     delegate: Item {
                         id: turn
@@ -3270,7 +3327,7 @@ Item {
                                                         entry: parent.isImg ? parent.modelData : null
                                                         maxWidth: replyFlow.width
                                                         onEnlarge:
-                                                            lightbox.openAt([parent.modelData], 0)
+                                                            win.openPicture(parent.modelData)
                                                         onContextRequested: (p, x, y) => win.openMediaMenu(p, x, y, false)
                                                     }
 
@@ -3297,7 +3354,7 @@ Item {
                                                 width: replyFlow.width
                                                 visible: turn.leftoverImages.length > 0
                                                 entries: turn.leftoverImages
-                                                onEnlarge: (i) => lightbox.openAt(turn.leftoverOks, i)
+                                                onEnlarge: (i) => win.openPicture(turn.leftoverOks[i])
                                                 onContextRequested: (p, x, y) => win.openMediaMenu(p, x, y, false)
                                             }
 
@@ -3503,6 +3560,8 @@ Item {
     // sends it.
     Lightbox {
         id: lightbox
+        // Stepping through the conversation's pictures takes the log with it.
+        onCurrentRowChanged: if (opened) win.scrollToRow(currentRow)
         onClosed: replyFlick.forceActiveFocus()
         onContextRequested: (p, x, y) => win.openMediaMenu(p, x, y, false)
     }
