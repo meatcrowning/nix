@@ -1239,9 +1239,12 @@ your line breaks; everything else is passed through verbatim (Krea 2's
 `<think>…</think>` prose must not be touched). The string actually sent is what
 gets recorded in the PNG.
 
-`danbooru` is `single_line` plus the two things a model writing the prompt gets
-wrong most often, both mechanical [his, 2026-08-24]: **underscores become
-spaces**, and an artist becomes **`@name`** (`artist:x`, and `by x` when x is
+`danbooru` is `single_line` plus the three things a model writing the prompt
+gets wrong most often, all mechanical [his, 2026-08-24]: **underscores become
+spaces**, a near-miss becomes **the tag the site actually has**
+(`one girl` → `1girl`, `amber eyes` → `yellow eyes`, via `pylib/boorutags`'s
+`canonical` — which returns nothing rather than a guess, because a wrong tag
+fires something and an unknown one does not), and an artist becomes **`@name`** (`artist:x`, and `by x` when x is
 one token — "by the window" is a sentence, and this transform must never
 rewrite his prose). It normalises SPELLING and edits nothing else. Three things
 keep their underscores because they are not word separators: `score_*`, the

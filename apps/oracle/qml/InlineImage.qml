@@ -35,9 +35,9 @@ Item {
     // The height ceiling, and it is not generous on purpose: a portrait render
     // sized by the bubble's width alone is nearly three times the height of a
     // landscape one and pushes the reply off the screen [his, 2026-08-24]. Same
-    // 420 the gallery and VideoCard use, so every shape of media in a reply
+    // 320 the gallery and VideoCard use, so every shape of media in a reply
     // takes comparable room; click it for the full size.
-    readonly property real maxH: Math.max(240, Math.min(420, maxWidth * 1.5))
+    readonly property real maxH: Math.max(200, Math.min(320, maxWidth * 1.5))
     readonly property real scaleFit: Math.min(1, maxWidth / Math.max(1, natW),
                                               maxH / Math.max(1, natH))
     readonly property real dispW: Math.max(1, Math.round(natW * scaleFit))

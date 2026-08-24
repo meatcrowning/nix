@@ -1840,12 +1840,25 @@ nothing about the bar is persisted.
 **A PORTRAIT picture is capped by its HEIGHT, not only by the column.** Sized by
 the column alone a 2:3 render is nearly three times the height of a 16:9 one in
 the same chat and pushes the reply off the screen [his, 2026-08-24]. The ceiling
-is 420 in all three places media is drawn — `ImageGallery.maxH`,
+is 320 in all three places media is drawn — `ImageGallery.maxH`,
 `InlineImage.maxH` and `VideoCard.maxH` — so a still and a clip of the same
 shape take the same room. Nothing is cropped: the picture is drawn smaller, and
 one click still opens it full size in the Lightbox.
 
-**A generated picture says what made it.** The caption is his prompt; a second,
+**ONE PICTURE, DRAWN ONCE.** `_images_shown` keys on the URL, so it never
+covered a local file — and a turn that generated one picture then `show_image`d
+the same path twice put it in the chat three times and told him two had been
+generated [2026-08-24]. `_paths_shown` is the per-turn set of local files
+already drawn (reset in `send`, like the URL ledgers); a second request for one
+already on screen is answered `ok` with `already_shown`, no second card, and a
+note saying there is one of it and not two. The file is the identity here, not
+the URL, because a generated picture has no URL at all.
+
+**A generated picture says what made it.** The caption is the prompt the GRAPH
+ran — the generator reports it in `::result`, so it is the transformed spelling
+with the NegPip negative folded in, not the argument the tool was handed [his,
+2026-08-24: "i dont see the negpip negative text anywhere in the caption"]. A
+second,
 dimmer line under it (`entry.meta`, drawn where a fetched picture's host goes)
 carries the model, the size, the steps, the sampler/scheduler, the cfg and the
 seed — the rest of the answer to "what is this", and the seed is what makes the

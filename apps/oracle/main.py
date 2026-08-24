@@ -276,10 +276,11 @@ MAKE_IMAGE_TOOL = {
             "booru_tags before you write them — an invented tag does nothing — "
             "write them with spaces and an artist as @name, and NEVER open with "
             "'masterpiece, best quality' or a score_ tag: he does not prompt "
-            "that way. Leave `negative` out unless this picture needs something "
-            "extra kept out — his own is applied from his painter settings, and "
-            "on that model whatever you pass is folded into the positive as an "
-            "inline negative weight with its own box left empty. PASS ONLY WHAT "
+            "that way. Name a CHARACTER by its tag plus its series tag and let "
+            "those carry the appearance — do not describe hair and eyes from "
+            "memory. Write your own `negative` for the picture; on that model "
+            "it is folded into the positive as an inline negative weight with "
+            "its own box left empty. PASS ONLY WHAT "
             "HE ASKED FOR: every argument you leave out falls back to what he "
             "himself set in painter for that model — size, steps, sampler, his "
             "own negative prompt — which is what he wants unless he says "
@@ -3653,6 +3654,7 @@ class Ollama(QObject):
         self._done_reason = ""   # ollama's reason the last frame was the last
         self._pending_vision = []  # local images view_image is handing the model
         self._images_shown = set()
+        self._paths_shown = set()  # …and every LOCAL file already drawn, by path
         self._image_entries = {}   # url -> the entry we already drew, this turn
         self._row_urls = set()     # …and which of them are on the CURRENT bubble
         self._md_images = {"n": 0}
@@ -4245,6 +4247,7 @@ class Ollama(QObject):
         self._think_tokens = 0
         self._rounds = 0
         self._images_shown = set()   # every image URL already fetched this turn
+        self._paths_shown = set()    # …and every LOCAL file already drawn, by path
         self._image_entries = {}     # …and the entry each one produced, to redraw
         self._row_urls = set()       # what is already on the bubble being written
         self._md_images = {"n": 0}   # typed-markdown images still downloading
@@ -4394,6 +4397,7 @@ class Ollama(QObject):
         self._think_tokens = 0
         self._rounds = 0
         self._images_shown = set()
+        self._paths_shown = set()
         self._image_entries = {}
         self._row_urls = set()
         self._md_images = {"n": 0}
@@ -7908,9 +7912,24 @@ class Ollama(QObject):
         the outcome either way."""
         local_host = "book" if ON_BOOK else "top"
         here = os.path.abspath(os.path.expanduser(path))
+        # ONE PICTURE, DRAWN ONCE. `_images_shown` keys on the URL, so it has
+        # never covered a local file — and on 2026-08-24 a turn generated one
+        # picture and then `show_image`d the same path twice, putting it in the
+        # chat three times and telling him two had been generated. The file is
+        # the identity here; a second request for one already on screen is
+        # answered with where it is, not with another copy of it.
+        if here in getattr(self, "_paths_shown", set()):
+            answer({"ok": True, "path": here, "already_shown": True,
+                    "note": ("This picture is ALREADY in the chat — you showed "
+                             "it earlier this turn, so it was not drawn again. "
+                             "There is one of it, not two. Do not call "
+                             "show_image for it again, and do not tell him "
+                             "more pictures were made than you made.")})
+            return
         if target_host in (None, local_host):
             probe = QImage()
             if probe.load(here) and not probe.isNull():
+                self._paths_shown.add(here)
                 self.imageFetchStarted.emit(here)
                 self._emit_image({"ok": True, "url": "", "path": here,
                                   "alt": caption or os.path.basename(here),
@@ -7960,6 +7979,7 @@ class Ollama(QObject):
             if not saved:
                 answer({"error": "could not save the image locally"}, False)
                 return
+            self._paths_shown.add(here)
             self.imageFetchStarted.emit(saved)
             self._emit_image({"ok": True, "url": "", "path": saved,
                               "alt": caption or os.path.basename(here),
@@ -8149,7 +8169,13 @@ class Ollama(QObject):
                         "note": ("`unknown` tags are not on Danbooru and will "
                                  "do nothing — replace or drop them. `renamed` "
                                  "are real but written the wrong way; use the "
-                                 "`tag` given.")}, True,
+                                 "`tag` given. `suspect` is usually a CHARACTER "
+                                 "or a series written out as a phrase instead "
+                                 "of as its tag — search for it and use the "
+                                 "real character tag plus its copyright tag, "
+                                 "and let those carry the appearance instead "
+                                 "of describing hair and eyes you are not "
+                                 "sure of.")}, True,
                        "tags · %d ok, %d unknown" % (len(got["known"]),
                                                      len(got["unknown"])))
                 return
@@ -8336,7 +8362,13 @@ class Ollama(QObject):
                 answer({"error": why[:400]}, False, name + ": " + why[:120])
                 return
             path = made[-1]
-            caption = str(args.get("prompt") or "")
+            # THE CAPTION IS THE PROMPT THE GRAPH RAN, when the generator said
+            # what that was: transformed to the family's spelling, and with the
+            # negative folded in where NegPip took it. The tool's own argument
+            # is what was ASKED for, which is not the same thing and hides the
+            # half he cannot otherwise see [his, 2026-08-24].
+            caption = (str((state["meta"] or {}).get("positive") or "").strip()
+                       or str(args.get("prompt") or ""))
             meta = self._gen_meta(state["meta"])
             if kind == "video":
                 self._display_clip(path, caption, args, answer, meta,

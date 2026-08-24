@@ -34,9 +34,13 @@ Column {
     // the rows on it. Same shape as `enlarge`.
     signal contextRequested(string path, real x, real y)
 
-    // How tall a single picture may be drawn. VideoCard's own ceiling, so a
-    // still and a clip of the same shape take the same room in a reply.
-    property int maxH: 420
+    // How tall a single picture may be drawn. A landscape render comes out
+    // around 260 in this column, so this keeps a portrait one close to it
+    // rather than towering over the reply [his, 2026-08-24, twice: 420 was
+    // still too big]. The same ceiling is used inline and by VideoCard, so
+    // every shape of media in a reply takes comparable room; nothing is
+    // cropped and one click opens it full size.
+    property int maxH: 320
 
     readonly property var oks: {
         var out = [];
