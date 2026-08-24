@@ -899,6 +899,26 @@ with text-only toolbar rows in a session where everything else is Oxygen.
 icon theme name, and the icon search paths Qt only fills in from a platform
 theme — so a stripped or offscreen environment behaves like the session.
 
+**The window's colour group comes from KWIN, not from Qt.** Qt derives
+`isActiveWindow()` from wl_keyboard focus and KWin's decoration draws from the
+window it made active, and a screenshot tool splits those two: it takes the
+keyboard without taking the activation. Measured on `top` 2026-08-24 off a
+Spectacle capture of a FOCUSED chatter, the client painted Oxygen's background
+in the INACTIVE group (44,62,97 at the top of the menubar) against the deco's
+ACTIVE one (54,63,84 at the bottom of the titlebar) — one gradient, two groups,
+a hard seam through the middle. **The app cannot go and ask**: KWin does not
+advertise `org_kde_plasma_window_management` to ordinary clients (48 globals in
+the registry a normal app sees; that one is not among them). So the compositor
+pushes — `home/prog/kwin-winactive.nix` installs a KWin script that watches
+`workspace.windowActivated` and `callDBus`es the window's own process at
+`org.kde.lam.winactive.p<pid>`, and `pylib/kwinactive.py` owns that name.
+`_kwin_active_changed` then dresses the WINDOW in `_group_palette(...)`, so
+every child renders in KWin's group whatever Qt thinks, and the `kdebg` URL
+carries the same flag. All of it fails soft into `isActiveWindow()` — no
+script, no bus, nothing said yet — and the Hyprland face never builds it, since
+hyprvtb and the client already read one focus state there. Harness:
+`pylib/tools/kwinactive-test.py`, which needs no window on his screen.
+
 **The menus are KDE's, not the app's.** `MENU_ORDER`/`MENU_TITLE` fix the
 vocabulary — File, Edit, View, Go, Bookmarks, Tools, Settings, Help — with File
 first and Settings/Help last whatever an app's own `menuOrder` says; a group an

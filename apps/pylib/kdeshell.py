@@ -369,6 +369,11 @@ class KdeShell:
 # holds the list rather than a snapshot of it.
 _palette_view_lists = []
 
+# Every live shell that has been told a KWin activation state. A palette change
+# has to re-flatten their window palettes: an explicitly-set widget palette is
+# a snapshot, exactly like a QQuickWidget's, and stops tracking the app's.
+_kwin_shells = []
+
 
 def _redress_palette_views():
     """Hand every registered QQuickWidget the app's current palette.
@@ -389,6 +394,54 @@ def _redress_palette_views():
                 view.setClearColor(pal.window().color())
             except RuntimeError:      # the view is gone; forget it
                 views.remove(view)
+    for shell in list(_kwin_shells):
+        try:
+            shell._reapply_kwin_group()
+        except RuntimeError:          # the window is gone; forget it
+            _kwin_shells.remove(shell)
+
+
+def _group_palette(group):
+    """The app palette with `group`'s colours copied into every group.
+
+    Two callers, one reason: something has to render in a chosen colour group
+    rather than in the one Qt would pick for it.
+
+    * The background proxy is NEVER A WINDOW ON SCREEN, so Qt decides its group
+      on its own, and it decided differently from the REAL window: with his
+      colour scheme's inactive effect on (`[ColorEffects:Inactive] Enable=true`,
+      Window 43,35,23 active vs 46,34,0 inactive) the chrome the style paints
+      and the crop the QML draws came from two different tones the moment the
+      window lost focus [his, 2026-08-23].
+    * The WINDOW itself wears one of these when KWin tells us what it thinks
+      (`kwinactive.py`), which is how the menubar stops following wl_keyboard
+      focus and starts following the titlebar.
+
+    Flattening is what makes the answer independent of what Qt guesses.
+    """
+    from PySide6.QtGui import QPalette
+    from PySide6.QtWidgets import QApplication
+    src = QApplication.palette()
+    out = QPalette(src)
+    for role in QPalette.ColorRole:
+        if role == QPalette.NColorRoles:
+            continue
+        colour = src.color(group, role)
+        for g in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
+            out.setColor(g, role, colour)
+    return out
+
+
+def _window_active(win):
+    """Is this window active — KWin's answer where we have it, Qt's otherwise.
+
+    `kwinactive.py` has the whole argument: the two differ exactly when a
+    screenshot tool takes the keyboard without taking the activation, and the
+    window would otherwise be drawn half in one colour group and half in the
+    other.
+    """
+    kwin = getattr(win, "_kwin_active", None)
+    return win.isActiveWindow() if kwin is None else kwin
 
 
 def _build_background_classes():
@@ -404,29 +457,6 @@ def _build_background_classes():
     from PySide6.QtGui import QImage, QPalette, QRegion
     from PySide6.QtQuick import QQuickImageProvider
     from PySide6.QtWidgets import QApplication, QWidget
-
-    def _group_palette(group):
-        """The app palette with `group`'s colours copied into every group.
-
-        THE PROXY IS NEVER A WINDOW ON SCREEN, so Qt decides its colour group
-        (Active or Inactive) on its own, and it decided differently from the
-        REAL window: with his colour scheme's inactive effect on
-        (`[ColorEffects:Inactive] Enable=true`, Window 43,35,23 active vs
-        46,34,0 inactive) the chrome the style paints and the crop the QML
-        draws came from two different tones the moment the window lost focus —
-        which is the state a "select window" screenshot captures, and why the
-        titlebar looked disconnected from the window in one [his, 2026-08-23].
-        Flattening the palette is what makes the answer independent of what Qt
-        guesses about a widget nobody can see."""
-        src = QApplication.palette()
-        out = QPalette(src)
-        for role in QPalette.ColorRole:
-            if role == QPalette.NColorRoles:
-                continue
-            colour = src.color(group, role)
-            for g in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
-                out.setColor(g, role, colour)
-        return out
 
     class _BgProvider(QQuickImageProvider):
         def __init__(self):
@@ -518,7 +548,7 @@ def _build_background_classes():
             dpr = view.devicePixelRatioF() or 1.0
             return (f"image://kdebg/{win.width()},{win.height()},"
                     f"{off.x()},{off.y()},{view.width()},{view.height()},{dpr},"
-                    f"{'a' if win.isActiveWindow() else 'i'}"
+                    f"{'a' if _window_active(win) else 'i'}"
                     f"#{self._serial}")
 
     return _BgProvider, _StyledBackground
@@ -630,6 +660,16 @@ def _build_shell_class():
             # crop above [his, 2026-08-23: "it might fail to render properly"].
             self._views = [self.view]
             _palette_view_lists.append(self._views)
+
+            # THE WINDOW FOLLOWS ITS OWN TITLEBAR, not wl_keyboard focus.
+            # `kwinactive.py` for the measurement and for why the app cannot
+            # simply ask; None here (no script, no bus, or nothing said yet)
+            # leaves every colour group exactly where Qt puts it.
+            import kwinactive
+            self._kwin = kwinactive.watcher(self.window)
+            if self._kwin is not None:
+                self._kwin.changed.connect(self._kwin_active_changed)
+                _kwin_shells.append(self)
 
             self._toolbar = None
             self._status = None
@@ -869,6 +909,28 @@ def _build_shell_class():
                 elif isinstance(b, dict):
                     out.append(b)
             return out
+
+        def _kwin_active_changed(self, active):
+            """KWin activated or deactivated this window.
+
+            The window wears the matching group FLATTENED, so every child
+            widget — menubar, toolbar, status bar — renders in it whatever Qt
+            thinks about keyboard focus, and the QML crop reads the same flag
+            off the window. Re-applied on an application palette change too
+            (`_palette_view_lists` above), since an explicit widget palette
+            does not otherwise track the app's.
+            """
+            from PySide6.QtGui import QPalette
+            self.window._kwin_active = active
+            self.window.setPalette(_group_palette(QPalette.Active if active
+                                                  else QPalette.Inactive))
+            if self.background is not None:
+                self.background.refresh()
+
+        def _reapply_kwin_group(self):
+            """Put the flattened palette back after an app-wide palette change."""
+            if self._kwin is not None and self._kwin.active() is not None:
+                self._kwin_active_changed(self._kwin.active())
 
         def _rebuild(self):
             entries = self._entries()

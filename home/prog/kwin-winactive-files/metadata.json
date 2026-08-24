@@ -1,0 +1,16 @@
+{
+    "KPackageStructure": "KWin/Script",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "lam"
+            }
+        ],
+        "Description": "Tell an app when KWin activates or deactivates its window, so its chrome can agree with its titlebar.",
+        "Icon": "window",
+        "Id": "winactive",
+        "License": "GPL",
+        "Name": "Window Activation Relay"
+    },
+    "X-Plasma-API": "javascript"
+}
