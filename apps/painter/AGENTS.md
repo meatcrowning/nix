@@ -894,6 +894,36 @@ than just text-to-image:
   backend, no upload, no weights. That is how the parameter surface is checked
   without a render.
 
+**HIS OWN SETTINGS ARE THE FLOOR** (`userprefs.py`, his 2026-08-24 rule: use
+what he set in painter as the reference, and something else only when he says
+so). painter remembers a whole block per model under `genByModel` in
+`~/.local/state/painter/prefs.json` — steps, cfg, sampler, scheduler, his
+negative prompt, the resolution, the clip length, the toggles and the shift
+block — and restores it when that model is selected again. So a generation
+started anywhere else lays those UNDER whatever it was told, and a caller only
+has to name what differs. `--no-prefs` opts out.
+
+- **It mirrors what painter itself would SEND**, mode by mode (`Root.qml`'s
+  `submit()`), not the whole saved block: an edit takes only the scale keys
+  because the family's edit block supplies steps/cfg/shift, and a video job has
+  no CFG at all. Sending the image fields into either would claim settings that
+  graph never reads.
+- **The positive prompt is never carried over** — it is the last thing he typed
+  into the window, not a default.
+- **The seed is a policy, not a value.** `randomSeed` means a fresh one every
+  time, `reuseSeed` re-runs the last batch's base seed, otherwise it is the seed
+  in the box (`_start_jobs`' own rule). An explicit `--seed` beats all three;
+  with no prefs at all it falls back to 12345, so a bare run is still
+  reproducible.
+- **An aspect or a budget named on the command line REPLACES the remembered
+  width/height** — he asked for that shape, not the last one.
+- The LoRA stack is one list, not one per model, so it is carried only through
+  the same filter painter's own restore uses (applicable to this model, and
+  `lora_compat`).
+- The file is the window's; nothing here writes to it, and a missing, corrupt
+  or model-less prefs document is simply no defaults. Harness:
+  `tools/prefs-test.py` (pure, fabricated document, no backend).
+
 Outputs are saved under their own subfolder (a clip lands in `video/`) and
 tagged the way the app tags them — a PNG in a tEXt chunk, an MP4 as an `mdta`
 tag — with a file that cannot take the tag written verbatim rather than not

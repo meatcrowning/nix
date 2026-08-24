@@ -1769,6 +1769,12 @@ is what splitting them would cost.
   frame — a card with no poster is a black box wearing a play marker. A clip
   made from book is NOT shown, because QtMultimedia cannot stream a path that is
   not there; the tool says where it is instead (docs/DESIGN.md §10).
+- **What he set in painter is what he gets.** Every argument the model leaves
+  out falls back to painter's own remembered settings for that model
+  (`painter/userprefs.py` — size, steps, sampler, his negative prompt, a clip's
+  length, the seed policy), which is why both tool descriptions say to pass ONLY
+  what he asked for. His rule, 2026-08-24: painter's defaults are the reference,
+  and something else only when he says so.
 - **A clip's clock is not a picture's.** `MAKE_VIDEO_MS` is an hour against
   `MAKE_IMAGE_MS`'s fifteen minutes: MiniMax H3 samples every frame, so six
   seconds is tens of minutes on this GPU.
