@@ -24,11 +24,22 @@ model selector* below).
 ## "server", not "ollama"
 
 **Every string he reads says `server`** [his, 2026-08-23] — the status bar
-(`server idle` / `server · <model>` / `server down`), the start/stop reasons the
+(`server running` / `server · <model>` / `server down`), the start/stop reasons the
 askpass dialog shows, the pull heading. Which daemon is behind it is an
 implementation detail and the name of one is noise in a status bar. The
 model-facing text keeps `ollama` where it is a technical fact (the endpoint in
 `describe_self`, the tool descriptions), and so does every identifier.
+
+The two halves say different kinds of thing, and neither repeats the other:
+the **left** is what is HAPPENING (`generating…`, an error, a server action's
+result) and the **right** is the standing fact (jobs, then the daemon). So the
+left names its resting state — **`idle`**, whenever the daemon is up and no
+turn is in flight — because a blank left half is also what a wedged window
+looks like [his, 2026-08-23], and `stopReply()` clears `win.status` so the
+line the interrupted turn was last saying about itself does not stand after it
+is over. With the daemon down the left is empty: the right already says
+`server down`, and `idle` beside it would be a claim about a server that is
+not running.
 
 ## Two roofs
 
@@ -305,8 +316,12 @@ each drawn only once it is non-zero (§5.2). `toolCallCount` sums the rows'
 `toolCount` and depends on `chatRev`, because a ListModel row settles without
 notifying; `Ollama.memoryCount` is the length of the same cache the system
 prompt injects, so the number and what the model actually knows are one thing.
-Under Plasma those two are the **status bar's** standing facts instead, beside
-the job count and the daemon (§7.6 — one source, two roofs). The row collapses
+
+**Under Plasma those two are the status bar's alone** — not drawn in the row
+at all [his, 2026-08-23]. The row is the CONTEXT readout; a face that has a
+status bar for standing facts does not also print them beside the context bar
+(§7.6 — one source, two roofs, and only ever one of them at a time). The
+Hyprland face has no status bar, so there they stay in the row. It collapses
 to nothing until at least one stat exists.
 
 ### The window is the real one

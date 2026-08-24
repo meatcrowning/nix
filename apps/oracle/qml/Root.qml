@@ -1116,8 +1116,8 @@ Item {
     // How many tool calls this conversation has made, and how many durable
     // memories the model is carrying [his, 2026-08-23]. Both are STANDING FACTS
     // about the chat on screen rather than about the turn in flight, which is
-    // why they sit with the context readout and in the status bar rather than
-    // in a bubble. `chatRev` is the dependency: ListModel rows settle without
+    // why they belong in the status bar rather than in a bubble — and, in the
+    // face that has no status bar, in the stats row. `chatRev` is the dependency: ListModel rows settle without
     // notifying, so every writer bumps it (see `accrueThink`).
     readonly property int toolCallCount: {
         win.chatRev;
@@ -1135,7 +1135,13 @@ Item {
         if (win.serverNote !== "") return win.serverNote;
         if (win.status !== "") return win.status;
         if (Ollama.busy) return "generating…";
-        return "";
+        // Blank read as STUCK: he pressed stop, "generating…" went away and
+        // the left half said nothing at all, which is what a wedged window
+        // also looks like [his, 2026-08-23]. So the resting state is named.
+        // Only when the daemon is actually there — with it down the right half
+        // already says so, and "idle" beside "server down" would be a lie
+        // about a server that is not running at all.
+        return Backend.serverUp ? "idle" : "";
     }
     // No honest fraction: a reply has no known length. The line says it instead.
     readonly property real statusProgress: -1
@@ -1157,8 +1163,12 @@ Item {
         // an implementation detail, and the name of one is noise in a status
         // bar (docs/agents/his-voice.md — the fact, not the plumbing).
         if (!Backend.serverUp) return jobs + counts + "server down";
+        // Up with nothing loaded used to read "server idle" — a noun and a
+        // state that both belong to the LEFT half, which now says "idle"
+        // itself. This half is the standing fact: the daemon is running, and
+        // what it is holding when it holds something.
         return jobs + counts + (Backend.loadedModels.length > 0
-               ? "server · " + Backend.loadedModels.join(", ") : "server idle");
+               ? "server · " + Backend.loadedModels.join(", ") : "server running");
     }
     // The taskbar entry says which conversation this is (kdeshell.bind_title).
     readonly property string windowTitle:
@@ -1294,6 +1304,11 @@ Item {
         // Stop is stop: it also spends the auto-continue budget, so a turn he
         // interrupted is never carried on for him.
         win.autoContinues = Ollama.autoContinueMax;
+        // And it drops whatever the turn was last saying about itself
+        // ("carrying on by itself…", "it stopped short again…"): the turn is
+        // over, so that line is no longer true, and left standing it is the
+        // other half of the status bar looking stuck.
+        win.status = "";
         Ollama.cancel();
         if (win.activeIndex >= 0) {
             win.stopThinkClock(win.activeIndex);
@@ -1725,8 +1740,8 @@ Item {
         readonly property bool hasFill: hasCtx && Ollama.contextUsed > 0
         readonly property real fillFrac: hasFill
             ? Math.min(1, Ollama.contextUsed / Ollama.contextMax) : 0
-        visible: hasCtx || hasTps || win.toolCallCount > 0
-                 || Ollama.memoryCount > 0
+        visible: hasCtx || hasTps
+                 || (!win.plasma && (win.toolCallCount > 0 || Ollama.memoryCount > 0))
         height: visible ? Theme.lineHeight : 0
 
         // Compact token formatter: 8192 → "8K", 8000 → "7.8K", 512 → "512".
@@ -1785,12 +1800,14 @@ Item {
             color: Theme.textDim
         }
 
-        // The two counts, in the session that has no status bar to put them in
-        // (§7.6 — one source, two roofs; under Plasma these same two numbers
-        // are the status bar's standing facts). Each appears only once it is
-        // non-zero: a fresh chat says nothing about nothing (§5.2).
+        // The two counts, ONLY in the session that has no status bar to put
+        // them in (§7.6 — one source, two roofs). Under Plasma they are the
+        // status bar's standing facts and belong nowhere else: drawn here too
+        // they said the same thing twice, once in the readout that is supposed
+        // to be about the context window [his, 2026-08-23]. Each appears only
+        // once it is non-zero: a fresh chat says nothing about nothing (§5.2).
         PixelText {
-            visible: win.toolCallCount > 0
+            visible: !win.plasma && win.toolCallCount > 0
             anchors.verticalCenter: parent.verticalCenter
             text: win.toolCallCount + (win.toolCallCount === 1
                                        ? " tool call" : " tool calls")
@@ -1798,7 +1815,7 @@ Item {
         }
 
         PixelText {
-            visible: Ollama.memoryCount > 0
+            visible: !win.plasma && Ollama.memoryCount > 0
             anchors.verticalCenter: parent.verticalCenter
             text: Ollama.memoryCount + " mem"
             color: Theme.textDim
