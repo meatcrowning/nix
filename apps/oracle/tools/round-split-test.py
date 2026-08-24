@@ -4,32 +4,56 @@
 Everything a turn did used to pile into a single row — every round's prose,
 every tool name and the final answer — so there was no telling where a round
 began [his, 2026-08-23]. This drives one real prompt through the real window
-(offscreen) against a STUB ollama on 127.0.0.1 that asks for two tool rounds,
-and reads the chat rows back:
+(offscreen) against a STUB ollama on 127.0.0.1, and reads the chat rows back.
 
-    row 0  you           the prompt
-    row 1  model          round 1's prose + the tool it called
-    row 2  model         round 2's prose + its tool
-    row 3  model         the answer
+Two scenarios, mode-selected so each stays independent:
+
+    MODE=rounds  (default, the original) — two plain tool rounds, no media:
+        row 0  you           the prompt
+        row 1  model          round 1's prose + the tool it called
+        row 2  model         round 2's prose + its tool
+        row 3  model         the answer
+    A turn with no media splits once per round, and a round that said nothing
+    is drawn only as the turn's meta block.
+
+    MODE=media — round 1 shows a picture and says nothing, round 2 answers:
+        row 0  you           the prompt
+        row 1  model          the picture AND "here is the picture…" (ONE row)
+    A media-only round does NOT open a fresh bubble [his, 2026-08-23]: the next
+    round's text lands on the same row, so the image and the answer it
+    accompanies read as one message instead of a detached picture floating
+    above a separate text bubble.
 
 His daemon is never touched, no model is loaded, nothing reaches his screen.
 """
+import base64
 import http.server
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 from pathlib import Path
 
 APP = Path(__file__).resolve().parent.parent
-ROUNDS = {"n": 0}
 fails = []
+ST = {"n": 0}
+
+
+def make_png():
+    """A tiny 1x1 PNG for `show_image` to draw — real pixels, no network."""
+    p = Path(tempfile.mkdtemp()) / "pix.png"
+    p.write_bytes(base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYA"
+        "AAAAYAAjCB0C8AAAAASUVORK5CYII="))
+    return str(p)
 
 
 class Stub(http.server.BaseHTTPRequestHandler):
-    """Two rounds of one tool call each, then a plain answer."""
+    mode = "rounds"
+    png = ""
 
     def _json(self, obj):
         body = json.dumps(obj).encode()
@@ -53,20 +77,33 @@ class Stub(http.server.BaseHTTPRequestHandler):
         if not self.path.startswith("/api/chat"):
             self._json({})
             return
-        ROUNDS["n"] += 1
-        i = ROUNDS["n"]
-        if i <= 2:
-            # Round 1 says NOTHING and only calls a tool — the bookkeeping that
-            # folds. Round 2 speaks, which is output and must stay drawn.
-            frames = [{"message": {"content": "" if i == 1 else "looking at round 2.",
-                                   "tool_calls": [
-                                       {"function": {"name": "get_current_time",
-                                                     "arguments": {}}}]},
-                       "done": False},
-                      {"done": True, "done_reason": "stop"}]
+        ST["n"] += 1
+        i = ST["n"]
+        if self.mode == "media":
+            if i == 1:
+                # Round 1 shows a picture and says nothing — a media-only round.
+                frames = [{"message": {"content": "",
+                                       "tool_calls": [
+                                           {"function": {"name": "show_image",
+                                                         "arguments": {"path": self.png}}}]},
+                           "done": False},
+                          {"done": True, "done_reason": "stop"}]
+            else:
+                frames = [{"message": {"content": "here is the picture I looked at."}},
+                          {"done": True, "done_reason": "stop"}]
         else:
-            frames = [{"message": {"content": "and here is the answer."}},
-                      {"done": True, "done_reason": "stop"}]
+            if i <= 2:
+                # Round 1 says NOTHING and only calls a tool — the bookkeeping that
+                # folds. Round 2 speaks, which is output and must stay drawn.
+                frames = [{"message": {"content": "" if i == 1 else "looking at round 2.",
+                                       "tool_calls": [
+                                           {"function": {"name": "get_current_time",
+                                                         "arguments": {}}}]},
+                           "done": False},
+                          {"done": True, "done_reason": "stop"}]
+            else:
+                frames = [{"message": {"content": "and here is the answer."}},
+                          {"done": True, "done_reason": "stop"}]
         self.send_response(200)
         self.send_header("Content-Type", "application/x-ndjson")
         self.end_headers()
@@ -84,29 +121,37 @@ def check(name, cond, extra=""):
         fails.append(name)
 
 
-srv = http.server.HTTPServer(("127.0.0.1", 0), Stub)
-threading.Thread(target=srv.serve_forever, daemon=True).start()
+def run_app():
+    ST["n"] = 0                     # each scenario is a fresh conversation
+    srv = http.server.HTTPServer(("127.0.0.1", 0), Stub)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    env = dict(os.environ)
+    env["OLLAMA_HOST"] = "http://127.0.0.1:%d" % srv.server_address[1]
+    env["ORACLE_SEND"] = "do the thing"
+    env["QT_QPA_PLATFORM"] = "offscreen"
+    env["XDG_CURRENT_DESKTOP"] = "Hyprland"
+    for k in ("QT_QPA_PLATFORMTHEME", "DESK_SESSION", "WAYLAND_DISPLAY", "DISPLAY"):
+        env.pop(k, None)
+    out = subprocess.run([sys.executable, str(APP / "main.py"), "--selftest"],
+                         env=env, capture_output=True, text=True, timeout=240)
+    srv.shutdown()
+    return out
 
-env = dict(os.environ)
-env["OLLAMA_HOST"] = "http://127.0.0.1:%d" % srv.server_address[1]
-env["ORACLE_SEND"] = "do the thing"
-env["QT_QPA_PLATFORM"] = "offscreen"
-env["XDG_CURRENT_DESKTOP"] = "Hyprland"
-env.pop("QT_QPA_PLATFORMTHEME", None)
-env.pop("DESK_SESSION", None)
-env.pop("WAYLAND_DISPLAY", None)
-env.pop("DISPLAY", None)
-out = subprocess.run([sys.executable, str(APP / "main.py"), "--selftest"],
-                     env=env, capture_output=True, text=True, timeout=240)
-srv.shutdown()
-txt = out.stdout + out.stderr
-m = re.search(r"^rows: (.*)$", txt, re.M)
-if not m:
-    print(txt[-1500:])
-    print("FAILED: the harness printed no rows")
-    sys.exit(1)
-rows = json.loads(m.group(1))
 
+def parse(out):
+    txt = out.stdout + out.stderr
+    m = re.search(r"^rows: (.*)$", txt, re.M)
+    mf = re.search(r"^turns: (.*)$", txt, re.M)
+    if not m:
+        print(txt[-1500:])
+        print("FAILED: the harness printed no rows")
+        sys.exit(1)
+    return txt, json.loads(m.group(1)), (json.loads(mf.group(1)) if mf else None)
+
+
+# ---- MODE=rounds: the original split behaviour -----------------------------
+Stub.mode = "rounds"
+txt, rows, turns = parse(run_app())
 check("the window still loads clean", "0 QML warning(s)" in txt)
 check("the prompt is its own row", rows and rows[0]["isUser"])
 replies = [r for r in rows if not r["isUser"]]
@@ -127,14 +172,8 @@ if len(replies) == 3:
           str([r["toolCount"] for r in replies]))
     check("nothing is left reading as still streaming",
           not any(r["streaming"] for r in rows))
-
-# The META BLOCK: a turn's bookkeeping is aggregated into ONE block at its head,
-# so the bubbles run one after another with nothing between them but their
-# timestamps [his, 2026-08-23]. A round that said nothing is drawn nowhere.
-mf = re.search(r"^turns: (.*)$", txt, re.M)
-check("the turn block reports itself", bool(mf))
-if mf:
-    turns = json.loads(mf.group(1))
+check("the turn block reports itself", bool(turns))
+if turns:
     check("his prompt is in no turn", turns[0]["head"] == -1)
     check("every model row of the turn points at the same head",
           [t["head"] for t in turns] == [-1, 1, 1, 1],
@@ -147,6 +186,27 @@ if mf:
     check("a round that said nothing is drawn only as the block",
           turns[1]["drawn"] and turns[2]["drawn"] and turns[3]["drawn"],
           json.dumps([t["drawn"] for t in turns]))
+
+# ---- MODE=media: a media-only round merges with the following text ---------
+Stub.mode = "media"
+Stub.png = make_png()
+txt, rows, turns = parse(run_app())
+check("the window still loads clean (media)", "0 QML warning(s)" in txt)
+check("the prompt is its own row (media)", rows and rows[0]["isUser"])
+replies = [r for r in rows if not r["isUser"]]
+check("a media-only round and its answer are ONE row", len(replies) == 1,
+      json.dumps([(r["step"], r["body"][:28], r["images"]) for r in replies]))
+if len(replies) == 1:
+    r = replies[0]
+    check("the picture landed on the merged row", r["images"] not in ("", "[]"),
+          r["images"][:60])
+    check("the following round's text landed on the SAME row",
+          r["body"].strip() == "here is the picture I looked at.",
+          json.dumps(r["body"]))
+    check("no second bubble was opened for the answer", r["step"] == 1,
+          str(r["step"]))
+    check("nothing is left reading as still streaming (media)",
+          not any(x["streaming"] for x in rows))
 
 print("FAILED: " + ", ".join(fails) if fails else "OK")
 sys.exit(1 if fails else 0)

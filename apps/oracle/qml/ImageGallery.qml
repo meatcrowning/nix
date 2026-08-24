@@ -44,6 +44,15 @@ Column {
 
     spacing: 6
 
+    // The picture's SOURCE, for the small caption under it: the host of the
+    // url it was fetched from, lowercased — `danbooru.donmai.us`, never the
+    // whole path (his-voice §3: a number/name, not a sentence).
+    function hostOf(u) {
+        var s = "" + (u || "");
+        s = s.replace(/^[a-z]+:\/\//i, "").split("/")[0];
+        return s;
+    }
+
     // ---- one picture: unchanged — full width, framed, its caption under it --
     Column {
         width: gal.width
@@ -83,6 +92,16 @@ Column {
             wrapMode: Text.Wrap
             text: gal.oks.length === 1 ? (gal.oks[0].alt || "") : ""
             color: Theme.textDim
+        }
+        // The source, one step dimmer — a small caption naming where the
+        // picture came from, under the model's caption [his, 2026-08-23].
+        PixelText {
+            visible: gal.oks.length === 1 && !!gal.oks[0].url
+            width: gal.width
+            wrapMode: Text.Wrap
+            text: gal.oks.length === 1 ? hostOf(gal.oks[0].url) : ""
+            color: Theme.textDim
+            opacity: 0.6
         }
         // A file that saved but will not decode (§10 — say so, never a blank).
         PixelText {
@@ -186,21 +205,37 @@ Column {
                     // own under it all along. The wash goes one step more opaque
                     // as the pointer arrives, so the text stays readable over a
                     // busy crop without hiding the picture the rest of the time.
+                    // The source host joins the alt line beneath it [his,
+                    // 2026-08-23] — the strip names where the tile came from.
                     Rectangle {
                         anchors { left: parent.left; right: parent.right
                                   bottom: parent.bottom }
-                        height: capText.height + 4
-                        visible: !!tile.e && !!tile.e.alt
+                        height: tileCap.height + 4
+                        visible: !!tile.e && (!!tile.e.alt || !!tile.e.url)
                         color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b,
                                        hover.containsMouse ? 0.92 : 0.72)
-                        PixelText {
-                            id: capText
+                        Column {
+                            id: tileCap
                             anchors { left: parent.left; right: parent.right
                                       verticalCenter: parent.verticalCenter
                                       leftMargin: 3; rightMargin: 3 }
-                            text: (tile.e && tile.e.alt) ? tile.e.alt : ""
-                            elide: Text.ElideRight
-                            color: Theme.text
+                            spacing: 0
+                            PixelText {
+                                width: tileCap.width
+                                visible: !!tile.e && !!tile.e.alt
+                                text: (tile.e && tile.e.alt) ? tile.e.alt : ""
+                                elide: Text.ElideRight
+                                color: Theme.text
+                            }
+                            PixelText {
+                                width: tileCap.width
+                                visible: !!tile.e && !!tile.e.url
+                                text: (tile.e && tile.e.url)
+                                      ? gal.hostOf(tile.e.url) : ""
+                                elide: Text.ElideRight
+                                color: Theme.text
+                                opacity: 0.6
+                            }
                         }
                     }
                 }

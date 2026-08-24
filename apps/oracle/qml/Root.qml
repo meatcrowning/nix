@@ -430,7 +430,16 @@ Item {
         function onRoundStarted(n) {
             if (win.activeIndex < 0) return;
             win.stopThinkClock(win.activeIndex);
-            chatLog.setProperty(win.activeIndex, "streaming", false);
+            var cur = chatLog.get(win.activeIndex);
+            // A media-only round — a picture fetched (or a video resolved) with
+            // no words yet — does NOT open a fresh bubble [his, 2026-08-23].
+            // The next round's text lands on the SAME row, so the image and the
+            // answer it accompanies read as one message instead of a detached
+            // picture floating above a separate text bubble. Once a row HAS
+            // words, the rounds split again (one bubble per round) as before.
+            var mediaOnly = !cur.isUser && (cur.body || "") === ""
+                && ((cur.images !== "[]" && cur.images !== "") || cur.imagesActive
+                    || (cur.videos !== "[]" && cur.videos !== "") || cur.videosActive);
             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
             chatLog.setProperty(win.activeIndex, "awaiting", false);
             chatLog.setProperty(win.activeIndex, "toolsActive", false);
@@ -438,6 +447,16 @@ Item {
             // still running: without this it keeps execRunning forever and its
             // files disclosure stays auto-open for the rest of the session.
             chatLog.setProperty(win.activeIndex, "execRunning", false);
+            if (mediaOnly) {
+                // Stay on this row, still streaming, so the next delta's prose
+                // appends here and the think-clock keeps running — the same
+                // wake-up the fresh-row path gives a new row.
+                chatLog.setProperty(win.activeIndex, "streaming", true);
+                chatLog.setProperty(win.activeIndex, "awaiting", true);
+                win.accrueThink(win.activeIndex);
+                return;
+            }
+            chatLog.setProperty(win.activeIndex, "streaming", false);
             win.appendReplyRow(n);
         }
         // The image-fetch tool: the model asked for an image, and one entry came
