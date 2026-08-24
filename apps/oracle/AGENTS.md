@@ -432,18 +432,26 @@ preset** — which meant picking a persona for one message, getting a video prom
 for everything you said afterwards, and picking the persona back off. **That
 preset is gone**; a persisted `{"choice": "vidprompt"}` falls back to `default`
 by itself (`_load_prompt_config` already rejects an unknown id). One tool now
-covers every skill, and a skill added under `~/.claude/skills` is offered with
+covers every skill, and a skill added under the skills root is offered with
 no code change at all.
 
-- **Where they live** — `SKILLS_ROOT` (`~/.claude/skills`, override
-  `$ORACLE_SKILLS`): a directory per skill holding `SKILL.md` (YAML
-  frontmatter `name`/`description`, then the instructions) plus reference
-  guides in `references/`. **Nothing is vendored here** — `~/.claude` syncs to
-  both hosts (`home/srvs/claude-state.nix`), so chatter and Claude Code read
-  ONE source of truth and none of it lands in this public repo. Today:
+- **Where they live** — `SKILLS_ROOT` (`~/.local/share/oracle/skills` since
+  2026-08-23, override `$ORACLE_SKILLS`): a directory per skill holding
+  `SKILL.md` (YAML frontmatter `name`/`description`, then the instructions)
+  plus reference guides in `references/`. **chatter's canonical base is its
+  OWN runtime dir**, not `~/.claude/skills` — that dir belongs to Claude Code,
+  and the two sets drifted apart (chatter reads its own, Claude Code its own).
+  The old default (`~/.claude/skills`) and its claude-state sync are gone; the
+  runtime dir is machine-local, so skills created here do NOT auto-reach book.
+  Seed both machines explicitly if that matters. Today:
   `video-prompt`, `flux-klein-edit` (the painter edit-mode instruction),
-  `krea-prompt` (the positive/negative image pair) and `anima-prompt` (the
-  same pair in Danbooru tags, for painter's anime mode).
+  `krea-prompt` (the positive/negative image pair), `anima-prompt` (the same
+  pair in Danbooru tags, for painter's anime mode), and the machine-runbook
+  set translated into chatter's vocabulary: `music-library`,
+  `soulseek-acquisition`, `music-library-curation`, `goetia-board-agents`,
+  `comfyui`, `media-library-organization`, and the four hardware-triage skills
+  (`nixos-hard-freeze-triage`, `nvidia-gpu-fault-triage`,
+  `memory-corruption-diagnosis`, `linux-data-integrity-triage`).
 - **`use_skill(name)`** returns that skill's `description`, its `instructions`
   (the SKILL.md with frontmatter stripped) and the names of its `guides`;
   **`use_skill(name, guide=…)`** returns one guide **in full**, in ONE call —
@@ -452,7 +460,7 @@ no code change at all.
   largest guide today is ~24k) and a cut is reported in the result.
 - **Read in-process, no host branch.** Unlike the sandbox/session/memory
   stores it is a plain local file read, so it runs wherever the window is —
-  both machines have the same `~/.claude`.
+  the runtime dir exists on each machine chatter runs on.
 - **The `name` is an enum built from what is installed**, and the tool is not
   offered at all when the skills directory is missing (docs/DESIGN.md §10 —
   never an affordance that is not there). A `guide` is resolved by **basename**
