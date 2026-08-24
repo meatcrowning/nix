@@ -178,6 +178,29 @@ check("it carries the chrome AND the scrollbar",
 check("it names itself generated", "hand-edit" in body)
 check("an unchanged palette does not rewrite it", gen.write_ui("hypr", "flat", uidir)[2] is False)
 
+# --- the flatpak seat --------------------------------------------------------
+# Its sandbox cannot open ~/.local/share/vivaldi-ui at all; the only folder it
+# reads is the one he picked through the file chooser, which the pref records
+# as a document-portal path.
+real = TMP / "vivaldi-mods" / "chrome"
+real.mkdir(parents=True, exist_ok=True)
+docid = "HFNvj4xFeQJa_1m2mImB_g"
+gen._doc_origins = lambda: {docid: real}
+portal = Path("/run/user/1000/doc/%s/chrome" % docid)
+check("a portal path resolves to the real folder", gen.host_path(portal) == real)
+check("a plain path is left alone", gen.host_path(real) == real)
+
+fresh()
+data = json.loads(prefs.read_text())
+data["vivaldi"]["appearance"] = {"css_ui_mods_directory": str(portal)}
+prefs.write_text(json.dumps(data))
+check("the folder a profile already names is where custom.css goes",
+      gen.mods_dir(prefs, TMP / "vivaldi-ui") == real)
+gen.write_prefs("hypr", prefs=prefs, force=True, ui_dir=real)
+check("and that portal path is left VERBATIM — the real one is unopenable there",
+      json.loads(prefs.read_text())["vivaldi"]["appearance"]
+      ["css_ui_mods_directory"] == str(portal))
+
 n = total[0]
 print("%d/%d checks passed" % (n - len(fails), n))
 sys.exit(1 if fails else 0)

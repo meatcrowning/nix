@@ -6,7 +6,11 @@ custom properties (`pylib/vivaldichrome.py` builds them from the live palette),
 so the browser can be re-themed the way a web page is — no patched build, and
 no source to build even if one wanted to. Two surfaces, written here:
 
-    --ui      ~/.local/share/vivaldi-ui/custom.css
+    --ui      ~/.local/share/vivaldi-ui/custom.css, and the folder each
+              INSTALLED profile is pointed at — the flatpak build reads only
+              the one he picked through the file-chooser portal (its sandbox
+              cannot open the data dir above), so it is discovered and written
+              too, or the browser just looks untouched there.
               The colour ladder, Oxygen's relief on the surfaces that have one
               (header, toolbar, tabs, address field, buttons) and the page
               scrollbar sheet, in one file. Read at startup: a change shows at
@@ -64,7 +68,75 @@ DATA = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"
 UI_DIR = Path(os.environ.get("VIVALDI_UI_DIR") or (DATA / "vivaldi-ui"))
 PREFS = Path(os.environ.get("VIVALDI_PREFS")
              or (Path.home() / ".config" / "vivaldi" / "Default" / "Preferences"))
+# The flatpak build keeps its own profile, and its sandbox cannot see
+# `~/.local/share/vivaldi-ui` at all — the only seat it reads is the folder he
+# picked through the file-chooser portal, which lands in the pref as an
+# ephemeral `/run/user/N/doc/<id>/...` path. So both profiles are discovered
+# and each is written where IT can read from. (book runs the flatpak; the nix
+# vivaldi is installed on both hosts.)
+FLATPAK_PREFS = (Path.home() / ".var" / "app" / "com.vivaldi.Vivaldi"
+                 / "config" / "vivaldi" / "Default" / "Preferences")
+FLATPAK_UI_DIR = Path.home() / ".config" / "vivaldi-mods" / "chrome"
 THEME_ID = "desktop-live"
+
+
+def _doc_origins():
+    """Portal document id -> the real path it stands for."""
+    try:
+        out = subprocess.run(["flatpak", "documents", "--columns=id,origin"],
+                             capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    origins = {}
+    for line in out.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) == 2 and parts[0] and parts[1].startswith("/"):
+            origins[parts[0].strip()] = Path(parts[1].strip())
+    return origins
+
+
+def host_path(p: Path) -> Path:
+    """A path a sandboxed Vivaldi named, as this side of the sandbox sees it.
+
+    `/run/user/1000/doc/<id>/chrome` is the document portal's view of
+    `~/.config/vivaldi-mods/chrome`; writing through the fuse mount works but
+    the mount only exists while the portal is up, so resolve to the real path.
+    """
+    parts = p.parts
+    if len(parts) >= 6 and parts[1] == "run" and parts[2] == "user" and parts[4] == "doc":
+        origin = _doc_origins().get(parts[5])
+        if origin is not None:
+            rest = list(parts[6:])
+            if rest and rest[0] == origin.name:
+                rest = rest[1:]
+            return origin.joinpath(*rest)
+    return p
+
+
+def profiles():
+    """(Preferences, where THAT profile reads custom.css from), for each install."""
+    if os.environ.get("VIVALDI_PREFS"):
+        return [(PREFS, UI_DIR)]
+    found = []
+    for prefs, fallback in ((PREFS, UI_DIR), (FLATPAK_PREFS, FLATPAK_UI_DIR)):
+        if prefs.exists():
+            found.append((prefs, mods_dir(prefs, fallback)))
+    return found or [(PREFS, UI_DIR)]
+
+
+def mods_dir(prefs: Path, fallback: Path) -> Path:
+    """Where this profile is already told to read UI css from, if anywhere."""
+    try:
+        data = json.loads(prefs.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return fallback
+    named = (data.get("vivaldi", {}).get("appearance", {})
+             .get("css_ui_mods_directory"))
+    if named:
+        real = host_path(Path(named))
+        if real.is_dir():
+            return real
+    return fallback
 
 HEADER = """\
 /* Vivaldi wearing this desktop's look — %s.
@@ -150,7 +222,11 @@ def write_prefs(source=None, prefs=PREFS, force=False, ui_dir=UI_DIR):
     # tilde is not expanded and fails silently.
     appearance = data.setdefault("vivaldi", {}).setdefault("appearance", {})
     was_dir = appearance.get("css_ui_mods_directory")
-    appearance["css_ui_mods_directory"] = str(ui_dir.resolve())
+    # A pref already naming this directory is left VERBATIM: under flatpak it
+    # is a document-portal path, and the real path we would write in its place
+    # is one the sandbox cannot open.
+    if not (was_dir and host_path(Path(was_dir)) == ui_dir.resolve()):
+        appearance["css_ui_mods_directory"] = str(ui_dir.resolve())
 
     entry = vivaldichrome.theme(pal.__getitem__)
     entry["id"] = THEME_ID
@@ -184,8 +260,8 @@ def write_prefs(source=None, prefs=PREFS, force=False, ui_dir=UI_DIR):
     # reconstruction.
     if was_map and was_map != {"dark": THEME_ID, "light": THEME_ID}:
         try:
-            ui_dir.mkdir(parents=True, exist_ok=True)
-            (ui_dir / "previous-theme-schedule.json").write_text(
+            UI_DIR.mkdir(parents=True, exist_ok=True)
+            (UI_DIR / "previous-theme-schedule.json").write_text(
                 json.dumps({"o_s": was_map, "current": was_current}, indent=1),
                 encoding="utf-8")
         except OSError:
@@ -195,7 +271,7 @@ def write_prefs(source=None, prefs=PREFS, force=False, ui_dir=UI_DIR):
     changed = (before != json.dumps([entry], sort_keys=True)
                or was_current != THEME_ID
                or was_map != schedule["o_s"]
-               or was_dir != appearance["css_ui_mods_directory"])
+               or was_dir != appearance.get("css_ui_mods_directory"))
     if changed:
         prefs.write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
     return prefs, changed
@@ -212,26 +288,34 @@ def main():
     ap.add_argument("--css", action="store_true", help="print the css, write nothing")
     ap.add_argument("--force", action="store_true",
                     help="write Preferences even with Vivaldi running (it will be lost)")
-    ap.add_argument("--dir", type=Path, default=UI_DIR)
+    ap.add_argument("--dir", type=Path, default=None,
+                    help="write custom.css here instead of each install's own folder")
     a = ap.parse_args()
 
     if a.css:
         sys.stdout.write(build_css(a.source, a.style)[0])
         return 0
     both = not (a.ui or a.prefs)
-    if a.ui or both:
-        path, prov, changed = write_ui(a.source, a.style, a.dir)
-        print("%s\n  %s — %s" % (path, "rewritten" if changed else "unchanged", prov))
-    if a.prefs or both:
-        if both and vivaldi_running(PREFS):
-            print("Preferences: skipped, vivaldi is running (it would be overwritten "
-                  "on exit). Close it and run: vivaldi-theme --prefs")
-        else:
-            path, changed = write_prefs(a.source, force=a.force, ui_dir=a.dir)
+    seats = [(PREFS, a.dir)] if a.dir else profiles()
+    written = set()
+    for prefs, ui_dir in seats:
+        if a.ui or both:
+            if ui_dir not in written:
+                written.add(ui_dir)
+                path, prov, changed = write_ui(a.source, a.style, ui_dir)
+                print("%s\n  %s — %s"
+                      % (path, "rewritten" if changed else "unchanged", prov))
+        if a.prefs or both:
+            if both and vivaldi_running(prefs):
+                print("%s: skipped, vivaldi is running (it would be overwritten "
+                      "on exit). Close it and run: vivaldi-theme --prefs" % prefs)
+                continue
+            path, changed = write_prefs(a.source, prefs=prefs, force=a.force,
+                                        ui_dir=ui_dir)
             print("%s\n  theme %r %s, made current, and custom UI modifications"
                   " pointed at %s"
                   % (path, THEME_ID, "written" if changed else "already installed",
-                     a.dir.resolve()))
+                     ui_dir.resolve()))
     return 0
 
 
