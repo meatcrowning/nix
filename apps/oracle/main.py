@@ -8380,9 +8380,14 @@ class Ollama(QObject):
                     answer(result, False)
                     return
                 answer({"ok": True, "path": path,
-                        "note": ("Generated and shown to him in the chat. You "
-                                 "have not seen it — view_image if you need "
-                                 "to.")}, True,
+                        **self._gen_facts(state["meta"]),
+                        "note": ("Generated and placed in the chat. You have "
+                                 "NOT seen it — view_image if you need to. Do "
+                                 "not say where it is (above, below, inline) "
+                                 "and do not describe it. It is made: do NOT "
+                                 "call make_image again for this request. To "
+                                 "remake the SAME picture, pass this seed "
+                                 "back.")}, True,
                        "made " + os.path.basename(path))
 
             self._display_image(path, caption,
@@ -8415,6 +8420,23 @@ class Ollama(QObject):
         if stdin:
             proc.write(stdin)
         proc.closeWriteChannel()
+
+    @staticmethod
+    def _gen_facts(got):
+        """WHAT THE GRAPH RAN, handed back to the MODEL as fields.
+
+        The caption gives him the same facts; this gives them to the model,
+        which otherwise cannot answer "lock that seed and change one thing" at
+        all. On 2026-08-24 it spent five tool rounds — `file_metadata`,
+        `find_files`, three `run_bash` — digging its own seed back out of the
+        PNG it had just written, because the tool result had told it only that
+        the picture existed."""
+        if not isinstance(got, dict) or not got:
+            return {}
+        keep = ("seed", "model", "steps", "cfg", "sampler", "scheduler",
+                "width", "height", "frames", "fps", "seconds", "positive",
+                "negative")
+        return {k: got[k] for k in keep if got.get(k) not in (None, "")}
 
     @staticmethod
     def _gen_meta(got):
@@ -8479,10 +8501,12 @@ class Ollama(QObject):
                                        or args.get("seconds") or 0),
                      "live": False}
             self.videoResult.emit(json.dumps(entry))
-            answer({"ok": True, "path": here,
+            answer({"ok": True, "path": here, **Ollama._gen_facts(got),
                     "note": ("Generated and placed in the chat as a video he "
                              "can play. You have not seen it. Do not describe "
-                             "it or offer to make it again.")}, True,
+                             "it, do not say where it is, and do not offer to "
+                             "make it again. To remake the same clip, pass "
+                             "this seed back.")}, True,
                    "made " + os.path.basename(here))
 
         if ON_BOOK:

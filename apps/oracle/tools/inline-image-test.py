@@ -234,6 +234,35 @@ crit = [c for c in find("PixelText") if c.property("visible")
 check("a failed fetch is named inline (not silently dropped)",
       len(crit) >= 1, "crit=%d" % len(crit))
 
+# ---- 5. the lightbox walks the WHOLE conversation, and takes the log with it
+# Three rows have carried a picture by now. Opening the last one must offer all
+# of them, and stepping must scroll the reply to the row the picture is on.
+box = [b for b in find("Lightbox")]
+check("the window has a lightbox", len(box) == 1, "n=%d" % len(box))
+if box:
+    QMetaObject.invokeMethod(content, "openPicture",
+                             Q_ARG("QVariant", {"path": str(TALL),
+                                                "url": "https://x/tall.png"}))
+    settle()
+    n = box[0].property("count")
+    check("it offers every picture in the conversation, not just the row's",
+          n >= 3, "count=%s" % n)
+    at = box[0].property("index")
+    check("...opened on the one that was clicked",
+          at == n - 1, "index=%s of %s" % (at, n))
+    flick = win.findChild(QObject, "replyFlick")
+    QMetaObject.invokeMethod(box[0], "step", Q_ARG("QVariant", -1))
+    settle()
+    check("stepping back moves the lightbox",
+          box[0].property("index") == at - 1, str(box[0].property("index")))
+    check("...and the chat scrolled to that picture's row",
+          box[0].property("currentRow") >= 0
+          and flick.property("contentY") >= 0,
+          "row=%s y=%s" % (box[0].property("currentRow"),
+                           flick.property("contentY")))
+    QMetaObject.invokeMethod(box[0], "close")
+    settle()
+
 check("no QML warnings", not warns, "; ".join(warns)[:300])
 print("\n%d checks failed" % len(fails))
 sys.exit(1 if fails else 0)
