@@ -767,6 +767,19 @@ reply: the model hits its generation ceiling (ollama's final frame says
 presses stop — either marks the row `cutOff` — or it simply finishes. All three
 are continuable.
 
+**A fourth way, which nothing announces: the TURN ran out of window.** ollama
+shifts the context rather than failing, so a turn that spent its 32k on tool
+rounds gets a normal `done_reason: "stop"` on an answer that breaks off
+mid-sentence — observed 2026-08-23, a music-library turn whose table stops
+mid-row with no `continue` on it, because nothing in the app knew. So
+`_truncation_reason` reports `"context"` when the turn was **squeezed**
+(a round filled `CTX_FULL_FRACTION` of `CHAT_NUM_CTX`, or the tool loop was
+forced into its wrap-up round) **and** `_ends_abruptly` says the text stops
+mid-sentence. **Both halves are required**: measured across his saved sessions,
+one finished reply in nine ends on a bare word (a bullet list, a heading, a
+trailing link), so shape alone would put a `continue` on answers that are
+complete. Harness `tools/cutoff-detect-test.py`.
+
 So the one button beside the prompt box has three states, in this precedence
 (docs/DESIGN.md §10.2 — one control, one place, and it says what it will do):
 
