@@ -1152,9 +1152,13 @@ Item {
                       : "")
                    + (Ollama.memoryCount > 0
                       ? Ollama.memoryCount + " mem · " : "");
-        if (!Backend.serverUp) return jobs + counts + "ollama down";
+        // "server", never "ollama" [his, 2026-08-23]. What he is looking at is
+        // this window's model server; which daemon happens to be behind it is
+        // an implementation detail, and the name of one is noise in a status
+        // bar (docs/agents/his-voice.md — the fact, not the plumbing).
+        if (!Backend.serverUp) return jobs + counts + "server down";
         return jobs + counts + (Backend.loadedModels.length > 0
-               ? "ollama · " + Backend.loadedModels.join(", ") : "ollama idle");
+               ? "server · " + Backend.loadedModels.join(", ") : "server idle");
     }
     // The taskbar entry says which conversation this is (kdeshell.bind_title).
     readonly property string windowTitle:
@@ -2113,11 +2117,27 @@ Item {
     // KStyle's Frame under Plasma (`+plasma/ViewFrame.qml`), which is what puts
     // the view and the compose box under it in the same hand. The inset is the
     // frame's (`pad`), so the content just fills what it is given.
+    // The background jobs (`JobsTray.qml`, with its Plasma twin), ABOVE the
+    // conversation [his, 2026-08-23: *"should go at the top of the chat window
+    // rather than the bottom"*]. A job outlives the turn that started it, so it
+    // belongs with the window's own standing facts — the stat line it sits
+    // under — rather than in the gap between the reply and the compose box,
+    // where it grew upward into what he was reading. Collapsed to zero height
+    // when there are none, so nothing is reserved for nothing (§5.2).
+    JobsTray {
+        id: jobsTray
+        objectName: "jobsTray"
+        anchors { top: statsRow.bottom; topMargin: visible ? 8 : 0
+                  left: parent.left; right: parent.right
+                  leftMargin: 10; rightMargin: 10 }
+    }
+
     ViewFrame {
         id: replyBox
-        anchors { top: statsRow.bottom; topMargin: 10
+        anchors { top: jobsTray.bottom
+                  topMargin: jobsTray.visible ? 8 : 10
                   left: parent.left; right: parent.right
-                  bottom: jobsTray.top
+                  bottom: attachBar.top
                   leftMargin: 10; rightMargin: 10; bottomMargin: 10 }
 
         KineticFlickable {
@@ -3199,19 +3219,6 @@ Item {
     // component with two implementations — ours here, and the KStyle's own
     // Frame/TextArea/Button under Plasma (`+plasma/PromptBox.qml`, chosen by
     // the file selector, apps/AGENTS.md → kdeshell.select_plasma_files).
-    // The background jobs (`JobsTray.qml`, with its Plasma twin). Between the
-    // conversation and what he is about to send: the work the window has in
-    // flight belongs next to the window's own state, not inside a turn — a job
-    // outlives the turn that started it (docs/DESIGN.md §10). Collapsed to zero
-    // height when there are none, so nothing is reserved for nothing (§5.2).
-    JobsTray {
-        id: jobsTray
-        objectName: "jobsTray"
-        anchors { left: parent.left; right: parent.right; bottom: attachBar.top
-                  leftMargin: 10; rightMargin: 10
-                  bottomMargin: visible ? 8 : 0 }
-    }
-
     PromptBox {
         id: promptBox
         objectName: "promptBox"
