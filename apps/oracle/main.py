@@ -362,21 +362,24 @@ VIDEO_TOOL_NAMES = {"show_video"}
 PLAYER_TOOL = {
     "type": "function",
     "function": {
-        "name": "control_player",
+        "name": "control_media",
         "description": (
-            "See and control the music playing on this machine (the `player` "
-            "app). `status` tells you what is playing — title, artist, album, "
-            "how far in, how long, volume — and every other action does the "
-            "thing and then tells you the same. Use it when he asks what is "
-            "playing, or asks you to pause it, skip it, go back, jump to a "
-            "point, or change the volume. Every action returns the resulting "
-            "status, so never guess what happened; and if no player is running "
-            "you are told that plainly — say so rather than pretending."),
+            "See and control ANY media playing on this machine — his `player` "
+            "app, a browser tab, mpv, anything that speaks MPRIS. `status` "
+            "tells you what is playing (title, artist, album, how far in, how "
+            "long, which player, and the SYSTEM volume), `list` names every "
+            "player on the bus, and every other action does the thing and then "
+            "tells you the same. `volume` sets the machine's volume, not the "
+            "app's — his player exposes none, so its own number is meaningless. "
+            "Use it when he asks what is playing, or asks you to pause it, skip "
+            "it, go back, jump to a point, mute, or change the volume. Every "
+            "action returns the resulting status, so never guess what happened; "
+            "and if nothing is playing you are told that plainly."),
         "parameters": {"type": "object", "properties": {
             "action": {"type": "string",
-                       "enum": ["status", "play", "pause", "play_pause", "next",
-                                "previous", "seek", "volume", "shuffle", "loop",
-                                "play_these", "queue_these"],
+                       "enum": ["status", "list", "play", "pause", "play_pause",
+                                "next", "previous", "seek", "volume", "mute",
+                                "shuffle", "loop", "play_these", "queue_these"],
                        "description": ("What to do. `status` changes nothing; "
                                        "`play_these` replaces the queue with "
                                        "`paths` and starts it, `queue_these` "
@@ -389,7 +392,18 @@ PLAYER_TOOL = {
             "relative": {"type": "boolean",
                          "description": "For `seek`: jump BY `seconds` rather than TO it."},
             "level": {"type": "integer",
-                      "description": "For `volume`: 0-100."},
+                      "description": ("For `volume`: 0-100, the SYSTEM volume "
+                                      "unless `scope` says otherwise.")},
+            "player": {"type": "string",
+                       "description": ("Which player, as `list` names them — "
+                                       "e.g. 'player', 'vivaldi', 'mpv'. "
+                                       "Leave it out for his music player, or "
+                                       "whatever else is playing.")},
+            "scope": {"type": "string", "enum": ["system", "player"],
+                      "description": ("For `volume`: the machine's mixer "
+                                      "(default) or that one player's own.")},
+            "on": {"type": "boolean",
+                   "description": "For `mute`: mute (true) or unmute (false)."},
             "on": {"type": "boolean", "description": "For `shuffle`: on or off."},
             "mode": {"type": "string", "enum": ["none", "track", "playlist"],
                      "description": "For `loop`: repeat nothing, this track, or the queue."},
@@ -399,7 +413,10 @@ PLAYER_TOOL = {
                                       "them. An album is its tracks in order.")}},
             "required": ["action"]}},
 }
-PLAYER_TOOL_NAMES = {"control_player"}
+#: Both names answer: `control_player` is what every earlier session, every
+#: agent definition and his own habit call it, and a rename that broke those
+#: would be a rename that cost him something.
+PLAYER_TOOL_NAMES = {"control_media", "control_player"}
 
 #: THE LIBRARY, not just the transport [his, 2026-08-23: *"are agents able to
 #: easily browse and play music from my library?"*]. They were not: MPRIS
@@ -419,7 +436,7 @@ MUSIC_TOOL = {
             "text against title, artist and album at once (how a person names "
             "music), `albums` lists albums, `album_tracks` gives one album in "
             "play order, `stats` sizes the library. Every track comes back with "
-            "its `path`, which is what control_player's play_these / "
+            "its `path`, which is what control_media's play_these / "
             "queue_these take — so 'put on X' is this tool and then that one. "
             "Read-only: it never changes a rating, a tag or a play count."),
         "parameters": {"type": "object", "properties": {
@@ -589,7 +606,22 @@ MUSIC_SCRIPT = "/home/lam/nix/apps/player/tools/library-ipc.py"
 #: measured against the real player 2026-08-23). Both are overridable, which is
 #: how the harness drives a STUB and never his player — he is listening on it
 #: while the tests run (root AGENTS.md).
-MPRIS_NAME = os.environ.get("ORACLE_MPRIS", "player")
+#: WHICH player, when he does not say. `player,%any` is playerctl's own
+#: fallback list: his own app if it is on the bus, otherwise whatever else is
+#: — a browser tab, mpv, anything that speaks MPRIS. It used to be `player`
+#: alone, which meant the tool could not touch the thing actually making noise
+#: [his, 2026-08-23: *"i want it to be able to control all types of media
+#: playback"*].
+MPRIS_NAME = os.environ.get("ORACLE_MPRIS", "player,%any")
+
+#: The MIXER. His player does not expose an MPRIS volume — it answers 1.0 for
+#: ever — so "what is the volume" and "turn it down" were both lies through
+#: playerctl [his, 2026-08-23: *"right now it thinks the volume level is always
+#: 100 since player doesnt expose any volume its always 100 so it should be
+#: reading the system volume level"*]. This machine is PipeWire, so `wpctl` is
+#: the true answer for both reading and setting.
+WPCTL = os.environ.get("ORACLE_WPCTL", "wpctl")
+AUDIO_SINK = os.environ.get("ORACLE_AUDIO_SINK", "@DEFAULT_AUDIO_SINK@")
 PLAYERCTL = os.environ.get("ORACLE_PLAYERCTL", "playerctl")
 
 #: The PAGE-READER tool. web_search returns Tavily's snippets, which are a
@@ -1736,7 +1768,7 @@ AGENT_TOOL_GROUPS = {
     "write": ["write_file", "edit_file", "move_path", "delete_path", "make_dir"],
     "exec": ["run_python", "run_bash"],
     "web": ["web_search", "fetch_url", "call_api"],
-    "music": ["music_library", "lastfm"],
+    "music": ["music_library", "lastfm", "control_media"],
     "sessions": ["list_sessions", "read_session"],
     "skills": ["use_skill"],
     "author": ["make_tool", "make_skill", "make_agent"],
@@ -1912,7 +1944,7 @@ def _tool_registry():
     itself is absent, which is what keeps subagents one level deep."""
     tools = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, FETCH_URL_TOOL,
              CALL_API_TOOL, EXEC_TOOL, BASH_TOOL, SHOW_IMAGE_TOOL,
-             MUSIC_TOOL, LASTFM_TOOL] + list(JOB_TOOLS)
+             MUSIC_TOOL, LASTFM_TOOL, PLAYER_TOOL] + list(JOB_TOOLS)
              + list(SESSION_TOOLS) + list(AUTHOR_TOOLS)
              + [t for t in [skill_tool()] if t]
              + custom_tool_defs())
@@ -2293,12 +2325,12 @@ CAPABILITY_NOTE = (
     "show, pull a new one from the ollama library with progress, remove one) — "
     "use it rather than `ollama` in a shell; "
     "SEARCH HIS MUSIC LIBRARY and put something on (music_library "
-    "finds tracks and albums with their paths; control_player play_these / "
+    "finds tracks and albums with their paths; control_media play_these / "
     "queue_these plays or queues them); "
     "SHOW him a picture that is already on the machine (show_image — "
     "for a chart you plotted or a file you found: it costs you nothing and "
     "needs no vision); GENERATE one (make_image, his own image backend); LOOK "
-    "AT HIS SCREEN (screenshot); SEE AND CONTROL THE MUSIC (control_player — "
+    "AT HIS SCREEN (screenshot); SEE AND CONTROL ANY MEDIA (control_media — "
     "what is playing, pause, skip, seek, volume, on the machine this window "
     "runs on); read a "
     "file's real type, size, duration, codecs and TAGS without opening it "
@@ -2402,6 +2434,28 @@ CHAT_NUM_CTX = 32768
 #: qwen3.5:4b at 262144 went from 3.1 GB resident to 13.7 GB, half of it off the
 #: GPU) — so the ceiling is a deliberate number, not the hardware's limit.
 CHAT_NUM_CTX_CAP = 131072
+
+#: SAMPLER DEFAULTS, BY FAMILY. Chatter used to send none at all, which means
+#: whatever the model's own Modelfile carries — fine for a model published with
+#: good ones, wrong for a raw GGUF imported from HuggingFace, which is exactly
+#: how the two Gemma 4 entries arrived (2026-08-23). Google publishes Gemma's:
+#: temperature 1.0, top_k 64, top_p 0.95, min_p 0.0. The key is matched against
+#: the model name, longest first, and anything unmatched is left alone —
+#: silence is the right default for a model whose author already tuned it.
+SAMPLER_DEFAULTS = {
+    "gemma4": {"temperature": 1.0, "top_k": 64, "top_p": 0.95, "min_p": 0.0},
+    "gemma3": {"temperature": 1.0, "top_k": 64, "top_p": 0.95, "min_p": 0.0},
+}
+
+
+def sampler_for(model):
+    """The sampling options to send with `model`, or {} for leave-it-alone."""
+    name = (model or "").lower()
+    for key in sorted(SAMPLER_DEFAULTS, key=len, reverse=True):
+        if key in name:
+            return dict(SAMPLER_DEFAULTS[key])
+    return {}
+
 
 #: The windows that may actually be asked for. Steps, because changing
 #: `num_ctx` makes ollama reload the model — see `CtxFit.numCtx`.
@@ -3254,6 +3308,9 @@ class Ollama(QObject):
     #: `continue` on that row rather than leaving him a half-sentence with no
     #: way on (docs/DESIGN.md §10 — the state is shown, and it is actionable).
     replyTruncated = Signal(str)
+    #: The finished reply, REWRITTEN — a typed `{{show_video|…}}` marker becomes
+    #: the bare URL once the card is drawn from it. QML replaces the row's body.
+    replyBodyFixed = Signal(str)
     replyError = Signal(str)
 
     # The web_search tool-call loop, surfaced so QML can draw a subordinated
@@ -3355,6 +3412,9 @@ class Ollama(QObject):
         # for room before it is sent. Fail-open by construction: no warden, no
         # gate. See apps/pylib/warden.py.
         self._warden = Warden(self)
+        # A typed video ends the turn when it lands — both routes (resolved or
+        # failed) come home through `videoResult`.
+        self.videoResult.connect(lambda _j: self._typed_video_done())
         self._reply = None       # the in-flight chat QNetworkReply, if any
         self._buf = b""          # partial NDJSON line carried between reads
         self._think_tokens = 0   # reasoning tokens seen this turn (one per delta)
@@ -3367,6 +3427,8 @@ class Ollama(QObject):
         self._image_entries = {}   # url -> the entry we already drew, this turn
         self._row_urls = set()     # …and which of them are on the CURRENT bubble
         self._md_images = {"n": 0}
+        self._md_videos = {"n": 0}
+        self._videos_shown = set()
         self._tool_calls = []    # tool calls accumulated in this sub-turn
         self._rounds = 0         # tool rounds taken this turn (MAX_TOOL_ROUNDS cap)
         self._no_tools = False   # the wrap-up round: answer, do not call tools
@@ -3863,6 +3925,8 @@ class Ollama(QObject):
         self._image_entries = {}     # …and the entry each one produced, to redraw
         self._row_urls = set()       # what is already on the bubble being written
         self._md_images = {"n": 0}   # typed-markdown images still downloading
+        self._md_videos = {"n": 0}   # …and typed videos still resolving
+        self._videos_shown = set()   # every video URL already drawn this turn
         self._pending_vision = []    # local images view_image must hand the model
         self._no_tools = False       # not a wrap-up round
         self._squeezed = False       # …and nothing has squeezed it yet
@@ -4005,6 +4069,8 @@ class Ollama(QObject):
         self._image_entries = {}
         self._row_urls = set()
         self._md_images = {"n": 0}
+        self._md_videos = {"n": 0}
+        self._videos_shown = set()
         self._pending_vision = []
         self._no_tools = False
         self._squeezed = False
@@ -4780,7 +4846,8 @@ class Ollama(QObject):
             "model": self._model,
             "messages": self._messages,
             "stream": True,
-            "options": {"num_ctx": self._num_ctx},
+            "options": dict(sampler_for(self._model),
+                            num_ctx=self._num_ctx),
         }
         # The WRAP-UP round carries no tools at all: `_on_finished` sets
         # `_no_tools` when the model is still calling tools at MAX_TOOL_ROUNDS,
@@ -4996,6 +5063,8 @@ class Ollama(QObject):
         # there. replyDone waits for those downloads.
         if self._attach_typed_images():
             return
+        if self._attach_typed_videos():
+            return              # `_typed_video_done` ends the turn instead
         self._remember_turn()
         self._set_busy(False)
         reason = self._truncation_reason()
@@ -5006,6 +5075,78 @@ class Ollama(QObject):
     #: How many `![](…)` images one reply may pull in on its own. A model
     #: listing a booru page can type a dozen; four is what fits a turn.
     MD_IMAGE_MAX = 4
+
+    #: …and how many VIDEOS. Two: a reply that recommends listening is naming
+    #: one or two things, not a playlist.
+    MD_VIDEO_MAX = 2
+
+    #: A model that TYPED a call instead of making one. Observed 2026-08-23 in
+    #: his own session: the reply carried `{{show_video|https://…}}` as literal
+    #: text and no card was drawn — *"it seems something happaned to where the
+    #: video was not shown inline like how it should"*. Every brace-marker shape
+    #: a model reaches for when it decides to invent a syntax.
+    VIDEO_MARKER_RE = re.compile(
+        r"\{\{\s*(?:show_video|video|play_video)\s*[|:(=]\s*"
+        r"(https?://[^\s}|)]+)\s*\)?\s*\}\}", re.I)
+
+    #: A video URL written as prose or as a markdown link. Attached too — "show
+    #: me a youtube video" is answered with a card, not with a link he has to
+    #: click out of the window (docs/DESIGN.md §10).
+    VIDEO_URL_RE = re.compile(
+        r"https?://(?:www\.)?(?:youtube\.com/watch\?[^\s)\]<]*v=[\w-]+"
+        r"|youtu\.be/[\w-]+|vimeo\.com/\d+)[^\s)\]<>{}\"']*", re.I)
+
+    def _attach_typed_videos(self):
+        """Draw the videos the reply NAMED but never called for. True if any.
+
+        The same gap `_attach_typed_images` closes at the other end, and the
+        same fix: the tool exists, the model wrote the URL into its prose
+        instead of calling it, and the window drew nothing. Since 2026-08-23
+        `show_video` is not even on the wire every turn (it is in the tool
+        index), so typing it is the MORE likely failure, not less.
+
+        A `{{show_video|…}}` marker is replaced in the prose by the bare URL —
+        the card carries the video, and if the card fails he can still see what
+        it was. A URL the model merely mentioned is left exactly as written.
+        """
+        text = self._acc_content or ""
+        found, cleaned = [], text
+        for m in self.VIDEO_MARKER_RE.finditer(text):
+            found.append(m.group(1))
+            cleaned = cleaned.replace(m.group(0), m.group(1))
+        # The CLEANED text, not the original: a marker's own URL would
+        # otherwise be found a second time with the closing braces stuck to it.
+        for m in self.VIDEO_URL_RE.finditer(cleaned):
+            url = m.group(0).rstrip(".,;:")
+            if url not in found:
+                found.append(url)
+        found = [u for u in found if u not in self._videos_shown]
+        found = found[:self.MD_VIDEO_MAX]
+        if cleaned != text:
+            self._acc_content = cleaned
+            self.replyBodyFixed.emit(cleaned)
+        if not found:
+            return False
+        self._videos_shown.update(found)
+        self._md_videos = {"n": len(found)}
+        for url in found:
+            self._show_video(url, "", None, None, None)
+        return True
+
+    def _typed_video_done(self):
+        """One typed video resolved (or failed). The turn ends when the last
+        one is in, so the session that gets saved has the card in it."""
+        if not self._md_videos.get("n"):
+            return
+        self._md_videos["n"] -= 1
+        if self._md_videos["n"] > 0 or not self._busy:
+            return
+        self._remember_turn()
+        self._set_busy(False)
+        reason = self._truncation_reason()
+        if reason:
+            self.replyTruncated.emit(reason)
+        self.replyDone.emit()
 
     def _attach_typed_images(self):
         """Fetch the markdown images in the finished reply. True if any started.
@@ -6369,15 +6510,19 @@ class Ollama(QObject):
                    .encode("utf-8"))
         proc.closeWriteChannel()
 
-    # ---- the music player (control_player, over MPRIS) ----
+    # ---- media playback (control_media, over MPRIS + the PipeWire mixer) ----
 
     @staticmethod
-    def _player_argv(rest):
+    def _player_argv(rest, target=None):
         """`playerctl -p <name> …` for one verb. The name, and the binary, are
         both overridable — which is how the harness drives a STUB and never his
         player, playing music a foot away while the tests run (root AGENTS.md).
+
+        `target` is what he named, if he named one; otherwise `MPRIS_NAME`,
+        which is a FALLBACK LIST (`player,%any`) rather than one bus name.
         """
-        return [PLAYERCTL, "-p", MPRIS_NAME] + list(rest)
+        name = str(target or "").strip() or MPRIS_NAME
+        return [PLAYERCTL, "-p", name] + list(rest)
 
     #: One line carrying everything the model is told, so a status costs ONE
     #: process rather than nine property reads. (QtDBus was the obvious route
@@ -6387,9 +6532,9 @@ class Ollama(QObject):
     #: MPRIS client and hands back text.)
     PLAYER_FORMAT = ("{{status}}\t{{title}}\t{{artist}}\t{{album}}\t"
                      "{{mpris:length}}\t{{position}}\t{{volume}}\t"
-                     "{{shuffle}}\t{{loop}}")
+                     "{{shuffle}}\t{{loop}}\t{{playerName}}")
 
-    def _pctl(self, rest, cb):
+    def _pctl(self, rest, cb, target=None):
         """Run one playerctl call and hand (rc, stdout, stderr) to `cb`.
 
         Async on the file tools' QProcess idiom: these answer in milliseconds,
@@ -6425,13 +6570,13 @@ class Ollama(QObject):
 
         proc.finished.connect(finished)
         proc.errorOccurred.connect(failed)
-        argv = self._player_argv(rest)
+        argv = self._player_argv(rest, target)
         proc.start(argv[0], argv[1:])
 
     @staticmethod
     def _player_parse(line):
         """PLAYER_FORMAT's one line -> the status the model gets back."""
-        f = (line.rstrip("\n").split("\t") + [""] * 9)[:9]
+        f = (line.rstrip("\n").split("\t") + [""] * 10)[:10]
 
         def secs(us):
             try:
@@ -6443,12 +6588,82 @@ class Ollama(QObject):
                "artist": f[2], "album": f[3],
                "duration_seconds": secs(f[4]), "position_seconds": secs(f[5]),
                "shuffle": f[7].strip().lower() in ("true", "on", "1"),
-               "loop": f[8] or "None"}
+               "loop": f[8] or "None",
+               "player": f[9] or ""}
+        # The PLAYER's own volume, which for his `player` is 1.0 for ever
+        # because it exposes none — reported as what it is, and never as the
+        # answer to "how loud is it" (that is `system_volume`, added by
+        # `_mixer`). docs/DESIGN.md §10: a number that means nothing is not
+        # dressed up as one that does.
         try:
-            out["volume"] = int(round(float(f[6]) * 100))
+            out["player_volume"] = int(round(float(f[6]) * 100))
         except (TypeError, ValueError):
             pass
         return out
+
+    # ---- the system mixer (PipeWire) ----
+
+    def _mixer(self, cb):
+        """Read the machine's volume and mute state. `wpctl get-volume` prints
+        `Volume: 0.55` (plus ` [MUTED]`), so one call answers both."""
+        proc = QProcess(self)
+        self._procs.append(proc)
+
+        def done():
+            try:
+                out = bytes(proc.readAllStandardOutput().data()).decode(
+                    "utf-8", "replace")
+                rc = proc.exitCode()
+            except RuntimeError:
+                return
+            if proc in self._procs:
+                self._procs.remove(proc)
+            proc.deleteLater()
+            if rc != 0:
+                cb({})
+                return
+            m = re.search(r"([\d.]+)", out)
+            vol = {}
+            if m:
+                try:
+                    vol["system_volume"] = int(round(float(m.group(1)) * 100))
+                except ValueError:
+                    pass
+            vol["muted"] = "MUTED" in out.upper()
+            cb(vol)
+
+        proc.finished.connect(done)
+        proc.errorOccurred.connect(lambda *_: cb({}))
+        proc.start(WPCTL, ["get-volume", AUDIO_SINK])
+
+    def _mixer_set(self, args, cb):
+        """One `wpctl set-…` call; `cb(ok)` when it is done.
+
+        A HARNESS NEVER MOVES HIS VOLUME. Under `--selftest` this refuses
+        unless `$ORACLE_WPCTL` has been pointed at a stub — the same shape as
+        `Backend._systemctl`'s refusal, and for the same reason: he is
+        listening while the tests run (root AGENTS.md), and a test that turns
+        the music down is a bug in the test.
+        """
+        if SELFTEST and not os.environ.get("ORACLE_WPCTL"):
+            cb(False)
+            return
+        proc = QProcess(self)
+        self._procs.append(proc)
+
+        def done():
+            try:
+                rc = proc.exitCode()
+            except RuntimeError:
+                return
+            if proc in self._procs:
+                self._procs.remove(proc)
+            proc.deleteLater()
+            cb(rc == 0)
+
+        proc.finished.connect(done)
+        proc.errorOccurred.connect(lambda *_: cb(False))
+        proc.start(WPCTL, list(args))
 
     @staticmethod
     def _music_argv():
@@ -6499,7 +6714,7 @@ class Ollama(QObject):
 
     def _run_music_tool(self, args, idx, remaining, calls):
         """Search the library and hand back rows, each carrying its `path` —
-        which is the whole point: a path is what control_player can put on."""
+        which is the whole point: a path is what control_media can put on."""
         a = args if isinstance(args, dict) else {}
         action = str(a.get("action") or "search").strip().lower()
         req = {"op": action,
@@ -6737,19 +6952,45 @@ class Ollama(QObject):
         has nothing to drive)."""
         a = args if isinstance(args, dict) else {}
         action = str(a.get("action") or "status").strip().lower()
+        target = str(a.get("player") or "").strip()
         if action in ("play_these", "queue_these"):
             self._player_put_on(action, a, idx, remaining, calls)
             return
-        try:
-            verb = self._player_verb(action, a)
-        except ValueError as e:
-            self._player_result({"error": str(e)}, idx, remaining, calls)
+        if action == "list":
+            self._player_list(idx, remaining, calls)
             return
 
         def status(_rc=0, _out="", _err=""):
             self._pctl(["metadata", "--format", self.PLAYER_FORMAT],
                        lambda rc, out, err: self._player_answer(
-                           action, rc, out, err, idx, remaining, calls))
+                           action, rc, out, err, idx, remaining, calls),
+                       target)
+
+        # THE MIXER, not the player, is what "volume" and "mute" mean here —
+        # unless he asked for that one app's own (`scope: player`).
+        if action in ("volume", "mute") \
+                and str(a.get("scope") or "system").lower() != "player":
+            args_ = self._mixer_verb(action, a)
+            if isinstance(args_, str):
+                self._player_result({"error": args_}, idx, remaining, calls)
+                return
+
+            def mixed(ok):
+                if not ok:
+                    self._player_result(
+                        {"error": "the system mixer refused %s (wpctl)" % action},
+                        idx, remaining, calls)
+                    return
+                status()
+
+            self._mixer_set(args_, mixed)
+            return
+
+        try:
+            verb = self._player_verb(action, a)
+        except ValueError as e:
+            self._player_result({"error": str(e)}, idx, remaining, calls)
+            return
 
         if not verb:
             status()
@@ -6763,7 +7004,61 @@ class Ollama(QObject):
                 return
             status()
 
-        self._pctl(verb, after)
+        self._pctl(verb, after, target)
+
+    @staticmethod
+    def _mixer_verb(action, a):
+        """The `wpctl` arguments for a system-wide volume change, or a reason
+        it cannot be built."""
+        if action == "mute":
+            on = a.get("on")
+            return ["set-mute", AUDIO_SINK,
+                    "toggle" if on is None else ("1" if on else "0")]
+        try:
+            lvl = int(a.get("level"))
+        except (TypeError, ValueError):
+            return "volume needs `level`, 0-100"
+        return ["set-volume", AUDIO_SINK, "%d%%" % max(0, min(100, lvl))]
+
+    def _player_list(self, idx, remaining, calls):
+        """Every player on the bus, so he (and the model) can name one."""
+        def done(rc, out, err):
+            names = [n.strip() for n in (out or "").splitlines() if n.strip()]
+            if rc != 0 and not names:
+                self._player_result(
+                    {"ok": True, "players": [],
+                     "note": self._player_reason(err)
+                             or "nothing is on the MPRIS bus right now"},
+                    idx, remaining, calls)
+                return
+            self._player_result({"ok": True, "players": names,
+                                 "did": "list"}, idx, remaining, calls)
+
+        self._pctl_raw(["-l"], done)
+
+    def _pctl_raw(self, rest, cb):
+        """playerctl with NO `-p` — for `-l`, which lists rather than drives."""
+        proc = QProcess(self)
+        self._procs.append(proc)
+
+        def done():
+            try:
+                out = bytes(proc.readAllStandardOutput().data()).decode(
+                    "utf-8", "replace")
+                err = bytes(proc.readAllStandardError().data()).decode(
+                    "utf-8", "replace")
+                rc = proc.exitCode()
+            except RuntimeError:
+                return
+            if proc in self._procs:
+                self._procs.remove(proc)
+            proc.deleteLater()
+            cb(rc, out, err)
+
+        proc.finished.connect(done)
+        proc.errorOccurred.connect(
+            lambda *_: cb(127, "", "playerctl is not installed here"))
+        proc.start(PLAYERCTL, list(rest))
 
     @staticmethod
     def _player_verb(action, a):
@@ -6824,14 +7119,20 @@ class Ollama(QObject):
             return
         result = self._player_parse(out.splitlines()[0])
         result["did"] = action
-        self._player_result(result, idx, remaining, calls)
+        # The volume he means is the machine's, always — so it is on every
+        # answer, not only on a volume call.
+        def with_mixer(vol):
+            result.update(vol)
+            self._player_result(result, idx, remaining, calls)
 
-    def _player_result(self, result, idx, remaining, calls):
+        self._mixer(with_mixer)
+
+    def _player_result(self, result, idx, remaining, calls, name="control_media"):
         if idx is None:
             self.playerToolDone.emit(json.dumps(result))
             return
         self.playerToolDone.emit(json.dumps(result))
-        remaining["sink"][idx] = {"role": "tool", "tool_name": "control_player",
+        remaining["sink"][idx] = {"role": "tool", "tool_name": name,
                                    "content": json.dumps(result)}
         self._tool_done(remaining, calls)
 
@@ -6857,6 +7158,7 @@ class Ollama(QObject):
                                idx, remaining, calls)
             return
         self.videoStarted.emit(url)
+        self._videos_shown.add(url)     # so `_attach_typed_videos` skips it
         if VIDEO_DIRECT_RE.search(url):
             self._video_probe(url, lambda ok, status, ctype:
                               self._on_video_direct(ok, ctype, url, alt,

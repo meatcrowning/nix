@@ -306,6 +306,14 @@ Item {
         // collapsed heading shows it climbing while the model thinks.
         // The reply hit the model's length ceiling mid-sentence. Mark the row
         // so it offers `continue` (§10 — a dead end is never left silent).
+        // The finished reply, rewritten: a `{{show_video|…}}` the model TYPED
+        // instead of calling becomes the bare URL, now that the card carries the
+        // video (main.py `_attach_typed_videos`).
+        function onReplyBodyFixed(text) {
+            if (win.activeIndex < 0) return;
+            chatLog.setProperty(win.activeIndex, "body", text);
+            win.chatRev++;
+        }
         function onReplyTruncated(reason) {
             if (win.activeIndex < 0) return;
             chatLog.setProperty(win.activeIndex, "cutOff", true);

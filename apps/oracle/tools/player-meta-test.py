@@ -58,6 +58,31 @@ STUB.write_text(
 STUB.chmod(STUB.stat().st_mode | stat.S_IEXEC)
 oracle.PLAYERCTL = str(STUB)
 
+# ---- the stub MIXER: the same, for wpctl ----------------------------------
+# It records its argv too, and never touches PipeWire — he is listening while
+# this runs, and a test that moves his volume is a bug in the test (root
+# AGENTS.md). `main.py` refuses `wpctl` under --selftest unless $ORACLE_WPCTL
+# points somewhere, which is the backstop behind this stub.
+WLOG = _TMP / "wpctl.log"
+WSTUB = _TMP / "wpctl-stub.sh"
+WSTUB.write_text(
+    "#!/bin/sh\n"
+    'printf "%s\\n" "$*" >> ' + str(WLOG) + "\n"
+    'case "$1" in\n'
+    '  get-volume) echo "Volume: 0.55" ;;\n'
+    "esac\n", encoding="utf-8")
+WSTUB.chmod(WSTUB.stat().st_mode | stat.S_IEXEC)
+os.environ["ORACLE_WPCTL"] = str(WSTUB)
+oracle.WPCTL = str(WSTUB)
+
+
+def wcalls():
+    """What the mixer stub was asked to do, and reset."""
+    got = WLOG.read_text().splitlines() if WLOG.exists() else []
+    if WLOG.exists():
+        WLOG.unlink()
+    return got
+
 o = oracle.Ollama()
 seen = []
 o.playerToolDone.connect(lambda j: seen.append(json.loads(j)))
@@ -84,12 +109,16 @@ res, calls = player({"action": "status"})
 check("status reads the player in one call",
       res is not None and res.get("ok") is True
       and res.get("title") == "Stone Age" and res.get("artist") == "Machinedrum"
-      and res.get("playing") == "Playing" and res.get("volume") == 80
+      and res.get("playing") == "Playing" and res.get("player_volume") == 80
+      and res.get("system_volume") == 55 and res.get("muted") is False
+      and res.get("player") == ""
       and res.get("duration_seconds") == 236.9
       and res.get("position_seconds") == 61.0
       and res.get("shuffle") is True and res.get("loop") == "Playlist",
       json.dumps(res)[:200])
 check("...and it is a metadata read, nothing else", len(calls) == 1, str(calls))
+check("the volume he means is the MACHINE's, read from the mixer every time",
+      any(c.startswith("get-volume") for c in wcalls()))
 
 # 2. every verb ends in a status read, so the model reports what it produced
 for action, want in (("pause", "pause"), ("play_pause", "play-pause"),
@@ -110,13 +139,40 @@ res, calls = player({"action": "seek", "seconds": -15, "relative": True})
 check("a backward relative seek is `position 15-`",
       calls and calls[0].endswith("position 15-"), str(calls))
 
-# 4. volume is 0-100 to the model and 0-1 on the wire, and it is clamped
+# 4. VOLUME IS THE SYSTEM'S. His player exposes no MPRIS volume — it answers
+# 1.0 for ever — so "turn it down" through playerctl did nothing he could hear
+# [his, 2026-08-23]. It goes to the PipeWire mixer instead, and only a
+# `scope: player` asks that one app.
+wcalls()
 res, calls = player({"action": "volume", "level": 40})
-check("volume 40 goes out as 0.40", calls and calls[0].endswith("volume 0.40"),
-      str(calls))
+w = wcalls()
+check("volume 40 sets the SYSTEM volume",
+      any(c == "set-volume @DEFAULT_AUDIO_SINK@ 40%" for c in w), str(w))
+check("...and the player is only read back, never told to change",
+      all("volume" not in c or "metadata" in c for c in calls), str(calls))
 res, calls = player({"action": "volume", "level": 500})
-check("...and an absurd level is clamped, not passed on",
-      calls and calls[0].endswith("volume 1.00"), str(calls))
+check("...an absurd level is clamped, not passed on",
+      any(c.endswith("100%") for c in wcalls()), str(w))
+res, calls = player({"action": "volume", "level": 40, "scope": "player"})
+check("scope=player still drives that one app's own volume",
+      calls and calls[0].endswith("volume 0.40"), str(calls))
+wcalls()
+res, calls = player({"action": "mute"})
+check("mute with no argument toggles the machine",
+      any(c == "set-mute @DEFAULT_AUDIO_SINK@ toggle" for c in wcalls()))
+res, calls = player({"action": "mute", "on": True})
+check("...and `on` says which way", any(c.endswith("1") for c in wcalls()))
+
+# 4b. ANY player, not just his. `list` names them and `player:` picks one.
+res, calls = player({"action": "list"})
+check("list asks the bus, with no -p", calls and calls[0].strip() == "-l",
+      str(calls))
+res, calls = player({"action": "pause", "player": "vivaldi"})
+check("a named player is the one driven",
+      calls and calls[0].startswith("-p vivaldi "), str(calls))
+res, calls = player({"action": "status"})
+check("and with none named it falls back through his player to anything else",
+      calls and calls[0].startswith("-p player,%any "), str(calls))
 
 # 5. shuffle and loop
 res, calls = player({"action": "shuffle", "on": False})
