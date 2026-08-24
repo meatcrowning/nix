@@ -15,6 +15,9 @@ to invalidate and no hook into wal-set.sh to keep in step:
     GET /scrollbar.css  ->  the desktop's scrollbar (pylib/scrollcss.py):
                             Oxygen's own bar under Plasma, the win31/beveled/
                             flat variant otherwise
+    GET /chan.user.js   ->  the Tampermonkey script itself, so its @updateURL
+    GET /scrollbar.user.js  is one the extension will actually fetch (it never
+                            updates from a file:// URL)
     GET /version        ->  {"stamp": ..., "scrollbarStamp": ..., ...}
 
 LOOPBACK ONLY, and that is the whole of its security story: it binds
@@ -49,6 +52,20 @@ sys.path.insert(0, str(HERE.parent))
 
 import chansource                                               # noqa: E402
 import scrollcss                                                # noqa: E402
+
+
+def _generator(filename):
+    """Import a `*-userscript.py` neighbour (a dash is not an identifier)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        filename.replace("-", "_").removesuffix(".py"), HERE / filename)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+chan_script = _generator("chan-userscript.py")
+scrollbar_script = _generator("scrollbar-userscript.py")
 
 
 # --------------------------------------------------------------------------- #
@@ -126,14 +143,25 @@ class Handler(BaseHTTPRequestHandler):
         if body:
             self.wfile.write(body)
 
-    # path -> the builder behind it. Both rebuild from the live palette per
-    # request; neither caches, so a colour-scheme or wallpaper change needs
+    # path -> (builder, content type). Every one rebuilds from the live palette
+    # per request; none caches, so a colour-scheme or wallpaper change needs
     # nothing restarted and nothing notified.
+    #
+    # The two `.user.js` routes are what makes the installed scripts UPDATE:
+    # Tampermonkey's updater refuses a `file://` @updateURL, so the scripts
+    # used to sit at whatever version was installed by hand. Served from here
+    # they carry an http @updateURL the extension will actually fetch, and the
+    # version in them steps only when the script's own sources move (see
+    # `userscript.source_version`) — a palette change still costs no reinstall.
+    CSS = "text/css; charset=utf-8"
+    JS = "text/javascript; charset=utf-8"
     ROUTES = {
-        "/chan.css": lambda src: chansource.build_css(src),
-        "/": lambda src: chansource.build_css(src),
-        "/css": lambda src: chansource.build_css(src),
-        "/scrollbar.css": lambda src: scrollcss.build(src),
+        "/chan.css": (lambda src: chansource.build_css(src), CSS),
+        "/": (lambda src: chansource.build_css(src), CSS),
+        "/css": (lambda src: chansource.build_css(src), CSS),
+        "/scrollbar.css": (lambda src: scrollcss.build(src), CSS),
+        "/chan.user.js": (lambda src: chan_script.build(src), JS),
+        "/scrollbar.user.js": (lambda src: scrollbar_script.build(src), JS),
     }
 
     def do_GET(self):
@@ -141,7 +169,8 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         route = self.ROUTES.get(path)
         if route is None and path != "/version":
-            self._send(404, b"chan-theme: /chan.css, /scrollbar.css or /version\n")
+            self._send(404, b"chan-theme: /chan.css, /scrollbar.css, "
+                            b"/chan.user.js, /scrollbar.user.js or /version\n")
             return
         try:
             if path == "/version":
@@ -154,7 +183,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, body, "application/json",
                            [("ETag", '"%s"' % chansource.stamp(css + bar))])
                 return
-            css, _prov = route(self.source)
+            build, ctype = route
+            css, _prov = build(self.source)
         except SystemExit as e:
             self._send(503, str(e).encode("utf-8"))
             return
@@ -169,7 +199,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             return
-        self._send(200, css.encode("utf-8"), "text/css; charset=utf-8", [("ETag", tag)])
+        self._send(200, css.encode("utf-8"), ctype, [("ETag", tag)])
 
 
 def main():

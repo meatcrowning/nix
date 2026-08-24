@@ -26,6 +26,7 @@ sys.path.insert(0, str(HERE.parent))
 TMP = Path(tempfile.mkdtemp(prefix="scrollcss-"))
 os.environ["DESK_SESSION"] = "hypr"          # nothing here may read his session
 
+import chansource                                                    # noqa: E402
 import scrollcss                                                    # noqa: E402
 
 sys.path.insert(0, str(HERE))
@@ -137,7 +138,13 @@ v1 = re.search(r"@version\s+(\S+)", text).group(1)
 v2 = re.search(r"@version\s+(\S+)", gen.build("plasma", "flat", TMP / "o.js")[0]).group(1)
 v3 = re.search(r"@version\s+(\S+)", gen.build("plasma", "win31", TMP / "o.js")[0]).group(1)
 check("the version is stable across an unchanged regeneration", v1 == v2)
-check("and moves when the sheet does", v1 != v3)
+# It tracks the script's own sources, not the palette: a style or colour change
+# needs no reinstall (the installed script polls the courier for it), and the
+# version must only ever step FORWARD — Tampermonkey silently refuses one that
+# is not newer, which an unordered content hash caused half the time.
+check("a style change does NOT churn it — the script is unchanged", v1 == v3)
+check("the updater is pointed at the courier, not file:// (which it refuses)",
+      "@updateURL    http://127.0.0.1:%d/scrollbar.user.js" % chansource.PORT in text)
 
 # Vivaldi's custom.css is written by vivaldi-theme.py (one writer, chrome and
 # scrollbar in one file) and checked by vivaldi-theme-test.py.
