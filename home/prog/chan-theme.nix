@@ -16,11 +16,15 @@
 # when the SHEET (`apps/pylib/chantheme.py`) or the generator changes — NOT
 # after a colour-scheme or wallpaper change, which now needs nothing.
 #
-# And the installed script then updates ITSELF: the courier serves it too, at
-# `http://127.0.0.1:8791/chan.user.js`, which it carries as its `@updateURL`.
-# Tampermonkey refuses to update from a `file://` URL, so a copy installed by
-# hand sat at its install-time version for good — install once from that URL
-# instead; the file this writes is the offline copy and the fallback.
+# And the installed script then updates ITSELF: it carries
+# `http://127.0.0.1:8791/chan.meta.js` as its `@updateURL` and the courier
+# serves both that and the script. Tampermonkey never updates from a `file://`
+# URL, which is why a hand-installed copy sat at its install-time version for
+# good — the file this writes now carries http update URLs, so installing it
+# from disk is fine. NAVIGATING to the http url loops between Tampermonkey's
+# install page and a load error (its own interception, not the courier — a
+# Vivaldi renderer fetches the same URL fine); install through the dashboard's
+# Utilities > Install from URL instead.
 #
 # Live source at apps/pylib/tools/chan-userscript.py (absolute path, valid on
 # both machines); a rebuild is only needed to change THIS wrapper. Plain

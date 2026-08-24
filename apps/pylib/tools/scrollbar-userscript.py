@@ -55,7 +55,8 @@ def build(source=None, style=None, path=OUT, port=None):
                      "polling the loopback courier." % prov),
         matches=MATCHES, css=css, version=version,
         url="http://127.0.0.1:%d/scrollbar.css" % port,
-        update_url="http://127.0.0.1:%d/scrollbar.user.js" % port,
+        update_url="http://127.0.0.1:%d/scrollbar.meta.js" % port,
+        download_url="http://127.0.0.1:%d/scrollbar.user.js" % port,
         key="__deskScrollbar", style_id="desk-scrollbar",
         path=path, tool="scrollbar-userscript.py"), prov
 
@@ -84,9 +85,11 @@ def main():
     a.out.write_text(text, encoding="utf-8")
     print("%s\n  live from: http://127.0.0.1:%d/scrollbar.css (chan-theme-server)"
           "\n  embedded fallback: %s"
-          "\n  install ONCE from http://127.0.0.1:%d/scrollbar.user.js — from THERE"
-          "\n  it auto-updates; a copy installed from file:// never will."
-          % (a.out, a.port, prov, a.port))
+          "\n  updates from http://127.0.0.1:%d/scrollbar.meta.js — install it\n"
+          "  through Tampermonkey's dashboard (Utilities > Install from URL,\n"
+          "  http://127.0.0.1:%d/scrollbar.user.js) or from this file; either way the\n"
+          "  installed copy carries that update URL.\n"
+          % (a.out, a.port, prov, a.port, a.port))
     return 0
 
 

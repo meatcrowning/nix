@@ -150,8 +150,19 @@ def source_version(sources, major=1):
     return "%d.%s.%s" % (major, time.strftime("%Y%m%d", t), time.strftime("%H%M", t))
 
 
+def metadata_block(script):
+    """Just the `==UserScript==` header of a built script.
+
+    What an updater actually needs: Greasyfork points `@updateURL` at a
+    `.meta.js` and `@downloadURL` at the `.user.js` for exactly this reason —
+    the daily check then costs a few hundred bytes instead of the whole sheet.
+    """
+    end = script.find("// ==/UserScript==")
+    return script[:end + len("// ==/UserScript==")] + "\n" if end >= 0 else script
+
+
 def build(*, name, description, matches, css, version, url, key, style_id,
-          path, tool, gate=None, update_url=None):
+          path, tool, gate=None, update_url=None, download_url=None):
     """The whole `.user.js` for one sheet."""
     # Tampermonkey never updates from a `file://` URL — the extension has no
     # file access and its updater refuses the scheme outright, which is why
@@ -159,10 +170,11 @@ def build(*, name, description, matches, css, version, url, key, style_id,
     # already serves the sheet; it serves the SCRIPT from the same loopback
     # port, and the updater is a background fetch, so no mixed-content rule
     # applies to it.
-    update_url = update_url or ("file://%s" % path)
+    download_url = download_url or update_url or ("file://%s" % path)
+    update_url = update_url or download_url
     header = HEADER % {
         "name": name, "description": description, "version": version,
-        "tool": tool, "path": path, "downloadURL": update_url,
+        "tool": tool, "path": path, "downloadURL": download_url,
         "updateURL": update_url,
         "matches": "".join("// @match        %s\n" % m for m in matches),
     }
