@@ -150,14 +150,6 @@
       katerc.filetree.showToolbar = true;
       katerc.filetree.viewShade = "211,190,222";
       kded5rc.Module-device_automounter.autoload = false;
-      # NOTHING dims an unfocused window in a Plasma session — his call,
-      # 2026-08-24, after trying KWin's Dim Inactive scrim for an evening
-      # (*"i dont want it to just dim all inactive windows"*). Focus is marked
-      # by the border and the shadow. The colour scheme's own inactive effect
-      # stays OFF, which is the half that matters: the deco and the client read
-      # focus from different places and a Spectacle grab splits them — see
-      # home/srvs/kde-inactive-effect.nix for the measurement.
-      kdeglobals."ColorEffects:Inactive".Enable = false;
       kdeglobals."KFileDialog Settings"."Automatically select filename extension" = true;
       kdeglobals."KFileDialog Settings"."Breadcrumb Navigation" = true;
       kdeglobals."KFileDialog Settings"."Show Inline Previews" = true;
