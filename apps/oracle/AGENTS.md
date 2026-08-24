@@ -717,6 +717,53 @@ the tunnel's ssh master from `book` (`ssh top python3 sandbox-exec.py
 installed. **Because it runs on top, top's checkout needs `sandbox-exec.py`**
 — a `book` edit is inert until top pulls (same caveat the `put` op carries).
 
+## Media, not just the player — `control_media`
+
+**Any MPRIS player, and the SYSTEM volume** [his, 2026-08-23: *"it seems
+control_player should be made into a broader control_media … right now it
+thinks the volume level is always 100 since player doesnt expose any volume …
+i want it to be able to control all types of media playback"*].
+
+- **`MPRIS_NAME` is a fallback LIST now** (`player,%any`), not one bus name, so
+  the tool reaches a browser tab or mpv when his own player is not running. A
+  call may name one (`player: "vivaldi"`), and `action: "list"` names what is
+  on the bus.
+- **`volume` and `mute` go to the PipeWire mixer** (`wpctl`, `AUDIO_SINK`),
+  because his player exposes no MPRIS volume — it answers 1.0 for ever, which
+  is why the model kept reporting 100. Every status now carries
+  `system_volume` and `muted` from the mixer, plus `player_volume` reported as
+  what it is: that one app's own number, meaningless for his. `scope: "player"`
+  asks the app instead.
+- **`control_player` still answers** — every earlier session and agent
+  definition calls it that.
+- **A harness never moves his volume**: `_mixer_set` refuses under `--selftest`
+  unless `$ORACLE_WPCTL` points at a stub, the same shape as
+  `Backend._systemctl`. Harness `tools/player-meta-test.py`.
+
+## Gemma 4, and per-family sampler defaults
+
+Chatter sent **no sampling options at all** until 2026-08-23 — fine for a model
+whose published Modelfile carries good ones, wrong for a raw GGUF imported from
+HuggingFace. `SAMPLER_DEFAULTS` is a small table matched against the model name
+(longest key first); an unmatched model is still left alone, because silence is
+the right default when the author already tuned it. Gemma's are Google's own:
+temperature 1.0, top_k 64, top_p 0.95, min_p 0.0.
+
+**The two Gemma 4 12B entries live in ollama, not in a llama.cpp service**:
+`gemma4-qat:12b` (unsloth `UD-Q4_K_XL`, the QAT build, 6.9 GB) and
+`gemma4-q5:12b` (`Q5_K_M`, PTQ, 8.6 GB) — same size class, one QAT and one not,
+which is the comparison he wanted. Both were imported with the shared
+`mmproj-F16` projector, so `/api/show` reports **vision, audio, tools,
+thinking** and 262144 trained context. `ollama pull hf.co/…` is rate-limited by
+IP without an HF token (429 on the manifest API, measured); plain file
+downloads are not, so `~/models/gguf-import/import-gemma4.sh` curls the GGUF
+and the projector and does an `ollama create` off a two-`FROM` Modelfile.
+
+**The blob store had to be repaired first**: `~/.ollama/models/blobs` held 28
+blobs still owned by `lam` from before ollama became a system unit, and the
+daemon cannot `chtimes` a file it does not own — every import died on
+`operation not permitted`. They are `ollama:ollama` now.
+
 ## Background jobs (run_job, and the tray)
 
 **The work he actually wants an agent doing on his music library does not fit
@@ -1423,6 +1470,23 @@ user (a visible line) and the model (a tool error). The saved `path` persists in
 the session transcript, so a reloaded conversation still shows its images.
 
 ## Video (show_video)
+
+**A video the reply NAMES is drawn even when the tool was never called.**
+Observed 2026-08-23 in his own session: the model wrote
+`{{show_video|https://…}}` into its prose as literal text and the window drew
+nothing — *"it seems something happaned to where the video was not shown inline
+like how it should"*. `_attach_typed_videos` is the same fix
+`_attach_typed_images` already was at the other end: every brace-marker shape a
+model invents (`{{show_video|…}}`, `{{video(…)}}`, `{{play_video=…}}`) plus a
+plain YouTube/Vimeo URL it merely mentioned, capped at `MD_VIDEO_MAX`. A marker
+is replaced in the prose by the bare URL through `replyBodyFixed` (the card
+carries the video; if the card fails he can still see what it was), while a
+mentioned URL is left exactly as written. The tool path registers its own URLs
+in `_videos_shown`, so nothing is drawn twice, and the turn does not end until
+the cards resolve — the saved session has them in it. Harness
+`tools/typed-video-test.py`. It matters more since the tool index landed:
+`show_video` is not on the wire every turn any more, so typing it is the MORE
+likely failure.
 
 **A reply can play a video where it says it** [his, 2026-08-23: *"are inline
 youtube video displays possible in oracle? like the youtube video displays in
