@@ -231,7 +231,14 @@ for qml in sorted((APP / "qml").glob("*.qml")):
         lit = s[8:].split("\"")[0]
         if not (lit.startswith(GLYPHS) or lit in ("x", "-", "+")):
             continue
-        near = " ".join(lines[max(0, i - 1):i + 4])
+        # Every line of the button's OWN block, not a fixed window: a comment
+        # explaining the button pushes its `iconName` past a four-line peek,
+        # and the check then failed on a button that states everything it
+        # should (SettingsPanel's close 'x', 2026-08-23).
+        end = i + 1
+        while end < len(lines) and lines[end].strip() not in ("}", "};"):
+            end += 1
+        near = " ".join(lines[max(0, i - 1):end])
         check(f"{qml.name}: {lit!r} says what a KDE button should read",
               "plainLabel:" in near or "iconOnly:" in near, near.strip())
 

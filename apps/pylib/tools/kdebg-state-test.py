@@ -104,15 +104,14 @@ app.sendEvent(win, QEvent(QEvent.ApplicationPaletteChange))
 check("...and so does a scheme change", len(seen) > before)
 
 # ---- a QQuickWidget's palette follows the desktop's -----------------------
-# The view is handed the palette once, at construction; the watcher is what
-# keeps that from going stale when the scheme moves under a running app.
+# The view is handed the palette once, at construction; the app object hearing
+# ApplicationPaletteChange is what keeps that from going stale when the scheme
+# moves under a running app.
 from PySide6.QtQuickWidgets import QQuickWidget                      # noqa: E402
 
 qv = QQuickWidget()
 qv.setPalette(QApplication.palette())
-views = [qv]
-watch = kdeshell._palette_watcher(views)
-app.installEventFilter(watch)
+kdeshell._palette_view_lists.append([qv])
 NEW = QColor(10, 200, 90)
 pal2 = QPalette(app.palette())
 pal2.setColor(QPalette.Active, QPalette.Window, NEW)
@@ -134,6 +133,15 @@ app.setPalette(pal3)
 app.processEvents()
 check("...and its clear colour with it", calls[-1:] == [LAST.getRgb()[:3]],
       str(calls))
+
+# ...and it does it WITHOUT an application-wide event filter. One of those runs
+# a Python function for every event in the program, including the QChildEvent a
+# QObject sends from inside its own constructor, and PySide segfaulted tearing
+# down the wrapper it had to build for that half-constructed object — chatter
+# died in `PyObject_ClearWeakRefs` whenever the prompt box was clicked
+# (2026-08-23). The app object's own `event` sees only what is sent to it.
+src = (Path(kdeshell.__file__)).read_text()
+check("no application-wide event filter", "instance().installEventFilter" not in src)
 
 print("FAILED: " + ", ".join(fails) if fails else "OK")
 sys.exit(1 if fails else 0)

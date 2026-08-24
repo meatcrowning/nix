@@ -143,8 +143,31 @@ def make_app(argv, name: str):
     object: nothing in that session's face needs a widget.
     """
     if is_plasma():
+        from PySide6.QtCore import QEvent
         from PySide6.QtWidgets import QApplication
-        app = QApplication(argv)
+
+        class _PlasmaApp(QApplication):
+            """QApplication that hears the desktop's colour scheme change.
+
+            NOT an application-wide event filter, which is what this was until
+            2026-08-23 and which SEGFAULTED the process. `installEventFilter`
+            on the QApplication runs a PYTHON function for every event in the
+            program, including the QChildEvent a QObject sends from inside its
+            own constructor — and PySide has to build a wrapper for that
+            half-constructed object and tear it down again. Chatter died in
+            `PyObject_ClearWeakRefs` doing exactly that, while QML instantiated
+            a lazily-created singleton (a `Layout` attached property, mid-ctor),
+            which is why clicking the prompt box killed the window. Overriding
+            `event` sees only what is sent TO the app object — the one event
+            this needs — and nothing on the QML creation path at all.
+            """
+
+            def event(self, ev):
+                if ev.type() == QEvent.ApplicationPaletteChange:
+                    _redress_palette_views()
+                return super().event(ev)
+
+        app = _PlasmaApp(argv)
     else:
         from PySide6.QtGui import QGuiApplication
         app = QGuiApplication(argv)
@@ -340,33 +363,32 @@ class KdeShell:
     """
 
 
-def _palette_watcher(views):
-    """An application-level filter that re-dresses every QQuickWidget when the
-    desktop's colour scheme changes.
+# Every live `KdeShell`'s list of QQuickWidgets, so an application-wide colour
+# scheme change can re-dress all of them. A LIST OF LISTS: each shell owns its
+# own `_views` and appends to it as docks and dialogs are built, so the registry
+# holds the list rather than a snapshot of it.
+_palette_view_lists = []
+
+
+def _redress_palette_views():
+    """Hand every registered QQuickWidget the app's current palette.
 
     A QQuickWidget does NOT inherit `QApplication`'s palette on its own (see
     the comment in `KdeShell.__init__`), so each one is handed it explicitly at
     construction — and that is a snapshot. The scheme is not fixed for the life
-    of the process, so the snapshot goes stale and the window ends up
-    half-dressed: real widgets in the new colours, the QML in the old ones.
-    The returned object must be kept alive by the caller, or Qt drops the
-    filter with it."""
-    from PySide6.QtCore import QObject, QEvent
+    of the process: `wal-set.sh` rewrites `kdeglobals` on every wallpaper change
+    and the KDE platform theme pushes that into a running app. Without this the
+    widgets around the view would restyle and the QML inside it would keep the
+    old palette."""
     from PySide6.QtWidgets import QApplication
-
-    class _PaletteWatch(QObject):
-        def eventFilter(self, obj, ev):
-            if ev.type() == QEvent.ApplicationPaletteChange:
-                pal = QApplication.palette()
-                for view in list(views):
-                    try:
-                        view.setPalette(pal)
-                        view.setClearColor(pal.window().color())
-                    except RuntimeError:      # the view is gone; forget it
-                        views.remove(view)
-            return False
-
-    return _PaletteWatch()
+    pal = QApplication.palette()
+    for views in _palette_view_lists:
+        for view in list(views):
+            try:
+                view.setPalette(pal)
+                view.setClearColor(pal.window().color())
+            except RuntimeError:      # the view is gone; forget it
+                views.remove(view)
 
 
 def _build_background_classes():
@@ -607,8 +629,7 @@ def _build_shell_class():
             # which is the same class of half-updated window as the background
             # crop above [his, 2026-08-23: "it might fail to render properly"].
             self._views = [self.view]
-            self._palette_watch = _palette_watcher(self._views)
-            QApplication.instance().installEventFilter(self._palette_watch)
+            _palette_view_lists.append(self._views)
 
             self._toolbar = None
             self._status = None
