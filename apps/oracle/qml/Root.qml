@@ -420,6 +420,10 @@ Item {
             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
             chatLog.setProperty(win.activeIndex, "awaiting", false);
             chatLog.setProperty(win.activeIndex, "toolsActive", false);
+            // The row this round leaves behind is finished, so nothing in it is
+            // still running: without this it keeps execRunning forever and its
+            // files disclosure stays auto-open for the rest of the session.
+            chatLog.setProperty(win.activeIndex, "execRunning", false);
             win.appendReplyRow(n);
         }
         // The image-fetch tool: the model asked for an image, and one entry came
@@ -490,6 +494,13 @@ Item {
             if (t.length > win.execTailMax)
                 t = "…" + t.substring(t.length - win.execTailMax);
             chatLog.setProperty(win.activeIndex, "execTail", t);
+        }
+        // The program stopped. `execRunning` means one is running RIGHT NOW —
+        // it is what opens the files disclosure on its own — so it falls at the
+        // end of the program, not at the end of the turn.
+        function onExecFinished() {
+            if (win.activeIndex < 0) return;
+            chatLog.setProperty(win.activeIndex, "execRunning", false);
         }
         function onReplyDone() {
             if (win.activeIndex < 0) return;
