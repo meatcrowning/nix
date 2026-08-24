@@ -148,6 +148,24 @@ check("Find… is still in the View menu", any(r.startswith("Find…") for r in 
 for name in ("Previous Track", "Play", "Next Track", "Favourite", "Repeat", "Shuffle"):
     check(f"{name} is on the transport bar",
           any(verb(r).startswith(name) for r in transport), str(transport))
+# ---- the repeat row says WHICH repeat is on -----------------------------
+# It used to wear one icon for all three modes, so clicking it changed nothing
+# a Plasma user could see (the lit state alone cannot separate off from all).
+loop_icons = {}
+for mode in ("0", "1", "2"):
+    dump = run("plasma", PLAYER_STATEPOKE="1,2,3", PLAYER_STATEPOKE_LOOP=mode)
+    row = next((r for r in section(dump, "icons") if r.startswith("loop: ")), "")
+    loop_icons[mode] = row[len("loop: "):]
+check("repeat-track wears its own icon",
+      loop_icons["1"] and loop_icons["1"] != loop_icons["0"], str(loop_icons))
+check("repeat-all and off share the icon, separated by the check",
+      loop_icons["0"] and loop_icons["2"] == loop_icons["0"], str(loop_icons))
+for mode, word in (("1", "Repeat Track"), ("2", "Repeat All"), ("0", "Repeat")):
+    dump = run("plasma", PLAYER_STATEPOKE="1,2,3", PLAYER_STATEPOKE_LOOP=mode)
+    check(f"the Playback row reads {word!r} in mode {mode}",
+          any(verb(r) == word for r in section(dump, "&Playback")),
+          str(section(dump, "&Playback")))
+
 check("the seek widget is on the transport bar",
       any(r.startswith("<TransportSeek") for r in transport), str(transport))
 check("every playback verb is also in the Playback menu",

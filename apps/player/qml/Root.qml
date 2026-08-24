@@ -288,9 +288,15 @@ Item {
             { id: "favorite",  label: "♥",  state: favState, tip: "favourite",
               menu: "playback", menuSep: true, menuText: "Favourite",
               icon: "favorites", bar: "transport", shortcut: "L" },
+            // The MODE is in the icon, not only in the lit state: off and
+            // repeat-all differ by the check, repeat-track by the glyph
+            // (breeze/oxygen both carry the -song face). One dim icon for all
+            // three modes said nothing about which one a click had reached.
             { id: "loop",      label: Player.loop === 1 ? "1" : "o", state: Player.loop > 0 ? 1 : 0,
               tip: Player.loop === 1 ? "repeat track" : (Player.loop === 2 ? "repeat all" : "repeat"),
-              menu: "playback", menuText: "Repeat", icon: "media-playlist-repeat",
+              menu: "playback",
+              menuText: Player.loop === 1 ? "Repeat Track" : (Player.loop === 2 ? "Repeat All" : "Repeat"),
+              icon: Player.loop === 1 ? "media-playlist-repeat-song" : "media-playlist-repeat",
               bar: "transport" },
             { id: "shuffle",   label: "*",  state: Player.shuffle ? 1 : 0, tip: "shuffle",
               menu: "playback", menuText: "Shuffle", icon: "media-playlist-shuffle",

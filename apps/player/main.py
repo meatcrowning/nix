@@ -4563,6 +4563,12 @@ def _selftest(app, shell, win, plasma, warnings, player=None, library=None):
         if os.environ.get("PLAYER_STATEPOKE_PLAYING"):
             player._playing = True
             player.playingChanged.emit()
+        # PLAYER_STATEPOKE_LOOP: 0/1/2, so a harness can see the repeat row
+        # take the mode's own icon. Set directly for the same reason as the
+        # queue — `setLoop` talks to mpv, which is his audio device.
+        if os.environ.get("PLAYER_STATEPOKE_LOOP"):
+            player._loop = int(os.environ["PLAYER_STATEPOKE_LOOP"]) % 3
+            player.loopChanged.emit()
         for _ in range(4):
             app.processEvents()
 
