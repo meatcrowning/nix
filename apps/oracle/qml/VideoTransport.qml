@@ -11,7 +11,8 @@ import QtMultimedia
 // stop buttons, so a video can be driven from anywhere the strip shows, not
 // just by clicking the picture.
 //
-// `pointerHere` is the OR of every interactive MouseArea's containsMouse. It
+// `pointerHere` is the OR of every hover tracker on the strip — the four
+// controls and a NoButton area over the whole of it. It
 // exists because the strip's visibility can't read `hover.containsMouse`
 // alone: the instant the pointer lands on the strip's own controls they steal
 // the mouse from the card's whole-frame hover tracker, so a strip shown "on
@@ -38,7 +39,7 @@ Rectangle {
     // card's hover logic reads this so the strip does not vanish under the
     // pointer that is trying to use it (see the header comment).
     readonly property bool pointerHere:
-        track.containsMouse || fsHit.containsMouse
+        barHit.containsMouse || trackHit.containsMouse || fsHit.containsMouse
         || ppHit.containsMouse || stopHit.containsMouse
 
     height: Theme.lineHeight + 8
@@ -52,6 +53,20 @@ Rectangle {
         var m = Math.floor(t / 60);
         var s = t % 60;
         return m + ":" + (s < 10 ? "0" : "") + s;
+    }
+
+    // THE WHOLE STRIP TRACKS THE POINTER, not just its four buttons [his,
+    // 2026-08-24: the bar "flips constantly from being visible to invisible"
+    // with the pointer on the scrub track]. `track.containsMouse` was a read of
+    // a Rectangle, which has no such property — it was undefined, so the two
+    // thirds of the strip that are not a button reported nothing and the card's
+    // hover logic had only its own frame tracker to go on. NoButton, so every
+    // press still reaches what is under it.
+    MouseArea {
+        id: barHit
+        anchors.fill: parent
+        hoverEnabled: true
+        acceptedButtons: Qt.NoButton
     }
 
     Row {
@@ -171,8 +186,10 @@ Rectangle {
                 color: Theme.accent
             }
             MouseArea {
+                id: trackHit
                 anchors.fill: parent
                 anchors.margins: -6      // the hit band exceeds the ink (§5.3)
+                hoverEnabled: true
                 preventStealing: true
                 function seek(x) {
                     if (!bar.player || bar.dur <= 0) return;

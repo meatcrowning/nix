@@ -234,6 +234,24 @@ check("the heading comes back once the render is over",
                 and ((c.property("text") or "").startswith("files ·")
                      or c.property("text") == "working with files"), [])))
 
+# ---- 6. what a turn left on disk goes into the next turn's history --------
+# The model's context is rebuilt from the log's TEXT, so after a restart the
+# path of a picture the chat is looking at was gone and "animate that image"
+# had nothing to animate [his, 2026-08-24].
+note = QMetaObject.invokeMethod(
+    root, "mediaNote", Q_RETURN_ARG("QVariant"),
+    Q_ARG("QVariant", {"images": json.dumps(
+        [{"ok": True, "path": "/tmp/made.png", "w": 896, "h": 1088}]),
+        "videos": json.dumps(
+        [{"ok": True, "path": "/tmp/made.mp4"}])}))
+check("a made picture's path rides along in the history",
+      "/tmp/made.png" in (note or "") and "896x1088" in (note or ""), repr(note))
+check("...and a clip's does too", "/tmp/made.mp4" in (note or ""), repr(note))
+check("a turn with no media adds nothing",
+      QMetaObject.invokeMethod(root, "mediaNote", Q_RETURN_ARG("QVariant"),
+                               Q_ARG("QVariant", {"images": "[]",
+                                                  "videos": "[]"})) == "")
+
 srv.shutdown()
 print("FAILED: " + ", ".join(fails) if fails else "OK")
 sys.exit(1 if fails else 0)

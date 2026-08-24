@@ -16,8 +16,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 PAINTER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -191,6 +193,33 @@ def main(argv=None):
         raise SystemExit(f"{fam.get('label', entry.family)} cannot edit an image")
 
     client = None if args.dry_run else C.ComfyClient(args.url)
+
+    # A SIGNAL STOPS THE RENDER ON THE BACKEND, not just this process. Killing
+    # the script leaves ComfyUI sampling — nothing on the server knows the
+    # caller has gone, and the GPU stays busy for the rest of the job. chatter's
+    # Stop button terminates exactly this process (apps/oracle/main.py, cancel),
+    # so this handler is what makes that button mean anything [his, 2026-08-24].
+    if client is not None:
+        def _bail(_sig, _frm):
+            # Blocking urllib, not the client's own QNetworkAccessManager: its
+            # POSTs are asynchronous, and nothing in a signal handler that ends
+            # in `_exit` gets the event loop back to send them.
+            def post(path, payload):
+                try:
+                    urllib.request.urlopen(urllib.request.Request(
+                        args.url.rstrip("/") + path,
+                        data=json.dumps(payload).encode("utf-8"),
+                        headers={"Content-Type": "application/json"}),
+                        timeout=5).read()
+                except Exception:  # noqa: BLE001 — we are on our way out
+                    pass
+            ours = [pid for pid in (getattr(client, "_jobs", None) or {})]
+            if ours:
+                post("/queue", {"delete": ours})
+            post("/interrupt", {})
+            os._exit(130)
+        for _s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            signal.signal(_s, _bail)
     def ref_of(path):
         return os.path.basename(path) if args.dry_run else upload(app, client, path)
     refs = [ref_of(p) for p in args.image]

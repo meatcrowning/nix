@@ -30,6 +30,22 @@ Rectangle {
     signal toggleFull()
 
     readonly property real pos: player ? player.position : 0
+    // THE SAME CONTRACT AS THE SIBLING, and the half that was missing until
+    // 2026-08-24: `pointerHere` did not exist here at all, so under Plasma the
+    // card's hover logic read `undefined` and had only its own frame tracker to
+    // go on — and the Slider and the Button take the mouse the moment he
+    // reaches for them. That is the bar he watched "flip constantly from being
+    // visible to invisible" while trying to scrub. NoButton over the whole
+    // strip, plus the two controls' own `hovered`.
+    readonly property bool pointerHere:
+        barHit.containsMouse || scrub.hovered || fsBtn.hovered
+
+    MouseArea {
+        id: barHit
+        anchors.fill: parent
+        hoverEnabled: true
+        acceptedButtons: Qt.NoButton
+    }
 
     height: Math.max(Theme.lineHeight + 8, fsBtn.implicitHeight + 4)
     color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.82)

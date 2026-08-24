@@ -233,17 +233,35 @@ Column {
         // absent for a live stream, which has nothing to scrub. The same strip
         // the fullscreen stage wears — VideoTransport.qml.
         //
-        // The visibility ORs the transport's own `pointerHere` into `hover`
-        // (see VideoTransport's header comment): without it, moving the pointer
-        // onto the strip's controls steals `hover.containsMouse` from the
-        // whole-frame tracker below, the strip's condition goes false, it
-        // hides under the pointer, and the mouse is handed back — the
-        // pop-in-and-out glitch while manipulating it.
+        // The pointer test ORs the transport's own `pointerHere` into `hover`
+        // (see VideoTransport's header comment): moving the pointer onto the
+        // strip's controls steals `hover.containsMouse` from the whole-frame
+        // tracker below, so without it the strip hides under the pointer that
+        // is trying to use it.
+        // THE STRIP DOES NOT FLICKER [his, 2026-08-24]. Hover alone is a
+        // feedback loop waiting to happen: the strip appears under the pointer,
+        // anything about that appearance costs the frame tracker its
+        // `containsMouse`, and the condition that showed it is the condition
+        // that hides it — a bar flipping on and off many times a second while
+        // he tries to scrub. So the pointer only ever TURNS IT ON, and a timer
+        // turns it off a moment after the pointer has actually gone. Nothing in
+        // the loop can flip faster than that timer.
+        property bool pointerOnClip: hover.containsMouse || videoTransport.pointerHere
+        onPointerOnClipChanged: {
+            if (frame.pointerOnClip) { stripLinger.stop(); frame.stripShown = true; }
+            else stripLinger.restart();
+        }
+        property bool stripShown: false
+        Timer {
+            id: stripLinger
+            interval: 900
+            onTriggered: frame.stripShown = frame.pointerOnClip
+        }
+
         VideoTransport {
             id: videoTransport
             visible: frame.started && !card.live
-                     && (hover.containsMouse || videoTransport.pointerHere
-                         || !video.playing)
+                     && (frame.stripShown || !video.playing)
             anchors { left: parent.left; right: parent.right; bottom: parent.bottom
                       margins: 1 }
             player: video.item !== null ? video.item.player : null
