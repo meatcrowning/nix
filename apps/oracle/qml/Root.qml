@@ -751,7 +751,11 @@ Item {
               } },
             { label: win.plasma ? "Copy Message" : "copy message",
               trigger: function () {
-                  Clip.copyText(md ? item.source : item.text);
+                  // A run of a split reply copies the WHOLE original markdown
+                  // (its `messageSource`), image references intact — not just
+                  // the one run the selection sits in.
+                  var whole = md ? (item.messageSource || item.source) : item.text;
+                  Clip.copyText(whole);
               } },
             { separator: true },
             { label: win.plasma ? "Select All" : "select all",
@@ -2266,6 +2270,38 @@ Item {
                         // name its own row without reaching for a context
                         // property that may not be there by then.
                         readonly property int rowIndex: index
+                        // The reply's markdown split into render runs, and the
+                        // fetched pictures it did NOT place inline — computed
+                        // here so the bubble can lay a reply out as a FLOW of
+                        // text + inline images (see replyFlow below) and still
+                        // hug its text (natural). `Ollama.replyRuns` does the
+                        // split; user/error rows carry no runs.
+                        readonly property var replyData: (function () {
+                            if (isUser) return { runs: [], leftovers: [] };
+                            try { return JSON.parse(Ollama.replyRuns(body, images)); }
+                            catch (e) { return { runs: [{ t: "text", md: body }], leftovers: [] }; }
+                        })()
+                        readonly property var replyRunsArr: replyData.runs || []
+                        readonly property var leftoverImages: replyData.leftovers || []
+                        readonly property var leftoverOks: (function () {
+                            var out = [];
+                            for (var i = 0; i < leftoverImages.length; i++)
+                                if (leftoverImages[i] && leftoverImages[i].ok)
+                                    out.push(leftoverImages[i]);
+                            return out;
+                        })()
+                        // The widest laid-out line across the reply's TEXT runs,
+                        // for the bubble's hug. Images and failures contribute
+                        // nothing (a hidden run reports 0), so this is the old
+                        // mdBody.contentWidth, spread over however many runs.
+                        readonly property real replyTextMax: {
+                            var m = 0;
+                            for (var i = 0; i < replyRunsRepeater.count; i++) {
+                                var it = replyRunsRepeater.itemAt(i);
+                                if (it && it.runWidth > m) m = it.runWidth;
+                            }
+                            return m;
+                        }
                         width: replyCol.width
                         height: rowStack.height
                         // A round that said nothing draws NOTHING and takes no
@@ -3035,78 +3071,155 @@ Item {
                                         // width of the model's name.
                                         readonly property real natural:
                                             Math.max(plainBody.contentWidth,
-                                                     mdBody.contentWidth)
+                                                     turn.replyTextMax)
 
 
-                                        // The pictures a reply carries, at the TOP of the
-                                        // bubble [his, 2026-08-22] — before the words, the way
-                                        // a message with a photo in it reads everywhere else.
-                                        // Fetched from the web with fetch_image, or read off
-                                        // this machine with view_image; the one place a reply
-                                        // becomes a picture. Each entry (the Python↔QML
-                                        // contract) is either a fetched image, framed like
-                                        // every surface here (1px border, Theme.rounding,
-                                        // never upscaled past its own size), with the model's
-                                        // caption under it, or an honest crit line for a fetch
-                                        // that failed or a file that will not load
-                                        // (docs/DESIGN.md §10 — surfaced, never vanished).
+                                        // The reply's content, laid out as a FLOW of runs so a
+                                        // picture the model wrote into the prose (`![alt](url)`)
+                                        // sits AT that spot, in with the words, rather than all
+                                        // hoisted to the top of the bubble [his, 2026-08-23 — "all
+                                        // images must be at top of message ... allow them to be put
+                                        // in line i.e. in with the text"]. `turn.replyRunsArr` is the
+                                        // markdown split by Ollama.replyRuns: text runs render as
+                                        // MarkdownText, image runs as an inline picture (capped to
+                                        // the column, PNG alpha intact, click to enlarge), and a
+                                        // failed fetch names itself where the picture was meant to
+                                        // be (docs/DESIGN.md §10). A fetched picture the reply
+                                        // never referenced inline is still SEEN — it falls to the
+                                        // trailing gallery below, so nothing is hidden.
+                                        //
+                                        // A markdown image that was NOT fetched this turn is
+                                        // demoted to a plain link inside its text run: MarkdownText
+                                        // would draw it at its raw pixel size and fetch the URL on
+                                        // render (the risk MarkdownText.qml itself flags). As a
+                                        // link the URL is still there and clickable — just not
+                                        // auto-fetched or upscaled.
                                         Column {
-                                            id: imageCol
+                                            id: replyFlow
                                             width: parent.width
                                             spacing: 6
-                                            visible: !isUser && (images !== "[]" || imagesActive)
+                                            visible: !isUser
 
-                                            // ONE picture is one picture; two or
-                                            // more are a tiled grid, and a tile
-                                            // opens the Lightbox over the whole
-                                            // window [his, 2026-08-23]. Both live
-                                            // in ImageGallery.qml.
-                                            ImageGallery {
-                                                width: imageCol.width
-                                                entries: {
-                                                    try { return JSON.parse(images); }
-                                                    catch (e) { return []; }
+                                            Repeater {
+                                                id: replyRunsRepeater
+                                                model: turn.replyRunsArr
+                                                delegate: Column {
+                                                    required property var modelData
+                                                    readonly property bool isText: modelData.t === "text"
+                                                    readonly property bool isImg: modelData.t === "img"
+                                                    readonly property bool isBad: modelData.t === "bad"
+                                                    width: replyFlow.width
+                                                    spacing: 0
+                                                    // For the bubble's hug-width measurement: an image
+                                                    // or a failure contributes no text width.
+                                                    readonly property real runWidth: runText.contentWidth
+
+                                                    MarkdownText {
+                                                        id: runText
+                                                        objectName: "mdBody"
+                                                        width: parent.width
+                                                        visible: parent.isText
+                                                        // One expression, both properties: `text` is
+                                                        // what is drawn, `source` is what Ctrl+C copies
+                                                        // (MarkdownText.qml). `messageSource` is the
+                                                        // WHOLE original reply, so "copy message" from
+                                                        // any run hands over the full markdown — image
+                                                        // references intact — not just the run.
+                                                        readonly property string md:
+                                                            parent.isText ? (parent.modelData.md || "")
+                                                                          : ""
+                                                        readonly property string messageSource: body
+                                                        text: win.hardBreaks(md)
+                                                        source: md
+                                                        onSelectedTextChanged:
+                                                            if (selectedText !== "" || win.selectedBody === runText)
+                                                                win.noteSelection(runText, true);
+                                                        MouseArea {
+                                                            anchors.fill: parent
+                                                            acceptedButtons: Qt.RightButton
+                                                            onClicked: function (m) {
+                                                                var p = mapToItem(win, m.x, m.y);
+                                                                ctxMenu.open(p.x, p.y,
+                                                                    win.turnMenu(runText, true,
+                                                                                 turn.rowIndex, false));
+                                                            }
+                                                        }
+                                                    }
+
+                                                    // A picture in with the text. Capped, alpha kept,
+                                                    // one click opens the Lightbox.
+                                                    InlineImage {
+                                                        id: runImg
+                                                        width: parent.width
+                                                        visible: parent.isImg
+                                                        entry: parent.isImg ? parent.modelData : null
+                                                        maxWidth: replyFlow.width
+                                                        onEnlarge:
+                                                            lightbox.openAt([parent.modelData], 0)
+                                                    }
+
+                                                    // A fetch that failed, where the picture was meant
+                                                    // to be — surfaced, never vanished (§10).
+                                                    PixelText {
+                                                        visible: parent.isBad
+                                                        width: parent.width
+                                                        wrapMode: Text.Wrap
+                                                        text: "image: " + (parent.isBad
+                                                                           && parent.modelData.error
+                                                                    ? parent.modelData.error
+                                                                    : "could not display")
+                                                        color: Theme.crit
+                                                    }
                                                 }
-                                                onEnlarge: (i) => lightbox.openAt(oks, i)
                                             }
 
-                                            // A fetch still in flight (§10 — the wait is shown).
+                                            // A fetched picture the reply never tied to a word:
+                                            // still shown, as the gallery below the text. ONE is
+                                            // one; two or more tile (ImageGallery.qml), and a tile
+                                            // opens the Lightbox.
+                                            ImageGallery {
+                                                width: replyFlow.width
+                                                visible: turn.leftoverImages.length > 0
+                                                entries: turn.leftoverImages
+                                                onEnlarge: (i) => lightbox.openAt(turn.leftoverOks, i)
+                                            }
+
+                                            // A typed/fetched image still landing (§10 — wait shown).
                                             PixelText {
                                                 visible: imagesActive
                                                 text: "fetching an image…"
                                                 color: Theme.text
                                             }
-                                        }
 
-                                        // The videos a reply carries, under the pictures and
-                                        // still above the words [his, 2026-08-23 — "are inline
-                                        // youtube video displays possible … like the youtube
-                                        // video displays in the bubble?"]. One card per video,
-                                        // playing a STREAM the resolver found — nothing is
-                                        // downloaded, and nothing starts until he clicks it.
-                                        // VideoDeck.qml / VideoCard.qml.
-                                        Column {
-                                            id: videoCol
-                                            width: parent.width
-                                            spacing: 6
-                                            visible: !isUser && (videos !== "[]" || videosActive)
+                                            // The videos a reply carries, under the words [his,
+                                            // 2026-08-23 — "are inline youtube video displays
+                                            // possible … like the youtube video displays in the
+                                            // bubble?"]. One card per video, playing a STREAM the
+                                            // resolver found — nothing is downloaded, nothing starts
+                                            // until he clicks it. VideoDeck.qml / VideoCard.qml.
+                                            Column {
+                                                id: videoCol
+                                                width: parent.width
+                                                spacing: 6
+                                                visible: videos !== "[]" || videosActive
 
-                                            VideoDeck {
-                                                width: videoCol.width
-                                                stage: videoStage
-                                                host: win
-                                                entries: {
-                                                    try { return JSON.parse(videos); }
-                                                    catch (e) { return []; }
+                                                VideoDeck {
+                                                    width: videoCol.width
+                                                    stage: videoStage
+                                                    host: win
+                                                    entries: {
+                                                        try { return JSON.parse(videos); }
+                                                        catch (e) { return []; }
+                                                    }
                                                 }
-                                            }
 
-                                            // Resolving a watch page takes seconds, so the
-                                            // wait is shown (§10) rather than left blank.
-                                            PixelText {
-                                                visible: videosActive
-                                                text: "finding the video…"
-                                                color: Theme.text
+                                                // Resolving a watch page takes seconds, so the wait
+                                                // is shown (§10) rather than left blank.
+                                                PixelText {
+                                                    visible: videosActive
+                                                    text: "finding the video…"
+                                                    color: Theme.text
+                                                }
                                             }
                                         }
 
@@ -3144,51 +3257,6 @@ Item {
                                                         win.turnMenu(plainBody, false,
                                                                      turn.rowIndex,
                                                                      isUser));
-                                                }
-                                            }
-                                        }
-                                        // The model's answer, rendered as Markdown (the reply
-                                        // comes back in it — docs/DESIGN.md §2). Only the
-                                        // assistant body; user text and errors above stay plain.
-                                        //
-                                        // A markdown IMAGE (`![alt](url)`) is DEMOTED to a plain
-                                        // link (`[alt](url)`) first: Text.MarkdownText would draw
-                                        // it at its intrinsic pixel size — overflowing the column
-                                        // — and fetch the URL on render (the risk MarkdownText.qml
-                                        // itself flags). A picture the model wants shown comes
-                                        // through fetch_image and the capped `images` delegate
-                                        // below, exactly ONCE; a stray `![](…)` in the prose must
-                                        // not become a second, giant, uncontrolled copy. As a link
-                                        // the URL is still there and clickable (docs/DESIGN.md §10
-                                        // — nothing hidden), just not auto-fetched or upscaled.
-                                        MarkdownText {
-                                            id: mdBody
-                                            // The selftest's handle on a reply, for
-                                            // rendering the message menu over it.
-                                            objectName: "mdBody"
-                                            width: parent.width
-                                            visible: !isUser && !isError && body !== ""
-                                            // One expression, both properties: `text`
-                                            // is what is drawn, `source` is what
-                                            // Ctrl+C copies (MarkdownText.qml).
-                                            readonly property string md:
-                                                body.replace(/!\[([^\]]*)\]\(/g, "[$1](")
-                                            text: win.hardBreaks(md)
-                                            source: md
-
-                                            onSelectedTextChanged:
-                                                if (selectedText !== "" || win.selectedBody === mdBody)
-                                                    win.noteSelection(mdBody, true);
-
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                acceptedButtons: Qt.RightButton
-                                                onClicked: function (m) {
-                                                    var p = mapToItem(win, m.x, m.y);
-                                                    ctxMenu.open(p.x, p.y,
-                                                        win.turnMenu(mdBody, true,
-                                                                     turn.rowIndex,
-                                                                     false));
                                                 }
                                             }
                                         }

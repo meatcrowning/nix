@@ -3471,6 +3471,92 @@ class Ollama(QObject):
     def lastModel(self):
         return self._last_model
 
+    @Slot(str, str, result=str)
+    def replyRuns(self, body, imagesJson):
+        """Split a reply's markdown into the runs an inline bubble renders.
+
+        The model places a picture inline by writing `![alt](url)` where it
+        wants it in the prose. QML lays the reply out as a flow of runs rather
+        than one TextEdit so the picture can sit AT that spot — but a TextEdit
+        would draw the URL at its raw pixel size and fetch it on render, so the
+        split happens here, where the row's fetched images are known.
+
+        Returns a JSON object:
+          {"runs":[{t:"text",md}|{t:"img",url,path,alt,w,h}|{t:"bad",url,error}],
+           "leftovers":[...]}
+        - a `text` run is the markdown between two images, with any image it
+          could NOT place (not fetched this turn) demoted to a plain link so
+          nothing is hidden (docs/DESIGN.md §10) and nothing is auto-fetched.
+        - an `img` run is a fetched local file to draw in place, alpha intact
+          (PNG stays PNG — no flatten, so transparency survives).
+        - a `bad` run is a fetch that failed, named honestly where the picture
+          was meant to be.
+        - `leftovers` are the row's images the reply never referenced inline,
+          for the trailing gallery — a fetched picture must still be SEEN even
+          when the model did not tie it to a word.
+        """
+        try:
+            images = json.loads(imagesJson) if imagesJson else []
+        except (ValueError, TypeError):
+            images = []
+        if not isinstance(images, list):
+            images = []
+        by_ok, by_bad = {}, {}
+        for e in images:
+            if not isinstance(e, dict):
+                continue
+            u = str(e.get("url") or "")
+            if not u:
+                continue
+            if e.get("ok") and e.get("path"):
+                by_ok.setdefault(u, e)
+            else:
+                by_bad.setdefault(u, e)
+
+        body = body or ""
+        runs, text_parts = [], []
+        referenced = set()
+        last = 0
+
+        def flush():
+            md = "".join(text_parts)
+            if md.strip():
+                runs.append({"t": "text", "md": md})
+                del text_parts[:]
+
+        for m in re.finditer(r"!\[([^\]]*)\]\(\s*([^)\s]+)(?:\s+[^)\s]*)?\)",
+                             body):
+            alt = m.group(1).strip()
+            url = m.group(2).rstrip(")")
+            referenced.add(url)
+            text_parts.append(body[last:m.start()])
+            entry = by_ok.get(url)
+            if entry:
+                flush()
+                runs.append({"t": "img", "url": url, "path": entry["path"],
+                             "alt": alt or entry.get("alt", ""),
+                             "w": int(entry.get("w") or 0),
+                             "h": int(entry.get("h") or 0)})
+            else:
+                bad = by_bad.get(url)
+                if bad:
+                    flush()
+                    runs.append({"t": "bad", "url": url,
+                                 "error": bad.get("error", "could not display")})
+                else:
+                    # Not fetched: keep it a plain link. The URL is still there
+                    # and clickable — just not auto-fetched or upscaled.
+                    text_parts.append("[%s](%s)" % (alt, url))
+            last = m.end()
+        text_parts.append(body[last:])
+        flush()
+
+        leftovers = [e for e in images
+                     if isinstance(e, dict) and str(e.get("url") or "")
+                     not in referenced]
+        return json.dumps({"runs": runs, "leftovers": leftovers},
+                          ensure_ascii=False)
+
     @Property(int, notify=modelsChanged)
     def suggestedCount(self):
         """How many leading entries of `models` are agent-suggested — so the
