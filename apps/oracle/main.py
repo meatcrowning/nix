@@ -1409,7 +1409,7 @@ BASH_TOOL_NAMES = {"run_bash"}
 #: file read, so unlike the sandbox/session/memory stores it needs no ssh
 #: branch to `top`.
 SKILLS_ROOT = os.path.expanduser(
-    os.environ.get("ORACLE_SKILLS", "~/.claude/skills"))
+    os.environ.get("ORACLE_SKILLS", "~/.local/share/oracle/skills"))
 #: One skill file's text, capped so a huge guide cannot swallow the context
 #: (the largest today, video-prompt's full-reference guide, is ~24k).
 SKILL_MAX_CHARS = 40000
@@ -6357,7 +6357,7 @@ class Ollama(QObject):
                              % (free / (1 << 30))}, False)
             return
         self.fileToolStarted.emit("pulling " + model)
-        self.execStarted.emit("ollama pull " + model)
+        self.execStarted.emit("pulling " + model)
         req = QNetworkRequest(QUrl(OLLAMA + "/api/pull"))
         req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
                       "application/json")
@@ -8824,12 +8824,12 @@ class Backend(QObject):
 
     @Slot()
     def startServer(self):
-        self._run(self._systemctl("start"), "starting the ollama server",
+        self._run(self._systemctl("start"), "starting the server",
                   "server started", "start failed")
 
     @Slot()
     def stopServer(self):
-        self._run(self._systemctl("stop"), "stopping the ollama server",
+        self._run(self._systemctl("stop"), "stopping the server",
                   "server stopped", "stop failed")
 
     def _run(self, argv, reason, ok_msg, fail_label):
@@ -9181,7 +9181,7 @@ def run_selftest(app, shell, win, plasma, warnings):
                                         "alt": "a demo picture, 320x180",
                                         "w": 320, "h": 180}]) if shot_img else "[]"},
                 {"isUser": False, "who": "qwen3.6:35b-a3b",
-                 "body": "ollama: connection refused", "isError": True},
+                 "body": "server: connection refused", "isError": True},
                 {"isUser": False, "who": "qwen3.6:35b-a3b",
                  "body": "and this one stopped mid-sen", "cutOff": True},
             ]

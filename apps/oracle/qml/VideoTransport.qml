@@ -10,6 +10,8 @@ import QtMultimedia
 Rectangle {
     id: bar
 
+    property string face: "hypr"     // how a harness proves which one loaded
+
     // The MediaPlayer this drives, or null while the card has not built one.
     property var player: null
     // Duration in ms — the player's own once it knows, else what the resolver

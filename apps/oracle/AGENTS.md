@@ -21,6 +21,15 @@ editable custom text (*The base prompt* below). It remembers the **model
 selector** too — the model last used and an agent-suggested ranking (see *The
 model selector* below).
 
+## "server", not "ollama"
+
+**Every string he reads says `server`** [his, 2026-08-23] — the status bar
+(`server idle` / `server · <model>` / `server down`), the start/stop reasons the
+askpass dialog shows, the pull heading. Which daemon is behind it is an
+implementation detail and the name of one is noise in a status bar. The
+model-facing text keeps `ollama` where it is a technical fact (the endpoint in
+`describe_self`, the tool descriptions), and so does every identifier.
+
 ## Two roofs
 
 **Under Plasma, chatter is a REAL KDE window** — a `QMainWindow` with a real
@@ -717,6 +726,38 @@ the tunnel's ssh master from `book` (`ssh top python3 sandbox-exec.py
 installed. **Because it runs on top, top's checkout needs `sandbox-exec.py`**
 — a `book` edit is inert until top pulls (same caveat the `put` op carries).
 
+## The Oxygen pass — what the Plasma face actually draws
+
+Audited 2026-08-23 [his: *"quadruple check that the entire program is fully
+oxygen no breeze or anything else"*], by rendering the window offscreen in that
+session and reading the item tree (`ORACLE_TREE=1` with
+`QT_QPA_PLATFORMTHEME=kde DESK_SESSION=plasma`) rather than by grepping —
+the rule the panel's own audits landed on.
+
+- **The style and the icons are Oxygen's**: the run prints
+  `style=oxygen … icons=oxygen`, and every widget-shaped thing in the tree is
+  the style's own — `Button`, `Frame`, `ScrollView`, `TextArea`,
+  `KQuickStyleItem`, plus the menubar/toolbar/status bar on the widget side.
+- **The scrollbar is the style's too**, through `qmlcommon/+plasma/VScroll.qml`
+  — the selector is on for every kdeshell app, so the hand-drawn pixel bar is
+  not what loads here.
+- **The type called `PixelText` does NOT draw a pixel font in that session.**
+  `DeskStyle` already resolves the family and size from `kdeglobals` under
+  Plasma (measured: `Oxygen-Sans` at 12px, a 16px line box, `smooth=true`, and
+  the same font in `editorFont`), so every label, every message and the compose
+  box are already in the session's own face. The name is a misnomer there, and
+  a reader auditing by type name will draw the wrong conclusion — this
+  paragraph is the correction.
+- **What is still ours, on purpose**: the `Meter` (a data readout, not a
+  widget — the style's `ProgressBar` paints nothing inside a `QQuickWidget`,
+  measured), and the surfaces that frame CONTENT — `VideoCard`, `ImageGallery`,
+  `Lightbox`. Those are picture furniture, not chrome.
+- **Fixed in this pass**: `qml/+plasma/VideoTransport.qml`. The video strip
+  drew its own scrub track and a fullscreen mark made of four 1px corner
+  brackets; in that session it is now a `Slider`, two `Label`s and a `Button`
+  carrying the session's own `view-fullscreen` / `view-restore` icon — the rule
+  player's transport bar was rebuilt under (§7.6).
+
 ## Media, not just the player — `control_media`
 
 **Any MPRIS player, and the SYSTEM volume** [his, 2026-08-23: *"it seems
@@ -802,8 +843,13 @@ so `stop` can take the whole process group down rather than a shell.
   parses a summary starting with `-` as an option.
 
 **The tray** (`qml/JobsTray.qml` + `qml/JobRow.qml`, both with `+plasma`
-twins) sits between the conversation and the compose box, and collapses to
-nothing when there are no jobs (§5.2). A row is: a state dot that pulses only
+twins) sits ABOVE the conversation, under the stat line [his, 2026-08-23:
+*"should go at the top of the chat window rather than the bottom"*] — the
+machine's own state belongs with the window's other standing facts, and a strip
+that grows downward from there does not push what he is reading. It is small on
+purpose: two rows before it scrolls, and **no heading** (the rows say what is
+running better than a count of them does). It collapses to nothing when there
+are no jobs (§5.2). A row is: a state dot that pulses only
 while the job runs, the label, the state in words with the exit code on a
 failure, a **reserved** clock slot so nothing shifts when a job ends (§5.4),
 and two verbs — `log`/`hide` plus `stop` while running, `clear` once finished
