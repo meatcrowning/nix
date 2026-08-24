@@ -30,6 +30,10 @@ Rectangle {
     signal toggleFull()
 
     readonly property real pos: player ? player.position : 0
+    // The volume, handed in and reported back — the strip owns nothing, so one
+    // clip's level is every clip's level (see the sibling's header).
+    property real volume: 1
+    signal volumeSet(real v)
     // THE SAME CONTRACT AS THE SIBLING, and the half that was missing until
     // 2026-08-24: `pointerHere` did not exist here at all, so under Plasma the
     // card's hover logic read `undefined` and had only its own frame tracker to
@@ -39,6 +43,7 @@ Rectangle {
     // strip, plus the two controls' own `hovered`.
     readonly property bool pointerHere:
         barHit.containsMouse || scrub.hovered || fsBtn.hovered
+        || volBtn.hovered || vol.hovered
 
     MouseArea {
         id: barHit
@@ -84,9 +89,43 @@ Rectangle {
         onMoved: if (bar.player && bar.dur > 0) bar.player.position = Math.round(value)
     }
 
+    // THE VOLUME ROCKER, as the style's own button and slider — Oxygen ships
+    // the four `audio-volume-*` icons for exactly this, and a hand-drawn cone
+    // beside a real Slider is the mismatch §7.6 exists to stop.
+    QQC.Button {
+        id: volBtn
+        anchors { right: vol.left; rightMargin: 2
+                  verticalCenter: parent.verticalCenter }
+        flat: true
+        property real preMute: 1
+        icon.name: bar.volume <= 0.001 ? "audio-volume-muted"
+                   : bar.volume < 0.34 ? "audio-volume-low"
+                   : bar.volume < 0.67 ? "audio-volume-medium"
+                                       : "audio-volume-high"
+        display: QQC.AbstractButton.IconOnly
+        QQC.ToolTip.visible: hovered
+        QQC.ToolTip.text: bar.volume <= 0.001 ? "unmute" : "mute"
+        onClicked: {
+            if (bar.volume <= 0.001)
+                bar.volumeSet(volBtn.preMute > 0.01 ? volBtn.preMute : 1);
+            else { volBtn.preMute = bar.volume; bar.volumeSet(0); }
+        }
+    }
+
+    QQC.Slider {
+        id: vol
+        anchors { right: fsBtn.left; rightMargin: 6
+                  verticalCenter: parent.verticalCenter }
+        width: 60
+        from: 0
+        to: 1
+        value: bar.volume
+        onMoved: bar.volumeSet(value)
+    }
+
     QQC.Label {
         id: total
-        anchors { right: fsBtn.left; rightMargin: 6
+        anchors { right: volBtn.left; rightMargin: 6
                   verticalCenter: parent.verticalCenter }
         width: 38
         horizontalAlignment: Text.AlignRight

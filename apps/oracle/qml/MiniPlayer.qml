@@ -118,6 +118,8 @@ Item {
                     player: mini.playing
                     dur: mini.dur
                     full: false
+                    volume: mini.card ? mini.card.volume : 1
+                    onVolumeSet: (v) => { if (mini.card) mini.card.setVolume(v); }
                     onToggleFull: mini.goFull()
                 }
             }

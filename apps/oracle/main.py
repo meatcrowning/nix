@@ -2528,6 +2528,21 @@ PERSISTENCE_NOTE = (
     "he has to read that the answer then repeats; the tool activity is already "
     "shown to him separately." % MAX_TOOL_ROUNDS)
 
+#: The app's own notes inside the conversation, and the rule that they are not
+#: his words. A turn that made a picture or a clip carries a
+#: `[image in this chat: /path · WxH]` line in the history so the path survives
+#: a restart (Root.qml `mediaNote`) — and a model reading it verbatim back at
+#: him is a line of app plumbing in the middle of an answer, which is what
+#: happened the first day it existed [2026-08-24].
+MARKER_NOTE = (
+    "Lines in square brackets like `[image in this chat: /path]`, "
+    "`[video in this chat: /path]` and `[attached: name]` are the APP telling "
+    "you what is already on screen and where it is on disk. They are not his "
+    "words and he cannot see them as text. Use the paths — they are what "
+    "you pass as first_frame, input_images or to view_image — but never "
+    "quote, repeat or print one in your answer, and never present one as a "
+    "link.")
+
 #: How many times a turn may carry ITSELF on before it has to hand back. A
 #: model that announces its next step instead of taking it is the single reason
 #: he was pressing `continue` over and over [his, 2026-08-23: "its still
@@ -2741,6 +2756,17 @@ ON_BOOK = socket.gethostname() == "book"
 CONFIG_DIR = Path(os.path.expanduser(
     os.environ.get("ORACLE_CONFIG", "~/.config/oracle")))
 LAST_MODEL_PATH = CONFIG_DIR / "last-model"
+#: HOW LOUD A CLIP PLAYS, for every clip [his, 2026-08-24: "if the user sets
+#: the volume of one clip it sets the same volume for every other past and
+#: future clip"]. One number, 0..1, in its own file beside the others — the
+#: transports all read the same one, so setting it on any card sets it on the
+#: card three replies up as well as on the next one.
+VIDEO_VOLUME_PATH = CONFIG_DIR / "video-volume"
+
+#: What a soundless copy of a clip is called, beside the original — the same
+#: name painter gives it (`apps/painter/main.py`, MUTED_TAG), so the two apps
+#: reuse each other's copy instead of each making one.
+MUTED_TAG = "-muted"
 SUGGESTED_PATH = CONFIG_DIR / "suggested.json"
 
 #: The chosen base system prompt, persisted like `last-model`: one small JSON,
@@ -2985,6 +3011,64 @@ class Clip(QObject):
     @Slot(str)
     def copyFile(self, path):
         self._copy_file(path, False)
+
+    # A SILENT COPY OF A CLIP, the way painter has offered one since 2026-08-06
+    # [his, 2026-08-24]. The video models generate sound with the picture and it
+    # is usually not what the clip is wanted for — dropping one into a browser
+    # or a chat is a page that starts making noise. Same rule as painter's
+    # `copyMuted`: `<name>-muted.mp4` beside the original, REUSED when it is
+    # already there and not older than the source (asking twice must not leave
+    # three files), and a `-c copy` remux rather than an encode, so it runs at
+    # IO speed and the picture is bit-identical.
+    @Slot(str)
+    def copyMutedVideo(self, path):
+        raw = str(path or "")
+        if raw.startswith("file://"):
+            raw = QUrl(raw).toLocalFile()
+        src = Path(os.path.abspath(os.path.expanduser(raw))) if raw else None
+        if src is None or not src.exists():
+            self.copied.emit("can't copy it: it is gone", True)
+            return
+        if src.stem.endswith(MUTED_TAG):
+            self._copy_file(str(src), False)
+            return
+        dest = src.with_name(src.stem + MUTED_TAG + src.suffix)
+        try:
+            fresh = dest.exists() and dest.stat().st_mtime >= src.stat().st_mtime
+        except OSError:
+            fresh = False
+        if fresh:
+            self._copy_file(str(dest), False)
+            return
+        proc = QProcess(self)
+        self._procs.add(proc)
+
+        def finished(code, _status):
+            err = bytes(proc.readAllStandardError()).decode("utf-8", "replace").strip()
+            self._procs.discard(proc)
+            proc.deleteLater()
+            if code == 0 and dest.exists():
+                self._copy_file(str(dest), False)
+            else:
+                self.copied.emit("could not mute it: " + (err.splitlines()[-1]
+                                                          if err else
+                                                          "exit %d" % code), True)
+
+        def failed(_e):
+            if proc in self._procs:
+                self._procs.discard(proc)
+                proc.deleteLater()
+                self.copied.emit("could not mute it: no ffmpeg", True)
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(failed)
+        # -map 0 -map -0:a keeps everything that is not audio; -dn drops the
+        # data streams an mp4 copy otherwise refuses. The same command painter
+        # and filer's videoconv use.
+        proc.start("ffmpeg", ["-hide_banner", "-nostdin", "-y",
+                              "-loglevel", "error", "-i", str(src),
+                              "-map", "0", "-map", "-0:a", "-c", "copy", "-dn",
+                              "-movflags", "+faststart", str(dest)])
 
     def _copy_file(self, path, as_image):
         raw = str(path or "")
@@ -3656,6 +3740,7 @@ class Ollama(QObject):
         self._pending_vision = []  # local images view_image is handing the model
         self._images_shown = set()
         self._paths_shown = set()  # …and every LOCAL file already drawn, by path
+        self._made_this_turn = {}  # kind -> the path it already generated
         self._image_entries = {}   # url -> the entry we already drew, this turn
         self._row_urls = set()     # …and which of them are on the CURRENT bubble
         self._md_images = {"n": 0}
@@ -3851,6 +3936,31 @@ class Ollama(QObject):
         rest = sorted((n for n in names if n not in seen), key=str.lower)
         self._suggested_count = len(top)
         return top + rest
+
+    # ---- how loud a clip plays, once, for all of them ---------------------
+
+    @Slot(result=float)
+    def videoVolume(self):
+        """The remembered clip volume, 0..1 (1 the first time)."""
+        try:
+            v = float(VIDEO_VOLUME_PATH.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            return 1.0
+        return max(0.0, min(1.0, v))
+
+    @Slot(float)
+    def rememberVideoVolume(self, v):
+        """Persist it. A write failure is swallowed — the setting is a
+        convenience and the session it was set in already has it."""
+        try:
+            v = max(0.0, min(1.0, float(v)))
+        except (TypeError, ValueError):
+            return
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            VIDEO_VOLUME_PATH.write_text("%.4f\n" % v, encoding="utf-8")
+        except OSError:
+            pass
 
     @Slot(str)
     def rememberModel(self, name):
@@ -4250,6 +4360,7 @@ class Ollama(QObject):
         self._rounds = 0
         self._images_shown = set()   # every image URL already fetched this turn
         self._paths_shown = set()    # …and every LOCAL file already drawn, by path
+        self._made_this_turn = {}    # what this turn has already GENERATED, by kind
         self._image_entries = {}     # …and the entry each one produced, to redraw
         self._row_urls = set()       # what is already on the bubble being written
         self._md_images = {"n": 0}   # typed-markdown images still downloading
@@ -4400,6 +4511,7 @@ class Ollama(QObject):
         self._rounds = 0
         self._images_shown = set()
         self._paths_shown = set()
+        self._made_this_turn = {}
         self._image_entries = {}
         self._row_urls = set()
         self._md_images = {"n": 0}
@@ -4909,6 +5021,7 @@ class Ollama(QObject):
         base += "\n\n" + SAVE_GUIDANCE
         base += "\n\n" + CAPABILITY_NOTE
         base += "\n\n" + PERSISTENCE_NOTE
+        base += "\n\n" + MARKER_NOTE
         tools = tools_note()
         if tools:
             base += "\n\n" + tools
@@ -8260,6 +8373,30 @@ class Ollama(QObject):
             self.fileToolStarted.emit("make a " + noun)
             answer({"error": name + " needs a prompt"}, False)
             return
+        # ONE RENDER OF EACH KIND PER TURN [his, 2026-08-24: "it did generate a
+        # video but then it tried to generate another until i stopped the comfy
+        # server"]. The tool's own description and its result both say not to
+        # call it again, and a model that has just watched twenty minutes of
+        # silence does it anyway — so this is mechanical rather than worded. Per
+        # KIND, not per turn: "make a picture and animate it" is one turn and two
+        # calls, and that one is right. A second CLIP in the same turn is a
+        # model deciding on its own to spend another twenty minutes of his GPU.
+        if kind in self._made_this_turn:
+            self.fileToolStarted.emit("make a " + noun)
+            answer({"error": ("you already made a " + noun + " this turn, at "
+                              + self._made_this_turn[kind] + ". He asked for "
+                              "one. Do not generate another — talk about the "
+                              "one you made, and wait for him to ask if he "
+                              "wants it changed."),
+                    "path": self._made_this_turn[kind]}, False,
+                   name + ": one " + noun + " per turn")
+            return
+        if self._gen_procs:
+            self.fileToolStarted.emit("make a " + noun)
+            answer({"error": ("a generation is ALREADY RUNNING for this turn. "
+                              "Wait for its result — do not call this again.")},
+                   False, name + ": one at a time")
+            return
         head = prompt if len(prompt) <= 60 else prompt[:59].rstrip() + "…"
         verb = ("animating" if (kind == "video" and a.get("first_frame"))
                 else ("editing" if (kind == "image" and a.get("input_images"))
@@ -8418,6 +8555,7 @@ class Ollama(QObject):
                 if not ok:
                     answer(result, False)
                     return
+                self._made_this_turn["image"] = path
                 answer({"ok": True, "path": path,
                         **self._gen_facts(state["meta"]),
                         "note": ("Generated and placed in the chat. You have "
@@ -8561,6 +8699,7 @@ class Ollama(QObject):
                                        or args.get("seconds") or 0),
                      "live": False}
             self.videoResult.emit(json.dumps(entry))
+            self._made_this_turn["video"] = here
             answer({"ok": True, "path": here, **Ollama._gen_facts(got),
                     "note": ("Generated and placed in the chat as a video he "
                              "can play. You have not seen it. Do not describe "
@@ -8573,6 +8712,7 @@ class Ollama(QObject):
             # The clip is on top and QtMultimedia cannot stream a path that is
             # not here. Nothing to draw locally, so say where it is rather than
             # showing a card that would not play (docs/DESIGN.md §10).
+            self._made_this_turn["video"] = here
             answer({"ok": True, "path": here, "host": "top",
                     "note": ("Generated on top, at this path. It is not on this "
                              "machine, so it is not playable in this window — "

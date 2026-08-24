@@ -1742,6 +1742,23 @@ scrub track]:
   (900ms) once the pointer has actually gone, so nothing in the loop can flip
   faster than that timer.
 
+**One volume, for every clip there has ever been** [his, 2026-08-24]. The strip
+owns no level: it draws `volume` and emits `volumeSet`, and every mount (card,
+stage, mini-player) reads Root's `clipVolume` and writes back through
+`setClipVolume`. So a level set on the clip at the bottom is the level of the
+one six replies up and of the one not generated yet, and it is remembered
+across launches in `~/.config/oracle/video-volume` (`Ollama.videoVolume` /
+`rememberVideoVolume`). The speaker mutes and unmutes to the level it left,
+which is why the button keeps `preMute`. Both faces carry it: a drawn cone and
+a track under Hyprland, the style's `audio-volume-*` button and a real `Slider`
+under Plasma.
+
+**The fullscreen caption is a BAND over the picture**, not a dim line in the
+margin [his, 2026-08-24: it "is not visible"]. Same translucent strip the
+transport wears, at the top, `z: 5` so nothing the picture's shape leaves free
+can cover it, full text colour rather than dim, with `esc` at its right end;
+the VideoOutput starts below it.
+
 **Failure is drawn** (docs/DESIGN.md §10): a non-http URL is refused before any
 request, a resolve that fails reports yt-dlp's own last line, a resolve that
 produced no single stream says so, a missing yt-dlp names itself and the limit
@@ -1869,6 +1886,16 @@ land on the turn as `genLabel`/`genFrac`/`genRunning`/`genDone`, and QML draws a
 that the wait is visible. Transient like `execTail`: what it MADE is the
 picture, so nothing about the bar is persisted.
 
+**ONE RENDER OF EACH KIND PER TURN** [his, 2026-08-24: "it did generate a video
+but then it tried to generate another until i stopped the comfy server"]. The
+tool description says to call it once, the result says the same again, and a
+model that has just watched twenty minutes of silence calls it anyway. So
+`_make_media` refuses mechanically: a second `make_video` (or `make_image`) in
+the same turn comes back as an error carrying the path of what it ALREADY made,
+and a call while a render is still running comes back as "one at a time". Per
+KIND, deliberately — "make a picture and animate it" is one turn and two calls,
+and that one is right. `_made_this_turn` is cleared where `_paths_shown` is.
+
 **Stop stops the RENDER, not just the stream.** `cancel()` used to abort the
 ollama reply and leave the backend sampling for another twenty minutes for
 nobody. It now terminates the generator processes it is holding (`_gen_procs`),
@@ -1974,6 +2001,14 @@ signal and Root, which holds the one `ctxMenu`, puts the rows on it. The outcome
 is TOASTED (§10): chatter had no transient surface at all, so painter's toast
 came over verbatim — a copy that silently did nothing looks exactly like one
 that worked, right up until the paste.
+
+A CLIP also copies SILENT [his, 2026-08-24]: `Clip.copyMutedVideo` makes
+`<name>-muted.mp4` beside the original with the same `-c copy` remux painter and
+filer use (a remux, not an encode — IO speed, same picture), reuses one that is
+already there and not older than the source, and copies that. The video models
+generate sound with the picture and a clip dropped into a browser or a chat is a
+page that starts making noise; painter has offered this since 2026-08-06 and the
+two apps share the `-muted` name, so one app's copy serves the other.
 
 **`booru_tags` — the vocabulary, searched, not remembered.** Anima was captioned
 with Danbooru's tags, and a tag the site does not have does nothing at all — it

@@ -85,7 +85,8 @@ Item {
 
     VideoOutput {
         id: out
-        anchors { fill: parent; margins: 12; topMargin: 28; bottomMargin: 28 }
+        anchors { fill: parent; margins: 12
+                  topMargin: 12 + capBand.height + 6; bottomMargin: 28 }
         fillMode: VideoOutput.PreserveAspectFit
         // Click the picture to play/pause; the ground behind it closes.
         MouseArea {
@@ -103,19 +104,39 @@ Item {
         }
     }
 
-    // The title, dim, out of the picture's way — and what closes it, stated
-    // once (§8.1: the fact and nothing else).
-    PixelText {
-        anchors { left: parent.left; top: parent.top; margins: 8 }
-        width: parent.width - 60
-        elide: Text.ElideRight
-        text: stage.caption
-        color: Theme.textDim
-    }
-    PixelText {
-        anchors { right: parent.right; top: parent.top; margins: 8 }
-        text: "esc"
-        color: Theme.textDim
+    // The title, and what closes it, stated once (§8.1: the fact and nothing
+    // else) — IN A BAND, over the top of the picture rather than in a margin
+    // beside it [his, 2026-08-24: the caption "is not visible" in fullscreen].
+    // A dim line on the ground at the very edge of the window is a line he has
+    // to go looking for; the same translucent strip the transport wears makes
+    // it part of the same object, and `z` puts it over the video whatever the
+    // picture's shape leaves free. Full text colour, not dim: this is the one
+    // thing on screen naming what he is watching.
+    Rectangle {
+        id: capBand
+        z: 5
+        anchors { left: parent.left; right: parent.right; top: parent.top
+                  margins: 12 }
+        height: Theme.lineHeight + 8
+        color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.82)
+        radius: Theme.rounding
+        visible: stage.caption !== "" || stage.opened
+
+        PixelText {
+            anchors { left: parent.left; leftMargin: 8
+                      right: escLabel.left; rightMargin: 8
+                      verticalCenter: parent.verticalCenter }
+            elide: Text.ElideRight
+            text: stage.caption
+            color: Theme.text
+        }
+        PixelText {
+            id: escLabel
+            anchors { right: parent.right; rightMargin: 8
+                      verticalCenter: parent.verticalCenter }
+            text: "esc"
+            color: Theme.textDim
+        }
     }
 
     // The same strip the card wears, with the mark turned inward.
@@ -126,6 +147,8 @@ Item {
         player: stage.playing
         dur: stage.dur
         full: true
+        volume: stage.card ? stage.card.volume : 1
+        onVolumeSet: (v) => { if (stage.card) stage.card.setVolume(v); }
         onToggleFull: stage.close()
     }
 }
