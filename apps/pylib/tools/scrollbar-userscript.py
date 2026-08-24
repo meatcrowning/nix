@@ -46,13 +46,16 @@ MATCHES = ("*://*/*", "file:///*")
 def build(source=None, style=None, path=OUT, port=None):
     css, prov = scrollcss.build(source, style)
     port = port or chansource.PORT
-    version = "1.0.%s" % chansource.stamp(css)
+    version = userscript.source_version(
+        (HERE.parent / "scrollcss.py", HERE.parent / "userscript.py",
+         HERE / "scrollbar-userscript.py"), major=2)
     return userscript.build(
         name="desktop scrollbar",
         description=("Draws every page's scrollbar as this desktop's (%s), "
                      "polling the loopback courier." % prov),
         matches=MATCHES, css=css, version=version,
         url="http://127.0.0.1:%d/scrollbar.css" % port,
+        update_url="http://127.0.0.1:%d/scrollbar.user.js" % port,
         key="__deskScrollbar", style_id="desk-scrollbar",
         path=path, tool="scrollbar-userscript.py"), prov
 
@@ -80,8 +83,10 @@ def main():
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(text, encoding="utf-8")
     print("%s\n  live from: http://127.0.0.1:%d/scrollbar.css (chan-theme-server)"
-          "\n  embedded fallback: %s\n  open file://%s in Vivaldi to (re)install"
-          % (a.out, a.port, prov, a.out))
+          "\n  embedded fallback: %s"
+          "\n  install ONCE from http://127.0.0.1:%d/scrollbar.user.js — from THERE"
+          "\n  it auto-updates; a copy installed from file:// never will."
+          % (a.out, a.port, prov, a.port))
     return 0
 
 

@@ -207,6 +207,18 @@ class Isolated:
         return self
 
     def _prepare(self, profile):
+        # Pointing the pref at a folder is not enough: the loader is behind the
+        # `vivaldi-css-mods` lab flag, which lives in Local State — without it
+        # `--css DIR` silently loads nothing at all.
+        state = profile / "Local State"
+        try:
+            ls = json.loads(state.read_text(encoding="utf-8"))
+            labs = ls.setdefault("browser", {}).setdefault("enabled_labs_experiments", [])
+            if isinstance(labs, list) and "vivaldi-css-mods@1" not in labs:
+                labs.append("vivaldi-css-mods@1")
+                state.write_text(json.dumps(ls, separators=(",", ":")), encoding="utf-8")
+        except (OSError, ValueError):
+            pass
         prefs = profile / "Default" / "Preferences"
         try:
             data = json.loads(prefs.read_text(encoding="utf-8"))
