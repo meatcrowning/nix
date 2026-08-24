@@ -70,7 +70,8 @@ def build(source=None, path=OUT, port=None):
         matches=("*://boards.4chan.org/*", "*://boards.4channel.org/*"),
         css=css, version=version,
         url="http://127.0.0.1:%d/chan.css" % port,
-        update_url="http://127.0.0.1:%d/chan.user.js" % port,
+        update_url="http://127.0.0.1:%d/chan.meta.js" % port,
+        download_url="http://127.0.0.1:%d/chan.user.js" % port,
         key="__deskChanTheme", style_id="desk-chan-theme",
         gate="oneechan", path=path, tool="chan-userscript.py"), prov
 
@@ -96,9 +97,11 @@ def main():
     a.out.write_text(text, encoding="utf-8")
     print("%s\n  live from: http://127.0.0.1:%d/chan.css (chan-theme-server)"
           "\n  embedded fallback: %s"
-          "\n  install ONCE from http://127.0.0.1:%d/chan.user.js — from THERE it"
-          "\n  auto-updates; a copy installed from file:// never will."
-          % (a.out, a.port, prov, a.port))
+          "\n  updates from http://127.0.0.1:%d/chan.meta.js — install it\n"
+          "  through Tampermonkey's dashboard (Utilities > Install from URL,\n"
+          "  http://127.0.0.1:%d/chan.user.js) or from this file; either way the\n"
+          "  installed copy carries that update URL.\n"
+          % (a.out, a.port, prov, a.port, a.port))
     return 0
 
 

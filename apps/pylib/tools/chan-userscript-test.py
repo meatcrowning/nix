@@ -19,6 +19,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -130,13 +131,17 @@ v3text, v3prov = gen.build("plasma", TMP / "out.user.js")
 v3 = re.search(r"@version\s+(\S+)", v3text).group(1)
 check("the version is stable across an unchanged regeneration", v1 == v2)
 check("a palette change does NOT churn it — the script is unchanged", v1 == v3)
-(TMP / "newer.py").write_text("# a source edited after the real ones\n")
+# An hour on, not "now": the version has minute resolution, so a source edited
+# in this same minute reads as unchanged.
+later = TMP / "newer.py"
+later.write_text("# a source edited after the real ones\n")
+os.utime(later, (time.time() + 3600, time.time() + 3600))
 check("it moves when a source of the script does",
-      userscript.source_version([TMP / "newer.py"], major=3) > v1)
+      userscript.source_version([later], major=3) > v1)
 check("and it sorts as a version, newest last",
       sorted(["3.20260101.0000", v1, "3.19700101.0000"])[-1] == v1)
 check("the updater is pointed at the courier, not file:// (which it refuses)",
-      "@updateURL    http://127.0.0.1:%d/chan.user.js" % chansource.PORT in text
+      "@updateURL    http://127.0.0.1:%d/chan.meta.js" % chansource.PORT in text
       and "@downloadURL  http://127.0.0.1:%d/chan.user.js" % chansource.PORT in text)
 check("plasma + breeze: a flat KStyle bakes no gradient",
       "linear-gradient(to bottom" not in v3text)
@@ -188,14 +193,21 @@ try:
 
     # The update seat: Tampermonkey's updater fetches the SCRIPT over http,
     # never file://, so the courier has to hand out the script itself.
-    for route in ("/chan.user.js", "/scrollbar.user.js"):
-        with urllib.request.urlopen(base + route, timeout=5) as r:
+    for name in ("chan", "scrollbar"):
+        with urllib.request.urlopen(base + "/%s.user.js" % name, timeout=5) as r:
             body, jtype = r.read().decode("utf-8"), r.headers.get("Content-Type")
-        check("the courier serves %s" % route, "==UserScript==" in body)
+        check("the courier serves /%s.user.js" % name, "==UserScript==" in body)
         check("  as javascript", "javascript" in (jtype or ""))
         check("  pointing its updater back here",
-              ("@updateURL    http://127.0.0.1:%d%s" % (chansource.PORT, route))
-              in body)
+              ("@updateURL    http://127.0.0.1:%d/%s.meta.js"
+               % (chansource.PORT, name)) in body)
+        with urllib.request.urlopen(base + "/%s.meta.js" % name, timeout=5) as r:
+            meta = r.read().decode("utf-8")
+        check("  and the check itself is metadata only, not the whole sheet",
+              meta.endswith("// ==/UserScript==\n") and len(meta) < len(body) / 4)
+        check("  carrying the same version the script does",
+              re.search(r"@version\s+(\S+)", meta).group(1)
+              == re.search(r"@version\s+(\S+)", body).group(1))
 
     with urllib.request.urlopen(base + "/version", timeout=5) as r:
         ver = json.loads(r.read().decode("utf-8"))

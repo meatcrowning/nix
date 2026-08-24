@@ -144,7 +144,7 @@ check("the version is stable across an unchanged regeneration", v1 == v2)
 # is not newer, which an unordered content hash caused half the time.
 check("a style change does NOT churn it — the script is unchanged", v1 == v3)
 check("the updater is pointed at the courier, not file:// (which it refuses)",
-      "@updateURL    http://127.0.0.1:%d/scrollbar.user.js" % chansource.PORT in text)
+      "@updateURL    http://127.0.0.1:%d/scrollbar.meta.js" % chansource.PORT in text)
 
 # Vivaldi's custom.css is written by vivaldi-theme.py (one writer, chrome and
 # scrollbar in one file) and checked by vivaldi-theme-test.py.

@@ -52,6 +52,7 @@ sys.path.insert(0, str(HERE.parent))
 
 import chansource                                               # noqa: E402
 import scrollcss                                                # noqa: E402
+import userscript                                               # noqa: E402
 
 
 def _generator(filename):
@@ -162,6 +163,13 @@ class Handler(BaseHTTPRequestHandler):
         "/scrollbar.css": (lambda src: scrollcss.build(src), CSS),
         "/chan.user.js": (lambda src: chan_script.build(src), JS),
         "/scrollbar.user.js": (lambda src: scrollbar_script.build(src), JS),
+        # The update CHECK, which is all a `.meta.js` is: the header block on
+        # its own, so the daily poll costs a few hundred bytes rather than the
+        # whole baked sheet. Greasyfork's shape, and what @updateURL points at.
+        "/chan.meta.js": (lambda src: (userscript.metadata_block(
+            chan_script.build(src)[0]), "meta"), JS),
+        "/scrollbar.meta.js": (lambda src: (userscript.metadata_block(
+            scrollbar_script.build(src)[0]), "meta"), JS),
     }
 
     def do_GET(self):
@@ -170,7 +178,8 @@ class Handler(BaseHTTPRequestHandler):
         route = self.ROUTES.get(path)
         if route is None and path != "/version":
             self._send(404, b"chan-theme: /chan.css, /scrollbar.css, "
-                            b"/chan.user.js, /scrollbar.user.js or /version\n")
+                            b"/chan.user.js, /scrollbar.user.js, /chan.meta.js, "
+                            b"/scrollbar.meta.js or /version\n")
             return
         try:
             if path == "/version":
