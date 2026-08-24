@@ -1,0 +1,20 @@
+# Managed by home/srvs/oracle-skills.nix; edits here are overwritten.
+#
+# ALLOWLIST, and it must stay one. The repo root is ~/.local/share/oracle,
+# chatter's whole runtime dir — it also holds `sessions/` (every conversation
+# he has had with chatter), `memory/`, `jobs/`, `sandbox/` and `images/`. None
+# of that may ever leave the machine. So: ignore everything at the root, then
+# re-include exactly the two directories that ARE the shared base. A new store
+# landing beside them can therefore never widen what gets pushed; only a
+# deliberate edit here can.
+/*
+!/.gitignore
+!/.gitattributes
+!/skills/
+!/agents/
+
+# Machine-local build products inside a skill. youtube-content builds a ~20 MB
+# venv on first use; the skill's own setup block recreates it on the other host.
+venv/
+__pycache__/
+*.pyc
