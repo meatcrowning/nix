@@ -198,6 +198,42 @@ spin()
 check("the preview disappears when the console finishes", not peek_items(),
       repr([c.property("text") for c in peek_items()]))
 
+# ---- 4b. the tool heading NAMES the tool ---------------------------------
+# It read "calling turn.agg.tools" until 2026-08-24 — a rename that ran through
+# the string literals — and a heading that names the running tool beats
+# "calling tools" anyway [his].
+ollama.toolCallStarted.emit("generate_image")
+spin()
+check("the tool heading names what is being called",
+      bool(walk(win, lambda c: c.property("text") == "calling generate_image", [])),
+      repr([c.property("text") for c in
+            walk(win, lambda c: isinstance(c.property("text"), str)
+                 and (c.property("text") or "").startswith("calling"), [])]))
+
+# ---- 5. a render's bar: alone while it runs, and it STAYS ----------------
+# His, 2026-08-24: "working with files" over the top of a render says nothing
+# about a picture being made, and a bar that vanishes the moment it fills
+# leaves nothing to say the wait is over.
+ollama.genProgress.emit("sampling 24/50", 0.46)
+spin()
+check("the files heading stands down while a render runs",
+      not walk(win, lambda c: c.property("text") == "working with files", []))
+check("the render's label is drawn instead",
+      bool(walk(win, lambda c: c.property("text") == "sampling 24/50", [])))
+ollama.genFinished.emit(True)
+spin()
+bar = walk(win, lambda c: c.property("text") == "done", [])
+check("the finished bar stays, full", bool(bar),
+      repr([c.property("text") for c in
+            walk(win, lambda c: isinstance(c.property("text"), str)
+                 and "%" in (c.property("text") or ""), [])]))
+check("and it reads 100%",
+      bool(walk(win, lambda c: c.property("text") == "100%", [])))
+check("the heading comes back once the render is over",
+      bool(walk(win, lambda c: isinstance(c.property("text"), str)
+                and ((c.property("text") or "").startswith("files ·")
+                     or c.property("text") == "working with files"), [])))
+
 srv.shutdown()
 print("FAILED: " + ", ".join(fails) if fails else "OK")
 sys.exit(1 if fails else 0)

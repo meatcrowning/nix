@@ -1834,11 +1834,23 @@ of one was a single motionless "making a picture…", which reads as stalled. Th
 generator reports its position (`--progress`) and chatter reads stdout AS IT
 RUNS — `readyReadStandardOutput`, accumulating the whole of it, because
 `finished` still needs the `saved …` lines and `readAllStandardOutput` hands
-back only what has not been read. `genProgress(label, frac)` / `genFinished()`
-land on the turn as `genLabel`/`genFrac`/`genRunning`, and QML draws a `Meter`
-under the tool disclosure's heading — open or shut, since the point is that the
-wait is visible. Transient like `execTail`: what it MADE is the picture, so
-nothing about the bar is persisted.
+back only what has not been read. `genProgress(label, frac)` / `genFinished(ok)`
+land on the turn as `genLabel`/`genFrac`/`genRunning`/`genDone`, and QML draws a
+`Meter` under the tool disclosure's heading — open or shut, since the point is
+that the wait is visible. Transient like `execTail`: what it MADE is the
+picture, so nothing about the bar is persisted.
+
+Two rules on top of that, both his, 2026-08-24:
+
+- **The finished bar STAYS.** `genFinished` used to clear the lot, so the last
+  thing a render did was blink out of existence. It now sets `genDone` and
+  leaves the row drawn — `done` at 100% when the generator exited clean,
+  `stopped` at wherever it got to when it did not, which is why the signal
+  carries `ok`.
+- **`working with files` stands down while a render runs.** The bar under it
+  already says what is happening, and the heading says nothing about a picture
+  being made. `fileHead` is hidden on `genRunning` and comes back with the
+  round.
 
 **A PORTRAIT picture is capped by its HEIGHT, not only by the column.** Sized by
 the column alone a 2:3 render is nearly three times the height of a 16:9 one in

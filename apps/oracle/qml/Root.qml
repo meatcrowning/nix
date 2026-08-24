@@ -203,7 +203,7 @@ Item {
                   sources: "", searchCount: 0, searching: false,
                   files: "", fileCount: 0, filesActive: false,
                   execTail: "", execRunning: false, loading: false,
-                  genLabel: "", genFrac: 0, genRunning: false };
+                  genLabel: "", genFrac: 0, genRunning: false, genDone: false };
         if (head < 0 || head >= chatLog.count) return a;
         for (var i = head; i < chatLog.count && !chatLog.get(i).isUser; i++) {
             var r = chatLog.get(i);
@@ -238,9 +238,13 @@ Item {
                 a.execTail = r.execTail;
                 a.execRunning = !!r.execRunning;
             }
-            // A render's bar belongs to whichever row is generating now.
-            if (r.genRunning) {
-                a.genRunning = true;
+            // A render's bar belongs to whichever row is generating now — or,
+            // once it has finished, to the last row that did: a bar that
+            // vanishes the moment it fills leaves nothing to say the wait is
+            // over [his, 2026-08-24].
+            if (r.genRunning || r.genDone) {
+                a.genRunning = a.genRunning || !!r.genRunning;
+                a.genDone = !r.genRunning;
                 a.genLabel = r.genLabel || "";
                 a.genFrac = r.genFrac || 0;
             }
@@ -579,12 +583,25 @@ Item {
             chatLog.setProperty(win.activeIndex, "genLabel", label);
             chatLog.setProperty(win.activeIndex, "genFrac", frac);
             chatLog.setProperty(win.activeIndex, "genRunning", true);
+            chatLog.setProperty(win.activeIndex, "genDone", false);
         }
-        function onGenFinished() {
+        // THE FINISHED BAR STAYS [his, 2026-08-24]. It used to be cleared here,
+        // so a render's only trace between the last step and the picture
+        // arriving was a gap where the bar had been. `genDone` keeps it drawn,
+        // full and settled, until the turn is gone from the log.
+        function onGenFinished(ok) {
             if (win.activeIndex < 0) return;
             chatLog.setProperty(win.activeIndex, "genRunning", false);
-            chatLog.setProperty(win.activeIndex, "genFrac", 0);
-            chatLog.setProperty(win.activeIndex, "genLabel", "");
+            if (!chatLog.get(win.activeIndex).genDone
+                && chatLog.get(win.activeIndex).genLabel === "")
+                return;   // nothing ever ran on this row
+            chatLog.setProperty(win.activeIndex, "genDone", true);
+            if (ok) {
+                chatLog.setProperty(win.activeIndex, "genFrac", 1);
+                chatLog.setProperty(win.activeIndex, "genLabel", "done");
+            } else {
+                chatLog.setProperty(win.activeIndex, "genLabel", "stopped");
+            }
         }
         function onReplyDone() {
             if (win.activeIndex < 0) return;
@@ -933,7 +950,7 @@ Item {
                          images: "[]", imagesActive: false, imagesPending: 0,
                          videos: "[]", videosActive: false, videosPending: 0,
                          execTail: "", execRunning: false,
-                         genLabel: "", genFrac: 0, genRunning: false,
+                         genLabel: "", genFrac: 0, genRunning: false, genDone: false,
                          tools: "", toolCount: 0, toolsActive: false,
                          streaming: true, isError: false });
         win.activeIndex = chatLog.count - 1;
@@ -1011,7 +1028,7 @@ Item {
                              images: t.images || "[]", imagesActive: false, imagesPending: 0,
                              videos: t.videos || "[]", videosActive: false, videosPending: 0,
                              execTail: "", execRunning: false,
-                             genLabel: "", genFrac: 0, genRunning: false,
+                             genLabel: "", genFrac: 0, genRunning: false, genDone: false,
                              tools: t.tools || "", toolCount: t.toolCount || 0, toolsActive: false,
                              streaming: false, isError: !!t.isError,
                              step: t.step || 0, ts: t.ts || 0 });
@@ -1140,7 +1157,7 @@ Item {
                          images: "[]", imagesActive: false, imagesPending: 0,
                          videos: "[]", videosActive: false, videosPending: 0,
                          execTail: "", execRunning: false,
-                         genLabel: "", genFrac: 0, genRunning: false,
+                         genLabel: "", genFrac: 0, genRunning: false, genDone: false,
                          tools: "", toolCount: 0, toolsActive: false,
                          streaming:false, isError: false, step: 0 });
         win.appendReplyRow(1);
@@ -2794,8 +2811,9 @@ Item {
                                                 spacing: 6
                                                 PixelText { text: toolAct.expanded ? "-" : "+"; color: Theme.textDim }
                                                 PixelText {
-                                                    text: turn.agg.toolsActive ? "calling turn.agg.tools"
-                                                                      : "tools · " + turn.agg.toolCount
+                                                    text: turn.agg.toolsActive
+                                                          ? "calling " + (win.lastLine(turn.agg.tools) || "a tool")
+                                                          : "tools · " + turn.agg.toolCount
                                                     color: turn.agg.toolsActive ? Theme.text : Theme.textDim
                                                 }
                                                 PixelText {
@@ -2955,7 +2973,7 @@ Item {
                                                 PixelText { text: src.expanded ? "-" : "+"; color: Theme.textDim }
                                                 PixelText {
                                                     text: turn.agg.searching ? "searching the web"
-                                                                    : "web · " + turn.agg.searchCount + (turn.agg.searchCount === 1 ? " source" : " turn.agg.sources")
+                                                                    : "web · " + turn.agg.searchCount + (turn.agg.searchCount === 1 ? " source" : " sources")
                                                     color: turn.agg.searching ? Theme.text : Theme.textDim
                                                 }
                                                 PixelText {
@@ -3028,7 +3046,7 @@ Item {
                                             // the heading, and the line it printed last
                                             // under it. A render adds its bar the same
                                             // way, below both.
-                                            height: Theme.lineHeight
+                                            height: (fileHead.visible ? Theme.lineHeight : 0)
                                                     + (execPeek.visible ? Theme.lineHeight : 0)
                                                     + (genRow.visible ? Theme.lineHeight : 0)
                                             property int dotPhase: 0
@@ -3040,10 +3058,19 @@ Item {
                                                 repeat: true
                                                 onTriggered: fileToggle.dotPhase = (fileToggle.dotPhase + 1) % 4
                                             }
+                                            // NOT WHILE A RENDER RUNS [his,
+                                            // 2026-08-24]: the bar under it is
+                                            // already saying what is happening,
+                                            // and "working with files" over the
+                                            // top of it says nothing about a
+                                            // picture being made. It comes back
+                                            // as "files · N" when the round is
+                                            // over.
                                             Row {
                                                 id: fileHead
                                                 anchors { left: parent.left; top: parent.top }
-                                                height: Theme.lineHeight
+                                                visible: !turn.agg.genRunning
+                                                height: visible ? Theme.lineHeight : 0
                                                 spacing: 6
                                                 PixelText { text: fileAct.expanded ? "-" : "+"; color: Theme.textDim }
                                                 PixelText {
@@ -3112,7 +3139,7 @@ Item {
                                                                                 : fileHead.bottom }
                                                 height: visible ? Theme.lineHeight : 0
                                                 spacing: 8
-                                                visible: turn.agg.genRunning
+                                                visible: turn.agg.genRunning || turn.agg.genDone
                                                 Meter {
                                                     anchors.verticalCenter: parent.verticalCenter
                                                     width: 120
