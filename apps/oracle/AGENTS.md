@@ -1236,11 +1236,25 @@ instead of a detached picture floating above a separate text bubble [his,
 merge decision is made off the row's `images`/`videos` roles, never a child
 item's `visible` (the latch in the bubble's `visible`).
 
+**And a SHORT line in front of a picture counts as no words at all.** He watched
+a turn draw "Here's your Lain image:" with the picture under it and then a
+second bubble saying "Here you go — here's Lain:" with nothing in it
+[2026-08-24]. The row that called the tool wrote before it had seen the result —
+which `PERSISTENCE_NOTE` already forbids and models do anyway — and the round
+after it says the same thing again. So a media row whose body is at most
+`preambleMax` (140) characters AND that called a tool has its body cleared and
+merges like a wordless one: one picture, one bubble, one sentence. Longer prose
+is left alone and still splits — that is content, and losing it would be worse
+than repeating it. Only the DISPLAY is trimmed; the model's own context still
+holds what it wrote.
+
 Harness: `tools/round-split-test.py` — it drives one real prompt through the
 real window offscreen against a stub ollama that asks for two tool rounds, and
 asserts the log comes out as three reply rows with the prose and the tool on the
 round that made them; a second scenario (MODE=media, a `show_image` round then
-an answer) asserts the picture and the following text land on ONE row. It rides
+an answer) asserts the picture and the following text land on ONE row, and a
+third (MODE=preamble) replays exactly what he saw and asserts the announcement
+is dropped. It rides
 on `ORACLE_SEND` (send this prompt, then print the chat log as JSON via
 `Root.rowsJson()`), which is the only way to see what the ROWS became.
 
@@ -1822,6 +1836,14 @@ land on the turn as `genLabel`/`genFrac`/`genRunning`, and QML draws a `Meter`
 under the tool disclosure's heading — open or shut, since the point is that the
 wait is visible. Transient like `execTail`: what it MADE is the picture, so
 nothing about the bar is persisted.
+
+**A PORTRAIT picture is capped by its HEIGHT, not only by the column.** Sized by
+the column alone a 2:3 render is nearly three times the height of a 16:9 one in
+the same chat and pushes the reply off the screen [his, 2026-08-24]. The ceiling
+is 420 in all three places media is drawn — `ImageGallery.maxH`,
+`InlineImage.maxH` and `VideoCard.maxH` — so a still and a clip of the same
+shape take the same room. Nothing is cropped: the picture is drawn smaller, and
+one click still opens it full size in the Lightbox.
 
 **A generated picture says what made it.** The caption is his prompt; a second,
 dimmer line under it (`entry.meta`, drawn where a fetched picture's host goes)

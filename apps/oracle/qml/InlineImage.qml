@@ -32,7 +32,12 @@ Item {
     readonly property var e: (entry && entry.path) ? entry : null
     readonly property real natW: (e && e.w > 0) ? e.w : maxWidth
     readonly property real natH: (e && e.h > 0) ? e.h : maxWidth
-    readonly property real maxH: Math.max(200, maxWidth * 1.5)
+    // The height ceiling, and it is not generous on purpose: a portrait render
+    // sized by the bubble's width alone is nearly three times the height of a
+    // landscape one and pushes the reply off the screen [his, 2026-08-24]. Same
+    // 420 the gallery and VideoCard use, so every shape of media in a reply
+    // takes comparable room; click it for the full size.
+    readonly property real maxH: Math.max(240, Math.min(420, maxWidth * 1.5))
     readonly property real scaleFit: Math.min(1, maxWidth / Math.max(1, natW),
                                               maxH / Math.max(1, natH))
     readonly property real dispW: Math.max(1, Math.round(natW * scaleFit))

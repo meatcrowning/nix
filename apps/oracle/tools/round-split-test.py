@@ -79,7 +79,21 @@ class Stub(http.server.BaseHTTPRequestHandler):
             return
         ST["n"] += 1
         i = ST["n"]
-        if self.mode == "media":
+        if self.mode == "preamble":
+            # WHAT HE ACTUALLY SAW [2026-08-24]: the round that shows the
+            # picture announces it first, and the round after says the same
+            # thing again in a bubble of its own with nothing in it.
+            if i == 1:
+                frames = [{"message": {"content": "Here's your Lain image:",
+                                       "tool_calls": [
+                                           {"function": {"name": "show_image",
+                                                         "arguments": {"path": self.png}}}]},
+                           "done": False},
+                          {"done": True, "done_reason": "stop"}]
+            else:
+                frames = [{"message": {"content": "Here you go — here's Lain:"}},
+                          {"done": True, "done_reason": "stop"}]
+        elif self.mode == "media":
             if i == 1:
                 # Round 1 shows a picture and says nothing — a media-only round.
                 frames = [{"message": {"content": "",
@@ -207,6 +221,24 @@ if len(replies) == 1:
           str(r["step"]))
     check("nothing is left reading as still streaming (media)",
           not any(x["streaming"] for x in rows))
+
+# ---- MODE=preamble: a short line in front of the picture is not an answer --
+# The row that called the tool wrote before it saw the result; the round after
+# it then repeats itself in an empty bubble. The preamble is dropped and the two
+# merge, so one picture gets one bubble and one sentence.
+Stub.mode = "preamble"
+txt, rows, turns = parse(run_app())
+check("the window still loads clean (preamble)", "0 QML warning(s)" in txt)
+replies = [r for r in rows if not r["isUser"]]
+check("an announcement in front of a picture does not split the turn",
+      len(replies) == 1,
+      json.dumps([(r["step"], r["body"][:34], r["images"][:20]) for r in replies]))
+if len(replies) == 1:
+    r = replies[0]
+    check("the picture is on the one row", r["images"] not in ("", "[]"),
+          r["images"][:60])
+    check("the announcement is gone and the answer stands",
+          r["body"].strip() == "Here you go — here's Lain:", json.dumps(r["body"]))
 
 print("FAILED: " + ", ".join(fails) if fails else "OK")
 sys.exit(1 if fails else 0)
