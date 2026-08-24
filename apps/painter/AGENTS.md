@@ -866,6 +866,39 @@ there, and each was worth measuring:
   first tick and retries while it comes up empty, because the sshfs mount may
   still be landing.
 
+## `tools/smoke.py` — the app without the window, and chatter's generator
+
+The registry/graph/client path with the GUI taken off, so a failure in it is a
+failure in painter proper rather than in the interface. It is also **the
+generator chatter shells out to** (`make_image`/`make_video` in
+`apps/oracle/main.py`), which is why it carries painter's WHOLE surface rather
+than just text-to-image:
+
+- `--mode anime|real|edit|video` is painter's own shortcut table
+  (`registry.MODES`) — it resolves to HIS canonical file for that mode, so a
+  caller naming "anima" or "klein" lands on exactly what the button would have.
+  `--model` is a substring of a filename and still wins over it.
+- `--image PATH` (repeatable) is the edit subject and its references, or a
+  clip's first frame; `--last-frame PATH` is the other end of one. Each is
+  UPLOADED to the backend (`ComfyClient.upload_image`) rather than passed by
+  path, because ComfyUI loads only out of its own input directory and the
+  backend is not necessarily on this filesystem.
+- `--aspect W:H` + `--megapixels N` go through the registry's own `calc_dims`,
+  so the shorthand and the sliders produce the same numbers. Neither applies to
+  an edit or to a clip with a frame in hand — the picture decides the size —
+  and `--megapixels` on an edit means RESIZE to that budget (given none, the
+  original's exact pixels are kept, which is painter's own default).
+- `--seconds` is a duration; `registry.video_frames` turns it into the frame
+  count the model will accept.
+- `--dry-run` builds the graph, prints the plan and submits nothing — no
+  backend, no upload, no weights. That is how the parameter surface is checked
+  without a render.
+
+Outputs are saved under their own subfolder (a clip lands in `video/`) and
+tagged the way the app tags them — a PNG in a tEXt chunk, an MP4 as an `mdta`
+tag — with a file that cannot take the tag written verbatim rather than not
+written.
+
 ## `tools/tunnel-test.sh` — the LAUNCHER's harness
 
 `ui-test.py` can see nothing outside the window, and **both bugs that left

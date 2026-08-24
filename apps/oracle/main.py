@@ -20,6 +20,7 @@ way it comes off the model.
 """
 import base64
 import hashlib
+import io
 import json
 import os
 import platform
@@ -27,6 +28,7 @@ import re
 import shutil
 import socket
 import sys
+import tarfile
 import time
 import unicodedata
 from datetime import datetime, timezone
@@ -74,6 +76,7 @@ from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font set
 from kdetheme import theme_source, is_plasma  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
 import kdeshell  # noqa: E402  (pylib; the Plasma session's real QtWidgets window)
 import lastfm as lastfmlib  # noqa: E402  (pylib; his Last.fm account, shared with player)
+import genshort  # noqa: E402  (his generation shorthand -> make_image/make_video args)
 
 #: The local ollama daemon. Loopback-pinned like everything else that speaks to
 #: a local backend here — never a new listener (root AGENTS.md → the tailnet).
@@ -255,25 +258,45 @@ MAKE_IMAGE_TOOL = {
     "function": {
         "name": "make_image",
         "description": (
-            "GENERATE a picture from a text description and show it in the "
+            "GENERATE or EDIT a picture on his own machine and show it in the "
             "chat. Use it when he asks you to draw, generate, imagine or make "
-            "an image — not when he wants a real photograph of something that "
-            "exists, which is search_images plus fetch_image. Write the prompt "
-            "the way an image model wants it: subject first, then the concrete "
-            "visual details, then style and lighting; commas, not sentences. "
-            "This runs on his own machine and takes anywhere from twenty "
-            "seconds to a few minutes, so call it ONCE and wait. He sees the "
-            "picture; you do not, unless you view_image it afterwards."),
+            "an image, or to change one he has given you — not when he wants a "
+            "real photograph of something that exists, which is search_images "
+            "plus fetch_image. Write the prompt the way an image model wants "
+            "it: subject first, then the concrete visual details, then style "
+            "and lighting; commas, not sentences. Pass his own tags through "
+            "VERBATIM — never rewrite a danbooru-style tag list. Give "
+            "input_images to EDIT those pictures instead of generating a fresh "
+            "one (that switches to the edit model on its own). This takes "
+            "anywhere from twenty seconds to a few minutes, so call it ONCE and "
+            "wait. He sees the picture; you do not, unless you view_image it "
+            "afterwards."),
         "parameters": {"type": "object", "properties": {
             "prompt": {"type": "string",
                        "description": "What to draw, as image-model prompt text."},
             "negative": {"type": "string",
                          "description": "What to keep out of it (optional)."},
             "model": {"type": "string",
-                      "description": ("Part of a model name to use, e.g. 'krea' "
-                                      "or 'anima'. Omit for his default.")},
-            "width": {"type": "integer", "description": "Pixels (optional)."},
-            "height": {"type": "integer", "description": "Pixels (optional)."},
+                      "description": ("Part of a model name, e.g. 'anima' "
+                                      "(anime), 'krea' (photoreal), 'klein' "
+                                      "(editing), 'chroma', 'z_image', 'qwen'. "
+                                      "Omit for his default.")},
+            "input_images": {"type": "array", "items": {"type": "string"},
+                             "description": ("Local paths of pictures to EDIT. "
+                                             "The first one is the subject and "
+                                             "sets the output size; the rest are "
+                                             "references. Omit to generate "
+                                             "fresh.")},
+            "aspect": {"type": "string",
+                       "description": ("Aspect ratio as W:H, e.g. '2:3', '16:9' "
+                                       "(optional; ignored when editing).")},
+            "megapixels": {"type": "number",
+                           "description": ("Output size in megapixels, e.g. 1 or "
+                                           "2 (optional).")},
+            "count": {"type": "integer",
+                      "description": "How many to make in one go (optional, default 1)."},
+            "width": {"type": "integer", "description": "Pixels (optional; overrides aspect)."},
+            "height": {"type": "integer", "description": "Pixels (optional; overrides aspect)."},
             "seed": {"type": "integer",
                      "description": "Fixed seed, for a repeatable picture (optional)."},
             "steps": {"type": "integer", "description": "Sampling steps (optional)."}},
@@ -287,6 +310,61 @@ MAKE_IMAGE_TOOL_NAMES = {"make_image"}
 #: which is what painter's own launcher does on book (home/prog/painter.nix).
 PAINTER_SMOKE = "/home/lam/nix/apps/painter/tools/smoke.py"
 MAKE_IMAGE_MS = 15 * 60 * 1000
+#: A CLIP is the same act on a much longer clock — MiniMax H3 samples every
+#: frame, so six seconds is tens of minutes on this GPU, not one. The ceiling is
+#: what stops a wedged backend holding the warden lease for ever, so it is
+#: generous rather than tight.
+MAKE_VIDEO_MS = 60 * 60 * 1000
+#: What a generated clip looks like on disk, so the video branch can tell
+#: its own output from a still the same graph also saved.
+VIDEO_SUFFIXES = (".mp4", ".webm", ".mkv", ".mov")
+
+#: The VIDEO-GENERATION tool. Same backend, same warden, same generator script
+#: as `make_image` — what differs is the model family (a video one), the clock
+#: above, and that the result is drawn as a VideoCard rather than an image.
+#: Image-to-video is the shape he actually uses: a picture he pasted becomes the
+#: first frame, and the prompt says what happens next.
+MAKE_VIDEO_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "make_video",
+        "description": (
+            "GENERATE a short video on his own machine and put it in the chat. "
+            "Use it when he asks for a video, a clip or an animation. Give "
+            "first_frame (a local image path — one he attached, or one you "
+            "made) to animate FROM that picture, which is the usual case; give "
+            "last_frame as well to make the clip land on a second picture; give "
+            "neither for text-to-video. Write the prompt as motion: what moves, "
+            "how the camera moves, what changes over the clip. This is SLOW — "
+            "many minutes for a few seconds of video — so call it ONCE, wait, "
+            "and do not offer to do it again while it runs. He sees the clip; "
+            "you do not."),
+        "parameters": {"type": "object", "properties": {
+            "prompt": {"type": "string",
+                       "description": "What happens in the clip, as motion."},
+            "first_frame": {"type": "string",
+                            "description": ("Local path of the image to start "
+                                            "from (optional).")},
+            "last_frame": {"type": "string",
+                           "description": ("Local path of the image to end on "
+                                           "(optional). The same file in both "
+                                           "makes it loop.")},
+            "seconds": {"type": "number",
+                        "description": "How long, in seconds (optional, default 5)."},
+            "model": {"type": "string",
+                      "description": ("Part of a video model's name, e.g. "
+                                      "'minimax'. Omit for his default.")},
+            "aspect": {"type": "string",
+                       "description": ("Aspect ratio as W:H (optional; ignored "
+                                       "when a frame is given — the picture "
+                                       "decides).")},
+            "megapixels": {"type": "number",
+                           "description": "Frame size in megapixels (optional)."},
+            "seed": {"type": "integer", "description": "Fixed seed (optional)."},
+            "steps": {"type": "integer", "description": "Sampling steps (optional)."}},
+            "required": ["prompt"]}},
+}
+MAKE_VIDEO_TOOL_NAMES = {"make_video"}
 
 #: The IMAGE-SEARCH tool. fetch_image can only GET a URL the model already has,
 #: and a model asked for "a picture of X" tends to GUESS a plausible-looking
@@ -1797,8 +1875,8 @@ CORE_TOOL_NAMES = [
 EXTRA_TOOL_GROUPS = {
     "jobs": ["run_job", "job_status", "job_log", "job_stop"],
     "images": ["fetch_image", "search_images", "view_image", "show_image",
-               "make_image", "screenshot"],
-    "video": ["show_video"],
+               "make_image", "make_video", "screenshot"],
+    "video": ["show_video", "make_video"],
     "memory": ["save_memory", "list_memories", "delete_memory"],
     "models": ["manage_models"],
     "self": ["describe_self"],
@@ -3989,6 +4067,14 @@ class Ollama(QObject):
             content += "\n\n" + stage_note
         if img_note:
             content += "\n\n" + img_note
+        # HIS SHORTHAND, parsed here rather than by the model (genshort.py):
+        # "anima. 2:3 x1 1girl, solo" is a job with numbers in it, and a local
+        # model asked to infer them gets the aspect backwards and rewrites his
+        # tag list. The parse is conservative — a message that does not open
+        # with a model or mode word produces nothing at all.
+        gen = genshort.parse(prompt, [it["path"] for it in image_items])
+        if gen:
+            content += "\n\n" + genshort.hint_for(gen)
         user_msg = {"role": "user", "content": content}
         if images_b64:                     # ollama /api/chat: base64 on the message
             user_msg["images"] = images_b64
@@ -4021,6 +4107,11 @@ class Ollama(QObject):
         self._no_tools = False       # not a wrap-up round
         self._squeezed = False       # …and nothing has squeezed it yet
         self._extra_tools = set()    # a fresh turn attaches its own tools
+        if gen:
+            # The generator is not a CORE tool, so a turn that is plainly a
+            # generation attaches it itself rather than spending a get_tools
+            # round on a job whose arguments are already parsed.
+            self._extra_tools.add(gen["tool"])
         self._resp_t0 = 0.0
         self._resp_tokens = 0
         self._set_tps(0.0)
@@ -4288,14 +4379,24 @@ class Ollama(QObject):
                 ok_names.append(name)
             except OSError as e:
                 skipped.append("%s (could not read: %s)" % (name, e.strerror))
+        # THE PATH IS PART OF THE NOTE, whether the model can see the picture
+        # or not: an attachment is also the thing make_image edits and the frame
+        # make_video animates from, and neither needs vision. Without it the
+        # model has a picture it cannot name to a tool.
+        where = "\n".join("  %s — %s" % (it["name"], it["path"])
+                           for it in image_items)
         if not vision:
             names = ", ".join(it["name"] for it in image_items)
             return [], ("[attached image(s): %s — the selected model has no "
-                        "vision support, so they were not sent. Pick a "
-                        "vision-capable model to have it see them.]" % names)
+                        "vision support, so they were not sent, and you have "
+                        "not seen them. Pick a vision-capable model to look. "
+                        "make_image and make_video do not need vision and can "
+                        "still use them, at these paths:\n%s]" % (names, where))
         parts = []
         if ok_names:
-            parts.append("[attached image(s): %s]" % ", ".join(ok_names))
+            parts.append("[attached image(s), which you can see above, and "
+                         "which make_image/make_video can use at these "
+                         "paths:\n%s]" % where)
         if skipped:
             parts.append("[image(s) not sent: %s]" % "; ".join(skipped))
         return b64, "\n".join(parts)
@@ -4838,7 +4939,8 @@ class Ollama(QObject):
         decided against this list, not against a hand-kept copy of it."""
         return (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, SELF_TOOL,
                 IMAGE_TOOL, SEARCH_IMAGE_TOOL, VIEW_IMAGE_TOOL, SHOW_IMAGE_TOOL,
-                SCREENSHOT_TOOL, MAKE_IMAGE_TOOL, VIDEO_TOOL, PLAYER_TOOL,
+                SCREENSHOT_TOOL, MAKE_IMAGE_TOOL, MAKE_VIDEO_TOOL,
+                VIDEO_TOOL, PLAYER_TOOL,
                 MUSIC_TOOL, LASTFM_TOOL, MODEL_TOOL,
                 FETCH_URL_TOOL,
                 CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
@@ -5367,6 +5469,8 @@ class Ollama(QObject):
             self._show_image(args, i, remaining, calls)
         elif name in MAKE_IMAGE_TOOL_NAMES:
             self._make_image(args, i, remaining, calls)
+        elif name in MAKE_VIDEO_TOOL_NAMES:
+            self._make_video(args, i, remaining, calls)
         elif name in SCREENSHOT_TOOL_NAMES:
             self._screenshot(args, i, remaining, calls)
         elif name in VIEW_IMAGE_TOOL_NAMES:
@@ -7720,19 +7824,88 @@ class Ollama(QObject):
         proc.write(json.dumps({"op": "image", "path": path}).encode("utf-8"))
         proc.closeWriteChannel()
 
-    # ---- generating a picture (make_image, through painter's backend) ----
+    # ---- generating a picture or a clip (make_image / make_video) ----
 
-    @staticmethod
-    def _make_image_argv(args):
-        """The one command that generates a picture on `top`.
+    #: Where input pictures land on `top` when the window is on book. They have
+    #: to be ON the machine the backend runs on, and the two share no
+    #: filesystem — only the ssh master — so they travel as a tar on the
+    #: command's stdin rather than by path. /tmp because they are consumed by
+    #: the one generation and nothing should keep them.
+    PAINTER_IN_DIR = "/tmp/oracle-painter-in"
+    #: …and how much may travel at once. A dropped screenshot is a megabyte; the
+    #: cap is here so a video reference set cannot turn one tool call into a
+    #: 200 MB ssh write.
+    PAINTER_INPUT_MAX = 24 * 1024 * 1024
 
-        Three steps in one shell, because they are one act: start the backend
-        if it is down (a user unit; `start` on a running one is a no-op), wait
-        until it answers, then run painter's own headless generator. Same host
-        branch as the code runner — local on top, over the tunnel's ssh master
-        from book — because the weights and the GPU are only there.
-        `$ORACLE_PAINTER` replaces the generator whole, which is how the harness
-        drives a stub and never loads 20 GB of weights for a test."""
+    @classmethod
+    def _painter_inputs(cls, args, kind):
+        """The input pictures this call feeds the generator, as (flag, path).
+
+        Order and flag both matter: an edit's FIRST image is the subject and
+        sets the output size, and a clip's two frames are two different ends of
+        it, so they cannot be flattened into one list."""
+        if kind == "video":
+            pairs = [("--image", str(args.get("first_frame") or "").strip()),
+                     ("--last-frame", str(args.get("last_frame") or "").strip())]
+        else:
+            raw = args.get("input_images")
+            if isinstance(raw, str):
+                raw = [raw]
+            pairs = [("--image", str(p or "").strip())
+                     for p in (raw if isinstance(raw, list) else [])]
+        return [(f, os.path.abspath(os.path.expanduser(p))) for f, p in pairs if p]
+
+    @classmethod
+    def _painter_input_payload(cls, pairs):
+        """Pack the input pictures for the machine the backend is on.
+
+        Returns `(flags, stdin, error)`. On `top` there is nothing to pack — the
+        paths are already where the generator will look. On book they are tarred
+        and base64'd onto the command's stdin, under flat names, because the ssh
+        master is the only thing the two machines share (the same reason
+        painter uploads a drop over HTTP rather than passing a path)."""
+        flags, seen, total = "", {}, 0
+        for flag, path in pairs:
+            if not os.path.isfile(path):
+                return "", b"", "no such image: " + path
+            try:
+                total += os.path.getsize(path)
+            except OSError as e:
+                return "", b"", "cannot read %s: %s" % (path, e.strerror)
+            if total > cls.PAINTER_INPUT_MAX:
+                return "", b"", ("the input images come to more than %d MB"
+                                 % (cls.PAINTER_INPUT_MAX // (1024 * 1024)))
+            if not ON_BOOK:
+                flags += " %s %s" % (flag, shlex.quote(path))
+                continue
+            name = seen.get(path)
+            if name is None:
+                name = "in%d%s" % (len(seen), os.path.splitext(path)[1] or ".png")
+                seen[path] = name
+            flags += " %s %s" % (flag, shlex.quote(cls.PAINTER_IN_DIR + "/" + name))
+        if not ON_BOOK or not seen:
+            return flags, b"", ""
+        buf = io.BytesIO()
+        try:
+            with tarfile.open(fileobj=buf, mode="w") as tar:
+                for path, name in seen.items():
+                    tar.add(path, arcname=name)
+        except (OSError, tarfile.TarError) as e:
+            return "", b"", "could not pack the input images: %s" % e
+        return flags, base64.b64encode(buf.getvalue()), ""
+
+    @classmethod
+    def _painter_argv(cls, args, kind="image"):
+        """The one command that generates on `top`. `(argv, stdin, error)`.
+
+        Four steps in one shell, because they are one act: put any input
+        pictures where the backend can see them, start the backend if it is
+        down (a user unit; `start` on a running one is a no-op), wait until it
+        answers, then run painter's own headless generator. Same host branch as
+        the code runner — local on top, over the tunnel's ssh master from book —
+        because the weights and the GPU are only there. `$ORACLE_PAINTER`
+        replaces the generator whole, which is how the harness drives a stub and
+        never loads 20 GB of weights for a test."""
         def flag(name, key, cast=str):
             v = args.get(key)
             if v in (None, "", 0):
@@ -7742,17 +7915,38 @@ class Ollama(QObject):
             except (TypeError, ValueError):
                 return ""
 
+        pairs = cls._painter_inputs(args, kind)
+        inputs, stdin, err = cls._painter_input_payload(pairs)
+        if err:
+            return [], b"", err
+        edit = kind == "image" and bool(pairs)
         gen = os.environ.get("ORACLE_PAINTER", "").strip()
         cmd = gen or ("painter-qtenv python3 " + shlex.quote(PAINTER_SMOKE))
         stub = bool(gen)
         cmd += " --prompt " + shlex.quote(str(args.get("prompt") or ""))
         cmd += " --out-dir " + shlex.quote(MAKE_IMAGE_DIR)
+        cmd += inputs
+        # A MODE, not a model, when he named none: painter's own canonical pick
+        # for the job (registry.MODES), so chatter and the button land on the
+        # same file. An explicit model still wins, inside the generator.
+        if not str(args.get("model") or "").strip():
+            cmd += " --mode " + ("video" if kind == "video"
+                                 else ("edit" if edit else "anime"))
+        if edit:
+            cmd += " --edit"
         cmd += flag("--negative", "negative")
         cmd += flag("--model", "model")
+        cmd += flag("--aspect", "aspect")
+        cmd += flag("--megapixels", "megapixels", float)
+        cmd += flag("--batch", "count", int)
         cmd += flag("--width", "width", int)
         cmd += flag("--height", "height", int)
         cmd += flag("--steps", "steps", int)
         cmd += flag("--seed", "seed", int)
+        if kind == "video":
+            cmd += flag("--seconds", "seconds", float)
+        cmd += " --timeout %d" % ((MAKE_VIDEO_MS if kind == "video"
+                                   else MAKE_IMAGE_MS) // 1000 - 60)
         # The BACKEND preamble is skipped for a stub: a test that starts
         # comfy-painter is a test that changed his machine, and this one did —
         # it left the daemon up and 1.1G held after a run [2026-08-23].
@@ -7761,7 +7955,12 @@ class Ollama(QObject):
                 "for i in $(seq 1 90); do "
                 "curl -sf -m 2 -o /dev/null http://127.0.0.1:8188/system_stats "
                 "&& break; sleep 2; done; ")
-        script = "mkdir -p %s; %s%s" % (shlex.quote(MAKE_IMAGE_DIR), wake, cmd)
+        unpack = ("rm -rf %s; mkdir -p %s; base64 -d | tar -xf - -C %s; "
+                  % (shlex.quote(cls.PAINTER_IN_DIR),
+                     shlex.quote(cls.PAINTER_IN_DIR),
+                     shlex.quote(cls.PAINTER_IN_DIR))) if stdin else ""
+        script = "mkdir -p %s; %s%s%s" % (shlex.quote(MAKE_IMAGE_DIR), unpack,
+                                          wake, cmd)
         if ON_BOOK:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
             ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
@@ -7770,11 +7969,20 @@ class Ollama(QObject):
             if ctl:
                 argv += ["-o", "ControlMaster=auto", "-o", "ControlPersist=30",
                          "-o", "ControlPath=" + ctl]
-            return argv + [host, "bash -lc " + shlex.quote(script)]
-        return ["bash", "-lc", script]
+            return argv + [host, "bash -lc " + shlex.quote(script)], stdin, ""
+        return ["bash", "-lc", script], stdin, ""
 
     def _make_image(self, args, idx, remaining, calls):
-        """Generate one picture through painter's backend and draw it here.
+        self._make_media(args, idx, remaining, calls, "image")
+
+    def _make_video(self, args, idx, remaining, calls):
+        self._make_media(args, idx, remaining, calls, "video")
+
+    def _make_media(self, args, idx, remaining, calls, kind):
+        """Generate one picture or one clip through painter's backend and put it
+        here. One body for both: the model family, the clock and how the result
+        is DRAWN are the whole difference, and splitting them would be two
+        copies of the warden dance.
 
         The warden goes FIRST (apps/pylib/warden.py): ollama is holding this
         model's weights and ComfyUI wants most of what is left, and the two
@@ -7782,38 +7990,49 @@ class Ollama(QObject):
         refusal is a reason the model relays, never a silent nothing."""
         a = args if isinstance(args, dict) else {}
         prompt = str(a.get("prompt") or "").strip()
-        name = "make_image"
+        name = "make_video" if kind == "video" else "make_image"
+        noun = "clip" if kind == "video" else "picture"
 
         def answer(result, ok=True, line=""):
             remaining["sink"][idx] = {"role": "tool", "tool_name": name,
                                        "content": json.dumps(result)}
-            self.fileToolDone.emit(line or ("make_image — "
+            self.fileToolDone.emit(line or (name + " — "
                                             + str(result.get("error", ""))), ok)
             self._tool_done(remaining, calls)
 
         if not prompt:
-            self.fileToolStarted.emit("make a picture")
-            answer({"error": "make_image needs a prompt"}, False)
+            self.fileToolStarted.emit("make a " + noun)
+            answer({"error": name + " needs a prompt"}, False)
             return
         head = prompt if len(prompt) <= 60 else prompt[:59].rstrip() + "…"
-        self.fileToolStarted.emit("making a picture: " + head)
+        verb = ("animating" if (kind == "video" and a.get("first_frame"))
+                else ("editing" if (kind == "image" and a.get("input_images"))
+                      else "making"))
+        self.fileToolStarted.emit("%s a %s: %s" % (verb, noun, head))
 
         def go(ok, reason):
             if not ok:
                 answer({"error": ("no room to generate right now — " +
-                                  str(reason or "memory") + ". The picture "
-                                  "cannot be made while this much of the "
+                                  str(reason or "memory") + ". The " + noun +
+                                  " cannot be made while this much of the "
                                   "machine is his model: tell him, and say a "
                                   "smaller model would leave room.")}, False,
-                       "make_image: no room — " + str(reason or ""))
+                       name + ": no room — " + str(reason or ""))
                 return
-            self._make_image_run(a, answer)
+            self._make_media_run(a, answer, kind)
 
         # nbytes 0 — "a big family, size unknown", which is what the warden
         # reads it as; painter knows its weights, chatter does not.
         self._warden.reserve("comfy", nbytes=0, cb=go)
 
-    def _make_image_run(self, args, answer):
+    def _make_media_run(self, args, answer, kind):
+        name = "make_video" if kind == "video" else "make_image"
+        noun = "clip" if kind == "video" else "picture"
+        limit_ms = MAKE_VIDEO_MS if kind == "video" else MAKE_IMAGE_MS
+        argv, stdin, err = self._painter_argv(args, kind)
+        if err:
+            answer({"error": err}, False, name + ": " + err)
+            return
         proc = QProcess(self)
         self._procs.append(proc)
         state = {"done": False, "timeout": False}
@@ -7837,19 +8056,25 @@ class Ollama(QObject):
             release()
             if state["timeout"]:
                 answer({"error": "the generation ran past %d minutes and was "
-                                 "stopped" % (MAKE_IMAGE_MS // 60000)}, False,
-                       "make_image: timed out")
+                                 "stopped" % (limit_ms // 60000)}, False,
+                       name + ": timed out")
                 return
             made = re.findall(r"(?m)^\s*saved (.+?) \(\d+ bytes\)$", out)
+            if kind == "video":
+                clips = [m for m in made
+                         if os.path.splitext(m)[1].lower() in VIDEO_SUFFIXES]
+                made = clips or made
             if rc != 0 or not made:
                 why = (([l for l in err.strip().splitlines() if l.strip()]
                         or [l for l in out.strip().splitlines() if l.strip()]
-                        or ["the backend produced no image"])[-1])
-                answer({"error": why[:400]}, False,
-                       "make_image: " + why[:120])
+                        or ["the backend produced no " + noun])[-1])
+                answer({"error": why[:400]}, False, name + ": " + why[:120])
                 return
             path = made[-1]
             caption = str(args.get("prompt") or "")
+            if kind == "video":
+                self._display_clip(path, caption, args, answer)
+                return
 
             def shown(result, ok=True):
                 if not ok:
@@ -7864,8 +8089,8 @@ class Ollama(QObject):
             self._display_image(path, caption,
                                 "top" if ON_BOOK else None, shown)
 
-        def failed(err):
-            if state["done"] or err != QProcess.ProcessError.FailedToStart:
+        def failed(e):
+            if state["done"] or e != QProcess.ProcessError.FailedToStart:
                 return
             state["done"] = True
             if proc in self._procs:
@@ -7885,9 +8110,75 @@ class Ollama(QObject):
 
         proc.finished.connect(finished)
         proc.errorOccurred.connect(failed)
-        QTimer.singleShot(MAKE_IMAGE_MS, expire)
-        argv = self._make_image_argv(args)
+        QTimer.singleShot(limit_ms, expire)
         proc.start(argv[0], argv[1:])
+        if stdin:
+            proc.write(stdin)
+        proc.closeWriteChannel()
+
+    def _display_clip(self, path, caption, args, answer):
+        """Put a generated clip in the chat, on its own poster frame.
+
+        A VideoCard streams whatever `src` names, and a local file is a source
+        QtMultimedia can open, so nothing is uploaded and nothing is resolved —
+        the card points at the file the backend just wrote. The poster is one
+        ffmpeg frame, because a card with no poster is a black box wearing a
+        play marker (docs/DESIGN.md §10: the affordance should look like what it
+        is). It is never worth failing over: no ffmpeg, no poster, same clip."""
+        here = os.path.abspath(os.path.expanduser(path))
+        poster = os.path.join(IMAGES_ROOT,
+                              "clip-%s.png" % time.strftime("%Y%m%d-%H%M%S"))
+
+        def emit(shot):
+            probe = QImage()
+            if shot and probe.load(shot) and not probe.isNull():
+                w, h = probe.width(), probe.height()
+            else:
+                shot, w, h = "", 0, 0
+            entry = {"ok": True, "url": "file://" + here, "src": "file://" + here,
+                     "alt": caption, "title": os.path.basename(here),
+                     "w": w, "h": h, "poster": shot,
+                     "duration": float(args.get("seconds") or 0), "live": False}
+            self.videoResult.emit(json.dumps(entry))
+            answer({"ok": True, "path": here,
+                    "note": ("Generated and placed in the chat as a video he "
+                             "can play. You have not seen it. Do not describe "
+                             "it or offer to make it again.")}, True,
+                   "made " + os.path.basename(here))
+
+        if ON_BOOK:
+            # The clip is on top and QtMultimedia cannot stream a path that is
+            # not here. Nothing to draw locally, so say where it is rather than
+            # showing a card that would not play (docs/DESIGN.md §10).
+            answer({"ok": True, "path": here, "host": "top",
+                    "note": ("Generated on top, at this path. It is not on this "
+                             "machine, so it is not playable in this window — "
+                             "tell him where it is.")}, True,
+                   "made " + os.path.basename(here))
+            return
+        try:
+            os.makedirs(IMAGES_ROOT, exist_ok=True)
+        except OSError:
+            emit("")
+            return
+        shot = QProcess(self)
+        self._procs.append(shot)
+
+        def done(*_):
+            if shot not in self._procs:
+                return
+            self._procs.remove(shot)
+            try:
+                rc = shot.exitCode()
+            except RuntimeError:
+                return
+            shot.deleteLater()
+            emit(poster if rc == 0 and os.path.exists(poster) else "")
+
+        shot.finished.connect(done)
+        shot.errorOccurred.connect(lambda *_: done())
+        shot.start("ffmpeg", ["-y", "-loglevel", "error", "-i", here,
+                              "-frames:v", "1", "-f", "image2", poster])
 
     # ---- the screen, as a picture (screenshot) ----
 

@@ -147,12 +147,15 @@ o = oracle.Ollama()
 o._set_busy(True)
 shown = []
 o.imageFetchResult.connect(lambda j: shown.append(json.loads(j)))
+clips = []
+o.videoResult.connect(lambda j: clips.append(json.loads(j)))
 results = {}
 
 
 def run_tool(name, args, ms=8000):
     """One tool call through the real dispatcher, to completion."""
     shown.clear()
+    clips.clear()
     results.clear()
     remaining = {"n": 1, "sink": [None]}
     o._dispatch_tool(name, args, 0, remaining, [{}])
@@ -232,6 +235,61 @@ r = run_tool("make_image", {"prompt": "a red cube"}, ms=20000)
 check("a backend that will not generate is reported",
       bool(r) and "error" in r and "unreachable" in r["error"],
       json.dumps(r)[:200])
+
+# 3b. every knob reaches the generator's command line, and an input picture
+# turns the same tool into an EDIT.
+argv, stdin, err = oracle.Ollama._painter_argv(
+    {"prompt": "1girl, solo", "model": "anima", "aspect": "2:3",
+     "megapixels": 1, "count": 2, "seed": 7}, "image")
+line = argv[-1]
+check("make_image passes his settings through, not a paraphrase",
+      not err and " --aspect 2:3" in line and " --megapixels 1" in line
+      and " --batch 2" in line and " --seed 7" in line
+      and " --model anima" in line, (err or line)[-220:])
+argv, stdin, err = oracle.Ollama._painter_argv(
+    {"prompt": "make it night", "input_images": [str(PIC)]}, "image")
+check("an input picture makes it an edit, on the edit model",
+      not err and " --edit" in argv[-1] and " --mode edit" in argv[-1]
+      and (" --image " + str(PIC)) in argv[-1], (err or argv[-1])[-220:])
+argv, stdin, err = oracle.Ollama._painter_argv(
+    {"prompt": "she turns", "first_frame": str(PIC), "last_frame": str(PIC),
+     "seconds": 6}, "video")
+check("a clip names both ends and its length",
+      not err and " --mode video" in argv[-1] and " --seconds 6" in argv[-1]
+      and (" --last-frame " + str(PIC)) in argv[-1], (err or argv[-1])[-260:])
+argv, stdin, err = oracle.Ollama._painter_argv(
+    {"prompt": "x", "first_frame": str(_TMP / "gone.png")}, "video")
+check("a frame that is not there is refused before the backend is woken",
+      bool(err) and not argv, str(err))
+
+# 3c. make_video: the same generator, drawn as a clip he can play
+clip = _TMP / "made.mp4"
+subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+                "-i", "testsrc=size=320x240:rate=8", "-t", "1",
+                "-pix_fmt", "yuv420p", str(clip)], check=False)
+if clip.exists():
+    os.environ["ORACLE_PAINTER"] = str(script(
+        _TMP / "genvid.sh",
+        'echo "mode     video"\n'
+        'echo "prompt_id abc  in 61.0s"\n'
+        'echo "  saved %s (9999 bytes)"' % str(clip)))
+    r = run_tool("make_video", {"prompt": "she turns", "seconds": 6}, ms=30000)
+    check("make_video puts a playable clip in the chat",
+          len(clips) == 1 and clips[0].get("ok")
+          and clips[0].get("src") == "file://" + str(clip),
+          json.dumps(clips)[:200])
+    check("...on a poster frame, not a black box",
+          bool(clips) and bool(clips[0].get("poster")), json.dumps(clips)[:200])
+    check("...and tells the model it has not seen it",
+          bool(r) and r.get("ok") and "not seen" in (r.get("note") or ""),
+          json.dumps(r)[:200])
+else:
+    print("skip  make_video (no ffmpeg to build a test clip)")
+os.environ["ORACLE_PAINTER"] = str(script(
+    _TMP / "genvidfail.sh", 'echo "cannot build: no video model" >&2; exit 1'))
+r = run_tool("make_video", {"prompt": "x"}, ms=20000)
+check("a clip that cannot be built is reported",
+      bool(r) and "error" in r, json.dumps(r)[:200])
 
 # 4. tools as files
 script(_TMP / "tools" / "weather", 'read -r a; echo "{\\"ok\\":true,\\"said\\":$a}"')
@@ -315,7 +373,10 @@ parts = {"WalPalette": oracle.Palette(oracle.theme_source(oracle.PANEL_THEME)),
          "DeskStyle": oracle.DeskStyle(), "Titlebar": oracle.Titlebar(),
          "Ollama": oracle.Ollama(), "Backend": oracle.Backend(),
          "Sessions": oracle.Sessions(), "Clip": oracle.Clip(),
-         "Md": oracle.MdFormat()}
+         "Md": oracle.MdFormat(),
+         # The jobs tray reads `Jobs`; without it the window loads with a
+         # ReferenceError rather than an empty tray.
+         "Jobs": oracle.Jobs()}
 for key, obj in parts.items():
     obj.setParent(app)
     ctx.setContextProperty(key, obj)
