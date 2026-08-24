@@ -34,6 +34,10 @@ Column {
     // the rows on it. Same shape as `enlarge`.
     signal contextRequested(string path, real x, real y)
 
+    // How tall a single picture may be drawn. VideoCard's own ceiling, so a
+    // still and a clip of the same shape take the same room in a reply.
+    property int maxH: 420
+
     readonly property var oks: {
         var out = [];
         for (var i = 0; i < (entries ? entries.length : 0); i++)
@@ -67,6 +71,13 @@ Column {
         Rectangle {
             width: solo.width + 2
             height: solo.height + 2
+            // A PORTRAIT PICTURE IS CAPPED BY ITS HEIGHT, not only by the
+            // column [his, 2026-08-24]. Sized to the column alone, a 2:3 render
+            // is nearly three times the height of a 16:9 one in the same chat
+            // and pushes the reply off the screen. `gal.maxH` is the same
+            // ceiling VideoCard uses for a clip, so a still and a video of the
+            // same shape take the same room; the picture is not cropped — it
+            // is drawn smaller, and one click still opens it full size.
             color: Theme.bgAlt
             radius: Theme.rounding
             border.width: Theme.ctrlBorder
@@ -79,7 +90,11 @@ Column {
                 // alone, scales height by the real aspect — never upscaling
                 // past native.
                 readonly property real natW: (e && e.w > 0) ? e.w : (gal.width - 2)
-                sourceSize.width: Math.min(gal.width - 2, natW)
+                readonly property real natH: (e && e.h > 0) ? e.h : (gal.width - 2)
+                // Width the height cap allows, then the column, then native.
+                sourceSize.width: Math.max(1, Math.round(
+                    Math.min(gal.width - 2, natW,
+                             gal.maxH * natW / Math.max(1, natH))))
                 fillMode: Image.PreserveAspectFit
                 asynchronous: true
                 source: e ? "file://" + e.path : ""

@@ -83,6 +83,14 @@ pic = QImage(600, 300, QImage.Format.Format_RGB32)
 pic.fill(QColor("#2f4858"))
 pic.save(str(OPAQUE))
 
+# A REAL landscape and a REAL portrait, at the shapes a render comes out at —
+# the height cap is measured against the file's own pixels, so a stub with a
+# different aspect than the entry claims would measure nothing.
+WIDE = _TMP / "wide.png"
+QImage(1856, 1088, QImage.Format.Format_RGB32).save(str(WIDE))
+TALL = _TMP / "tall.png"
+QImage(1088, 1856, QImage.Format.Format_RGB32).save(str(TALL))
+
 TRANSP = _TMP / "transp.png"
 tp = QImage(400, 400, QImage.Format.Format_ARGB32)
 tp.fill(QColor(0, 0, 0, 0))                # fully transparent
@@ -191,6 +199,30 @@ gals = [g for g in find("ImageGallery") if g.property("visible")]
 check("an unreferenced fetched picture still renders in the gallery",
       len(gals) == 1 and gals[0].property("height") > 100,
       "gal=%d height=%s" % (len(gals), (gals[0].property("height") if gals else "?")))
+
+# ---- 3b. a PORTRAIT picture is capped by its HEIGHT ----------------------
+# Sized by the column alone, a 2:3 render is nearly three times the height of a
+# 16:9 one in the same chat and pushes the reply off the screen [his,
+# 2026-08-24]. Both shapes go through the same gallery here, and the tall one
+# must not tower over the wide one.
+reply_row(5)
+emit_image({"ok": True, "url": "https://x/wide.png", "path": str(WIDE),
+            "w": 1856, "h": 1088})
+settle()
+gals = [g for g in find("ImageGallery") if g.property("visible")]
+wide = gals[-1].property("height") if gals else 0
+reply_row(6)
+emit_image({"ok": True, "url": "https://x/tall.png", "path": str(TALL),
+            "w": 1088, "h": 1856})
+settle()
+gals = [g for g in find("ImageGallery") if g.property("visible")]
+tall = gals[-1].property("height") if gals else 0
+check("a portrait picture is capped, not drawn at column width",
+      0 < tall <= 470, "tall=%s wide=%s" % (tall, wide))
+check("...and is no more than twice a landscape one",
+      0 < wide and tall <= wide * 2.0, "tall=%s wide=%s" % (tall, wide))
+check("...while a landscape one still fills the column",
+      wide > 200, "wide=%s" % wide)
 
 # ---- 4. a failed fetch names itself where the picture was meant to be -----
 reply_row(4)

@@ -444,9 +444,26 @@ Item {
             // answer it accompanies read as one message instead of a detached
             // picture floating above a separate text bubble. Once a row HAS
             // words, the rounds split again (one bubble per round) as before.
-            var mediaOnly = !cur.isUser && (cur.body || "") === ""
-                && ((cur.images !== "[]" && cur.images !== "") || cur.imagesActive
-                    || (cur.videos !== "[]" && cur.videos !== "") || cur.videosActive);
+            var hasMedia = (cur.images !== "[]" && cur.images !== "") || cur.imagesActive
+                || (cur.videos !== "[]" && cur.videos !== "") || cur.videosActive;
+            // A SHORT LINE IN FRONT OF THE PICTURE IS A PREAMBLE, not an
+            // answer [his, 2026-08-24: "here is the image" + the image, then a
+            // second bubble saying "here you go…" with no image]. The row that
+            // called the tool wrote before it saw the result, which the base
+            // prompt already forbids and models do anyway; the round after it
+            // then says the same thing again, in its own bubble, next to
+            // nothing. So a media row whose words are short enough to be an
+            // announcement drops them and merges like a wordless one — the
+            // picture and the one real sentence end up in the same bubble.
+            // Long prose is left alone and still splits: that is content, not
+            // a preamble, and losing it would be worse than repeating it.
+            var body = (cur.body || "");
+            var preamble = hasMedia && body !== "" && body.length <= win.preambleMax
+                           && (cur.toolCount || 0) > 0;
+            if (preamble)
+                chatLog.setProperty(win.activeIndex, "body", "");
+            var mediaOnly = !cur.isUser && hasMedia
+                && (body === "" || preamble);
             chatLog.setProperty(win.activeIndex, "thinkingActive", false);
             chatLog.setProperty(win.activeIndex, "awaiting", false);
             chatLog.setProperty(win.activeIndex, "toolsActive", false);
@@ -874,6 +891,9 @@ Item {
     // bubble with everything in it.
     // How much of a running program's output the row keeps on screen.
     readonly property int execTailMax: 4000
+    // How short a line in front of a picture has to be to count as an
+    // announcement of it rather than an answer (see `onRoundStarted`).
+    readonly property int preambleMax: 140
 
     function rowsJson() {
         var a = [];
