@@ -527,11 +527,28 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   makes the rule inert with no error.
   Deliberately **not** a submodule: `git
   pull` does not update submodule contents, so the other machine would read a
-  stale runbook. There are now three callers of that script; a fourth **must**
+  stale runbook. There are now four callers of that script (claude-state,
+  nix-docs, oracle-skills — see below — and its own tests); a fifth **must**
   override `CM_SYNC_SEED` — its default installs `~/.claude`'s denylist
   `.gitignore`, whose exclusions mean nothing in another tree while that tree's
   own secrets go unguarded. `DESIGN.md` and `HARDWARE.md` live in here;
   a few docs stay outside on purpose and `docs/README.md` says which and why.
+- `home/srvs/oracle-skills.nix` + `oracle-skills-files/` — **chatter's skills
+  and subagent definitions, synced both ways between `top` and `book`.** They
+  live in chatter's own runtime dir (`~/.local/share/oracle/{skills,agents}`),
+  not `~/.claude`, and were machine-local until 2026-08-23 — a skill written on
+  one host simply did not exist on the other, and `book` had neither directory.
+  Same engine as the two above (`claude-memory-sync.sh`, 5-min timer, private
+  remote `meatcrowning/oracle-skills`). Two things make it safe: the repo root
+  is the WHOLE runtime dir — `sessions/`, `memory/`, `jobs/`, `sandbox/`,
+  `images/` sit beside the two shared dirs — so the seeded `.gitignore` is an
+  **allowlist** that can never widen by accident, and `*.md` merges through the
+  boards' recency driver (`board-recent-merge.sh`, registered by
+  `oracle-skills-setup.sh`) because chatter's `make_skill` writes these
+  unattended on both machines and an unresolved conflict would wedge the sync.
+  The machine-built `youtube-content` venv is excluded by name. Log
+  `~/.cache/oracle-skills-sync.log`; force a run with
+  `systemctl --user start oracle-skills-sync.service`.
 - `home/srvs/hypr-env.nix` + `hypr-env-files/hypr-session-env.sh` — **a user
   unit must never inherit the systemd user manager's
   `HYPRLAND_INSTANCE_SIGNATURE` / `WAYLAND_DISPLAY`.** Hyprland *itself* (not
