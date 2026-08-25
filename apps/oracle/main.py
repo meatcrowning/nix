@@ -2676,6 +2676,32 @@ PERSISTENCE_NOTE = (
     "he has to read that the answer then repeats; the tool activity is already "
     "shown to him separately." % MAX_TOOL_ROUNDS)
 
+#: DON'T MAKE IT UP. The one complaint about the small models here that no
+#: amount of context fixes by itself [his, 2026-08-24: "sometimes it like
+#: halucinates facts and i know its a small model"]. A model states an invented
+#: date, version or citation with exactly the confidence it states a real one,
+#: so the fix is not "be careful" — it is a rule about WHEN to answer from
+#: memory at all, next to tools that can actually go and look (`wikipedia` is
+#: core for this reason).
+GROUNDING_NOTE = (
+    "DO NOT INVENT FACTS. Before you state a specific — a date, a number, "
+    "a name, a version, a price, a quote, a URL, a filename, a command, a "
+    "function or an API — ask yourself whether you actually know it. If "
+    "you are not sure, CHECK IT FIRST: wikipedia for anything encyclopedic "
+    "(people, places, history, science, works, definitions), web_search for "
+    "current or niche things, fetch_url for a page you were given, and the "
+    "file tools for anything on this machine. Checking is cheap and you have "
+    "rounds to spare.\n"
+    "If you cannot check it, say so plainly (\"I'm not sure\", \"I don't "
+    "know\", \"you would have to check X\") and answer the part you do know. "
+    "An honest gap is worth more to him than a confident guess, and he would "
+    "rather be told a thing is uncertain than find out later it was wrong.\n"
+    "When a tool gave you the answer, say where it came from (the article, the "
+    "page, the file) so he can check it himself. Never invent a citation, a "
+    "URL, a filename or a command line to look authoritative: a made-up source "
+    "is worse than none. And never present a guess about HIS machine, his "
+    "files or his music as fact — look, with the tools you have.")
+
 #: The app's own notes inside the conversation, and the rule that they are not
 #: his words. A turn that made a picture or a clip carries a
 #: `[image in this chat: /path · WxH]` line in the history so the path survives
@@ -2766,13 +2792,39 @@ SAMPLER_DEFAULTS = {
 }
 
 
-def sampler_for(model):
-    """The sampling options to send with `model`, or {} for leave-it-alone."""
+#: THE FACTUAL FLOOR, and the presets that are exempt from it.
+#: A published sampler is tuned for general chat — Google ships Gemma at
+#: temperature 1.0 — and chatter sent NOTHING for every other model, i.e.
+#: whatever its Modelfile carries, typically 0.7-0.8. That is a hot sampler
+#: answering questions of fact, which is the other half of a small model
+#: inventing one [his, 2026-08-24]. So a factual turn clamps the temperature
+#: and tightens top_p; a turn he has explicitly asked to be creative does not,
+#: because that is what those presets are FOR.
+FACTUAL_SAMPLER = {"temperature": 0.3, "top_p": 0.9}
+CREATIVE_PRESETS = {"writer", "casual"}
+
+
+def sampler_for(model, preset="default"):
+    """The sampling options to send with `model`.
+
+    The family default is the floor's starting point, not its competitor: a
+    model whose author published `top_k`/`min_p` keeps them, and only the two
+    knobs that decide how far off the distribution's nose it will wander are
+    pulled in. `custom` counts as factual — his own base prompt says what he
+    wants, and a custom persona is not evidence that he wants invented dates.
+    """
     name = (model or "").lower()
+    opts = {}
     for key in sorted(SAMPLER_DEFAULTS, key=len, reverse=True):
         if key in name:
-            return dict(SAMPLER_DEFAULTS[key])
-    return {}
+            opts = dict(SAMPLER_DEFAULTS[key])
+            break
+    if str(preset or "") in CREATIVE_PRESETS:
+        return opts
+    opts["temperature"] = min(float(opts.get("temperature", 1.0)),
+                              FACTUAL_SAMPLER["temperature"])
+    opts["top_p"] = min(float(opts.get("top_p", 1.0)), FACTUAL_SAMPLER["top_p"])
+    return opts
 
 
 #: The windows that may actually be asked for. Steps, because changing
@@ -5253,6 +5305,7 @@ class Ollama(QObject):
             base += "\n\n" + memory_block
         base += "\n\n" + RECALL_GUIDANCE
         base += "\n\n" + SAVE_GUIDANCE
+        base += "\n\n" + GROUNDING_NOTE
         base += "\n\n" + CAPABILITY_NOTE
         base += "\n\n" + PERSISTENCE_NOTE
         base += "\n\n" + MARKER_NOTE
@@ -5425,8 +5478,11 @@ class Ollama(QObject):
             "tools_available": self._offered_tool_names(),
             "tools_attached_now": sorted(
                 t["function"]["name"] for t in self._offered_tools()),
-            "sampling": {"num_ctx": self._num_ctx,
-                         "temperature": "model default (chatter does not override)"},
+            # READ OFF THE SAME CALL THE PAYLOAD MAKES, never a remembered
+            # sentence (docs/DESIGN.md §10) — it said "model default (chatter
+            # does not override)" for a day after chatter started overriding.
+            "sampling": dict(sampler_for(self._model, self._prompt_choice),
+                             num_ctx=self._num_ctx),
         }
         remaining["sink"][idx] = {"role": "tool", "tool_name": "describe_self",
                                    "content": json.dumps(result)}
@@ -5538,7 +5594,7 @@ class Ollama(QObject):
             "model": self._model,
             "messages": self._messages,
             "stream": True,
-            "options": dict(sampler_for(self._model),
+            "options": dict(sampler_for(self._model, self._prompt_choice),
                             num_ctx=self._num_ctx),
         }
         # The WRAP-UP round carries no tools at all: `_on_finished` sets
@@ -6110,8 +6166,12 @@ class Ollama(QObject):
         carries no tools — the same lesson the main loop learned: a model still
         calling tools when it is out of rounds, offered them again, answers
         with nothing at all."""
+        # A SUBAGENT IS ALWAYS FACTUAL: it exists to establish something and
+        # report it back, whatever persona the main turn is wearing.
         payload = {"model": run["model"], "messages": run["messages"],
-                   "stream": False, "options": {"num_ctx": self._num_ctx}}
+                   "stream": False,
+                   "options": dict(sampler_for(run["model"]),
+                                   num_ctx=self._num_ctx)}
         if run["tools"] and not run["wrap"]:
             payload["tools"] = run["tools"]
         req = QNetworkRequest(QUrl(OLLAMA + "/api/chat"))
