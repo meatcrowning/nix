@@ -23,9 +23,29 @@
 # plasma-manager applies this with `plasma-apply-colorscheme` from its one-shot
 # login script, ordered after the `plasma-apply-lookandfeel` that would
 # otherwise put OxygenDark back.
+#
+# THE FILE THIS INSTALLS IS A TEMPLATE, NOT THE LIVE SCHEME (2026-08-24). The
+# live `~/.local/share/color-schemes/OxygenDarkFlat.colors` is MINTED from it by
+# `wal-set.sh` -> `plasma-scheme.py`, with the whole blue family hue-rotated onto
+# the wallpaper's accent, so that picking a wallpaper in Plasma's own settings
+# repaints the windows the way it repaints the panel. It cannot be a
+# `/nix/store` symlink for the same reason `Theme.qml` and `hyprland.lua`
+# cannot: something at runtime writes it. The seed below is what a machine that
+# has never run wal-set.sh reads — the untinted Oxygen blues.
 {
-  home.file.".local/share/color-schemes/OxygenDarkFlat.colors".source =
+  xdg.configFile."scripts/plasma-scheme-template.colors".source =
     ./plasma-files/OxygenDarkFlat.colors;
+
+  # Seed the live scheme once, so plasma-manager's login `plasma-apply-colorscheme`
+  # has a file to read before the first wallpaper apply. Never overwrites a
+  # minted one — wal-set.sh owns it from then on.
+  home.activation.seedPlasmaScheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    live="$HOME/.local/share/color-schemes/OxygenDarkFlat.colors"
+    if [ -L "$live" ]; then rm -f "$live"; fi   # retire the old store symlink
+    if [ ! -e "$live" ]; then
+      $DRY_RUN_CMD install -D -m644 ${./plasma-files/OxygenDarkFlat.colors} "$live"
+    fi
+  '';
 
   programs.plasma.workspace.colorScheme = lib.mkIf (host == "air") "OxygenDarkFlat";
 }
