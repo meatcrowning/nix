@@ -13,6 +13,11 @@
 !/skills/
 !/agents/
 !/tools/
+# Not a store he writes, but the same class of fact: measured KV-cache bytes
+# per token, per model. That is a property of the MODEL, so a measurement taken
+# on either machine is true on the other — and book cannot take one (the daemon
+# is on top), so without this it falls back to a 32k window for every model.
+!/ctxfit.json
 
 # Machine-local build products inside a skill. youtube-content builds a ~20 MB
 # venv on first use; the skill's own setup block recreates it on the other host.

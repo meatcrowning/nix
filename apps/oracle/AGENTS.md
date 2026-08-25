@@ -359,8 +359,18 @@ ceiling that matters, and a third number reads as a repeat.
   cannot bounce the window; and a model already loaded is asked for the window
   it is already in, so a newly measured fit applies at its next load rather than
   dropping 24 GB of weights mid-conversation.
-- **`book` has no local `ollama.service`** (the daemon is on `top`, over the
-  tunnel), so nothing calibrates there and the fallback is the whole behaviour.
+- **On `book` every number here is TOP's.** The daemon is on top over the
+  tunnel, so the KV cache is allocated out of top's RAM and VRAM and the load
+  line is in top's journal; book's own `/proc/meminfo` and its absent NVIDIA GPU
+  describe a machine the cache never touches. Both halves are host-branched over
+  the ssh master `tools/ollama-tunnel.sh` holds open — one probe per turn,
+  cached 30s including a failed one — and `ctxfit.json` is synced between the
+  machines besides (`home/srvs/oracle-skills.nix`), bytes per token being a
+  property of the MODEL. Until 2026-08-24 both halves read locally and
+  calibration was skipped outright, so every model on book fell back to
+  `CHAT_NUM_CTX`: the same model got a window 2-4x smaller there than on top,
+  for no reason but which machine the window was asked from. A probe that fails
+  answers (0, 0) and lands back on that fallback, never on book's own numbers.
 
 Harness: `tools/ctx-fit-test.py`, with a stub ollama, a fake `journalctl` and a
 fake `nvidia-smi` — it never reads the real journal or loads a model.

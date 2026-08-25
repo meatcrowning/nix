@@ -21,9 +21,10 @@
 # three siblings. That dir also holds `sessions/`, `memory/`, `jobs/`, `sandbox/` and
 # `images/` — every conversation he has had with chatter — so the seeded
 # .gitignore is an ALLOWLIST: ignore everything at the root, re-include exactly
-# skills/, agents/ and tools/. ctxfit.json stays out on purpose: it is measured
-# KV-cache bytes per model, learned from the ollama that loads them, not
-# something he authors. A new store landing beside them cannot widen the push.
+# skills/, agents/, tools/ and ctxfit.json — the last of those not because he
+# writes it but because it is measured KV-cache bytes per token per MODEL, true
+# on whichever machine reads it, and book (no local ollama) can never measure
+# one for itself. A new store landing beside them cannot widen the push.
 #
 # Both machines get this: `home/` is shared verbatim between `top` and `air`
 # via lam.nix + umport, and Fedora Asahi runs systemd the same as NixOS.

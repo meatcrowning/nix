@@ -2688,7 +2688,11 @@ VRAM_HEADROOM = 512 * 1024 * 1024
 CTX_RAM_FLOOR = 6 * 1024 * 1024 * 1024
 
 #: What `CtxFit` has learned, per model: bytes of KV cache per token, measured
-#: from ollama's own load. Small enough to rewrite whole.
+#: from ollama's own load. Small enough to rewrite whole. SYNCED between the
+#: machines (home/srvs/oracle-skills.nix): bytes per token is a property of the
+#: MODEL, not of the box that measured it, so book inherits top's measurements
+#: rather than falling back to CHAT_NUM_CTX for every model it has not loaded
+#: first.
 CTX_FIT_STORE = os.path.expanduser(
     os.environ.get("ORACLE_CTXFIT", "~/.local/share/oracle/ctxfit.json"))
 
@@ -3490,9 +3494,17 @@ class CtxFit(QObject):
     which is what every model got before this existed. Nothing here can make the
     window smaller than it used to be.
 
-    On `book` there is no local `ollama.service` to read a journal from (the
-    daemon runs on `top`, over the tunnel), so calibration never happens there
-    and the fallback is the whole behaviour.
+    ON BOOK, EVERY NUMBER HERE BELONGS TO TOP. The daemon runs there, over the
+    tunnel, so the KV cache is allocated out of top's RAM and top's VRAM and the
+    load line is in top's journal — book's own `/proc/meminfo` and its absent
+    NVIDIA GPU describe a machine the cache never touches. Until 2026-08-24 both
+    halves read locally and calibration was skipped outright, so every model on
+    book fell back to `CHAT_NUM_CTX` — a window 2-4x smaller than the same model
+    got on top, for no reason but where the window was being asked from. The
+    probe and the journal read are both host-branched now, over the ssh master
+    `tools/ollama-tunnel.sh` already holds open, and `ctxfit.json` syncs between
+    the machines besides (bytes per token is a property of the MODEL, so a
+    measurement taken on either host is true on both).
     """
 
     #: ollama's KV line: total size, then the cell count it covers.
@@ -3504,6 +3516,8 @@ class CtxFit(QObject):
         self._kv = self._load()      # model -> bytes of KV per token
         self._procs = []             # live journalctl QProcesses
         self._asked = set()          # models a calibration has been tried for
+        self._remote = (0, 0)        # book: top's (free VRAM, MemAvailable)
+        self._remote_at = 0.0        # when that was read (time.monotonic)
 
     # ---- the store ----
 
@@ -3536,6 +3550,72 @@ class CtxFit(QObject):
         except (OSError, ValueError, IndexError):
             pass
         return 0
+
+    #: How long one probe of the ollama host's free memory is reused. It runs
+    #: once per turn, and a turn is seconds; 30s keeps a fast back-and-forth
+    #: from paying an ssh round trip per message without ever sizing a window
+    #: against a minute-old picture.
+    REMOTE_TTL = 30.0
+
+    @staticmethod
+    def _ssh_argv(*cmd):
+        """argv to run `cmd` on the machine ollama is on — book only.
+
+        Reuses the control master `tools/ollama-tunnel.sh` exported, exactly as
+        the jobs, file and exec tools do, so this costs a round trip and not a
+        handshake.
+        """
+        host = os.environ.get("OLLAMA_SSH_HOST", "top")
+        ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+        argv = [ssh, "-o", "BatchMode=yes", "-o", "ConnectTimeout=4"]
+        ctl = os.environ.get("OLLAMA_SSH_CTL")
+        if ctl:
+            argv += ["-o", "ControlMaster=auto", "-o", "ControlPersist=30",
+                     "-o", "ControlPath=" + ctl]
+        return argv + [host] + [str(c) for c in cmd]
+
+    def _free(self):
+        """(free VRAM, MemAvailable) on the machine ollama runs on, in bytes.
+
+        On top that is here. On book it is top, over ssh — cached for
+        `REMOTE_TTL`, including a FAILED probe: an unreachable top must not cost
+        a four-second timeout on every turn. A failure answers (0, 0), which
+        sizes nothing and leaves `CHAT_NUM_CTX`, i.e. exactly the behaviour book
+        had before this branch existed.
+        """
+        if not ON_BOOK:
+            return self._vram_free(), self._mem_available()
+        now = time.monotonic()
+        if self._remote_at and now - self._remote_at < self.REMOTE_TTL:
+            return self._remote
+        self._remote_at = now
+        self._remote = (0, 0)
+        argv = self._ssh_argv(
+            "sh", "-c",
+            shlex.quote("grep '^MemAvailable:' /proc/meminfo; "
+                        "nvidia-smi --query-gpu=memory.free "
+                        "--format=csv,noheader,nounits 2>/dev/null || true"))
+        proc = QProcess()
+        proc.start(argv[0], argv[1:])
+        if not proc.waitForFinished(6000) or proc.exitCode() != 0:
+            return self._remote
+        try:
+            out = bytes(proc.readAllStandardOutput().data()).decode(
+                "utf-8", "replace")
+        except (RuntimeError, ValueError):
+            return self._remote
+        mem = vram = 0
+        for line in out.splitlines():
+            line = line.strip()
+            if line.startswith("MemAvailable:"):
+                try:
+                    mem = int(line.split()[1]) * 1024
+                except (ValueError, IndexError):
+                    pass
+            elif line.isdigit():
+                vram = int(line) * 1024 * 1024
+        self._remote = (vram, mem)
+        return self._remote
 
     @staticmethod
     def _vram_free():
@@ -3571,8 +3651,9 @@ class CtxFit(QObject):
         if kv <= 0:
             fit = CHAT_NUM_CTX               # never measured: as it always was
         else:
-            budget = self._vram_free() - VRAM_HEADROOM
-            budget += max(0, self._mem_available() - CTX_RAM_FLOOR)
+            vram, mem = self._free()
+            budget = vram - VRAM_HEADROOM
+            budget += max(0, mem - CTX_RAM_FLOOR)
             if not loaded:
                 budget -= max(0, int(weights))
             fit = int(max(0, budget) * CTX_FIT_SAFETY / kv)
@@ -3605,7 +3686,7 @@ class CtxFit(QObject):
         cells = int(context_length or 0)
         if not model or cells <= 0 or self.known(model) or model in self._asked:
             return
-        if ON_BOOK or not shutil.which("journalctl"):
+        if not ON_BOOK and not shutil.which("journalctl"):
             return
         self._asked.add(model)
         proc = QProcess(self)
@@ -3627,8 +3708,13 @@ class CtxFit(QObject):
                 self._procs.remove(proc)
 
         proc.finished.connect(done)
-        proc.start("journalctl", ["-u", "ollama.service", "-n", "3000",
-                                  "--no-pager", "-o", "cat"])
+        jargv = ["journalctl", "-u", "ollama.service", "-n", "3000",
+                 "--no-pager", "-o", "cat"]
+        if ON_BOOK:
+            argv = self._ssh_argv(*[shlex.quote(a) for a in jargv])
+            proc.start(argv[0], argv[1:])
+        else:
+            proc.start(jargv[0], jargv[1:])
 
 
 class Ollama(QObject):
@@ -10627,6 +10713,8 @@ def build_kde_chrome(shell, ollama, sessions, backend):
     # root's own `actionsChanged` instead — `actions` is a binding over every
     # state it reports, so it fires whenever any of them moves.
     shell.bind_chrome(None)
+    # Konsole's toolbar names its buttons; so does this one [his, 2026-08-24].
+    shell.bar_labels()
     shell.bind_status()
     shell.bind_title("windowTitle")
 
