@@ -1023,6 +1023,27 @@ player and chatter call it; a `barText` row keeps its own words. `dump_chrome`
 prints the bar's style as `barstyle:`, which is the only way to check it
 without looking.
 
+**The underline on a toolbar button is `iconText`, not `text`.** Every
+main-toolbar row gets an Alt-letter, assigned by the shell and unique within
+the window — the menubar's own titles are reserved first, because two owners of
+one Alt sequence in one window is an ambiguous shortcut and Qt answers those by
+firing NEITHER. It is `setIconText` that carries it: a bar draws `iconText`,
+which Qt derives from `text` with the mnemonic and the trailing ellipsis
+stripped, so an `&` in the action text alone never reaches the button.
+Re-assigned on every state flip too, since a row whose words change with its
+state (chatter's Send / Stop Generating / Continue) cannot keep the letter its
+old word had. Extra bars are left alone: they are icon-only, so an underline
+there is invisible and would only eat the good letters.
+
+**The menubar's visibility is NOT in `saveState()`.** Qt's blob carries
+toolbars and docks and nothing else, so Ctrl+M's answer used to die with the
+process and he had to hide the menubar again every launch. The shell writes
+`chrome/menubar` and `chrome/statusbar` itself — on the toggle, not at quit —
+and puts them back in `_restore_state`. `KDESHELL_STATE=<path>` points the whole
+store at one ini, which is the only way a harness can drive save-and-restore
+(`pylib/tools/kdeshell-state-test.py`); without it an offscreen process refuses
+to read or write his window state at all.
+
 **A dock is a second scene graph.** `QQuickWidget` cannot use the threaded
 render loop, so every one of them renders on the GUI thread each frame. Two is
 measurably more than one: painter had its parameter column in a dock for a day
