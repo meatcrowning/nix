@@ -130,12 +130,44 @@ Item {
             text: stage.caption
             color: Theme.text
         }
-        PixelText {
+        // CLOSE — a mark he can click, not a keyboard hint [his, 2026-08-24].
+        // Esc still works (`Keys.onEscapePressed` above); this is the same act
+        // with an affordance on it, which is what §10 asks of anything that can
+        // be done. DRAWN, like every other mark in this window: two 1px
+        // diagonals, exact at any size and in no pixel font's cmap (§2.3).
+        Item {
             id: escLabel
-            anchors { right: parent.right; rightMargin: 8
+            anchors { right: parent.right; rightMargin: 6
                       verticalCenter: parent.verticalCenter }
-            text: "esc"
-            color: Theme.textDim
+            width: 20
+            height: 20
+            Item {
+                anchors.centerIn: parent
+                width: 11
+                height: 11
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 15
+                    height: 1
+                    rotation: 45
+                    color: escHit.containsMouse ? Theme.accent : Theme.text
+                }
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 15
+                    height: 1
+                    rotation: -45
+                    color: escHit.containsMouse ? Theme.accent : Theme.text
+                }
+            }
+            MouseArea {
+                id: escHit
+                anchors.fill: parent
+                anchors.margins: -4      // the hit band exceeds the ink (§5.3)
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: stage.close()
+            }
         }
     }
 

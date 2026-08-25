@@ -890,6 +890,14 @@ than just text-to-image:
   original's exact pixels are kept, which is painter's own default).
 - `--seconds` is a duration; `registry.video_frames` turns it into the frame
   count the model will accept.
+- `--set KEY=VALUE` (repeatable) writes ANY graph param by its own name, read
+  as JSON when it parses and as a string otherwise, applied LAST so it beats
+  both the flags and his saved prefs. It is the escape hatch for a knob with no
+  flag: chatter's `make_image`/`make_video` pass their `extra` object straight
+  through it [his, 2026-08-24 — "wire it up so agents can change not only cfg
+  but any other param open in a workflow"]. What a key DOES is the family
+  template's business: `steps` lands, `shift` on a family that has
+  `shift_start`/`shift_end` does nothing.
 - `--dry-run` builds the graph, prints the plan and submits nothing — no
   backend, no upload, no weights. That is how the parameter surface is checked
   without a render.

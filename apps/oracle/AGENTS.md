@@ -1756,8 +1756,10 @@ under Plasma.
 **The fullscreen caption is a BAND over the picture**, not a dim line in the
 margin [his, 2026-08-24: it "is not visible"]. Same translucent strip the
 transport wears, at the top, `z: 5` so nothing the picture's shape leaves free
-can cover it, full text colour rather than dim, with `esc` at its right end;
-the VideoOutput starts below it.
+can cover it, full text colour rather than dim, with a drawn X at its right end;
+the VideoOutput starts below it. That X CLOSES it [his, 2026-08-24]: the band
+used to say `esc`, which is a keyboard hint where §10 asks for something he can
+click. Escape still works — the mark is the same act with an affordance on it.
 
 **Failure is drawn** (docs/DESIGN.md §10): a non-http URL is refused before any
 request, a resolve that fails reports yt-dlp's own last line, a resolve that
@@ -1885,6 +1887,18 @@ land on the turn as `genLabel`/`genFrac`/`genRunning`/`genDone`, and QML draws a
 `Meter` under the tool disclosure's heading — open or shut, since the point is
 that the wait is visible. Transient like `execTail`: what it MADE is the
 picture, so nothing about the bar is persisted.
+
+**EVERY KNOB THE WORKFLOW HAS, not the four it shipped with** [his,
+2026-08-24]. A turn asked to turn the cfg up answered that it could not — cfg
+was simply not in the schema, though the generator has taken `--cfg` all along.
+`make_image` and `make_video` now carry `cfg`, `sampler`, `scheduler`,
+`denoise`, `loras` (each `name` or `name:strength`) and, for a clip, `fps`;
+`extra` is an object of ANY other graph param by its own name, passed through as
+the generator's `--set key=value` with the value JSON-typed on both sides, so
+`{"scheduler": "3"}` stays the string. `extra` is applied last and beats his
+saved settings, which is why the description tells the model to use it only for
+something he named. `--set` is painter's, added the same day
+(`apps/painter/AGENTS.md`).
 
 **ONE RENDER OF EACH KIND PER TURN** [his, 2026-08-24: "it did generate a video
 but then it tried to generate another until i stopped the comfy server"]. The
