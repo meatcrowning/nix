@@ -1,9 +1,10 @@
 { pkgs, lib, ... }:
 
-# Cross-machine sync for chatter's skills and agent definitions.
+# Cross-machine sync for chatter's skills, tools and agent definitions.
 #
-# chatter (apps/oracle) reads its skills from ~/.local/share/oracle/skills and
-# its subagent definitions from ~/.local/share/oracle/agents — its OWN runtime
+# chatter (apps/oracle) reads its skills from ~/.local/share/oracle/skills, the
+# tool manifests he and it write from ~/.local/share/oracle/tools, and its
+# subagent definitions from ~/.local/share/oracle/agents — its OWN runtime
 # dirs, deliberately not ~/.claude/skills, because that one belongs to Claude
 # Code and the two sets drifted. Being runtime dirs they were machine-local, so
 # a skill written on `top` never reached `book` and `book` in fact had neither
@@ -16,11 +17,13 @@
 # races and offline ticks. Only the environment differs.
 #
 # The REPO ROOT IS THE WHOLE RUNTIME DIR (~/.local/share/oracle), not skills/
-# alone, because agents/ has to come along and one repo cannot span two
-# siblings. That dir also holds `sessions/`, `memory/`, `jobs/`, `sandbox/` and
+# alone, because agents/ and tools/ have to come along and one repo cannot span
+# three siblings. That dir also holds `sessions/`, `memory/`, `jobs/`, `sandbox/` and
 # `images/` — every conversation he has had with chatter — so the seeded
 # .gitignore is an ALLOWLIST: ignore everything at the root, re-include exactly
-# skills/ and agents/. A new store landing beside them cannot widen the push.
+# skills/, agents/ and tools/. ctxfit.json stays out on purpose: it is measured
+# KV-cache bytes per model, learned from the ollama that loads them, not
+# something he authors. A new store landing beside them cannot widen the push.
 #
 # Both machines get this: `home/` is shared verbatim between `top` and `air`
 # via lam.nix + umport, and Fedora Asahi runs systemd the same as NixOS.
@@ -37,7 +40,7 @@
   };
 
   systemd.user.services.oracle-skills-sync = {
-    Unit.Description = "Sync chatter's skills and agents with the private oracle-skills repo";
+    Unit.Description = "Sync chatter's skills, tools and agents with the private oracle-skills repo";
     Service = {
       Type = "oneshot";
       # Same PATH pinning rationale as the other two callers: the git credential
@@ -70,7 +73,7 @@
   };
 
   systemd.user.timers.oracle-skills-sync = {
-    Unit.Description = "Periodically sync chatter's skills and agents across machines";
+    Unit.Description = "Periodically sync chatter's skills, tools and agents across machines";
     Timer = {
       OnBootSec = "4min";
       # MUST accompany OnBootSec in a USER manager — OnBootSec counts from
