@@ -365,6 +365,46 @@ argv, stdin, err = oracle.Ollama._painter_argv(
     {"prompt": "x", "first_frame": str(_TMP / "gone.png")}, "video")
 check("a frame that is not there is refused before the backend is woken",
       bool(err) and not argv, str(err))
+check("...and the refusal names the machine it looked on",
+      "on " + oracle.LOCAL_HOST in str(err), str(err))
+
+# A PICTURE make_image JUST MADE IS ON THE GENERATOR'S DISK, not this one. From
+# book that path is a top path, and validating it here failed every "make an
+# image and animate it" [2026-08-24, sess-1787643678852]. A remembered
+# generator-side path goes through unstaged.
+MADE = "/home/lam/.local/share/oracle/images/made/painter_00041_.png"
+argv, stdin, err = oracle.Ollama._painter_argv(
+    {"prompt": "she moves", "first_frame": MADE}, "video", [MADE])
+if oracle.Ollama._painter_remote():
+    check("a path the generator wrote is passed straight through",
+          not err and (" --image " + MADE) in gen_line(argv) and not stdin,
+          (err or gen_line(argv))[-200:])
+else:
+    check("on top the same path is simply a local file",
+          bool(err) or (" --image " + MADE) in gen_line(argv), str(err)[:120])
+argv, stdin, err = oracle.Ollama._painter_argv(
+    {"prompt": "she moves", "first_frame": MADE}, "video")
+check("...but only one this app actually generated",
+      bool(err) if oracle.Ollama._painter_remote() else True, str(err)[:120])
+
+# WHY IT FAILED, not the last line of the traceback. ComfyUI's error text ends
+# on python's caret underline, and that is what reached the model as the reason
+# [same session: it invented "a mismatch between the image format/dimensions"].
+OOM = ("\nFAILED: Traceback (most recent call last):\n"
+       '  File "cuda/__init__.py", line 1864, in int8_linear\n'
+       "    out = torch.empty((m, n), dtype=out_dtype, device=x.device)\n"
+       "          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"
+       "torch.OutOfMemoryError: Allocation on device 0 would exceed allowed "
+       "memory. (out of memory)\n")
+why = oracle.Ollama._gen_failure(OOM, "", "clip")
+check("a caret underline is never the reason given", "^^^" not in why, why[:80])
+check("...an OOM is named as the GPU, with what to do about it",
+      "GPU ran out of memory" in why and "unloaded" in why, why[:120])
+check("...and a plain refusal is passed through as itself",
+      oracle.Ollama._gen_failure("", "no model matching 'zzz'", "picture")
+      == "no model matching 'zzz'")
+check("...and an empty failure still says something",
+      oracle.Ollama._gen_failure("", "", "clip") == "the backend produced no clip")
 
 # 3c. make_video: the same generator, drawn as a clip he can play
 clip = _TMP / "made.mp4"

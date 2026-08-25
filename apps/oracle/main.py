@@ -4181,6 +4181,10 @@ class Ollama(QObject):
         self._images_shown = set()
         self._paths_shown = set()  # …and every LOCAL file already drawn, by path
         self._made_this_turn = {}  # kind -> the path it already generated
+        # …and every path the GENERATOR wrote, which on book is a path on top.
+        # Kept across turns (he says "animate that one" a turn later) and
+        # bounded, because it exists only to be recognised, not to be a store.
+        self._made_remote = []
         self._image_entries = {}   # url -> the entry we already drew, this turn
         self._row_urls = set()     # …and which of them are on the CURRENT bubble
         self._md_images = {"n": 0}
@@ -9130,7 +9134,7 @@ class Ollama(QObject):
         return [(f, os.path.abspath(os.path.expanduser(p))) for f, p in pairs if p]
 
     @classmethod
-    def _painter_input_payload(cls, pairs):
+    def _painter_input_payload(cls, pairs, remote_ok=()):
         """Pack the input pictures for the machine the backend is on.
 
         Returns `(flags, stdin, error)`. On `top` there is nothing to pack — the
@@ -9140,8 +9144,23 @@ class Ollama(QObject):
         painter uploads a drop over HTTP rather than passing a path)."""
         flags, seen, total = "", {}, 0
         for flag, path in pairs:
+            # A PICTURE THIS APP JUST MADE IS ALREADY ON THE GENERATOR'S DISK.
+            # `make_image` hands back the path the generator wrote, which on
+            # book is a path on TOP — and this check ran here, so "make an
+            # image and animate it" failed every time from book with "no such
+            # image" [2026-08-24, session sess-1787643678852]. A path this turn
+            # generated over there goes through untouched: nothing to pack, and
+            # the file is exactly where the backend will look.
+            if cls._painter_remote() and path in tuple(remote_ok):
+                flags += " %s %s" % (flag, shlex.quote(path))
+                continue
             if not os.path.isfile(path):
-                return "", b"", "no such image: " + path
+                return "", b"", (
+                    "no such image on %s: %s" % (LOCAL_HOST, path)
+                    + ("" if not cls._painter_remote() else
+                       " — if it is one you generated, pass back the exact "
+                       "path make_image returned (it lives on top, where the "
+                       "backend runs) rather than a path from this machine"))
             try:
                 total += os.path.getsize(path)
             except OSError as e:
@@ -9177,7 +9196,7 @@ class Ollama(QObject):
         return ON_BOOK and not os.environ.get("ORACLE_PAINTER", "").strip()
 
     @classmethod
-    def _painter_argv(cls, args, kind="image"):
+    def _painter_argv(cls, args, kind="image", remote_ok=()):
         """The one command that generates on `top`. `(argv, stdin, error)`.
 
         Four steps in one shell, because they are one act: put any input
@@ -9198,7 +9217,7 @@ class Ollama(QObject):
                 return ""
 
         pairs = cls._painter_inputs(args, kind)
-        inputs, stdin, err = cls._painter_input_payload(pairs)
+        inputs, stdin, err = cls._painter_input_payload(pairs, remote_ok)
         if err:
             return [], b"", err
         edit = kind == "image" and bool(pairs)
@@ -9444,7 +9463,7 @@ class Ollama(QObject):
         name = "make_video" if kind == "video" else "make_image"
         noun = "clip" if kind == "video" else "picture"
         limit_ms = MAKE_VIDEO_MS if kind == "video" else MAKE_IMAGE_MS
-        argv, stdin, err = self._painter_argv(args, kind)
+        argv, stdin, err = self._painter_argv(args, kind, self._made_remote)
         if err:
             answer({"error": err}, False, name + ": " + err)
             return
@@ -9536,9 +9555,7 @@ class Ollama(QObject):
                          if os.path.splitext(m)[1].lower() in VIDEO_SUFFIXES]
                 made = clips or made
             if rc != 0 or not made:
-                why = (([l for l in err.strip().splitlines() if l.strip()]
-                        or [l for l in out.strip().splitlines() if l.strip()]
-                        or ["the backend produced no " + noun])[-1])
+                why = self._gen_failure(err, out, noun)
                 answer({"error": why[:400]}, False, name + ": " + why[:120])
                 return
             path = made[-1]
@@ -9560,7 +9577,9 @@ class Ollama(QObject):
                     answer(result, False)
                     return
                 self._made_this_turn["image"] = path
-                answer({"ok": True, "path": path,
+                self._note_generated(path)
+                where = ("top" if self._painter_remote() else LOCAL_HOST)
+                answer({"ok": True, "path": path, "host": where,
                         **self._gen_facts(state["meta"]),
                         "note": ("Generated and placed in the chat. You have "
                                  "NOT seen it — view_image if you need to. Do "
@@ -9568,7 +9587,11 @@ class Ollama(QObject):
                                  "and do not describe it. It is made: do NOT "
                                  "call make_image again for this request. To "
                                  "remake the SAME picture, pass this seed "
-                                 "back.")}, True,
+                                 "back. The file is on %s, where the backend "
+                                 "runs: to animate it pass THIS path to "
+                                 "make_video as first_frame — do not go "
+                                 "looking for it with ls or find."
+                                 % where)}, True,
                        "made " + os.path.basename(path))
 
             # The picture is wherever the GENERATOR ran — top from book, and
@@ -9606,6 +9629,54 @@ class Ollama(QObject):
         if stdin:
             proc.write(stdin)
         proc.closeWriteChannel()
+
+    #: A line that is only punctuation says nothing — python's own caret
+    #: underline most of all, which is what a ComfyUI traceback ENDS on.
+    _GEN_NOISE = re.compile(r"^[\s^~|=_\-*+.]*$")
+    #: …and the lines worth lifting out of one, in the order they are believed.
+    _GEN_FAULT = re.compile(
+        r"(?i)(out of memory|outofmemory|cuda|error|exception|failed|refused|"
+        r"traceback|no such|timed out)")
+
+    @classmethod
+    def _gen_failure(cls, err, out, noun):
+        """Why the generator produced nothing, in one line the model can act on.
+
+        The LAST line was the whole answer until 2026-08-24, and a backend
+        failure does not end on its reason: painter prints ComfyUI's traceback
+        verbatim (`FAILED: …`) and a python traceback's last line is the caret
+        underline, so a VRAM exhaustion reached the model as
+        `^^^^^^^^^^^^^^^^` and it invented a cause for him (session
+        sess-1787643678852: "a mismatch between the image format/dimensions").
+        So: skip the punctuation-only lines, prefer the last line that names a
+        fault, and say the one thing a caller can do about the common one.
+        """
+        lines = [l.strip() for l in ((err or "") + "\n" + (out or "")).splitlines()
+                 if l.strip() and not cls._GEN_NOISE.match(l.strip())]
+        faults = [l for l in lines if cls._GEN_FAULT.search(l)]
+        why = (faults or lines or ["the backend produced no " + noun])[-1]
+        if re.search(r"(?i)out ?of ?memory|outofmemory", why):
+            # THE ONE THE MODEL CANNOT GUESS. Both backends want the same
+            # 11.5 GiB card, and nothing frees VRAM (ai-warden refuses on RAM
+            # and only tidies VRAM — root AGENTS.md), so a clip asked for while
+            # the chat model is resident dies here. Name it, and say what fixes
+            # it, rather than leaving a torch traceback to be interpreted.
+            return ("the GPU ran out of memory: " + why[:200] + " — the chat "
+                    "model and the render want the same card. Tell him plainly "
+                    "that it needs the model unloaded (or a smaller one) to "
+                    "make this clip; do NOT retry it and do not guess at "
+                    "another cause.")
+        return why
+
+    def _note_generated(self, path):
+        """Remember a path the GENERATOR wrote, so a later call can feed it
+        back in. On book that path is on top and does not exist here — see
+        `_painter_input_payload`, which is where forgetting it cost every
+        "make an image and animate it" a failed second half."""
+        if not path or path in self._made_remote:
+            return
+        self._made_remote.append(path)
+        del self._made_remote[:-40]
 
     @staticmethod
     def _gen_facts(got):

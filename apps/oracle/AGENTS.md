@@ -1931,7 +1931,17 @@ is what splitting them would cost.
   command's stdin (`_painter_input_payload`, capped at `PAINTER_INPUT_MAX`) and
   are unpacked into `/tmp/oracle-painter-in`, because the ssh master is the only
   thing the two machines share. A path that is not there is refused BEFORE the
-  backend is woken.
+  backend is woken, naming the machine it looked on.
+- **…except a picture chatter itself just generated, which is ALREADY there.**
+  `make_image` hands back the path the GENERATOR wrote — from book, a path on
+  top — and `_painter_input_payload` was validating it here, so "make an image
+  and animate it" failed its second half **every time** from book with `no such
+  image` (2026-08-24, session `sess-1787643678852`; the model then spent seven
+  `run_bash` rounds hunting for a file that was never on this machine). Every
+  generated path is remembered in `_made_remote` and passed to the backend
+  **unstaged**: nothing to pack, and the file is exactly where the backend
+  looks. The `make_image` result now also carries `host` and says to pass that
+  path straight to `make_video` rather than go looking for it.
 - **A still is drawn through `_display_image`; a clip is a VideoCard pointed at
   the local file** (`_display_clip`), on a poster frame lifted with one ffmpeg
   frame — a card with no poster is a black box wearing a play marker. A clip
@@ -1943,6 +1953,16 @@ is what splitting them would cost.
   length, the seed policy), which is why both tool descriptions say to pass ONLY
   what he asked for. His rule, 2026-08-24: painter's defaults are the reference,
   and something else only when he says so.
+- **A failure says WHY, not the last line of the traceback** (`_gen_failure`).
+  painter prints ComfyUI's traceback verbatim, and a python traceback ends on
+  the caret underline — so a VRAM exhaustion reached the model as
+  `^^^^^^^^^^^^^^^^^^^^` and it invented a cause for him ("a mismatch between
+  the image format/dimensions"), same session. Punctuation-only lines are
+  skipped, the last line that names a fault wins, and an **out-of-memory** is
+  turned into the one sentence a caller can act on: both backends want the same
+  11.5 GiB card, `ai-warden` refuses on RAM and only *tidies* VRAM (root
+  AGENTS.md), so a clip asked for while the chat model is resident dies here and
+  the model is told to say so plainly rather than retry.
 - **A clip's clock is not a picture's.** `MAKE_VIDEO_MS` is an hour against
   `MAKE_IMAGE_MS`'s fifteen minutes: MiniMax H3 samples every frame, so six
   seconds is tens of minutes on this GPU.
