@@ -446,7 +446,12 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   and puts back exactly what it took whatever happens to the build; on *anyway*,
   or on no answer inside the timeout, the build runs throttled beside them. A
   power-cycle on 2026-08-09 is why the gate exists, and his "ask me" is why it
-  no longer decides alone. `REBUILD_IGNORE_GPU=1` skips it,
+  no longer decides alone. **A rebuild you trigger on the OTHER machine over
+  ssh must pass `REBUILD_IGNORE_GPU=1`**: the toast lands on a screen nobody is
+  sitting at, so the question cannot be answered and the gate spends its whole
+  `REBUILD_ASK_TIMEOUT` (5 min by default) before falling through to "rebuild
+  anyway" regardless — the same outcome, five minutes later [2026-08-24].
+  `REBUILD_IGNORE_GPU=1` skips it,
   `REBUILD_ASK_TIMEOUT` sets the wait. Harness `heavy-gate-test.sh`, which
   drives stub endpoints and never his backends; `heavy-gate.sh demo` is how HE
   raises the real toast),
