@@ -1,0 +1,140 @@
+# Oxygen Dark Flat — OxygenDark with the unfocused look BAKED IN.
+#
+# OxygenDark ships [ColorEffects:Inactive] ColorEffect=1 (desaturate) with
+# ColorAmount=-0.9, i.e. KColorUtils::darken(c, 0.0, 1.9): same luma, chroma
+# x1.9. That is why an unfocused window here reads as a BRIGHTER blue than the
+# focused one — and it is the colour he wants on every window, focused or not
+# (2026-08-24). There is no [ColorEffects:Active] to mirror it with, so the
+# boosted values are written into the scheme itself and the inactive effect is
+# switched OFF: every Background*/Decoration* below is the OxygenDark value put
+# through that same chroma x1.9, so what used to be the unfocused palette is now
+# the only palette.
+#
+# Foreground* are NOT boosted. The inactive effect also tinted text toward the
+# background (ContrastEffect=2, 0.25) — that is the greying he explicitly did
+# not want; body text stays the active near-white, and [WM] *Foreground is a
+# flat white on both states so the titlebar title matches it.
+#
+# Regenerate: home/prog/plasma-colors.nix names the maths; the source values are
+# kdePackages.oxygen's OxygenDark.colors.
+[ColorEffects:Disabled]
+ChangeSelectionColor=
+Color=56,56,56
+ColorAmount=0
+ColorEffect=0
+ContrastAmount=0.65
+ContrastEffect=1
+Enable=
+IntensityAmount=0.1
+IntensityEffect=2
+
+[ColorEffects:Inactive]
+ChangeSelectionColor=true
+Color=112,111,110
+ColorAmount=-0.9
+ColorEffect=1
+ContrastAmount=0.25
+ContrastEffect=2
+Enable=false
+IntensityAmount=0
+IntensityEffect=0
+
+[Colors:Button]
+BackgroundAlternate=0,77,166
+BackgroundNormal=46,54,73
+DecorationFocus=0,88,203
+DecorationHover=0,88,203
+ForegroundActive=38,89,193
+ForegroundInactive=129,137,152
+ForegroundLink=181,193,248
+ForegroundNegative=174,49,57
+ForegroundNeutral=163,132,75
+ForegroundNormal=244,236,246
+ForegroundPositive=0,108,69
+ForegroundVisited=93,76,160
+
+[Colors:Complementary]
+BackgroundAlternate=52,55,77
+BackgroundNormal=14,21,37
+DecorationFocus=0,88,203
+DecorationHover=0,88,203
+ForegroundActive=38,89,193
+ForegroundInactive=129,137,152
+ForegroundLink=181,193,248
+ForegroundNegative=174,49,57
+ForegroundNeutral=163,132,75
+ForegroundNormal=224,253,255
+ForegroundPositive=0,108,69
+ForegroundVisited=142,115,233
+
+[Colors:Selection]
+BackgroundAlternate=0,70,154
+BackgroundNormal=0,70,154
+DecorationFocus=0,88,203
+DecorationHover=0,88,203
+ForegroundActive=38,89,193
+ForegroundInactive=255,255,255
+ForegroundLink=28,65,141
+ForegroundNegative=142,42,52
+ForegroundNeutral=241,224,113
+ForegroundNormal=255,255,255
+ForegroundPositive=130,252,167
+ForegroundVisited=63,42,137
+
+[Colors:Tooltip]
+BackgroundAlternate=38,46,59
+BackgroundNormal=14,21,37
+DecorationFocus=0,88,203
+DecorationHover=0,88,203
+ForegroundActive=38,89,193
+ForegroundInactive=129,137,152
+ForegroundLink=181,193,248
+ForegroundNegative=174,49,57
+ForegroundNeutral=163,132,75
+ForegroundNormal=245,243,249
+ForegroundPositive=0,108,69
+ForegroundVisited=142,115,233
+
+[Colors:View]
+BackgroundAlternate=20,31,51
+BackgroundNormal=15,29,49
+DecorationFocus=0,88,203
+DecorationHover=0,88,203
+ForegroundActive=38,89,193
+ForegroundInactive=129,137,152
+ForegroundLink=181,193,248
+ForegroundNegative=174,49,57
+ForegroundNeutral=163,132,75
+ForegroundNormal=244,232,243
+ForegroundPositive=0,108,69
+ForegroundVisited=93,76,160
+
+[Colors:Window]
+BackgroundAlternate=15,31,53
+BackgroundNormal=25,36,56
+DecorationFocus=0,88,203
+DecorationHover=0,88,203
+ForegroundActive=38,89,193
+ForegroundInactive=129,137,152
+ForegroundLink=181,193,248
+ForegroundNegative=174,49,57
+ForegroundNeutral=163,132,75
+ForegroundNormal=244,234,244
+ForegroundPositive=0,108,69
+ForegroundVisited=93,76,160
+
+[WM]
+activeBackground=25,36,56
+activeBlend=0,0,0
+activeForeground=255,255,255
+inactiveBackground=25,36,56
+inactiveBlend=0,0,0
+inactiveForeground=255,255,255
+
+[General]
+ColorScheme=OxygenDarkFlat
+Name=Oxygen Dark Flat
+shadeSortColumn=true
+
+[KDE]
+contrast=7
