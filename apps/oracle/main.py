@@ -27,6 +27,7 @@ import platform
 import re
 import shutil
 import socket
+import struct
 import sys
 import tarfile
 import time
@@ -71,6 +72,7 @@ if "--selftest" in sys.argv:
     os.environ.setdefault("ORACLE_CONFIG", str(_tmp / "config"))
     os.environ.setdefault("ORACLE_SESSIONS", str(_tmp / "sessions"))
     os.environ.setdefault("ORACLE_IMAGES", str(_tmp / "images"))
+    os.environ.setdefault("ORACLE_AUDIO", str(_tmp / "audio"))
 
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
@@ -90,6 +92,36 @@ OLLAMA = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 #: `web_search` tool AND a key is configured — oracle opens no listener, and
 #: without a key the tool reports itself unavailable rather than reaching out.
 TAVILY_URL = "https://api.tavily.com/search"
+
+#: LISTENING. gemma4 carries an AUDIO encoder beside its vision one and ollama
+#: reports it in the same `capabilities` list (`audio`), but nothing here ever
+#: sent it a sample: a dropped song was inlined as "binary, not shown" and the
+#: chip beside the context bar promised an ear the app had no wire to.
+#: Measured against the daemon on top, 2026-08-24, on gemma4-qat:12b:
+#: **audio bytes ride the very same `images` message field** — there is no
+#: `audio` key on ollama's /api/chat message, and a base64 wav in `images`
+#: raised prompt_eval_count from 29 to 101 for 2.7s of speech, which the model
+#: then transcribed verbatim. So the wire is `images`; only the sniffing, the
+#: capability gate and the trimming below are new.
+#:
+#: Roughly **25 prompt tokens per second of audio** at that measurement (500
+#: tokens for a 20s excerpt), so a whole 4-minute track is ~6k tokens and a
+#: 10-minute one is most of a 32k window. Everything is therefore TRIMMED to a
+#: bounded excerpt and downmixed to 16 kHz mono — the rate the encoder wants
+#: anyway — rather than sent whole.
+AUDIO_RATE = 16000                   # what the excerpt is resampled to, mono
+AUDIO_TOKENS_PER_SEC = 25            # measured; used only to explain a cap to the model
+ATTACH_AUDIO_SECONDS = 60            # a dropped audio file is trimmed to this
+ATTACH_AUDIO_MAX = 64 * 1024 * 1024  # …and one over this is not even read
+LISTEN_SECONDS = 30                  # `listen_audio` default excerpt length
+LISTEN_MAX_SECONDS = 180             # …and its ceiling, whatever the model asks for
+LISTEN_CAPTURE_MAX = 60              # a capture of what the speakers are playing, ever
+
+#: ffmpeg does the trim/downmix, wherever the file is (the executor carries the
+#: op to the other host). Absent, an audio attachment is NAMED as not sent
+#: rather than dumped whole at 44.1 kHz stereo, which measures as four times the
+#: tokens for no more information (docs/DESIGN.md §10).
+FFMPEG = os.environ.get("ORACLE_FFMPEG", "ffmpeg")
 
 #: The web-search tool offered to ollama on EVERY turn (his call — no toggle,
 #: same as the file tools). ollama's function-calling: the model may emit a
@@ -185,6 +217,70 @@ VIEW_IMAGE_TOOL = {
             "required": ["path"]}},
 }
 VIEW_IMAGE_TOOL_NAMES = {"view_image"}
+
+#: LISTENING is its own tool, not a mode of view_image [his ask, 2026-08-24:
+#: *"give it the ability to ingest audio files from the system ... 'listen to
+#: the song im currently playing' and itll pull it from my library or the audio
+#: stream it detects"*]. Three sources, because those are the three ways a
+#: sound exists on this desktop: a FILE (his library, a download, anything
+#: read_file could reach, on either machine), whatever the PLAYER is playing
+#: right now (resolved through the same MPRIS seam control_media drives, so the
+#: model needs neither the path nor the position), and what the SPEAKERS are
+#: actually putting out (the default sink's monitor — a browser tab, a game, a
+#: stream that is not a file at all).
+#:
+#: Every one of them ends as a bounded 16 kHz mono excerpt on the next message,
+#: never a whole track: see ATTACH_AUDIO_SECONDS for what a second of audio
+#: costs. The clip is kept on disk and NAMED in the result, so he can play back
+#: exactly what the model was handed.
+LISTEN_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "listen_audio",
+        "description": (
+            "LISTEN TO sound on this machine and hear it for yourself — a song, "
+            "a recording, a voice memo, or whatever is coming out of the "
+            "speakers right now. Use it whenever answering depends on what "
+            "something SOUNDS like: he asks what he is playing, what a track "
+            "sounds like, what is said in a recording, or to identify or "
+            "describe a piece of music. `source` picks where the sound comes "
+            "from: 'now_playing' takes it from the track the media player is "
+            "on (no path needed — it finds the file and starts at the point he "
+            "is at), 'file' takes a path you name, 'capture' records what the "
+            "speakers are outputting for a few seconds, which is the only way "
+            "to hear something that is not a file. The excerpt is attached to "
+            "your next turn — so after calling this, WAIT for it and then "
+            "answer from what you HEAR, not from the title or the tags. Needs "
+            "an audio-capable model; excerpts are short by necessity (about %d "
+            "tokens per second of sound), so ask for a window, not a whole "
+            "album." % AUDIO_TOKENS_PER_SEC),
+        "parameters": {"type": "object", "properties": {
+            "source": {"type": "string",
+                       "enum": ["now_playing", "file", "capture"],
+                       "description": ("Where the sound comes from. Defaults to "
+                                       "'now_playing' when no path is given, "
+                                       "'file' when one is.")},
+            "path": {"type": "string",
+                     "description": ("For `file`: the audio or video file to "
+                                     "listen to (absolute, or as list_dir or "
+                                     "music_library gave it).")},
+            "seconds": {"type": "number",
+                        "description": ("How long an excerpt, default %d, at "
+                                        "most %d (%d for `capture`)."
+                                        % (LISTEN_SECONDS, LISTEN_MAX_SECONDS,
+                                           LISTEN_CAPTURE_MAX))},
+            "start": {"type": "number",
+                      "description": ("Seconds into the file to start at. For "
+                                      "`now_playing`, leave it out to start "
+                                      "where he is listening; for `file` it "
+                                      "defaults to the beginning, and a chorus "
+                                      "is usually a minute in.")},
+            "host": {"type": "string",
+                     "description": ("For `file`: which machine the file is on, "
+                                     "'top' or 'book'. Defaults to this one.")}},
+            "required": []}},
+}
+LISTEN_TOOL_NAMES = {"listen_audio", "listen"}
 
 #: SHOWING is not LOOKING [his, 2026-08-23]. Until now the only way to put a
 #: local picture in the chat was `view_image`, which is a VISION tool: it needs
@@ -1210,6 +1306,13 @@ IMAGES_ROOT = os.path.expanduser(
 #: session still shows it.
 MAKE_IMAGE_DIR = os.path.join(IMAGES_ROOT, "made")
 
+#: Where an excerpt chatter LISTENED to is kept — beside the pictures, and for
+#: the same reason: he can play back the exact clip the model was handed
+#: (docs/DESIGN.md §10 — nothing listened to in secret). Local to the window,
+#: like IMAGES_ROOT.
+AUDIO_ROOT = os.path.expanduser(
+    os.environ.get("ORACLE_AUDIO", "~/.local/share/oracle/audio"))
+
 #: A ceiling on a single image download, so a mis-pointed URL cannot pull a
 #: multi-gigabyte body into memory.
 IMAGE_MAX_BYTES = 20 * 1024 * 1024
@@ -2108,6 +2211,11 @@ EXTRA_TOOL_GROUPS = {
     "images": ["fetch_image", "search_images", "view_image", "show_image",
                "make_image", "make_video", "screenshot", "booru_tags"],
     "video": ["show_video", "make_video"],
+    # `listen_audio` is a MAIN-AGENT tool, like `view_image` and for the same
+    # reason: the bytes it fetches ride a message on the loop that called it,
+    # and a subagent's loop ends before that message is ever sent — so a
+    # subagent would fetch a clip its parent then heard out of nowhere.
+    "audio": ["listen_audio", "control_media"],
     "memory": ["save_memory", "list_memories", "delete_memory"],
     "models": ["manage_models"],
     "self": ["describe_self"],
@@ -4069,6 +4177,7 @@ class Ollama(QObject):
         self._acc_content = ""   # assistant content accumulated in this sub-turn
         self._done_reason = ""   # ollama's reason the last frame was the last
         self._pending_vision = []  # local images view_image is handing the model
+        self._pending_audio = []   # …and the excerpts listen_audio is handing it
         self._images_shown = set()
         self._paths_shown = set()  # …and every LOCAL file already drawn, by path
         self._made_this_turn = {}  # kind -> the path it already generated
@@ -4638,15 +4747,25 @@ class Ollama(QObject):
         # Split the dropped files: images go to the model as native vision blocks
         # (if the model supports vision), everything else is inlined as text.
         items = self._parse_attachment_items(attachments_json)
-        image_items, file_items = [], []
+        image_items, audio_items, file_items = [], [], []
         for it in items:
-            (image_items if self._sniff_image(it["path"]) else file_items).append(it)
+            if self._sniff_image(it["path"]):
+                image_items.append(it)
+            elif self._sniff_audio(it["path"]):
+                audio_items.append(it)
+            else:
+                file_items.append(it)
         # Trust the capability list only when it was read for THIS model (the
         # selection triggers the /api/show that fills it); otherwise treat vision
         # as unknown, which falls back to the honest "not sent" note below.
         vision = self._ctx_model == model and "vision" in (self._caps or [])
+        # SOUND IS THE SAME BARGAIN. gemma4 reports `audio` beside `vision` and
+        # the bytes ride the same field; a dropped song used to be inlined as
+        # "binary, not shown" by a model whose own chip said it could hear.
+        audible = self._ctx_model == model and "audio" in (self._caps or [])
         attach_block = self._read_attachments(file_items)
         images_b64, img_note = self._read_image_attachments(image_items, vision)
+        audio_b64, audio_note = self._read_audio_attachments(audio_items, audible)
         # Beyond the bounded inline text, stage each dropped file INTO the file-
         # tool sandbox so the model can read the FULL file and edit it in place.
         staged, stage_errs = (self._stage_attachments(file_items)
@@ -4659,6 +4778,8 @@ class Ollama(QObject):
             content += "\n\n" + stage_note
         if img_note:
             content += "\n\n" + img_note
+        if audio_note:
+            content += "\n\n" + audio_note
         # HIS SHORTHAND, parsed here rather than by the model (genshort.py):
         # "anima. 2:3 x1 1girl, solo" is a job with numbers in it, and a local
         # model asked to infer them gets the aspect backwards and rewrites his
@@ -4668,8 +4789,11 @@ class Ollama(QObject):
         if gen:
             content += "\n\n" + genshort.hint_for(gen)
         user_msg = {"role": "user", "content": content}
-        if images_b64:                     # ollama /api/chat: base64 on the message
-            user_msg["images"] = images_b64
+        # ONE FIELD CARRIES BOTH. ollama's chat message has no `audio` key —
+        # measured 2026-08-24: base64 wav bytes in `images` are decoded by the
+        # model's audio encoder exactly as png bytes go to its vision one.
+        if images_b64 or audio_b64:
+            user_msg["images"] = images_b64 + audio_b64
         # WHAT IT DID LAST TURN COMES WITH IT. `_carry` returns the previous
         # turn's whole message list — tool calls and results included — when
         # this is the next turn of the same conversation, so the agent starts
@@ -4698,6 +4822,7 @@ class Ollama(QObject):
         self._md_videos = {"n": 0}   # …and typed videos still resolving
         self._videos_shown = set()   # every video URL already drawn this turn
         self._pending_vision = []    # local images view_image must hand the model
+        self._pending_audio = []     # …and the excerpts listen_audio must hand it
         self._no_tools = False       # not a wrap-up round
         self._squeezed = False       # …and nothing has squeezed it yet
         self._extra_tools = set()    # a fresh turn attaches its own tools
@@ -4849,6 +4974,7 @@ class Ollama(QObject):
         self._md_videos = {"n": 0}
         self._videos_shown = set()
         self._pending_vision = []
+        self._pending_audio = []
         self._no_tools = False
         self._squeezed = False
         self._extra_tools = set()
@@ -4995,6 +5121,166 @@ class Ollama(QObject):
                          "paths:\n%s]" % where)
         if skipped:
             parts.append("[image(s) not sent: %s]" % "; ".join(skipped))
+        return b64, "\n".join(parts)
+
+    @staticmethod
+    def _sniff_audio(path):
+        """The audio media-type of a file from its MAGIC BYTES (never the
+        extension — the same rule `_sniff_image` follows), or "" if it is not
+        sound. Only the containers his library and his downloads actually hold:
+        flac, mp3, ogg/opus, wav, m4a and wma. A bare `ftyp…mp42` is NOT claimed
+        — that shape is usually a video, and a video dropped on the window is
+        still a file, not a song."""
+        try:
+            with open(path, "rb") as fh:
+                head = fh.read(16)
+        except OSError:
+            return ""
+        if head[:4] == b"fLaC":
+            return "audio/flac"
+        if head[:3] == b"ID3" or head[:2] in (b"\xff\xfb", b"\xff\xf3",
+                                             b"\xff\xf2", b"\xff\xfa"):
+            return "audio/mpeg"
+        if head[:4] == b"OggS":
+            return "audio/ogg"
+        if head[:4] == b"RIFF" and head[8:12] == b"WAVE":
+            return "audio/wav"
+        if head[4:8] == b"ftyp" and head[8:12] in (b"M4A ", b"M4B "):
+            return "audio/mp4"
+        if head[:4] == b"\x30\x26\xb2\x75":
+            return "audio/x-ms-wma"
+        return ""
+
+    @staticmethod
+    def _audio_excerpt(path, start=0.0, seconds=ATTACH_AUDIO_SECONDS):
+        """A bounded 16 kHz MONO wav excerpt of a sound file, as raw bytes.
+
+        Trimmed and downmixed rather than sent whole, because a second of audio
+        costs the model about AUDIO_TOKENS_PER_SEC prompt tokens whatever the
+        source rate: a 44.1 kHz stereo album track is four times the bytes and
+        the same information. Returns `(wav_bytes, error)`; ffmpeg missing is an
+        error with a reason, never a silent drop (docs/DESIGN.md §10).
+        """
+        import subprocess          # only the audio path shells out; see run_bash
+        exe = shutil.which(FFMPEG) or FFMPEG
+        argv = [exe, "-v", "error", "-nostdin"]
+        if start and start > 0:
+            argv += ["-ss", "%.3f" % float(start)]
+        argv += ["-t", "%.3f" % max(0.2, float(seconds)), "-i", path,
+                 "-map", "0:a:0", "-vn", "-ar", str(AUDIO_RATE), "-ac", "1",
+                 "-c:a", "pcm_s16le", "-f", "wav", "-"]
+        try:
+            out = subprocess.run(argv, capture_output=True, timeout=180)
+        except OSError:
+            return b"", ("ffmpeg is not on this machine, so the audio could not "
+                         "be trimmed to something a model can hear")
+        except subprocess.SubprocessError:
+            return b"", "ffmpeg took too long reading that audio"
+        if out.returncode != 0 or len(out.stdout) <= 44:
+            why = out.stderr.decode("utf-8", "replace").strip().splitlines()
+            return b"", (why[-1][:200] if why else
+                         "ffmpeg found no audio stream in that file")
+        return Ollama._wav_sized(out.stdout), ""
+
+    @staticmethod
+    def _wav_sized(raw):
+        """A wav ffmpeg wrote to a PIPE, with its length stamped in.
+
+        ffmpeg cannot seek back on stdout, so it leaves 0xFFFFFFFF placeholders
+        in the RIFF and `data` size fields. ollama decodes it anyway (measured),
+        but a file whose header says it is 34 hours long is a trap for anything
+        else that reads it — including him double-clicking the kept clip — so
+        the two lengths are patched to what actually arrived.
+        """
+        if len(raw) < 44 or raw[:4] != b"RIFF" or raw[8:12] != b"WAVE":
+            return raw
+        out = bytearray(raw)
+        out[4:8] = struct.pack("<I", len(out) - 8)
+        pos = 12
+        while pos + 8 <= len(out):
+            cid = bytes(out[pos:pos + 4])
+            size = struct.unpack("<I", bytes(out[pos + 4:pos + 8]))[0]
+            body = len(out) - (pos + 8)
+            if cid == b"data" and (size > body or size == 0):
+                out[pos + 4:pos + 8] = struct.pack("<I", body)
+                break
+            if size > body:
+                break
+            pos += 8 + size + (size & 1)
+        return bytes(out)
+
+    @staticmethod
+    def _keep_clip(wav, label):
+        """Write an excerpt under AUDIO_ROOT and return its path (or "").
+
+        He gets to hear exactly what the model was handed — the audio half of
+        `view_image` drawing the picture in the chat (docs/DESIGN.md §10).
+        """
+        if not wav:
+            return ""
+        stem = re.sub(r"[^A-Za-z0-9._-]+", "-", label or "clip").strip("-")[:60]
+        name = "%s-%s.wav" % (stem or "clip",
+                              hashlib.sha256(wav).hexdigest()[:8])
+        try:
+            os.makedirs(AUDIO_ROOT, exist_ok=True)
+            path = os.path.join(AUDIO_ROOT, name)
+            with open(path, "wb") as fh:
+                fh.write(wav)
+            return path
+        except OSError:
+            return ""
+
+    @classmethod
+    def _read_audio_attachments(cls, audio_items, audible):
+        """Turn dropped SOUND files into what the turn needs.
+
+        For an **audio-capable** model (ollama's own `capabilities` list, read
+        for THIS model): each is trimmed to an ATTACH_AUDIO_SECONDS excerpt at
+        16 kHz mono and base64-encoded onto the message — the same `images`
+        field the pictures ride, which is measurably how ollama carries audio
+        too (there is no `audio` key on its chat message). For a model with **no
+        audio support**: no bytes are sent and the note says so, so a song is
+        never silently ignored by a model that cannot hear (docs/DESIGN.md §10).
+        Returns `(base64_list, note)`.
+        """
+        if not audio_items:
+            return [], ""
+        where = "\n".join("  %s — %s" % (it["name"], it["path"])
+                          for it in audio_items)
+        if not audible:
+            names = ", ".join(it["name"] for it in audio_items)
+            return [], ("[attached audio: %s — the selected model has no audio "
+                        "support, so it was not sent and you have NOT heard it. "
+                        "Tell him to pick a model whose capabilities include "
+                        "audio (gemma4 does). file_metadata still reads its "
+                        "tags and length, at these paths:\n%s]" % (names, where))
+        b64, ok, skipped = [], [], []
+        for it in audio_items:
+            path, name = it["path"], it["name"]
+            try:
+                size = os.path.getsize(path)
+            except OSError as e:
+                skipped.append("%s (could not read: %s)" % (name, e.strerror))
+                continue
+            if size > ATTACH_AUDIO_MAX:
+                skipped.append("%s (%d MB, over the %d MB limit)"
+                               % (name, size // (1024 * 1024),
+                                  ATTACH_AUDIO_MAX // (1024 * 1024)))
+                continue
+            wav, err = cls._audio_excerpt(path, 0, ATTACH_AUDIO_SECONDS)
+            if err:
+                skipped.append("%s (%s)" % (name, err))
+                continue
+            b64.append(base64.b64encode(wav).decode("ascii"))
+            ok.append(name)
+        parts = []
+        if ok:
+            parts.append("[attached audio, which you can HEAR above — the first "
+                         "%d seconds of each, 16 kHz mono. Answer from the "
+                         "sound itself, not from the filename. The files "
+                         "are:\n%s]" % (ATTACH_AUDIO_SECONDS, where))
+        if skipped:
+            parts.append("[audio not sent: %s]" % "; ".join(skipped))
         return b64, "\n".join(parts)
 
     @staticmethod
@@ -5545,7 +5831,7 @@ class Ollama(QObject):
         return (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, SELF_TOOL,
                 IMAGE_TOOL, SEARCH_IMAGE_TOOL, VIEW_IMAGE_TOOL, SHOW_IMAGE_TOOL,
                 SCREENSHOT_TOOL, MAKE_IMAGE_TOOL, MAKE_VIDEO_TOOL, BOORU_TOOL,
-                VIDEO_TOOL, PLAYER_TOOL,
+                VIDEO_TOOL, PLAYER_TOOL, LISTEN_TOOL,
                 MUSIC_TOOL, LASTFM_TOOL, MODEL_TOOL,
                 FETCH_URL_TOOL, WIKIPEDIA_TOOL,
                 CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
@@ -5585,6 +5871,16 @@ class Ollama(QObject):
         reg = self._main_registry()
         want = list(CORE_TOOL_NAMES) + [n for n in self._extra_tools
                                         if n not in CORE_TOOL_NAMES]
+        # AN EAR IS ATTACHED ONLY TO A MODEL THAT HAS ONE. "listen to what I'm
+        # playing" is a plain-words ask, and the generators are core for exactly
+        # that reason — but a schema offered to a model with no `audio` in its
+        # capabilities buys a refusal for a thousand characters of window, so
+        # this one is attached by capability rather than always or never. It
+        # stays in the index (`tools_note`) regardless, so a model that can hear
+        # is never the only one told it exists.
+        if ("audio" in (self._caps or []) and self._ctx_model == self._model
+                and "listen_audio" not in want):
+            want.append("listen_audio")
         return [reg[n] for n in want if n in reg]
 
     @staticmethod
@@ -6110,6 +6406,8 @@ class Ollama(QObject):
             self._screenshot(args, i, remaining, calls)
         elif name in VIEW_IMAGE_TOOL_NAMES:
             self._view_image(args, i, remaining, calls)
+        elif name in LISTEN_TOOL_NAMES:
+            self._listen_audio(args, i, remaining, calls)
         elif name in MODEL_TOOL_NAMES:
             self._run_model_tool(args, i, remaining, calls)
         elif name in MUSIC_TOOL_NAMES:
@@ -6905,6 +7203,15 @@ class Ollama(QObject):
                  "content": ("[the image(s) you asked to look at, attached]"),
                  "images": self._pending_vision})
             self._pending_vision = []
+        # …and the SOUND `listen_audio` fetched, on its own message for the same
+        # reason and through the same field (see `_read_audio_attachments`).
+        if self._pending_audio:
+            self._messages.append(
+                {"role": "user",
+                 "content": ("[the audio you asked to listen to, attached — "
+                             "answer from what you HEAR in it]"),
+                 "images": self._pending_audio})
+            self._pending_audio = []
         # A new round: the segment just finished is closed and QML opens a
         # fresh bubble for what comes next (see `roundStarted`).
         self._row_urls = set()          # a fresh bubble carries no pictures yet
@@ -8426,6 +8733,244 @@ class Ollama(QObject):
         proc.start(argv[0], argv[1:])
         proc.write(json.dumps({"op": "image", "path": path}).encode("utf-8"))
         proc.closeWriteChannel()
+
+    # ---- listen_audio: a SOUND, for the model to hear ----
+
+    #: What `now_playing` needs off the bus, in one playerctl call: where the
+    #: track lives and how far in he is. Separate from PLAYER_FORMAT on purpose
+    #: — that line is `control_media`'s contract and its harness asserts its
+    #: arity.
+    LISTEN_META_FORMAT = "{{xesam:url}}\t{{position}}\t{{artist}} - {{title}}"
+
+    def _listen_audio(self, args, idx, remaining, calls):
+        """Hear a sound: a file, whatever is playing, or the speakers themselves.
+
+        The bytes never enter the tool RESULT (a base64 wav in the transcript
+        would be enormous and unreadable) — they are held in `_pending_audio`
+        and go out as an ollama `images` block on a user message that
+        `_tool_done` appends before the next post, exactly as `view_image`'s
+        pixels do.
+        """
+        a = args if isinstance(args, dict) else {}
+        path = str(a.get("path", "") or "").strip()
+        source = str(a.get("source", "") or "").strip().lower()
+        if source not in ("now_playing", "file", "capture"):
+            source = "file" if path else "now_playing"
+        target_host = str(a.get("host", "") or "").strip().lower() or None
+        cap = LISTEN_CAPTURE_MAX if source == "capture" else LISTEN_MAX_SECONDS
+        try:
+            seconds = float(a.get("seconds") or LISTEN_SECONDS)
+        except (TypeError, ValueError):
+            seconds = float(LISTEN_SECONDS)
+        seconds = max(1.0, min(seconds, float(cap)))
+        start = a.get("start")
+        try:
+            start = None if start is None else max(0.0, float(start))
+        except (TypeError, ValueError):
+            start = None
+
+        def fail(reason):
+            remaining["sink"][idx] = {
+                "role": "tool", "tool_name": "listen_audio",
+                "content": json.dumps({"error": reason})}
+            self.fileToolDone.emit("listen — " + reason, False)
+            self._tool_done(remaining, calls)
+
+        # A model with no ear cannot be handed a waveform; say so rather than
+        # spending the context on bytes it will ignore (docs/DESIGN.md §10).
+        if "audio" not in (self._caps or []) or self._ctx_model != self._model:
+            self.fileToolStarted.emit("listen")
+            fail("this model has no audio support, so it cannot hear — tell "
+                 "him to pick a model whose capabilities include audio")
+            return
+        if source == "capture":
+            self.fileToolStarted.emit("listen to the speakers (%ds)" % int(seconds))
+            self._listen_capture(seconds, idx, remaining, calls)
+            return
+        if source == "file":
+            if not path:
+                self.fileToolStarted.emit("listen")
+                fail("no path given — pass `path`, or use source "
+                     "'now_playing' to hear what he is playing")
+                return
+            self.fileToolStarted.emit("listen to " + os.path.basename(path))
+            self._listen_file(path, target_host, start or 0.0, seconds,
+                              os.path.basename(path), idx, remaining, calls)
+            return
+        # now_playing: the same MPRIS seam control_media drives, so the model
+        # needs neither the path nor the position. It is the bus of the machine
+        # the WINDOW runs on, and that limit is reported, not hidden.
+        self.fileToolStarted.emit("listen to what is playing")
+
+        def got(rc, out, err):
+            line = (out or "").splitlines()[0] if out else ""
+            f = (line.split("\t") + ["", "", ""])[:3]
+            url, pos_us, label = f[0].strip(), f[1].strip(), f[2].strip(" -")
+            if rc != 0 or not url:
+                fail(self._player_reason(err)
+                     or ("nothing is playing here that names a file — its "
+                         "track has no local path (a stream?), so use source "
+                         "'capture' to hear the speakers instead"))
+                return
+            track = QUrl(url).toLocalFile() if url.startswith("file:") else ""
+            if not track:
+                fail("the current track is not a local file (%s) — use source "
+                     "'capture' to hear it as it plays" % url[:120])
+                return
+            at = start
+            if at is None:
+                try:
+                    at = max(0.0, float(pos_us) / 1_000_000 - 2.0)
+                except (TypeError, ValueError):
+                    at = 0.0
+            self._listen_file(track, LOCAL_HOST, at, seconds,
+                              label or os.path.basename(track),
+                              idx, remaining, calls, playing=True)
+
+        self._pctl(["metadata", "--format", self.LISTEN_META_FORMAT], got)
+
+    def _listen_file(self, path, target_host, start, seconds, label,
+                     idx, remaining, calls, playing=False):
+        """Excerpt a sound FILE through the jailed executor (`sandbox-fs.py` op
+        `audio`) — same wide READ root and same host branch as `read_file`, so
+        listening reaches exactly what reading reaches and nothing more. The
+        trim runs where the FILE is, which is what keeps a 40 MB flac on top
+        from crossing the tailnet to be cut on book."""
+        argv = self._fs_argv(target_host)
+        proc = QProcess(self)
+        self._procs.append(proc)
+
+        def fail(reason):
+            remaining["sink"][idx] = {
+                "role": "tool", "tool_name": "listen_audio",
+                "content": json.dumps({"error": reason})}
+            self.fileToolDone.emit("listen to " + label + " — " + reason, False)
+            self._tool_done(remaining, calls)
+
+        def finished(*_):
+            if proc not in self._procs:
+                return
+            self._procs.remove(proc)
+            try:
+                out = bytes(proc.readAllStandardOutput())
+                err = bytes(proc.readAllStandardError())
+                rc = proc.exitCode()
+            except RuntimeError:
+                return
+            proc.deleteLater()
+            result = self._fs_result(out, err, rc)
+            b64 = result.pop("b64", "") if isinstance(result, dict) else ""
+            if "error" in result or not b64:
+                fail(result.get("error", "could not read that as audio"))
+                return
+            self._listen_deliver(
+                b64, label,
+                {"ok": True, "source": "now_playing" if playing else "file",
+                 "path": result.get("path", path),
+                 "track": label if playing else "",
+                 "start_seconds": round(float(result.get("start", start)), 1),
+                 "seconds": round(float(result.get("seconds", seconds)), 1),
+                 "duration_seconds": result.get("duration", 0)},
+                idx, remaining, calls)
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(lambda *_: None)
+        proc.start(argv[0], argv[1:])
+        proc.write(json.dumps({"op": "audio", "path": path, "start": start,
+                               "seconds": seconds, "rate": AUDIO_RATE
+                               }).encode("utf-8"))
+        proc.closeWriteChannel()
+
+    def _listen_capture(self, seconds, idx, remaining, calls):
+        """Record what the SPEAKERS are putting out — the default sink's own
+        monitor, never a microphone, and never on any other machine than the
+        one the window runs on.
+
+        This is the only source that can hear something which is not a file: a
+        browser tab, a game, a stream. It is passive — a monitor read changes
+        nothing about what is playing — and it is bounded by LISTEN_CAPTURE_MAX
+        so a model cannot leave a recorder running on his desktop.
+        """
+        exe = shutil.which(FFMPEG) or FFMPEG
+        argv = [exe, "-v", "error", "-nostdin", "-f", "pulse",
+                "-i", os.environ.get("ORACLE_MONITOR", "@DEFAULT_MONITOR@"),
+                "-t", "%.3f" % seconds, "-ar", str(AUDIO_RATE), "-ac", "1",
+                "-c:a", "pcm_s16le", "-f", "wav", "-"]
+        proc = QProcess(self)
+        self._procs.append(proc)
+
+        def fail(reason):
+            remaining["sink"][idx] = {
+                "role": "tool", "tool_name": "listen_audio",
+                "content": json.dumps({"error": reason})}
+            self.fileToolDone.emit("listen to the speakers — " + reason, False)
+            self._tool_done(remaining, calls)
+
+        def finished(*_):
+            if proc not in self._procs:
+                return
+            self._procs.remove(proc)
+            try:
+                wav = bytes(proc.readAllStandardOutput())
+                err = bytes(proc.readAllStandardError()).decode("utf-8", "replace")
+                rc = proc.exitCode()
+            except RuntimeError:
+                return
+            proc.deleteLater()
+            if rc != 0 or len(wav) <= 44:
+                tail = (err.strip().splitlines() or [""])[-1]
+                fail(tail[:200] or "nothing could be recorded from this "
+                                   "machine's audio output")
+                return
+            self._listen_deliver(
+                base64.b64encode(self._wav_sized(wav)).decode("ascii"), "speakers",
+                {"ok": True, "source": "capture", "seconds": round(seconds, 1),
+                 "note_source": "recorded from this machine's audio output"},
+                idx, remaining, calls)
+
+        def failed(e):
+            if e != QProcess.ProcessError.FailedToStart:
+                return
+            if proc in self._procs:
+                self._procs.remove(proc)
+            proc.deleteLater()
+            fail("ffmpeg is not on this machine, so the speakers cannot be "
+                 "recorded")
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(failed)
+        proc.start(argv[0], argv[1:])
+
+    def _listen_deliver(self, b64, label, result, idx, remaining, calls):
+        """Hand one excerpt to the model and name it to him.
+
+        The clip is also written under AUDIO_ROOT and its path put in the
+        result, so what the model heard is a file he can play — the audio half
+        of `view_image` drawing its picture in the chat (docs/DESIGN.md §10:
+        nothing listened to in secret).
+        """
+        self._pending_audio.append(b64)
+        try:
+            clip = self._keep_clip(base64.b64decode(b64), label)
+        except ValueError:      # binascii.Error subclasses ValueError
+            clip = ""
+        result = dict(result)
+        if clip:
+            result["clip"] = clip
+        result["note"] = ("The audio is attached to your next turn — listen to "
+                          "it and answer from what you HEAR, not from the title "
+                          "or the tags. It is %d kHz mono, %s seconds of it."
+                          % (AUDIO_RATE // 1000, result.get("seconds", "?")))
+        remaining["sink"][idx] = {"role": "tool", "tool_name": "listen_audio",
+                                   "content": json.dumps(result)}
+        span = ""
+        if result.get("start_seconds"):
+            span = " from %d:%02d" % (int(result["start_seconds"]) // 60,
+                                      int(result["start_seconds"]) % 60)
+        self.fileToolDone.emit(
+            "listened to %s%s (%ss)" % (label, span, result.get("seconds", "?")),
+            True)
+        self._tool_done(remaining, calls)
 
     def _show_image(self, args, idx, remaining, calls):
         """Put a local picture in the chat WITHOUT showing it to the model.
