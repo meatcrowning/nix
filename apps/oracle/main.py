@@ -783,7 +783,11 @@ MODEL_TOOL_NAMES = {"manage_models"}
 MODEL_PULL_MS = 90 * 60 * 1000
 MODEL_DISK_FLOOR = 5 * 1024 * 1024 * 1024
 
-#: The library and the queue socket both live with the player, on `top`.
+#: The library and the queue socket live with the PLAYER — which since
+#: 2026-08-24 means the machine this window is on, book included: book runs its
+#: own player against the synced database and the SMB-mounted library, so
+#: asking top what is queued was asking the wrong machine (see TOOLS_HOST).
+#: The path is identical on both.
 MUSIC_SCRIPT = "/home/lam/nix/apps/player/tools/library-ipc.py"
 
 #: Which player, and what drives it. `playerctl` is the client (a real MPRIS
@@ -1303,6 +1307,13 @@ WRITE_FREE = os.path.realpath(WRITE_ROOT) == os.sep
 WRITE_PATH = ("absolute (or relative to '/')" if WRITE_FREE
               else "relative to your sandbox root")
 WRITE_WHERE = ("anywhere on the filesystem" if WRITE_FREE else "in your sandbox")
+#: The `host` argument, in one place: every file tool takes it, read or write,
+#: and its default is THE MACHINE THIS WINDOW IS ON — see TOOLS_HOST.
+HOST_ARG_DESC = ("Which machine to act on. Default '%s', the machine you and "
+                 "he are on right now; name the other one to reach it over the "
+                 "tailnet." % ("book" if socket.gethostname() == "book" else "top"))
+HOST_ARG = {"type": "string", "enum": ["top", "book"],
+            "description": HOST_ARG_DESC}
 
 #: The FILE TOOLS oracle offers the model on EVERY turn (no toggle — his call:
 #: "always available to the model"). Reading and manipulation both, and every
@@ -1326,8 +1337,7 @@ FILE_TOOLS = [
         "parameters": {"type": "object", "properties": {
             "path": {"type": "string",
                      "description": "Directory to list, relative to '/'. Default '.'."},
-            "host": {"type": "string", "enum": ["top", "book"],
-                     "description": "Which machine to read. Default 'top'."}},
+            "host": dict(HOST_ARG)},
             "required": []}}},
     {"type": "function", "function": {
         "name": "read_file",
@@ -1343,8 +1353,7 @@ FILE_TOOLS = [
                        "description": "0-based line to start at. Default 0."},
             "limit": {"type": "integer",
                       "description": "Max lines to return this call."},
-            "host": {"type": "string", "enum": ["top", "book"],
-                     "description": "Which machine to read. Default 'top'."}},
+            "host": dict(HOST_ARG)},
             "required": ["path"]}}},
     {"type": "function", "function": {
         "name": "write_file",
@@ -1352,7 +1361,8 @@ FILE_TOOLS = [
                         "the given content. Parent directories are created."),
         "parameters": {"type": "object", "properties": {
             "path": {"type": "string", "description": "File to write, " + WRITE_PATH + "."},
-            "content": {"type": "string", "description": "Full new file contents."}},
+            "content": {"type": "string", "description": "Full new file contents."},
+            "host": dict(HOST_ARG)},
             "required": ["path", "content"]}}},
     {"type": "function", "function": {
         "name": "edit_file",
@@ -1364,14 +1374,16 @@ FILE_TOOLS = [
             "old": {"type": "string", "description": "Exact text to find."},
             "new": {"type": "string", "description": "Text to put in its place."},
             "replace_all": {"type": "boolean",
-                            "description": "Replace every match, not just a unique one."}},
+                            "description": "Replace every match, not just a unique one."},
+            "host": dict(HOST_ARG)},
             "required": ["path", "old", "new"]}}},
     {"type": "function", "function": {
         "name": "move_path",
         "description": "Move or rename a file or directory " + WRITE_WHERE + ".",
         "parameters": {"type": "object", "properties": {
             "src": {"type": "string", "description": "Path to move, " + WRITE_PATH + "."},
-            "dst": {"type": "string", "description": "Destination, " + WRITE_PATH + "."}},
+            "dst": {"type": "string", "description": "Destination, " + WRITE_PATH + "."},
+            "host": dict(HOST_ARG)},
             "required": ["src", "dst"]}}},
     {"type": "function", "function": {
         "name": "delete_path",
@@ -1382,13 +1394,15 @@ FILE_TOOLS = [
         "parameters": {"type": "object", "properties": {
             "path": {"type": "string", "description": "Path to delete, " + WRITE_PATH + "."},
             "recursive": {"type": "boolean",
-                          "description": "Delete a directory and its contents."}},
+                          "description": "Delete a directory and its contents."},
+            "host": dict(HOST_ARG)},
             "required": ["path"]}}},
     {"type": "function", "function": {
         "name": "make_dir",
         "description": "Create a directory (and parents) " + WRITE_WHERE + ".",
         "parameters": {"type": "object", "properties": {
-            "path": {"type": "string", "description": "Directory to create, " + WRITE_PATH + "."}},
+            "path": {"type": "string", "description": "Directory to create, " + WRITE_PATH + "."},
+            "host": dict(HOST_ARG)},
             "required": ["path"]}}},
     {"type": "function", "function": {
         "name": "find_files",
@@ -1402,8 +1416,7 @@ FILE_TOOLS = [
                         "description": "Glob, e.g. '*.md' or '**/*.py'."},
             "path": {"type": "string",
                      "description": "Directory to search under, relative to '/'. Default '.'."},
-            "host": {"type": "string", "enum": ["top", "book"],
-                     "description": "Which machine to search. Default 'top'."}},
+            "host": dict(HOST_ARG)},
             "required": ["pattern"]}}},
     {"type": "function", "function": {
         "name": "search_text",
@@ -1420,8 +1433,7 @@ FILE_TOOLS = [
                      "description": "Only search files whose name matches this glob, e.g. '*.py'."},
             "ignore_case": {"type": "boolean",
                             "description": "Case-insensitive match."},
-            "host": {"type": "string", "enum": ["top", "book"],
-                     "description": "Which machine to search. Default 'top'."}},
+            "host": dict(HOST_ARG)},
             "required": ["pattern"]}}},
     {"type": "function", "function": {
         "name": "show_tree",
@@ -1433,8 +1445,7 @@ FILE_TOOLS = [
                      "description": "Directory to show, relative to '/'. Default '.'."},
             "depth": {"type": "integer",
                       "description": "How many levels deep to descend. Default 5."},
-            "host": {"type": "string", "enum": ["top", "book"],
-                     "description": "Which machine to show. Default 'top'."}},
+            "host": dict(HOST_ARG)},
             "required": []}}},
 ]
 
@@ -2920,6 +2931,15 @@ MEMORY_ROOT = os.path.expanduser(
     os.environ.get("ORACLE_MEMORY", "~/.local/share/oracle/memory"))
 MEMORY_SCRIPT = str(HERE / "tools" / "memory-store.py")
 
+#: A STORE POINTED SOMEWHERE ELSE IS A LOCAL STORE. The session and memory
+#: stores keep their `top` branch on purpose — one set of memories, one history,
+#: whichever machine he is on — but `$ORACLE_MEMORY`/`$ORACLE_SESSIONS` exist so
+#: a harness can drive a disposable one, and that root is a path in ITS /tmp.
+#: Sending the op to top made every such run fail on book with a store the
+#: other machine had never heard of.
+STORE_LOCAL = bool(os.environ.get("ORACLE_MEMORY")
+                   or os.environ.get("ORACLE_SESSIONS"))
+
 #: The code runner. Same absolute path on both machines and pure stdlib, so
 #: `python3 <this> <sandbox>` runs unchanged locally on top or over ssh from
 #: book — identical to FS_SCRIPT. Runs against SANDBOX_ROOT (the WRITE jail):
@@ -2944,6 +2964,31 @@ MEMORY_CTX_CHARS = 8000
 #: 11434, tools/ollama-tunnel.sh) and — for start/stop — its systemd unit over
 #: the same ssh. See Backend below.
 ON_BOOK = socket.gethostname() == "book"
+
+#: WHERE A TOOL DOES ITS WORK — and since 2026-08-24 the answer is THIS
+#: MACHINE, on either of them.
+#:
+#: Every executor here used to hard-branch to `top` from book, on the reasoning
+#: that the library and the compute live there. For the model's own compute
+#: that is still true and unchanged (ollama, image and video generation, the
+#: session and memory stores — one history, not two). For his FILES and his
+#: PLAYER it was wrong: chatter on book could not read a file on book, could
+#: not run a command against it, and asked top what was playing while he sat in
+#: front of book playing something else [his, 2026-08-24: "when im in air,
+#: chatter agents can see what im playing / manipulate airs files like it can
+#: on top"].
+#:
+#: So the file tools, the two runners, background jobs and the music library
+#: default to the machine the window is running on, and the file tools' `host`
+#: argument still reaches the OTHER one over the tailnet — which is the same
+#: mechanism as before, with its default corrected. `ORACLE_TOOLS_HOST=top`
+#: puts the old behaviour back wholesale.
+LOCAL_HOST = "book" if ON_BOOK else "top"
+TOOLS_HOST = os.environ.get("ORACLE_TOOLS_HOST", "").strip().lower()
+if TOOLS_HOST not in ("top", "book"):
+    TOOLS_HOST = LOCAL_HOST
+#: True only when the work has to leave this machine — i.e. book reaching top.
+TOOLS_REMOTE = TOOLS_HOST != LOCAL_HOST
 
 #: oracle's own config dir (shared with tavily.key). Two optional, no-rebuild
 #: files drive the model selector — drop them in and relaunch, same as the key:
@@ -3463,7 +3508,7 @@ class Jobs(QObject):
 
     @staticmethod
     def _argv(*args):
-        if ON_BOOK:
+        if TOOLS_REMOTE:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
             ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
             argv = [ssh, "-o", "BatchMode=yes"]
@@ -5452,6 +5497,10 @@ class Ollama(QObject):
             "provider": {"backend": "ollama", "endpoint": OLLAMA},
             "app": "chatter (the oracle ollama chat window)",
             "host": socket.gethostname(),
+            # WHERE THE TOOLS ACT. A model that assumed "top" wrote a file on
+            # the wrong machine; it is a fact about this window, so it is
+            # reported rather than left to be inferred.
+            "tools_act_on": TOOLS_HOST,
             "os": self._os_pretty(),
             "arch": platform.machine(),
             "cpu_logical": os.cpu_count(),
@@ -7531,7 +7580,7 @@ class Ollama(QObject):
         `$ORACLE_MUSIC` replaces the script, which is how the harness drives a
         fake library and a fake socket instead of his."""
         script = os.environ.get("ORACLE_MUSIC", "").strip() or MUSIC_SCRIPT
-        if ON_BOOK:
+        if TOOLS_REMOTE:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
             ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
             argv = [ssh, "-o", "BatchMode=yes"]
@@ -7803,8 +7852,9 @@ class Ollama(QObject):
         Every action ends in a STATUS read, so the model reports the state it
         produced rather than the one it intended — and a failure is a REASON,
         never a silent no-op: nothing running on this machine's bus is the
-        common one and a real answer (his library is on `top`, so a book window
-        has nothing to drive)."""
+        common one and a real answer (nothing is playing on THIS machine's
+        bus — which since 2026-08-24 is the machine he is sitting at, not
+        always top)."""
         a = args if isinstance(args, dict) else {}
         action = str(a.get("action") or "status").strip().lower()
         target = str(a.get("player") or "").strip()
@@ -8273,8 +8323,8 @@ class Ollama(QObject):
         AGENTS.md "Off-LAN: the tailnet"), reusing the tunnel's control master
         only for the one hop (book asking for top) that already has one open.
         The op JSON is written to stdin regardless of which branch runs."""
-        host = target_host if target_host in ("top", "book") else "top"
-        local = "book" if ON_BOOK else "top"
+        host = target_host if target_host in ("top", "book") else TOOLS_HOST
+        local = LOCAL_HOST
         if host == local:
             return [sys.executable, FS_SCRIPT, WRITE_ROOT, READ_ROOT]
         ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
@@ -8554,7 +8604,7 @@ class Ollama(QObject):
             if total > cls.PAINTER_INPUT_MAX:
                 return "", b"", ("the input images come to more than %d MB"
                                  % (cls.PAINTER_INPUT_MAX // (1024 * 1024)))
-            if not ON_BOOK:
+            if not cls._painter_remote():
                 flags += " %s %s" % (flag, shlex.quote(path))
                 continue
             name = seen.get(path)
@@ -8562,7 +8612,7 @@ class Ollama(QObject):
                 name = "in%d%s" % (len(seen), os.path.splitext(path)[1] or ".png")
                 seen[path] = name
             flags += " %s %s" % (flag, shlex.quote(cls.PAINTER_IN_DIR + "/" + name))
-        if not ON_BOOK or not seen:
+        if not cls._painter_remote() or not seen:
             return flags, b"", ""
         buf = io.BytesIO()
         try:
@@ -8572,6 +8622,14 @@ class Ollama(QObject):
         except (OSError, tarfile.TarError) as e:
             return "", b"", "could not pack the input images: %s" % e
         return flags, base64.b64encode(buf.getvalue()), ""
+
+    @staticmethod
+    def _painter_remote():
+        """Is the generator on the OTHER machine? `top` from book, unless
+        `$ORACLE_PAINTER` replaced it — a harness's stub is a script in its own
+        /tmp, so it runs here, its inputs need no staging and its output IS on
+        this disk."""
+        return ON_BOOK and not os.environ.get("ORACLE_PAINTER", "").strip()
 
     @classmethod
     def _painter_argv(cls, args, kind="image"):
@@ -8676,7 +8734,11 @@ class Ollama(QObject):
         # leaves its child rendering (see `_stop_generating`).
         script = "mkdir -p %s; %s%sexec %s" % (shlex.quote(MAKE_IMAGE_DIR),
                                                unpack, wake, cmd)
-        if ON_BOOK:
+        # THE WEIGHTS AND THE GPU ARE ON TOP, so this one does not follow
+        # TOOLS_HOST — except when `$ORACLE_PAINTER` replaced the generator,
+        # which only a harness does and only ever with a script in its own
+        # /tmp. Sending that to top ran a file the other machine has never had.
+        if cls._painter_remote():
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
             ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
             argv = [ssh, "-o", "BatchMode=yes"]
@@ -8964,8 +9026,11 @@ class Ollama(QObject):
                                  "back.")}, True,
                        "made " + os.path.basename(path))
 
+            # The picture is wherever the GENERATOR ran — top from book, and
+            # this machine when a stub replaced it (`_painter_remote`).
             self._display_image(path, caption,
-                                "top" if ON_BOOK else None, shown, meta)
+                                "top" if self._painter_remote() else None,
+                                shown, meta)
 
         def failed(e):
             if state["done"] or e != QProcess.ProcessError.FailedToStart:
@@ -9105,9 +9170,10 @@ class Ollama(QObject):
                              "this seed back.")}, True,
                    "made " + os.path.basename(here))
 
-        if ON_BOOK:
+        if ON_BOOK and not os.path.exists(here):
             # The clip is on top and QtMultimedia cannot stream a path that is
-            # not here. Nothing to draw locally, so say where it is rather than
+            # not here. Asked of the FILE, not of the hostname: a path that is
+            # on this disk plays, whichever machine wrote it. Nothing to draw locally, so say where it is rather than
             # showing a card that would not play (docs/DESIGN.md §10).
             self._made_this_turn["video"] = here
             answer({"ok": True, "path": here, "host": "top",
@@ -9294,9 +9360,11 @@ class Ollama(QObject):
         the args before they become the op request (sandbox-fs.py doesn't know
         about it) and instead selects which machine `_fs_argv` targets."""
         req = {k: v for k, v in args.items()} if isinstance(args, dict) else {}
+        # `host` reaches EITHER machine now, on a write as much as on a read:
+        # the sandbox runs on both and their layouts are identical, and a
+        # chatter on book that could read book but only write top would be the
+        # more confusing half-answer.
         target_host = str(req.pop("host", "") or "").strip().lower() or None
-        if name not in FILE_READ_TOOL_NAMES:
-            target_host = None   # mutating tools have no host arg; ignore stray input
         req["op"] = FILE_OP[name]
         self.fileToolStarted.emit(self._fs_heading(name, args))
         argv = self._fs_argv(target_host)
@@ -9346,7 +9414,7 @@ class Ollama(QObject):
         root — the runner's default working directory, not a jail — plus
         `--no-net` when ORACLE_EXEC_NET=0 asks for the old network cut."""
         extra = [] if EXEC_NET else ["--no-net"]
-        if ON_BOOK:
+        if TOOLS_REMOTE:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
             ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
             argv = [ssh, "-o", "BatchMode=yes"]
@@ -9553,7 +9621,7 @@ class Ollama(QObject):
         (duplicated rather than shared: Ollama and Sessions are independent
         QObjects with no reference to each other) — local on `top`, over the
         tunnel's ssh master from `book`."""
-        if ON_BOOK:
+        if ON_BOOK and not STORE_LOCAL:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
             ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
             argv = [ssh, "-o", "BatchMode=yes"]
@@ -9625,7 +9693,7 @@ class Ollama(QObject):
         tools/memory-store.py — the same host branch as `_sessions_argv`: local
         on `top`, over the tunnel's ssh master from `book`, so the memories live
         in one canonical place both machines share."""
-        if ON_BOOK:
+        if ON_BOOK and not STORE_LOCAL:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
             ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
             argv = [ssh, "-o", "BatchMode=yes"]
@@ -10243,7 +10311,7 @@ class Sessions(QObject):
         (OLLAMA_SSH*), so the sessions/transcripts live in one canonical place
         keyed to top and both machines share them. The op JSON is written to
         stdin."""
-        if ON_BOOK:
+        if ON_BOOK and not STORE_LOCAL:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
             ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
             argv = [ssh, "-o", "BatchMode=yes"]

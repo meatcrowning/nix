@@ -14,6 +14,7 @@ import json
 import os
 import stat
 import subprocess
+import shlex
 import sys
 import tempfile
 from pathlib import Path
@@ -298,12 +299,30 @@ check("...and the render process is gone", all(_dead(pr) for pr in live))
 os.environ.pop("ORACLE_PAINTER", None)
 o._set_busy(True)          # cancel() dropped it; the sections below need it
 
+# THE SAME ASSERTIONS ON BOTH MACHINES. From book the generator still runs on
+# top (the weights and the GPU are there), so `_painter_argv` returns
+# `ssh top bash -lc '<script>'` — one more level of quoting — and any input
+# picture is named by the copy that gets staged into PAINTER_IN_DIR rather than
+# by its path here. Normalise both, and what the checks below read is the
+# generator's own command line either way.
+def gen_line(argv):
+    line = argv[-1]
+    return shlex.split(line)[-1] if oracle.Ollama._painter_remote() else line
+
+
+def staged(path):
+    if not oracle.Ollama._painter_remote():
+        return str(path)
+    return "%s/in0%s" % (oracle.Ollama.PAINTER_IN_DIR,
+                         os.path.splitext(str(path))[1] or ".png")
+
+
 # 3b. every knob reaches the generator's command line, and an input picture
 # turns the same tool into an EDIT.
 argv, stdin, err = oracle.Ollama._painter_argv(
     {"prompt": "1girl, solo", "model": "anima", "aspect": "2:3",
      "megapixels": 1, "count": 2, "seed": 7}, "image")
-line = argv[-1]
+line = gen_line(argv)
 check("make_image passes his settings through, not a paraphrase",
       not err and " --aspect 2:3" in line and " --megapixels 1" in line
       and " --batch 2" in line and " --seed 7" in line
@@ -311,21 +330,24 @@ check("make_image passes his settings through, not a paraphrase",
 argv, stdin, err = oracle.Ollama._painter_argv(
     {"prompt": "make it night", "input_images": [str(PIC)]}, "image")
 check("an input picture makes it an edit, on the edit model",
-      not err and " --edit" in argv[-1] and " --mode edit" in argv[-1]
-      and (" --image " + str(PIC)) in argv[-1], (err or argv[-1])[-220:])
+      not err and " --edit" in gen_line(argv) and " --mode edit" in gen_line(argv)
+      and (" --image " + staged(PIC)) in gen_line(argv),
+      (err or gen_line(argv))[-220:])
 argv, stdin, err = oracle.Ollama._painter_argv(
     {"prompt": "she turns", "first_frame": str(PIC), "last_frame": str(PIC),
      "seconds": 6}, "video")
 check("a clip names both ends and its length",
-      not err and " --mode video" in argv[-1] and " --seconds 6" in argv[-1]
-      and (" --last-frame " + str(PIC)) in argv[-1], (err or argv[-1])[-260:])
+      not err and " --mode video" in gen_line(argv)
+      and " --seconds 6" in gen_line(argv)
+      and (" --last-frame " + staged(PIC)) in gen_line(argv),
+      (err or gen_line(argv))[-260:])
 # EVERY KNOB THE WORKFLOW HAS, not the four it started with [his, 2026-08-24:
 # a turn that answered "CFG isn't something I can directly control from here"].
 argv, stdin, err = oracle.Ollama._painter_argv(
     {"prompt": "x", "cfg": 1.0, "sampler": "euler", "scheduler": "beta",
      "denoise": 0.8, "loras": ["thing", "other:0.4"],
      "extra": {"shift": 3.0, "flavour": "wet"}}, "image")
-line = argv[-1]
+line = gen_line(argv)
 check("the whole sampler is reachable, not just steps and seed",
       not err and " --cfg 1.0" in line and " --sampler euler" in line
       and " --scheduler beta" in line and " --denoise 0.8" in line,
@@ -337,8 +359,8 @@ check("...and anything else by name, typed as JSON",
       line[-200:])
 argv, stdin, err = oracle.Ollama._painter_argv(
     {"prompt": "x", "fps": 12, "cfg": 4}, "video")
-check("a clip's own knobs too", not err and " --fps 12" in argv[-1]
-      and " --cfg 4" in argv[-1], (err or argv[-1])[-200:])
+check("a clip's own knobs too", not err and " --fps 12" in gen_line(argv)
+      and " --cfg 4" in gen_line(argv), (err or gen_line(argv))[-200:])
 argv, stdin, err = oracle.Ollama._painter_argv(
     {"prompt": "x", "first_frame": str(_TMP / "gone.png")}, "video")
 check("a frame that is not there is refused before the backend is woken",
