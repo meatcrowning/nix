@@ -52,6 +52,16 @@ freeze anything — ollama partially offloads to CPU and ComfyUI errors the job 
 so running out of VRAM makes the warden free the other backend but NEVER refuse.
 Only RAM can refuse, because only RAM can take the desktop with it.
 
+  …but tidying has to actually happen, and until 2026-08-25 it did not when it
+  mattered. `busy()` is two signals wearing one name: a live LEASE, which is an
+  app saying "this turn is mine" and is rule 2, and a GUESS (a resident model
+  plus GPU load). For a render that needs VRAM the guess protects exactly the
+  thing in its way, so a comfy reserve that cannot fit on the card now WAITS an
+  advisory-busy ollama out (`wait_idle`, IDLE_WAIT) and then frees it. A lease
+  is never waited on and never taken from. Measured that night: llama-server
+  holding 9.7 GiB of an 11.5 GiB card, comfy admitted on RAM alone, dead 0.74s
+  later on `Free (according to CUDA): 9.62 MiB`.
+
 FAIL-OPEN, ALWAYS. A warden that is down, wedged or switched off must never be
 the reason he cannot work: the clients treat any error or timeout as "go", and
 the kill switch below makes every reserve an immediate yes.
@@ -105,6 +115,10 @@ HARD_FLOOR = int(float(os.environ.get("AI_WARDEN_HARD_FLOOR_GB", "2.5")) * GiB)
 #: length why pressure, not free bytes, is the honest signal.
 PSI_TRIP = float(os.environ.get("AI_WARDEN_PSI_TRIP", "20"))
 VRAM_FLOOR = int(float(os.environ.get("AI_WARDEN_VRAM_FLOOR_GB", "0.7")) * GiB)
+#: How long a VRAM-hungry reserve waits out an ADVISORY busy (a resident model
+#: under GPU load, which is a guess and not a claim) before freeing it. Short:
+#: it is the tail of the last reply, not a job.
+IDLE_WAIT = int(os.environ.get("AI_WARDEN_IDLE_WAIT", "20"))
 
 #: A weights figure is never the whole cost — a runner adds KV cache, a CUDA
 #: context, python, and comfy adds the working tensors of whatever it is
@@ -246,6 +260,46 @@ def cgroup_bytes(path):
 
 def ollama_cgroup():
     return cgroup_bytes("/sys/fs/cgroup/system.slice/ollama.service/memory.current")
+
+
+#: ollama's own cgroup CPU clock. `usage_usec` over a short window is the one
+#: honest answer to "is ollama GENERATING", and it replaces a device-wide
+#: `gpu_util()` reading that was wrong in both directions: it called ollama busy
+#: while COMFY was the thing loading (the GPU has one number and two tenants),
+#: and it would have called a CPU-only generation idle. Measured 2026-08-25 —
+#: that false positive is what protected 9.7 GiB of resident weights from being
+#: freed for the render that then died on them.
+OLLAMA_CPU_STAT = os.environ.get(
+    "AI_WARDEN_OLLAMA_CPU", "/sys/fs/cgroup/system.slice/ollama.service/cpu.stat")
+#: Fraction of ONE core over the sample that counts as working. A generating
+#: llama-server pegs a core even with every layer on the GPU; an idle one is
+#: flat.
+OLLAMA_CPU_BUSY = float(os.environ.get("AI_WARDEN_OLLAMA_CPU_BUSY", "0.25"))
+OLLAMA_CPU_SAMPLE = float(os.environ.get("AI_WARDEN_OLLAMA_CPU_SAMPLE", "0.7"))
+
+
+def cgroup_cpu_usec(path=None):
+    """`usage_usec` from a cgroup's cpu.stat, or 0 when it cannot be read."""
+    try:
+        for line in open(path or OLLAMA_CPU_STAT, encoding="utf-8"):
+            if line.startswith("usage_usec"):
+                return int(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        return 0
+    return 0
+
+
+def ollama_working(sample=None):
+    """Is ollama actually generating right now? Two reads of its cgroup CPU
+    clock, `sample` seconds apart. False when the file is missing — an unknown
+    is not a claim (the LEASE is the claim)."""
+    sample = OLLAMA_CPU_SAMPLE if sample is None else sample
+    first = cgroup_cpu_usec()
+    if not first:
+        return False
+    time.sleep(sample)
+    used = cgroup_cpu_usec() - first
+    return used > OLLAMA_CPU_BUSY * sample * 1_000_000
 
 
 def comfy_cgroup():
@@ -439,12 +493,38 @@ class Warden:
             if q:
                 return True, "painter is rendering (%d in the queue)" % q
             return False, ""
-        # ollama has no "am I generating" endpoint at all. A resident model
-        # under sustained GPU load is the only hint there is, and it is
-        # advisory — say so in the reason rather than claiming certainty.
-        if ollama_ps() and gpu_util() >= 40:
-            return True, "chatter looks busy (gpu %d%%)" % gpu_util()
+        # ollama has no "am I generating" endpoint at all, so this is inference
+        # and it says so in the reason. It reads OLLAMA'S OWN cgroup CPU clock
+        # rather than the device's GPU utilisation: one GPU, two tenants, and
+        # `gpu_util` cannot tell you which of them is using it — on 2026-08-25
+        # it reported comfy's own model loading as "chatter looks busy" and
+        # thereby protected the 9.7 GiB of weights the render needed back.
+        if ollama_ps() and ollama_working():
+            return True, "chatter looks busy (its cpu is running)"
         return False, ""
+
+    def leased(self, backend):
+        """Does the backend hold a live LEASE — i.e. has an app said in so many
+        words that this work is in flight? The hard half of `busy`, and the only
+        half rule 2 protects; the rest of `busy` is inference."""
+        with self.lock:
+            return self.leases.get(backend, 0) > time.time()
+
+    def wait_idle(self, backend, wait=IDLE_WAIT):
+        """Wait, briefly, for an ADVISORY busy to clear. Returns whether it is
+        still busy. Waiting is not interrupting: if the other side really is
+        mid-job it stays busy and the caller falls back to what it did before.
+        """
+        deadline = time.time() + wait
+        while time.time() < deadline:
+            bsy, _ = self.busy(backend)
+            if not bsy:
+                log("waited %ds for idle %s" % (wait, NICE[backend]))
+                return False
+            if self.leased(backend):
+                return True          # a real claim landed — hands off
+            time.sleep(2)
+        return self.busy(backend)[0]
 
     def snapshot(self):
         vf, vt = vram()
@@ -578,35 +658,49 @@ class Warden:
         # path below does not free it a second time.
         freed_other = False
         held = self.footprint(other)
-        if backend == "comfy" and held >= 1 * GiB and ram_ok:
+        if backend == "comfy" and held >= 1 * GiB and (ram_ok or not vram_ok):
             bsy, _ = self.busy(other)
+            # A GPU THAT IS FULL IS THE SYMPTOM, NOT A REASON TO STAND BACK.
+            # `busy(ollama)` has two halves and they are not equal: a live
+            # LEASE means chatter has said "this turn is mine" and is rule 2 —
+            # never interrupted. The other half is a guess (a resident model
+            # plus GPU load), and when a render needs VRAM that guess protects
+            # the very thing standing in its way. Measured 2026-08-25 00:04:
+            # llama-server holding 9.7 GiB of a 11.5 GiB card, comfy admitted
+            # on RAM alone, `Free (according to CUDA): 9.62 MiB`, dead in 0.74s
+            # [his: "why did that agent fail again to generate a video"]. So a
+            # VRAM shortfall WAITS the guess out — bounded, and the wait is the
+            # opposite of an interruption — and only then frees.
+            if bsy and not vram_ok and not self.leased(other):
+                bsy = self.wait_idle(other)
             if not bsy:
                 released = self.free(other)
                 if released:
                     freed.append(other)
                     freed_other = True
+                    why_room = ("%s needed the gpu" % NICE[backend]
+                                if not vram_ok else
+                                "%s needed the room" % NICE[backend])
                     notify("unloaded %s (%s)" % (NICE[other], gb(released)),
-                           "%s needed the room" % NICE[backend])
+                           why_room)
                 avail = mem_available()
+                vf, vt = vram()
                 ram_ok = need == 0 or (avail - need) >= RAM_FLOOR
+                vram_ok = vt == 0 or need == 0 or (vf - min(need, vt)) >= VRAM_FLOOR
 
         if ram_ok and vram_ok:
-            self._take_lease(backend, lease)
-            return {"ok": True, "reason": "", "freed": freed,
-                    "need": need, "available": avail}
+            return self._admit(backend, lease, freed, need, avail, "room for it")
 
         held = self.footprint(other)
         if held < 1 * GiB:
             # Nothing of ours to give back. Refuse only if RAM is the problem —
             # a VRAM squeeze still goes ahead.
             if ram_ok:
-                self._take_lease(backend, lease)
-                return {"ok": True, "reason": "", "freed": freed, "need": need,
-                        "available": avail}
+                return self._admit(backend, lease, freed, need, avail,
+                                   "ram fine, nothing of ours holds the gpu")
             if (avail - hard) >= HARD_FLOOR:
-                self._take_lease(backend, lease)
-                return {"ok": True, "reason": "", "freed": freed, "need": need,
-                        "available": avail}
+                return self._admit(backend, lease, freed, need, avail,
+                                   "over the hard floor, nothing to unload")
             return self._refuse(
                 "not enough memory: needs %s, %s free, nothing to unload"
                 % (gb(hard), gb(avail)), need, avail, freed)
@@ -614,13 +708,11 @@ class Warden:
         bsy, why = self.busy(other)
         if bsy:
             if ram_ok:
-                self._take_lease(backend, lease)
-                return {"ok": True, "reason": "", "freed": freed, "need": need,
-                        "available": avail}
+                return self._admit(backend, lease, freed, need, avail,
+                                   "ram fine, but " + why)
             if (avail - hard) >= HARD_FLOOR:
-                self._take_lease(backend, lease)
-                return {"ok": True, "reason": "", "freed": freed, "need": need,
-                        "available": avail}
+                return self._admit(backend, lease, freed, need, avail,
+                                   "over the hard floor, but " + why)
             return self._refuse(
                 "%s, %s stuck under it" % (why, gb(held)), need, avail, freed)
 
@@ -644,9 +736,23 @@ class Warden:
                 "%sneeds %s plus a %s floor, only %s free%s"
                 % (gave, gb(hard), gb(HARD_FLOOR), gb(avail), hogs_note()),
                 need, avail, freed)
+        return self._admit(backend, lease, freed, need, avail,
+                           "room after unloading " + NICE[other])
+
+    def _admit(self, backend, lease, freed, need, avail, why):
+        """Say yes — and LOG it. Until 2026-08-25 only frees and refusals were
+        written down, so a reserve that was admitted while doing nothing left no
+        trace at all: the video that died on a full GPU looked, from the log,
+        exactly like a render the warden had never been asked about. One line
+        per decision is what makes "why did it not free anything" answerable.
+        """
+        vf, _vt = vram()
+        log("ADMIT %s: %s (need %s, avail %s, vram free %s%s)"
+            % (NICE[backend], why, gb(need), gb(avail), gb(vf),
+               ", freed " + ",".join(freed) if freed else ""))
         self._take_lease(backend, lease)
-        return {"ok": True, "reason": "", "freed": freed, "need": need,
-                "available": avail}
+        return {"ok": True, "reason": "", "freed": freed,
+                "need": need, "available": avail}
 
     def _refuse(self, reason, need, avail, freed=None):
         log("REFUSED: " + reason)

@@ -9458,14 +9458,18 @@ class Ollama(QObject):
         # warden see an idle ollama and free it, which is what he asked for —
         # unload to make room, reload to carry on — and `release()` takes the
         # lease back afterwards. [his, 2026-08-24]
-        self._warden.done("ollama")
+        # …and the reserve waits for that release to LAND. Both calls are
+        # async HTTP, so fired together they can arrive in either order, and a
+        # reserve that overtakes the release reads chatter's own lease as work
+        # in flight and stands back from the very weights it just gave up.
         # nbytes 0 — "a big family, size unknown", which is what the warden
         # reads it as; painter knows its weights, chatter does not. The lease is
         # SHORT and heartbeat-renewed rather than long and taken once, so a
         # chatter that dies mid-render costs painter two minutes, not an hour
         # (apps/pylib/warden.py: renew — which extends a lease and cannot free
         # or admit anything, unlike the re-reserve it replaces).
-        self._warden.reserve("comfy", nbytes=0, cb=go, lease=WARDEN_LEASE_S)
+        self._warden.done("ollama", cb=lambda *_: self._warden.reserve(
+            "comfy", nbytes=0, cb=go, lease=WARDEN_LEASE_S))
 
     def _make_media_run(self, args, answer, kind):
         name = "make_video" if kind == "video" else "make_image"

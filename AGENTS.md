@@ -612,8 +612,16 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
       what free VRAM can hold; `need` (which decides whether to FREE) still
       counts the whole file, because over-freeing is cheap and the freeze this
       daemon exists for came from under-estimating.
-    - **RAM refuses; VRAM only tidies.** A VRAM shortfall degrades a job
-      (ollama offloads, comfy errors); only RAM takes the desktop with it.
+    - **RAM refuses; VRAM only tidies — but the tidying has to HAPPEN.** A
+      VRAM shortfall degrades a job (ollama offloads, comfy errors); only RAM
+      takes the desktop with it. What made that a dead letter until 2026-08-25
+      was `busy()`: it read the DEVICE's `gpu_util`, and one GPU has two
+      tenants, so comfy's own model loading came back as "chatter looks busy"
+      and protected the 9.7 GiB of resident weights the render needed. It now
+      reads **ollama's own cgroup CPU clock** (`ollama_working`), and a comfy
+      reserve that cannot fit on the card waits an advisory-busy ollama out
+      (`IDLE_WAIT`) before freeing it. A live LEASE is still never touched —
+      that is a claim, `busy` is an inference, and rule 2 protects the claim.
     - **Two floors, on purpose.** `RAM_FLOOR` (6G) decides whether to *free* —
       generous, because freeing is cheap. `HARD_FLOOR` (2.5G) is the only one a
       *refusal* is measured against, because a refusal is chatter telling him
