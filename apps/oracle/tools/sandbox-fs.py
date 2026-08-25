@@ -2,8 +2,9 @@
 """oracle's jailed filesystem executor — the muscle behind its file tools.
 
 oracle offers the local ollama model a set of file tools (list/read/write/edit/
-move/delete/mkdir, plus the search ops glob/grep/tree and `image`, which hands a
-local picture back base64 for a vision model to LOOK at; see apps/oracle/main.py
+move/delete/mkdir, plus the search ops glob/grep/tree, `image`, which hands a
+local picture back base64 for a vision model to LOOK at, and `audio`, which cuts
+a bounded excerpt for an audio model to LISTEN to; see apps/oracle/main.py
 `FILE_TOOLS`). Every one of them runs
 THROUGH this script, and this script is the jail: it takes a WRITE root as
 argv[1] and refuses to write, edit, move or delete anything outside it, symlinks
@@ -44,6 +45,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -244,6 +246,113 @@ def op_image(root, req):
     return {"ok": True, "path": rel_to_root(root, p), "media": media,
             "bytes": len(raw),
             "b64": base64.b64encode(raw).decode("ascii")}
+
+
+#: LISTENING (op `audio`, main.py `listen_audio`). The excerpt is cut WHERE THE
+#: FILE IS — that is the whole reason this lives in the executor rather than in
+#: the window: a 40 MB flac on top would otherwise cross the tailnet to be
+#: trimmed on book. What comes back is a bounded 16 kHz mono wav, because a
+#: second of audio costs the model ~25 prompt tokens whatever the source rate,
+#: so a whole album track is most of a small window and says no more than a
+#: chorus does.
+AUDIO_MAX_SECONDS = 180        # hard ceiling on one excerpt, whatever is asked
+AUDIO_DEFAULT_SECONDS = 30
+AUDIO_RATE = 16000
+
+
+def _duration(p):
+    """The file's length in seconds via ffprobe, or 0 when it cannot say."""
+    exe = shutil.which("ffprobe")
+    if not exe:
+        return 0
+    try:
+        out = subprocess.run(
+            [exe, "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=nw=1:nk=1", "--", p],
+            capture_output=True, timeout=20)
+        return round(float(out.stdout.decode("utf-8", "replace").strip()), 1)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0
+
+
+def _wav_sized(raw):
+    """A wav ffmpeg wrote to a PIPE, with its real length stamped in.
+
+    ffmpeg cannot seek back on stdout, so it leaves 0xFFFFFFFF placeholders in
+    the RIFF and `data` size fields — a header claiming 34 hours. Patched here
+    to what actually arrived (main.py keeps the same fix for the clips it cuts
+    itself; this script stays stdlib-only and cannot share it).
+    """
+    if len(raw) < 44 or raw[:4] != b"RIFF" or raw[8:12] != b"WAVE":
+        return raw
+    out = bytearray(raw)
+    out[4:8] = struct.pack("<I", len(out) - 8)
+    pos = 12
+    while pos + 8 <= len(out):
+        cid = bytes(out[pos:pos + 4])
+        size = struct.unpack("<I", bytes(out[pos + 4:pos + 8]))[0]
+        body = len(out) - (pos + 8)
+        if cid == b"data" and (size > body or size == 0):
+            out[pos + 4:pos + 8] = struct.pack("<I", body)
+            break
+        if size > body:
+            break
+        pos += 8 + size + (size & 1)
+    return bytes(out)
+
+
+def op_audio(root, req):
+    """Cut a bounded excerpt out of an audio (or video) file and hand it back
+    base64, for an audio-capable model to LISTEN to.
+
+    The same read jail as every other read op, so `listen_audio` reaches
+    exactly what the model could already `read_file` and nothing more. ffmpeg
+    does the trim and the downmix; absent, the op FAILS with a reason rather
+    than handing back a 44.1 kHz stereo album track (docs/DESIGN.md §10).
+    """
+    p = resolve(root, req.get("path", ""), must_exist=True)
+    if os.path.isdir(p):
+        fail("is a directory: " + req.get("path", ""))
+    try:
+        seconds = float(req.get("seconds") or AUDIO_DEFAULT_SECONDS)
+    except (TypeError, ValueError):
+        seconds = float(AUDIO_DEFAULT_SECONDS)
+    seconds = max(1.0, min(seconds, float(AUDIO_MAX_SECONDS)))
+    try:
+        start = max(0.0, float(req.get("start") or 0))
+    except (TypeError, ValueError):
+        start = 0.0
+    try:
+        rate = int(req.get("rate") or AUDIO_RATE)
+    except (TypeError, ValueError):
+        rate = AUDIO_RATE
+    exe = shutil.which("ffmpeg")
+    if not exe:
+        fail("ffmpeg is not installed on this machine, so the audio cannot be "
+             "trimmed to something a model can hear")
+    dur = _duration(p)
+    # A start past the end is a silent wav and a confused model; say so.
+    if dur and start >= dur:
+        fail("that file is only %.1fs long, so there is nothing at %.1fs"
+             % (dur, start))
+    argv = [exe, "-v", "error", "-nostdin"]
+    if start > 0:
+        argv += ["-ss", "%.3f" % start]
+    argv += ["-t", "%.3f" % seconds, "-i", p, "-map", "0:a:0", "-vn",
+             "-ar", str(rate), "-ac", "1", "-c:a", "pcm_s16le", "-f", "wav", "-"]
+    try:
+        out = subprocess.run(argv, capture_output=True, timeout=180)
+    except (OSError, subprocess.SubprocessError) as e:
+        fail("ffmpeg could not read that file: " + str(e))
+    if out.returncode != 0 or len(out.stdout) <= 44:
+        why = out.stderr.decode("utf-8", "replace").strip().splitlines()
+        fail(why[-1][:200] if why else "no audio stream in that file")
+    wav = _wav_sized(out.stdout)
+    got = round((len(wav) - 44) / float(rate * 2), 1)
+    return {"ok": True, "path": rel_to_root(root, p), "media": "audio/wav",
+            "bytes": len(wav), "start": round(start, 1),
+            "seconds": got, "duration": dur,
+            "b64": base64.b64encode(wav).decode("ascii")}
 
 
 #: What a file IS, sniffed from its first bytes — never from its extension,
@@ -684,7 +793,7 @@ def op_tree(root, req):
 OPS = {"list": op_list, "read": op_read, "write": op_write, "edit": op_edit,
        "move": op_move, "delete": op_delete, "mkdir": op_mkdir, "put": op_put,
        "glob": op_glob, "grep": op_grep, "tree": op_tree,
-       "image": op_image, "meta": op_meta}
+       "image": op_image, "meta": op_meta, "audio": op_audio}
 
 # The READ-ONLY ops. They may reach a WIDER root than the mutating ops: the
 # model gets read access to the whole filesystem, root '/' (his ask,
@@ -693,7 +802,7 @@ OPS = {"list": op_list, "read": op_read, "write": op_write, "edit": op_edit,
 # Absent argv[2], read ops fall back to the write root — so an older executor
 # over ssh (the OTHER host not yet pulled) just keeps the old jailed-both
 # behaviour rather than breaking.
-READ_OPS = {"list", "read", "glob", "grep", "tree", "image", "meta"}
+READ_OPS = {"list", "read", "glob", "grep", "tree", "image", "meta", "audio"}
 
 
 def main():

@@ -2468,6 +2468,10 @@ clears when the message is sent. A message may be text, files, or both.
   a truncation note; a **binary or unreadable** file is NAMED with the reason,
   never dumped (docs/DESIGN.md §10). The budget heuristic runs on the prompt
   BEFORE inlining, so a big file cannot fan the web search wide.
+- **AUDIO goes to the model as sound** — the third branch of the same split, on
+  the same message field, gated on the model's `audio` capability. See
+  *Listening* below for the wire, the trimming and why a whole track is never
+  sent.
 - **An IMAGE goes to the model as vision, not text.** `send` classifies each
   dropped file by its MAGIC BYTES (`_sniff_image`, never the extension —
   png/jpeg/gif/webp); image items are routed away from the text block and, for a
@@ -2501,6 +2505,100 @@ clears when the message is sent. A message may be text, files, or both.
   model on the turn they were dropped, so history stays clean and a later turn
   does not silently re-see them. (The staged copies under `attachments/` do
   persist in the sandbox — the model may have edited them on purpose.)
+
+## Listening — `listen_audio`, and audio he drops on the window
+
+**The `audio` chip beside the context bar had nothing behind it.** gemma4
+carries an audio encoder next to its vision one and ollama reports it in the
+same `capabilities` list, so the indicator was honest about the MODEL and a lie
+about the app: a song dragged onto the window was inlined as "binary, not
+shown", and there was no way to hand it a sound at all [his ask, 2026-08-24:
+*"why does the gemma4 model indicate audio if it doesnt have an audio input?"*,
+then *"give it the ability to ingest audio files from the system … 'listen to
+the song im currently playing'"*].
+
+**The wire is the `images` field — measured, not assumed.** ollama's chat
+message has no `audio` key (there is no such struct tag in the 0.32.13 server
+binary, and its own CLI collects `.jpg .png .webp .wav` into one media list).
+Base64 wav bytes in `images` are routed to the model's audio encoder: against
+the daemon on top, 2026-08-24, gemma4-qat:12b's `prompt_eval_count` went 29 →
+101 for 2.7s of speech and it transcribed the sentence verbatim. So the only
+new parts here are the sniffing, the capability gate and the trimming.
+
+**A second of sound costs ~25 prompt tokens**, whatever the source rate (500
+for a 20s excerpt, measured the same way). That is the whole design constraint:
+a 4-minute track is ~6k tokens and a 10-minute one is most of a 32k window, and
+a 44.1 kHz stereo album rip is four times the bytes of a 16 kHz mono one for no
+more information. **Nothing is ever sent whole** — every path downmixes to 16
+kHz mono and cuts a bounded excerpt (`ATTACH_AUDIO_SECONDS` for a drop,
+`LISTEN_SECONDS`/`LISTEN_MAX_SECONDS` for the tool, `LISTEN_CAPTURE_MAX` for a
+recording).
+
+**Dropped audio** is the third branch of `send`'s split (`_sniff_audio`, by
+MAGIC BYTES like the image one — flac, mp3, ogg, wav, m4a, wma; a bare
+`ftyp…mp42` is left to the file branch because that shape is usually a video).
+`_read_audio_attachments` trims each to an excerpt and puts it on the same
+`images` field beside any pictures. A model with **no** `audio` capability is
+sent no bytes and the note says so, naming the paths so `file_metadata` can
+still read the tags — never a song silently ignored by a model that cannot hear
+(docs/DESIGN.md §10).
+
+**`listen_audio` is the tool**, and it has three sources because those are the
+three ways a sound exists on this desktop:
+
+- **`now_playing`** — the track the player is on, resolved through the same
+  MPRIS seam `control_media` drives (`xesam:url` + `position` in ONE playerctl
+  read, never a transport verb), starting two seconds before where he is. It is
+  the bus of the machine the WINDOW runs on, and a track that is not a local
+  file says so and points at `capture` rather than failing on a path.
+- **`file`** — any path, through the **jailed executor** (`sandbox-fs.py` op
+  `audio`, the wide READ root, `host` selects the machine exactly as
+  `read_file` does). **The trim runs where the FILE is**: a 40 MB flac on top
+  is cut there and only the excerpt crosses the tailnet.
+- **`capture`** — what the speakers are actually putting out, from the default
+  sink's **monitor** (`@DEFAULT_MONITOR@`, never a microphone), which is the
+  only way to hear something that is not a file at all. Passive — a monitor
+  read changes nothing about what is playing — and bounded, so a model cannot
+  leave a recorder running on his desktop.
+
+Like `view_image`, the bytes **never enter the tool result** (a base64 wav in
+the transcript is enormous and unreadable): they are held in `_pending_audio`
+and go out as an `images` block on a user message `_tool_done` appends before
+the next post. The excerpt is also **written under `AUDIO_ROOT`
+(`~/.local/share/oracle/audio`) and its path named in the result**, so what the
+model heard is a file he can play — the audio half of the picture being drawn
+in the chat (docs/DESIGN.md §10: nothing listened to in secret).
+
+**Attached by CAPABILITY, not always or never.** "Listen to what I'm playing"
+is a plain-words ask, which is the argument that made the generators core — but
+a schema offered to a model with no ear buys a refusal for a thousand
+characters of window. So `_offered_tools` adds `listen_audio` when the selected
+model's `capabilities` include `audio`, and it stays in the one-line index
+(`tools_note`) for every model regardless. It is a **main-agent** tool, absent
+from `_tool_registry()` for exactly the reason `view_image` is: the clip rides a
+message on the loop that called it, and a subagent's loop ends before that
+message is ever sent.
+
+**ffmpeg does the trim, and its absence is a REASON.** Both paths refuse with a
+sentence rather than falling back to sending a whole 44.1 kHz stereo track. One
+wrinkle it costs: ffmpeg cannot seek back on a pipe, so it leaves `0xFFFFFFFF`
+placeholders in the RIFF/`data` size fields — ollama decodes that fine, but a
+header claiming 34 hours is a trap for anything else that opens the kept clip,
+so `_wav_sized` (and the executor's own copy) stamps the real length in.
+
+**Quality is the model's, and it varies.** The plumbing is verifiable — the
+prompt-token count proves the encoder ran — but gemma4-qat:12b transcribes
+speech reliably and describes MUSIC differently every time it is asked. Report
+that as what it is; do not chase it in this code.
+
+Harness: `tools/listen-test.py`. It never hears his desktop: the MPRIS half
+drives a stub `playerctl` (`$ORACLE_PLAYERCTL`) so the player he is listening to
+is not even asked, the capture half drives a stub `ffmpeg` (`$ORACLE_FFMPEG`)
+so nothing on his audio output is ever recorded, and the file half uses the real
+executor against wavs the test generates with the `wave` module.
+
+    /usr/bin/python3 tools/listen-test.py        # on book
+    oracle-qtenv python3 tools/listen-test.py    # on top
 
 ## File tools (unjailed since 2026-08-22)
 
