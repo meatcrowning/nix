@@ -2072,6 +2072,12 @@ class Player(QObject):
     replayGainChanged = Signal()
     seeked = Signal(float)  # explicit seeks only (not per-tick) — MPRIS Seeked
 
+    #: CLASS-level, not only instance: the harnesses build a Player without
+    #: running `__init__` (it would open libmpv and take his audio device), and
+    #: `_announce` reads this on the very first queue change — so a scrobbler
+    #: that was never set has to be None rather than absent.
+    _scrobbler = None
+
     _sigPos = Signal(float)
     _sigDur = Signal(float)
     _sigPause = Signal(bool)
@@ -3697,7 +3703,7 @@ def _mpris_user_rating(track):
     return float(r) if r is not None else None
 
 
-def start_queue_server(player, app, lyrics=None):
+def start_queue_server(player, app, lyrics=None, raise_window=None):
     """Serve the play queue to the desktop panel's media widget.
 
     MPRIS carries the CURRENT track and nothing else — its TrackList interface
@@ -3715,6 +3721,8 @@ def start_queue_server(player, app, lyrics=None):
                            LYRICS <0|1>     — "I am showing a lyrics box"
                            OPEN <enc> [<enc> …]  — play these files now
                            QUEUE <enc> [<enc> …] — append them to the queue
+                           RAISE            — "somebody launched me again":
+                                              come forward, they are exiting
 
     OPEN is not the panel's; it is how a SECOND launch hands its `%F` arguments
     to the player that is already running and exits (`handoff_paths`). It is
@@ -3881,6 +3889,20 @@ def start_queue_server(player, app, lyrics=None):
                     print("queue server: bad QUEUE:", e, flush=True)
                 c.write(snapshot(c in want))
                 c.flush()
+            elif parts and parts[0] == "RAISE":
+                # A SECOND LAUNCH WITH NO FILES. `handoff_paths` sends this
+                # instead of starting a second player (which would take this
+                # one's socket and its MPRIS name); presenting the window is
+                # what clicking the icon meant. Answered with a snapshot like
+                # OPEN, because that answer is how the launcher knows it was
+                # heard and can exit rather than waiting out its timeout.
+                if raise_window is not None:
+                    try:
+                        raise_window()
+                    except Exception as e:
+                        print("queue server: bad RAISE:", e, flush=True)
+                c.write(snapshot(c in want))
+                c.flush()
             elif len(parts) == 2 and parts[0] == "LYRICS":
                 on = parts[1] not in ("0", "false", "off")
                 was = bool(want)
@@ -3921,6 +3943,12 @@ def start_queue_server(player, app, lyrics=None):
     if lyrics is not None:
         lyrics.ready.connect(on_lyrics)
     print("queue server: listening on", path, flush=True)
+
+
+#: The bus name this app owns when MPRIS is up — `mpris_server` builds it from
+#: the Server's name, and `start_mpris` checks the bus for it rather than
+#: assuming the request succeeded.
+MPRIS_NAME = "org.mpris.MediaPlayer2.player"
 
 
 def start_mpris(player, app):
@@ -4027,6 +4055,27 @@ def start_mpris(player, app):
         player.volumeChanged.connect(events.on_volume)
         player.seeked.connect(lambda s: events.on_seek(int(s * 1_000_000)))
         server.publish()
+        # PUBLISHING IS NOT OWNING. `publish()` only ASKS for the name, on
+        # GLib's main context, and the answer arrives later — so a player that
+        # lost the race to another instance sat there for an hour with no MPRIS
+        # name at all and said nothing, while the panel, Plasma's applet and
+        # chatter's control_media all reported no player [2026-08-24, on book].
+        # Check once the loop has turned, and SAY so (docs/DESIGN.md §10).
+        def check_name():
+            try:
+                from pydbus import SessionBus
+                names = SessionBus().get(".DBus").ListNames()
+            except Exception as e:
+                print("mpris: cannot check the bus name:", e, flush=True)
+                return
+            if MPRIS_NAME in names:
+                print("mpris: published as", MPRIS_NAME, flush=True)
+            else:
+                print("mpris: NOT on the bus as " + MPRIS_NAME + " — another "
+                      "player instance is probably holding the name; this "
+                      "window will be invisible to the panel, to Plasma's "
+                      "media applet and to chatter", flush=True)
+        QTimer.singleShot(1500, check_name)
         return server
     except Exception as e:
         print("mpris: failed to publish:", e, flush=True)
@@ -4077,7 +4126,7 @@ def paths_from_argv(argv):
 
 
 def handoff_paths(paths, timeout=2.0):
-    """Give `paths` to a player that is already running; True if one took them.
+    """Hand this launch to a player that is already running; True if one took it.
 
     Two players must never run at once — they would fight over the MPRIS name,
     the queue socket and the same mpv-shaped hole in the audio device, and the
@@ -4085,16 +4134,27 @@ def handoff_paths(paths, timeout=2.0):
     module used to claim the library lock prevented it, and there is no such
     lock (sqlite's WAL lets a second writer in after a 60s wait).
 
+    **A launch with NO files is a launch too** [2026-08-24]. This returned False
+    on the spot when `paths` was empty, so the singleton check simply did not
+    run for a bare `player` — and a bare `player` is the common one: the runner,
+    the desktop entry, an agent with a shell. The second instance then took the
+    queue socket off the first (the server unlinks a stale path before it
+    listens), lost the race for the MPRIS name and kept running silently
+    without one — which is a player the panel, Plasma's applet and chatter's
+    control_media can all no longer see, playing its own restored queue over
+    the top of his. With no files it sends RAISE instead: the running window
+    comes forward and this launch exits, which is what clicking the icon meant.
+
     The queue socket is the singleton check, because it already exists and is
     already only ever created by a live player. Plain stdlib sockets rather than
     QLocalSocket: this runs before QGuiApplication, on the path where the whole
     point is not to start Qt at all. A failure of ANY kind falls through to a
     normal startup — an unreachable socket means no player, which is exactly the
     case a normal startup handles."""
-    if not paths:
-        return False
     sock_path = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", QUEUE_SOCK)
-    line = ("OPEN " + " ".join(urllib.parse.quote(p) for p in paths) + "\n").encode()
+    line = (("OPEN " + " ".join(urllib.parse.quote(p) for p in paths))
+            if paths else "RAISE") + "\n"
+    line = line.encode()
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         s.settimeout(timeout)
@@ -4407,6 +4467,9 @@ def main():
         # signals are exactly the "the chrome changed" notification this face
         # needs — no second source and no polling.
         shell.bind_chrome(titlebar)
+        # Konsole's toolbar names its buttons; so does this one [his,
+        # 2026-08-24]. The sort row keeps its own `barText` words.
+        shell.bar_labels()
         shell.bind_status()      # statusLine / statusProgress / statusRight
         shell.bind_title("windowTitle")   # "artist — title", as under Hyprland
 
@@ -4523,7 +4586,20 @@ def main():
     if open_paths:
         player.playPaths(open_paths)
     start_mpris(player, app)
-    start_queue_server(player, app, lyrics)
+
+    def present():
+        """Bring the window forward for a second launch (RAISE). `show()`
+        first: it may be minimised, in which case activating alone leaves it
+        exactly where it was."""
+        win.show()
+        if hasattr(win, "raise_"):
+            win.raise_()
+        if hasattr(win, "requestActivate"):
+            win.requestActivate()
+        elif hasattr(win, "activateWindow"):
+            win.activateWindow()
+
+    start_queue_server(player, app, lyrics, raise_window=present)
     QTimer.singleShot(400, library.rescan)  # incremental; UI is already up
 
     app.aboutToQuit.connect(player.save_state)

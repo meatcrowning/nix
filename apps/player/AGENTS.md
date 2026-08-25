@@ -340,6 +340,13 @@ Nothing here happens until an account is linked — `tools/lastfm-connect.py`,
 or the `connect` button in the settings page, which opens the approval page in
 his browser and finishes by itself once he says yes.
 
+- **The account file is machine-local, and that is the whole "wire it up".**
+  `~/.config/lastfm/account.json` is a credential, `~/nix` is public and
+  nothing syncs it, so player on book scrobbled nothing while top had been
+  linked for months [his, 2026-08-24]. Either approve a second token there, or
+  **`tools/lastfm-connect.py --copy-from top`**, which reads the file over the
+  same BatchMode ssh everything else here uses and writes it 0600 — it refuses
+  anything that does not parse as an account, and it needs top awake.
 - **`Player._maybe_count` decides, once.** It already owned "this counts as a
   listen" for the library's own play count (half the track, or four minutes);
   it now calls `Scrobbler.submit` at the same instant, so the two counts cannot
@@ -545,6 +552,19 @@ Until 2026-07-29 it was the default for nine and dropped the argument on the
 floor; `home/prog/mime-defaults.nix` and `docs/agents/mime-defaults-audit.md`
 carry the reason the other five were withheld, which was exactly this defect.
 
+**A LAUNCH WITH NO FILES IS A LAUNCH TOO** [2026-08-24]. `handoff_paths`
+returned False on the spot when there were no paths, so the singleton check
+simply did not run for a bare `player` — and a bare `player` is the common one:
+the runner, the desktop entry, an agent with a shell. The second instance then
+took the running one's queue socket (the server unlinks a stale path before it
+listens), lost the race for the MPRIS name, and kept playing its own restored
+queue with no name at all — a player the panel, Plasma's media applet and
+chatter's `control_media` could none of them see. With no files the launch now
+sends **`RAISE`**, the running window comes forward and the new process exits,
+which is what clicking the icon meant. A player running the OLD source does not
+know the verb, so that launch waits out its 2-second timeout and starts as it
+used to; one relaunch fixes it.
+
 Three pieces, each with a rule:
 
 - **`paths_from_argv`** takes plain paths and `file://` URIs, skips anything
@@ -595,6 +615,17 @@ writing to a transient id creates no DB row. 37/37, 2026-07-29.
 "activate this window" verb the app can reach, and MPRIS `Raise` is declared
 unsupported here. Double-clicking a track while player is minimized starts it
 playing without bringing it forward.
+
+## MPRIS: publishing is not owning
+
+`start_mpris` prints and moves on if `mpris_server` is missing or `publish()`
+raises — but `publish()` only ASKS for the bus name, on GLib's main context,
+and the answer arrives later. A player that lost the race to another instance
+therefore sat for an hour with no name at all and said nothing, while the
+panel, Plasma's applet and chatter all reported no player [2026-08-24, on
+book]. It now re-reads `ListNames` a second and a half later and says which it
+is — `mpris: published as …` or a line naming the likely cause and what stops
+working. `MPRIS_NAME` is the one place that name is written down.
 
 ## The queue socket (`start_queue_server`)
 
