@@ -131,5 +131,31 @@ for line in plain.splitlines():
 check("with nothing selected every Edit row is disabled, not dead-looking",
       bool(ed0) and all("(disabled)" in r for r in ed0 if r != "---"), str(ed0))
 
+# --- the toolbar names its buttons, as Konsole's does ---------------------
+check("the toolbar's buttons wear their names beside the icons",
+      "barstyle: text-beside-icon" in txt,
+      re.search(r"^barstyle: .*$", txt, re.M).group(0) if "barstyle:" in txt else "(none)")
+
+# --- and each of them wears an Alt-letter, none of them a menu title's ----
+bar = []
+for line in txt.splitlines():
+    if line == "toolbar":
+        bar = []
+        cur = "bar"
+    elif line.startswith("    ") and 'cur' in dir() and cur == "bar":
+        bar.append(line.strip())
+    elif not line.startswith("    "):
+        cur = None
+named = [r for r in bar if not r.startswith("<") and r != "---"]
+letters = [re.search(r"&(\w)", r).group(1).upper() for r in named
+           if re.search(r"&(\w)", r)]
+title_letters = [re.search(r"&(\w)", t).group(1).upper() for t in titles
+                 if re.search(r"&(\w)", t)]
+check("every toolbar row carries an underlined letter",
+      len(letters) == len(named) and named, str(named))
+check("no two of them claim the same one, and none is a menu title's",
+      len(set(letters)) == len(letters) and not (set(letters) & set(title_letters)),
+      str(letters) + " vs " + str(title_letters))
+
 print("FAILED: " + ", ".join(fails) if fails else "OK")
 sys.exit(1 if fails else 0)

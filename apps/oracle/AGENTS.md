@@ -416,8 +416,9 @@ music-library turn had nothing left to answer with.
 | **saved, every round** | **~7,650** |
 
 - **`CORE_TOOL_NAMES` is what a turn reaches for unprompted**: the file six,
-  the two runners, `web_search`/`fetch_url`, the clock, memory's two, and the
-  three doors to everything else — `use_skill`, `spawn_agent`, `get_tools`.
+  the two runners, `web_search`/`fetch_url`/`wikipedia`, the clock, memory's
+  two, and the three doors to everything else — `use_skill`, `spawn_agent`,
+  `get_tools`.
 - **`tools_note()` names every other tool in one line each** — name plus first
   sentence, capped at 90 characters. Same shape and the same reason as
   `skills_note()`: a model does not reach for a door it was never told about.
@@ -442,6 +443,60 @@ music-library turn had nothing left to answer with.
   which is the same idea one level down.
 
 Harness: `tools/lazy-tools-test.py`.
+
+### Not inventing facts
+
+Two things, both of them on the wire every turn, against the one complaint a
+bigger context does not fix [his, 2026-08-24: *"sometimes it like halucinates
+facts and i know its a small model"*]. The `wikipedia` tool below is the third.
+
+- **`GROUNDING_NOTE`** — the contract, in `_system_prompt` beside the rest:
+  check a specific (date, number, name, version, quote, URL, filename,
+  command, API) before stating it; say plainly when you cannot; cite what you
+  used; never invent a citation, a URL or a command line to look
+  authoritative; never guess about HIS machine when the file tools are right
+  there.
+- **`sampler_for(model, preset)` clamps the sampler for a factual turn** —
+  `FACTUAL_SAMPLER` (temperature 0.3, top_p 0.9) as a FLOOR, applied over the
+  family default rather than instead of it, so a model whose author published
+  `top_k`/`min_p` keeps them. Chatter used to send **no options at all** for
+  every model but the two Gemma families, i.e. whatever hot default the
+  Modelfile carried; Google ships Gemma itself at temperature 1.0. A preset he
+  picked in order to be creative with (`CREATIVE_PRESETS`: writer, casual) is
+  exempt — that is what those presets are FOR — and a custom base prompt is
+  not, since a persona is not evidence he wants invented dates. **Subagents are
+  always factual**, whatever the main turn is wearing.
+- `describe_self` reports the sampling by BUILDING it, not by describing it —
+  it said "model default (chatter does not override)" for a day after chatter
+  started overriding (docs/DESIGN.md §10).
+
+Harness: `tools/grounding-test.py`, which asserts on the real POST body against
+a stub ollama.
+
+### `wikipedia` — the source a small model can cite
+
+**A model that does not know a fact should be able to fetch one, not compose
+one** [his, 2026-08-24: *"sometimes it like halucinates facts and i know its a
+small model"*]. `web_search` returns snippets written to be clicked on and
+`fetch_url` returns whatever HTML is at a URL; neither is an encyclopedia. This
+is **one** MediaWiki call — `generator=search` plus `prop=extracts`, so the
+search and the article text arrive together and a title the model guessed at is
+a search rather than a 404 — and it comes back as plain text with the article's
+URL beside it, which is the part a reply can cite.
+
+- **CORE, deliberately.** The whole point is a source it does not have to go
+  looking for; an unattached tool is one it can reason its way around (the same
+  reasoning that made the generators core).
+- **Capped and pageable** like `fetch_url`: `WIKIPEDIA_CHARS` of text, then
+  `truncated` + `next_offset`. `full=true` asks for the whole article instead
+  of the lead; `lang` picks the edition and is VALIDATED, not scrubbed — a
+  language code is a hostname here.
+- **The best match carries the text; the other matches are titles and URLs
+  only**, so a wrong guess costs a few dozen tokens rather than five articles.
+- `wikipedia_url()` and `wikipedia_result()` are pure, which is what lets the
+  harness drive the parse off a canned payload. Harness:
+  `tools/wikipedia-test.py` — its last check is a real lookup, and a machine
+  with no route to Wikipedia reports skipped rather than failed.
 
 ## Skills (chatter's own, as a real tool)
 
@@ -718,6 +773,44 @@ in both directions, and never overstating a jail). It exists because gemma4:e4b
 told him it "has no code-execution env": true at the time, but reached for blind
 rather than from its real inventory. That gap is now closed — see *Code runners*
 below — and `describe_self` still gives the exact live tool list on demand.
+
+## Which machine a tool acts on
+
+**THIS ONE, on either of them, since 2026-08-24.** Every executor here used to
+hard-branch to `top` from book, on the reasoning that the library and the
+compute live there. For his FILES and his PLAYER that was wrong: chatter on
+book could not read a file on book, could not run a command against it, and
+asked top what was playing while he sat in front of book playing something else
+[his: *"when im in air, chatter agents can see what im playing / manipulate airs
+files like it can on top"*].
+
+- **`TOOLS_HOST`** is `LOCAL_HOST` unless `$ORACLE_TOOLS_HOST` names the other
+  machine (junk falls back rather than building a junk hostname), and
+  **`TOOLS_REMOTE`** is the one question every executor asks. What follows it:
+  the **file tools**, **run_python/run_bash**, **background jobs** and the
+  **music library** (book runs its own player against the synced database and
+  the SMB-mounted library, so its queue is the one to ask about).
+- **`host` is on EVERY file tool now, writes included** — one shared
+  `HOST_ARG`, whose description names this machine as the default. A chatter
+  that could read book but only write top would be the more confusing half.
+  The other machine is reached over the tailnet, and book→top reuses the
+  tunnel's control master.
+- **What does NOT follow it**, deliberately: ollama and the model's compute;
+  image and video generation (the weights and the GPU are top's — except when
+  `$ORACLE_PAINTER` replaced the generator, which only a harness does and only
+  ever with a script in its own /tmp, so `_painter_remote()` asks that question
+  in one place for the argv, the input staging and the display); and the
+  **session and memory stores**, which stay on top so both machines share one
+  history and one set of memories. `STORE_LOCAL` is the exception under them:
+  a store whose root was overridden (`$ORACLE_MEMORY`/`$ORACLE_SESSIONS`) is a
+  harness's disposable one, in ITS /tmp, so the op runs here.
+- **A file that is on this disk is shown, whatever host made it** — the video
+  card asks `os.path.exists`, not the hostname.
+- `describe_self` reports `tools_act_on`, because a model that assumed `top`
+  wrote to the wrong machine.
+
+Harness: `tools/tools-host-test.py`, which runs a child per configuration and
+reads the argv the app would actually build.
 
 ## Code runners (run_python and run_bash, on top)
 

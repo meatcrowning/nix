@@ -75,6 +75,7 @@ and an app that never calls this module behaves exactly as it did.
 from __future__ import annotations
 
 import os
+import re
 import sys
 
 from PySide6.QtCore import Qt, QUrl, QMetaObject, Q_ARG
@@ -108,6 +109,55 @@ MENU_TITLE = {
     "bookmarks": "&Bookmarks", "tools": "&Tools", "settings": "Se&ttings",
     "help": "&Help",
 }
+
+
+def _as_bool(v):
+    """A QSettings value that was written as a bool. The native backends hand
+    one back as `True`, the INI one as the string `"true"` or `"1"`, and a key
+    that was never written as `None` — which must stay distinguishable from a
+    stored False, or "he has never touched this bar" reads as "he hid it"."""
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return v
+    return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
+_BARE_TAIL = re.compile(r"\s*(\.\.\.|…)\s*$")   # what a toolbar label drops
+
+
+def _mnemonic_letter(text, taken):
+    """A free Alt-letter for `text`, preferring the initial of a word.
+
+    KDE underlines the letter that works; a button whose underline is a
+    letter nothing answers to would be exactly the "affordance that can
+    silently fail" docs/DESIGN.md forbids — so the caller reserves the
+    menubar's own titles first and every letter handed out here is unique
+    within the window.
+    """
+    words = [w for w in re.split(r"[^0-9A-Za-z]+", text) if w]
+    for w in words:
+        if w[0].upper() not in taken:
+            return w[0].upper()
+    for ch in text:
+        if ch.isalnum() and ch.upper() not in taken:
+            return ch.upper()
+    return None
+
+
+def _with_mnemonic(text, letter):
+    """`text` with `&` before its first `letter`. A string that already has
+    one is left alone — the app said what it wanted."""
+    if not letter or not text or "&" in text:
+        return text
+    i = text.upper().find(letter)
+    return text if i < 0 else text[:i] + "&" + text[i:]
+
+
+def _title_letter(title):
+    """The letter a menubar title's own `&` marks, e.g. `Se&ttings` -> `T`."""
+    i = title.find("&")
+    return title[i + 1].upper() if 0 <= i < len(title) - 1 else ""
 
 
 def controls_style() -> str:
@@ -689,6 +739,8 @@ def _build_shell_class():
             self._hooks = {}        # button id -> a python answer to it
             self._about_box = None  # kept: a dialog owned by the stack crashes
             self._bar_buttons = {}      # id -> QToolButton, for `barText` rows
+            self._mnemo = {}            # id -> the Alt-letter its bar row wears
+            self._menu_letters = set()  # the menubar's own, which it may not take
             self._widget_actions = {}   # id(widget) -> its QWidgetAction, kept
             self._spacer_w = None       # the stretch before the search field
             self._toolbars = {}         # ident -> QToolBar, the EXTRA bars
@@ -717,6 +769,7 @@ def _build_shell_class():
             # its visibility belongs to the user (Settings -> Show Toolbar).
             self._chrome_restored = False
             self._state_restored = False
+            self._state_saves = False   # may this process write his state at all
             self._root = None
 
         # ---------------------------------------------------------- engine
@@ -780,6 +833,13 @@ def _build_shell_class():
         def _settings(self):
             from PySide6.QtCore import QSettings
             from PySide6.QtWidgets import QApplication
+            # `KDESHELL_STATE` points the whole store at one ini file, which is
+            # the ONLY way a harness can exercise save-and-restore: his own
+            # store is off limits and the offscreen guard below refuses to
+            # write it at all.
+            path = os.environ.get("KDESHELL_STATE")
+            if path:
+                return QSettings(path, QSettings.IniFormat)
             return QSettings("nixdesk", QApplication.applicationName() or "app")
 
         def _restore_state(self):
@@ -792,8 +852,10 @@ def _build_shell_class():
             # hand him back a window the size of a test the next time he opened
             # the app — the same rule as everything else under
             # "Testing without interfering with the user".
-            if QApplication.instance().platformName() == "offscreen":
+            if (QApplication.instance().platformName() == "offscreen"
+                    and not os.environ.get("KDESHELL_STATE")):
                 return
+            self._state_saves = True
             st = self._settings()
             geom = st.value("window/geometry")
             state = st.value("window/state")
@@ -803,14 +865,34 @@ def _build_shell_class():
                 # Version 1: bumped only if the chrome is renamed out from under
                 # a saved blob, which Qt then ignores rather than misapplying.
                 self.window.restoreState(state, 1)
+            # THE MENUBAR IS NOT IN THAT BLOB. `saveState()` records toolbars
+            # and docks and nothing else, so Ctrl+M's answer died with the
+            # process and he had to hide the menubar again every single launch
+            # [his, 2026-08-24]. The status bar is in the same position. Both
+            # are written by `_save_state` and put back here; a bar the user
+            # has never touched has no key and keeps the app's own default.
+            for which in ("menubar", "statusbar"):
+                want = _as_bool(st.value("chrome/" + which))
+                widget = self._bar_widget(which)
+                if want is not None and widget is not None:
+                    widget.setVisible(want)
+            self._sync_toggles()
             app = QApplication.instance()
             if app is not None:
                 app.aboutToQuit.connect(self._save_state)
 
         def _save_state(self):
+            # Only ever after a restore that was allowed to happen — that is
+            # the same test as "may this process write his window state".
+            if not self._state_saves:
+                return
             st = self._settings()
             st.setValue("window/geometry", self.window.saveGeometry())
             st.setValue("window/state", self.window.saveState(1))
+            for which in ("menubar", "statusbar"):
+                widget = self._bar_widget(which)
+                if widget is not None:
+                    st.setValue("chrome/" + which, 0 if widget.isHidden() else 1)
             st.sync()
 
         # ---------------------------------------------------------- chrome
@@ -966,7 +1048,20 @@ def _build_shell_class():
                 groups.setdefault(g, []).append(e)
             groups = {g: self._trim(items) for g, items in groups.items()}
 
-            for g in self._order(groups):
+            # THE UNDERLINED LETTER, for every row that reaches a toolbar.
+            # He asked for the rest of the bar to say what the send button
+            # says [his, 2026-08-24]: an Alt-letter, drawn underlined by the
+            # style. The menubar's own titles are reserved first — two owners
+            # of one Alt sequence in one window is an ambiguous shortcut, and
+            # Qt answers those by firing NEITHER.
+            order = self._order(groups)
+            self._menu_letters = {
+                _title_letter(MENU_TITLE.get(g, "&" + g.capitalize()))
+                for g in order}
+            self._menu_letters.discard("")
+            self._assign_mnemonics(entries)
+
+            for g in order:
                 menu = bar.addMenu(MENU_TITLE.get(g, "&" + g.capitalize()))
                 items = groups.get(g, [])
                 prev_sep = True
@@ -1042,7 +1137,8 @@ def _build_shell_class():
                         btn.setDefaultAction(act)
                         btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
                         self._bar_buttons[str(e.get("id", ""))] = btn
-                    btn.setText(label)
+                    btn.setText(_with_mnemonic(label, self._mnemo.get(
+                        str(e.get("id", "")))))
                     self._append_widget(tb, btn)
                 else:
                     tb.addAction(act)
@@ -1114,6 +1210,33 @@ def _build_shell_class():
                     tb2.setVisible(bool(tb2.actions()))
                 self._chrome_restored = True
             self._sync_toggles()
+
+        def _assign_mnemonics(self, entries):
+            """One Alt-letter per main-toolbar row, unique within the window.
+
+            RE-RUN ON EVERY STATE FLIP, not only on a rebuild: a row whose
+            words change with its state (chatter's Send / Stop Generating /
+            Continue) would otherwise keep the letter its OLD word had, and
+            `_with_mnemonic` cannot underline a letter that is not in the
+            string — so the button silently lost its underline the first time
+            it changed its mind.
+            """
+            taken = set(self._menu_letters)
+            self._mnemo = {}
+            for e in entries:
+                # THE MAIN BAR ONLY. An extra bar is icon-only (player's
+                # transport), so an underline there is invisible and all it
+                # would do is eat the good letters before the bar he can
+                # actually read them on gets a turn.
+                if e is None or self._bar_of(e) != "main":
+                    continue
+                bid = str(e.get("id", ""))
+                shown = str(e.get("barText") or e.get("menuText") or e.get("tip")
+                            or e.get("label") or bid)
+                letter = _mnemonic_letter(shown, taken)
+                if letter:
+                    taken.add(letter)
+                    self._mnemo[bid] = letter
 
         @staticmethod
         def _bar_of(e):
@@ -1454,6 +1577,10 @@ def _build_shell_class():
                     widget = self._bar_widget(w)
                     if widget is not None:
                         widget.setVisible(on)
+                    # WRITTEN NOW, not at quit: he hides the menubar and the
+                    # next launch has to agree with him even if this process
+                    # never gets a clean exit.
+                    self._save_state()
 
                 act.toggled.connect(toggled)
                 self._actions[key] = act
@@ -1562,8 +1689,22 @@ def _build_shell_class():
             # generation that is every progress tick — and this used to re-do a
             # `QIcon.fromTheme` lookup for all twenty actions each time.
             text = str(e.get("menuText") or e.get("tip") or e.get("label") or bid)
+            # A `barText` row's words are the button's, not this one's, so its
+            # underline goes on there instead (`_rebuild`).
+            letter = None if e.get("barText") else self._mnemo.get(bid)
+            plain = text
+            text = _with_mnemonic(text, letter)
             if act.text() != text:
                 act.setText(text)
+            # THE BAR DRAWS `iconText`, NOT `text` — and Qt derives it from
+            # `text` with the mnemonic and the trailing ellipsis stripped, so
+            # an `&` in the menu row never reached the toolbar button at all.
+            # Say it here too, on a label that keeps the ellipsis off (a KDE
+            # toolbar button does not carry one) but keeps the underline.
+            if letter:
+                bar_text = _with_mnemonic(_BARE_TAIL.sub("", plain), letter)
+                if act.iconText() != bar_text:
+                    act.setIconText(bar_text)
             tip = str(e.get("tip") or "")
             if act.toolTip() != tip:
                 act.setToolTip(tip)
@@ -1638,6 +1779,7 @@ def _build_shell_class():
             if self._row_signature(entries) != self._row_sig:
                 self._rebuild()
                 return
+            self._assign_mnemonics(entries)
             for e in entries:
                 if e is not None:
                     self._action_for(e)
@@ -1733,6 +1875,19 @@ def _build_shell_class():
             if self._root is not None:      # bind_chrome may not have run yet
                 self._rebuild()
             return item
+
+        # --------------------------------------------------------- bar labels
+        def bar_labels(self, on=True):
+            """Names beside the icons on the main toolbar, as Konsole draws it.
+
+            A KDE toolbar's button style is bar-wide — which is why a single
+            row that wants its own words says `barText` and is added as its
+            own `QToolButton`. Those keep the style they set for themselves;
+            everything else on the bar takes this one.
+            """
+            tb = self._ensure_toolbar()
+            tb.setToolButtonStyle(Qt.ToolButtonTextBesideIcon if on
+                                  else Qt.ToolButtonIconOnly)
 
         # ----------------------------------------------------- overlay toolbar
         def use_overlay_toolbar(self, width_prop=None, inset_prop="chromeInset"):
@@ -1953,6 +2108,15 @@ def _build_shell_class():
                 self._status_label.text() if self._status_label is not None else "",
                 self._status_right.text() if self._status_right is not None else "",
                 "" if st is not None and st.isVisible() else " (hidden)"))
+            # The bar's button style, which no row above can show: with
+            # labels on, every row on the main toolbar wears its own name
+            # (`bar_labels`, Konsole's toolbar).
+            styles = {Qt.ToolButtonIconOnly: "icon-only",
+                      Qt.ToolButtonTextBesideIcon: "text-beside-icon",
+                      Qt.ToolButtonTextUnderIcon: "text-under-icon",
+                      Qt.ToolButtonTextOnly: "text-only"}
+            out.append("barstyle: %s" % (
+                styles.get(tb.toolButtonStyle(), "?") if tb is not None else "-"))
             # The icon a row is WEARING, by button id. A row's text and its
             # check state are already above; the icon is the third thing a
             # button says and the only one nothing here could see — an app that

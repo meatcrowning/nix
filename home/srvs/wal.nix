@@ -56,6 +56,14 @@ in
       source = ./wal-files/wal-repo-sync.sh;
       executable = true;
     };
+    "scripts/plasma-wallpaper-watch.sh" = {
+      source = ./wal-files/plasma-wallpaper-watch.sh;
+      executable = true;
+    };
+    "scripts/plasma-scheme.py" = {
+      source = ./wal-files/plasma-scheme.py;
+      executable = true;
+    };
     "scripts/cursor-recolor.sh" = {
       source = cursorRecolor;
       executable = true;
@@ -167,6 +175,35 @@ in
   systemd.user.paths.wal-repo-sync = {
     Unit.Description = "Watch ~/Pictures/wall and sync new wallpapers into the nix repo";
     Path.PathModified = "%h/Pictures/wall";
+    Install.WantedBy = [ "default.target" ];
+  };
+
+  # Picking a wallpaper in PLASMA's own desktop settings re-themes the desktop
+  # too. Under Hyprland the Quickshell picker calls wal-set.sh itself; Plasma's
+  # picker was wired to nothing, so the wal palette (and with it kitty, the
+  # 4chan sheet and Vivaldi's custom.css) froze while Plasma's
+  # accentColorFromWallpaper moved the panel alone. See
+  # plasma-wallpaper-watch.sh — it dedupes against ~/.cache/wal/current, which
+  # it has to: Plasma rewrites this file for any applet's state, not just the
+  # wallpaper.
+  #
+  # plasma-apply-colorscheme lives in plasma-workspace, and on book that is
+  # Fedora's, not a nix package — so the PATH here is the ambient one plus
+  # /usr/bin rather than a makeBinPath list.
+  systemd.user.services.plasma-wallpaper-watch = {
+    Unit = {
+      Description = "Re-theme the desktop from the wallpaper Plasma just set";
+      After = [ "graphical-session.target" ];
+    };
+    Service = {
+      Type = "oneshot";
+      ExecStart = "%h/.config/scripts/plasma-wallpaper-watch.sh";
+    };
+  };
+
+  systemd.user.paths.plasma-wallpaper-watch = {
+    Unit.Description = "Watch Plasma's containment config for a wallpaper change";
+    Path.PathChanged = "%h/.config/plasma-org.kde.plasma.desktop-appletsrc";
     Install.WantedBy = [ "default.target" ];
   };
 }

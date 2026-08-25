@@ -783,7 +783,11 @@ MODEL_TOOL_NAMES = {"manage_models"}
 MODEL_PULL_MS = 90 * 60 * 1000
 MODEL_DISK_FLOOR = 5 * 1024 * 1024 * 1024
 
-#: The library and the queue socket both live with the player, on `top`.
+#: The library and the queue socket live with the PLAYER — which since
+#: 2026-08-24 means the machine this window is on, book included: book runs its
+#: own player against the synced database and the SMB-mounted library, so
+#: asking top what is queued was asking the wrong machine (see TOOLS_HOST).
+#: The path is identical on both.
 MUSIC_SCRIPT = "/home/lam/nix/apps/player/tools/library-ipc.py"
 
 #: Which player, and what drives it. `playerctl` is the client (a real MPRIS
@@ -841,6 +845,107 @@ FETCH_URL_TOOL_NAMES = {"fetch_url"}
 #: hands back (his rule 5 — a tool result must never blow the context window).
 FETCH_URL_MAX_BYTES = 4 * 1024 * 1024
 FETCH_URL_CHARS = 20000
+
+
+#: ---- wikipedia: the citable answer, for a small model that guesses ---------
+#: `web_search` returns snippets somebody wrote to be clicked on and `fetch_url`
+#: hands back whatever HTML happens to be at a URL; neither is an encyclopedia,
+#: and a 3B-class model asked for a plain fact will happily invent one [his,
+#: 2026-08-24: "sometimes it like halucinates facts"]. This is one round trip
+#: to MediaWiki's own action API — `generator=search` plus `prop=extracts`, so
+#: the search and the article text arrive together — and it comes back as plain
+#: text with the article's URL beside it, which is the thing a reply can cite.
+#: Read-only, no key, any language edition.
+WIKIPEDIA_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "wikipedia",
+        "description": (
+            "Look a subject up in Wikipedia and read the article. PREFER THIS "
+            "over web_search for encyclopedic facts — people, places, history, "
+            "science, works, dates, definitions — and use it whenever you are "
+            "about to state a fact you are not certain of. Returns the article "
+            "title, its URL and its text, so you can cite it. Set full=true "
+            "for the whole article instead of the opening summary; page on with "
+            "offset when the text comes back truncated."),
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string",
+                      "description": "Article title or search terms."},
+            "full": {"type": "boolean",
+                     "description": ("false (default) = the opening summary; "
+                                     "true = the whole article as plain text.")},
+            "offset": {"type": "integer",
+                       "description": ("0-based character offset into the "
+                                       "article text. Use next_offset to page.")},
+            "lang": {"type": "string",
+                     "description": "Wikipedia language edition. Default en."}},
+            "required": ["query"]}},
+}
+WIKIPEDIA_TOOL_NAMES = {"wikipedia"}
+#: How much article text one call hands back (his rule 5 — a tool result must
+#: never blow the context window), and how many other matches it names.
+WIKIPEDIA_CHARS = 8000
+WIKIPEDIA_HITS = 5
+
+
+def wikipedia_url(query, full=False, lang="en"):
+    """The one API call this tool makes.
+
+    `generator=search` runs the search and `prop=extracts` renders the results
+    in the SAME request, which is what keeps this to one round trip — a title
+    the model guessed at is a search here, not a 404.
+    """
+    # A language edition is a HOST here, so it is validated rather than
+    # cleaned: anything that is not one falls back to en instead of being
+    # scrubbed into some other site's name.
+    lang = str(lang or "en").strip().lower()
+    if not re.fullmatch(r"[a-z]{2,3}(-[a-z]{2,8})?", lang):
+        lang = "en"
+    q = QUrlQuery()
+    for k, v in (("action", "query"), ("format", "json"), ("formatversion", "2"),
+                 ("redirects", "1"), ("prop", "extracts|info"),
+                 ("inprop", "url"), ("explaintext", "1"),
+                 ("generator", "search"), ("gsrsearch", str(query or "")),
+                 ("gsrlimit", str(WIKIPEDIA_HITS))):
+        q.addQueryItem(k, v)
+    if not full:
+        q.addQueryItem("exintro", "1")
+    u = QUrl("https://" + lang + ".wikipedia.org/w/api.php")
+    u.setQuery(q)
+    return u
+
+
+def wikipedia_result(payload, query, offset=0, chars=WIKIPEDIA_CHARS):
+    """MediaWiki's answer, as the tool result. Pure, so the harness can drive
+    it off a canned payload without going near the network.
+
+    The best match carries its TEXT; the others are named by title and URL
+    only — enough for the model to ask again, at no cost to the window.
+    """
+    pages = [p for p in (payload.get("query", {}) or {}).get("pages", []) or []
+             if isinstance(p, dict)]
+    if not pages:
+        return {"error": "nothing on Wikipedia matches that", "query": query}
+    # `generator=search` hands back the search's own ranking in `index`.
+    pages.sort(key=lambda p: p.get("index", 1 << 30))
+    best, rest = pages[0], pages[1:]
+    text = str(best.get("extract") or "").strip()
+    total = len(text)
+    offset = max(0, int(offset or 0))
+    page = text[offset:offset + chars]
+    out = {"title": best.get("title", ""),
+           "url": best.get("fullurl") or "",
+           "chars_total": total, "offset": offset, "text": page}
+    if not text:
+        out["error"] = ("that page has no text extract — read it with "
+                        "fetch_url instead")
+    if offset + len(page) < total:
+        out["truncated"] = True
+        out["next_offset"] = offset + len(page)
+    if rest:
+        out["other_matches"] = [{"title": p.get("title", ""),
+                                 "url": p.get("fullurl") or ""} for p in rest]
+    return out
 
 
 #: ---- call_api: a JSON web API as a tool ------------------------------------
@@ -1202,6 +1307,13 @@ WRITE_FREE = os.path.realpath(WRITE_ROOT) == os.sep
 WRITE_PATH = ("absolute (or relative to '/')" if WRITE_FREE
               else "relative to your sandbox root")
 WRITE_WHERE = ("anywhere on the filesystem" if WRITE_FREE else "in your sandbox")
+#: The `host` argument, in one place: every file tool takes it, read or write,
+#: and its default is THE MACHINE THIS WINDOW IS ON — see TOOLS_HOST.
+HOST_ARG_DESC = ("Which machine to act on. Default '%s', the machine you and "
+                 "he are on right now; name the other one to reach it over the "
+                 "tailnet." % ("book" if socket.gethostname() == "book" else "top"))
+HOST_ARG = {"type": "string", "enum": ["top", "book"],
+            "description": HOST_ARG_DESC}
 
 #: The FILE TOOLS oracle offers the model on EVERY turn (no toggle — his call:
 #: "always available to the model"). Reading and manipulation both, and every
@@ -1225,8 +1337,7 @@ FILE_TOOLS = [
         "parameters": {"type": "object", "properties": {
             "path": {"type": "string",
                      "description": "Directory to list, relative to '/'. Default '.'."},
-            "host": {"type": "string", "enum": ["top", "book"],
-                     "description": "Which machine to read. Default 'top'."}},
+            "host": dict(HOST_ARG)},
             "required": []}}},
     {"type": "function", "function": {
         "name": "read_file",
@@ -1242,8 +1353,7 @@ FILE_TOOLS = [
                        "description": "0-based line to start at. Default 0."},
             "limit": {"type": "integer",
                       "description": "Max lines to return this call."},
-            "host": {"type": "string", "enum": ["top", "book"],
-                     "description": "Which machine to read. Default 'top'."}},
+            "host": dict(HOST_ARG)},
             "required": ["path"]}}},
     {"type": "function", "function": {
         "name": "write_file",
@@ -1251,7 +1361,8 @@ FILE_TOOLS = [
                         "the given content. Parent directories are created."),
         "parameters": {"type": "object", "properties": {
             "path": {"type": "string", "description": "File to write, " + WRITE_PATH + "."},
-            "content": {"type": "string", "description": "Full new file contents."}},
+            "content": {"type": "string", "description": "Full new file contents."},
+            "host": dict(HOST_ARG)},
             "required": ["path", "content"]}}},
     {"type": "function", "function": {
         "name": "edit_file",
@@ -1263,14 +1374,16 @@ FILE_TOOLS = [
             "old": {"type": "string", "description": "Exact text to find."},
             "new": {"type": "string", "description": "Text to put in its place."},
             "replace_all": {"type": "boolean",
-                            "description": "Replace every match, not just a unique one."}},
+                            "description": "Replace every match, not just a unique one."},
+            "host": dict(HOST_ARG)},
             "required": ["path", "old", "new"]}}},
     {"type": "function", "function": {
         "name": "move_path",
         "description": "Move or rename a file or directory " + WRITE_WHERE + ".",
         "parameters": {"type": "object", "properties": {
             "src": {"type": "string", "description": "Path to move, " + WRITE_PATH + "."},
-            "dst": {"type": "string", "description": "Destination, " + WRITE_PATH + "."}},
+            "dst": {"type": "string", "description": "Destination, " + WRITE_PATH + "."},
+            "host": dict(HOST_ARG)},
             "required": ["src", "dst"]}}},
     {"type": "function", "function": {
         "name": "delete_path",
@@ -1281,13 +1394,15 @@ FILE_TOOLS = [
         "parameters": {"type": "object", "properties": {
             "path": {"type": "string", "description": "Path to delete, " + WRITE_PATH + "."},
             "recursive": {"type": "boolean",
-                          "description": "Delete a directory and its contents."}},
+                          "description": "Delete a directory and its contents."},
+            "host": dict(HOST_ARG)},
             "required": ["path"]}}},
     {"type": "function", "function": {
         "name": "make_dir",
         "description": "Create a directory (and parents) " + WRITE_WHERE + ".",
         "parameters": {"type": "object", "properties": {
-            "path": {"type": "string", "description": "Directory to create, " + WRITE_PATH + "."}},
+            "path": {"type": "string", "description": "Directory to create, " + WRITE_PATH + "."},
+            "host": dict(HOST_ARG)},
             "required": ["path"]}}},
     {"type": "function", "function": {
         "name": "find_files",
@@ -1301,8 +1416,7 @@ FILE_TOOLS = [
                         "description": "Glob, e.g. '*.md' or '**/*.py'."},
             "path": {"type": "string",
                      "description": "Directory to search under, relative to '/'. Default '.'."},
-            "host": {"type": "string", "enum": ["top", "book"],
-                     "description": "Which machine to search. Default 'top'."}},
+            "host": dict(HOST_ARG)},
             "required": ["pattern"]}}},
     {"type": "function", "function": {
         "name": "search_text",
@@ -1319,8 +1433,7 @@ FILE_TOOLS = [
                      "description": "Only search files whose name matches this glob, e.g. '*.py'."},
             "ignore_case": {"type": "boolean",
                             "description": "Case-insensitive match."},
-            "host": {"type": "string", "enum": ["top", "book"],
-                     "description": "Which machine to search. Default 'top'."}},
+            "host": dict(HOST_ARG)},
             "required": ["pattern"]}}},
     {"type": "function", "function": {
         "name": "show_tree",
@@ -1332,8 +1445,7 @@ FILE_TOOLS = [
                      "description": "Directory to show, relative to '/'. Default '.'."},
             "depth": {"type": "integer",
                       "description": "How many levels deep to descend. Default 5."},
-            "host": {"type": "string", "enum": ["top", "book"],
-                     "description": "Which machine to show. Default 'top'."}},
+            "host": dict(HOST_ARG)},
             "required": []}}},
 ]
 
@@ -1952,7 +2064,7 @@ AGENT_TOOL_GROUPS = {
     "read": ["list_dir", "read_file", "find_files", "search_text", "show_tree"],
     "write": ["write_file", "edit_file", "move_path", "delete_path", "make_dir"],
     "exec": ["run_python", "run_bash"],
-    "web": ["web_search", "fetch_url", "call_api"],
+    "web": ["web_search", "fetch_url", "wikipedia", "call_api"],
     "music": ["music_library", "lastfm", "control_media"],
     "sessions": ["list_sessions", "read_session"],
     "skills": ["use_skill"],
@@ -1972,6 +2084,10 @@ CORE_TOOL_NAMES = [
     "write_file", "edit_file",
     "run_bash", "run_python",
     "web_search", "fetch_url",
+    # WIKIPEDIA IS CORE, on purpose: the fix for a model that states facts it
+    # does not have is a source it can reach without being asked to go looking
+    # for one [his, 2026-08-24].
+    "wikipedia",
     "get_current_time",
     "use_skill", "spawn_agent",
     "save_memory", "list_memories",
@@ -2135,6 +2251,7 @@ def _tool_registry():
     same objects the main payload carries, so the two cannot drift; spawn_agent
     itself is absent, which is what keeps subagents one level deep."""
     tools = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, FETCH_URL_TOOL,
+             WIKIPEDIA_TOOL,
              CALL_API_TOOL, EXEC_TOOL, BASH_TOOL, SHOW_IMAGE_TOOL,
              MUSIC_TOOL, LASTFM_TOOL, PLAYER_TOOL] + list(JOB_TOOLS)
              + list(SESSION_TOOLS) + list(AUTHOR_TOOLS)
@@ -2570,6 +2687,32 @@ PERSISTENCE_NOTE = (
     "he has to read that the answer then repeats; the tool activity is already "
     "shown to him separately." % MAX_TOOL_ROUNDS)
 
+#: DON'T MAKE IT UP. The one complaint about the small models here that no
+#: amount of context fixes by itself [his, 2026-08-24: "sometimes it like
+#: halucinates facts and i know its a small model"]. A model states an invented
+#: date, version or citation with exactly the confidence it states a real one,
+#: so the fix is not "be careful" — it is a rule about WHEN to answer from
+#: memory at all, next to tools that can actually go and look (`wikipedia` is
+#: core for this reason).
+GROUNDING_NOTE = (
+    "DO NOT INVENT FACTS. Before you state a specific — a date, a number, "
+    "a name, a version, a price, a quote, a URL, a filename, a command, a "
+    "function or an API — ask yourself whether you actually know it. If "
+    "you are not sure, CHECK IT FIRST: wikipedia for anything encyclopedic "
+    "(people, places, history, science, works, definitions), web_search for "
+    "current or niche things, fetch_url for a page you were given, and the "
+    "file tools for anything on this machine. Checking is cheap and you have "
+    "rounds to spare.\n"
+    "If you cannot check it, say so plainly (\"I'm not sure\", \"I don't "
+    "know\", \"you would have to check X\") and answer the part you do know. "
+    "An honest gap is worth more to him than a confident guess, and he would "
+    "rather be told a thing is uncertain than find out later it was wrong.\n"
+    "When a tool gave you the answer, say where it came from (the article, the "
+    "page, the file) so he can check it himself. Never invent a citation, a "
+    "URL, a filename or a command line to look authoritative: a made-up source "
+    "is worse than none. And never present a guess about HIS machine, his "
+    "files or his music as fact — look, with the tools you have.")
+
 #: The app's own notes inside the conversation, and the rule that they are not
 #: his words. A turn that made a picture or a clip carries a
 #: `[image in this chat: /path · WxH]` line in the history so the path survives
@@ -2660,13 +2803,39 @@ SAMPLER_DEFAULTS = {
 }
 
 
-def sampler_for(model):
-    """The sampling options to send with `model`, or {} for leave-it-alone."""
+#: THE FACTUAL FLOOR, and the presets that are exempt from it.
+#: A published sampler is tuned for general chat — Google ships Gemma at
+#: temperature 1.0 — and chatter sent NOTHING for every other model, i.e.
+#: whatever its Modelfile carries, typically 0.7-0.8. That is a hot sampler
+#: answering questions of fact, which is the other half of a small model
+#: inventing one [his, 2026-08-24]. So a factual turn clamps the temperature
+#: and tightens top_p; a turn he has explicitly asked to be creative does not,
+#: because that is what those presets are FOR.
+FACTUAL_SAMPLER = {"temperature": 0.3, "top_p": 0.9}
+CREATIVE_PRESETS = {"writer", "casual"}
+
+
+def sampler_for(model, preset="default"):
+    """The sampling options to send with `model`.
+
+    The family default is the floor's starting point, not its competitor: a
+    model whose author published `top_k`/`min_p` keeps them, and only the two
+    knobs that decide how far off the distribution's nose it will wander are
+    pulled in. `custom` counts as factual — his own base prompt says what he
+    wants, and a custom persona is not evidence that he wants invented dates.
+    """
     name = (model or "").lower()
+    opts = {}
     for key in sorted(SAMPLER_DEFAULTS, key=len, reverse=True):
         if key in name:
-            return dict(SAMPLER_DEFAULTS[key])
-    return {}
+            opts = dict(SAMPLER_DEFAULTS[key])
+            break
+    if str(preset or "") in CREATIVE_PRESETS:
+        return opts
+    opts["temperature"] = min(float(opts.get("temperature", 1.0)),
+                              FACTUAL_SAMPLER["temperature"])
+    opts["top_p"] = min(float(opts.get("top_p", 1.0)), FACTUAL_SAMPLER["top_p"])
+    return opts
 
 
 #: The windows that may actually be asked for. Steps, because changing
@@ -2762,6 +2931,15 @@ MEMORY_ROOT = os.path.expanduser(
     os.environ.get("ORACLE_MEMORY", "~/.local/share/oracle/memory"))
 MEMORY_SCRIPT = str(HERE / "tools" / "memory-store.py")
 
+#: A STORE POINTED SOMEWHERE ELSE IS A LOCAL STORE. The session and memory
+#: stores keep their `top` branch on purpose — one set of memories, one history,
+#: whichever machine he is on — but `$ORACLE_MEMORY`/`$ORACLE_SESSIONS` exist so
+#: a harness can drive a disposable one, and that root is a path in ITS /tmp.
+#: Sending the op to top made every such run fail on book with a store the
+#: other machine had never heard of.
+STORE_LOCAL = bool(os.environ.get("ORACLE_MEMORY")
+                   or os.environ.get("ORACLE_SESSIONS"))
+
 #: The code runner. Same absolute path on both machines and pure stdlib, so
 #: `python3 <this> <sandbox>` runs unchanged locally on top or over ssh from
 #: book — identical to FS_SCRIPT. Runs against SANDBOX_ROOT (the WRITE jail):
@@ -2786,6 +2964,31 @@ MEMORY_CTX_CHARS = 8000
 #: 11434, tools/ollama-tunnel.sh) and — for start/stop — its systemd unit over
 #: the same ssh. See Backend below.
 ON_BOOK = socket.gethostname() == "book"
+
+#: WHERE A TOOL DOES ITS WORK — and since 2026-08-24 the answer is THIS
+#: MACHINE, on either of them.
+#:
+#: Every executor here used to hard-branch to `top` from book, on the reasoning
+#: that the library and the compute live there. For the model's own compute
+#: that is still true and unchanged (ollama, image and video generation, the
+#: session and memory stores — one history, not two). For his FILES and his
+#: PLAYER it was wrong: chatter on book could not read a file on book, could
+#: not run a command against it, and asked top what was playing while he sat in
+#: front of book playing something else [his, 2026-08-24: "when im in air,
+#: chatter agents can see what im playing / manipulate airs files like it can
+#: on top"].
+#:
+#: So the file tools, the two runners, background jobs and the music library
+#: default to the machine the window is running on, and the file tools' `host`
+#: argument still reaches the OTHER one over the tailnet — which is the same
+#: mechanism as before, with its default corrected. `ORACLE_TOOLS_HOST=top`
+#: puts the old behaviour back wholesale.
+LOCAL_HOST = "book" if ON_BOOK else "top"
+TOOLS_HOST = os.environ.get("ORACLE_TOOLS_HOST", "").strip().lower()
+if TOOLS_HOST not in ("top", "book"):
+    TOOLS_HOST = LOCAL_HOST
+#: True only when the work has to leave this machine — i.e. book reaching top.
+TOOLS_REMOTE = TOOLS_HOST != LOCAL_HOST
 
 #: oracle's own config dir (shared with tavily.key). Two optional, no-rebuild
 #: files drive the model selector — drop them in and relaunch, same as the key:
@@ -3305,7 +3508,7 @@ class Jobs(QObject):
 
     @staticmethod
     def _argv(*args):
-        if ON_BOOK:
+        if TOOLS_REMOTE:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
             ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
             argv = [ssh, "-o", "BatchMode=yes"]
@@ -5147,6 +5350,7 @@ class Ollama(QObject):
             base += "\n\n" + memory_block
         base += "\n\n" + RECALL_GUIDANCE
         base += "\n\n" + SAVE_GUIDANCE
+        base += "\n\n" + GROUNDING_NOTE
         base += "\n\n" + CAPABILITY_NOTE
         base += "\n\n" + PERSISTENCE_NOTE
         base += "\n\n" + MARKER_NOTE
@@ -5293,6 +5497,10 @@ class Ollama(QObject):
             "provider": {"backend": "ollama", "endpoint": OLLAMA},
             "app": "chatter (the oracle ollama chat window)",
             "host": socket.gethostname(),
+            # WHERE THE TOOLS ACT. A model that assumed "top" wrote a file on
+            # the wrong machine; it is a fact about this window, so it is
+            # reported rather than left to be inferred.
+            "tools_act_on": TOOLS_HOST,
             "os": self._os_pretty(),
             "arch": platform.machine(),
             "cpu_logical": os.cpu_count(),
@@ -5319,8 +5527,11 @@ class Ollama(QObject):
             "tools_available": self._offered_tool_names(),
             "tools_attached_now": sorted(
                 t["function"]["name"] for t in self._offered_tools()),
-            "sampling": {"num_ctx": self._num_ctx,
-                         "temperature": "model default (chatter does not override)"},
+            # READ OFF THE SAME CALL THE PAYLOAD MAKES, never a remembered
+            # sentence (docs/DESIGN.md §10) — it said "model default (chatter
+            # does not override)" for a day after chatter started overriding.
+            "sampling": dict(sampler_for(self._model, self._prompt_choice),
+                             num_ctx=self._num_ctx),
         }
         remaining["sink"][idx] = {"role": "tool", "tool_name": "describe_self",
                                    "content": json.dumps(result)}
@@ -5336,7 +5547,7 @@ class Ollama(QObject):
                 SCREENSHOT_TOOL, MAKE_IMAGE_TOOL, MAKE_VIDEO_TOOL, BOORU_TOOL,
                 VIDEO_TOOL, PLAYER_TOOL,
                 MUSIC_TOOL, LASTFM_TOOL, MODEL_TOOL,
-                FETCH_URL_TOOL,
+                FETCH_URL_TOOL, WIKIPEDIA_TOOL,
                 CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
                 + list(SESSION_TOOLS) + list(MEMORY_TOOLS) + list(AUTHOR_TOOLS)
                 + [GET_TOOLS_TOOL] + list(JOB_TOOLS)
@@ -5432,7 +5643,7 @@ class Ollama(QObject):
             "model": self._model,
             "messages": self._messages,
             "stream": True,
-            "options": dict(sampler_for(self._model),
+            "options": dict(sampler_for(self._model, self._prompt_choice),
                             num_ctx=self._num_ctx),
         }
         # The WRAP-UP round carries no tools at all: `_on_finished` sets
@@ -5914,6 +6125,8 @@ class Ollama(QObject):
         elif name in SEARCH_IMAGE_TOOL_NAMES:
             self._search_images(str(args.get("query", "")).strip(),
                                 i, remaining, calls)
+        elif name in WIKIPEDIA_TOOL_NAMES:
+            self._wikipedia(args, i, remaining, calls)
         elif name in FETCH_URL_TOOL_NAMES:
             self._fetch_url(str(args.get("url", "")).strip(),
                             args.get("offset", 0), i, remaining, calls)
@@ -6002,8 +6215,12 @@ class Ollama(QObject):
         carries no tools — the same lesson the main loop learned: a model still
         calling tools when it is out of rounds, offered them again, answers
         with nothing at all."""
+        # A SUBAGENT IS ALWAYS FACTUAL: it exists to establish something and
+        # report it back, whatever persona the main turn is wearing.
         payload = {"model": run["model"], "messages": run["messages"],
-                   "stream": False, "options": {"num_ctx": self._num_ctx}}
+                   "stream": False,
+                   "options": dict(sampler_for(run["model"]),
+                                   num_ctx=self._num_ctx)}
         if run["tools"] and not run["wrap"]:
             payload["tools"] = run["tools"]
         req = QNetworkRequest(QUrl(OLLAMA + "/api/chat"))
@@ -6380,6 +6597,75 @@ class Ollama(QObject):
             remaining["sink"][idx] = {
                 "role": "tool", "tool_name": "fetch_url",
                 "content": json.dumps({"error": str(e), "url": url})}
+        finally:
+            reply.deleteLater()
+            self._tool_done(remaining, calls)
+
+    def _wikipedia(self, args, idx, remaining, calls):
+        """One MediaWiki query, in process. Same shared QNetworkAccessManager
+        as fetch_url — no executor, no host branch — and surfaced through the
+        same web-search disclosure, so the reply says where the fact came
+        from."""
+        query = str(args.get("query", "") or "").strip()
+        full = bool(args.get("full", False))
+        lang = str(args.get("lang", "en") or "en")
+        try:
+            offset = max(0, int(args.get("offset", 0) or 0))
+        except (TypeError, ValueError):
+            offset = 0
+        if not query:
+            remaining["sink"][idx] = {
+                "role": "tool", "tool_name": "wikipedia",
+                "content": json.dumps({"error": "wikipedia needs a query"})}
+            self._tool_done(remaining, calls)
+            return
+        label = "wikipedia: " + query
+        self.webSearchStarted.emit(label)
+        req = QNetworkRequest(wikipedia_url(query, full, lang))
+        # Wikimedia's policy asks every client to identify itself; an app that
+        # does not is the one that gets rate-limited.
+        req.setRawHeader(b"User-Agent",
+                         b"chatter/1.0 (https://github.com/meatcrowning/nix)")
+        req.setRawHeader(b"Accept", b"application/json")
+        reply = self._nam.get(req)
+        reply.finished.connect(
+            lambda: self._on_wikipedia(reply, query, label, offset,
+                                       idx, remaining, calls))
+
+    def _on_wikipedia(self, reply, query, label, offset, idx, remaining, calls):
+        if not self._busy:              # turn was cancelled mid-fetch
+            reply.deleteLater()
+            return
+        try:
+            data = bytes(reply.readAll().data())
+            if reply.error() != QNetworkReply.NetworkError.NoError:
+                msg = reply.errorString()
+                self.webSearchError.emit(label, msg)
+                result = {"error": "wikipedia lookup failed: " + msg,
+                          "query": query}
+            else:
+                try:
+                    payload = json.loads(data.decode("utf-8", "replace"))
+                except ValueError as e:
+                    payload, result = None, {"error": "wikipedia returned "
+                                             "something that is not JSON: "
+                                             + str(e), "query": query}
+                if payload is not None:
+                    result = wikipedia_result(payload, query, offset)
+                    if result.get("url"):
+                        self.webSearchDone.emit(
+                            label, "- [" + str(result.get("title") or query)
+                            + "](" + result["url"] + ")", 1)
+                    else:
+                        self.webSearchError.emit(
+                            label, str(result.get("error") or "no match"))
+            remaining["sink"][idx] = {"role": "tool", "tool_name": "wikipedia",
+                                      "content": json.dumps(result)}
+        except (ValueError, TypeError) as e:
+            self.webSearchError.emit(label, str(e))
+            remaining["sink"][idx] = {
+                "role": "tool", "tool_name": "wikipedia",
+                "content": json.dumps({"error": str(e), "query": query})}
         finally:
             reply.deleteLater()
             self._tool_done(remaining, calls)
@@ -7294,7 +7580,7 @@ class Ollama(QObject):
         `$ORACLE_MUSIC` replaces the script, which is how the harness drives a
         fake library and a fake socket instead of his."""
         script = os.environ.get("ORACLE_MUSIC", "").strip() or MUSIC_SCRIPT
-        if ON_BOOK:
+        if TOOLS_REMOTE:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
             ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
             argv = [ssh, "-o", "BatchMode=yes"]
@@ -7566,8 +7852,9 @@ class Ollama(QObject):
         Every action ends in a STATUS read, so the model reports the state it
         produced rather than the one it intended — and a failure is a REASON,
         never a silent no-op: nothing running on this machine's bus is the
-        common one and a real answer (his library is on `top`, so a book window
-        has nothing to drive)."""
+        common one and a real answer (nothing is playing on THIS machine's
+        bus — which since 2026-08-24 is the machine he is sitting at, not
+        always top)."""
         a = args if isinstance(args, dict) else {}
         action = str(a.get("action") or "status").strip().lower()
         target = str(a.get("player") or "").strip()
@@ -8036,8 +8323,8 @@ class Ollama(QObject):
         AGENTS.md "Off-LAN: the tailnet"), reusing the tunnel's control master
         only for the one hop (book asking for top) that already has one open.
         The op JSON is written to stdin regardless of which branch runs."""
-        host = target_host if target_host in ("top", "book") else "top"
-        local = "book" if ON_BOOK else "top"
+        host = target_host if target_host in ("top", "book") else TOOLS_HOST
+        local = LOCAL_HOST
         if host == local:
             return [sys.executable, FS_SCRIPT, WRITE_ROOT, READ_ROOT]
         ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
@@ -8317,7 +8604,7 @@ class Ollama(QObject):
             if total > cls.PAINTER_INPUT_MAX:
                 return "", b"", ("the input images come to more than %d MB"
                                  % (cls.PAINTER_INPUT_MAX // (1024 * 1024)))
-            if not ON_BOOK:
+            if not cls._painter_remote():
                 flags += " %s %s" % (flag, shlex.quote(path))
                 continue
             name = seen.get(path)
@@ -8325,7 +8612,7 @@ class Ollama(QObject):
                 name = "in%d%s" % (len(seen), os.path.splitext(path)[1] or ".png")
                 seen[path] = name
             flags += " %s %s" % (flag, shlex.quote(cls.PAINTER_IN_DIR + "/" + name))
-        if not ON_BOOK or not seen:
+        if not cls._painter_remote() or not seen:
             return flags, b"", ""
         buf = io.BytesIO()
         try:
@@ -8335,6 +8622,14 @@ class Ollama(QObject):
         except (OSError, tarfile.TarError) as e:
             return "", b"", "could not pack the input images: %s" % e
         return flags, base64.b64encode(buf.getvalue()), ""
+
+    @staticmethod
+    def _painter_remote():
+        """Is the generator on the OTHER machine? `top` from book, unless
+        `$ORACLE_PAINTER` replaced it — a harness's stub is a script in its own
+        /tmp, so it runs here, its inputs need no staging and its output IS on
+        this disk."""
+        return ON_BOOK and not os.environ.get("ORACLE_PAINTER", "").strip()
 
     @classmethod
     def _painter_argv(cls, args, kind="image"):
@@ -8439,7 +8734,11 @@ class Ollama(QObject):
         # leaves its child rendering (see `_stop_generating`).
         script = "mkdir -p %s; %s%sexec %s" % (shlex.quote(MAKE_IMAGE_DIR),
                                                unpack, wake, cmd)
-        if ON_BOOK:
+        # THE WEIGHTS AND THE GPU ARE ON TOP, so this one does not follow
+        # TOOLS_HOST — except when `$ORACLE_PAINTER` replaced the generator,
+        # which only a harness does and only ever with a script in its own
+        # /tmp. Sending that to top ran a file the other machine has never had.
+        if cls._painter_remote():
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
             ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
             argv = [ssh, "-o", "BatchMode=yes"]
@@ -8727,8 +9026,11 @@ class Ollama(QObject):
                                  "back.")}, True,
                        "made " + os.path.basename(path))
 
+            # The picture is wherever the GENERATOR ran — top from book, and
+            # this machine when a stub replaced it (`_painter_remote`).
             self._display_image(path, caption,
-                                "top" if ON_BOOK else None, shown, meta)
+                                "top" if self._painter_remote() else None,
+                                shown, meta)
 
         def failed(e):
             if state["done"] or e != QProcess.ProcessError.FailedToStart:
@@ -8868,9 +9170,10 @@ class Ollama(QObject):
                              "this seed back.")}, True,
                    "made " + os.path.basename(here))
 
-        if ON_BOOK:
+        if ON_BOOK and not os.path.exists(here):
             # The clip is on top and QtMultimedia cannot stream a path that is
-            # not here. Nothing to draw locally, so say where it is rather than
+            # not here. Asked of the FILE, not of the hostname: a path that is
+            # on this disk plays, whichever machine wrote it. Nothing to draw locally, so say where it is rather than
             # showing a card that would not play (docs/DESIGN.md §10).
             self._made_this_turn["video"] = here
             answer({"ok": True, "path": here, "host": "top",
@@ -9057,9 +9360,11 @@ class Ollama(QObject):
         the args before they become the op request (sandbox-fs.py doesn't know
         about it) and instead selects which machine `_fs_argv` targets."""
         req = {k: v for k, v in args.items()} if isinstance(args, dict) else {}
+        # `host` reaches EITHER machine now, on a write as much as on a read:
+        # the sandbox runs on both and their layouts are identical, and a
+        # chatter on book that could read book but only write top would be the
+        # more confusing half-answer.
         target_host = str(req.pop("host", "") or "").strip().lower() or None
-        if name not in FILE_READ_TOOL_NAMES:
-            target_host = None   # mutating tools have no host arg; ignore stray input
         req["op"] = FILE_OP[name]
         self.fileToolStarted.emit(self._fs_heading(name, args))
         argv = self._fs_argv(target_host)
@@ -9109,7 +9414,7 @@ class Ollama(QObject):
         root — the runner's default working directory, not a jail — plus
         `--no-net` when ORACLE_EXEC_NET=0 asks for the old network cut."""
         extra = [] if EXEC_NET else ["--no-net"]
-        if ON_BOOK:
+        if TOOLS_REMOTE:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
             ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
             argv = [ssh, "-o", "BatchMode=yes"]
@@ -9316,7 +9621,7 @@ class Ollama(QObject):
         (duplicated rather than shared: Ollama and Sessions are independent
         QObjects with no reference to each other) — local on `top`, over the
         tunnel's ssh master from `book`."""
-        if ON_BOOK:
+        if ON_BOOK and not STORE_LOCAL:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
             ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
             argv = [ssh, "-o", "BatchMode=yes"]
@@ -9388,7 +9693,7 @@ class Ollama(QObject):
         tools/memory-store.py — the same host branch as `_sessions_argv`: local
         on `top`, over the tunnel's ssh master from `book`, so the memories live
         in one canonical place both machines share."""
-        if ON_BOOK:
+        if ON_BOOK and not STORE_LOCAL:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
             ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
             argv = [ssh, "-o", "BatchMode=yes"]
@@ -10006,7 +10311,7 @@ class Sessions(QObject):
         (OLLAMA_SSH*), so the sessions/transcripts live in one canonical place
         keyed to top and both machines share them. The op JSON is written to
         stdin."""
-        if ON_BOOK:
+        if ON_BOOK and not STORE_LOCAL:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
             ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
             argv = [ssh, "-o", "BatchMode=yes"]

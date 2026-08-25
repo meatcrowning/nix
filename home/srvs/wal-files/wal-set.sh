@@ -280,13 +280,28 @@ fi
 # wal-set.sh is reachable from a Plasma session (apps/pylib/systheme.py, the
 # player's "create systheme"). One gate covers the fonts too:
 # apply-pixel-font.sh is called from inside this block.
+#
+# That gate went in on 2026-08-18 and took the wallpaper OUT of the window
+# colours in a Plasma session with it — the panel followed the wallpaper (via
+# Plasma's own accentColorFromWallpaper) and the windows did not. The Plasma
+# branch below is the answer: not a kdeglobals rewrite, a re-mint of the colour
+# SCHEME FILE he picked, which plasma-apply-colorscheme then pushes into
+# kdeglobals through KDE's own route — leaving widget style, icons and fonts
+# alone.
 KG="$CONFIG/kdeglobals"
 PLASMA_SESSION=0
 case ":$(printf '%s' "${XDG_CURRENT_DESKTOP:-}" | tr '[:lower:]' '[:upper:]'):" in
     *:KDE:*) PLASMA_SESSION=1 ;;
 esac
 if [ "$PLASMA_SESSION" = 1 ]; then
-    echo "wal-set: Plasma session — leaving the KDE global theme alone"
+    # The KDE global theme stays his — but the COLOUR SCHEME follows the
+    # wallpaper, by re-minting the scheme file he already picked with its hue
+    # moved onto the accent and re-applying it under the same name. Oxygen's
+    # shape survives; only its family of blues becomes the wallpaper's colour.
+    # See plasma-scheme.py for the maths and for why it refuses to apply when
+    # the live scheme is not the one it templates.
+    echo "wal-set: Plasma session — KDE theme untouched, re-minting its colour scheme"
+    "$SCRIPTS/plasma-scheme.py" --accent "$ACCENT"
 elif command -v kwriteconfig6 >/dev/null 2>&1; then
     hx() { printf '%d,%d,%d' "0x${1:0:2}" "0x${1:2:2}" "0x${1:4:2}"; }   # "rrggbb" -> "R,G,B"
     kw() { kwriteconfig6 --file "$KG" "$@"; }
