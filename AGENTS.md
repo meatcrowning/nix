@@ -534,9 +534,9 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   own secrets go unguarded. `DESIGN.md` and `HARDWARE.md` live in here;
   a few docs stay outside on purpose and `docs/README.md` says which and why.
 - `home/srvs/oracle-skills.nix` + `oracle-skills-files/` — **chatter's skills,
-  tool manifests and subagent definitions, synced both ways between `top` and
-  `book`.** They live in chatter's own runtime dir
-  (`~/.local/share/oracle/{skills,agents,tools}`),
+  tool manifests, subagent definitions and measured per-model KV costs, synced
+  both ways between `top` and `book`.** They live in chatter's own runtime dir
+  (`~/.local/share/oracle/{skills,agents,tools}` + `ctxfit.json`),
   not `~/.claude`, and were machine-local until 2026-08-23 — a skill written on
   one host simply did not exist on the other, and `book` had neither directory.
   Same engine as the two above (`claude-memory-sync.sh`, 5-min timer, private

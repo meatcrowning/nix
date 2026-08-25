@@ -49,13 +49,29 @@ KV_LOG = ("load_tensors: offloaded 41/42 layers to GPU\n"
           "llama_context: n_ctx                 = 32768\n"
           "llama_kv_cache: size =  640.00 MiB ( 32768 cells,  10 layers,"
           "  1/1 seqs), K (f16):  320.00 MiB, V (f16):  320.00 MiB\n")
+# And a fake `ssh`. On book CtxFit reads BOTH halves off top — the machine the
+# KV cache is actually allocated on — so without this the harness would probe
+# the real top over the real tunnel. This one drops the ssh options and the
+# host, then runs the command here, which is what makes the fakes above serve
+# for both hosts: the test asserts the same numbers whichever machine it runs
+# on, which is the whole point of the branch it is pinning.
+SSH = ("#!/bin/sh\n"
+       "while [ $# -gt 0 ]; do\n"
+       "  case \"$1\" in -o) shift 2 ;; *) break ;; esac\n"
+       "done\n"
+       "shift\n"          # the host
+       "eval \"$@\"\n")
+
 for name, body in (("journalctl", "#!/bin/sh\ncat <<'EOF'\n%s\nEOF\n" % KV_LOG),
-                   ("nvidia-smi", "#!/bin/sh\necho 8192\n")):   # 8 GiB free
+                   ("nvidia-smi", "#!/bin/sh\necho 8192\n"),   # 8 GiB free
+                   ("ssh", SSH)):
     p = os.path.join(BIN, name)
     with open(p, "w") as f:
         f.write(body)
     os.chmod(p, os.stat(p).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 os.environ["PATH"] = BIN + os.pathsep + os.environ.get("PATH", "")
+os.environ["OLLAMA_SSH"] = os.path.join(BIN, "ssh")
+os.environ.pop("OLLAMA_SSH_CTL", None)
 
 MODEL = "stub:latest"
 PS = {"models": []}
@@ -183,8 +199,9 @@ check("a small-context model is not stretched to the flat default",
 
 # ---- no memory to speak of: the floor holds -------------------------------
 o._ctx_train = 262144
-o._ctx_fit._vram_free = staticmethod(lambda: 0)
-o._ctx_fit._mem_available = staticmethod(lambda: 0)
+# `_free` is the one seam on both hosts — locally on top, over ssh from book —
+# so patching it here pins the fallback for either.
+o._ctx_fit._free = lambda: (0, 0)
 o._set_window(MODEL)
 check("with nothing free it falls back to the flat window, not to zero",
       o._num_ctx == oracle.CHAT_NUM_CTX, str(o._num_ctx))
