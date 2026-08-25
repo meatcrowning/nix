@@ -103,10 +103,10 @@ def section(text, head):
 
 
 def verb(row):
-    """A row's verb, with the checkbox gutter off the front. A checkable row
-    reads `[x] Playlists`, and which one is checked depends on the page the
-    harness happens to be on."""
-    return row[4:] if row[:1] == "[" else row
+    """A row's verb, with the checkbox gutter off the front and the mnemonic
+    marker out of the middle. A checkable row reads `[x] P&laylists`, and
+    which one is checked depends on the page the harness happens to be on."""
+    return (row[4:] if row[:1] == "[" else row).replace("&", "")
 
 
 view = section(plasma, "&View")
@@ -121,12 +121,14 @@ for name in ("Albums", "Playlists"):
     check(f"{name} is on the toolbar",
           any(verb(r).startswith(name) for r in top), str(top))
 check("Now Playing is a radio row (checked, not just present)",
-      any(r.startswith("[x] Now Playing") or r.startswith("[ ] Now Playing")
+      any(r.replace("&", "").startswith("[x] Now Playing")
+          or r.replace("&", "").startswith("[ ] Now Playing")
           for r in view), str(view))
 
 # ---- the sort row carries the WORD, not the titlebar's two-character cell -
 check("sort names the mode in full on the toolbar",
-      any(r.startswith("<QToolButton 'sort: ") for r in top), str(top))
+      any(r.replace("&", "").startswith("<QToolButton 'sort: ") for r in top),
+      str(top))
 check("...and in the View menu", any(r.startswith("Sort by ") for r in view),
       str(view))
 check("no two-character titlebar cell reached the chrome",
@@ -137,6 +139,25 @@ check("no two-character titlebar cell reached the chrome",
 check("the toolbar's buttons wear their names beside the icons",
       "barstyle: text-beside-icon" in plasma,
       [ln for ln in plasma.splitlines() if ln.startswith("barstyle:")] or "(none)")
+
+# ---- every top-bar row wears an Alt-letter, and no two share one --------
+# The underline is what says a button HAS a shortcut, so a letter two rows
+# both claim — or one the menubar's own titles already answer to — is worse
+# than none (docs/DESIGN.md §10).
+import re as _re
+bar_letters = [m.group(1).upper() for r in top
+               for m in [_re.search(r"&(\w)", r)] if m]
+menu_letters = [m.group(1).upper() for t in menus
+                for m in [_re.search(r"&(\w)", t)] if m]
+check("every named row on the top toolbar has one",
+      len(bar_letters) == len([r for r in top if not r.startswith("<QWidget")
+                               and not r.startswith("<QLineEdit") and r != "---"]),
+      str(top))
+check("no two rows claim the same letter",
+      len(set(bar_letters)) == len(bar_letters), str(bar_letters))
+check("...and none of them is a menubar title's",
+      not (set(bar_letters) & set(menu_letters)),
+      str(sorted(set(bar_letters))) + " vs " + str(sorted(set(menu_letters))))
 
 # ---- the finder is a real field, at the right-hand end ------------------
 check("the finder is a QLineEdit on the toolbar",
