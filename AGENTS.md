@@ -452,7 +452,13 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   `REBUILD_ASK_TIMEOUT` (5 min by default) before falling through to "rebuild
   anyway" regardless — the same outcome, five minutes later [2026-08-24].
   `REBUILD_IGNORE_GPU=1` skips it,
-  `REBUILD_ASK_TIMEOUT` sets the wait. Harness `heavy-gate-test.sh`, which
+  `REBUILD_ASK_TIMEOUT` sets the wait. **Its toast may never hold the rebuild
+  lock**: `as_user` is `runuser -- env … notify-send`, so killing it at the
+  timeout reaps runuser and ORPHANS the notify-send, which with no notification
+  daemon on that host blocks on `-w` for ever — and it inherited the wrapper's
+  flock on fd 9, so every later rebuild there queued behind a question nothing
+  could display (found 17 minutes in, 2026-08-24). The toast now runs under
+  `timeout` and with fd 9 closed. Harness `heavy-gate-test.sh`, which
   drives stub endpoints and never his backends; `heavy-gate.sh demo` is how HE
   raises the real toast),
   `sandbox.sh`, `leak-check.sh` (a test that leaked into his live session —
@@ -622,6 +628,25 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
       gives its OWN weights back before asking for room — the warden never
       interrupts work in flight, so without that a chatter holding 22 GiB would
       refuse every generation it asked for itself.
+    - **It must be RUNNING and REACHABLE, or fail-open makes it a no-op.**
+      Both halves were broken until 2026-08-24 and neither said a word: the
+      unit was `WantedBy=graphical-session.target`, so it died whenever nobody
+      was sitting at `top` — while ollama (a system unit) and comfy-painter (a
+      user unit needing no session) stayed up and were driven from book — and
+      `ollama-tunnel.sh` forwarded 11434 but not **8199**, so every reserve
+      chatter made from book was an instant unarbitrated yes. Measured that
+      evening: warden dead since 20:47, and a `make_video` from book at 23:41
+      landed on a GPU still holding gemma4-qat:12b —
+      `torch.OutOfMemoryError … Free (according to CUDA): 9.62 MiB`, with
+      nothing in its own log because it was never asked. It is now
+      `WantedBy=default.target` and the tunnel forwards both ports. **A
+      fail-open daemon is one you have to check is alive**
+      (`systemctl --user is-active ai-warden`, `ai-warden status`), because
+      down and working look identical from the app.
+    - **What it freed is drawn where HE is.** The warden's toast lands on
+      `top`; from book that is a screen nobody is looking at, so `Warden.last`
+      carries the whole answer back and chatter says
+      `unloaded your model to make room on the gpu` in the tool line itself.
     - **Fail open everywhere.** Kill switch `~/.local/state/ai-warden/off`; a
       dead or wedged daemon is an immediate yes. Log `~/.cache/ai-warden.log`,
       `ai-warden status` for the picture, harness `tools/ai-warden-test.py`.
