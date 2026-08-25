@@ -244,6 +244,127 @@ def kde_palette(ini=None) -> dict | None:
     }
 
 
+# --------------------------------------------------------------------------- #
+#  the ANSI sixteen, for the terminals
+# --------------------------------------------------------------------------- #
+# A terminal needs something the twelve tokens do not carry: six chromatic ANSI
+# slots that stay TELLABLE APART. The wal palette has four real hues to spend on
+# them, so konsole-theme could map them straight through; a KDE colour scheme
+# has no ANSI set at all, and its `ForegroundLink` is very often the accent
+# again (Oxygen's is, exactly). Mapping the tokens through anyway pinned that
+# one accent into foreground, blue, cyan and white at once, so a Plasma konsole
+# drew four slots in one gold and only red/green/yellow broke out — "the colors
+# are all wrong in konsole", 2026-08-23.
+#
+# So under Plasma the ramp is DERIVED rather than borrowed. Each slot has a
+# canonical hue; the scheme's own colour takes the slot when it genuinely lives
+# in that hue's neighbourhood (and is nearer that hue than any other slot's),
+# and the rest are synthesised at the canonical angle wearing the saturation and
+# value of the hues the scheme did provide — so the set reads as one family
+# rather than as six stock ANSI colours dropped on his desktop. Every slot is
+# then contrast-guarded against the terminal background at §3.1's status floor,
+# because an unreadable green is not a green.
+ANSI_SLOTS = (
+    #  name      hue°   the kdeglobals key that may already hold it
+    ("red",        2.0, "ForegroundNegative"),
+    ("green",    128.0, "ForegroundPositive"),
+    ("yellow",    46.0, "ForegroundNeutral"),
+    ("blue",     218.0, "ForegroundLink"),
+    ("magenta",  298.0, "ForegroundVisited"),
+    ("cyan",     186.0, None),
+)
+ANSI_HUE_TOLERANCE = 46.0   # degrees a scheme colour may sit off its slot
+ANSI_MIN_SAT = 0.18         # below this a colour is grey, and names no hue
+
+
+def _hsv(rgb):
+    return colorsys.rgb_to_hsv(*(c / 255.0 for c in rgb))
+
+
+def _from_hsv(h, s, v):
+    return tuple(round(c * 255) for c in colorsys.hsv_to_rgb((h % 360.0) / 360.0, s, v))
+
+
+def _hue_gap(a, b) -> float:
+    d = abs((a - b) % 360.0)
+    return min(d, 360.0 - d)
+
+
+def kde_ansi(ini=None) -> dict | None:
+    """The eight base ANSI colours from the KDE scheme, as `#rrggbb`.
+
+    Keys: black, red, green, yellow, blue, magenta, cyan, white. The bright
+    half is the caller's business — konsole derives its own INTENSE tone per
+    slot, and kitty is handed a lift toward white — because how "bright" reads
+    is a property of the terminal, not of the scheme.
+    """
+    ini = read_ini() if ini is None else ini
+    win = ini.get("Colors:Window")
+    if not win:
+        return None
+    bg = _rgb(win.get("BackgroundNormal"), (0, 0, 0))
+    text = _rgb(win.get("ForegroundNormal"), (255, 255, 255))
+
+    # 1. which of the scheme's own colours may keep a slot
+    taken: dict = {}
+    for name, hue, key in ANSI_SLOTS:
+        if not key:
+            continue
+        c = _rgb(win.get(key), None)
+        if c is None:
+            continue
+        h, s, _v = _hsv(c)
+        h *= 360.0
+        if s < ANSI_MIN_SAT or _hue_gap(h, hue) > ANSI_HUE_TOLERANCE:
+            continue
+        # …and only if this really is the slot it is nearest to. Oxygen's link
+        # colour IS the gold accent: it is 4° off yellow and 177° off blue, so
+        # this is what keeps it out of the blue slot.
+        if min(_hue_gap(h, o) for _n, o, _k in ANSI_SLOTS) < _hue_gap(h, hue):
+            continue
+        taken[name] = c
+
+    # 2. the envelope the synthesised slots wear: what saturation and value the
+    #    scheme spends on a hue when it has one. A scheme with no hues at all
+    #    (a pure greyscale one) gets a restrained default rather than neon.
+    sats = [_hsv(c)[1] for c in taken.values()]
+    vals = [_hsv(c)[2] for c in taken.values()]
+    sat = sum(sats) / len(sats) if sats else 0.62
+    val = sum(vals) / len(vals) if vals else (0.66 if _lum(bg) < 0.5 else 0.45)
+    sat = max(0.35, min(0.90, sat))
+    val = max(0.30, min(0.95, val))
+
+    out = {"black": bg, "white": text}
+    for name, hue, _key in ANSI_SLOTS:
+        c = taken.get(name)
+        out[name] = _readable(c, bg, STATUS_RATIO) if c else _synth(hue, sat, val, bg)
+    return {k: _hex(v) for k, v in out.items()}
+
+
+def _synth(hue, sat, val, bg):
+    """A slot the scheme has no colour for, at `hue`, wearing its envelope.
+
+    Blue and cyan on a dark background are the reason this is not just
+    `_readable` over a synthesised colour: a fully saturated blue cannot clear
+    the contrast floor by value alone, so the guard drives it to v=1 and the
+    result is the fluorescent blue docs/DESIGN.md §3.2 rules out. **Saturation
+    is capped as value rises**, which is the same "pastel, not fluorescent"
+    trade the wal palette makes — the colour goes pale rather than neon.
+    """
+    dark = _lum(bg) < 0.5
+    best, best_ratio = None, -1.0
+    for i in range(0, 21):
+        v = min(1.0, val + i * 0.035) if dark else max(0.0, val - i * 0.035)
+        s = min(sat, 1.0 - 0.5 * max(0.0, v - 0.6) / 0.4) if dark else min(1.0, sat + i * 0.02)
+        cand = _from_hsv(hue, s, v)
+        r = _ratio(cand, bg)
+        if r > best_ratio:
+            best, best_ratio = cand, r
+        if r >= STATUS_RATIO:
+            return cand
+    return best
+
+
 def kde_font(ini=None):
     """`(family, point_size)` from `kdeglobals [General] font=`, or None.
 
