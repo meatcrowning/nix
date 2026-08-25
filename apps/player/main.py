@@ -4512,7 +4512,7 @@ def main():
         # is the library drive mounted?". A read of the DB and nothing else: no
         # scan, no writes.
         bridge.refreshAlbums()
-        return _selftest(app, shell, win, plasma, warnings, player, library)
+        return _selftest(app, shell, win, plasma, warnings, player, library, bridge)
 
     bridge.refreshAlbums()
     # With files on the command line, restore the SESSION (shuffle, loop, the
@@ -4530,7 +4530,8 @@ def main():
     sys.exit(app.exec())
 
 
-def _selftest(app, shell, win, plasma, warnings, player=None, library=None):
+def _selftest(app, shell, win, plasma, warnings, player=None, library=None,
+              bridge=None):
     """Look at the window without opening one, and quit.
 
     Deliberately NOT reached by the normal path: no MPRIS name, no queue socket
@@ -4696,6 +4697,62 @@ def _selftest(app, shell, win, plasma, warnings, player=None, library=None):
                 print(f"face {cls} = {seen[cls]}")
             if not seen:
                 print("face: none found")
+        # PLAYER_SEARCH: type a query into the finder and press Return, then
+        # say what the window did with it. The finder is two halves that mirror
+        # each other (a real QLineEdit under Plasma, `searchInput` in the QML),
+        # and every way it can break — a mirror that does not fire, a Return
+        # that reaches nobody, an overlay that stays hidden — is invisible to a
+        # query the Library answers correctly. This drives the half the SESSION
+        # owns and prints the other end.
+        if os.environ.get("PLAYER_SEARCH"):
+            from PySide6.QtCore import QMetaObject
+            from PySide6.QtGui import QKeyEvent
+            from PySide6.QtCore import QEvent
+            q = os.environ["PLAYER_SEARCH"]
+            root_item = shell.root if shell is not None else win
+            if plasma and shell is not None and shell._search is not None:
+                shell._search.setFocus()
+                for ch in q:
+                    ev = QKeyEvent(QEvent.KeyPress, 0, Qt.NoModifier, ch)
+                    app.sendEvent(shell._search, ev)
+                app.processEvents()
+                app.sendEvent(shell._search,
+                              QKeyEvent(QEvent.KeyPress, Qt.Key_Return,
+                                        Qt.NoModifier, "\r"))
+            else:
+                QMetaObject.invokeMethod(root_item, "setSearchText",
+                                         Q_ARG("QVariant", q))
+                app.processEvents()
+                QMetaObject.invokeMethod(root_item, "submitSearch")
+            for _ in range(8):
+                app.processEvents()
+            item = root_item if shell is not None else (
+                win.property("contentItem").childItems()[0])
+            print(f"search: typed={q!r} "
+                  f"searchText={item.property('searchText')!r} "
+                  f"searching={item.property('searching')} "
+                  f"results={bridge.searchModel.count if bridge else -1}")
+            # ...and WHERE the overlay landed. A result set the model holds
+            # and the window draws nowhere is the same thing to him as no
+            # results at all.
+            def _find(it, cls, depth=0):
+                if it is None or depth > 14:
+                    return None
+                for ch in (it.childItems() if hasattr(it, "childItems") else []):
+                    if ch.metaObject().className().startswith(cls):
+                        return ch
+                    got = _find(ch, cls, depth + 1)
+                    if got is not None:
+                        return got
+                return None
+            ov = _find(item, "SearchOverlay")
+            if ov is None:
+                print("search: NO SearchOverlay in the tree")
+            else:
+                print(f"search: overlay vis={ov.property('visible')} "
+                      f"x={ov.property('x')} y={ov.property('y')} "
+                      f"w={ov.property('width')} h={ov.property('height')} "
+                      f"z={ov.property('z')} opacity={ov.property('opacity')}")
         shot = os.environ.get("PLAYER_SHOT")
         if shot:
             try:
