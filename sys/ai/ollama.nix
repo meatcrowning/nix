@@ -35,9 +35,34 @@
     # is one person in one window, so neither buys anything and both can cost
     # the machine. This is also what makes `ai-warden`'s "swapping model A for
     # model B frees A first" estimate true rather than hopeful.
+    #
+    # OLLAMA_KEEP_ALIVE: FEWER TEARDOWNS, because the teardown is what crashed
+    # the machine. On 2026-08-24 top livelocked and had to be reset; the cause
+    # was not memory and oomd had nothing to reap — at 22:31:17 the kernel took
+    # a general protection fault (non-canonical address) inside the NVIDIA open
+    # module while `llama-server` was EXITING:
+    #
+    #   nvidia_close -> rm_cleanup_file_private -> serverFreeResourceTree
+    #     -> memdescDestroy -> osDestroyOsDescriptorPageArray
+    #     -> os_unlock_user_pages -> set_page_dirty_lock
+    #
+    # It died holding NVIDIA's GPU locks, so from 22:35 every task that touched
+    # the GPU or waited on an RCU grace period wedged — soft lockups on eleven
+    # CPUs, sshd and smbd among them, which is why the box answered TCP
+    # handshakes and nothing else. Once, in six boots, no Xid before it (this
+    # box also has a documented marginal DRAM line, so a bit flip landing in a
+    # page array is not excluded).
+    #
+    # The default idle unload is 5 minutes, i.e. this exact code path several
+    # times a day. Two hours makes it a couple of times a day at most, and it
+    # costs nothing that matters: `ai-warden` frees the weights ON DEMAND with a
+    # zero `keep_alive` whenever painter needs the room, so "resident longer" is
+    # not "resident in the way". A long idle still gives the memory back if the
+    # warden is switched off.
     environmentVariables = {
       OLLAMA_MAX_LOADED_MODELS = "1";
       OLLAMA_NUM_PARALLEL = "1";
+      OLLAMA_KEEP_ALIVE = "2h";
     };
   };
 
