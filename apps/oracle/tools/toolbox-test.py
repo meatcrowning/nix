@@ -319,6 +319,26 @@ argv, stdin, err = oracle.Ollama._painter_argv(
 check("a clip names both ends and its length",
       not err and " --mode video" in argv[-1] and " --seconds 6" in argv[-1]
       and (" --last-frame " + str(PIC)) in argv[-1], (err or argv[-1])[-260:])
+# EVERY KNOB THE WORKFLOW HAS, not the four it started with [his, 2026-08-24:
+# a turn that answered "CFG isn't something I can directly control from here"].
+argv, stdin, err = oracle.Ollama._painter_argv(
+    {"prompt": "x", "cfg": 1.0, "sampler": "euler", "scheduler": "beta",
+     "denoise": 0.8, "loras": ["thing", "other:0.4"],
+     "extra": {"shift": 3.0, "flavour": "wet"}}, "image")
+line = argv[-1]
+check("the whole sampler is reachable, not just steps and seed",
+      not err and " --cfg 1.0" in line and " --sampler euler" in line
+      and " --scheduler beta" in line and " --denoise 0.8" in line,
+      (err or line)[-260:])
+check("...and its LoRAs, one flag each",
+      " --lora thing" in line and " --lora other:0.4" in line, line[-200:])
+check("...and anything else by name, typed as JSON",
+      " --set shift=3.0" in line and " --set 'flavour=\"wet\"'" in line,
+      line[-200:])
+argv, stdin, err = oracle.Ollama._painter_argv(
+    {"prompt": "x", "fps": 12, "cfg": 4}, "video")
+check("a clip's own knobs too", not err and " --fps 12" in argv[-1]
+      and " --cfg 4" in argv[-1], (err or argv[-1])[-200:])
 argv, stdin, err = oracle.Ollama._painter_argv(
     {"prompt": "x", "first_frame": str(_TMP / "gone.png")}, "video")
 check("a frame that is not there is refused before the backend is woken",

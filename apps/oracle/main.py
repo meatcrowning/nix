@@ -317,7 +317,33 @@ MAKE_IMAGE_TOOL = {
             "height": {"type": "integer", "description": "Pixels (optional; overrides aspect)."},
             "seed": {"type": "integer",
                      "description": "Fixed seed, for a repeatable picture (optional)."},
-            "steps": {"type": "integer", "description": "Sampling steps (optional)."}},
+            "steps": {"type": "integer", "description": "Sampling steps (optional)."},
+            "cfg": {"type": "number",
+                    "description": ("Guidance (optional). Model-dependent: some "
+                                    "families want 0.7-1, others 4-8. Only when "
+                                    "he asks.")},
+            "sampler": {"type": "string",
+                        "description": ("Sampler, by its exact ComfyUI name — "
+                                        "e.g. 'euler', 'euler_cfg_pp', "
+                                        "'dpmpp_2m', 'res_multistep' (optional).")},
+            "scheduler": {"type": "string",
+                          "description": ("Scheduler, e.g. 'simple', 'beta', "
+                                          "'karras' (optional).")},
+            "denoise": {"type": "number",
+                        "description": ("0-1. Below 1 keeps some of the input "
+                                        "picture; 1 is a fresh one (optional).")},
+            "loras": {"type": "array", "items": {"type": "string"},
+                      "description": ("LoRAs to load, each 'name' or "
+                                      "'name:strength' (optional). Naming any "
+                                      "REPLACES the ones he has set for this "
+                                      "model.")},
+            "extra": {"type": "object",
+                      "description": ("ANY other graph parameter, by its own "
+                                      "name — {\"shift\": 3.0}. The escape "
+                                      "hatch for a knob with no argument of its "
+                                      "own; it beats every other argument here "
+                                      "and his own saved settings. Use it only "
+                                      "for something he named.")}},
             "required": ["prompt"]}},
 }
 MAKE_IMAGE_TOOL_NAMES = {"make_image"}
@@ -388,7 +414,23 @@ MAKE_VIDEO_TOOL = {
             "megapixels": {"type": "number",
                            "description": "Frame size in megapixels (optional)."},
             "seed": {"type": "integer", "description": "Fixed seed (optional)."},
-            "steps": {"type": "integer", "description": "Sampling steps (optional)."}},
+            "steps": {"type": "integer", "description": "Sampling steps (optional)."},
+            "cfg": {"type": "number", "description": "Guidance (optional)."},
+            "sampler": {"type": "string",
+                        "description": ("Sampler, by its exact ComfyUI name "
+                                        "(optional).")},
+            "scheduler": {"type": "string", "description": "Scheduler (optional)."},
+            "denoise": {"type": "number", "description": "0-1 (optional)."},
+            "fps": {"type": "number",
+                    "description": "Frames per second (optional)."},
+            "loras": {"type": "array", "items": {"type": "string"},
+                      "description": ("LoRAs, each 'name' or 'name:strength' "
+                                      "(optional).")},
+            "extra": {"type": "object",
+                      "description": ("ANY other graph parameter, by its own "
+                                      "name (optional). Beats every other "
+                                      "argument and his saved settings; use it "
+                                      "only for something he named.")}},
             "required": ["prompt"]}},
 }
 MAKE_VIDEO_TOOL_NAMES = {"make_video"}
@@ -8257,8 +8299,40 @@ class Ollama(QObject):
         cmd += flag("--height", "height", int)
         cmd += flag("--steps", "steps", int)
         cmd += flag("--seed", "seed", int)
+        # THE REST OF THE SAMPLER, not just the two it started with [his,
+        # 2026-08-24: "wire it up so agents can change not only cfg but any
+        # other param open in a workflow"]. Every one of these already existed
+        # as a flag on the generator; chatter simply did not offer them, so a
+        # model asked to turn the cfg up answered that it could not.
+        cmd += flag("--cfg", "cfg", float)
+        cmd += flag("--sampler", "sampler")
+        cmd += flag("--scheduler", "scheduler")
+        cmd += flag("--denoise", "denoise", float)
         if kind == "video":
             cmd += flag("--seconds", "seconds", float)
+            cmd += flag("--fps", "fps", float)
+        # LoRAs: `name` or `name:strength`, one flag each. Naming any replaces
+        # the set he has saved for that model (the generator's own rule).
+        raw_loras = args.get("loras")
+        if isinstance(raw_loras, str):
+            raw_loras = [raw_loras]
+        for lo in (raw_loras if isinstance(raw_loras, list) else []):
+            lo = str(lo or "").strip()
+            if lo:
+                cmd += " --lora " + shlex.quote(lo)
+        # ...and ANYTHING ELSE, by its own name. The generator reads a `--set
+        # key=value` as JSON when it parses, so a number stays a number and a
+        # string stays a string. Last, so it beats the flags above.
+        extra = args.get("extra")
+        if isinstance(extra, dict):
+            for k, v in extra.items():
+                k = str(k or "").strip()
+                if not k or k in ("positive", "prompt"):
+                    continue
+                # JSON on BOTH sides of the type line: a string goes over
+                # quoted, so `{"scheduler": "3"}` arrives as the string "3"
+                # rather than as the number three.
+                cmd += " --set " + shlex.quote("%s=%s" % (k, json.dumps(v)))
         cmd += " --timeout %d" % ((MAKE_VIDEO_MS if kind == "video"
                                    else MAKE_IMAGE_MS) // 1000 - 60)
         cmd += " --progress"

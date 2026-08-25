@@ -162,6 +162,16 @@ def main(argv=None):
     ap.add_argument("--dry-run", action="store_true",
                     help="build the graph and print the plan; submit nothing "
                          "(and upload nothing — an --image is taken by name)")
+    ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                    dest="sets",
+                    help="ANY other graph param, by its own name — "
+                         "`--set shift=3.0`, repeatable. The value is read as "
+                         "JSON when it parses (number, true/false, a list) and "
+                         "as a string otherwise. This is the escape hatch for a "
+                         "knob that has no flag of its own: chatter's "
+                         "make_image/make_video pass their `extra` object "
+                         "through here, so an agent can reach a param this CLI "
+                         "has never heard of.")
     ap.add_argument("--timeout", type=float, default=900.0)
     args = ap.parse_args(argv)
 
@@ -253,6 +263,18 @@ def main(argv=None):
                      ("width", args.width), ("height", args.height)):
         if val is not None:
             params[key] = val
+
+    # ...and anything else, by name. LAST, so an explicit `--set` beats both the
+    # flags above and his saved prefs — it is the most specific thing said.
+    for spec in args.sets:
+        key, _, raw = spec.partition("=")
+        key = key.strip()
+        if not key:
+            continue
+        try:
+            params[key] = json.loads(raw)
+        except ValueError:
+            params[key] = raw
 
     # SIZE. An aspect plus a pixel budget is what he types; width/height is what
     # the graph takes. The conversion is the registry's own (`calc_dims`), on the
