@@ -245,10 +245,21 @@ Stop $(join_by " and " "${what[@]}") and build, or build alongside it?"
   # key; -p prints the id first. Both go to a file rather than a pipe, because
   # the read has to survive us killing notify-send at the timeout — a pipe's
   # block-buffered tail would be lost with it.
+  #
+  # `timeout` AND `9>&-`, both learned the hard way on 2026-08-24. `as_user` is
+  # `runuser -- env … notify-send`, so `$!` is runuser's pid and the kill below
+  # reaps THAT — the notify-send under it is orphaned, not killed. With no
+  # notification daemon on the host (nobody sitting at it) `-w` then blocks for
+  # ever, and because it inherited rebuild-top's flock on fd 9 it holds THE
+  # REBUILD LOCK: found 17 minutes later still parked on a toast nothing could
+  # display, with every rebuild on that machine queued behind it. So the toast
+  # (a) dies on its own a little after the timeout we are counting out, and (b)
+  # cannot hold the lock even if it somehow outlives that.
   local out; out=$(mktemp)
-  as_user notify-send -a "rebuild" -u critical -t 0 -p -w \
+  as_user timeout -k 5 "$((timeout + 15))" \
+    notify-send -a "rebuild" -u critical -t 0 -p -w \
     --action=stop="Stop & rebuild" --action=keep="Rebuild anyway" \
-    -- "$sum" "$body" >"$out" 2>/dev/null &
+    -- "$sum" "$body" >"$out" 2>/dev/null 9>&- &
   local pid=$!
 
   local waited=0 key="" nid=""
