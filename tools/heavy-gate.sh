@@ -241,6 +241,20 @@ Stop $(join_by " and " "${what[@]}") and build, or build alongside it?"
     echo "$HEAVY_GATE_ASK_ANSWER"; return 0
   fi
 
+  # NOBODY CAN ANSWER A TOAST NOBODY CAN SEE. If no process OWNS
+  # org.freedesktop.Notifications there is no notification server — `top` sits
+  # at the ly greeter for days at a time with no session at all — and raising
+  # the question means holding the rebuild lock for the whole ask timeout to
+  # arrive at the answer we would have given anyway. `--acquired`, not
+  # `--activatable`: the activatable entry is what made this look answerable,
+  # and D-Bus activating it just fails 20s later (`plasma_waitforname:
+  # WaitForName: Service was not registered within timeout`).
+  if ! as_user busctl --user list --acquired --no-pager 2>/dev/null \
+       | grep -q "org.freedesktop.Notifications"; then
+    echo "heavy-gate: nothing on this machine can show a toast — not asking" >&2
+    echo noask; return 0
+  fi
+
   # notify-send -w blocks until the toast is acted on and then prints the action
   # key; -p prints the id first. Both go to a file rather than a pipe, because
   # the read has to survive us killing notify-send at the timeout — a pipe's
