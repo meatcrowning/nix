@@ -9439,6 +9439,14 @@ class Ollama(QObject):
                                   "smaller model would leave room.")}, False,
                        name + ": no room — " + str(reason or ""))
                 return
+            # SAY WHAT IT COST. The warden toasts what it unloaded — on TOP,
+            # which from book is a screen nobody is looking at — so the line he
+            # is actually watching says it too (docs/DESIGN.md §10). It is also
+            # the honest explanation for the twenty seconds before the render
+            # starts, and for the model reload after it.
+            if "ollama" in (self._warden.last.get("freed") or []):
+                self.fileToolStarted.emit(
+                    "unloaded your model to make room on the gpu")
             self._make_media_run(a, answer, kind)
 
         # CHATTER GIVES ITS OWN WEIGHTS BACK FIRST. Its `send` lease is still
