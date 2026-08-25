@@ -4407,6 +4407,9 @@ def main():
         # signals are exactly the "the chrome changed" notification this face
         # needs — no second source and no polling.
         shell.bind_chrome(titlebar)
+        # Konsole's toolbar names its buttons; so does this one [his,
+        # 2026-08-24]. The sort row keeps its own `barText` words.
+        shell.bar_labels()
         shell.bind_status()      # statusLine / statusProgress / statusRight
         shell.bind_title("windowTitle")   # "artist — title", as under Hyprland
 
