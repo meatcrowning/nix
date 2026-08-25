@@ -1017,6 +1017,12 @@ the recovery.
 button — the button style is a toolbar-wide setting, so that row is added as a
 `QToolButton` with its own style rather than as an action.
 
+**`shell.bar_labels()`** does it for the WHOLE main toolbar — every button
+wears its name beside its icon, the way Konsole's does [his, 2026-08-24].
+player and chatter call it; a `barText` row keeps its own words. `dump_chrome`
+prints the bar's style as `barstyle:`, which is the only way to check it
+without looking.
+
 **A dock is a second scene graph.** `QQuickWidget` cannot use the threaded
 render loop, so every one of them renders on the GUI thread each frame. Two is
 measurably more than one: painter had its parameter column in a dock for a day

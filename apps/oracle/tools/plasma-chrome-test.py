@@ -131,5 +131,10 @@ for line in plain.splitlines():
 check("with nothing selected every Edit row is disabled, not dead-looking",
       bool(ed0) and all("(disabled)" in r for r in ed0 if r != "---"), str(ed0))
 
+# --- the toolbar names its buttons, as Konsole's does ---------------------
+check("the toolbar's buttons wear their names beside the icons",
+      "barstyle: text-beside-icon" in txt,
+      re.search(r"^barstyle: .*$", txt, re.M).group(0) if "barstyle:" in txt else "(none)")
+
 print("FAILED: " + ", ".join(fails) if fails else "OK")
 sys.exit(1 if fails else 0)

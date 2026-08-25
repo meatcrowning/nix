@@ -1734,6 +1734,19 @@ def _build_shell_class():
                 self._rebuild()
             return item
 
+        # --------------------------------------------------------- bar labels
+        def bar_labels(self, on=True):
+            """Names beside the icons on the main toolbar, as Konsole draws it.
+
+            A KDE toolbar's button style is bar-wide — which is why a single
+            row that wants its own words says `barText` and is added as its
+            own `QToolButton`. Those keep the style they set for themselves;
+            everything else on the bar takes this one.
+            """
+            tb = self._ensure_toolbar()
+            tb.setToolButtonStyle(Qt.ToolButtonTextBesideIcon if on
+                                  else Qt.ToolButtonIconOnly)
+
         # ----------------------------------------------------- overlay toolbar
         def use_overlay_toolbar(self, width_prop=None, inset_prop="chromeInset"):
             """Float the toolbar OVER the content instead of giving it a band.
@@ -1953,6 +1966,15 @@ def _build_shell_class():
                 self._status_label.text() if self._status_label is not None else "",
                 self._status_right.text() if self._status_right is not None else "",
                 "" if st is not None and st.isVisible() else " (hidden)"))
+            # The bar's button style, which no row above can show: with
+            # labels on, every row on the main toolbar wears its own name
+            # (`bar_labels`, Konsole's toolbar).
+            styles = {Qt.ToolButtonIconOnly: "icon-only",
+                      Qt.ToolButtonTextBesideIcon: "text-beside-icon",
+                      Qt.ToolButtonTextUnderIcon: "text-under-icon",
+                      Qt.ToolButtonTextOnly: "text-only"}
+            out.append("barstyle: %s" % (
+                styles.get(tb.toolButtonStyle(), "?") if tb is not None else "-"))
             # The icon a row is WEARING, by button id. A row's text and its
             # check state are already above; the icon is the third thing a
             # button says and the only one nothing here could see — an app that

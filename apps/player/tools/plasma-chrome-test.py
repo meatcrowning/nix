@@ -133,6 +133,11 @@ check("no two-character titlebar cell reached the chrome",
       not any(r.strip() in ("yr", "ar", "al", "fs", "st", "<<", ">>") for r in top + view),
       str(top + view))
 
+# ---- the toolbar names its buttons, as Konsole's does -------------------
+check("the toolbar's buttons wear their names beside the icons",
+      "barstyle: text-beside-icon" in plasma,
+      [ln for ln in plasma.splitlines() if ln.startswith("barstyle:")] or "(none)")
+
 # ---- the finder is a real field, at the right-hand end ------------------
 check("the finder is a QLineEdit on the toolbar",
       any(r.startswith("<QLineEdit") for r in top), str(top))
