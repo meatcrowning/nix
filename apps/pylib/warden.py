@@ -44,6 +44,13 @@ class Warden(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._nam = QNetworkAccessManager(self)
+        #: What the last answer said, whole. `cb(ok, reason)` is deliberately
+        #: two arguments (every caller unpacks exactly those), and the one other
+        #: field a caller wants is `freed` — the warden raises its own toast
+        #: when it unloads something, and that toast lands on TOP, which from
+        #: book is a screen nobody is looking at. So the app can read this and
+        #: say it where he IS (docs/DESIGN.md §10 — no silent change).
+        self.last = {}
 
     def _post(self, path, payload, cb=None):
         req = QNetworkRequest(QUrl(WARDEN + path))
@@ -54,11 +61,12 @@ class Warden(QObject):
         if cb is None:
             reply.finished.connect(reply.deleteLater)
             return
-        reply.finished.connect(lambda: self._done(reply, cb))
+        reply.finished.connect(lambda: self._done(reply, cb, self.last))
 
     @staticmethod
-    def _done(reply, cb):
+    def _done(reply, cb, box):
         try:
+            box.clear()
             if reply.error() != QNetworkReply.NetworkError.NoError:
                 cb(True, "")               # fail open — see the module docstring
                 return
@@ -67,6 +75,7 @@ class Warden(QObject):
             except (ValueError, TypeError):
                 cb(True, "")
                 return
+            box.update(doc if isinstance(doc, dict) else {})
             cb(bool(doc.get("ok", True)), str(doc.get("reason") or ""))
         finally:
             reply.deleteLater()
