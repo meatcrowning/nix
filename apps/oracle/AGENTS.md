@@ -444,6 +444,35 @@ music-library turn had nothing left to answer with.
 
 Harness: `tools/lazy-tools-test.py`.
 
+### Not inventing facts
+
+Two things, both of them on the wire every turn, against the one complaint a
+bigger context does not fix [his, 2026-08-24: *"sometimes it like halucinates
+facts and i know its a small model"*]. The `wikipedia` tool below is the third.
+
+- **`GROUNDING_NOTE`** — the contract, in `_system_prompt` beside the rest:
+  check a specific (date, number, name, version, quote, URL, filename,
+  command, API) before stating it; say plainly when you cannot; cite what you
+  used; never invent a citation, a URL or a command line to look
+  authoritative; never guess about HIS machine when the file tools are right
+  there.
+- **`sampler_for(model, preset)` clamps the sampler for a factual turn** —
+  `FACTUAL_SAMPLER` (temperature 0.3, top_p 0.9) as a FLOOR, applied over the
+  family default rather than instead of it, so a model whose author published
+  `top_k`/`min_p` keeps them. Chatter used to send **no options at all** for
+  every model but the two Gemma families, i.e. whatever hot default the
+  Modelfile carried; Google ships Gemma itself at temperature 1.0. A preset he
+  picked in order to be creative with (`CREATIVE_PRESETS`: writer, casual) is
+  exempt — that is what those presets are FOR — and a custom base prompt is
+  not, since a persona is not evidence he wants invented dates. **Subagents are
+  always factual**, whatever the main turn is wearing.
+- `describe_self` reports the sampling by BUILDING it, not by describing it —
+  it said "model default (chatter does not override)" for a day after chatter
+  started overriding (docs/DESIGN.md §10).
+
+Harness: `tools/grounding-test.py`, which asserts on the real POST body against
+a stub ollama.
+
 ### `wikipedia` — the source a small model can cite
 
 **A model that does not know a fact should be able to fetch one, not compose
