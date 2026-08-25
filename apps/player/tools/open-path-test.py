@@ -215,11 +215,19 @@ check("an all-unreadable open leaves the queue alone",
 # ---------------------------------------------------------------------------
 print("\nhandoff_paths <-> OPEN")
 
-check("no paths, no handoff attempt", P.handoff_paths([]), False)
+# A BARE LAUNCH IS A LAUNCH TOO. This used to return False without even
+# looking — so `player` with no arguments never ran the singleton check, and a
+# second instance took the running one's queue socket, lost the race for the
+# MPRIS name and played its own restored queue over the top of his
+# [2026-08-24, on book].
+check("no player listening, no files -> False", P.handoff_paths([], timeout=0.5),
+      False)
 check("no player listening -> False", P.handoff_paths([in_lib], timeout=0.5), False)
 
 srv_player = mk_player(library)
-P.start_queue_server(srv_player, app, None)
+raised = []
+P.start_queue_server(srv_player, app, None,
+                     raise_window=lambda: raised.append(1))
 
 
 def handoff(paths, timeout=5.0):
@@ -259,6 +267,13 @@ check("...replaced the queue", [t["path"] for t in srv_player._queue], [in_lib])
 check("unopenable handoff still answers",
       handoff([os.path.join(SCRATCH, "ghost.flac")]), True)
 check("...and did not stop the music",
+      [t["path"] for t in srv_player._queue], [in_lib])
+
+# ...and a bare second launch RAISES the running window instead of becoming a
+# second player.
+check("a bare second launch is taken by the running player", handoff([]), True)
+check("...and asked it to come forward", len(raised), 1)
+check("...without touching the queue",
       [t["path"] for t in srv_player._queue], [in_lib])
 
 # ---------------------------------------------------------------------------
