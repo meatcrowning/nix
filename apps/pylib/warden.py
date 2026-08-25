@@ -109,7 +109,13 @@ class Warden(QObject):
             body["lease"] = int(lease)
         self._post("/renew", body)
 
-    def done(self, backend):
+    def done(self, backend, cb=None):
         """The work is over — release the lease so the other app can have the
-        memory. Safe to call twice, and safe to call having never reserved."""
-        self._post("/done", {"backend": backend})
+        memory. Safe to call twice, and safe to call having never reserved.
+
+        `cb` exists for the one caller that must not race itself: chatter drops
+        its ollama lease and immediately reserves comfy, and two async posts
+        fired together can arrive in either order — a reserve that overtakes the
+        release sees a live lease and stands back from weights already given up.
+        Chain the reserve off this instead."""
+        self._post("/done", {"backend": backend}, cb and (lambda ok, why: cb()))

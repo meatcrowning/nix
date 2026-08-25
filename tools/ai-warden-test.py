@@ -39,7 +39,7 @@ class World:
 
     def __init__(self, avail_gb=28, psi=0.0, ollama_gb=0.0, comfy_gb=0.0,
                  comfy_queue=0, gpu=0, ollama_models=None, tags=None,
-                 vram_free_gb=11.0):
+                 vram_free_gb=11.0, working=False):
         self.avail = int(avail_gb * GiB)
         self.psi = psi
         self.ollama = int(ollama_gb * GiB)
@@ -49,6 +49,7 @@ class World:
         self.models = ollama_models or []
         self.tags = tags or {}
         self.vram_free = int(vram_free_gb * GiB)
+        self.working = working
         self.freed = []
 
     def install(self):
@@ -58,6 +59,8 @@ class World:
         W.comfy_cgroup = lambda: self.comfy
         W.comfy_queue = lambda: self.queue
         W.gpu_util = lambda: self.gpu
+        # ollama's OWN cpu clock, not the device's GPU number — see busy().
+        W.ollama_working = lambda *a, **k: self.working
         W.vram = lambda: (self.vram_free, int(12 * GiB))
         W.unit_active = lambda *a, **k: True
         W.ollama_ps = lambda: [
@@ -204,6 +207,46 @@ r = w.reserve("ollama", "small:3b", )
 check("goes ahead despite no VRAM", r["ok"], r.get("reason", ""))
 check("but comfy was freed to make room", world.freed == ["comfy"],
       str(world.freed))
+
+print("\na full GPU is a reason to free, even when RAM is fine")
+# 2026-08-25: llama-server held 9.7 GiB of an 11.5 GiB card, RAM was fine, comfy
+# was admitted on RAM alone and the render died 0.74s later on
+# `Free (according to CUDA): 9.62 MiB`. GPU load made ollama read as busy — and
+# a busy GUESS was protecting the very thing standing in the render's way.
+world = World(avail_gb=26, ollama_gb=9, vram_free_gb=0.1, gpu=70,
+              ollama_models=[("big:12b", 9.0)], tags={"big:12b": 9.0})
+w = world.install()
+r = w.reserve("comfy", hint=int(9 * GiB))
+check("admitted", r["ok"], r.get("reason", ""))
+check("...and the gpu was cleared for it", world.freed == ["ollama"],
+      str(world.freed))
+check("a busy DEVICE is not a busy ollama — one gpu, two tenants",
+      not w.busy("ollama")[0], str(w.busy("ollama")))
+
+print("\n...a working ollama is waited out, not cut")
+world = World(avail_gb=26, ollama_gb=9, vram_free_gb=0.1, working=True,
+              ollama_models=[("big:12b", 9.0)], tags={"big:12b": 9.0})
+w = world.install()
+W.IDLE_WAIT = 0                                # do not really sit for 20s
+r = w.reserve("comfy", hint=int(9 * GiB))
+check("its own cpu clock is what says busy", w.busy("ollama")[0],
+      str(w.busy("ollama")))
+check("admitted anyway — VRAM never refuses", r["ok"], r.get("reason", ""))
+check("...and a reply in flight keeps its weights", world.freed == [],
+      str(world.freed))
+
+print("\n...but a LEASE is still work in flight, whatever the GPU says")
+world = World(avail_gb=26, ollama_gb=9, vram_free_gb=0.1, working=True,
+              ollama_models=[("big:12b", 9.0)], tags={"big:12b": 9.0})
+w = world.install()
+W.IDLE_WAIT = 0
+w.leases["ollama"] = W.time.time() + 300
+r = w.reserve("comfy", hint=int(9 * GiB))
+check("still admitted — VRAM never refuses", r["ok"], r.get("reason", ""))
+check("...and nothing was taken from a live lease", world.freed == [],
+      str(world.freed))
+check("`leased` is the hard half of busy — a claim, not an inference",
+      w.leased("ollama"))
 
 print("\nthe kill switch makes every reserve an immediate yes")
 world = World(avail_gb=1, ollama_gb=24, comfy_queue=3)
