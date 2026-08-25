@@ -452,7 +452,13 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   `REBUILD_ASK_TIMEOUT` (5 min by default) before falling through to "rebuild
   anyway" regardless — the same outcome, five minutes later [2026-08-24].
   `REBUILD_IGNORE_GPU=1` skips it,
-  `REBUILD_ASK_TIMEOUT` sets the wait. **Its toast may never hold the rebuild
+  `REBUILD_ASK_TIMEOUT` sets the wait — and both only reach the wrapper because
+  `sys/nixos-rebuild.nix` carries them across sudo's env reset by name. Until
+  2026-08-25 it did not, so that documented incantation had never once worked.
+  **The gate no longer asks a screen nobody is at either**: with no owner of
+  `org.freedesktop.Notifications` on the user bus (top sits at the greeter for
+  days) it answers `noask` at once and builds throttled, instead of holding the
+  rebuild lock for the full timeout to reach the same place. **Its toast may never hold the rebuild
   lock**: `as_user` is `runuser -- env … notify-send`, so killing it at the
   timeout reaps runuser and ORPHANS the notify-send, which with no notification
   daemon on that host blocks on `-w` for ever — and it inherited the wrapper's

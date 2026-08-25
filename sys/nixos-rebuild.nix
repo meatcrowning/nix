@@ -173,6 +173,16 @@ in
   # Both the /run/current-system symlink and the resolved store path are listed
   # so the rule matches whether or not sudo canonicalises the invoked command to
   # its store path (mirrors how the old rule listed both).
+  # `sudo` RESETS THE ENVIRONMENT, so the three switches this wrapper reads have
+  # to be carried across it by name. Without this, `REBUILD_IGNORE_GPU=1 sudo
+  # rebuild-top` — the form AGENTS.md tells every agent to use for a rebuild
+  # driven over ssh from the other machine — silently did nothing, and the gate
+  # asked a question no unattended screen could answer, holding the rebuild lock
+  # for its whole timeout each time [2026-08-25]. Scoped to lam, and every one
+  # of these is read only by rebuild-top itself.
+  security.sudo.extraConfig =
+    "Defaults:lam env_keep += \"REBUILD_IGNORE_GPU REBUILD_ASK_TIMEOUT REBUILD_NO_PREFLIGHT\"\n";
+
   security.sudo.extraRules = [{
     users = [ "lam" ];
     commands = [
