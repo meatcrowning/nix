@@ -416,8 +416,9 @@ music-library turn had nothing left to answer with.
 | **saved, every round** | **~7,650** |
 
 - **`CORE_TOOL_NAMES` is what a turn reaches for unprompted**: the file six,
-  the two runners, `web_search`/`fetch_url`, the clock, memory's two, and the
-  three doors to everything else — `use_skill`, `spawn_agent`, `get_tools`.
+  the two runners, `web_search`/`fetch_url`/`wikipedia`, the clock, memory's
+  two, and the three doors to everything else — `use_skill`, `spawn_agent`,
+  `get_tools`.
 - **`tools_note()` names every other tool in one line each** — name plus first
   sentence, capped at 90 characters. Same shape and the same reason as
   `skills_note()`: a model does not reach for a door it was never told about.
@@ -442,6 +443,31 @@ music-library turn had nothing left to answer with.
   which is the same idea one level down.
 
 Harness: `tools/lazy-tools-test.py`.
+
+### `wikipedia` — the source a small model can cite
+
+**A model that does not know a fact should be able to fetch one, not compose
+one** [his, 2026-08-24: *"sometimes it like halucinates facts and i know its a
+small model"*]. `web_search` returns snippets written to be clicked on and
+`fetch_url` returns whatever HTML is at a URL; neither is an encyclopedia. This
+is **one** MediaWiki call — `generator=search` plus `prop=extracts`, so the
+search and the article text arrive together and a title the model guessed at is
+a search rather than a 404 — and it comes back as plain text with the article's
+URL beside it, which is the part a reply can cite.
+
+- **CORE, deliberately.** The whole point is a source it does not have to go
+  looking for; an unattached tool is one it can reason its way around (the same
+  reasoning that made the generators core).
+- **Capped and pageable** like `fetch_url`: `WIKIPEDIA_CHARS` of text, then
+  `truncated` + `next_offset`. `full=true` asks for the whole article instead
+  of the lead; `lang` picks the edition and is VALIDATED, not scrubbed — a
+  language code is a hostname here.
+- **The best match carries the text; the other matches are titles and URLs
+  only**, so a wrong guess costs a few dozen tokens rather than five articles.
+- `wikipedia_url()` and `wikipedia_result()` are pure, which is what lets the
+  harness drive the parse off a canned payload. Harness:
+  `tools/wikipedia-test.py` — its last check is a real lookup, and a machine
+  with no route to Wikipedia reports skipped rather than failed.
 
 ## Skills (chatter's own, as a real tool)
 

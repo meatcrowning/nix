@@ -843,6 +843,107 @@ FETCH_URL_MAX_BYTES = 4 * 1024 * 1024
 FETCH_URL_CHARS = 20000
 
 
+#: ---- wikipedia: the citable answer, for a small model that guesses ---------
+#: `web_search` returns snippets somebody wrote to be clicked on and `fetch_url`
+#: hands back whatever HTML happens to be at a URL; neither is an encyclopedia,
+#: and a 3B-class model asked for a plain fact will happily invent one [his,
+#: 2026-08-24: "sometimes it like halucinates facts"]. This is one round trip
+#: to MediaWiki's own action API — `generator=search` plus `prop=extracts`, so
+#: the search and the article text arrive together — and it comes back as plain
+#: text with the article's URL beside it, which is the thing a reply can cite.
+#: Read-only, no key, any language edition.
+WIKIPEDIA_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "wikipedia",
+        "description": (
+            "Look a subject up in Wikipedia and read the article. PREFER THIS "
+            "over web_search for encyclopedic facts — people, places, history, "
+            "science, works, dates, definitions — and use it whenever you are "
+            "about to state a fact you are not certain of. Returns the article "
+            "title, its URL and its text, so you can cite it. Set full=true "
+            "for the whole article instead of the opening summary; page on with "
+            "offset when the text comes back truncated."),
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string",
+                      "description": "Article title or search terms."},
+            "full": {"type": "boolean",
+                     "description": ("false (default) = the opening summary; "
+                                     "true = the whole article as plain text.")},
+            "offset": {"type": "integer",
+                       "description": ("0-based character offset into the "
+                                       "article text. Use next_offset to page.")},
+            "lang": {"type": "string",
+                     "description": "Wikipedia language edition. Default en."}},
+            "required": ["query"]}},
+}
+WIKIPEDIA_TOOL_NAMES = {"wikipedia"}
+#: How much article text one call hands back (his rule 5 — a tool result must
+#: never blow the context window), and how many other matches it names.
+WIKIPEDIA_CHARS = 8000
+WIKIPEDIA_HITS = 5
+
+
+def wikipedia_url(query, full=False, lang="en"):
+    """The one API call this tool makes.
+
+    `generator=search` runs the search and `prop=extracts` renders the results
+    in the SAME request, which is what keeps this to one round trip — a title
+    the model guessed at is a search here, not a 404.
+    """
+    # A language edition is a HOST here, so it is validated rather than
+    # cleaned: anything that is not one falls back to en instead of being
+    # scrubbed into some other site's name.
+    lang = str(lang or "en").strip().lower()
+    if not re.fullmatch(r"[a-z]{2,3}(-[a-z]{2,8})?", lang):
+        lang = "en"
+    q = QUrlQuery()
+    for k, v in (("action", "query"), ("format", "json"), ("formatversion", "2"),
+                 ("redirects", "1"), ("prop", "extracts|info"),
+                 ("inprop", "url"), ("explaintext", "1"),
+                 ("generator", "search"), ("gsrsearch", str(query or "")),
+                 ("gsrlimit", str(WIKIPEDIA_HITS))):
+        q.addQueryItem(k, v)
+    if not full:
+        q.addQueryItem("exintro", "1")
+    u = QUrl("https://" + lang + ".wikipedia.org/w/api.php")
+    u.setQuery(q)
+    return u
+
+
+def wikipedia_result(payload, query, offset=0, chars=WIKIPEDIA_CHARS):
+    """MediaWiki's answer, as the tool result. Pure, so the harness can drive
+    it off a canned payload without going near the network.
+
+    The best match carries its TEXT; the others are named by title and URL
+    only — enough for the model to ask again, at no cost to the window.
+    """
+    pages = [p for p in (payload.get("query", {}) or {}).get("pages", []) or []
+             if isinstance(p, dict)]
+    if not pages:
+        return {"error": "nothing on Wikipedia matches that", "query": query}
+    # `generator=search` hands back the search's own ranking in `index`.
+    pages.sort(key=lambda p: p.get("index", 1 << 30))
+    best, rest = pages[0], pages[1:]
+    text = str(best.get("extract") or "").strip()
+    total = len(text)
+    offset = max(0, int(offset or 0))
+    page = text[offset:offset + chars]
+    out = {"title": best.get("title", ""),
+           "url": best.get("fullurl") or "",
+           "chars_total": total, "offset": offset, "text": page}
+    if not text:
+        out["error"] = ("that page has no text extract — read it with "
+                        "fetch_url instead")
+    if offset + len(page) < total:
+        out["truncated"] = True
+        out["next_offset"] = offset + len(page)
+    if rest:
+        out["other_matches"] = [{"title": p.get("title", ""),
+                                 "url": p.get("fullurl") or ""} for p in rest]
+    return out
+
+
 #: ---- call_api: a JSON web API as a tool ------------------------------------
 #: `fetch_url` already GETs a JSON endpoint, but it hands the model the RAW
 #: body against a 20k character cap — a Danbooru `posts.json` spends that whole
@@ -1952,7 +2053,7 @@ AGENT_TOOL_GROUPS = {
     "read": ["list_dir", "read_file", "find_files", "search_text", "show_tree"],
     "write": ["write_file", "edit_file", "move_path", "delete_path", "make_dir"],
     "exec": ["run_python", "run_bash"],
-    "web": ["web_search", "fetch_url", "call_api"],
+    "web": ["web_search", "fetch_url", "wikipedia", "call_api"],
     "music": ["music_library", "lastfm", "control_media"],
     "sessions": ["list_sessions", "read_session"],
     "skills": ["use_skill"],
@@ -1972,6 +2073,10 @@ CORE_TOOL_NAMES = [
     "write_file", "edit_file",
     "run_bash", "run_python",
     "web_search", "fetch_url",
+    # WIKIPEDIA IS CORE, on purpose: the fix for a model that states facts it
+    # does not have is a source it can reach without being asked to go looking
+    # for one [his, 2026-08-24].
+    "wikipedia",
     "get_current_time",
     "use_skill", "spawn_agent",
     "save_memory", "list_memories",
@@ -2135,6 +2240,7 @@ def _tool_registry():
     same objects the main payload carries, so the two cannot drift; spawn_agent
     itself is absent, which is what keeps subagents one level deep."""
     tools = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, FETCH_URL_TOOL,
+             WIKIPEDIA_TOOL,
              CALL_API_TOOL, EXEC_TOOL, BASH_TOOL, SHOW_IMAGE_TOOL,
              MUSIC_TOOL, LASTFM_TOOL, PLAYER_TOOL] + list(JOB_TOOLS)
              + list(SESSION_TOOLS) + list(AUTHOR_TOOLS)
@@ -5336,7 +5442,7 @@ class Ollama(QObject):
                 SCREENSHOT_TOOL, MAKE_IMAGE_TOOL, MAKE_VIDEO_TOOL, BOORU_TOOL,
                 VIDEO_TOOL, PLAYER_TOOL,
                 MUSIC_TOOL, LASTFM_TOOL, MODEL_TOOL,
-                FETCH_URL_TOOL,
+                FETCH_URL_TOOL, WIKIPEDIA_TOOL,
                 CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
                 + list(SESSION_TOOLS) + list(MEMORY_TOOLS) + list(AUTHOR_TOOLS)
                 + [GET_TOOLS_TOOL] + list(JOB_TOOLS)
@@ -5914,6 +6020,8 @@ class Ollama(QObject):
         elif name in SEARCH_IMAGE_TOOL_NAMES:
             self._search_images(str(args.get("query", "")).strip(),
                                 i, remaining, calls)
+        elif name in WIKIPEDIA_TOOL_NAMES:
+            self._wikipedia(args, i, remaining, calls)
         elif name in FETCH_URL_TOOL_NAMES:
             self._fetch_url(str(args.get("url", "")).strip(),
                             args.get("offset", 0), i, remaining, calls)
@@ -6380,6 +6488,75 @@ class Ollama(QObject):
             remaining["sink"][idx] = {
                 "role": "tool", "tool_name": "fetch_url",
                 "content": json.dumps({"error": str(e), "url": url})}
+        finally:
+            reply.deleteLater()
+            self._tool_done(remaining, calls)
+
+    def _wikipedia(self, args, idx, remaining, calls):
+        """One MediaWiki query, in process. Same shared QNetworkAccessManager
+        as fetch_url — no executor, no host branch — and surfaced through the
+        same web-search disclosure, so the reply says where the fact came
+        from."""
+        query = str(args.get("query", "") or "").strip()
+        full = bool(args.get("full", False))
+        lang = str(args.get("lang", "en") or "en")
+        try:
+            offset = max(0, int(args.get("offset", 0) or 0))
+        except (TypeError, ValueError):
+            offset = 0
+        if not query:
+            remaining["sink"][idx] = {
+                "role": "tool", "tool_name": "wikipedia",
+                "content": json.dumps({"error": "wikipedia needs a query"})}
+            self._tool_done(remaining, calls)
+            return
+        label = "wikipedia: " + query
+        self.webSearchStarted.emit(label)
+        req = QNetworkRequest(wikipedia_url(query, full, lang))
+        # Wikimedia's policy asks every client to identify itself; an app that
+        # does not is the one that gets rate-limited.
+        req.setRawHeader(b"User-Agent",
+                         b"chatter/1.0 (https://github.com/meatcrowning/nix)")
+        req.setRawHeader(b"Accept", b"application/json")
+        reply = self._nam.get(req)
+        reply.finished.connect(
+            lambda: self._on_wikipedia(reply, query, label, offset,
+                                       idx, remaining, calls))
+
+    def _on_wikipedia(self, reply, query, label, offset, idx, remaining, calls):
+        if not self._busy:              # turn was cancelled mid-fetch
+            reply.deleteLater()
+            return
+        try:
+            data = bytes(reply.readAll().data())
+            if reply.error() != QNetworkReply.NetworkError.NoError:
+                msg = reply.errorString()
+                self.webSearchError.emit(label, msg)
+                result = {"error": "wikipedia lookup failed: " + msg,
+                          "query": query}
+            else:
+                try:
+                    payload = json.loads(data.decode("utf-8", "replace"))
+                except ValueError as e:
+                    payload, result = None, {"error": "wikipedia returned "
+                                             "something that is not JSON: "
+                                             + str(e), "query": query}
+                if payload is not None:
+                    result = wikipedia_result(payload, query, offset)
+                    if result.get("url"):
+                        self.webSearchDone.emit(
+                            label, "- [" + str(result.get("title") or query)
+                            + "](" + result["url"] + ")", 1)
+                    else:
+                        self.webSearchError.emit(
+                            label, str(result.get("error") or "no match"))
+            remaining["sink"][idx] = {"role": "tool", "tool_name": "wikipedia",
+                                      "content": json.dumps(result)}
+        except (ValueError, TypeError) as e:
+            self.webSearchError.emit(label, str(e))
+            remaining["sink"][idx] = {
+                "role": "tool", "tool_name": "wikipedia",
+                "content": json.dumps({"error": str(e), "query": query})}
         finally:
             reply.deleteLater()
             self._tool_done(remaining, calls)
