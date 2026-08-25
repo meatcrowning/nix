@@ -13,3 +13,9 @@
 # every tick. Without that registration these lines are INERT and git falls
 # back to the default merge — i.e. back to the wedged sync.
 *.md merge=recentwins
+
+# Tool manifests (tools/*.json) are written by the same unattended hands and
+# would wedge the sync the same way. Same policy, and the union fallback at the
+# bottom of the driver — which would emit invalid JSON — is only reachable when
+# neither side can be dated, i.e. never on this timer.
+*.json merge=recentwins
