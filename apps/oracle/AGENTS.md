@@ -774,6 +774,44 @@ told him it "has no code-execution env": true at the time, but reached for blind
 rather than from its real inventory. That gap is now closed — see *Code runners*
 below — and `describe_self` still gives the exact live tool list on demand.
 
+## Which machine a tool acts on
+
+**THIS ONE, on either of them, since 2026-08-24.** Every executor here used to
+hard-branch to `top` from book, on the reasoning that the library and the
+compute live there. For his FILES and his PLAYER that was wrong: chatter on
+book could not read a file on book, could not run a command against it, and
+asked top what was playing while he sat in front of book playing something else
+[his: *"when im in air, chatter agents can see what im playing / manipulate airs
+files like it can on top"*].
+
+- **`TOOLS_HOST`** is `LOCAL_HOST` unless `$ORACLE_TOOLS_HOST` names the other
+  machine (junk falls back rather than building a junk hostname), and
+  **`TOOLS_REMOTE`** is the one question every executor asks. What follows it:
+  the **file tools**, **run_python/run_bash**, **background jobs** and the
+  **music library** (book runs its own player against the synced database and
+  the SMB-mounted library, so its queue is the one to ask about).
+- **`host` is on EVERY file tool now, writes included** — one shared
+  `HOST_ARG`, whose description names this machine as the default. A chatter
+  that could read book but only write top would be the more confusing half.
+  The other machine is reached over the tailnet, and book→top reuses the
+  tunnel's control master.
+- **What does NOT follow it**, deliberately: ollama and the model's compute;
+  image and video generation (the weights and the GPU are top's — except when
+  `$ORACLE_PAINTER` replaced the generator, which only a harness does and only
+  ever with a script in its own /tmp, so `_painter_remote()` asks that question
+  in one place for the argv, the input staging and the display); and the
+  **session and memory stores**, which stay on top so both machines share one
+  history and one set of memories. `STORE_LOCAL` is the exception under them:
+  a store whose root was overridden (`$ORACLE_MEMORY`/`$ORACLE_SESSIONS`) is a
+  harness's disposable one, in ITS /tmp, so the op runs here.
+- **A file that is on this disk is shown, whatever host made it** — the video
+  card asks `os.path.exists`, not the hostname.
+- `describe_self` reports `tools_act_on`, because a model that assumed `top`
+  wrote to the wrong machine.
+
+Harness: `tools/tools-host-test.py`, which runs a child per configuration and
+reads the argv the app would actually build.
+
 ## Code runners (run_python and run_bash, on top)
 
 `run_python` (`EXEC_TOOL`) and `run_bash` (`BASH_TOOL`) — both offered every
