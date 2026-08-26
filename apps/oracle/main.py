@@ -11169,8 +11169,13 @@ def main():
     # drawing is written against Oxygen's own metrics and animation durations
     # (kstyle/oxygen.kcfg) and would be an imitation anywhere else.
     oxygen = (face == "oxygen") if face else is_oxygen()
-    shell = kdeshell.shell("chatter", size=(620, 720),
-                           min_size=(420, 360)) if plasma else None
+    # THE TWO FACES KEEP TWO WINDOW LAYOUTS. The Oxygen face carries a Fleet
+    # dock the legacy face does not, so one saved blob restored into the other
+    # either drops the panel or leaves a hole where it was — and he runs them
+    # side by side on purpose. The legacy face keeps the historical flat keys so
+    # the window size he already has is not thrown away.
+    shell = kdeshell.shell("chatter", size=(620, 720), min_size=(420, 360),
+                           state_key="oxygen" if oxygen else "") if plasma else None
     engine = shell.engine() if plasma else QQmlApplicationEngine()
     if plasma:
         # THE SELECTOR IS HOW THE CONTENT CHANGES CLOTHES WITHOUT CHANGING CODE:
@@ -11658,6 +11663,24 @@ def run_selftest(app, shell, win, plasma, warnings, fleet_pane=None):
             print("fleet: busy_timer=%s step_ms=%d"
                   % (_o._tick.isActive(), _o.delegate.step_ms))
             print(_o.dump())
+            # VIEW SETTINGS, ROUND TRIP. `aboutToQuit` never fires in a
+            # selftest (it exits before `app.exec()`), so the save is called
+            # here on purpose — the point is to prove the two halves agree, and
+            # a store that is written but never read back would pass a test
+            # that only checked the write. Writes nothing of HIS: kdeshell
+            # refuses to save from an offscreen run unless KDESHELL_STATE has
+            # pointed the whole store at a throwaway ini.
+            _grp = _o.model.agents_group.index()
+            _o.view.setExpanded(_grp, False)
+            _o.view.header().resizeSection(0, 123)
+            _o._save_view()
+            _o.view.setExpanded(_grp, True)
+            _o.view.header().resizeSection(0, 40)
+            _o._restore_view()
+            print("fleet view: folded=%s col0=%d saves=%s"
+                  % (not _o.view.isExpanded(_grp),
+                     _o.view.header().sectionSize(0),
+                     getattr(shell, "_state_saves", False)))
         if plasma and os.environ.get("ORACLE_CHROME"):
             print(shell.dump_chrome())
         if os.environ.get("ORACLE_TREE"):
