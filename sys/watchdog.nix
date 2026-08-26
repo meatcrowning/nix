@@ -54,6 +54,15 @@ let
     now_iso=$(date -Is)
     now_epoch=$(date +%s)
 
+    # Once per BOOT, not once per start. The unit restarts on every
+    # nixos-rebuild, and a second entry for the same dead boot is both a lie in
+    # the log and a false vote toward the loop guard — three rebuilds in an
+    # hour would have disarmed the watchdog.
+    this_boot=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '-')
+    if [ -n "$this_boot" ] && [ "$this_boot" = "$(cat "$STATE/last-boot-id" 2>/dev/null)" ]; then
+      exit 0
+    fi
+
     # WDIOF_CARDRESET (0x20) is the chip saying it fired. Not every driver
     # reports it, so an unclean previous boot is the second, weaker signal.
     bootstatus=$(cat "$WD/bootstatus" 2>/dev/null || echo 0)
@@ -82,6 +91,7 @@ let
       exit 0   # nothing happened; say nothing
     fi
 
+    [ -n "$this_boot" ] && echo "$this_boot" > "$STATE/last-boot-id"
     echo "$now_epoch" >> "$STATE/events"
     # Keep only the last hour. Never clobber the tally on a failure here: an
     # empty events file is a DISARMED loop guard, which is the one thing this
