@@ -480,6 +480,18 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   built against the new kernel, ESP headroom) and, with `--vm`, a headless
   QEMU boot to `multi-user.target`. What it can and cannot prove, and the
   known-good ring below, are in `docs/agents/boot-safety.md`.
+- `sys/remote-power.nix` — **rebooting and powering off `top` from away
+  (`top` only).** It could not be done at all before 2026-08-26 and nothing said
+  so: an ssh session is a remote, inactive seat, so logind's polkit answers
+  `auth_admin_keep` for a reboot (a dialog on a screen nobody is at), and
+  `sudo` covered only `rebuild-top`. `sudo -n remote-power <verb>` is the way
+  now — NOPASSWD on the wrapper, never on `systemctl`. `status` touches nothing
+  and proves the privileged path without exercising it; `reboot` is clean,
+  `reboot-force` skips the unit shutdown, `reboot-sysrq` is sync + remount-ro +
+  reset for when userspace is gone (`kernel.sysrq` is raised to 176 for it —
+  it ships at 16 and a masked bit fails silently). **`poweroff` needs a literal
+  `--confirm`**: wake-on-LAN only reaches a machine from its own LAN segment,
+  so with nothing at home, off is a state nobody can get it out of remotely.
 - `sys/watchdog.nix` — **the hardware watchdog, armed (`top` only).** PID1 pets
   the board's SP5100 TCO timer; a kernel that can no longer schedule PID1 stops
   petting and the chip resets the box, which is the only thing that recovers a
