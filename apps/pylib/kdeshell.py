@@ -381,7 +381,7 @@ def apply_icon_theme() -> None:
         QIcon.setFallbackThemeName("breeze")
 
 
-def select_plasma_files(engine) -> None:
+def select_plasma_files(engine, extra=()) -> None:
     """Turn on the `+plasma` file selector for an engine.
 
     Qt resolves `dir/+plasma/Foo.qml` in place of `dir/Foo.qml` whenever the
@@ -389,6 +389,14 @@ def select_plasma_files(engine) -> None:
     beside the first and every call site picks the right one with no branch.
     That is what lets painter keep one `Root.qml` while its controls are ours in
     one session and the system style's in the other.
+
+    `extra` names selectors to try BEFORE "plasma" — chatter passes `("oxygen",)`
+    when the widget style really is Oxygen, so `qml/+oxygen/Foo.qml` wins where a
+    component is drawn in Oxygen's own vocabulary and `qml/+plasma/Foo.qml`
+    remains the generic KStyle face for everything that is not. Qt tries the
+    selectors in list order and takes the first directory that exists, so a
+    component with no `+oxygen` twin falls through to `+plasma` and then to the
+    unselected file, with nothing to declare at the call site.
     """
     from PySide6.QtQml import QQmlFileSelector
     # PARENTED TO THE ENGINE, deliberately: the constructor's first argument is
@@ -398,7 +406,7 @@ def select_plasma_files(engine) -> None:
     # error and no warning. Measured: `QQmlFileSelector.get(engine)` came back
     # None immediately after constructing one.
     sel = QQmlFileSelector(engine, engine)
-    sel.setExtraSelectors(["plasma"])
+    sel.setExtraSelectors([*extra, "plasma"])
 
 
 class KdeShell:
@@ -1099,6 +1107,12 @@ def _build_shell_class():
                             self._toggle_action("toolbar")]
                     lead += [self._toggle_action("tb:" + i) for i in self._toolbars]
                     lead.append(self._toggle_action("statusbar"))
+                    # A DOCK'S TOGGLE LANDS HERE when the app declares no `view`
+                    # group — which chatter does not. Without this the panel is
+                    # reachable only by its own titlebar [x], i.e. closable and
+                    # then gone for good, and the menubar never admits it exists.
+                    if not any(g2 == "view" for g2 in groups):
+                        lead += list(self._dock_actions)
                     if first is not None:
                         for a in lead:
                             menu.insertAction(first, a)
@@ -1797,6 +1811,47 @@ def _build_shell_class():
             QMetaObject.invokeMethod(self._root, "tbAction", Q_ARG("QVariant", bid))
 
         # -------------------------------------------------------------- docks
+        def widget_dock(self, ident, title, widget, area=None, shortcut=None,
+                        sizes=None):
+            """The same real `QDockWidget`, hosting a plain QWidget.
+
+            `dock()` below puts QML in the panel, which is right for a pane that
+            is more of the app's own content. This one exists for a pane that
+            must be drawn by the WIDGET style itself — chatter's fleet tree is a
+            `QTreeView` because Oxygen's expanders, branch lines, header view and
+            (the reason it cannot be QML at all) its busy progress bar are
+            QStyle primitives; `QQC.ProgressBar` inside a `QQuickWidget` paints
+            zero pixels under Oxygen, measured 2026-08-25.
+
+            Everything else is `dock()`'s: the dock floats, tabs, re-docks, its
+            placement is saved against `objectName`, and the View menu row is the
+            dock's OWN `toggleViewAction` so it cannot disagree with reality.
+            """
+            from PySide6.QtWidgets import QDockWidget
+
+            if area is None:
+                area = Qt.RightDockWidgetArea
+            dw = QDockWidget(title, self.window)
+            dw.setObjectName("dock_" + ident)   # saveState() keys on this
+            dw.setWidget(widget)
+            dw.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+            self.window.addDockWidget(area, dw)
+            if sizes and sizes[0]:
+                widget.setMinimumWidth(int(sizes[0]))
+            self._docks[ident] = (dw, widget, None, None, None)
+
+            act = dw.toggleViewAction()
+            act.setText(title)
+            if shortcut:
+                from PySide6.QtGui import QKeySequence
+                act.setShortcut(QKeySequence(shortcut))
+                act.setShortcutContext(Qt.WindowShortcut)
+                self.window.addAction(act)
+            self._dock_actions.append(act)
+            if self._root is not None:      # bind_chrome may not have run yet
+                self._rebuild()
+            return dw
+
         def dock(self, ident, title, qml_path, area=None, shortcut=None,
                  sizes=None, props=None):
             """Put a QML file in a real `QDockWidget` beside the central widget.

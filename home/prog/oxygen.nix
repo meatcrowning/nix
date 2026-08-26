@@ -23,10 +23,12 @@
 # compiled-in default (`kstyle/oxygen.kcfg` in github.com/KDE/oxygen) for any key
 # neither of us has set — so an unset key is a known number, not an unknown one.
 #
-# Both hosts: `programs.plasma` is enabled unconditionally in home/plasma.nix
-# and `home/` is evaluated by `top` and `book` alike. On book, where the live
-# session is Hyprland and Plasma is not installed, this writes an ini file
-# nothing reads — harmless, and correct the moment a Plasma session exists.
+# Both hosts, and on both it is LIVE: `programs.plasma` is enabled
+# unconditionally in home/plasma.nix and `home/` is evaluated by `top` and
+# `book` alike. This comment used to claim book had no Plasma and that the file
+# was therefore inert there — it was wrong, corrected 2026-08-25: book runs a
+# Plasma session wearing Oxygen, which is what chatter's `+oxygen` face is
+# developed against.
 #
 # NOT set here, on purpose — the durations (`GenericAnimationsDuration` 150,
 # `MenuAnimationsDuration` 150, `ProgressBarBusyStepDuration` 50) and the

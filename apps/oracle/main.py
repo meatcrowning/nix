@@ -79,10 +79,12 @@ from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 from warden import Warden  # noqa: E402  (same)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
 from kdetheme import theme_source, is_plasma  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+from oxygenstyle import is_oxygen, read_oxygen  # noqa: E402  (pylib; Plasma AND the widget style is Oxygen, and its settings)
 import kdeshell  # noqa: E402  (pylib; the Plasma session's real QtWidgets window)
 import lastfm as lastfmlib  # noqa: E402  (pylib; his Last.fm account, shared with player)
 import genshort  # noqa: E402  (his generation shorthand -> make_image/make_video args)
 import boorutags  # noqa: E402  (pylib; the Danbooru vocabulary anima was captioned with)
+import fleet  # noqa: E402  (chatter's own; the subagent/jobs pane and its target helper)
 
 #: The local ollama daemon. Loopback-pinned like everything else that speaks to
 #: a local backend here — never a new listener (root AGENTS.md → the tailnet).
@@ -4137,6 +4139,12 @@ class Ollama(QObject):
     # delegation was worth it.
     agentStarted = Signal(str, str, str)    # agent name, task, model if it differs
     agentProgress = Signal(str, int, str)   # agent name, round, the tool it called
+    #: The same progress, plus WHAT the call was about — a path, a url, a query,
+    #: the head of a command. The bubble only ever needed the tool's name; the
+    #: fleet pane needs the target, because "run_shell" four times in a row says
+    #: nothing about what a subagent is actually touching. Separate rather than
+    #: widened so no existing connection has to change.
+    agentProgressAt = Signal(str, int, str, str)  # name, round, tool, target
     agentDone = Signal(str, bool, str)      # agent name, ok, the block to draw
 
     #: A NEW TOOL ROUND is about to generate. Emitted after a round's results
@@ -6622,6 +6630,8 @@ class Ollama(QObject):
             # turn.
             run["used"].append(name or "tool")
             self.agentProgress.emit(run["name"], run["rounds"], name or "tool")
+            self.agentProgressAt.emit(run["name"], run["rounds"], name or "tool",
+                                      fleet.tool_target(cargs))
             if name not in run["allowed"]:
                 round_["sink"][i] = {
                     "role": "tool", "tool_name": name,
@@ -11081,6 +11091,25 @@ def main():
     # OFFSCREEN ONLY (root AGENTS.md → "Testing without interfering with the
     # user"): the harness renders this window on the offscreen platform, never
     # on his screen, and refuses to run anywhere else.
+    # WHICH FACE, and why it is a flag rather than a fact.
+    #
+    #     --face=hypr     the Hyprland tree, even inside a Plasma session
+    #     --face=plasma   the generic KStyle face
+    #     --face=oxygen   Oxygen's own vocabulary, on top of the KStyle face
+    #
+    # With no flag the session decides, which is the only mode a person ever
+    # gets by accident: Plasma or not, and Oxygen or not. The flag exists so the
+    # OLD face and the NEW one can be put side by side on one screen [his,
+    # 2026-08-25] — `chatter (legacy)` in the runner is this same binary with
+    # `--face=plasma`, so there is no second copy of chatter to keep in step.
+    face = ""
+    for arg in list(sys.argv[1:]):
+        if arg.startswith("--face="):
+            face = arg.split("=", 1)[1]
+            sys.argv.remove(arg)
+    if face and face not in ("hypr", "plasma", "oxygen"):
+        raise SystemExit("--face takes hypr, plasma or oxygen, not %r" % face)
+
     selftest = "--selftest" in sys.argv
     if selftest:
         sys.argv.remove("--selftest")
@@ -11092,7 +11121,13 @@ def main():
     # session, `org.kde.desktop` under Plasma — which is not an imitation of the
     # KDE style but a renderer THROUGH it, so a Button here is drawn by Oxygen's
     # own code. pylib/kdeshell.py.
-    kdeshell.pin_controls_style()
+    if face == "hypr":
+        # A forced Hyprland face must not load the KDE Controls style either —
+        # pinning `org.kde.desktop` and then drawing our own components gives a
+        # window that is neither face.
+        os.environ["QT_QUICK_CONTROLS_STYLE"] = "Basic"
+    else:
+        kdeshell.pin_controls_style()
 
     # A QApplication under Plasma, the QGuiApplication we have always used
     # otherwise: QStyle is a QtWidgets class, and without it there is no system
@@ -11127,7 +11162,13 @@ def main():
     # `Root.qml` is the central widget of a real QMainWindow, so the menubar,
     # the toolbar (with the model and session pickers on it) and the status bar
     # are KDE widgets and the window background is the system style's.
-    plasma = is_plasma()
+    plasma = is_plasma() if not face else face in ("plasma", "oxygen")
+    # OXYGEN IS A SECOND, NARROWER GATE. `is_oxygen()` is Plasma AND the widget
+    # style actually being Oxygen — a Plasma session wearing Breeze gets the
+    # generic KStyle face and none of the Oxygen-specific drawing, because that
+    # drawing is written against Oxygen's own metrics and animation durations
+    # (kstyle/oxygen.kcfg) and would be an imitation anywhere else.
+    oxygen = (face == "oxygen") if face else is_oxygen()
     shell = kdeshell.shell("chatter", size=(620, 720),
                            min_size=(420, 360)) if plasma else None
     engine = shell.engine() if plasma else QQmlApplicationEngine()
@@ -11137,7 +11178,7 @@ def main():
         # `qml/Foo.qml` at every call site, so the compose box and the
         # attachment chips are QtQuick.Controls painted through the KDE style
         # while the Hyprland tree keeps ours, with no branch at either call site.
-        kdeshell.select_plasma_files(engine)
+        kdeshell.select_plasma_files(engine, extra=("oxygen",) if oxygen else ())
     ctx = engine.rootContext()
 
     ctx.setContextProperty("WalPalette", palette)
@@ -11148,6 +11189,13 @@ def main():
     ctx.setContextProperty("Backend", backend)
     ctx.setContextProperty("Sessions", sessions)
     ctx.setContextProperty("ollamaHost", OLLAMA)
+    # Which face actually loaded, readable from QML. `faceName` is what a
+    # harness asserts (a selector that failed to take is silent — pylib/
+    # kdeshell.py), and `oxygenFace` is for the handful of places where one file
+    # legitimately draws both ways rather than earning a `+oxygen` twin.
+    ctx.setContextProperty("faceName",
+                           "oxygen" if oxygen else ("plasma" if plasma else "hypr"))
+    ctx.setContextProperty("oxygenFace", bool(oxygen))
     ctx.setContextProperty("Clip", clip)
     ctx.setContextProperty("Md", mdfmt)
 
@@ -11172,6 +11220,13 @@ def main():
                 print(f"  {w}", file=sys.stderr)
             sys.exit(1)
         build_kde_chrome(shell, ollama, sessions, backend)
+        # THE FLEET PANE — Oxygen only, and a real widget on purpose
+        # (apps/oracle/fleet.py says why). It replaces the QML jobs tray's job
+        # in this face and adds the half that never had a display at all: what
+        # chatter has SPAWNED, how much of it is still working, and what each
+        # one is touching.
+        fleet_pane = fleet.FleetPane(shell, ollama, jobs,
+                                     read_oxygen()) if oxygen else None
         shell.show()
     else:
         engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
@@ -11183,7 +11238,8 @@ def main():
     win = None if plasma else engine.rootObjects()[0]
 
     if selftest:
-        sys.exit(run_selftest(app, shell, win, plasma, warnings))
+        sys.exit(run_selftest(app, shell, win, plasma, warnings,
+                              fleet_pane=fleet_pane if plasma else None))
 
     ollama.refreshModels()
     backend.pollStatus()
@@ -11192,7 +11248,7 @@ def main():
     sys.exit(app.exec())
 
 
-def run_selftest(app, shell, win, plasma, warnings):
+def run_selftest(app, shell, win, plasma, warnings, fleet_pane=None):
     """Render this window offscreen and report what it is wearing.
 
     The only way to check the Plasma face without looking at it (docs/DESIGN.md,
@@ -11586,6 +11642,22 @@ def run_selftest(app, shell, win, plasma, warnings):
                          _j.get("label"),
                          len(_verbs(_r))))
             print("jobs status right: %r" % _root.property("statusRight"))
+        if fleet_pane is not None and os.environ.get("ORACLE_FLEET"):
+            # THE FLEET PANE, as text. Driven through the same signals chatter
+            # emits for real, so the harness exercises the wiring and not a
+            # private back door — and it never renders the pane, because the
+            # pane is checked by reading it, not by looking at it.
+            _o = fleet_pane
+            _o._started("librarian", "find albums with no year tag", "")
+            _o._progress("librarian", 1, "read_file",
+                         fleet.tool_target({"path": "/run/media/lam/SSD/aud/AGENTS.md"}))
+            _o._progress("librarian", 2, "run_shell",
+                         fleet.tool_target({"command": "find /run/media/lam/SSD/aud -name '*.flac'"}))
+            _o._started("scribe", "summarise the findings", "")
+            _o._done("scribe", True, "")
+            print("fleet: busy_timer=%s step_ms=%d"
+                  % (_o._tick.isActive(), _o.delegate.step_ms))
+            print(_o.dump())
         if plasma and os.environ.get("ORACLE_CHROME"):
             print(shell.dump_chrome())
         if os.environ.get("ORACLE_TREE"):
