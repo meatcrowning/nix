@@ -13,10 +13,28 @@
 # the fallbacks for that (a second machine on the LAN, a switched plug) were
 # not available on 2026-08-26. This one needs nothing but the board.
 #
-# TWO MINUTES, not the 60s default the driver ships. The trigger here is heavy
-# memory pressure, which stalls a desktop hard for tens of seconds and then
-# recovers; a short timer would turn a survivable stall into a reset. Two
-# minutes is past anything this box has come back from.
+# IT FIRES ONLY ON A WEDGE NOTHING REMOTE COULD HAVE FIXED, and that is a
+# property of WHO PETS IT, not of a policy written here. PID1 pets it. A kernel
+# that can still schedule PID1 can still schedule sshd, so every state this can
+# reset is one where ssh was already dead — there is no reachable-but-rebooted
+# case to design around. Everything short of that (a hung Hyprland, a dead
+# panel, a stuck unit, a runaway process) leaves PID1 scheduled, the timer
+# petted, and the box yours to fix over ssh.
+#
+# For the same reason the petting stays with PID1 rather than moving to a
+# daemon of ours that could take ssh liveness into account: our daemon can die,
+# and a dead petter resets a perfectly healthy machine. PID1 cannot.
+#
+# `sys/oomd.nix` is the layer that acts BEFORE this on the case that actually
+# happens here (memory pressure), and it acts on a box that is still reachable.
+# This only inherits the ones oomd was too starved to reach.
+#
+# FIVE MINUTES, not the driver's 60s default and not the 2min this shipped with
+# on 2026-08-26. Heavy memory pressure stalls this desktop hard for tens of
+# seconds and then recovers, and the cost of waiting longer is three extra
+# minutes of a box that is already unreachable — nothing — while the cost of
+# being too eager is resetting one that would have come back. When in doubt,
+# wait.
 #
 # THE LOOP GUARD is the point of `watchdog-record`. An unattended reset that
 # lands straight back in the state that caused it is a boot loop, and a box
@@ -120,10 +138,13 @@ let
   '';
 in
 {
-  # PID1 pets the timer every 60s; the chip resets the box if it goes 2 minutes
-  # unpetted. rebootTime is the separate ceiling on a REQUESTED reboot hanging.
+  # PID1 pets the timer every runtimeTime/2; the chip resets the box if it goes
+  # five minutes unpetted. rebootTime is the separate ceiling on a REQUESTED
+  # reboot hanging — the case `remote-power reboot` lands in
+  # (`sys/remote-power.nix`), and the reason that wrapper also carries a
+  # `reboot-force` and a `reboot-sysrq`.
   systemd.watchdog = {
-    runtimeTime = "2min";
+    runtimeTime = "5min";
     rebootTime = "10min";
   };
 
