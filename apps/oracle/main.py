@@ -3981,14 +3981,25 @@ class CtxFit(QObject):
         `trained` is the model's own ceiling (`/api/show`), `loaded` says
         whether its weights are already resident — an unloaded model has to pay
         for them out of the same budget — and `weights` is its file size.
+
+        The KV cache has to live in VRAM NEXT TO the model. ollama honours an
+        oversized `num_ctx` by spilling model layers to RAM rather than by
+        shrinking the window (measured 2026-08-23: qwen3.5:4b at 262144 went
+        from 3.1 GB resident to 13.7 GB, half of it off the GPU) — and a model
+        split across CPU/GPU runs far slower, which is exactly what a window
+        sized against the box's system RAM produced here (gemma4-qat:12b at
+        131072: 3.4 GB of 7.9 GB on the GPU, 56%/44% split). So the budget is
+        FREE VRAM only. RAM enters as a FLOOR, never a ceiling: a window that
+        would put the desktop at risk of swapping is refused, but spare RAM is
+        not licence to ask for a window the card cannot hold.
         """
         kv = self._kv.get(str(model or ""), 0.0)
         if kv <= 0:
             fit = CHAT_NUM_CTX               # never measured: as it always was
         else:
             vram, mem = self._free()
+            # The KV cache must fit beside the model on the card.
             budget = vram - VRAM_HEADROOM
-            budget += max(0, mem - CTX_RAM_FLOOR)
             if not loaded:
                 budget -= max(0, int(weights))
             fit = int(max(0, budget) * CTX_FIT_SAFETY / kv)
@@ -3998,6 +4009,15 @@ class CtxFit(QObject):
             # time a browser tab closed. Doubling steps are far apart compared
             # with that jitter.
             fit = max((r for r in CTX_LADDER if r <= fit), default=0)
+            # The RAM FLOOR: never let the KV claim so much system RAM the
+            # desktop starts swapping. This only shrinks the VRAM fit — it can
+            # never grow it (spare RAM does not buy a window the card cannot
+            # hold).
+            ram_fit = 0
+            if mem > CTX_RAM_FLOOR:
+                ram_fit = int((mem - CTX_RAM_FLOOR) * CTX_FIT_SAFETY / kv)
+            ram_fit = max((r for r in CTX_LADDER if r <= ram_fit), default=0)
+            fit = min(fit, ram_fit)
         fit = max(CHAT_NUM_CTX, min(fit, CHAT_NUM_CTX_CAP))
         if trained > 0:
             fit = min(fit, int(trained))
