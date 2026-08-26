@@ -649,7 +649,9 @@ def _build_shell_class():
     class _KdeShell:
         __doc__ = KdeShell.__doc__
 
-        def __init__(self, title: str, size=(1280, 900), min_size=(720, 560)):
+        def __init__(self, title: str, size=(1280, 900), min_size=(720, 560),
+                     state_key=""):
+            self._state_key = str(state_key or "")
             self.window = QMainWindow()
             self.window.setWindowTitle(title)
             self.window.resize(*size)
@@ -838,6 +840,22 @@ def _build_shell_class():
         # splitter between dock and central widget, and toolbar visibility in
         # one blob — keyed on each widget's objectName, which is why `dock()`
         # and `_ensure_toolbar()` set one.
+        def state_group(self, *parts):
+            """A settings key inside this shell's own state group.
+
+            An app with TWO faces has two window layouts, and they are not
+            interchangeable: chatter's Oxygen face carries a Fleet dock that its
+            legacy face does not, so one blob restored into the other either
+            drops the dock or restores a layout with a hole where it was. The
+            key namespaces the store per face.
+
+            An EMPTY key means the historical flat layout, and that is what the
+            legacy face keeps — moving it would throw away the window size he
+            already has, to no benefit.
+            """
+            key = "/".join(str(p) for p in parts)
+            return ("%s/%s" % (self._state_key, key)) if self._state_key else key
+
         def _settings(self):
             from PySide6.QtCore import QSettings
             from PySide6.QtWidgets import QApplication
@@ -865,8 +883,8 @@ def _build_shell_class():
                 return
             self._state_saves = True
             st = self._settings()
-            geom = st.value("window/geometry")
-            state = st.value("window/state")
+            geom = st.value(self.state_group("window", "geometry"))
+            state = st.value(self.state_group("window", "state"))
             if geom is not None:
                 self.window.restoreGeometry(geom)
             if state is not None:
@@ -880,7 +898,7 @@ def _build_shell_class():
             # are written by `_save_state` and put back here; a bar the user
             # has never touched has no key and keeps the app's own default.
             for which in ("menubar", "statusbar"):
-                want = _as_bool(st.value("chrome/" + which))
+                want = _as_bool(st.value(self.state_group("chrome", which)))
                 widget = self._bar_widget(which)
                 if want is not None and widget is not None:
                     widget.setVisible(want)
@@ -895,12 +913,12 @@ def _build_shell_class():
             if not self._state_saves:
                 return
             st = self._settings()
-            st.setValue("window/geometry", self.window.saveGeometry())
-            st.setValue("window/state", self.window.saveState(1))
+            st.setValue(self.state_group("window", "geometry"), self.window.saveGeometry())
+            st.setValue(self.state_group("window", "state"), self.window.saveState(1))
             for which in ("menubar", "statusbar"):
                 widget = self._bar_widget(which)
                 if widget is not None:
-                    st.setValue("chrome/" + which, 0 if widget.isHidden() else 1)
+                    st.setValue(self.state_group("chrome", which), 0 if widget.isHidden() else 1)
             st.sync()
 
         # ---------------------------------------------------------- chrome
@@ -2294,7 +2312,7 @@ def _build_shell_class():
     return _KdeShell
 
 
-def shell(title: str, size=(1280, 900), min_size=(720, 560)):
+def shell(title: str, size=(1280, 900), min_size=(720, 560), state_key=""):
     """Make the Plasma shell. Call only under `is_plasma()`."""
     cls = _build_shell_class()
-    return cls(title, size=size, min_size=min_size)
+    return cls(title, size=size, min_size=min_size, state_key=state_key)

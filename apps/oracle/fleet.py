@@ -248,7 +248,7 @@ class FleetPane(QObject):
         self.view.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.view.setContextMenuPolicy(Qt.ActionsContextMenu)
         self.view.header().setStretchLastSection(True)
-        self.view.expandAll()
+        self.view.expandAll()   # the default before _restore_view has a say
 
         self.delegate = BusyDelegate(
             self.view, cfg.get("ProgressBarBusyStepDuration", 50))
@@ -264,6 +264,18 @@ class FleetPane(QObject):
         self.dock = shell.widget_dock("fleet", "Fleet", self.view,
                                       shortcut="Ctrl+Shift+F", sizes=(280, 0))
 
+        # VIEW SETTINGS SURVIVE THE SESSION. The dock's own area, size and
+        # whether it is up at all ride in `QMainWindow.saveState()`, which
+        # kdeshell already writes — but a QTreeView's column widths and which
+        # groups are folded are the view's, not the window's, and nothing was
+        # keeping them. Restored here, written on quit beside the window blob so
+        # there is one store and one moment, not two that can disagree.
+        self._shell = shell
+        self._restore_view()
+        app = QApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self._save_view)
+
         ollama.agentStarted.connect(self._started)
         ollama.agentDone.connect(self._done)
         if hasattr(ollama, "agentProgressAt"):
@@ -271,6 +283,40 @@ class FleetPane(QObject):
         jobs.rowsChanged.connect(self._jobs_changed)
         self._jobs = jobs
         self._jobs_changed()
+
+    # ---------------------------------------------------------- persistence
+    def _settings(self):
+        # kdeshell owns the store AND the rule about when writing it is allowed
+        # (an offscreen harness must never hand him back a test's layout), so
+        # this borrows both rather than opening a second QSettings.
+        return self._shell._settings(), self._shell
+
+    def _restore_view(self):
+        st, sh = self._settings()
+        blob = st.value(sh.state_group("fleet", "header"))
+        if blob is not None:
+            self.view.header().restoreState(blob)
+        # Folded groups, by name rather than by row index: the two group rows
+        # are fixed today, and a stored index would silently point at the wrong
+        # one the moment a third is added.
+        folded = st.value(sh.state_group("fleet", "folded")) or ""
+        folded = {p for p in str(folded).split(",") if p}
+        for item in (self.model.agents_group, self.model.jobs_group):
+            self.view.setExpanded(item.index(), item.text().split(" · ")[0] not in folded)
+
+    def _save_view(self):
+        st, sh = self._settings()
+        # `_state_saves` is kdeshell's answer to "may this process write his
+        # state at all" — false in every offscreen harness run.
+        if not getattr(sh, "_state_saves", False):
+            return
+        st.setValue(sh.state_group("fleet", "header"),
+                    self.view.header().saveState())
+        folded = [item.text().split(" · ")[0]
+                  for item in (self.model.agents_group, self.model.jobs_group)
+                  if not self.view.isExpanded(item.index())]
+        st.setValue(sh.state_group("fleet", "folded"), ",".join(folded))
+        st.sync()
 
     # ------------------------------------------------------------- plumbing
     def _sync_timer(self):
@@ -291,7 +337,13 @@ class FleetPane(QObject):
     @Slot(str, str, str)
     def _started(self, name, task, model):
         self.model.agent_started(name, task, model)
-        self.view.expandAll()
+        # Expand the NEW row only, and only inside a group he has left open. A
+        # blanket expandAll() here unfolded a group he had just folded, every
+        # time chatter spawned anything — which is a view setting being
+        # overwritten by the app, not retained.
+        group = self.model.agents_group
+        if self.view.isExpanded(group.index()):
+            self.view.setExpanded(group.child(group.rowCount() - 1, 0).index(), True)
         self._sync_timer()
 
     @Slot(str, int, str, str)
