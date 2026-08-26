@@ -480,6 +480,19 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   built against the new kernel, ESP headroom) and, with `--vm`, a headless
   QEMU boot to `multi-user.target`. What it can and cannot prove, and the
   known-good ring below, are in `docs/agents/boot-safety.md`.
+- `sys/watchdog.nix` — **the hardware watchdog, armed (`top` only).** PID1 pets
+  the board's SP5100 TCO timer; a kernel that can no longer schedule PID1 stops
+  petting and the chip resets the box, which is the only thing that recovers a
+  memory livelock when nothing else is on the LAN to reach it (`sys/net/wol.nix`
+  covers only a machine that is genuinely OFF). Two minutes, not the driver's
+  60s — a heavy stall here recovers, and a short timer would turn one into a
+  reset. `watchdog-record.service` writes one line per unclean boot to
+  `/var/log/watchdog-resets.log` (nothing can be written AT a hardware reset, so
+  it reconstructs it on the way back up, once per boot), and the **third**
+  unclean boot inside an hour **disarms** the watchdog for that boot via a
+  `/run` drop-in — a box power-cycling itself every four minutes while nobody is
+  home is worse than a box that is down. NixOS-only, so `book` does not get it.
+
 - **Known-good boot entries (`top` only).** `sys/boot-known-good.nix` keeps the
   last three generations *observed to boot* — a timer 3 minutes into boot
   records `/run/booted-system`, a permanent GC root under
