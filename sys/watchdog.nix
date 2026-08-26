@@ -44,7 +44,7 @@
 let
   record = pkgs.writeShellScript "watchdog-record" ''
     set -u
-    PATH=${pkgs.lib.makeBinPath [ pkgs.coreutils pkgs.gnugrep pkgs.systemd ]}
+    PATH=${pkgs.lib.makeBinPath [ pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.systemd ]}
 
     LOG=/var/log/watchdog-resets.log
     STATE=/var/lib/watchdog-record
@@ -83,11 +83,17 @@ let
     fi
 
     echo "$now_epoch" >> "$STATE/events"
-    # keep only the last hour
+    # Keep only the last hour. Never clobber the tally on a failure here: an
+    # empty events file is a DISARMED loop guard, which is the one thing this
+    # must not fail into (it did, for want of awk on the PATH).
     cutoff=$(( now_epoch - 3600 ))
-    awk -v c="$cutoff" '$1 >= c' "$STATE/events" > "$STATE/events.new" 2>/dev/null || true
-    mv "$STATE/events.new" "$STATE/events" 2>/dev/null || true
+    if awk -v c="$cutoff" '$1 >= c' "$STATE/events" > "$STATE/events.new"; then
+      mv "$STATE/events.new" "$STATE/events"
+    else
+      rm -f "$STATE/events.new"
+    fi
     recent=$(wc -l < "$STATE/events" 2>/dev/null || echo 1)
+    [ -n "$recent" ] || recent=1
 
     printf '%s  %s  (previous boot %s, %s in the last hour)\n' \
       "$now_iso" "$cause" "''${prev_id:-unknown}" "$recent" >> "$LOG"
