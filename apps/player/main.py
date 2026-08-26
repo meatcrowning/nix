@@ -854,6 +854,22 @@ class Scanner(QThread):
             con.commit()
 
         rebuild_albums(con)
+
+        # A re-parsed file can carry NEW embedded art at the SAME path, and
+        # _art_pass alone never sees that: it re-donates only when an album has
+        # no thumb or its donor path is DEAD, so a cover replaced in place left
+        # the grid frozen on the old one for ever (Millie & Andrea, 2026-08-25).
+        # Anything whose tags we just re-read gives its album's cached art up.
+        for i in range(0, len(todo), 500):
+            chunk = todo[i:i + 500]
+            con.execute(
+                "UPDATE albums SET art_src=NULL, thumb=NULL, full_art=NULL "
+                "WHERE id IN (SELECT DISTINCT album_id FROM tracks "
+                " WHERE album_id IS NOT NULL AND path IN (%s))"
+                % ",".join("?" * len(chunk)), chunk)
+        if todo:
+            con.commit()
+
         self.batch.emit()
         self._art_pass(con)
 
