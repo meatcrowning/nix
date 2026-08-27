@@ -480,6 +480,19 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   built against the new kernel, ESP headroom) and, with `--vm`, a headless
   QEMU boot to `multi-user.target`. What it can and cannot prove, and the
   known-good ring below, are in `docs/agents/boot-safety.md`.
+  `ble-fastconn.py` + `ble-fastconn.service` are **why the bluetooth trackball
+  feels like the USB one (`book` only)**: a BLE peripheral advertises its own
+  preferred connection parameters and both BlueZ and the kernel believe it, and
+  the ERGO M575 asks for **slave latency 44** — permission to skip 44
+  connection events when idle, i.e. to stop listening for half a second. It is
+  responsive while moving and late every time you START moving, which is not
+  something a poll-based receiver can do. Hand-editing BlueZ's stored copy
+  (`/var/lib/bluetooth/<adapter>/<dev>/info`) loses, because it re-reads the
+  characteristic on every connect; the daemon asserts 7.5 ms / latency 0 on the
+  link instead, on every connect and again on any drift. Root-owned Fedora
+  state on book (`/etc/systemd/system/`, install line in the unit's header) —
+  redo it after a reinstall. `top` is unaffected: its trackball is on the
+  Logitech receiver and its bluetooth stack is not enabled at all.
 - `sys/remote-power.nix` — **rebooting and powering off `top` from away
   (`top` only).** It could not be done at all before 2026-08-26 and nothing said
   so: an ssh session is a remote, inactive seat, so logind's polkit answers
