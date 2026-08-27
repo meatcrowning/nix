@@ -2040,11 +2040,22 @@ and two things make that reach the GPU: `_painter_argv` **`exec`s** the
 generator so the signal lands on python rather than on a bash waiting in front
 of it, and `smoke.py` traps `TERM`/`INT`/`HUP` to DELETE what it queued and POST
 `/interrupt` before it goes (blocking urllib — the client's own POSTs are
-asynchronous and never fly from a handler that ends in `_exit`). On book the
-generator is at the far end of an ssh and terminating the local ssh does not
-signal it, so a render started from there runs to its own end. Harness: the
-`3a-stop` block of `tools/toolbox-test.py`, whose stub traps `TERM` and leaves a
-breadcrumb — the assertion that the signal reached the generator itself.
+asynchronous and never fly from a handler that ends in `_exit`).
+
+**And on book the signal does not cross the ssh, so it is sent again.**
+Terminating the local ssh client signals nothing on the far side — no pty, so no
+SIGHUP — and a render minutes deep into sampling never writes to the pipe that
+closed. Measured 2026-08-26, Stop pressed on book: `smoke.py` on top carried on
+to its own end with 25.6G held under it, and chatter then reported painter
+rendering because painter WAS. So the remote script writes its own `$$` to
+`/tmp/oracle-gen-<run>.pid` before the `exec` (same pid), the QProcess carries
+that path as `genPidFile`, and `_remote_kill` fires a second, detached ssh that
+TERMs it and KILLs it eight seconds later. The generation timeout takes the same
+route — killing the local ssh there left the far side sampling for the rest of
+its own, longer, limit. Harness: `3a-stop` in `tools/toolbox-test.py`, whose
+stub traps `TERM` and leaves a breadcrumb (the assertion the signal reached the
+generator and not its shell), and `3a-ssh` beside it for the pid file and the
+kill command.
 
 Two rules on top of that, both his, 2026-08-24:
 
