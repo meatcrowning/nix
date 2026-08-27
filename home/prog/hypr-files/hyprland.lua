@@ -705,6 +705,20 @@ hl.device({
     accel_profile = "flat",
 })
 
+-- The SAME trackball over bluetooth, which is how book has it. Hyprland
+-- matches a device rule on libinput's device name, lowercased with spaces
+-- turned into dashes, and that name is per-transport: the USB receiver above
+-- announces "Logitech ERGO M575" while bluetooth announces "ERGO M575 Mouse"
+-- (`libinput list-devices`, bluetooth:046d:b027). So the rule above matched
+-- nothing over bluetooth and the trackball silently ran on Hyprland's default
+-- adaptive acceleration — the feel difference. A rule for an absent device is
+-- inert, so both hosts carry both.
+hl.device({
+    name          = "ergo-m575-mouse",
+    sensitivity   = -0.200,
+    accel_profile = "flat",
+})
+
 
 ---------------------
 ---- KEYBINDINGS ----

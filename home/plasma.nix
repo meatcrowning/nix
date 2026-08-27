@@ -25,6 +25,39 @@
       soundTheme = "oxygen";
     };
 
+    # The Logitech ERGO M575 trackball, so a PLASMA session on either host
+    # feels like the Hyprland one. Hyprland gets sensitivity -0.200 +
+    # accel_profile "flat" from the `hl.device` rules in
+    # home/prog/hypr-files/hyprland.lua; these are the same two numbers for
+    # KWin. `accelerationProfile = "none"` is plasma-manager's name for
+    # PointerAccelerationProfile=1, which is libinput's FLAT — not "no
+    # acceleration".
+    #
+    # TWO entries because the same trackball reports a different name and
+    # product id per transport, and both KWin and Hyprland match on those:
+    # over its USB receiver it is `Logitech ERGO M575` / 046d:4096, over
+    # bluetooth `ERGO M575 Mouse` / 046d:b027. `top` had only the receiver
+    # entry (hand-written years ago by the KCM) and `book` had neither, which
+    # is why the bluetooth trackball on book ran on KDE's adaptive default.
+    # A section for a transport that is not plugged in is inert, so both
+    # hosts carry both.
+    input.mice = [
+      {
+        name = "Logitech ERGO M575";
+        vendorId = "046d";
+        productId = "4096";
+        acceleration = -0.2;
+        accelerationProfile = "none";
+      }
+      {
+        name = "ERGO M575 Mouse";
+        vendorId = "046d";
+        productId = "b027";
+        acceleration = -0.2;
+        accelerationProfile = "none";
+      }
+    ];
+
     shortcuts = {
       "KDE Keyboard Layout Switcher"."Switch to Last-Used Keyboard Layout" = "Meta+Alt+L";
       "KDE Keyboard Layout Switcher"."Switch to Next Keyboard Layout" = "Meta+Alt+K";
