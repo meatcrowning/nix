@@ -1,0 +1,22 @@
+# The Fedora (book) half of tools/ble-fastconn.py.  `sys/` is NixOS-only and
+# book has home-manager alone, so this unit is root-owned Fedora state, like
+# tailscaled and /etc/fstab: install it by hand and redo it after a reinstall.
+#
+#   sudo install -m644 ~/nix/tools/ble-fastconn.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now ble-fastconn
+#
+# top does not get it: its trackball is on the Logitech USB receiver (a flat
+# 125 Hz poll that cannot skip) and its bluetooth stack is not even enabled.
+[Unit]
+Description=Pin the ERGO M575 trackball's BLE connection parameters
+After=bluetooth.service
+BindsTo=bluetooth.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/lam/nix/tools/ble-fastconn.py --adopt FE:0D:FC:57:35:8E
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=bluetooth.service
