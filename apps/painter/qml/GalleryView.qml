@@ -215,6 +215,14 @@ Item {
             // then ran, one after another, while he was still scrolling. That
             // is what made the wheel feel heavy. A row passed in a quarter of a
             // second was never looked at.
+            // A still asks for its cached thumbnail the moment it is built.
+            // No dwell timer, unlike the poster below: the answer is usually
+            // already on the row (the model fills it in at scan time), and the
+            // queue behind it is a bounded stack, so a flick past this tile
+            // costs a request that is then dropped for a newer one.
+            Component.onCompleted: if (isVideo === false && thumb === "")
+                                       Gallery.requestThumb(path)
+
             Timer {
                 id: posterDwell
                 interval: 250
@@ -298,7 +306,14 @@ Item {
                     id: still
                     anchors.fill: parent
                     anchors.margins: 1
-                    source: isVideo ? poster : url
+                    // THE CACHED THUMBNAIL, not the output. Half this history
+                    // is top's output directory over sshfs and the originals
+                    // are 1-2 MB PNGs — measured 0.70s to read ONE, paid again
+                    // every time a delegate was rebuilt. main.py `_ThumbJob`.
+                    // Empty until one exists, the way a clip's poster is: a
+                    // tile that shows nothing for a moment beats a grid that
+                    // stalls the scroll.
+                    source: isVideo ? poster : thumb
                     fillMode: Image.PreserveAspectFit
                     asynchronous: true
                     // CACHED, and decoded at the size actually drawn.
