@@ -6050,11 +6050,15 @@ class Ollama(QObject):
         waiting for. The command is `exec`d by its shell so the signal lands on
         python and not on a bash that is only waiting for it. On book the
         generator is at the far end of an ssh, and terminating the local ssh
-        does NOT signal it — the render there runs to its own end.
+        does NOT signal it — so a second ssh carries the signal across, aimed
+        at the pid the far side left behind (`_remote_kill`).
         """
         procs, self._gen_procs = list(self._gen_procs), []
         for proc in procs:
             try:
+                # The far side FIRST, and unconditionally: a local ssh that has
+                # already exited proves nothing about the render behind it.
+                self._remote_kill(proc.property("genPidFile"))
                 if proc.state() == QProcess.ProcessState.NotRunning:
                     continue
                 proc.terminate()
@@ -6067,6 +6071,28 @@ class Ollama(QObject):
                 continue
         if procs:
             self.genFinished.emit(False)
+
+    def _remote_kill(self, pidfile):
+        """SIGTERM the generator on `top`, over an ssh of its own.
+
+        Detached and fire-and-forget: this runs while the turn is being torn
+        down and nothing here may wait on the network. The far side gets the
+        same two stages the local one does — TERM, so `smoke.py`'s handler
+        interrupts ComfyUI and deletes what it queued, then KILL eight seconds
+        later if it is somehow still there.
+        """
+        if not pidfile:
+            return
+        q = shlex.quote(pidfile)
+        script = ('p=$(cat %s 2>/dev/null); rm -f %s; [ -n "$p" ] || exit 0; '
+                  'kill -TERM "$p" 2>/dev/null; '
+                  '( sleep 8; kill -KILL "$p" 2>/dev/null ) '
+                  '</dev/null >/dev/null 2>&1 &' % (q, q))
+        argv = self._painter_ssh() + ["bash -lc " + shlex.quote(script)]
+        try:
+            QProcess.startDetached(argv[0], argv[1:])
+        except Exception:  # noqa: BLE001 — Stop must never raise
+            pass
 
     def _on_stream(self, reply):
         if reply is not self._reply:
@@ -9250,7 +9276,7 @@ class Ollama(QObject):
         return ON_BOOK and not os.environ.get("ORACLE_PAINTER", "").strip()
 
     @classmethod
-    def _painter_argv(cls, args, kind="image", remote_ok=()):
+    def _painter_argv(cls, args, kind="image", remote_ok=(), run_id=""):
         """The one command that generates on `top`. `(argv, stdin, error)`.
 
         Four steps in one shell, because they are one act: put any input
@@ -9352,20 +9378,42 @@ class Ollama(QObject):
         # leaves its child rendering (see `_stop_generating`).
         script = "mkdir -p %s; %s%sexec %s" % (shlex.quote(MAKE_IMAGE_DIR),
                                                unpack, wake, cmd)
+        # …AND OVER SSH THE SIGNAL DOES NOT CROSS AT ALL. Terminating the local
+        # ssh client does not signal what it started on the far side: no pty, so
+        # no SIGHUP, and the generator only notices when it next writes to a
+        # closed pipe — which a render minutes deep into sampling does not do.
+        # Measured 2026-08-26: Stop pressed on book, `smoke.py` on top still
+        # rendering afterwards with 25.6G held under it, right through to its
+        # own end. So the far side leaves its PID where the second ssh can find
+        # it (`$$` before the `exec`, which keeps the same pid), and
+        # `_stop_generating` kills it there.
+        if run_id:
+            script = "printf %%s $$ > %s; %s" % (
+                shlex.quote(cls._gen_pidfile(run_id)), script)
         # THE WEIGHTS AND THE GPU ARE ON TOP, so this one does not follow
         # TOOLS_HOST — except when `$ORACLE_PAINTER` replaced the generator,
         # which only a harness does and only ever with a script in its own
         # /tmp. Sending that to top ran a file the other machine has never had.
         if cls._painter_remote():
-            host = os.environ.get("OLLAMA_SSH_HOST", "top")
-            ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
-            argv = [ssh, "-o", "BatchMode=yes"]
-            ctl = os.environ.get("OLLAMA_SSH_CTL")
-            if ctl:
-                argv += ["-o", "ControlMaster=auto", "-o", "ControlPersist=30",
-                         "-o", "ControlPath=" + ctl]
-            return argv + [host, "bash -lc " + shlex.quote(script)], stdin, ""
+            return (cls._painter_ssh() + ["bash -lc " + shlex.quote(script)],
+                    stdin, "")
         return ["bash", "-lc", script], stdin, ""
+
+    @staticmethod
+    def _painter_ssh():
+        """`ssh … top` — the generator's host, and the kill's."""
+        host = os.environ.get("OLLAMA_SSH_HOST", "top")
+        ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+        argv = [ssh, "-o", "BatchMode=yes"]
+        ctl = os.environ.get("OLLAMA_SSH_CTL")
+        if ctl:
+            argv += ["-o", "ControlMaster=auto", "-o", "ControlPersist=30",
+                     "-o", "ControlPath=" + ctl]
+        return argv + [host]
+
+    @staticmethod
+    def _gen_pidfile(run_id):
+        return "/tmp/oracle-gen-%s.pid" % re.sub(r"[^A-Za-z0-9]", "", run_id)
 
     def _booru_tags(self, args, idx, remaining, calls):
         """The tag vocabulary, searched or a draft checked (`pylib/boorutags`).
@@ -9529,11 +9577,16 @@ class Ollama(QObject):
         name = "make_video" if kind == "video" else "make_image"
         noun = "clip" if kind == "video" else "picture"
         limit_ms = MAKE_VIDEO_MS if kind == "video" else MAKE_IMAGE_MS
-        argv, stdin, err = self._painter_argv(args, kind, self._made_remote)
+        run_id = "%d%d" % (os.getpid(), int(time.time() * 1000) % 10 ** 9)
+        argv, stdin, err = self._painter_argv(args, kind, self._made_remote,
+                                              run_id)
         if err:
             answer({"error": err}, False, name + ": " + err)
             return
         proc = QProcess(self)
+        # Where Stop has to reach when the generator is on the other machine.
+        if self._painter_remote():
+            proc.setProperty("genPidFile", self._gen_pidfile(run_id))
         self._procs.append(proc)
         # STOP MEANS STOP THE RENDER TOO [his, 2026-08-24]. `cancel()` used to
         # abort the ollama stream and leave the backend sampling for another
@@ -9683,6 +9736,9 @@ class Ollama(QObject):
             if state["done"]:
                 return
             state["timeout"] = True
+            # Same reach as Stop: killing the local ssh leaves the generator on
+            # top sampling for the rest of its own, longer, timeout.
+            self._remote_kill(proc.property("genPidFile"))
             try:
                 proc.kill()
             except RuntimeError:

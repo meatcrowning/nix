@@ -299,6 +299,35 @@ check("...and the render process is gone", all(_dead(pr) for pr in live))
 os.environ.pop("ORACLE_PAINTER", None)
 o._set_busy(True)          # cancel() dropped it; the sections below need it
 
+# 3a-ssh. AND ACROSS THE SSH, STOP HAS TO BE SENT AGAIN. Terminating the local
+# ssh client signals nothing on the far side — no pty, so no SIGHUP — and a
+# render minutes into sampling never writes to the closed pipe that would tell
+# it. Measured 2026-08-26: Stop on book, `smoke.py` on top still rendering with
+# 25.6G under it. So the far side records its pid and Stop kills it there.
+if oracle.Ollama._painter_remote():
+    argv, _st, err = oracle.Ollama._painter_argv(
+        {"prompt": "x"}, "image", (), "abc123")
+    check("the far side leaves its pid where Stop can find it",
+          not err and "printf %s $$ > /tmp/oracle-gen-abc123.pid" in argv[-1],
+          (err or argv[-1])[:160])
+    sent = []
+    _real_detach = oracle.QProcess.startDetached
+    oracle.QProcess.startDetached = staticmethod(
+        lambda prog, a=(): (sent.append([prog] + list(a)), True)[1])
+    try:
+        o._remote_kill(oracle.Ollama._gen_pidfile("abc123"))
+        o._remote_kill("")                       # a local generator: nothing to chase
+    finally:
+        oracle.QProcess.startDetached = _real_detach
+    check("...and Stop signals it over an ssh of its own",
+          len(sent) == 1 and "kill -TERM" in sent[0][-1]
+          and "oracle-gen-abc123.pid" in sent[0][-1]
+          and sent[0][-2] == os.environ.get("OLLAMA_SSH_HOST", "top"),
+          json.dumps(sent)[:200])
+    check("...with a KILL behind it, and never a wait on the network",
+          bool(sent) and "kill -KILL" in sent[0][-1] and "</dev/null >/dev/null 2>&1 &" in sent[0][-1],
+          json.dumps(sent)[-160:])
+
 # THE SAME ASSERTIONS ON BOTH MACHINES. From book the generator still runs on
 # top (the weights and the GPU are there), so `_painter_argv` returns
 # `ssh top bash -lc '<script>'` — one more level of quoting — and any input
