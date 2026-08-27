@@ -70,7 +70,8 @@ Item {
             visible: App.hasPreview
             // A provider image only reloads when the URL CHANGES, so the tick
             // is in it (main.py increments it per frame).
-            source: App.hasPreview ? ("image://livepreview/" + App.previewTick) : ""
+            source: (pane.open && App.hasPreview)
+                    ? ("image://livepreview/" + App.previewTick) : ""
             fillMode: Image.PreserveAspectFit
             cache: false
             asynchronous: true
@@ -82,7 +83,9 @@ Item {
             anchors.fill: parent
             anchors.margins: 1
             visible: !App.hasPreview && pane.source !== "" && !pane.sourceIsVideo
-            source: visible ? "file://" + pane.source : ""
+            // The pane being shut means the file is not decoded at all, not
+            // merely not drawn — see the MediaPlayer below.
+            source: (pane.open && visible) ? "file://" + pane.source : ""
             fillMode: Image.PreserveAspectFit
             cache: false
             asynchronous: true
@@ -95,10 +98,17 @@ Item {
         }
 
         // (2b) the finished clip — looped, and muted on purpose (see above)
+        //
+        // `pane.open` is in the source condition, not just in `visible`: a
+        // closed pane is height 0 and invisible, but a MediaPlayer with a
+        // source is a decoder running a clip on a loop for as long as the app
+        // is open, whether or not anything draws it. On book that is a core
+        // spent on a pane that is not there.
         AudioOutput { id: silent; muted: true }
         MediaPlayer {
             id: player
-            source: (!App.hasPreview && pane.source !== "" && pane.sourceIsVideo)
+            source: (pane.open && !App.hasPreview
+                     && pane.source !== "" && pane.sourceIsVideo)
                     ? "file://" + pane.source : ""
             videoOutput: videoOut
             audioOutput: silent

@@ -34,9 +34,11 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import (QAbstractListModel, QFileSystemWatcher, QModelIndex,
-                            QObject, Property, QProcess, QSortFilterProxyModel, Qt,
+                            QObject, Property, QProcess, QRunnable,
+                            QSortFilterProxyModel, QSize, Qt, QThreadPool,
                             QTimer, QUrl, Signal, Slot)
-from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QWindow
+from PySide6.QtGui import (QColor, QGuiApplication, QIcon, QImage, QImageReader,
+                           QWindow)
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtQuick import QQuickImageProvider
 
@@ -474,12 +476,72 @@ class LivePreview(QQuickImageProvider):
         return self.image
 
 
+# The longest side of a cached grid thumbnail. The grid asks for 2x its cell
+# and clamps at 560 (GalleryView `thumbPx`), so this is the biggest it will ever
+# draw; anything larger is bytes nobody looks at.
+THUMB_PX = 560
+
+
+class _ThumbJob(QRunnable):
+    """One output -> one small JPEG in ~/.cache/painter/thumbs, off the GUI thread.
+
+    WHY THIS EXISTS AT ALL, and why it is not "Qt already caches decoded
+    images": on book most of the history is TOP's output directory, mounted
+    read-only over sshfs (`tools/comfy-tunnel.sh`), and a tile bound straight at
+    the original re-read a 1.2 MB PNG **over the network** every time its
+    delegate was rebuilt — measured 0.70 s for one file. A GridView destroys a
+    delegate the moment it leaves the viewport, and QQuickPixmapCache only holds
+    a couple of unreferenced 420px thumbnails, so scrolling back over a row paid
+    that again. That is the whole of the scroll lag, and it is also why toggling
+    the preview pane stutters: closing it reveals another row and a half, i.e.
+    another handful of network reads at once.
+
+    A thumbnail is keyed by mtime+size, so a regenerated file with the same name
+    gets a new one and nothing is ever stale.
+    """
+
+    class _Sig(QObject):
+        done = Signal(str, str)      # (source path, thumbnail path or "")
+
+    def __init__(self, path, dest):
+        super().__init__()
+        self.setAutoDelete(False)   # the model holds it; see _next_thumb
+        self.path, self.dest = str(path), dest
+        self.sig = _ThumbJob._Sig()
+
+    def run(self):
+        out = ""
+        try:
+            rd = QImageReader(self.path)
+            rd.setAutoTransform(True)
+            dims = rd.size()
+            if dims.isValid() and max(dims.width(), dims.height()) > THUMB_PX:
+                k = THUMB_PX / max(dims.width(), dims.height())
+                rd.setScaledSize(QSize(max(1, round(dims.width() * k)),
+                                       max(1, round(dims.height() * k))))
+            img = rd.read()
+            if not img.isNull():
+                self.dest.parent.mkdir(parents=True, exist_ok=True)
+                # Written aside and renamed: a half-written JPEG that a later
+                # run finds by name would be a permanently broken tile.
+                tmp = self.dest.with_name(self.dest.name + f".{os.getpid()}.part")
+                if img.save(str(tmp), "JPG", 86):
+                    os.replace(tmp, self.dest)
+                    out = str(self.dest)
+                else:
+                    tmp.unlink(missing_ok=True)
+        except Exception:  # noqa: BLE001 - a missing thumbnail is cheap
+            out = ""
+        self.sig.done.emit(self.path, out)
+
+
 class Gallery(QAbstractListModel):
     PathRole = Qt.UserRole + 1
     UrlRole = Qt.UserRole + 2
     NameRole = Qt.UserRole + 3
     VideoRole = Qt.UserRole + 4
     PosterRole = Qt.UserRole + 5
+    ThumbRole = Qt.UserRole + 6
 
     countChanged = Signal()
     # A clip's poster frame landed: (the clip, the .jpg). The completion toast
@@ -500,10 +562,22 @@ class Gallery(QAbstractListModel):
         # machine that is already busy sampling.
         self._poster_queue = []
         self._poster_proc = None
+        # Thumbnails, likewise off the GUI thread but several at a time: each
+        # one is mostly a blocking read over sshfs, so three in flight overlap
+        # the waiting. The queue is a STACK — the newest request is the row he
+        # has just scrolled to, and the oldest is somewhere off screen.
+        self._thumb_pool = QThreadPool(self)
+        self._thumb_pool.setMaxThreadCount(3)
+        self._thumb_queue = []
+        self._thumb_busy = {}
+        # path -> the mtime-size stamp its cache entries are named with, so
+        # nothing on the scroll path ever stats a network mount.
+        self._ck = {}
 
     def roleNames(self):
         return {self.PathRole: b"path", self.UrlRole: b"url", self.NameRole: b"name",
-                self.VideoRole: b"isVideo", self.PosterRole: b"poster"}
+                self.VideoRole: b"isVideo", self.PosterRole: b"poster",
+                self.ThumbRole: b"thumb"}
 
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(self._rows)
@@ -518,7 +592,8 @@ class Gallery(QAbstractListModel):
         r = self._rows[index.row()]
         return {self.PathRole: r["path"], self.UrlRole: r["url"],
                 self.NameRole: r["name"], self.VideoRole: r["is_video"],
-                self.PosterRole: r["poster"]}.get(role)
+                self.PosterRole: r["poster"],
+                self.ThumbRole: r["thumb"]}.get(role)
 
     def has_path(self, path):
         return any(r["path"] == str(path) for r in self._all)
@@ -579,12 +654,58 @@ class Gallery(QAbstractListModel):
         """
         return Path(path).name
 
-    def _row_for(self, path):
+    def _row_for(self, path, st=None):
+        """One gallery row. `st` is the (mtime, size) the caller already read.
+
+        IT IS TAKEN RATHER THAN RE-STATTED because half these files live on
+        top's output directory over sshfs, where a stat is a network round trip
+        — and the cache keys below are needed on the GUI thread, from the
+        scroll path. `load_existing` stats every file exactly once anyway.
+        """
         p = Path(path)
         is_video = p.suffix.lower() in VIDEO_SUFFIXES
+        if st is None:
+            try:
+                s = os.stat(p)
+                st = (s.st_mtime, s.st_size)
+            except OSError:
+                st = None
         return {"path": str(p), "url": QUrl.fromLocalFile(str(p)).toString(),
                 "name": p.name, "is_video": is_video, "poster": "",
-                "key": self._dedup_key(p)}
+                "key": self._dedup_key(p),
+                # What makes a cache entry this file and not a later one of the
+                # same name. "" when the file could not be statted, which means
+                # nothing is cached for it rather than something wrong.
+                "ck": self._note_ck(p, st),
+                # Already cached from an earlier session? Then the row knows its
+                # picture before any delegate exists, which is the whole point:
+                # no first pass over the history that decodes originals.
+                "thumb": self._cached_thumb(p, is_video)}
+
+    def cache_stamp(self, path):
+        """The mtime-size stamp this row was scanned with, or "" if unknown.
+
+        Public so the collage key can identify a file without stat-ing it: a
+        shift-range over two hundred of top's outputs is two hundred sshfs
+        round trips on the GUI thread, and that is a visible freeze.
+        """
+        return self._ck.get(str(path), "")
+
+    def _cached_thumb(self, path, is_video):
+        if is_video:
+            return ""
+        dest = self._thumb_path(path)
+        try:
+            if dest is not None and dest.exists():
+                return QUrl.fromLocalFile(str(dest)).toString()
+        except OSError:
+            pass
+        return ""
+
+    def _note_ck(self, path, st):
+        ck = "" if st is None else f"{int(st[0])}-{int(st[1])}"
+        self._ck[str(path)] = ck
+        return ck
 
     def _drop_key(self, key):
         for j, r in enumerate(self._all):
@@ -615,6 +736,8 @@ class Gallery(QAbstractListModel):
         self.countChanged.emit()
         if row["is_video"]:
             self._want_poster(row["path"])
+        else:
+            self._want_thumb(row)
 
     def load_existing(self, limit=0):
         # Videos land in a subdirectory of their own, because that is where
@@ -641,36 +764,61 @@ class Gallery(QAbstractListModel):
                 if is_muted_copy(p) or key in seen:
                     continue
                 try:
-                    mtime = p.stat().st_mtime
+                    st = p.stat()
+                    mtime = st.st_mtime
                 except OSError:
                     continue   # deleted between the glob and the stat
                 seen.add(key)
-                found.append((mtime, p))
+                found.append((mtime, p, st.st_size))
         # ALL OF THEM, newest first. This was capped at 60 — a number from when
         # the grid was a strip — so the history simply stopped partway with
         # nothing saying so. The view is a GridView and only builds the
         # delegates it can see, so the cost of the rest is one small dict each;
         # `limit` survives for a caller that wants a slice.
         ordered = sorted(found, key=lambda t: t[0], reverse=True)
-        files = [p for _m, p in (ordered[:limit] if limit else ordered)]
-        self._all = [self._row_for(p) for p in files]
+        files = [(p, (m, sz)) for m, p, sz in (ordered[:limit] if limit else ordered)]
+        self._all = [self._row_for(p, st) for p, st in files]
         self._refilter()
-        # The first screenful eagerly, the rest on demand (`requestPoster`).
-        eager = 0
+        # The first screenful eagerly, the rest on demand (`requestPoster` /
+        # `requestThumb`) — so the top of the grid is never blank while the
+        # delegates that would ask for it are still being built.
+        posters, stills = 0, []
         for r in self._all:
-            if not r["is_video"]:
-                continue
-            self._want_poster(r["path"])
-            eager += 1
-            if eager >= 24:
+            if r["is_video"]:
+                if posters < 24:
+                    self._want_poster(r["path"])
+                    posters += 1
+            elif len(stills) < 24:
+                stills.append(r)
+            if posters >= 24 and len(stills) >= 24:
                 break
+        # REVERSED, because the thumbnail queue is a stack (see `_want_thumb`):
+        # pushed in order, the last one queued would be decoded first and the
+        # top-left tile last.
+        for r in reversed(stills):
+            self._want_thumb(r)
 
     # -- poster frames -----------------------------------------------------
 
-    def _poster_path(self, path):
+    def _cache_key(self, path):
+        """The mtime-size stamp this file's cache entries are named with.
+
+        Read off the row when there is one (see `_row_for`), so the scroll path
+        never stats an sshfs mount; only a caller holding a path we have never
+        seen pays for one.
+        """
+        path = str(path)
+        ck = self._ck.get(path)
+        if ck is not None:
+            return ck
         st = os.stat(path)
-        stem = f"{Path(path).stem}-{int(st.st_mtime)}-{st.st_size}.jpg"
-        return CACHE / "posters" / stem
+        return self._note_ck(path, (st.st_mtime, st.st_size))
+
+    def _poster_path(self, path):
+        ck = self._cache_key(path)
+        if not ck:
+            raise OSError("no cache key")
+        return CACHE / "posters" / f"{Path(path).stem}-{ck}.jpg"
 
     def _want_poster(self, path):
         try:
@@ -757,6 +905,91 @@ class Gallery(QAbstractListModel):
                 if vr is r:
                     idx = self.index(i, 0)
                     self.dataChanged.emit(idx, idx, [self.PosterRole])
+                    break
+            return
+
+    # -- grid thumbnails ---------------------------------------------------
+    #
+    # Same shape as the poster half above and for the same reason: the picture
+    # a tile draws is made once, small, and kept on local disk. See `_ThumbJob`
+    # for the measurement that made it necessary.
+
+    def _thumb_path(self, path):
+        ck = self._ck.get(str(path), "")
+        if not ck:
+            return None
+        return CACHE / "thumbs" / f"{Path(path).stem}-{ck}.jpg"
+
+    def _want_thumb(self, row):
+        if row["is_video"] or row["thumb"]:
+            return
+        dest = self._thumb_path(row["path"])
+        if dest is None:
+            return
+        if dest.exists():
+            # One turn of the event loop later: `requestThumb` is called from a
+            # delegate being built, and a dataChanged into a view mid-creation
+            # is not something to hand it.
+            QTimer.singleShot(0, lambda p=row["path"], d=dest: self._thumb_ready(p, d))
+            return
+        path = row["path"]
+        if path in self._thumb_busy:
+            return
+        q = self._thumb_queue
+        if path in q:
+            q.remove(path)
+        q.append(path)
+        # A flick builds and destroys hundreds of delegates; only the ones he
+        # stopped on are worth decoding, and they are the newest requests.
+        del q[:-24]
+        self._next_thumb()
+
+    def _next_thumb(self):
+        while self._thumb_queue and len(self._thumb_busy) < 3:
+            path = self._thumb_queue.pop()
+            dest = self._thumb_path(path)
+            if dest is None or path in self._thumb_busy:
+                continue
+            job = _ThumbJob(path, dest)
+            # HELD, because the signal is delivered a queued event later than
+            # the emit: an auto-deleting QRunnable would already have taken its
+            # signal object with it and the result would simply never arrive.
+            self._thumb_busy[path] = job
+            job.sig.done.connect(self._thumb_done)
+            self._thumb_pool.start(job)
+
+    @Slot(str, str)
+    def _thumb_done(self, path, dest):
+        self._thumb_busy.pop(path, None)
+        if dest:
+            self._thumb_ready(path, Path(dest))
+        self._next_thumb()
+
+    @Slot(str)
+    def requestThumb(self, path):
+        """A still's delegate, asking for its own grid thumbnail.
+
+        Answered from disk on the spot when there is one — that is the common
+        case after the first pass over the history — and queued otherwise."""
+        path = str(path)
+        for r in self._all:
+            if r["path"] == path:
+                self._want_thumb(r)
+                return
+
+    def _thumb_ready(self, path, dest):
+        url = QUrl.fromLocalFile(str(dest)).toString()
+        for r in self._all:
+            if r["path"] != path:
+                continue
+            if r["thumb"] == url:
+                return
+            # `_rows` holds the same dict, so this reaches both lists.
+            r["thumb"] = url
+            for i, vr in enumerate(self._rows):
+                if vr is r:
+                    idx = self.index(i, 0)
+                    self.dataChanged.emit(idx, idx, [self.ThumbRole])
                     break
             return
 
@@ -2386,6 +2619,13 @@ class Painter(QObject):
         the same path must not be served from the old collage."""
         h = hashlib.sha1()
         for p in paths:
+            # The gallery already knows this file's stamp from its own scan;
+            # ask it before stat-ing, since half these paths are on an sshfs
+            # mount and this runs on the GUI thread.
+            stamp = self.gallery.cache_stamp(p)
+            if stamp:
+                h.update(("%s|%s\0" % (p, stamp)).encode())
+                continue
             try:
                 st = os.stat(p)
                 h.update(("%s|%d|%d\0" % (p, st.st_mtime_ns, st.st_size)).encode())

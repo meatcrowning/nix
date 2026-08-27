@@ -87,11 +87,33 @@ here:
 - **The grid shows EVERY output** — `load_existing` was capped at 60, a number
   from when the results were a strip, and the history simply stopped partway
   with nothing saying so. A `GridView` only builds what it can see, so the rest
-  costs one small dict each. Two things make that affordable: a tile's `Image`
-  is `cache: true` at `grid.thumbPx` (a 60px-bucketed 2x of the cell) rather
-  than an uncached 420px decode of a multi-megabyte PNG on every scroll past,
-  and a clip's poster frame is extracted **on demand** (`Gallery.requestPoster`,
-  asked for by the delegate) with only the first 24 queued eagerly.
+  costs one small dict each. What makes that affordable is that **a tile never
+  draws the output**: every picture in the grid is a small cached JPEG made
+  once, on local disk.
+    - **Stills: `~/.cache/painter/thumbs`, keyed by mtime+size** (`_ThumbJob`,
+      `Gallery.requestThumb`, three worker threads, a bounded LIFO queue so a
+      flick decodes what he stopped on and not what he passed). The row already
+      carries the URL when the scan finds one cached, so the common case emits
+      no `dataChanged` at all. This is not a nicety: on `book` most of the
+      history is **top's output directory over sshfs**
+      (`tools/comfy-tunnel.sh`), a delegate bound at the original re-read a
+      1.2 MB PNG over the network every time it came back — measured **0.70s
+      for one file** — and QQuickPixmapCache holds only a couple of
+      unreferenced thumbnails, so scrolling back over a row paid it again. That
+      was the whole of the scroll lag, and the reason toggling the preview pane
+      stuttered: it reveals another row and a half at once.
+    - **Clips: `~/.cache/painter/posters`**, one ffmpeg frame extracted **on
+      demand** (`Gallery.requestPoster`), only the first 24 queued eagerly.
+    - **Nothing on the scroll path may stat a file.** Both cache names are
+      built from the mtime+size the scan already read (`Gallery._ck`,
+      `cache_stamp`), because half these paths are on an sshfs mount and a stat
+      is a network round trip on the GUI thread. Same reason the collage key
+      asks the gallery before stat-ing — a shift-range over 200 outputs was
+      200 of them.
+    - **A closed preview pane decodes nothing.** `PreviewPane`'s three sources
+      are gated on `pane.open`, not merely on `visible`: a MediaPlayer holding
+      a source is a decoder looping a clip for as long as the app is up.
+    - Harness: `tools/ui-test.py` → `test_thumb_cache`.
 - **`Gallery` keeps `_all` and shows `_rows`.** The toolbar\'s filter field
   (`kdeshell.toolbar_search`) calls `Gallery.setFilter`, which matches every
   word against the filename AND the prompt — read out of the file once and

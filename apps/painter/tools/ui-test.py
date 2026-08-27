@@ -1586,6 +1586,63 @@ def noisy_png(path, w, h):
     return path
 
 
+def test_thumb_cache(win, ctl, tmp):
+    """A still's tile draws a CACHED THUMBNAIL, never the output itself.
+
+    Half of book's history is top's output directory over sshfs, where reading
+    one 1.2 MB PNG was measured at 0.70s — and a GridView re-reads it every time
+    the delegate comes back. So the model makes a small JPEG once and the
+    delegate binds at that; the checks are that the file lands, that the row
+    reports it, that the tile is bound to the ROW and not to the original, and
+    that a second scan takes it straight off disk with no work at all.
+    """
+    import main as P
+    from PySide6.QtCore import QUrl
+
+    big = noisy_png(os.path.join(tmp, "out", "thumb_00001_.png"), 1400, 900)
+    ctl.gallery.load_existing()
+    spin(1200)
+
+    row = [r for r in ctl.gallery._all if r["path"] == big]
+    check("the still is in the gallery", len(row) == 1)
+    if not row:
+        return
+    thumb = QUrl(row[0]["thumb"]).toLocalFile() if row[0]["thumb"] else ""
+    check("a still gains a cached thumbnail", bool(thumb), row[0]["thumb"])
+    if thumb:
+        check("...which is a file in painter's cache, not the output",
+              os.path.exists(thumb) and thumb != big
+              and os.path.dirname(thumb) == str(P.CACHE / "thumbs"), thumb)
+        from PySide6.QtGui import QImage
+        img = QImage(thumb)
+        check("...decodable and no bigger than the grid ever draws",
+              not img.isNull() and max(img.width(), img.height()) <= P.THUMB_PX,
+              (img.width(), img.height()))
+        check("...and a fraction of the original's bytes",
+              os.path.getsize(thumb) < os.path.getsize(big) / 2,
+              (os.path.getsize(thumb), os.path.getsize(big)))
+
+    # A second scan must not queue a single job: the whole point is that the
+    # history is decoded once and never again.
+    ctl.gallery.load_existing()
+    check("a second scan takes them off disk, decoding nothing",
+          not ctl.gallery._thumb_queue and not ctl.gallery._thumb_busy,
+          (len(ctl.gallery._thumb_queue), len(ctl.gallery._thumb_busy)))
+
+    # And the tile is bound at the row, so a landing thumbnail reaches it and
+    # the original is never the source.
+    with open(os.path.join(PAINTER, "qml", "GalleryView.qml")) as fh:
+        src = fh.read()
+    check("the tile draws `thumb`, never the output url",
+          "source: isVideo ? poster : thumb" in src)
+
+    # This fixture is a big unparameterised still and every later test scans the
+    # same output root; leave the world as it was found.
+    os.remove(big)
+    ctl.gallery.load_existing()
+    spin(60)
+
+
 def test_selection_and_collage(win, ctl, tmp):
     """Shift and ctrl select outputs, and dragging a set hands over ONE picture.
 
@@ -3569,6 +3626,7 @@ def main():
     print("== modes ==");             test_modes(win, ctl, tmp)
     print("== drag out ==");          test_drag_out(win, ctl, tmp)
     print("== hover play ==");        test_hover_play(win, ctl, tmp)
+    print("== thumb cache ==");       test_thumb_cache(win, ctl, tmp)
     print("== selection ==");         test_selection_and_collage(win, ctl, tmp)
     print("== resolution ==");        test_resolution(win, ctl)
     print("== dropdowns ==");         test_dropdown(win, ctl)
