@@ -1,5 +1,27 @@
 { config, pkgs, lib, host, ... }:
 
+let
+  # See the comment on `input.mice` below. Hoisted into a `let` so the
+  # activation script that pushes the same values at a RUNNING KWin cannot
+  # drift from the ones written into kcminputrc.
+  mice = [
+    {
+      name = "Logitech ERGO M575";
+      vendorId = "046d";
+      productId = "4096";
+      acceleration = -0.2;
+      accelerationProfile = "none";
+    }
+    {
+      name = "ERGO M575 Mouse";
+      vendorId = "046d";
+      productId = "b027";
+      acceleration = -0.2;
+      accelerationProfile = "none";
+    }
+  ];
+in
+
 {
   programs.plasma = {
     enable = true;
@@ -41,22 +63,17 @@
     # is why the bluetooth trackball on book ran on KDE's adaptive default.
     # A section for a transport that is not plugged in is inert, so both
     # hosts carry both.
-    input.mice = [
-      {
-        name = "Logitech ERGO M575";
-        vendorId = "046d";
-        productId = "4096";
-        acceleration = -0.2;
-        accelerationProfile = "none";
-      }
-      {
-        name = "ERGO M575 Mouse";
-        vendorId = "046d";
-        productId = "b027";
-        acceleration = -0.2;
-        accelerationProfile = "none";
-      }
-    ];
+    # NOTE: writing kcminputrc is only half of it. A RUNNING KWin does not
+    # re-read a device's libinput settings when the file changes — it reads
+    # them once, when the device is added — so the block below reaches the
+    # session at the NEXT login and no sooner. That is how the first attempt
+    # at this looked like it had worked and had not: kcminputrc said flat
+    # /-0.200 while KWin's own
+    # `/org/kde/KWin/InputDevice/eventN org.kde.KWin.InputDevice` properties
+    # still said adaptive/0. `kwinReconfigure` below pushes the same two
+    # values over that D-Bus interface (exactly what the KCM does) so a switch
+    # applies immediately, and is a silent no-op when KWin is not on the bus.
+    input.mice = mice;
 
     shortcuts = {
       "KDE Keyboard Layout Switcher"."Switch to Last-Used Keyboard Layout" = "Meta+Alt+L";
@@ -202,4 +219,44 @@
       plasma-localerc.Formats.LANG = "en_US.UTF-8";
     };
   };
+
+  # Push the `mice` values at a RUNNING KWin, because writing kcminputrc does
+  # not reach one: KWin reads a device's libinput settings when the device is
+  # ADDED and never re-reads the file, so a switch used to land silently and
+  # take effect only at the next login. On 2026-08-26 that cost a round trip —
+  # kcminputrc read flat/-0.200 while KWin's own properties still read
+  # adaptive/0, and the trackball still felt wrong. This is the same D-Bus
+  # interface the System Settings KCM writes.
+  #
+  # A no-op when KWin is not on the bus (a Hyprland session, a headless
+  # activation over ssh), and it matches on the libinput device NAME, so a
+  # mouse that is not plugged in simply has no object to match.
+  home.activation.kwinPointerSettings =
+    lib.hm.dag.entryAfter [ "writeBoundary" "configure-plasma" ] ''
+      if command -v busctl >/dev/null 2>&1 \
+         && [ -n "''${DBUS_SESSION_BUS_ADDRESS:-}" ] \
+         && busctl --user status org.kde.KWin >/dev/null 2>&1; then
+        for obj in $(busctl --user tree org.kde.KWin 2>/dev/null \
+                     | grep -o '/org/kde/KWin/InputDevice/event[0-9]*'); do
+          devname=$(busctl --user get-property org.kde.KWin "$obj" \
+                      org.kde.KWin.InputDevice name 2>/dev/null \
+                    | sed -e 's/^s "//' -e 's/"$//')
+          case "$devname" in
+${lib.concatMapStrings (m: ''
+            ${lib.escapeShellArg m.name})
+              $DRY_RUN_CMD busctl --user set-property org.kde.KWin "$obj" \
+                org.kde.KWin.InputDevice pointerAccelerationProfileFlat b ${
+                  # plasma-manager's "none" IS libinput's flat profile (the
+                  # option's `apply` turns it into PointerAccelerationProfile=1);
+                  # here the list is raw, so match the string.
+                  if m.accelerationProfile == "none" then "true" else "false"
+                } || true
+              $DRY_RUN_CMD busctl --user set-property org.kde.KWin "$obj" \
+                org.kde.KWin.InputDevice pointerAcceleration d -- ${toString m.acceleration} || true
+              ;;
+'') mice}
+          esac
+        done
+      fi
+    '';
 }
