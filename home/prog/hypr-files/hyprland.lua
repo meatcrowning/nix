@@ -10,12 +10,24 @@
 -- itself is only seeded once, see home/prog/hyprland.nix).
 local host = dofile(os.getenv("HOME") .. "/.config/hypr/host.lua")
 
+-- The catch-all is scale 1: an external monitor is an ordinary display and
+-- wants no HiDPI factor. Only the laptop's own panel is scaled, by name, and a
+-- named rule beats the "" fallback whatever the order.
 hl.monitor({
     output   = "",
     mode     = "preferred",
     position = "auto",
-    scale    = host.scale or "1",
+    scale    = "1",
 })
+
+if host.laptop then
+    hl.monitor({
+        output   = "eDP-1",
+        mode     = "preferred",
+        position = "auto",
+        scale    = host.scale or "1",
+    })
+end
 
 -- Windows come back when the screen does.
 --
