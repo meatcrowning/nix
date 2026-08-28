@@ -1907,6 +1907,36 @@ copy, no re-encode. `_display_image` is the shared half; a file on the OTHER
 machine comes back through the same jailed executor and is saved locally,
 because QML cannot load a path that is not here.
 
+**A LOCAL PATH in the prose is a picture, and the path itself is not shown**
+[his, 2026-08-27: *"unable to properly attach images to chat bubbles ... they
+often put a filepath to it when they should not"*]. Both halves of that were
+one gap. `_attach_typed_images` matched `https?://` only, so a model that had
+just made, screenshotted or found a picture and wrote `![it](/home/lam/…png)`
+got nothing drawn — and `MarkdownText` demotes image markdown to a link on
+purpose, so the bubble showed HIS FILE PATH as a link with no picture in it.
+Three changes, one behaviour:
+
+- `_local_image_path` accepts `file://…`, `/abs/…` and `~/…` (never a bare
+  relative name — the model has no working directory here), and
+  `_draw_local_typed` probes it with `QImage` and emits the entry
+  **synchronously**, so a local draw never joins the pending-fetch count. A
+  target that is not an image is emitted as a `bad` entry, named where the
+  picture was meant to be, rather than dropped.
+- `replyRuns` indexes the row's pictures **by path as well as by URL**. A
+  picture shown from disk (`show_image`, `make_image`, a typed path) has no URL
+  at all, so before this it could never be placed inline — it fell to the
+  trailing gallery while its path stayed in the prose as a link.
+- `_strip_drawn_paths` takes the paths of pictures **drawn on that bubble** out
+  of the text around them, along with any `[image in this chat: …]` marker the
+  model quoted back. Only paths whose picture is on the bubble, only the
+  dangling half-sentence that introduced one (`head + sep` keeps "made you
+  one." and drops "it is at"), and never inside fenced code — a path in a
+  command is part of the command.
+
+`show_image`'s description and `MARKER_NOTE` now say the same thing to the
+model: put `![caption](/that/path)` where you want the picture, never print the
+path. Harness: `tools/typed-image-test.py`.
+
 **`make_image` / `make_video` — painter's backend, not a second one.**
 `apps/painter/tools/smoke.py` is painter's OWN registry/graph/client path with
 the GUI taken off, so chatter runs THAT, on `top`, where the weights and the GPU
