@@ -32,6 +32,7 @@ import sys
 import tarfile
 import time
 import unicodedata
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -303,7 +304,11 @@ SHOW_IMAGE_TOOL = {
             "it to you: it costs you nothing and needs no vision support. If "
             "you also need to SEE it yourself, use view_image instead (or as "
             "well). Say what the picture shows in your reply if it needs "
-            "saying; do not describe it as though you had looked at it."),
+            "saying; do not describe it as though you had looked at it. NEVER "
+            "write the file path in your answer — he is looking at the picture, "
+            "not at where it lives. To place it at a particular spot in your "
+            "reply, write ![caption](that same path) there and it is drawn "
+            "inline; otherwise it is shown under your message."),
         "parameters": {"type": "object", "properties": {
             "path": {"type": "string",
                      "description": "Path of the image file to display."},
@@ -2860,7 +2865,9 @@ MARKER_NOTE = (
     "words and he cannot see them as text. Use the paths — they are what "
     "you pass as first_frame, input_images or to view_image — but never "
     "quote, repeat or print one in your answer, and never present one as a "
-    "link.")
+    "link. The same goes for the path of any picture you make, show or find: "
+    "put `![caption](/that/path)` where you want the picture to appear and it "
+    "is drawn there — the path itself is never something he needs to read.")
 
 #: How many times a turn may carry ITSELF on before it has to hand back. A
 #: model that announces its next step instead of taking it is the single reason
@@ -4286,6 +4293,84 @@ class Ollama(QObject):
     def lastModel(self):
         return self._last_model
 
+    @staticmethod
+    def _strip_drawn_paths(md, paths):
+        """Take the file paths of pictures drawn on THIS bubble out of the
+        prose around them.
+
+        A model that has just shown him a picture also writes where it put it —
+        `/home/lam/.local/share/oracle/images/made/x.png`, as a link or as bare
+        text — and that is app plumbing in the middle of an answer, not an
+        answer [his, 2026-08-27: "they often put a filepath to it when they
+        should not"]. MARKER_NOTE asks the model not to; it does anyway.
+
+        Only paths whose picture is ON this bubble are removed, so nothing is
+        ever hidden: the thing the path pointed at is right there. Fenced code
+        is left alone — a path inside a command is part of the command."""
+        if not md:
+            return md
+        forms = []
+        home = os.path.expanduser("~")
+        for p in paths:
+            p = str(p or "")
+            if not p:
+                continue
+            forms.append(p)
+            if p.startswith(home):
+                forms.append("~" + p[len(home):])
+            forms.append("file://" + p)
+        forms = sorted({f for f in forms if len(f) > 8}, key=len, reverse=True)
+        parts = re.split(r"(```.*?```|`[^`\n]*`)", md, flags=re.S)
+        for i in range(0, len(parts), 2):          # even chunks are not code
+            #: The app's own markers, quoted back at him. MARKER_NOTE tells the
+            #: model these are plumbing and not his words; when it repeats one
+            #: anyway, the bubble is the wrong place to find out.
+            parts[i] = re.sub(
+                r"\[(?:image|video) in this chat:[^\]]*\]|\[attached:[^\]]*\]",
+                "", parts[i])
+            out = []
+            for line in parts[i].split("\n"):
+                hit = False
+                for f in forms:
+                    if f not in line:
+                        continue
+                    hit = True
+                    q = re.escape(f)
+                    line = re.sub(r"!?\[[^\]]*\]\(\s*<?%s>?\s*\)" % q, "", line)
+                    line = re.sub(r"<%s>" % q, "", line)
+                    line = line.replace(f, "")
+                if not hit:
+                    out.append(line)
+                    continue
+                #: What is LEFT of a line once its path is gone is usually the
+                #: half-sentence that introduced it — "and the file is at",
+                #: "saved to:". A line that carried a path and now says nothing
+                #: on its own goes with it; a line with a real sentence still
+                #: in it stays.
+                rest = re.sub(r"[ \t]{2,}", " ", line).strip(" \t")
+                #: Only the DANGLING TAIL goes — the half-sentence that
+                #: introduced the path ("saved to", "it is at"). Anything
+                #: before the last full stop is a real sentence and stays:
+                #: dropping the whole line took "made you one." with it.
+                head, sep, tail = "", "", rest
+                m2 = list(re.finditer(r"[.!?](?=\s|$)", rest))
+                if m2:
+                    head, sep, tail = (rest[:m2[-1].start()], rest[m2[-1].start()],
+                                       rest[m2[-1].end():])
+                bare = tail.strip(" \t*-+>:;,.")
+                dangling = not bare or (
+                    len(bare.split()) <= 8 and re.search(
+                        r"(?i)\b(at|to|in|on|is|are|was|here|path|file|saved|"
+                        r"stored|located|available)$", bare.rstrip(" :.,;")))
+                kept = (head + sep) if dangling else rest
+                kept = re.sub(r"[ \t]+([.,;:!?])", r"\1",
+                              re.sub(r"[ \t]*\(\s*\)", "", kept)).strip(" \t")
+                if not kept.strip(" \t*-+>:;,."):
+                    continue
+                out.append(kept)
+            parts[i] = re.sub(r"\n{3,}", "\n\n", "\n".join(out))
+        return "".join(parts)
+
     @Slot(str, str, result=str)
     def replyRuns(self, body, imagesJson):
         """Split a reply's markdown into the runs an inline bubble renders.
@@ -4316,28 +4401,38 @@ class Ollama(QObject):
             images = []
         if not isinstance(images, list):
             images = []
-        by_ok, by_bad = {}, {}
+        by_ok, by_bad, by_path = {}, {}, {}
         for e in images:
             if not isinstance(e, dict):
                 continue
             u = str(e.get("url") or "")
+            ok = bool(e.get("ok") and e.get("path"))
+            #: A picture SHOWN from disk (show_image, make_image, a typed local
+            #: path) has no URL — before 2026-08-27 that alone kept it out of
+            #: this index, so a reply that pointed at it inline got the path
+            #: rendered as a link and the picture pushed into the trailing
+            #: gallery. The file IS the identity for those.
+            if ok:
+                by_path.setdefault(os.path.abspath(str(e["path"])), e)
             if not u:
                 continue
-            if e.get("ok") and e.get("path"):
-                by_ok.setdefault(u, e)
-            else:
-                by_bad.setdefault(u, e)
+            (by_ok if ok else by_bad).setdefault(u, e)
 
         body = body or ""
         runs, text_parts = [], []
         referenced = set()
+        placed = set()
+        #: Every picture the row draws, inline OR in the trailing gallery: its
+        #: path is not something the prose beside it has to repeat.
+        drawn_paths = [str(e.get("path")) for e in images
+                       if isinstance(e, dict) and e.get("ok") and e.get("path")]
         last = 0
 
         def flush():
-            md = "".join(text_parts)
+            md = self._strip_drawn_paths("".join(text_parts), drawn_paths)
             if md.strip():
                 runs.append({"t": "text", "md": md})
-                del text_parts[:]
+            del text_parts[:]
 
         for m in re.finditer(r"!\[([^\]]*)\]\(\s*([^)\s]+)(?:\s+[^)\s]*)?\)",
                              body):
@@ -4346,7 +4441,11 @@ class Ollama(QObject):
             referenced.add(url)
             text_parts.append(body[last:m.start()])
             entry = by_ok.get(url)
+            if entry is None:
+                local = self._local_image_path(url)
+                entry = by_path.get(local) if local else None
             if entry:
+                placed.add(id(entry))
                 flush()
                 runs.append({"t": "img", "url": url, "path": entry["path"],
                              "alt": alt or entry.get("alt", ""),
@@ -4364,11 +4463,14 @@ class Ollama(QObject):
                     text_parts.append("[%s](%s)" % (alt, url))
             last = m.end()
         text_parts.append(body[last:])
+        #: The scrub is a SECOND pass over the tail as well: a path the model
+        #: printed as prose ("saved to /home/lam/…") sits after the last
+        #: picture, not between two of them.
         flush()
 
         leftovers = [e for e in images
-                     if isinstance(e, dict) and str(e.get("url") or "")
-                     not in referenced]
+                     if isinstance(e, dict) and id(e) not in placed
+                     and str(e.get("url") or "") not in referenced]
         return json.dumps({"runs": runs, "leftovers": leftovers},
                           ensure_ascii=False)
 
@@ -6351,6 +6453,46 @@ class Ollama(QObject):
             self.replyTruncated.emit(reason)
         self.replyDone.emit()
 
+    @staticmethod
+    def _local_image_path(target):
+        """The absolute path a markdown image target names on THIS machine, or
+        None if it is not a local path at all.
+
+        `file://…`, `/abs/…` and `~/…` only: a bare relative name is ambiguous
+        (the model's working directory is not a thing here) and a remote URL is
+        somebody else's job."""
+        t = str(target or "").strip()
+        if not t or t.lower().startswith(("http://", "https://", "data:")):
+            return None
+        if t.lower().startswith("file://"):
+            t = urllib.parse.unquote(t[7:])
+        elif t.startswith("~"):
+            t = os.path.expanduser(t)
+        elif not t.startswith("/"):
+            return None
+        return os.path.abspath(t)
+
+    def _draw_local_typed(self, target, path, alt):
+        """Put a typed local picture on the bubble, or say why it is not one.
+
+        The entry keeps the target AS THE MODEL WROTE IT in `url`, which is
+        what lets `replyRuns` place the picture at that spot in the prose
+        instead of leaving the path behind as a link."""
+        if path in self._paths_shown and target in self._row_urls:
+            return                              # already on THIS bubble
+        probe = QImage()
+        if not os.path.isfile(path) or not probe.load(path) or probe.isNull():
+            self._emit_image({"ok": False, "url": target,
+                              "error": ("not an image this window can display"
+                                        if os.path.isfile(path)
+                                        else "no such file on this machine")})
+            return
+        self._paths_shown.add(path)
+        self.imageFetchStarted.emit(path)
+        self._emit_image({"ok": True, "url": target, "path": path,
+                          "alt": alt or os.path.basename(path),
+                          "w": probe.width(), "h": probe.height()})
+
     def _attach_typed_images(self):
         """Fetch the markdown images in the finished reply. True if any started.
 
@@ -6368,9 +6510,28 @@ class Ollama(QObject):
         hidden either way (docs/DESIGN.md §10).
         """
         found = []
-        for m in re.finditer(r"!\[([^\]]*)\]\(\s*(https?://[^\s)]+)", self._acc_content):
+        seen_local = set()
+        for m in re.finditer(r"!\[([^\]]*)\]\(\s*([^)\s]+)", self._acc_content):
             url = m.group(2).rstrip(")")
             alt = m.group(1).strip()
+            #: A LOCAL PATH is the same gap, one turn later. The model that has
+            #: just made, screenshotted or found a picture writes
+            #: `![it](/home/lam/.../x.png)` — and until 2026-08-27 nothing here
+            #: matched anything but http(s), so MarkdownText demoted it and the
+            #: bubble showed HIS FILE PATH as a link with no picture in it [his,
+            #: 2026-08-27: "unable to properly attach images ... they often put
+            #: a filepath to it when they should not"]. Drawing it is
+            #: synchronous — a QML Image loads a local file — so it never joins
+            #: the pending-fetch count.
+            local = self._local_image_path(url)
+            if local is not None:
+                if local in seen_local:
+                    continue
+                seen_local.add(local)
+                self._draw_local_typed(url, local, alt)
+                continue
+            if not url.lower().startswith(("http://", "https://")):
+                continue
             if url in self._images_shown:
                 # ALREADY FETCHED THIS TURN — so DRAW IT HERE TOO, rather than
                 # skipping it [his, 2026-08-22]. A turn that gathers pictures

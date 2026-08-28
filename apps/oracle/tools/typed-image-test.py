@@ -208,6 +208,86 @@ if item is not None:
           bool(ok) and QGuiApplication.clipboard().text() == "a\n\nb\n",
           repr(QGuiApplication.clipboard().text()))
 
+# ---- a typed LOCAL PATH is a picture too, and the path itself is not text --
+# What he reported 2026-08-27: "unable to properly attach images to chat
+# bubbles ... they often put a filepath to it when they should not". A model
+# that has just made, screenshotted or found a picture writes
+# `![it](/home/lam/.../x.png)`, and until this both halves failed at once —
+# nothing matched a non-http target, so the picture never appeared AND
+# MarkdownText demoted the markdown to a link showing his file path.
+import tempfile as _tf                                      # noqa: E402
+
+_dir = Path(_tf.mkdtemp(prefix="oracle-localimg-"))
+LOCAL = _dir / "shot.png"
+img.save(str(LOCAL))
+NOTIMG = _dir / "notes.txt"
+NOTIMG.write_text("not a picture")
+
+entries.clear()
+o._images_shown, o._paths_shown, o._row_urls = set(), set(), set()
+o._acc_content = "here it is\n\n![the shot](%s)\n\nsaved to %s" % (LOCAL, LOCAL)
+started = o._attach_typed_images()
+check("a typed local path needs no fetch", started is False)
+check("...and the picture is drawn anyway",
+      len(entries) == 1 and entries[0].get("ok") is True
+      and entries[0].get("path") == str(LOCAL) and entries[0].get("w") == 4,
+      json.dumps(entries)[:200])
+
+runs = json.loads(o.replyRuns(o._acc_content, json.dumps(entries)))
+kinds = [r["t"] for r in runs["runs"]]
+check("the picture lands where the model put it", kinds == ["text", "img"], str(kinds))
+check("...and nothing is left over for the gallery", runs["leftovers"] == [])
+check("the file path is not printed as text",
+      all(str(LOCAL) not in r.get("md", "") for r in runs["runs"]),
+      json.dumps(runs["runs"])[:200])
+check("the prose around it survives",
+      runs["runs"][0]["md"].strip() == "here it is", repr(runs["runs"][0]["md"]))
+
+# a picture SHOWN from disk (show_image: no url at all) that the reply then
+# points at inline must land at that spot too, not in the trailing gallery.
+shown = [{"ok": True, "url": "", "path": str(LOCAL), "alt": "cover",
+          "w": 4, "h": 4}]
+runs = json.loads(o.replyRuns("look: ![cover](%s)" % LOCAL, json.dumps(shown)))
+check("a show_image picture can be placed inline by its path",
+      [r["t"] for r in runs["runs"]] == ["text", "img"]
+      and runs["leftovers"] == [], json.dumps(runs)[:200])
+
+# a path inside code is part of the command, and stays
+runs = json.loads(o.replyRuns(
+    "![x](%s)\n\nrun `ls %s` to see it" % (LOCAL, LOCAL), json.dumps(shown)))
+check("a path inside code is left alone",
+      any(str(LOCAL) in r.get("md", "") for r in runs["runs"]),
+      json.dumps(runs["runs"])[:200])
+
+# a picture shown WITHOUT being pointed at inline still lands in the gallery,
+# and its path is still not prose the bubble has to carry.
+gal = [{"ok": True, "url": "", "path": str(LOCAL), "alt": "c", "w": 4, "h": 4}]
+runs = json.loads(o.replyRuns(
+    "made you one. it is at %s" % LOCAL, json.dumps(gal)))
+check("a gallery picture's path is not printed either",
+      all(str(LOCAL) not in r.get("md", "") for r in runs["runs"])
+      and runs["leftovers"] == gal, json.dumps(runs)[:200])
+check("...and only the dangling half-sentence goes with it",
+      "made you one." in "".join(r.get("md", "") for r in runs["runs"]),
+      json.dumps(runs["runs"])[:200])
+
+# the app's own markers, quoted back at him, are plumbing and not an answer
+runs = json.loads(o.replyRuns(
+    "[image in this chat: /x/y.png \u00b7 512x512]\n\nhere you go", "[]"))
+check("a quoted app marker is not shown as text",
+      "".join(r.get("md", "") for r in runs["runs"]).strip() == "here you go",
+      json.dumps(runs["runs"])[:200])
+
+# and a local target that is NOT an image is named, not silently dropped
+entries.clear()
+o._images_shown, o._paths_shown, o._row_urls = set(), set(), set()
+o._acc_content = "![nope](%s)" % NOTIMG
+o._attach_typed_images()
+check("a local target that is not an image is named honestly",
+      len(entries) == 1 and entries[0].get("ok") is False
+      and "not an image" in entries[0].get("error", ""),
+      json.dumps(entries)[:200])
+
 srv.shutdown()
 print("FAILED: " + ", ".join(fails) if fails else "OK")
 sys.exit(1 if fails else 0)
