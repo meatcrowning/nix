@@ -405,6 +405,33 @@ def apply_change(audio, key, value):
 # cover art
 # ---------------------------------------------------------------------------
 
+def _dims(data):
+    """(w, h) from the JPEG/PNG/WebP header itself — the number that says
+    whether a cover is a 1200px front or a 300px thumbnail, without pulling
+    Pillow in for it."""
+    try:
+        if data[:8] == b"\x89PNG\r\n\x1a\n":
+            return (int.from_bytes(data[16:20], "big"),
+                    int.from_bytes(data[20:24], "big"))
+        if data[:2] == b"\xff\xd8":
+            i = 2
+            while i + 9 < len(data):
+                if data[i] != 0xFF:
+                    i += 1
+                    continue
+                m, ln = data[i + 1], int.from_bytes(data[i + 2:i + 4], "big")
+                if 0xC0 <= m <= 0xCF and m not in (0xC4, 0xC8, 0xCC):
+                    return (int.from_bytes(data[i + 7:i + 9], "big"),
+                            int.from_bytes(data[i + 5:i + 7], "big"))
+                i += 2 + ln
+        if data[:4] == b"RIFF" and data[8:12] == b"WEBP" and data[12:16] == b"VP8 ":
+            return (int.from_bytes(data[26:28], "little") & 0x3FFF,
+                    int.from_bytes(data[28:30], "little") & 0x3FFF)
+    except Exception:                                        # noqa: BLE001
+        pass
+    return None, None
+
+
 def _mime_of(data):
     if data[:3] == b"\xff\xd8\xff":
         return "image/jpeg"
@@ -610,8 +637,12 @@ def fetch_art(spec, artist, album, paths):
         except Exception as e:                               # noqa: BLE001
             return None, None, "url", "fetch failed: " + str(e)
         return data, _mime_of(data), "url", None
+    #: `auto` is BIGGEST-first, not alphabetical: the Cover Art Archive serves
+    #: 1200px fronts, Discogs ~600, and Last.fm's largest is a 300px thumbnail
+    #: (13 KB, measured). Ask for last.fm by name and you get last.fm's — that
+    #: is what "the one from lastfm" means — but nothing picks it by default.
     order = {"lastfm": ["lastfm"], "caa": ["caa"], "musicbrainz": ["caa"],
-             "discogs": ["discogs"]}.get(src, ["lastfm", "caa", "discogs"])
+             "discogs": ["discogs"]}.get(src, ["caa", "discogs", "lastfm"])
     errs = []
     for s in order:
         if s == "lastfm":
@@ -883,9 +914,11 @@ def op_art(req):
                 "artist": artist, "album": album}
     digest = hashlib.sha256(data).hexdigest()[:16]
     dirs = sorted({str(Path(p).parent) for p in paths})
+    w, h = _dims(data)
     plan = {"ok": True, "op": "art", "applied": apply_, "source": source,
             "artist": artist, "album": album,
-            "image": {"bytes": len(data), "mime": mime, "sha256": digest},
+            "image": {"bytes": len(data), "mime": mime, "sha256": digest,
+                      "width": w, "height": h},
             "tracks": len(paths), "dirs": dirs}
     if not apply_:
         plan["dry_run"] = ("would %s%s%s — say apply to write it"

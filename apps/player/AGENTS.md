@@ -56,6 +56,36 @@ audio, read-only directory, a `mutate()` that raises) for "original intact, no
 litter"; then hammers `os.replace()` with a concurrent reader to show it is a
 real rename on **exFAT** too. 53/53 on the SSD, 2026-07-28.
 
+## `tools/tagtool.py` — the arbitrary tag/art edit, and its one door
+
+`curate/` decides what a cluster of files SHOULD be called and converges it.
+`tagtool.py` is the other half: the single edit he asks for in a sentence —
+*"remove the disc numbers from this album"*, *"replace the cover with the one
+from last.fm"* — on the selection he names, on any key, in any container. Ops
+`show / set / remove / art / art_remove / undo / list_undo`, as a CLI or as
+`--json` on stdin.
+
+Four invariants, and none of them is optional:
+
+- **Dry run is the default.** The apply is the same code path one step further
+  on, so what the dry run printed is exactly what the apply writes.
+- **Every write goes through `atomicsave.atomic_save`** (see above). No bare
+  `mutagen.save()` here either.
+- **The rating, the favourite and the play count are refused by name**
+  (`RESERVED`), in `set` and in `remove` alike. They are the only library
+  metadata with no second copy anywhere.
+- **Every apply writes an undo manifest** to `~/.cache/player-tagtool/` — old
+  values, and the old cover bytes — and `undo <token>` restores it. It also
+  updates the tracks row it changed, so the player shows the edit with no
+  rescan.
+
+`AUD_ROOT` / `PLAYER_DB` / `TAGTOOL_STATE` move the three paths, which is how
+`tools/tagtool-test.py` exercises all of it (mp3/flac/m4a/ogg made with
+ffmpeg, in a temp dir) without going near the library. Chatter reaches it as
+the custom tool `music_tag` (`~/.local/share/oracle/tools/`), which runs it on
+`top` over ssh from `book`; the model-facing rules live in the
+`music-library` skill.
+
 **`tagWrites` cannot be changed while the app is running** — `Prefs` holds the
 whole file in memory and rewrites all of it on any `set()` (volume, sort,
 album-grid scroll, quit), and reads prefs only at startup. `tools/set-pref.py`
