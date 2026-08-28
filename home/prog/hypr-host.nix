@@ -7,6 +7,8 @@
   # per-host branch baked into the seeded-once template.
   xdg.configFile."hypr/host.lua".text = ''
     return {
+      -- The INTERNAL panel's scale. hyprland.lua applies it to eDP-1 by name;
+      -- external monitors take the catch-all rule's scale 1.
       scale = "${if host == "air" then "1.67" else "1"}",
       laptop = ${if host == "air" then "true" else "false"},
       -- Force Hyprland's software cursor only where the hardware cursor plane
