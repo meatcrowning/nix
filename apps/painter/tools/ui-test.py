@@ -3730,6 +3730,31 @@ def test_tag_complete(win, ctl, keep):
     check("tab takes the row too, spelled the way it is sent",
           edit.property("text") == "long hair, ", repr(edit.property("text")))
 
+    # THE COMMA AND THE SPACE COME WITH IT [his, 2026-08-28] — except where one
+    # is already there, or where it would break what it is being typed into.
+    edit.forceActiveFocus()
+    edit.setProperty("text", "1girl, long_h, solo")
+    edit.setProperty("cursorPosition", len("1girl, long_h"))
+    spin(300)
+    key(win, Qt.Key_Tab)
+    check("a tag with a comma already after it gains no second one",
+          edit.property("text") == "1girl, long hair, solo",
+          repr(edit.property("text")))
+
+    edit.setProperty("text", "(long_h:1.2)")
+    edit.setProperty("cursorPosition", len("(long_h"))
+    spin(300)
+    key(win, Qt.Key_Tab)
+    check("...and a weight group keeps its weight",
+          edit.property("text") == "(long hair:1.2)", repr(edit.property("text")))
+
+    edit.setProperty("text", "long_h\nsolo")
+    edit.setProperty("cursorPosition", len("long_h"))
+    spin(300)
+    key(win, Qt.Key_Tab)
+    check("...and at the end of a line the comma comes without the space",
+          edit.property("text") == "long hair,\nsolo", repr(edit.property("text")))
+
     edit.setProperty("text", "")
     spin(100)
     unstage()
@@ -3815,6 +3840,34 @@ def test_live_row(win, ctl, tmp):
     spin(60)
     check("...which is what the pane draws", pane.property("source") == landed,
           pane.property("source"))
+
+    # --- a NEWLY QUEUED batch takes the preview back -----------------------
+    # [his, 2026-08-28] "ensure the live step/frame preview replaces whatever is
+    # being previewed in the preview pane when the user queues something new".
+    invoke_str(view, "selectSingle", landed)
+    spin(120)
+    check("...until then, what he picked is what is shown",
+          view.property("followLive") is False and pane.property("source") == landed,
+          (view.property("followLive"), pane.property("source")))
+    ctl.gallery.begin_live("job-1b", grab=True)
+    spin(150)
+    check("queueing something new takes the preview over",
+          prop(view, "selection") == [P_LIVE] and pane.property("selLive") is True,
+          (prop(view, "selection"), pane.property("selLive")))
+
+    # ...but the SECOND job of that one batch does not: four images asked for in
+    # one press are one request, and being yanked back mid-batch is what this
+    # pane stopped doing.
+    ctl.gallery.end_live("job-1b")
+    spin(120)
+    invoke_str(view, "selectSingle", landed)
+    spin(120)
+    ctl.gallery.begin_live("job-1c", grab=False)
+    spin(150)
+    check("a later job of the same batch leaves his choice alone",
+          prop(view, "selection") == [landed], prop(view, "selection"))
+    ctl.gallery.end_live("job-1c")
+    spin(120)
 
     # --- a job that produces nothing gives its row back --------------------
     ctl.gallery.begin_live("job-2")
