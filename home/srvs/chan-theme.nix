@@ -56,7 +56,19 @@
   # next launches Vivaldi, what it reads is current. Unchanged content is not
   # rewritten, so a run that changes nothing costs nothing.
   systemd.user.services.vivaldi-ui-css = {
-    Unit.Description = "Mint Vivaldi's custom.css from the live palette";
+    Unit = {
+      Description = "Mint Vivaldi's custom.css from the live palette";
+      # No start limit, because the trigger is a BURST. wal-set.sh rewrites
+      # Theme.qml and then the KDE scheme in one pass, and each write starts
+      # this unit — five starts inside ten seconds is systemd's default ceiling
+      # and the run trips it. What made that more than cosmetic: the unit is
+      # then FAILED, its path unit fails with it, and the LAST write of the
+      # burst — the kdeglobals one that carries the new colour — reaches
+      # nothing. Measured on book 2026-08-28: Vivaldi and Konsole stayed green
+      # while the whole rest of the desktop went purple, and neither watcher
+      # would have fired again until the next rebuild.
+      StartLimitIntervalSec = 0;
+    };
     Service = {
       Type = "oneshot";
       ExecStart = "${pkgs.python3}/bin/python3 /home/lam/nix/apps/pylib/tools/vivaldi-theme.py --ui";
