@@ -797,6 +797,28 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   export beside the live ledger, so nothing double counts. Unchanged content is
   not rewritten, so a quiet host mints no docs commits. Harness
   `tools/board-test.py` → `test_hermes_spend_export`.
+- `home/srvs/palette-sync.nix` + `palette-sync-files/palette-sync.py` — **the
+  wallpaper colour-theme knobs, the same on both machines.** The palette is
+  derived from the wallpaper, but HOW it is derived was machine-local, and the
+  two hosts had drifted: measured 2026-08-28 on `paper_13.jpg`, identical
+  clusters and accent `766cbe` on `top` against `9fb7c7` on `book` — hue 247 vs
+  204, i.e. purple Plasma windows on one machine and blue-grey on the other,
+  from one picture. `paletteVariant`, `paletteColorCount` and `paletteDropped`
+  now sync; nothing else in `settings.json` does. Transport is `docs/` (already
+  two-way, every 5 min — no new remote), and it is **one file per host**,
+  `docs/palette.<host>.json`, for the boards' reason: a single shared file would
+  eventually conflict, and an unresolved conflict aborts the docs tick in both
+  directions — while the boards' recency driver falls back to a *union* merge,
+  which for JSON means a file that no longer parses. Two writers, two files,
+  nothing to merge. Each carries `{stamp, values}` (`stamp` = the settings.json
+  mtime), `~/.local/state/palette-sync/mirror.json` is what makes "changed here"
+  and "changed there" distinguishable, and the more recent edit wins on either
+  machine. **`top` seeded it** — [his, 2026-08-28] *"implying tops should
+  override airs at first until the user changes any on either system"* — via a
+  bootstrap rule: a host with no mirror yet adopts the other's file whole.
+  Applying rewrites `settings.json` in place, which `SettingsStore`'s
+  `watchChanges` picks up so `SettingsApply` re-runs `wal-set.sh` itself; with no
+  panel up, the mtime bump alone re-extracts at the next `wal-set`.
 - `home/srvs/lid.nix` + `lid-files/lid-close.sh` — **what closing the lid does,
   on `book` only** (`top` is a desktop; the module is gated on `host == "air"`).
   The setting is `lidClose` in `~/.config/quickshell/settings.json`
