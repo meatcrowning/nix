@@ -1424,8 +1424,34 @@ now does:
   looking random.
 - **A tag already in the box is drawn spent** (`Theme.inactive`), not hidden.
 - **The list is anchored at the tag, not at the caret**, so it sits still while
-  the word is typed rather than stepping right on every letter; the pointer
-  moves the same selection the arrow keys do.
+  the word is typed rather than stepping right on every letter; it is
+  re-anchored on a 60ms tick so it follows the word when the box or the column
+  scrolls, and closes when the word scrolls out of the box. The pointer moves
+  the same selection the arrow keys do.
+- **Typing asks for the list; moving the caret does not** [his, 2026-08-28:
+  *"how the cursor functions and moves around ... it still feels loose and not
+  very sharp"*]. Arrowing through a prompt, clicking into it, selecting — none
+  of those are a question, and a list that opened on all of them was most of
+  what felt loose. **`cursorPositionChanged` fires BEFORE `textChanged` for an
+  ordinary keystroke, with the text not yet updated** (measured — comparing the
+  text there, or trusting the order, closed the list on every letter typed), so
+  the close is deferred one turn through a 0ms timer and `textTouch`, set by the
+  text change and cleared by a second 0ms timer. Timers of equal interval fire
+  in the order they were started, which is what makes that reliable.
+- **Escape means "not for this tag"**, not "not for this keystroke":
+  `dismissedAt` + `dismissedWord` keep the list shut while the token still
+  starts with what it said when Escape was pressed. Deleting it, replacing it or
+  starting the next tag asks again.
+
+**Ctrl+Up / Ctrl+Down weights what is under the caret**, the way ComfyUI's own
+prompt boxes and every webui do it — `PromptBox.adjustWeight`, 0.05 a step
+(ComfyUI's default), on the selection when there is one and on the tag under the
+caret otherwise. It reuses the group already around the tag rather than nesting
+a second one, takes the group away again at exactly 1.0 so a prompt does not
+silt up with `(x:1.00)`, clamps to ±4 (what `graph._WEIGHTED` reads as a weight
+at all), leaves the body selected so a run of presses keeps adjusting the same
+thing, and knows an escaped bracket is part of a name and not a group. It is on
+in every prompt box on every family: it is prompt syntax, not a tag feature.
 
 Harness: `tools/ui-test.py` → `test_tag_complete`.
 
