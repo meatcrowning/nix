@@ -428,6 +428,10 @@ music-library turn had nothing left to answer with.
 | `tools_note()`, the one-line index | ~815 |
 | **saved, every round** | **~7,650** |
 
+`make_image` and `make_video` are now attached before round one only when
+shorthand or plain generation wording asks for them; they remain in the index.
+Ordinary chat saves their ~1.9k schema tokens.
+
 - **`CORE_TOOL_NAMES` is what a turn reaches for unprompted**: the file six,
   the two runners, `web_search`/`fetch_url`/`wikipedia`, the clock, memory's
   two, and the three doors to everything else — `use_skill`, `spawn_agent`,
@@ -1279,6 +1283,9 @@ presses. Two changes:
   `CHAT_NUM_CTX`. Past that the next tool result would be truncated by the
   server anyway (no context-shift on this model), so the turn is better spent
   answering. Measured, not guessed.
+- Past 55% context, `_compact_tool_history()` keeps the newest four results
+  whole and compacts only the middle of older results over 1800 characters;
+  calls and result edges remain, so the model keeps the actionable evidence.
 - **`PERSISTENCE_NOTE` is on every system prompt**: finish the job in THIS turn,
   look → act → check, do not stop to announce a plan or ask permission for
   something he already asked for. Without it a model treats one tool round as
