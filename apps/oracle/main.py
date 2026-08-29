@@ -1894,7 +1894,6 @@ def skill_tool(catalog=None):
     cat = skill_catalog() if catalog is None else catalog
     if not cat:
         return None
-    listing = "; ".join("%s: %s" % (s["name"], s["description"]) for s in cat)
     return {
         "type": "function",
         "function": {
@@ -1908,7 +1907,8 @@ def skill_tool(catalog=None):
                 "require that your whole reply IS the thing it produces, with "
                 "no preamble and no offer to revise). Call it again with "
                 "`guide` to read one of the reference guides it lists. "
-                "Installed skills — " + listing),
+                "The installed skills and what each is for are listed in your "
+                "system instructions; `name` below is the same live catalog."),
             "parameters": {"type": "object", "properties": {
                 "name": {"type": "string",
                          "enum": [s["name"] for s in cat],
@@ -1935,7 +1935,14 @@ def skills_note(catalog=None):
              "expert instructions for one job; when what he asks matches one, "
              "call use_skill FIRST and then follow it exactly, including its "
              "output contract:"]
-    lines += ["- %s — %s" % (s["name"], s["description"]) for s in cat]
+    # The full description is returned by use_skill. This always-on catalog is
+    # only the router; cap prose-heavy frontmatter so nineteen skills do not
+    # consume thousands of tokens before the model sees the user's request.
+    for s in cat:
+        desc = " ".join(str(s["description"]).split())
+        if len(desc) > 180:
+            desc = desc[:177].rstrip() + "…"
+        lines.append("- %s — %s" % (s["name"], desc))
     return "\n".join(lines)
 
 #: THE LONG WORK. `run_bash` is capped at 30 seconds by `sandbox-exec.py` —
@@ -4864,6 +4871,11 @@ class Ollama(QObject):
         if model == self._ctx_model and self._ctx_train:
             self._set_window(model)         # memory moves; the ceiling does not
             return
+        # `contextUsed` is Ollama's accounting for the last completed request.
+        # Once the selector points at another model, that numerator no longer
+        # belongs to the window beside it and must not be displayed as if it did.
+        if model != self._ctx_model:
+            self._set_ctx_used(0)
         self._ctx_model = model
         self._set_window(model)             # a first answer, before /api/show
         req = QNetworkRequest(QUrl(OLLAMA + "/api/show"))

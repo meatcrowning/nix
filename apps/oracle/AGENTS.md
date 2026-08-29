@@ -349,6 +349,10 @@ ceiling that matters, and a third number reads as a repeat.
   reports the `context_length` it was loaded in; that is the number, measured.
   `Backend`'s existing 3s poll hands the raw body to `Ollama.notePs` — one poll,
   two readers, rather than a second timer.
+- **The used numerator belongs to that model.** `contextUsed` is cleared when
+  the selector changes: Ollama reports it only after a completed request, so
+  carrying the previous model's usage under the new model's window would be a
+  precise-looking lie.
 - **`CtxFit` sizes what has not loaded yet**, from free VRAM (`nvidia-smi`) plus
   `MemAvailable` over `CTX_RAM_FLOOR`, minus the weights when they are not
   already resident, halved (`CTX_FIT_SAFETY`), over the model's KV cost per
@@ -515,6 +519,11 @@ the model follows it, output contract and all. It is the same mechanism Claude
 Code has, ported here in the same shape: the **catalog** (each skill's name and
 `description`) is named in every system prompt (`skills_note()`), and the
 **instructions** cost context only when the model actually calls the tool.
+The catalog appears in the system prompt only: `use_skill` carries the same
+live names as an enum but does not duplicate every description in its schema,
+and `skills_note()` caps each routing description at 180 characters. The full
+description and instructions still come back from the call. This removes
+several thousand fixed prompt tokens without changing any skill file.
 
 Until 2026-08-22 the one skill chatter had was `vidprompt`, a **base-prompt
 preset** — which meant picking a persona for one message, getting a video prompt
