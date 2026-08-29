@@ -180,6 +180,23 @@ try:
     check("the newest one survives whole", trimmed[2]["content"] == "y" * 100)
     check("the call that made it is untouched",
           trimmed[1]["content"] == "keep me" and trimmed[1].get("tool_calls"))
+
+    # A long visible session is fitted newest-first without ever cutting a
+    # tool exchange in half. Use a deliberately tiny synthetic window so the
+    # result is deterministic and cheap.
+    turns = [
+        {"role": "user", "content": "old " + "a" * 1500},
+        {"role": "assistant", "content": "old answer"},
+        {"role": "user", "content": "recent " + "b" * 900},
+        {"role": "assistant", "content": "calling", "tool_calls": [{}]},
+        {"role": "tool", "content": "result " + "c" * 300},
+        {"role": "assistant", "content": "recent answer"},
+    ]
+    fitted, dropped = oracle_main.Ollama._fit_history(turns, 1024)
+    check("oldest whole turn falls out when history fills its share",
+          dropped == 1 and fitted[0]["content"].startswith("recent"))
+    check("the retained tool call and result stay together",
+          [m["role"] for m in fitted] == ["user", "assistant", "tool", "assistant"])
 except ImportError as exc:      # no PySide6 in this interpreter
     print("skip  the budget check (%s)" % exc)
 

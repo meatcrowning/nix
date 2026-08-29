@@ -251,11 +251,14 @@ exactly what it always was.
   reduceMotion). The token count PERSISTS in the heading once counted (the
   ellipsis is the only part that ends with the thinking), so a folded block
   still reports its size after the answer starts — the heading is all that shows
-  when it is collapsed. **The model sees the whole current chat, not just the
+  when it is collapsed. **The model sees the recent current chat, not just the
   latest prompt**: every `send()` builds `history` from `chatLog` (skipping
   error rows and empty streams) and calls `Ollama.send(model, prompt,
-  JSON.stringify(history))`; no cap on its length yet, so a very long chat
-  resends its whole transcript every turn. Nothing persists **across
+  JSON.stringify(history))`. `Ollama._fit_history` keeps complete turns
+  newest-first within 40% of the context actually in force, so a long session
+  cannot crowd the new task and its tools out of the window; it never bisects a
+  tool-call/result sequence, and the saved/on-screen transcript remains whole.
+  Nothing persists **across
   launches** — only the current session's turns feed a send, and only while
   the window stays open (the selected model does persist — see *The model
   selector*; a whole conversation persists too, but only via *Sessions*
