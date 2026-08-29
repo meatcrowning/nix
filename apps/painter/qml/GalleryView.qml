@@ -38,6 +38,16 @@ Item {
     property var selection: []
     property string anchorPath: ""
 
+    // FOLLOWING THE JOB. The preview viewport shows what is SELECTED, and the
+    // running job is a row like any other (`Gallery.begin_live`), so "show me
+    // the generation" and "show me that output" are the same gesture. This is
+    // the one piece of state that keeps: while it is true the selection moves
+    // onto each job as it starts and onto the file it produced when it lands,
+    // which is the behaviour the pane had when it could show nothing else.
+    // Clicking any other output turns it off; clicking the running job turns it
+    // back on [his, 2026-08-28].
+    property bool followLive: true
+
     function isSelected(p) { return view.selection.indexOf(p) >= 0 }
 
     function setSelection(paths) {
@@ -49,11 +59,23 @@ Item {
     }
 
     function selectSingle(p) {
+        // A DELIBERATE pick decides whether the pane keeps following the job.
+        view.followLive = Gallery.isLive(p)
+        view.anchorPath = p
+        view.setSelection([p])
+    }
+
+    //: The automatic move — onto the job that just started, onto the output it
+    //: just produced. It must not touch `followLive`, or landing on a finished
+    //: file would stop the batch's next job being followed.
+    function followTo(p) {
+        if (p === "") return
         view.anchorPath = p
         view.setSelection([p])
     }
 
     function toggleSelect(p) {
+        view.followLive = false
         var s = view.selection.slice()
         var i = s.indexOf(p)
         if (i >= 0) s.splice(i, 1)
@@ -63,6 +85,7 @@ Item {
     }
 
     function extendTo(p) {
+        view.followLive = false
         var to = Gallery.indexOf(p)
         var from = view.anchorPath === "" ? to : Gallery.indexOf(view.anchorPath)
         if (to < 0) return
@@ -74,6 +97,11 @@ Item {
     }
 
     function clearSelection() {
+        // Nothing selected means the pane is back on "whatever is newest", which
+        // is where a job in flight would put it anyway — so this re-arms the
+        // follow rather than leaving it stuck on an output that is no longer
+        // selected.
+        view.followLive = true
         view.anchorPath = ""
         view.setSelection([])
     }
@@ -88,6 +116,19 @@ Item {
 
     // A row that goes (a file deleted outside painter, a reset) must not stay
     // selected: the collage would be built from a path that is not there.
+    // The running job appeared, or the file it made replaced it: move with it
+    // while nothing else has been picked.
+    Connections {
+        target: Gallery
+        function onLiveChanged() {
+            if (view.followLive && Gallery.livePath !== "")
+                view.followTo(Gallery.livePath)
+        }
+        function onLiveReplaced(path) {
+            if (view.followLive) view.followTo(path)
+        }
+    }
+
     Connections {
         target: Gallery
         function onCountChanged() {
@@ -116,6 +157,13 @@ Item {
             { label: "inject params", trigger: () => { root.injectParams(p); root.view = 0 } },
             { separator: true }
         ].concat(view.commonItems(index, path, isVideo, p))
+    }
+
+    //: The running job's own menu — one verb, because there is exactly one
+    //: thing to do to a job that has not finished. `cancel` is the titlebar's
+    //: `x` and stops the whole batch, which is what its label has to say.
+    function liveMenu() {
+        return [{ label: "cancel generation", trigger: () => App.cancel() }]
     }
 
     // The items every output gets, parameters or not. The last two are offered
@@ -220,13 +268,18 @@ Item {
             // already on the row (the model fills it in at scan time), and the
             // queue behind it is a bounded stack, so a flick past this tile
             // costs a request that is then dropped for a newer one.
-            Component.onCompleted: if (isVideo === false && thumb === "")
+            // `=== true` rather than a bare role for the same reason the hover
+            // player below uses one: a delegate being torn down evaluates this
+            // with its model context already gone.
+            readonly property bool live: isLive === true
+
+            Component.onCompleted: if (!tile.live && isVideo === false && thumb === "")
                                        Gallery.requestThumb(path)
 
             Timer {
                 id: posterDwell
                 interval: 250
-                running: isVideo && poster === ""
+                running: !tile.live && isVideo && poster === ""
                 onTriggered: if (isVideo && poster === "") Gallery.requestPoster(path)
             }
 
@@ -239,7 +292,12 @@ Item {
             // built on PRESS rather than bound, since building it can cost real
             // work (a clip is muted first — see below) and a binding would do
             // that for every realised tile.
-            Drag.active: tileMa.drag.active
+            // A JOB IN FLIGHT IS NOT A FILE. Nothing that hands a path to
+            // something else — the drag, the double-click, the menu's inject
+            // and copy rows — may act on the running job's row, and the way it
+            // is kept honest is that its "path" is a sentinel that exists
+            // nowhere (main.py `LIVE_PATH`).
+            Drag.active: !tile.live && tileMa.drag.active
             Drag.dragType: Drag.Automatic
             Drag.supportedActions: Qt.CopyAction
             Drag.hotSpot.x: 6
@@ -313,7 +371,13 @@ Item {
                     // Empty until one exists, the way a clip's poster is: a
                     // tile that shows nothing for a moment beats a grid that
                     // stalls the scroll.
-                    source: isVideo ? poster : thumb
+                    // The running job draws the sampler's own preview frames —
+                    // the same provider the preview viewport reads, and the
+                    // reason the tick is in the URL is that an Image whose URL
+                    // never changes never reloads (main.py `LivePreview`).
+                    source: tile.live
+                            ? (App.hasPreview ? "image://livepreview/" + App.previewTick : "")
+                            : (isVideo ? poster : thumb)
                     fillMode: Image.PreserveAspectFit
                     asynchronous: true
                     // CACHED, and decoded at the size actually drawn.
@@ -326,8 +390,11 @@ Item {
                     // re-decoded it — for a cell a third of that size. The
                     // cache is Qt's own (QML_PIXMAP_CACHE_LIMIT) and holds the
                     // decoded thumbnails, not the originals.
-                    cache: true
-                    sourceSize.width: grid.thumbPx
+                    // ...but a live frame is a NEW picture at the same URL every
+                    // step, so that one is never cached and never scaled to the
+                    // thumbnail size.
+                    cache: !tile.live
+                    sourceSize.width: tile.live ? 0 : grid.thumbPx
                 }
 
                 // HOVER A CLIP AND IT PLAYS, silently — the preview a video
@@ -351,7 +418,7 @@ Item {
                     // this once with its model context already gone, and a bare
                     // `isVideo` is then `undefined` — a QML warning, which in
                     // this app fails the harness.
-                    active: isVideo === true && tileMa.containsMouse
+                    active: isVideo === true && !tile.live && tileMa.containsMouse
                     sourceComponent: Item {
                         // Aliased so the harness can assert what a person can
                         // only hear: an AudioOutput is a plain QObject, not an
@@ -382,7 +449,7 @@ Item {
                 // construction filer's video tiles use. It says "this is a
                 // clip", so it goes while the clip is the thing on screen.
                 Loader {
-                    active: isVideo === true && !hoverPlay.active
+                    active: isVideo === true && !tile.live && !hoverPlay.active
                     anchors { left: parent.left; top: parent.top; margins: 5 }
                     sourceComponent: Rectangle {
                         width: 15
@@ -411,6 +478,19 @@ Item {
                     }
                 }
 
+                // A JOB WITH NO FRAME YET IS A STATE, not an empty cell — the
+                // first step of a video model can take half a minute, and a
+                // blank tile at the top of the history reads as a broken one.
+                PixelText {
+                    anchors.centerIn: parent
+                    width: parent.width - 16
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
+                    visible: tile.live && !App.hasPreview
+                    text: "waiting for the first frame"
+                    color: Theme.dim
+                }
+
                 Rectangle {
                     anchors.left: parent.left
                     anchors.right: parent.right
@@ -418,13 +498,21 @@ Item {
                     anchors.margins: 1
                     height: 18
                     color: Theme.bg
-                    opacity: tileMa.containsMouse ? 0.9 : 0
+                    // The running job says what it is at all times: it is the
+                    // one tile in the grid whose picture is not what it will
+                    // end up being.
+                    opacity: (tileMa.containsMouse || tile.live) ? 0.9 : 0
                     PixelText {
                         anchors.centerIn: parent
                         width: parent.width - 8
                         elide: Text.ElideMiddle
-                        text: name
-                        color: Theme.text
+                        text: tile.live
+                              ? (App.previewFrames > 1
+                                 ? "sampling - frame " + App.previewFrame
+                                   + " of " + App.previewFrames
+                                 : "sampling")
+                              : name
+                        color: tile.live ? Theme.accent : Theme.text
                     }
                 }
 
@@ -444,6 +532,14 @@ Item {
                     drag.onActiveChanged: if (tileMa.drag.active) tileMa.dragged = true
 
                     onPressed: function (m) {
+                        if (tile.live) {
+                            // Selecting it is the whole interaction: that is
+                            // how you get the preview viewport back onto the
+                            // generation after looking at something else.
+                            tileMa.drag.target = null
+                            view.selectSingle(path)
+                            return
+                        }
                         tileMa.drag.target = m.button === Qt.LeftButton ? dragProxy : null
                         if (m.button !== Qt.LeftButton) {
                             // A right-press opens the menu; it must not collapse
@@ -494,17 +590,23 @@ Item {
                         if (tileMa.deferSelect && !tileMa.dragged) view.selectSingle(path)
                         tileMa.deferSelect = false
                     }
-                    // DOUBLE-CLICK OPENS, right-click asks what else. A single
-                    // left click does nothing on purpose: the preview viewport
-                    // above shows the job that is running and then what it made
-                    // (his words: "no clicking on other outputs or anything"),
-                    // so a click here would have nowhere to put an old output.
+                    // DOUBLE-CLICK OPENS, right-click asks what else, and a
+                    // single left click SELECTS — which since 2026-08-28 is
+                    // also what puts that output in the preview viewport above.
+                    // It used to do nothing at all, because the pane could only
+                    // ever show the running job ("no clicking on other outputs
+                    // or anything"); the running job is a row in this grid now,
+                    // so selecting one is how you choose between them.
                     onClicked: function (m) {
                         if (m.button === Qt.LeftButton) return
                         var pt = mapToItem(null, m.x, m.y)
-                        view.menuRequested(pt.x, pt.y, view.menuFor(index, path, isVideo))
+                        view.menuRequested(pt.x, pt.y,
+                                           tile.live ? view.liveMenu()
+                                                     : view.menuFor(index, path, isVideo))
                     }
                     onDoubleClicked: function (m) {
+                        // There is no file to open until it lands.
+                        if (tile.live) return
                         // IN-APP NOW, not the external viewer. A double-click
                         // in a thumbnail grid means "look at this one", and
                         // since the pane grew a View mode that is a thing this

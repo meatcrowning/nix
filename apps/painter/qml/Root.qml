@@ -813,7 +813,14 @@ Item {
     // The selected output, for the rows above that act on one. A multi-select
     // has no single answer, so it counts as none (the gallery's own right-click
     // still handles the set).
-    readonly property string selOne: results.gallery.selection.length === 1
+    //
+    // AND NEITHER HAS THE RUNNING JOB. Its row is selectable — that is how the
+    // preview viewport is pointed back at the generation in flight — but it is
+    // not a file, so every verb that takes one (open, view, inject, reuse, copy
+    // prompt, the walk keys) reads it as nothing selected and greys out on its
+    // own, with no branch of its own to forget.
+    readonly property string selOne: (results.gallery.selection.length === 1
+                                      && !Gallery.isLive(results.gallery.selection[0]))
                                      ? results.gallery.selection[0] : ""
     // ...and the parameters stored in it, which is what "reuse" needs and what
     // a file written by something else does not have.
@@ -973,6 +980,16 @@ Item {
         anchors.fill: parent
     }
 
+    // The one tag list, under whichever prompt box is being typed in — same
+    // argument again (a prompt box is 64-130px tall), and it sits BELOW the
+    // menu and the dropdown in z because both of those are opened deliberately
+    // and this one appears on its own.
+    readonly property Item tagPopup: sceneTags
+    TagPopup {
+        id: sceneTags
+        anchors.fill: parent
+    }
+
     // ESCAPE LETS GO OF A TEXT BOX. IT DOES NOT STOP ANYTHING. It used to cancel
     // every queued job, which is a destructive action on the key people press to
     // back out of one — and there was no way to leave a text box at all, so the
@@ -1017,7 +1034,11 @@ Item {
     Shortcut {
         sequence: "Escape"
         onActivated: {
-            if (sceneOverlay.visible) sceneOverlay.close()
+            // The completer first: it is the innermost thing on screen, it was
+            // never opened deliberately, and Escape over an open tag list has
+            // to dismiss the list rather than let go of the box being typed in.
+            if (sceneTags.visible) sceneTags.close()
+            else if (sceneOverlay.visible) sceneOverlay.close()
             else if (sceneMenu.visible) sceneMenu.close()
             else if (root.showSettings) root.showSettings = false
             else if (root.inView) root.inView = false

@@ -58,6 +58,8 @@ APPS = os.path.dirname(PAINTER)
 sys.path.insert(0, PAINTER)
 sys.path.insert(0, os.path.join(APPS, "pylib"))
 
+P_LIVE = "live://generating"   # main.py LIVE_PATH, spelled out so a rename shows up here
+
 FAILS = []
 WARNINGS = []
 OPENED = []          # what the app would have launched (see _NoLaunch in build)
@@ -268,12 +270,13 @@ def build_window(engine_only=False):
     engine.addImageProvider("livepreview", ctl.preview)
     ctx = engine.rootContext()
     keep = (P.Palette(P.PANEL_THEME), _DESKSTYLE(parent=engine), P.Prefs(),
-            ctl, _STUBBAR(), P.SpellCheck())
+            ctl, _STUBBAR(), P.SpellCheck(), P.Tags())
     for name, obj in (("WalPalette", keep[0]), ("DeskStyle", keep[1]),
                       ("Prefs", keep[2]), ("App", ctl), ("Models", ctl.models),
                       ("Loras", ctl.loras), ("LoraChoices", ctl.choices),
                       ("Gallery", ctl.gallery), ("Titlebar", keep[4]),
-                      ("Spell", keep[5]), ("Theme", _THEME[0])):
+                      ("Spell", keep[5]), ("Tags", keep[6]),
+                      ("Theme", _THEME[0])):
         ctx.setContextProperty(name, obj)
     engine.warnings.connect(lambda ws: WARNINGS.extend(w.toString() for w in ws))
     engine.load(QUrl.fromLocalFile(os.path.join(PAINTER, "qml/Main.qml")))
@@ -394,7 +397,7 @@ def build(tmp):
     engine.addImageProvider("livepreview", ctl.preview)
     ctx = engine.rootContext()
     keep = (P.Palette(P.PANEL_THEME), DeskStyle(parent=engine), P.Prefs(),
-            ctl, StubTitlebar(), P.SpellCheck())
+            ctl, StubTitlebar(), P.SpellCheck(), P.Tags())
     ctx.setContextProperty("WalPalette", keep[0])
     ctx.setContextProperty("DeskStyle", keep[1])
     ctx.setContextProperty("Prefs", keep[2])
@@ -405,6 +408,7 @@ def build(tmp):
     ctx.setContextProperty("Gallery", ctl.gallery)
     ctx.setContextProperty("Titlebar", keep[4])
     ctx.setContextProperty("Spell", keep[5])
+    ctx.setContextProperty("Tags", keep[6])
     engine.warnings.connect(lambda ws: WARNINGS.extend(w.toString() for w in ws))
 
     comp = QQmlComponent(engine, QUrl.fromLocalFile(os.path.join(PAINTER, "qml/theme/Theme.qml")))
@@ -1633,8 +1637,10 @@ def test_thumb_cache(win, ctl, tmp):
     # the original is never the source.
     with open(os.path.join(PAINTER, "qml", "GalleryView.qml")) as fh:
         src = fh.read()
+    # (The live row's tile draws the sampler's frames instead, which is the
+    # other branch of the same binding — still never the output url.)
     check("the tile draws `thumb`, never the output url",
-          "source: isVideo ? poster : thumb" in src)
+          "(isVideo ? poster : thumb)" in src)
 
     # This fixture is a big unparameterised still and every later test scans the
     # same output root; leave the world as it was found.
@@ -3605,6 +3611,256 @@ def test_preset_isolation(win, ctl, tmp):
     spin(120)
 
 
+def test_tag_complete(win, ctl, keep):
+    """Typing a tag offers the tag Danbooru actually HAS.
+
+    [his, 2026-08-28] tag autocomplete "a la those comfyui extensions and what
+    the og cte does". The vocabulary was already here — painter spells a written
+    prompt with it on the way out (`pylib/boorutags`, `graph.danbooru_prompt`) —
+    so what is checked here is the half that is new: the gate (a prose family
+    gets no tag list at all), the index building OFF the GUI thread, the alias
+    that makes a half-remembered tag land on the real one, and the four keys the
+    list owns while it is open.
+    """
+    from PySide6.QtCore import Qt
+    tags = keep[6]
+    content = win.contentItem()
+    box = find_all(content, "PromptBox")[0]
+    edit = find(box, "QQuickTextEdit")
+    popup = find(content, "TagPopup")
+    check("the scene has one tag popup", popup is not None)
+    if popup is None or ctl.reg is None:
+        return
+
+    # An anima model and a krea one, exactly as the preset tests stage them:
+    # the gate is the FAMILY's `prompt_transform`, so the check needs a model
+    # of each kind on disk.
+    root = os.environ["PAINTER_MODELS"]
+    staged = {k: MODE_FAKES[k] for k in
+              ("unet/anima-base-v1.0.safetensors",
+               "unet/krea2_raw_fp8_scaled.safetensors")}
+    for rel, keys in staged.items():
+        write_safetensors(os.path.join(root, rel), keys)
+    import fingerprint as fp
+    fp.save_cache({})
+    ctl.setMode("")
+    ctl.rescan()
+    spin(200)
+
+    def unstage():
+        for rel in staged:
+            try: os.remove(os.path.join(root, rel))
+            except OSError: pass
+        fp.save_cache({}); ctl.rescan(); spin(120)
+
+    # --- the gate: tags are a DANBOORU-family feature ----------------------
+    ctl.selectModelByName("krea2_raw_fp8_scaled.safetensors")
+    spin(200)
+    check("a prose family gets no completer at all",
+          box.property("tagsOn") is False, prop(APP, "gen").get("promptTransform"))
+    ctl.selectModelByName("anima-base-v1.0.safetensors")
+    spin(200)
+    if prop(APP, "gen").get("promptTransform") != "danbooru":
+        print("SKIP  tag complete (models not recognised)")
+        unstage()
+        return
+    check("...and a danbooru family gets one", box.property("tagsOn") is True,
+          prop(APP, "gen").get("promptTransform"))
+
+    # --- the index is built on a worker, and the app waits for nothing ------
+    check("the vocabulary is on disk", tags.property("available") is True)
+    tags.prepare()
+    end = time.time() + 30
+    while not tags.property("ready") and time.time() < end:
+        spin(200)
+    check("the tag index builds off the GUI thread",
+          tags.property("ready") is True)
+
+    def type_into(text):
+        edit.forceActiveFocus()
+        edit.setProperty("text", text)
+        edit.setProperty("cursorPosition", len(text))
+        spin(300)
+
+    type_into("1gi")
+    check("a prefix opens the list", popup.property("visible") is True)
+    check("...on the tag the site actually has, most-used first",
+          popup.property("currentTag") == "1girl", popup.property("currentTag"))
+
+    # Return takes the highlighted row, and the comma comes with it: a tag list
+    # is comma-separated and typing that by hand is the thing being automated.
+    key(win, Qt.Key_Return)
+    check("Return inserts the tag and its separator",
+          edit.property("text") == "1girl, ", repr(edit.property("text")))
+    check("...and closes the list", popup.property("visible") is False)
+    check("...and does not immediately re-offer what it just wrote",
+          prop(APP, "gen").get("positive") == "1girl, ",
+          prop(APP, "gen").get("positive"))
+
+    # An ALIAS is half the value: the tag a model half-remembers, resolved.
+    type_into("sole_fem")
+    check("an alias resolves to the canonical tag",
+          popup.property("currentTag") == "1girl", popup.property("currentTag"))
+
+    # Down walks the list; Escape dismisses it without letting go of the box.
+    type_into("long_h")
+    first = popup.property("currentTag")
+    key(win, Qt.Key_Down)
+    check("down walks the list", popup.property("currentTag") != first,
+          (first, popup.property("currentTag")))
+    key(win, Qt.Key_Escape)
+    check("escape closes the list", popup.property("visible") is False)
+    check("...and leaves the keyboard in the box",
+          edit.property("activeFocus") is True)
+    check("...and changes nothing about the text",
+          edit.property("text") == "long_h", repr(edit.property("text")))
+
+    # A whole clause is prose, not a misspelt tag (`boorutags.check` reads it
+    # the same way), and one character matches thousands of tags and none of
+    # them is the one meant.
+    type_into("a")
+    check("one character offers nothing", popup.property("visible") is False)
+    type_into("a girl walks into the rain and")
+    check("a written clause offers nothing", popup.property("visible") is False)
+
+    # Underscores are the SITE's spelling; what lands in the box is what
+    # `danbooru_prompt` would have sent (`graph.spell_tag`).
+    type_into("long_h")
+    key(win, Qt.Key_Tab)
+    check("tab takes the row too, spelled the way it is sent",
+          edit.property("text") == "long hair, ", repr(edit.property("text")))
+
+    edit.setProperty("text", "")
+    spin(100)
+    unstage()
+
+
+def test_live_row(win, ctl, tmp):
+    """The generation in flight is a ROW, and the preview shows what is SELECTED.
+
+    [his, 2026-08-28] "make it so the preview element displays the currently
+    selected output ... i propose that the preview of the current step of the
+    currently processing generation get added to the history section and then
+    get replaced with the full output when its finished". Which supersedes the
+    pane's old rule ("no clicking on other outputs or anything") without losing
+    it: the running job is one of the things that can be selected.
+    """
+    content = win.contentItem()
+    view = find(content, "GalleryView")
+    pane = find(content, "PreviewPane")
+    APP.setProperty("showPreview", True)
+    spin(120)
+
+    made = [noisy_png(os.path.join(tmp, "out", "live_0000%d_.png" % i), 60, 40)
+            for i in range(1, 4)]
+    ctl.gallery.load_existing()
+    spin(250)
+    view.metaObject().invokeMethod(view, "clearSelection")
+    spin(60)
+    before = ctl.gallery.rowCount()
+    newest = ctl.gallery.pathAt(0)
+    check("with nothing selected the pane shows the newest output",
+          pane.property("source") == newest, pane.property("source"))
+
+    # --- a job starts: it takes row 0, and the selection follows it ---------
+    ctl.gallery.begin_live("job-1")
+    spin(150)
+    check("a running job is a row in the history",
+          ctl.gallery.rowCount() == before + 1 and ctl.gallery.isLiveAt(0) is True,
+          (ctl.gallery.rowCount(), before))
+    check("...that is not a file", ctl.gallery.pathAt(0) == P_LIVE, ctl.gallery.pathAt(0))
+    check("...and the selection follows it",
+          prop(view, "selection") == [P_LIVE], prop(view, "selection"))
+    check("...so the pane is on the job, not on a file",
+          pane.property("selLive") is True and pane.property("source") == "",
+          (pane.property("selLive"), pane.property("source")))
+    check("...and no verb that needs a file thinks one is selected",
+          prop(APP, "selOne") == "", prop(APP, "selOne"))
+
+    # A frame arrives: that is what the pane (and the tile) draw.
+    ctl._busy = True
+    with open(made[0], "rb") as fh:
+        frame = fh.read()
+    ctl._on_preview(None, frame, "png")
+    spin(120)
+    check("a sampler frame is what the pane draws",
+          pane.property("showLive") is True, pane.property("showLive"))
+
+    # --- and he can look at something else meanwhile -----------------------
+    invoke_str(view, "selectSingle", made[2])
+    spin(150)
+    check("selecting an older output shows it instead",
+          pane.property("source") == made[2] and pane.property("showLive") is False,
+          (pane.property("source"), pane.property("showLive")))
+    check("...and the running job is still there to go back to",
+          ctl.gallery.isLiveAt(0) is True)
+
+    invoke_str(view, "selectSingle", P_LIVE)
+    spin(150)
+    check("selecting the running job goes back to the frames",
+          pane.property("showLive") is True and view.property("followLive") is True,
+          (pane.property("showLive"), view.property("followLive")))
+
+    # --- it lands: the row becomes the file, and the selection with it ------
+    landed = noisy_png(os.path.join(tmp, "out", "live_00009_.png"), 60, 40)
+    ctl.gallery.add(landed, "job-1")
+    spin(250)
+    check("the finished output replaces the job's row",
+          ctl.gallery.rowCount() == before + 1 and ctl.gallery.isLiveAt(0) is False
+          and ctl.gallery.pathAt(0) == landed,
+          (ctl.gallery.rowCount(), ctl.gallery.pathAt(0)))
+    check("...and what was following the job is now on the output",
+          prop(view, "selection") == [landed], prop(view, "selection"))
+    ctl._busy = False
+    spin(60)
+    check("...which is what the pane draws", pane.property("source") == landed,
+          pane.property("source"))
+
+    # --- a job that produces nothing gives its row back --------------------
+    ctl.gallery.begin_live("job-2")
+    spin(120)
+    check("a second job takes a row", ctl.gallery.isLiveAt(0) is True)
+    ctl.gallery.end_live("job-2")
+    spin(120)
+    check("a cancelled job gives it back",
+          ctl.gallery.rowCount() == before + 1 and ctl.gallery.isLiveAt(0) is False,
+          ctl.gallery.rowCount())
+
+    # ...and a stale completion cannot take the row of the job now running.
+    ctl.gallery.begin_live("job-3")
+    spin(120)
+    stale = noisy_png(os.path.join(tmp, "out", "live_00010_.png"), 60, 40)
+    ctl.gallery.add(stale, "job-old")
+    spin(200)
+    check("an earlier job's file lands UNDER the one still sampling",
+          ctl.gallery.isLiveAt(0) is True and ctl.gallery.pathAt(1) == stale,
+          (ctl.gallery.isLiveAt(0), ctl.gallery.pathAt(1)))
+
+    # A filter is about the history; it must not take the running job off screen.
+    ctl.gallery.setFilter("zzzz-nothing-matches")
+    spin(200)
+    check("a filter never hides the job in flight",
+          ctl.gallery.rowCount() == 1 and ctl.gallery.isLiveAt(0) is True,
+          ctl.gallery.rowCount())
+    ctl.gallery.setFilter("")
+    spin(150)
+
+    # ...and neither does a rescan, which rebuilds the history from the disk.
+    ctl.gallery.load_existing()
+    spin(250)
+    check("a rescan keeps it too", ctl.gallery.isLiveAt(0) is True)
+
+    ctl.gallery.end_live()
+    spin(120)
+    view.metaObject().invokeMethod(view, "clearSelection")
+    APP.setProperty("showPreview", False)
+    for p in made + [landed, stale]:
+        try: os.remove(p)
+        except OSError: pass
+    ctl.gallery.load_existing()
+    spin(150)
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="painter-ui-test-")
     os.environ["PAINTER_MODELS"] = fake_models(os.path.join(tmp, "models"))
@@ -3649,6 +3905,8 @@ def main():
     print("== preset sampling ==");   test_preset_sampling(win, ctl, tmp)
     print("== section order ==");      test_section_order(win, ctl, tmp)
     print("== preset isolation ==");   test_preset_isolation(win, ctl, tmp)
+    print("== tag complete ==");       test_tag_complete(win, ctl, keep)
+    print("== live row ==");           test_live_row(win, ctl, tmp)
 
     real = [w for w in WARNINGS if "Qt Quick Layouts" not in w]
     for w in real:

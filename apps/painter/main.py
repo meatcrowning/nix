@@ -74,6 +74,7 @@ import comfy as C  # noqa: E402
 import graph as G  # noqa: E402
 import outmeta  # noqa: E402  (which of the three ways an output kept its job)
 import registry as R  # noqa: E402
+import boorutags  # noqa: E402  (pylib; Danbooru's vocabulary, for the completer)
 
 OUT_DIR = Path(os.environ.get("PAINTER_OUT", Path.home() / "Pictures" / "painter" / "out"))
 # THE OTHER MACHINE'S OUTPUTS, read-only. book generates through top's backend,
@@ -438,6 +439,14 @@ class LoraChoices(QAbstractListModel):
 
 
 VIDEO_SUFFIXES = (".mp4", ".webm", ".mkv")
+
+#: THE ROW A JOB OCCUPIES WHILE IT IS STILL SAMPLING. Not a file and never on
+#: disk: a sentinel path, so every lookup that goes by path (`indexOf`,
+#: `has_path`, the selection, the thumbnail cache) simply never matches it
+#: rather than needing to know it exists [his, 2026-08-28] — "the preview of the
+#: current step of the currently processing generation get added to the history
+#: section and then get replaced with the full output when its finished".
+LIVE_PATH = "live://generating"
 # A "<name>-muted.mp4" beside a clip is a DERIVATIVE, not an output: painter
 # makes one when you ask for a soundless copy to paste somewhere. It stays out
 # of the history, or every video would be there twice.
@@ -535,6 +544,113 @@ class _ThumbJob(QRunnable):
         self.sig.done.emit(self.path, out)
 
 
+class _TagIndexJob(QRunnable):
+    """Danbooru's 91,357 tags, indexed for a KEYSTROKE, off the GUI thread.
+
+    The vocabulary itself is a 1 MB gzip and a linear scan — 127ms to read,
+    175ms a query, which is a lookup's price and not a completer's. The index
+    that makes a query 4ms costs ~0.6s to build and ~24 MB, so it is built once,
+    here, rather than in front of him at the first keystroke.
+    """
+
+    class _Sig(QObject):
+        done = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.setAutoDelete(False)      # the Tags object holds it
+        self.sig = _TagIndexJob._Sig()
+
+    def run(self):
+        try:
+            boorutags.build_index()
+        except Exception:  # noqa: BLE001 - no completions is never a crash
+            pass
+        self.sig.done.emit()
+
+
+class Tags(QObject):
+    """The `Tags` context property — the prompt boxes' tag completer.
+
+    Danbooru's tag list is what Anima was captioned with, and a tag the site
+    does not have does nothing at all (`pylib/boorutags`). painter already
+    SPELLS a written prompt with it on the way out; this is the other half —
+    the tag offered while it is being typed, so the near-miss never gets written
+    in the first place.
+
+    Two rules it is built on:
+
+    - **It answers or it says nothing.** Until the index is built `complete`
+      returns nothing and `ready` is false; the popup simply is not there. No
+      blocking wait on the GUI thread, ever.
+    - **What it inserts is what will be SENT.** `graph.spell_tag` is the same
+      function `danbooru_prompt` uses at generation time, so the box and the
+      wire cannot disagree about how a tag is spelled.
+    """
+
+    readyChanged = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._job = None
+        self._pool = QThreadPool(self)
+        self._pool.setMaxThreadCount(1)
+
+    @Property(bool, constant=True)
+    def available(self):
+        """Whether there is a vocabulary at all. False means no completer, not a
+        broken one (docs/DESIGN.md §10)."""
+        return os.path.exists(boorutags.DATA)
+
+    @Property(bool, notify=readyChanged)
+    def ready(self):
+        return boorutags.index_ready()
+
+    @Slot()
+    def prepare(self):
+        """Start building. Called when a prompt box that WANTS completions takes
+        the keyboard — not at startup, because a session that never types an
+        Anima prompt should never pay for this."""
+        if self._job is not None or not self.available or boorutags.index_ready():
+            return
+        self._job = _TagIndexJob()
+        self._job.sig.done.connect(self._built)
+        self._pool.start(self._job)
+
+    @Slot()
+    def _built(self):
+        self._job = None
+        self.readyChanged.emit()
+
+    @Slot(str, int, result="QVariantList")
+    def complete(self, fragment, limit=8):
+        """Tags for what is under the caret, best first.
+
+        `alias` is the half of this worth having: typing `sole_female` offers
+        `1girl`, which is how a tag the model half-remembers becomes the tag it
+        was trained on.
+        """
+        q = str(fragment or "").strip()
+        if len(q) < 2 or not boorutags.index_ready():
+            self.prepare()
+            return []
+        norm = q.lower().replace(" ", "_").strip("_")
+        out = []
+        for e in boorutags.search(q, limit=max(1, int(limit))):
+            artist = e["category"] == "artist"
+            out.append({
+                "tag": e["tag"],
+                "category": e["category"],
+                "posts": e["posts"],
+                # The alias that matched, when the match was not the name — the
+                # row then reads `sole_female -> 1girl` rather than looking like
+                # a result the query has nothing to do with.
+                "alias": norm if (norm != e["tag"] and norm in e["aliases"]) else "",
+                "insert": G.spell_tag(("@" if artist else "") + e["tag"]),
+            })
+        return out
+
+
 class Gallery(QAbstractListModel):
     PathRole = Qt.UserRole + 1
     UrlRole = Qt.UserRole + 2
@@ -542,8 +658,15 @@ class Gallery(QAbstractListModel):
     VideoRole = Qt.UserRole + 4
     PosterRole = Qt.UserRole + 5
     ThumbRole = Qt.UserRole + 6
+    LiveRole = Qt.UserRole + 7
 
     countChanged = Signal()
+    #: The running job's row appeared or went. Separate from `countChanged`
+    #: because what follows it is a SELECTION move, not a relayout.
+    liveChanged = Signal()
+    #: ...and it was replaced by the output it produced, which is the path the
+    #: view moves the selection onto when it was following the job.
+    liveReplaced = Signal(str)
     # A clip's poster frame landed: (the clip, the .jpg). The completion toast
     # waits on this — QML cannot decode an mp4, so a clip's toast thumbnails the
     # poster and points the click at the video (docs/DESIGN.md §8.1).
@@ -556,6 +679,10 @@ class Gallery(QAbstractListModel):
         # SAME dicts, so a poster landing in one lands in both.
         self._all = []
         self._rows = []
+        # The running job's row, while there is one — held here as well as in
+        # the lists so a rescan can put it back (`load_existing` rebuilds
+        # `_all` from the directory, and a job in flight is not in a directory).
+        self._live = None
         self._filter = ""
         # Poster frames are extracted one at a time, off the GUI thread. A
         # gallery of 60 videos would otherwise fork 60 ffmpegs at once on a
@@ -577,7 +704,7 @@ class Gallery(QAbstractListModel):
     def roleNames(self):
         return {self.PathRole: b"path", self.UrlRole: b"url", self.NameRole: b"name",
                 self.VideoRole: b"isVideo", self.PosterRole: b"poster",
-                self.ThumbRole: b"thumb"}
+                self.ThumbRole: b"thumb", self.LiveRole: b"isLive"}
 
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(self._rows)
@@ -593,7 +720,8 @@ class Gallery(QAbstractListModel):
         return {self.PathRole: r["path"], self.UrlRole: r["url"],
                 self.NameRole: r["name"], self.VideoRole: r["is_video"],
                 self.PosterRole: r["poster"],
-                self.ThumbRole: r["thumb"]}.get(role)
+                self.ThumbRole: r["thumb"],
+                self.LiveRole: bool(r.get("live"))}.get(role)
 
     def has_path(self, path):
         return any(r["path"] == str(path) for r in self._all)
@@ -629,6 +757,11 @@ class Gallery(QAbstractListModel):
         return r["hay"]
 
     def _matches(self, r):
+        # THE RUNNING JOB IS NEVER FILTERED OUT. It has no filename and no
+        # prompt on disk to match against, and a filter typed while something is
+        # generating must not take the thing that is generating off the screen.
+        if r.get("live"):
+            return True
         if not self._filter:
             return True
         hay = self._haystack(r)
@@ -720,18 +853,27 @@ class Gallery(QAbstractListModel):
                     break
             return
 
-    def add(self, path):
+    def add(self, path, job=""):
         if is_muted_copy(path) or self.has_path(path):
             return
+        # The row the job occupied becomes the output it produced — the whole
+        # point of putting it there. Dropped first, so the new row lands at 0
+        # and a view following the job moves onto the file rather than onto
+        # whatever was above it.
+        self.end_live(job, replaced_by=str(path))
         # The peer root holds top's copy of this very output, and the scan at
         # startup may already be showing it. The local one replaces it: it is
         # the copy with the parameters written into it.
         self._drop_key(self._dedup_key(path))
         row = self._row_for(path)
-        self._all.insert(0, row)
+        # UNDER THE JOB THAT IS STILL SAMPLING, when the batch has moved on to
+        # its next job: this file is finished and that one is not, and the
+        # running job keeps the top of the history.
+        at = 1 if self._live is not None else 0
+        self._all.insert(at, row)
         if self._matches(row):
-            self.beginInsertRows(QModelIndex(), 0, 0)
-            self._rows.insert(0, row)
+            self.beginInsertRows(QModelIndex(), at, at)
+            self._rows.insert(at, row)
             self.endInsertRows()
         self.countChanged.emit()
         if row["is_video"]:
@@ -778,6 +920,11 @@ class Gallery(QAbstractListModel):
         ordered = sorted(found, key=lambda t: t[0], reverse=True)
         files = [(p, (m, sz)) for m, p, sz in (ordered[:limit] if limit else ordered)]
         self._all = [self._row_for(p, st) for p, st in files]
+        # A rescan rebuilds the history from the directory; a job in flight is
+        # not in the directory, and it must not vanish because something asked
+        # for a rescan while it was sampling.
+        if self._live is not None:
+            self._all.insert(0, self._live)
         self._refilter()
         # The first screenful eagerly, the rest on demand (`requestPoster` /
         # `requestThumb`) — so the top of the grid is never blank while the
@@ -992,6 +1139,72 @@ class Gallery(QAbstractListModel):
                     self.dataChanged.emit(idx, idx, [self.ThumbRole])
                     break
             return
+
+    # ------------------------------------------------------- the running job
+    def _live_row(self):
+        return {"path": LIVE_PATH, "url": "", "name": "generating",
+                "is_video": False, "poster": "", "key": LIVE_PATH, "ck": "",
+                "thumb": "", "live": True, "job": ""}
+
+    def begin_live(self, job=""):
+        """A job started: put its row at the top of the history.
+
+        The row draws the sampler's own preview frames (GalleryView reads
+        `App.previewTick`), so the generation is a thing in the grid that can be
+        SELECTED — which is what lets the preview viewport follow the selection
+        without losing the way back to the job in flight.
+        """
+        if self._live is not None:
+            self._live["job"] = str(job)
+            return
+        self._live = self._live_row()
+        self._live["job"] = str(job)
+        self._all.insert(0, self._live)
+        self.beginInsertRows(QModelIndex(), 0, 0)
+        self._rows.insert(0, self._live)
+        self.endInsertRows()
+        self.countChanged.emit()
+        self.liveChanged.emit()
+
+    def end_live(self, job="", replaced_by=""):
+        """The job ended — landed, failed or cancelled. Its row goes.
+
+        `job` is the prompt id: a batch is several jobs and the NEXT one may
+        already have started by the time the last one's file finishes
+        downloading, so a stale completion must not take the row of the job that
+        is currently sampling.
+        """
+        if self._live is None:
+            return
+        if job and self._live.get("job") and str(job) != self._live["job"]:
+            return
+        row = self._live
+        self._live = None
+        try:
+            self._all.remove(row)
+        except ValueError:
+            pass
+        for i, vr in enumerate(self._rows):
+            if vr is row:
+                self.beginRemoveRows(QModelIndex(), i, i)
+                self._rows.pop(i)
+                self.endRemoveRows()
+                break
+        self.countChanged.emit()
+        self.liveChanged.emit()
+        if replaced_by:
+            self.liveReplaced.emit(str(replaced_by))
+
+    livePath = Property(str, lambda self: LIVE_PATH if self._live else "",
+                        notify=liveChanged)
+
+    @Slot(int, result=bool)
+    def isLiveAt(self, i):
+        return bool(self._rows[i].get("live")) if 0 <= i < len(self._rows) else False
+
+    @Slot(str, result=bool)
+    def isLive(self, path):
+        return bool(self._live) and str(path) == LIVE_PATH
 
     @Slot(int, result=str)
     def pathAt(self, i):
@@ -2171,6 +2384,7 @@ class Painter(QObject):
     @Slot()
     def cancel(self):
         self.client.cancel_all()
+        self.gallery.end_live()
         self._jobs = 0
         self.warden.done("comfy")
         # A cancelled batch has nothing to announce, and nothing of its may
@@ -2202,7 +2416,13 @@ class Painter(QObject):
         self._queue = remaining
         self.statusChanged.emit()
 
-    def _on_started(self, _job):
+    def _on_started(self, job):
+        # THE JOB TAKES A ROW IN THE HISTORY while it samples, and the output it
+        # produces takes that row over (`Gallery.begin_live`). That is what lets
+        # the preview viewport follow the SELECTION and still have a way back to
+        # the generation in flight: it is a tile like any other [his,
+        # 2026-08-28].
+        self.gallery.begin_live(getattr(job, "prompt_id", "") or "")
         self._busy = True
         self._job_start = time.time()
         self._step = 0
@@ -2298,7 +2518,7 @@ class Painter(QObject):
                     # An edit keeps a copy of what it was an edit OF, beside the
                     # result, so the before/after survives the source moving.
                     self._keep_before(dest, job.meta.get("params", {}))
-                    self.gallery.add(str(dest))
+                    self.gallery.add(str(dest), getattr(job, "prompt_id", "") or "")
                     self._batch_saved.append(str(dest))
                 finally:
                     self._batch_pending = max(0, self._batch_pending - 1)
@@ -2313,6 +2533,12 @@ class Painter(QObject):
         self._jobs = max(0, self._jobs - 1)
         if self._jobs == 0:
             self._busy = False
+            # A job with no images at all — an interrupted sample, a graph that
+            # saved nothing — still has to give its row back, or the history
+            # keeps a tile sampling for ever. A job that DID produce something
+            # has already had its row replaced by the file (`Gallery.add`), and
+            # this is then a no-op.
+            self.gallery.end_live(getattr(job, "prompt_id", "") or "")
             # The batch is over — hand the lease back so chatter can
             # have the memory without waiting it out.
             self.warden.done("comfy")
@@ -2336,8 +2562,9 @@ class Painter(QObject):
         # download callback, so the last word on the batch is asked for twice.
         self._maybe_notify()
 
-    def _on_failed(self, _job, message):
+    def _on_failed(self, job, message):
         self._jobs = max(0, self._jobs - 1)
+        self.gallery.end_live(getattr(job, "prompt_id", "") or "")
         if self._jobs == 0:
             self._busy = False
             # The batch is over — hand the lease back so chatter can
@@ -3019,6 +3246,7 @@ def main():
     ctl = Painter()
     bar = Titlebar()
     spell = SpellCheck()
+    tags = Tags()
 
     # TWO ROOFS, ONE APP (docs/DESIGN.md §7.6). Under Hyprland the QML tree IS
     # the window. Under Plasma it is the central widget of a real QMainWindow,
@@ -3053,6 +3281,7 @@ def main():
     ctx.setContextProperty("Gallery", ctl.gallery)
     ctx.setContextProperty("Titlebar", bar)
     ctx.setContextProperty("Spell", spell)
+    ctx.setContextProperty("Tags", tags)
 
     # Theme.qml lives in qml/theme/ so it registers as a context property rather
     # than as a type that would shadow it (same arrangement as player/filer).

@@ -124,6 +124,14 @@ def _danbooru_tag(tag: str) -> str:
     return ("@" + body) if at and body else body
 
 
+def spell_tag(tag: str) -> str:
+    """One tag, spelled the way it will be SENT — public so the completer in
+    `main.py` inserts what `danbooru_prompt` would have written anyway. Two
+    spellings of a tag, one on screen and one on the wire, is a bug waiting for
+    the day they disagree."""
+    return _danbooru_tag(tag)
+
+
 def _danbooru_group(text: str) -> str:
     """A comma-separated run of tags, weight suffix and all."""
     m = _WEIGHTED.match(text)

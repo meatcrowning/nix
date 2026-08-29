@@ -46,6 +46,9 @@ Item {
     // that use neither.
     property Item pickerOverlay: app ? app.pickerOverlay : localPickerLoader.item
     property Item ctxMenu: app ? app.ctxMenu : localMenuLoader.item
+    //: ...and the completer's list, for the same reason: a 130px prompt box
+    //: cannot hold one.
+    property Item tagPopup: app ? app.tagPopup : localTagLoader.item
 
 
     // Created ONLY when this pane is a scene of its own. Instantiated
@@ -66,6 +69,13 @@ Item {
         active: !root.app
         anchors.fill: parent
         sourceComponent: CtxMenu { }
+    }
+
+    Loader {
+        id: localTagLoader
+        active: !root.app
+        anchors.fill: parent
+        sourceComponent: TagPopup { }
     }
 
     // True when this pane is the root of its own scene — the Plasma dock. The

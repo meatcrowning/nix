@@ -71,6 +71,9 @@ Item {
 
     PreviewPane {
         id: preview
+        // WHAT IS SELECTED, which is what this pane now shows. One output: a
+        // set has no single thing to draw, and neither has none.
+        selPath: galleryView.selection.length === 1 ? galleryView.selection[0] : ""
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top

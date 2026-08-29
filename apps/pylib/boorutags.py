@@ -28,10 +28,13 @@ generation time, so lookups here accept either and answer in the site's form.
 
 from __future__ import annotations
 
+import array
+import bisect
 import csv
 import gzip
 import os
 import re
+import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "data", "danbooru-tags.csv.gz")
@@ -47,6 +50,19 @@ ANIMA_META = {"safe", "sensitive", "nsfw", "explicit", "questionable",
 
 _ROWS = None            # [(name, category, count, [aliases])], count-descending
 _BY_NAME = None         # name or alias -> index into _ROWS
+
+#: The two lookup structures `search` needs to answer a KEYSTROKE. Built once,
+#: published as one tuple at the end of `build_index` so a reader either sees
+#: the whole thing or nothing — painter builds it on a worker thread while the
+#: GUI thread is already typing into it.
+#:
+#: Without them `search` is a linear scan of 91,357 rows: measured 175ms per
+#: query, which is a one-shot lookup's price and not a completer's. With them
+#: the same queries answer in under 4ms, at ~24 MB and one ~0.6s build.
+#:   words:  a tag's word -> row indices, ascending, i.e. count-ordered
+#:   names:  every name AND alias, sorted, for a bisect over prefixes
+_INDEX = None
+_INDEX_LOCK = threading.Lock()
 
 
 def _norm(s):
@@ -75,6 +91,42 @@ def _load():
         rows, by_name = [], {}      # no vocabulary is no lookups, never a crash
     _ROWS, _BY_NAME = rows, by_name
     return _ROWS, _BY_NAME
+
+
+def _split(name):
+    """A tag's words. `str.replace` rather than `re.split`: this runs 116,483
+    times when the index is built and the regex was a third of it."""
+    return name.replace("(", "_").replace(")", "_").replace(" ", "_").split("_")
+
+
+def build_index():
+    """Build the keystroke index, once. Safe to call from any thread, and safe
+    to call while another thread is searching — until it publishes, `search`
+    takes the scanning path it always took."""
+    global _INDEX
+    if _INDEX is not None:
+        return
+    with _INDEX_LOCK:
+        if _INDEX is not None:
+            return
+        rows, _by = _load()
+        words, names = {}, []
+        for i, (name, _cat, _count, aliases) in enumerate(rows):
+            for n in (name,) + tuple(aliases):
+                names.append((n, i))
+                for w in _split(n):
+                    if not w:
+                        continue
+                    got = words.get(w)
+                    if got is None:
+                        words[w] = got = array.array("i")
+                    got.append(i)
+        names.sort()
+        _INDEX = (words, names)
+
+
+def index_ready():
+    return _INDEX is not None
 
 
 def _words(name):
@@ -154,28 +206,72 @@ def search(query, category="", limit=25):
     # 2026-08-24: it invented Lain's appearance rather than tagging her].
     # Buckets, each count-ordered because `rows` is: exact, whole word, prefix,
     # substring.
-    exact, word, prefix, inside = [], [], [], []
+    exact = []
     seen = set()
     hit = by_name.get(q)
-    if hit is not None:
+    if hit is not None and not (want and CATEGORIES.get(rows[hit][1], "") != want):
         exact.append(hit)
         seen.add(hit)
-    for i, (name, cat, _count, aliases) in enumerate(rows):
+
+    def keep(i):
         if i in seen:
-            continue
-        if want and CATEGORIES.get(cat, "") != want:
-            continue
-        names = [name] + aliases
-        if any(q in _words(n) for n in names):
-            word.append(i)
-        elif any(n.startswith(q) for n in names):
-            prefix.append(i)
-        elif any(q in n for n in names):
-            inside.append(i)
-        if len(word) + len(prefix) >= limit * 4:
-            break
-    out = [_entry(i, rows) for i in
-           (exact + word + prefix + inside)[:max(1, int(limit))]]
+            return False
+        if want and CATEGORIES.get(rows[i][1], "") != want:
+            return False
+        seen.add(i)
+        return True
+
+    lim = max(1, int(limit))
+    if _INDEX is not None:
+        words, names = _INDEX
+        hits = set(words.get(q, ()))
+        at = bisect.bisect_left(names, (q,))
+        while at < len(names) and names[at][0].startswith(q):
+            hits.add(names[at][1])
+            at += 1
+        # THE HORIZON IS PART OF THE RANKING, not an optimisation. The scanning
+        # path below stops once it has `lim * 4` matches, which is what keeps a
+        # two-letter query answering with `long_hair` (4.3M posts, matched as a
+        # prefix) instead of with a dozen unheard-of artists who happen to have
+        # `lo` as a whole word. Ranking every candidate in the file by bucket
+        # would be a DIFFERENT function, so the horizon is reproduced here:
+        # candidates in count order, cut at the same place.
+        cands = [i for i in sorted(hits) if keep(i)][:lim * 4]
+        horizon = (cands[-1] + 1) if len(cands) >= lim * 4 else len(rows)
+        word, prefix = [], []
+        for i in cands:
+            name, _cat, _count, aliases = rows[i]
+            (word if any(q in _words(n) for n in [name] + aliases)
+             else prefix).append(i)
+        inside = []
+        # The substring bucket is the expensive one and is also the one almost
+        # nothing needs: a query that lands on a word or a prefix has already
+        # filled the answer. It is paid for only when the answer would
+        # otherwise be short — over the same rows the scan would have seen.
+        if len(exact) + len(word) + len(prefix) < lim:
+            for i in range(horizon):
+                if i in seen:
+                    continue
+                name, _cat, _count, aliases = rows[i]
+                if any(q in n for n in [name] + aliases) and keep(i):
+                    inside.append(i)
+    else:
+        word, prefix, inside = [], [], []
+        for i, (name, cat, _count, aliases) in enumerate(rows):
+            if i in seen:
+                continue
+            if want and CATEGORIES.get(cat, "") != want:
+                continue
+            names_ = [name] + aliases
+            if any(q in _words(n) for n in names_):
+                word.append(i)
+            elif any(n.startswith(q) for n in names_):
+                prefix.append(i)
+            elif any(q in n for n in names_):
+                inside.append(i)
+            if len(word) + len(prefix) >= lim * 4:
+                break
+    out = [_entry(i, rows) for i in (exact + word + prefix + inside)[:lim]]
     return out
 
 
