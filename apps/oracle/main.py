@@ -2229,13 +2229,6 @@ CORE_TOOL_NAMES = [
     "use_skill", "spawn_agent",
     "save_memory", "list_memories",
     "get_tools", "run_job",
-    # THE GENERATORS ARE CORE, on his machine, because "make me a picture" is
-    # a thing he asks in plain words and an unattached tool is one the model
-    # has to go LOOKING for. On 2026-08-24 it went looking: it read the comfyui
-    # skill, curled the backend, and told him the daemon did not exist and
-    # painter was not installed — with both sitting right there. A tool that is
-    # attached cannot be reasoned away.
-    "make_image", "make_video",
 ]
 
 #: Tool groups for `get_tools`, over and above `AGENT_TOOL_GROUPS`: the ones a
@@ -2680,6 +2673,9 @@ MAX_TOOL_ROUNDS = 24
 #: (this model's KV cache does not context-shift), so the turn is better spent
 #: writing the answer than on one more tool call whose result will not fit.
 TOOL_CTX_FRACTION = 0.75
+TOOL_COMPACT_FRACTION = 0.55
+TOOL_COMPACT_CHARS = 1800
+TOOL_COMPACT_KEEP = 4
 
 #: How full `CHAT_NUM_CTX` has to get before a round counts as having hit the
 #: ceiling (`_truncation_reason`). ollama's own accounting is prompt + generated
@@ -5078,11 +5074,16 @@ class Ollama(QObject):
         self._squeezed = False       # …and nothing has squeezed it yet
         self._extra_tools = set()    # a fresh turn attaches its own tools
         self._tool_seen = {}         # no result can leak into a later turn
-        if gen:
-            # The generator is not a CORE tool, so a turn that is plainly a
-            # generation attaches it itself rather than spending a get_tools
-            # round on a job whose arguments are already parsed.
-            self._extra_tools.add(gen["tool"])
+        # Generation schemas are ~1.9k tokens together. Attach them when the
+        # prompt asks for pixels, not to every factual/file/code conversation.
+        low = prompt.lower()
+        if gen or re.search(r"\b(make|create|generate|draw|render|edit)\b.{0,35}"
+                            r"\b(image|picture|photo|art|illustration)\b", low):
+            self._extra_tools.add("make_image")
+        if (gen and gen["tool"] == "make_video") or re.search(
+                r"\b(make|create|generate|animate|render)\b.{0,35}"
+                r"\b(video|clip|animation)\b", low):
+            self._extra_tools.add("make_video")
         self._resp_t0 = 0.0
         self._resp_tokens = 0
         self._set_tps(0.0)
@@ -6185,9 +6186,25 @@ class Ollama(QObject):
         chars = sum(len(str(m.get("content") or "")) for m in self._messages)
         return (chars / 4) < (self._num_ctx * TOOL_CTX_FRACTION)
 
+    def _compact_tool_history(self):
+        """Trim old bulky results only after the active turn is context-heavy."""
+        chars = sum(len(str(m.get("content") or "")) for m in self._messages)
+        if chars / 4 < self._num_ctx * TOOL_COMPACT_FRACTION:
+            return
+        tools = [i for i, m in enumerate(self._messages) if m.get("role") == "tool"]
+        for i in tools[:-TOOL_COMPACT_KEEP]:
+            text = str(self._messages[i].get("content") or "")
+            if len(text) <= TOOL_COMPACT_CHARS:
+                continue
+            edge = (TOOL_COMPACT_CHARS - 180) // 2
+            self._messages[i]["content"] = (
+                text[:edge] + "\n[older tool output compacted; call again with "
+                "narrower arguments if the omitted middle is needed]\n" + text[-edge:])
+
     def _post_chat(self):
         """POST the current message list, streaming, offering every tool.
         Re-entered after each tool round."""
+        self._compact_tool_history()
         payload = {
             "model": self._model,
             "messages": self._messages,
