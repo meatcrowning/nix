@@ -631,24 +631,44 @@ class Tags(QObject):
         was trained on.
         """
         q = str(fragment or "").strip()
-        if len(q) < 2 or not boorutags.index_ready():
+        if not q or not boorutags.index_ready():
             self.prepare()
             return []
-        norm = q.lower().replace(" ", "_").strip("_")
+        norm = q.lower().replace("\\", "").replace(" ", "_").strip("_")
+        lim = max(1, int(limit))
+        # A TYPO STILL ANSWERS. Strict substring first, because that is the
+        # ranking worth having; only when it comes back empty does the loose
+        # subsequence pass run (`lookingat`, `cybrpnk`) — a completer that goes
+        # blank is one you stop trusting.
+        found = (boorutags.search(q, limit=lim, order="posts")
+                 or boorutags.loose(q, limit=lim))
         out = []
-        for e in boorutags.search(q, limit=max(1, int(limit))):
+        for e in found:
             artist = e["category"] == "artist"
             out.append({
                 "tag": e["tag"],
                 "category": e["category"],
                 "posts": e["posts"],
-                # The alias that matched, when the match was not the name — the
-                # row then reads `sole_female -> 1girl` rather than looking like
-                # a result the query has nothing to do with.
-                "alias": norm if (norm != e["tag"] and norm in e["aliases"]) else "",
+                "alias": self._why(norm, e),
                 "insert": G.spell_tag(("@" if artist else "") + e["tag"]),
             })
         return out
+
+    @staticmethod
+    def _why(norm, entry):
+        """The ALIAS that put this row in the list, when the name did not.
+
+        Without it half the answers look random: `blue` offers `earrings`
+        (because of `blue_earrings`) and `sol` offers `1girl` (because of
+        `sole_female`), and a row you cannot explain is a row you do not trust.
+        Empty when the name itself matched — then there is nothing to explain.
+        """
+        if not norm or norm in entry["tag"]:
+            return ""
+        for a in entry["aliases"]:
+            if norm in a:
+                return a
+        return ""
 
 
 class Gallery(QAbstractListModel):
@@ -856,19 +876,23 @@ class Gallery(QAbstractListModel):
     def add(self, path, job=""):
         if is_muted_copy(path) or self.has_path(path):
             return
-        # The row the job occupied becomes the output it produced — the whole
-        # point of putting it there. Dropped first, so the new row lands at 0
-        # and a view following the job moves onto the file rather than onto
-        # whatever was above it.
-        self.end_live(job, replaced_by=str(path))
         # The peer root holds top's copy of this very output, and the scan at
         # startup may already be showing it. The local one replaces it: it is
         # the copy with the parameters written into it.
         self._drop_key(self._dedup_key(path))
         row = self._row_for(path)
-        # UNDER THE JOB THAT IS STILL SAMPLING, when the batch has moved on to
-        # its next job: this file is finished and that one is not, and the
-        # running job keeps the top of the history.
+        # UNDER THE JOB'S OWN ROW, which is then dropped — so the new output is
+        # already in the model when anything hears that the job ended.
+        #
+        # THE OTHER ORDER FLASHES. Ending the row first tells the preview pane
+        # the selection is no longer a running job while its replacement does
+        # not exist yet, so the pane falls back to "the newest output" — the
+        # PREVIOUS generation — for the frame or two before the new one lands
+        # [his, 2026-08-28: "when a gen finishes, it briefly flashes the
+        # previous gen before showing the new output"].
+        #
+        # It also stays under a job that is still sampling, when the batch has
+        # moved on to its next one: that file is finished and this one is not.
         at = 1 if self._live is not None else 0
         self._all.insert(at, row)
         if self._matches(row):
@@ -876,6 +900,9 @@ class Gallery(QAbstractListModel):
             self._rows.insert(at, row)
             self.endInsertRows()
         self.countChanged.emit()
+        # The row the job occupied becomes the output it produced — the whole
+        # point of putting it there.
+        self.end_live(job, replaced_by=str(path))
         if row["is_video"]:
             self._want_poster(row["path"])
         else:

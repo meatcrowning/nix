@@ -80,17 +80,33 @@ Rectangle {
         return true;
     }
 
-    //: What is offered for it — or nothing, which is most of the time. Two
-    //: characters minimum (one letter matches thousands of tags and none of
-    //: them is the one meant), and a clause is left alone: a full stop or more
-    //: than four words is prose, exactly as `boorutags.check` reads it.
+    //: What is offered for it — or nothing, which is most of the time. ONE
+    //: character is enough, the way every tag completer people already use
+    //: works: the list is ordered by post count, so the first letter's answer
+    //: is the tag you meant more often than not. A clause is still left alone —
+    //: a full stop or more than four words is prose, exactly as
+    //: `boorutags.check` reads it.
     function completionQuery() {
         if (!box.tagsOn || !input.activeFocus) return "";
         var b = box.tokenBounds();
         if (!b.ok) return "";
         var w = b.word.replace(/^@/, "").replace(/\\/g, "").trim();
-        if (w.length < 2 || w.indexOf(".") >= 0 || w.split(" ").length > 4) return "";
+        if (w.length < 1 || w.indexOf(".") >= 0 || w.split(" ").length > 4) return "";
         return w;
+    }
+
+    //: Is this tag already in the box? Drawn dim if it is — the thing every
+    //: good tag completer does, because the list is most useful when it says
+    //: what you have NOT got yet.
+    function hasTag(tag) {
+        var want = String(tag).replace(/_/g, " ").toLowerCase();
+        var parts = input.text.toLowerCase().replace(/\\/g, "").split(/[,\n]/);
+        for (var i = 0; i < parts.length; i++) {
+            var p = parts[i].replace(/_/g, " ").replace(/^[\s(@]+/, "")
+                            .replace(/[\s)]+$/, "").split(":")[0].trim();
+            if (p === want) return true;
+        }
+        return false;
     }
 
     function refreshCompletion() {
@@ -99,15 +115,20 @@ Rectangle {
         box.skipAt = -1;
         var q = box.completionQuery();
         if (q === "") { box.closeCompletion(); return }
-        var rows = Tags.complete(q, 8);
+        var rows = Tags.complete(q, 10);
         if (!rows || rows.length === 0) { box.closeCompletion(); return }
         var items = [];
         for (var i = 0; i < rows.length; i++)
             items.push({ tag: rows[i].tag, alias: rows[i].alias,
                          category: rows[i].category, posts: rows[i].posts,
-                         insert: rows[i].insert,
+                         insert: rows[i].insert, have: box.hasTag(rows[i].tag),
                          trigger: (function (e) { return function () { box.insertTag(e) } })(rows[i]) });
-        var r = input.positionToRectangle(input.cursorPosition);
+        // ANCHORED AT THE TAG, NOT AT THE CARET. A list that re-aims itself one
+        // character to the right on every keystroke is the single thing that
+        // makes a completer feel cheap; anchored where the word starts it sits
+        // still while the word is typed.
+        var b2 = box.tokenBounds();
+        var r = input.positionToRectangle(b2.ok ? b2.start : input.cursorPosition);
         var p = input.mapToItem(null, r.x, r.y);
         box.lastQuery = q;
         box.tagPopup.open(p.x, p.y, items, r.height);
@@ -139,13 +160,15 @@ Rectangle {
         // automated [his, 2026-08-28] — so a completion ends `tag, ` and the
         // caret is already in the next tag.
         //
-        // Three tails take no comma, because in all three one is already there
-        // or would be wrong: a comma already following, a weight (`:1.2` — the
-        // token ends at the colon, so this is `(lowres` inside a group), and a
-        // closing bracket. A completion at the end of a LINE takes the comma
-        // and not the space, so nothing trails the line.
+        // Two tails take no comma, because in both one is already there or
+        // would be wrong: a comma already following, and a weight or a closing
+        // bracket (`:1.2` / `)` — the token ends at the colon, so this is
+        // `(lowres` inside a group). EVERYTHING ELSE, end of line included,
+        // gets the comma AND the space: the newline case used to take the comma
+        // alone, on the reasoning that nothing should trail a line, and what
+        // that actually produced was a completion with no space after its comma
+        // [his, 2026-08-28, twice].
         if (/^\s*[,:)]/.test(tail)) { /* already separated */ }
-        else if (/^\n/.test(tail)) ins += ",";
         else ins += ", ";
         input.remove(b.start, b.end);
         input.insert(b.start, ins);
@@ -164,7 +187,11 @@ Rectangle {
 
     Timer {
         id: completeSoon
-        interval: 80        // a keystroke's worth: this runs on the GUI thread
+        // JUST ENOUGH TO COALESCE ONE KEYSTROKE's text change with its cursor
+        // move, and no more. This was 80ms — a tenth of a second between the
+        // letter and the list, which is exactly what makes a completer feel
+        // sluggish; the query itself is 1-4ms against the index.
+        interval: 12
         onTriggered: box.refreshCompletion()
     }
 

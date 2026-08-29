@@ -189,12 +189,23 @@ def canonical(tag):
     return None
 
 
-def search(query, category="", limit=25):
+def search(query, category="", limit=25, order="word"):
     """Tags matching `query`, most-used first.
 
     Substring, not fuzzy: an exact name (or alias) is put first, then anything
     the query is a prefix of, then anything containing it — which is the order
     a person guessing at a tag actually wants.
+
+    `order` picks between the two readings of "most-used first", because the two
+    callers want different ones:
+
+    * `word` (the default, for a LOOKUP): a whole-word match outranks a prefix,
+      whatever the counts — that is what puts `iwakura_lain` above six tags with
+      `lain` buried in them (see the bucket comment below).
+    * `posts` (for the COMPLETER): word and prefix matches are merged and read
+      in post-count order. Typing `sol` has to answer `solo` (5M posts) and not
+      `sol_badguy`, because a completer is ranked by what you probably meant and
+      is re-ranked by the next letter you type anyway.
     """
     rows, by_name = _load()
     q = _norm(query)
@@ -277,8 +288,59 @@ def search(query, category="", limit=25):
                 inside.append(i)
             if len(word) + len(prefix) >= lim * 4:
                 break
+    if str(order) == "posts":
+        # Rows are count-descending, so merging by index IS by post count.
+        word = sorted(word + prefix)
+        prefix = []
     out = [_entry(i, rows) for i in (exact + word + prefix + inside)[:lim]]
     return out
+
+
+def loose(query, limit=25):
+    """The LAST resort a completer falls back on: names whose letters appear in
+    `query`'s order, most-used first.
+
+    `search` is substring-strict, which is right for a lookup and wrong for a
+    person typing — `blonde hiar` and `lookingat` find nothing at all, and a
+    completer that goes blank is a completer you stop trusting. This is
+    a1111-tagcomplete's "fuzzy" mode in one line of scanning, and it is only
+    ever paid for when the strict search came back empty.
+    """
+    rows, _by = _load()
+    q = _norm(query)
+    if not q or not rows:
+        return []
+    lim = max(1, int(limit))
+    out = []
+    # A KEYSTROKE'S BUDGET. Rows are count-descending, so the first 40,000 are
+    # every tag with a few hundred posts or more — past that a subsequence match
+    # is noise anyway, and scanning the whole file cost 130ms on `book`.
+    for i, (name, _cat, _count, aliases) in enumerate(rows[:40000]):
+        # Aliases count, the way they do everywhere else here: `smilng` has to
+        # reach `smile`, and it only does through the alias `smiling`.
+        for cand in (name, *aliases):
+            at = 0
+            for ch in cand:
+                if ch == q[at]:
+                    at += 1
+                    if at == len(q):
+                        out.append(i)
+                        break
+            if len(out) and out[-1] == i:
+                break
+        if len(out) >= lim * 4:
+            break
+    # SHORTEST FIRST among what matched, then by count (the row order). A
+    # subsequence match gets easier the longer the name is, so ranking these by
+    # post count alone answers `blonde hiar` with
+    # `blonde_shrine_maiden_from_a_future_era_(touhou)` before `blonde_hair`.
+    # LENGTH IS A SANITY CHECK, NOT THE RANKING. A subsequence match gets easier
+    # the longer the name is, so anything more than twice the query's length is
+    # put last (`blonde hiar` answered with
+    # `blonde_shrine_maiden_from_a_future_era_(touhou)`); the rest keep the post
+    # count order every other answer here uses.
+    out.sort(key=lambda i: (len(rows[i][0]) > len(q) * 2, i))
+    return [_entry(i, rows) for i in out[:lim]]
 
 
 def check(prompt):
