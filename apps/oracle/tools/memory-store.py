@@ -8,7 +8,9 @@ its own, and is fed back to it as real context on later turns (analogous to the
 board / Claude-memory pattern: one fact per entry with a shared index). Every
 store operation runs THROUGH this script, exactly like the session and file
 stores: it takes a single ROOT directory as argv[1] and holds ONE JSON file,
-`memories.json`, under it — a list of {id,text,created,updated} entries.
+`memories.json`, under it — a list of
+{id,text,source_quote,created,updated} entries. Old entries without a quote are
+kept as legacy/unverified memories; the app labels them that way.
 
 WHERE it runs: like the session store, oracle keeps ONE canonical store so the
 two machines share one set of memories rather than a per-machine split. oracle's
@@ -94,14 +96,18 @@ def op_list(root):
     entries.sort(key=lambda e: e.get("updated", 0), reverse=True)
     return {"memories": [
         {"id": e.get("id"), "text": e.get("text", ""),
+         "source_quote": e.get("source_quote", ""),
          "created": e.get("created", 0), "updated": e.get("updated", 0)}
         for e in entries]}
 
 
 def op_save(root, req):
     text = str(req.get("text", "")).strip()
+    source_quote = str(req.get("source_quote", "")).strip()
     if not text:
         fail("save needs non-empty text")
+    if not source_quote:
+        fail("save needs a quote from the user's current message")
     if len(text) > TEXT_MAX:
         text = text[:TEXT_MAX]
     now = int(time.time())
@@ -113,10 +119,11 @@ def op_save(root, req):
         for e in entries:
             if e.get("id") == sid:
                 e["text"] = text
+                e["source_quote"] = source_quote
                 e["updated"] = now
                 write_all(root, entries)
                 return {"ok": True, "memory": {
-                    "id": sid, "text": text,
+                    "id": sid, "text": text, "source_quote": source_quote,
                     "created": e.get("created", now), "updated": now}}
         fail("no such memory: " + str(sid))
     # create — mint an id and prepend
@@ -124,7 +131,8 @@ def op_save(root, req):
         entries.sort(key=lambda e: e.get("updated", 0), reverse=True)
         entries = entries[:ENTRIES_MAX - 1]
     new_id = mint_id()
-    entry = {"id": new_id, "text": text, "created": now, "updated": now}
+    entry = {"id": new_id, "text": text, "source_quote": source_quote,
+             "created": now, "updated": now}
     entries.append(entry)
     write_all(root, entries)
     return {"ok": True, "memory": entry}

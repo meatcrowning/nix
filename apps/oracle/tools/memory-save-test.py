@@ -66,7 +66,10 @@ class Stub(http.server.BaseHTTPRequestHandler):
             frames = [{"message": {"content": "worth keeping.",
                                    "tool_calls": [
                                        {"function": {"name": "save_memory",
-                                                     "arguments": {"text": FACT}}}]},
+                                                     "arguments": {
+                                                         "text": FACT,
+                                                         "source_quote":
+                                                             "remember how i build this"}}}]},
                        "done": False},
                       {"done": True, "done_reason": "stop"}]
         else:
@@ -125,6 +128,9 @@ check("the model's own save_memory call wrote the store", bool(saved),
       str(store))
 check("and it wrote the fact it was given",
       any(FACT in str(m.get("text")) for m in saved),
+      json.dumps(saved)[:200])
+check("and records the user's supporting words",
+      any(m.get("source_quote") == "remember how i build this" for m in saved),
       json.dumps(saved)[:200])
 
 # --- and it comes back ----------------------------------------------------
