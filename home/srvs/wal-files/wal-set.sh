@@ -302,6 +302,56 @@ if [ "$PLASMA_SESSION" = 1 ]; then
     # the live scheme is not the one it templates.
     echo "wal-set: Plasma session — KDE theme untouched, re-minting its colour scheme"
     "$SCRIPTS/plasma-scheme.py" --accent "$ACCENT"
+
+    # ---- AeroThemePlasma glass ------------------------------------------
+    # In the ATP session the titlebar and panel colour is NOT art: smod's frame
+    # tiles are neutral greys (#212121 / #373737) and the colour arrives from
+    # the aeroglassblur kwin effect, which colorizes the DECORATION region as
+    # well as the window behind it. Its input is four ints in kwinrc — Win7's
+    # "Window Color" panel, hue/saturation/brightness/intensity — so the
+    # wallpaper accent reaches the whole chrome with a config write and no
+    # asset work at all.
+    #
+    # Gated on the EFFECT being enabled, not on a session name: ATP's session
+    # sets DesktopNames=KDE like every other Plasma session, so nothing in the
+    # environment tells them apart, while `aeroglassblurEnabled` is true only
+    # where ATP's own setup wizard has run.
+    #
+    # BlurEffect::reconfigure() reads the `kwinaero` shared-memory segment only
+    # on its FIRST config and kwinrc on every one after, so kwriteconfig6 plus
+    # one reconfigureEffect is the whole apply — there is no need to reproduce
+    # the KCM's shared-memory writer.
+    if command -v kwriteconfig6 >/dev/null 2>&1 && command -v kreadconfig6 >/dev/null 2>&1 \
+       && [ "$(kreadconfig6 --file kwinrc --group Plugins --key aeroglassblurEnabled 2>/dev/null)" = "true" ]; then
+        # accent hex -> HSV in the effect's own units (H 0-359, S/V 0-100).
+        r=$((16#${ACCENT:0:2})); g=$((16#${ACCENT:2:2})); b=$((16#${ACCENT:4:2}))
+        amax=$r; [ "$g" -gt "$amax" ] && amax=$g; [ "$b" -gt "$amax" ] && amax=$b
+        amin=$r; [ "$g" -lt "$amin" ] && amin=$g; [ "$b" -lt "$amin" ] && amin=$b
+        ad=$((amax - amin))
+        if   [ "$ad" -eq 0 ];        then AH=0
+        elif [ "$amax" -eq "$r" ];   then AH=$(( (60 * (g - b) / ad + 360) % 360 ))
+        elif [ "$amax" -eq "$g" ];   then AH=$(( (60 * (b - r) / ad + 120) % 360 ))
+        else                              AH=$(( (60 * (r - g) / ad + 240) % 360 ))
+        fi
+        AS=0; [ "$amax" -gt 0 ] && AS=$((100 * ad / amax))
+        AV=$((100 * amax / 255))
+        # A dark accent would make near-black glass, and Aero draws its titlebar
+        # caption in BLACK — so floor the value. Hue and saturation pass through
+        # untouched, which is what keeps a grey wallpaper's glass grey.
+        [ "$AV" -lt 55 ] && AV=55
+        # Intensity is how much of that colour is mixed in — his taste, not the
+        # wallpaper's. Keep whatever the Window Color panel was left on.
+        AI="$(kreadconfig6 --file kwinrc --group Effect-aeroglassblur --key AeroIntensity 2>/dev/null)"
+        case "$AI" in ""|*[!0-9]*) AI=50 ;; esac
+        for kv in "AeroHue $AH" "AeroSaturation $AS" "AeroBrightness $AV" "AeroIntensity $AI"; do
+            kwriteconfig6 --file kwinrc --group Effect-aeroglassblur \
+                --key "${kv%% *}" -- "${kv#* }"
+        done
+        dbus-send --session --dest=org.kde.KWin --type=method_call \
+            /Effects org.kde.kwin.Effects.reconfigureEffect \
+            string:aeroglassblur >/dev/null 2>&1 || true
+        echo "wal-set: aero glass -> hue $AH sat $AS val $AV intensity $AI"
+    fi
 elif command -v kwriteconfig6 >/dev/null 2>&1; then
     hx() { printf '%d,%d,%d' "0x${1:0:2}" "0x${1:2:2}" "0x${1:4:2}"; }   # "rrggbb" -> "R,G,B"
     kw() { kwriteconfig6 --file "$KG" "$@"; }

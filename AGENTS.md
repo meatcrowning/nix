@@ -966,10 +966,36 @@ build` before `switch` and keep the previous generation in mind. A third,
 Asahi's rpm compositor; see `home/prog/AGENTS.md` and
 `docs/book-hyprvtb-version-bridge.md`.
 
-**Aerotheme Plasma toggle.** `my.aerotheme.enable` (defined in
-`sys/options.nix`, set in `hosts/top/configuration.nix`) switches between stock
-Plasma 6 and the Windows-themed `aerothemeplasma`; `sys/dsk/plasma.nix` handles
-the conditional session and `aeroshell` activation.
+**AeroThemePlasma is a greeter choice, not a mode (`top` only).**
+`my.aerotheme.enable` (`sys/options.nix`, set in `hosts/top/configuration.nix`,
+on since 2026-08-28) installs AeroThemePlasma and registers its session through
+`services.displayManager.sessionPackages`, which is the same
+`sessionData.desktops` path ly reads — so it appears in the greeter's list and
+is picked at login. **`defaultSession` is always `hyprland`**; it used to flip
+to `aerothemeplasma` with this option, which made trying the theme a rebuild and
+leaving it another one. Nothing it installs can reach the Hyprland session:
+upstream namespaces the patched libplasma as `ATPlasma` under
+`io.gitgud.wackyideas.plasma.*` with its `share/` stripped, and the forked shell
+as `aeroshell` / `plasma-aeroshell.service` gated on
+`ConditionEnvironment=PLASMA_DEFAULT_SHELL=io.gitgud.wackyideas.desktop`.
+`sddm.enable` is off (the greeter is ly) and so is the X11 session (KDE drops
+X11 in 6.8, and building it doubles the kwin-effect compiles).
+
+**The wallpaper palette follows into that session, as far as config can carry
+it.** Three pieces, all in `home/srvs/wal-files/`:
+`plasma-scheme.py` now templates TWO schemes — `OxygenDarkFlat` and ATP's
+`Aero`, read out of `/run/current-system/sw/share/color-schemes/` rather than
+vendored — and applies whichever one kdeglobals currently names; `wal-set.sh`
+writes the `aeroglassblur` effect's `AeroHue`/`AeroSaturation`/`AeroBrightness`
+into `kwinrc` and pokes `reconfigureEffect`, which is Win7's Window Color panel
+and colorizes the decoration region too (smod's frame tiles are neutral greys,
+so the titlebar colour is entirely this); and `plasma-wallpaper-watch` watches
+both containment configs, because ATP's forked shell writes
+`plasma-io.gitgud.wackyideas.desktop-appletsrc` and watching only the stock name
+meant the loop never fired there. **What does NOT follow is the SVG art** — 51
+of 72 Seven-Black desktoptheme SVGs, 23 of 35 plasmoid SVGs and the 1.2 MB
+Kvantum `Windows7Aero.svg` carry ~5,100 baked blue-ish colour literals between
+them. Recolouring those is a build step per accent, not a config write.
 
 ---
 

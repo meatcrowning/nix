@@ -201,9 +201,19 @@ in
     };
   };
 
+  # Both shells, because a containment config is named after the SHELL package
+  # that owns it. Stock Plasma writes plasma-org.kde.plasma.desktop-appletsrc;
+  # AeroThemePlasma runs its own forked shell (io.gitgud.wackyideas.desktop) and
+  # writes plasma-io.gitgud.wackyideas.desktop-appletsrc, so watching only the
+  # first meant the whole wallpaper -> theme loop never fired in that session
+  # [2026-08-28]. A path unit takes a list; the service is the same either way,
+  # since the script reads Image= out of whichever file changed.
   systemd.user.paths.plasma-wallpaper-watch = {
     Unit.Description = "Watch Plasma's containment config for a wallpaper change";
-    Path.PathChanged = "%h/.config/plasma-org.kde.plasma.desktop-appletsrc";
+    Path.PathChanged = [
+      "%h/.config/plasma-org.kde.plasma.desktop-appletsrc"
+      "%h/.config/plasma-io.gitgud.wackyideas.desktop-appletsrc"
+    ];
     Install.WantedBy = [ "default.target" ];
   };
 }

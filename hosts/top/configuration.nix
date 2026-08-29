@@ -6,8 +6,9 @@
     ../../sys
   ];
 
-  # toggle for aerothemeplasma-nix
-  #my.aerotheme.enable = true;
+  # AeroThemePlasma: installed, and offered in ly's session list. hyprland
+  # stays the default session — this only adds a choice at the greeter.
+  my.aerotheme.enable = true;
 
   networking.hostName = "top";
   # 38899 is WiZ smart-bulb control, which is UDP and outbound — nothing on this

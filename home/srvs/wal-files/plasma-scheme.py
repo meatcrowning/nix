@@ -27,10 +27,17 @@ NOT tinted: `ForegroundNormal` (near-white body text), the three semantic
 roles (`ForegroundNegative`/`Neutral`/`Positive` — a red error stays red on a
 green wallpaper), and everything outside `[Colors:*]`/`[WM]`.
 
-Applying is gated on the live scheme actually BEING this template's scheme:
-the file is always minted, but the push into kdeglobals only happens when
-kdeglobals already names it. A host on some other scheme (top's aerotheme
-Plasma session) is left alone rather than silently repainted.
+TWO SCHEMES ARE TEMPLATED (2026-08-28): OxygenDarkFlat, and AeroThemePlasma's
+`Aero` — read out of the system profile, so it exists only where the aeroshell
+module put it. The same maths serves both; Aero is a LIGHT scheme whose greys
+have no saturation to move, so what actually follows the wallpaper there is the
+titlebar, the selection and the focus decoration, which is the Win7 behaviour
+anyway. See CANDIDATES for why Aero needs its name forced.
+
+Applying is gated on the live scheme actually BEING one of those: every
+candidate is minted, but the push into kdeglobals only happens for the one
+kdeglobals already names. A host on some third scheme is left alone rather than
+silently repainted.
 
 WHY NOT `plasma-apply-colorscheme`. Because it refuses: "The requested theme
 OxygenDarkFlat is already set as the theme for the current Plasma session" —
@@ -62,10 +69,35 @@ TINT_KEYS = {
     "ForegroundActive", "ForegroundLink", "ForegroundVisited",
     "ForegroundInactive",
     "activeBackground", "inactiveBackground",
+    # The titlebar gradient's light stop. Zero in OxygenDarkFlat (so tinting it
+    # is a no-op there), but Aero's is a real colour — leave it and the Win7
+    # titlebar keeps a blue top edge under a red wallpaper.
+    "activeBlend", "inactiveBlend",
 }
 TINT_GROUPS = re.compile(r"^\[(Colors:[A-Za-z]+|WM)\]$")
 
 SAT_REFERENCE = 0.30
+
+# The schemes this script knows how to re-mint, as (template path, forced name).
+# One is applied per run: whichever one kdeglobals currently NAMES. Anything
+# else he picks in System Settings is left alone, exactly as before — the list
+# only widens which schemes are ours to follow, never which are ours to
+# override.
+#
+# A forced name is needed for Aero because upstream's file says
+# `[General] ColorScheme=BreezeClassic` while Plasma stores and looks the scheme
+# up as `Aero` (its filename). Reading the name out of the file would mint
+# `BreezeClassic.colors` and then never match the live scheme, i.e. silently
+# do nothing forever.
+#
+# The Aero template is read out of the SYSTEM profile rather than vendored: the
+# aeroshell module installs it there (sys/dsk/plasma.nix), so it stays in step
+# with the flake pin, and on a host without AeroThemePlasma the path is simply
+# absent and the candidate is skipped.
+CANDIDATES = [
+    (os.path.join(HOME, ".config", "scripts", "plasma-scheme-template.colors"), None),
+    ("/run/current-system/sw/share/color-schemes/Aero.colors", "Aero"),
+]
 
 
 def hex_to_rgb(h):
@@ -81,7 +113,7 @@ def tint(rgb, hue, sat_scale):
     return tuple(int(round(c * 255)) for c in (r, g, b))
 
 
-def mint(template_text, accent_hex):
+def mint(template_text, accent_hex, force_name=None):
     ar, ag, ab = hex_to_rgb(accent_hex)
     hue, _, accent_s = colorsys.rgb_to_hls(ar / 255.0, ag / 255.0, ab / 255.0)
     sat_scale = min(1.0, accent_s / SAT_REFERENCE)
@@ -98,6 +130,8 @@ def mint(template_text, accent_hex):
                 and re.fullmatch(r"\d{1,3},\d{1,3},\d{1,3}", value)):
             rgb = tuple(int(c) for c in value.split(","))
             out.append("%s=%d,%d,%d" % ((key,) + tint(rgb, hue, sat_scale)))
+        elif force_name and group == "[General]" and key == "ColorScheme":
+            out.append("ColorScheme=%s" % force_name)
         else:
             out.append(line)
     return "\n".join(out) + "\n"
@@ -156,52 +190,62 @@ def live_scheme():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--accent", required=True, help="bare hex, e.g. d1a8a7")
-    ap.add_argument("--template",
-                    default=os.path.join(HOME, ".config", "scripts",
-                                         "plasma-scheme-template.colors"))
+    ap.add_argument("--template", default=None,
+                    help="mint only this template (default: every candidate)")
+    ap.add_argument("--name", default=None,
+                    help="scheme name to force for --template")
     ap.add_argument("--out", default=None)
     ap.add_argument("--no-apply", action="store_true")
     args = ap.parse_args()
 
-    try:
-        with open(args.template) as fh:
-            template = fh.read()
-    except OSError as exc:
-        print("plasma-scheme: no template (%s)" % exc, file=sys.stderr)
-        return 0                      # not a Plasma host — nothing to do
-
-    name = scheme_name(template)
-    if not name:
-        print("plasma-scheme: template has no [General] ColorScheme=", file=sys.stderr)
-        return 1
-
-    out_path = args.out or os.path.join(
-        HOME, ".local", "share", "color-schemes", "%s.colors" % name)
-    minted = mint(template, args.accent)
-
-    try:
-        with open(out_path) as fh:
-            unchanged = fh.read() == minted
-    except OSError:
-        unchanged = False
-    if not unchanged:
-        os.makedirs(os.path.dirname(out_path), exist_ok=True)
-        # Truncate + write in place, never tmp+mv: the scheme file is watched
-        # by inode elsewhere in this desktop (same rule as Theme.qml).
-        with open(out_path, "w") as fh:
-            fh.write(minted)
-    print("plasma-scheme: %s %s from #%s"
-          % (name, "unchanged" if unchanged else "minted", args.accent))
-
-    if args.no_apply:
-        return 0
+    candidates = ([(args.template, args.name)] if args.template
+                  else list(CANDIDATES))
     live = live_scheme()
-    if live != name:
-        print("plasma-scheme: live scheme is %r, not %r — not applying"
-              % (live, name))
-        return 0
-    push_to_kdeglobals(minted, name,
-                       hashlib.sha1(minted.encode()).hexdigest())
+    applied = False
+
+    for path, forced in candidates:
+        try:
+            with open(path) as fh:
+                template = fh.read()
+        except OSError as exc:
+            # Not a Plasma host, or that theme is not installed here.
+            if args.template:
+                print("plasma-scheme: no template (%s)" % exc, file=sys.stderr)
+            continue
+
+        name = forced or scheme_name(template)
+        if not name:
+            print("plasma-scheme: %s has no [General] ColorScheme=" % path,
+                  file=sys.stderr)
+            continue
+
+        out_path = args.out or os.path.join(
+            HOME, ".local", "share", "color-schemes", "%s.colors" % name)
+        minted = mint(template, args.accent, force_name=forced)
+
+        try:
+            with open(out_path) as fh:
+                unchanged = fh.read() == minted
+        except OSError:
+            unchanged = False
+        if not unchanged:
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            # Truncate + write in place, never tmp+mv: the scheme file is watched
+            # by inode elsewhere in this desktop (same rule as Theme.qml).
+            with open(out_path, "w") as fh:
+                fh.write(minted)
+        print("plasma-scheme: %s %s from #%s"
+              % (name, "unchanged" if unchanged else "minted", args.accent))
+
+        if args.no_apply or live != name:
+            continue
+        push_to_kdeglobals(minted, name,
+                           hashlib.sha1(minted.encode()).hexdigest())
+        applied = True
+
+    if not (args.no_apply or applied):
+        print("plasma-scheme: live scheme is %r, not one of ours — not applying"
+              % live)
     return 0
 
 
