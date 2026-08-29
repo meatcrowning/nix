@@ -539,6 +539,13 @@ Three rules hold that together, and each one is a bug that was found:
   from the `selPath` change handler — one step before any binding on `selPath`
   has re-run. A binding there drew the previous selection, which is exactly how
   the sentinel path ended up in a `file://` URL.
+- **The last frame stays until the file lands.** `App.hasPreview` goes false
+  the moment the job reports finished, which is a beat before its output has
+  been downloaded — and `Gallery.add` inserts the new row BEFORE ending the
+  live one, so nothing ever hears "the job is over" while its replacement does
+  not exist. Both halves are the same bug [his]: *"when a gen finishes, it
+  briefly flashes the previous gen before showing the new output"*, which is
+  what a pane falling back to "the newest output" for two frames looks like.
 - **Neither a filter nor a rescan may take the job off the screen.** It has no
   filename or prompt to match (`_matches` exempts it) and it is not in the
   output directory (`load_existing` puts it back).
@@ -1381,6 +1388,32 @@ being typed, so a near-miss is never written in the first place.
   flag: `PromptBox.skipAt` is where the caret was left, and any key at all moves
   off it. The flag it replaced swallowed whichever refresh came first, which was
   sometimes the next word he typed.
+
+**How it FEELS is the feature** [his, 2026-08-28: *"its just generally poor to
+use, feeling wise ... look up how the top autocomplete custom nodes for comfyui
+do it"*]. What the ones people actually use (a1111-tagcomplete and its
+descendants, pysssss's custom-scripts, Autocomplete-Plus) all do, and what this
+now does:
+
+- **One character is enough**, and the debounce is 12ms — long enough to
+  coalesce a keystroke's text change with its cursor move and nothing more. It
+  was 2 characters and 80ms, which is a tenth of a second of nothing happening
+  between the letter and the list.
+- **Post count is the ranking**, not the bucket: `boorutags.search(...,
+  order="posts")` merges the whole-word and prefix buckets and reads them by
+  count, so `sol` answers `solo` and not `sol_badguy`. The default `order="word"`
+  is unchanged for the LOOKUP, where a whole-word match beating a prefix is what
+  puts `iwakura_lain` above six tags with `lain` buried in them.
+- **A typo still answers**: when the strict search comes back empty,
+  `boorutags.loose` runs a subsequence pass (`lookingat`, `cybrpnk`) — capped at
+  the 40,000 most-used tags, because it is a fallback and not a search.
+- **Every row explains itself.** `Tags._why` names the alias that put it there,
+  so `blue` offering `earrings` reads `earrings (blue_earrings)` rather than
+  looking random.
+- **A tag already in the box is drawn spent** (`Theme.inactive`), not hidden.
+- **The list is anchored at the tag, not at the caret**, so it sits still while
+  the word is typed rather than stepping right on every letter; the pointer
+  moves the same selection the arrow keys do.
 
 Harness: `tools/ui-test.py` → `test_tag_complete`.
 

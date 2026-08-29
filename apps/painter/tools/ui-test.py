@@ -3736,11 +3736,13 @@ def test_tag_complete(win, ctl, keep):
     check("...and changes nothing about the text",
           edit.property("text") == "long_h", repr(edit.property("text")))
 
-    # A whole clause is prose, not a misspelt tag (`boorutags.check` reads it
-    # the same way), and one character matches thousands of tags and none of
-    # them is the one meant.
-    type_into("a")
-    check("one character offers nothing", popup.property("visible") is False)
+    # ONE CHARACTER IS ENOUGH — the list is post-count ordered, so the first
+    # letter's answer is usually the tag meant. A whole clause is still prose
+    # and not a misspelt tag, which `boorutags.check` reads the same way.
+    type_into("s")
+    check("one character already offers something",
+          popup.property("visible") is True and popup.property("count") > 0,
+          popup.property("currentTag"))
     type_into("a girl walks into the rain and")
     check("a written clause offers nothing", popup.property("visible") is False)
 
@@ -3773,8 +3775,24 @@ def test_tag_complete(win, ctl, keep):
     edit.setProperty("cursorPosition", len("long_h"))
     spin(300)
     key(win, Qt.Key_Tab)
-    check("...and at the end of a line the comma comes without the space",
-          edit.property("text") == "long hair,\nsolo", repr(edit.property("text")))
+    check("...and the end of a line is no exception: comma AND space",
+          edit.property("text") == "long hair, \nsolo", repr(edit.property("text")))
+
+    # A typo still answers — the loose subsequence pass behind the strict one.
+    type_into("lookingat")
+    check("a typo still finds the tag",
+          popup.property("currentTag") == "looking_at_viewer",
+          popup.property("currentTag"))
+
+    # ...and a tag already in the box is offered, marked as already there.
+    edit.setProperty("text", "solo, sol")
+    edit.setProperty("cursorPosition", len("solo, sol"))
+    spin(300)
+    rows_now = prop(popup, "items") or []
+    have = [it for it in rows_now if it.get("tag") == "solo"]
+    check("a tag already in the box is marked spent, not hidden",
+          bool(have) and have[0].get("have") is True,
+          [ (r.get("tag"), r.get("have")) for r in rows_now[:3] ])
 
     # --- what an ARTIST and a bracketed CHARACTER insert as ----------------
     # [his, 2026-08-28] "auto complete needs @ prepended to artists and

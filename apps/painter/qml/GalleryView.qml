@@ -383,7 +383,8 @@ Item {
                     // reason the tick is in the URL is that an Image whose URL
                     // never changes never reloads (main.py `LivePreview`).
                     source: tile.live
-                            ? (App.hasPreview ? "image://livepreview/" + App.previewTick : "")
+                            ? (App.previewTick > 0
+                               ? "image://livepreview/" + App.previewTick : "")
                             : (isVideo ? poster : thumb)
                     fillMode: Image.PreserveAspectFit
                     asynchronous: true
@@ -493,7 +494,7 @@ Item {
                     width: parent.width - 16
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.WordWrap
-                    visible: tile.live && !App.hasPreview
+                    visible: tile.live && App.previewTick === 0
                     // A ROW EXISTS FROM THE PRESS, not from the first sample:
                     // a prompt queued behind another job says so rather than
                     // looking like one that is producing nothing.

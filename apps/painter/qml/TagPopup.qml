@@ -30,13 +30,22 @@ Item {
     //: asks about without having to read a delegate's text back.
     readonly property string currentTag: (count > 0 && items[index]) ? items[index].tag : ""
 
+    //: Where the list was last put, so a keystroke that does not move the tag
+    //: does not move the list either — see `place`.
+    property real anchorX: -1
+    property real anchorY: -1
+
     function open(x, y, list, lineH) {
         root.items = list || [];
         if (root.count === 0) { root.close(); return }
         root.index = 0;
         root.visible = true;
         panel.remeasure();
-        panel.place(x, y, lineH || 16);
+        if (x !== root.anchorX || y !== root.anchorY || !panel.placed) {
+            root.anchorX = x;
+            root.anchorY = y;
+            panel.place(x, y, lineH || 16);
+        }
     }
     //: True for the rest of the event that closed the list — see
     //: `PromptBox.Keys.onEscapePressed` for why an Escape has to be spendable
@@ -47,6 +56,8 @@ Item {
     function close() {
         if (root.visible) { root.justClosed = true; closedLatch.restart() }
         root.visible = false;
+        panel.placed = false;
+        root.anchorX = root.anchorY = -1;
         root.items = [];
         root.index = 0;
     }
@@ -96,7 +107,9 @@ Item {
 
         // UNDER THE LINE BEING TYPED, and above it when there is no room below:
         // the list must never cover the caret it belongs to.
+        property bool placed: false
         function place(sx, sy, lineH) {
+            panel.placed = true;
             var below = sy + lineH + 2;
             panel.y = (below + height <= root.height - 4) ? below
                                                           : Math.max(4, sy - height - 2);
@@ -122,8 +135,7 @@ Item {
 
                     Rectangle {
                         anchors.fill: parent
-                        color: (row.index === root.index || rowMa.containsMouse)
-                               ? Theme.highlight : "transparent"
+                        color: row.index === root.index ? Theme.highlight : "transparent"
                     }
 
                     PixelText {
@@ -140,7 +152,11 @@ Item {
                         text: row.modelData.alias !== ""
                               ? (row.modelData.tag + "  (" + row.modelData.alias + ")")
                               : row.modelData.tag
-                        color: row.index === root.index ? Theme.text : Theme.textDim
+                        // A TAG ALREADY IN THE BOX IS DRAWN SPENT. The list is
+                        // most useful when it says what you have not got yet,
+                        // and every completer people already use marks these.
+                        color: row.modelData.have ? Theme.inactive
+                             : row.index === root.index ? Theme.text : Theme.textDim
                     }
 
                     PixelText {
@@ -154,11 +170,15 @@ Item {
                         color: Theme.dim
                     }
 
+                    // HOVER MOVES THE SELECTION, rather than painting a second
+                    // highlight beside the keyboard's: one row is current, and
+                    // the pointer and the arrow keys agree about which.
                     MouseArea {
                         id: rowMa
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
+                        onEntered: root.index = row.index
                         onClicked: { root.index = row.index; root.accept() }
                     }
                 }

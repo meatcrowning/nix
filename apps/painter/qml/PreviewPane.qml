@@ -49,7 +49,16 @@ Item {
     property bool selLive: false
     //: The sampler's frames, rather than a file: the running job is what is
     //: selected, or nothing is and one is running.
-    readonly property bool showLive: App.hasPreview && (pane.selLive || pane.selPath === "")
+    //:
+    //: THE LAST FRAME STAYS UNTIL THE FILE LANDS. `App.hasPreview` goes false
+    //: the moment the job reports finished, which is a beat BEFORE its output
+    //: has been downloaded and added — and this pane blanking (or falling back
+    //: to the previous output) for that beat is the flash he saw [his,
+    //: 2026-08-28]. So a selected LIVE row keeps drawing its last frame for as
+    //: long as the row exists; `_on_started` zeroes the tick, so a new job
+    //: never shows the old one's.
+    readonly property bool showLive: (pane.selLive && App.previewTick > 0)
+                                     || (pane.selPath === "" && App.hasPreview)
 
     // The file being drawn, derived from the selection — never written from
     // anywhere else.
