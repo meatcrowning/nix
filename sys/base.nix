@@ -4,7 +4,21 @@
   nix = {
     settings = {
       experimental-features = [ "nix-command" "flakes" "pipe-operators" ];
-      auto-optimise-store = true;
+      # OFF since 2026-08-28, and this is meant to go back on. `/nix/store`'s
+      # hardlink farm hit a corrupt ext4 inode (#75637920 on nvme0n1p2,
+      # `ext4_lookup: iget: checksum invalid`, EBADMSG on every stat), and with
+      # this true nix walks `.links` on every build — so EVERY rebuild on `top`
+      # died on it, on a path nothing in the flake had touched. The damage is
+      # one file deduped into three paths (discord/steam/steam-run fhsenv
+      # rootfs, `usr/share/alsa/ucm2/codecs/rt715-sdca/init.conf`); the other
+      # 84,274 store paths verify clean.
+      #
+      # Existing hardlinks are unaffected — this only stops NEW dedup, so the
+      # cost is disk, gradually. Turn it back on after an offline `e2fsck -f`
+      # on `/dev/nvme0n1p2` (needs someone at the machine: a forced fsck that
+      # prompts drops systemd to an emergency console) and a
+      # `nix-store --repair-path` on those three paths.
+      auto-optimise-store = false;
       # Defaults were max-jobs=auto(16) x cores=0(all 16): up to 16 parallel
       # derivations each spawning -j16 thrashes the 16-thread CPU and 30G RAM
       # on big uncached updates. Cap the product near the thread count.
