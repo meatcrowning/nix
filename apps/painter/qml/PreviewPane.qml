@@ -178,7 +178,8 @@ Item {
             // would be a lie that never resolves. A first step can genuinely
             // take half a minute on a video model, so the hint waits for the
             // clock rather than firing immediately.
-            text: !App.busy ? "nothing generated yet"
+            text: pane.selLive && !App.busy ? "queued"
+                : !App.busy ? "nothing generated yet"
                 : App.elapsed > 45
                   ? "no preview frames - if the backend has been up a while, restart it from settings so --preview-method takes effect"
                   : "waiting for the first preview frame"

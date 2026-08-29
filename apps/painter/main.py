@@ -1147,7 +1147,7 @@ class Gallery(QAbstractListModel):
                 "thumb": "", "live": True, "job": "", "grab": False}
 
     def begin_live(self, job="", grab=False):
-        """A job started: put its row at the top of the history.
+        """A job was queued or started: put its row at the top of the history.
 
         The row draws the sampler's own preview frames (GalleryView reads
         `App.previewTick`), so the generation is a thing in the grid that can be
@@ -1155,7 +1155,11 @@ class Gallery(QAbstractListModel):
         without losing the way back to the job in flight.
         """
         if self._live is not None:
-            self._live["job"] = str(job)
+            # Only ever NAMED, never un-named: the row is created at submit with
+            # no prompt id (there is none yet) and `_on_started` fills it in, so
+            # an empty key here must not wipe the id of the job now running.
+            if job:
+                self._live["job"] = str(job)
             if grab:
                 self._live["grab"] = True
                 self.liveChanged.emit()
@@ -2196,6 +2200,11 @@ class Painter(QObject):
         if self._object_info is None:
             self.toast.emit("backend is not ready yet", True)
             return
+        # ONE PRESS, ONE GRAB of the preview pane (see `_start_jobs`). Here
+        # rather than in `_start_jobs`, which is also re-entered per batch and
+        # by the warden's callback, and which cannot tell a fresh press from a
+        # queue that is already running.
+        self._live_grab = True
 
         # EDITING NEEDS THE PICTURE, and it is the one input with no default —
         # so it is checked before anything is uploaded rather than failing as a
@@ -2349,12 +2358,6 @@ class Painter(QObject):
             self._batch_saved = []
             self._batch_pending = 0
             self._batch_toasted = False
-            # QUEUEING SOMETHING NEW TAKES THE PREVIEW, whatever was being
-            # looked at [his, 2026-08-28]. Armed here rather than at every job
-            # start: a batch of four is ONE thing he asked for, so its second
-            # and third jobs must not yank him back off an output he chose to
-            # look at while it ran.
-            self._live_grab = True
         base = dict(params)
         base["loras"] = self.loras.active()
         seed = int(base.get("seed", 0))
@@ -2393,6 +2396,16 @@ class Painter(QObject):
             job = self.client.submit(built["prompt"], built["params"])
             job.meta = {"params": built["params"], "pairing": built["pairing"]}
             self._jobs += 1
+        # THE ROW APPEARS AT THE PRESS, not when the backend gets round to
+        # starting it, and QUEUEING SOMETHING NEW TAKES THE PREVIEW whatever was
+        # being looked at [his, 2026-08-28]. A prompt queued behind another job
+        # would otherwise leave him watching the old output with nothing saying
+        # his had been taken. `_live_grab` is armed once per `generate()` — one
+        # press — so the second and third jobs of a batch of four do not yank
+        # him off an output he chose to look at while it ran; `_on_started` then
+        # re-keys this row with the prompt id.
+        self.gallery.begin_live("", grab=self._live_grab)
+        self._live_grab = False
         self._busy = True
         self.busyChanged.emit()
 

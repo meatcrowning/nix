@@ -523,10 +523,15 @@ Three rules hold that together, and each one is a bug that was found:
   until he picks something else himself; clicking the running job's tile re-arms
   it, and so does pressing generate — [his] *"ensure the live step/frame preview
   replaces whatever is being previewed in the preview pane when the user queues
-  something new"*. That grab is armed **once per BATCH** (`_live_grab`, set
-  where `_batch_start` is, carried to QML as `Gallery.liveGrab`), not per job:
-  four images asked for in one press are one request, and yanking him off an
-  output mid-batch is what this pane stopped doing. `GalleryView`'s
+  something new"*. That grab is armed **once per `generate()`, i.e. per press**
+  (`_live_grab`, carried to QML as `Gallery.liveGrab`), not per job: four images
+  asked for in one press are one request, and yanking him off an output
+  mid-batch is what this pane stopped doing.
+- **The row appears at the PRESS, not at `execution_start`.** `_start_jobs`
+  calls `begin_live` once the batch is submitted and `_on_started` only re-keys
+  that row with the prompt id — a prompt queued behind another job would
+  otherwise leave him looking at the old output with nothing saying his had been
+  taken. Until the backend starts it the tile and the pane say **queued**. `GalleryView`'s
   `selectSingle` decides the flag, `followTo` is the automatic move and must
   never touch it.
 - **`Gallery.isLive` is a CALL, not a notifying property**, so nothing may hold
@@ -1346,6 +1351,15 @@ being typed, so a near-miss is never written in the first place.
   `_danbooru_tag` the transform uses, so the box and the wire cannot disagree:
   underscores become spaces, `score_*` and the emoticon tags keep theirs, and an
   artist is inserted as `@name`.
+- **An artist is inserted `@name` and a bracket is ESCAPED** [his] — half of
+  Danbooru's characters carry their series in brackets (`rebecca_(cyberpunk)`)
+  and a bare bracket in a prompt opens a weight group, so an unescaped one does
+  not merely fail to fire: it swallows the rest of the tag. `_danbooru_tag`
+  escapes on the way out, `danbooru_prompt`'s scanner does not count an escaped
+  bracket as depth — and a bracket welded to the end of a word is read as part
+  of the tag rather than as a group, so the same thing typed by hand comes out
+  right too. `boorutags._norm` strips the backslashes again, so the vocabulary
+  recognises what it told the caller to write.
 - **The comma and the space come with it** [his] — typing the separator after
   every completion is the thing being automated. Three tails take none, because
   in all three one is there already or would be wrong: a comma already

@@ -994,6 +994,13 @@ def test_video(win, ctl, tmp):
           sent.get("_submitted") is None, sent)
 
     ctl.reg.build, ctl.client.submit = orig_build, orig_submit
+    # A STUBBED SUBMIT STILL QUEUES A ROW. `_start_jobs` puts the job in the
+    # history the moment it is submitted (main.py, so the preview changes when
+    # generate is pressed and not when the backend gets round to it), and a
+    # stubbed client never finishes it — so the row is ended here rather than
+    # left at the top of the grid for every test that follows.
+    ctl.gallery.end_live()
+    spin(60)
     ctl._object_info = None
     g = prop(APP, "gen")
     g["useInputImage"] = False
@@ -1487,6 +1494,13 @@ def test_modes(win, ctl, tmp):
           ctl.property("editExtraImages"))
 
     ctl.reg.build, ctl.client.submit = orig_build, orig_submit
+    # A STUBBED SUBMIT STILL QUEUES A ROW. `_start_jobs` puts the job in the
+    # history the moment it is submitted (main.py, so the preview changes when
+    # generate is pressed and not when the backend gets round to it), and a
+    # stubbed client never finishes it — so the row is ended here rather than
+    # left at the top of the grid for every test that follows.
+    ctl.gallery.end_live()
+    spin(60)
     ctl._object_info = None
     ctl.clearInputImage()
     ctl.setMode("")
@@ -3400,6 +3414,13 @@ def test_seed(win, ctl):
           ctl.property("lastSeed") == rolled, (ctl.property("lastSeed"), rolled))
 
     ctl.reg.build, ctl.client.submit, ctl._object_info = orig_build, orig_submit, orig_oi
+    # A STUBBED SUBMIT STILL QUEUES A ROW. `_start_jobs` puts the job in the
+    # history the moment it is submitted (main.py, so the preview changes when
+    # generate is pressed and not when the backend gets round to it), and a
+    # stubbed client never finishes it — so the row is ended here rather than
+    # left at the top of the grid for every test that follows.
+    ctl.gallery.end_live()
+    spin(60)
 
 
 def test_preset_sampling(win, ctl, tmp):
@@ -3755,6 +3776,32 @@ def test_tag_complete(win, ctl, keep):
     check("...and at the end of a line the comma comes without the space",
           edit.property("text") == "long hair,\nsolo", repr(edit.property("text")))
 
+    # --- what an ARTIST and a bracketed CHARACTER insert as ----------------
+    # [his, 2026-08-28] "auto complete needs @ prepended to artists and
+    # parentheticals escaped via a back slash".
+    rows = tags.complete("toi8", 8)
+    check("an artist is offered as an artist",
+          bool(rows) and rows[0]["category"] == "artist", rows[:1])
+    check("...and inserts with its @",
+          bool(rows) and rows[0]["insert"] == "@toi8", rows[:1])
+    rows = tags.complete("rebecca_(cyber", 8)
+    hit = [r for r in rows if r["tag"] == "rebecca_(cyberpunk)"]
+    check("a character keeps its series", bool(hit), [r["tag"] for r in rows[:3]])
+    check("...and its brackets are escaped, or they open a weight group",
+          bool(hit) and hit[0]["insert"] == "rebecca \\(cyberpunk\\)",
+          hit[:1])
+
+    # ...and the escaped brackets are not read as separators when completing
+    # inside such a tag.
+    type_into("rebecca \\(cyberp")
+    check("an escaped bracket does not split the tag being typed",
+          popup.property("currentTag") == "rebecca_(cyberpunk)",
+          popup.property("currentTag"))
+    key(win, Qt.Key_Tab)
+    check("...and it completes as the whole name",
+          edit.property("text") == "rebecca \\(cyberpunk\\), ",
+          repr(edit.property("text")))
+
     edit.setProperty("text", "")
     spin(100)
     unstage()
@@ -3868,6 +3915,49 @@ def test_live_row(win, ctl, tmp):
           prop(view, "selection") == [landed], prop(view, "selection"))
     ctl.gallery.end_live("job-1c")
     spin(120)
+
+    # --- pressing GENERATE is what takes the preview, not the backend ------
+    # [his, 2026-08-28] "the active gen wont steal the preview pane, it stays on
+    # the users selection when the user initiates a generation when it should".
+    # The row is created at submit; `_on_started` only re-keys it.
+    class FakeJob:
+        def __init__(self):
+            self.meta = {}
+            self.prompt_id = "pid-submit"
+
+    orig_build, orig_submit, orig_oi = ctl.reg.build, ctl.client.submit, ctl._object_info
+    ctl.reg.build = lambda entry, params, object_info=None: (
+        {"prompt": {}, "params": dict(params), "pairing": {}})
+    ctl.client.submit = lambda prompt, params: FakeJob()
+    ctl._object_info = {"stub": True}
+    invoke_str(view, "selectSingle", landed)
+    spin(120)
+    g = prop(APP, "gen")
+    g.update({"positive": "x", "count": 1, "randomSeed": False, "seed": 7})
+    APP.setProperty("gen", g)
+    spin(80)
+    APP.metaObject().invokeMethod(APP, "submit")
+    spin(250)
+    check("pressing generate takes the preview at once, before the job starts",
+          prop(view, "selection") == [P_LIVE] and pane.property("selLive") is True,
+          (prop(view, "selection"), pane.property("selLive")))
+    check("...and the row is there before the backend has said anything",
+          ctl.gallery.isLiveAt(0) is True and ctl.gallery.property("liveGrab") is True,
+          (ctl.gallery.isLiveAt(0), ctl.gallery.property("liveGrab")))
+    ctl._on_started(FakeJob())
+    spin(150)
+    # +2: the history gained the finished output above, and this row on top of it.
+    check("...and the backend starting it only re-keys that row",
+          ctl.gallery.rowCount() == before + 2 and ctl.gallery.isLiveAt(0) is True,
+          ctl.gallery.rowCount())
+    check("...with the prompt id it now has",
+          ctl.gallery._live.get("job") == "pid-submit", ctl.gallery._live)
+    ctl.cancel()
+    spin(150)
+    check("cancelling takes the row away",
+          ctl.gallery.isLiveAt(0) is False and ctl.gallery.rowCount() == before + 1,
+          ctl.gallery.rowCount())
+    ctl.reg.build, ctl.client.submit, ctl._object_info = orig_build, orig_submit, orig_oi
 
     # --- a job that produces nothing gives its row back --------------------
     ctl.gallery.begin_live("job-2")

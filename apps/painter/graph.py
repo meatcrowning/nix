@@ -82,6 +82,11 @@ _UNSET = object()
 _VOCAB = _UNSET
 
 
+#: What a bracket has to follow to be part of a tag's NAME rather than the
+#: start of a weight group (see `danbooru_prompt`).
+_WORDCH = re.compile(r"[0-9A-Za-z_]")
+
+
 def _danbooru_tag(tag: str) -> str:
     """One tag, spelled the way Anima was captioned."""
     tag = tag.strip()
@@ -121,6 +126,14 @@ def _danbooru_tag(tag: str) -> str:
                 # unmarked]. The vocabulary knows which names are artists, so
                 # this does not have to be guessed.
                 at = at or got["category"] == "artist"
+    # A PARENTHESIS INSIDE A TAG IS PART OF ITS NAME, and a bare one in a
+    # prompt opens a weight group. Danbooru qualifies half its characters that
+    # way (`rebecca_(cyberpunk)`), so an unescaped one does not merely fail to
+    # fire — it swallows everything after it into a group. Normalised here
+    # rather than demanded of whoever typed it, which is what this function is
+    # for; already-escaped input is left where it was, not doubled.
+    body = body.replace("\\(", "(").replace("\\)", ")")
+    body = body.replace("(", "\\(").replace(")", "\\)")
     return ("@" + body) if at and body else body
 
 
@@ -171,6 +184,8 @@ def danbooru_prompt(text: str) -> str:
     still means what it meant.
     """
     out, buf, depth = [], [], 0
+    escaped = False
+    prev = ""
 
     def flush_text(chunk):
         """A run of plain tags, with whatever separated it from the group next
@@ -184,6 +199,30 @@ def danbooru_prompt(text: str) -> str:
                    else m.group(1) + m.group(3))
 
     for ch in _WS.sub(" ", text):
+        # `\(` IS A CHARACTER, NOT A GROUP. A tag that carries its series in
+        # brackets is written escaped (see `_danbooru_tag`), and a scanner that
+        # counted those as depth would read the rest of the prompt as one weight
+        # group.
+        if escaped:
+            escaped = False
+            buf.append(ch)
+            prev = ch
+            continue
+        if ch == "\\":
+            escaped = True
+            buf.append(ch)
+            prev = ch
+            continue
+        if ch == "(" and depth == 0 and _WORDCH.match(prev or ""):
+            # `rebecca_(cyberpunk)` — a bracket welded to the end of a word is
+            # part of a TAG, not the start of a weight group. Every weight group
+            # in a prompt opens after a comma, a space or nothing at all, so the
+            # character before it is what tells them apart. Written unescaped
+            # this used to eat the rest of the tag as a group and send
+            # `rebecca(cyberpunk)`; `_danbooru_tag` escapes it on the way out.
+            buf.append(ch)
+            prev = ch
+            continue
         if ch == "(":
             if depth == 0:
                 flush_text("".join(buf))
@@ -198,6 +237,7 @@ def danbooru_prompt(text: str) -> str:
                 buf = []
         else:
             buf.append(ch)
+        prev = ch
     if depth:
         out.append("".join(buf))           # an unclosed group: leave it alone
     else:

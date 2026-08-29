@@ -494,7 +494,10 @@ Item {
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.WordWrap
                     visible: tile.live && !App.hasPreview
-                    text: "waiting for the first frame"
+                    // A ROW EXISTS FROM THE PRESS, not from the first sample:
+                    // a prompt queued behind another job says so rather than
+                    // looking like one that is producing nothing.
+                    text: App.busy ? "waiting for the first frame" : "queued"
                     color: Theme.dim
                 }
 
@@ -513,12 +516,12 @@ Item {
                         anchors.centerIn: parent
                         width: parent.width - 8
                         elide: Text.ElideMiddle
-                        text: tile.live
-                              ? (App.previewFrames > 1
-                                 ? "sampling - frame " + App.previewFrame
-                                   + " of " + App.previewFrames
-                                 : "sampling")
-                              : name
+                        text: !tile.live ? name
+                              : !App.busy ? "queued"
+                              : App.previewFrames > 1
+                                ? "sampling - frame " + App.previewFrame
+                                  + " of " + App.previewFrames
+                                : "sampling"
                         color: tile.live ? Theme.accent : Theme.text
                     }
                 }

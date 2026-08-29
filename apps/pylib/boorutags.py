@@ -66,7 +66,13 @@ _INDEX_LOCK = threading.Lock()
 
 
 def _norm(s):
-    return str(s or "").strip().lower().replace(" ", "_").strip("_")
+    # BACKSLASHES ARE PROMPT SYNTAX, not part of a name. Half of Danbooru's
+    # characters carry their series in brackets (`rebecca_(cyberpunk)`) and a
+    # bare bracket in a prompt opens a weight group, so the written form is
+    # escaped (`graph._danbooru_tag`) — and the vocabulary has to recognise
+    # what it told the caller to write.
+    return (str(s or "").strip().lower().replace("\\", "")
+            .replace(" ", "_").strip("_"))
 
 
 def _load():
@@ -294,8 +300,11 @@ def check(prompt):
         if not piece:
             continue
         body = piece
-        if body.endswith(")"):
-            body = body.rstrip(")")
+        # A trailing `)` closes a WEIGHT GROUP — unless it is escaped, in which
+        # case it is the tail of a name like `rebecca \(cyberpunk\)` and
+        # stripping it turns a real tag into an invented one.
+        while body.endswith(")") and not body.endswith("\\)"):
+            body = body[:-1]
         body = body.lstrip("(").strip()
         if ":" in body:
             head, _, tail = body.rpartition(":")
