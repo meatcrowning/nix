@@ -42,9 +42,14 @@ in
     # Not on top: top's Plasma session defaults to stock Breeze (or, when
     # `my.aerotheme.enable` is set, the separate aerothemeplasma session) and
     # nobody asked for Oxygen there.
+    # soundTheme is NOT declared [2026-08-29]: plasma-manager re-asserted it on
+    # every Plasma login, so a pack picked in System Settings was silently put
+    # back to oxygen at the next session start, with nothing saying why. His
+    # call — the event sounds are a preference, not something a fresh machine
+    # needs guaranteed. lookAndFeel stays, because the colour pipeline reads
+    # the picked global theme (home/prog/plasma-colors.nix).
     workspace = lib.mkIf (host == "air") {
       lookAndFeel = "org.kde.oxygen";
-      soundTheme = "oxygen";
     };
 
     # The Logitech ERGO M575 trackball, so a PLASMA session on either host
