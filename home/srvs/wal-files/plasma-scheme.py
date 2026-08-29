@@ -180,11 +180,79 @@ def push_to_kdeglobals(minted, name, digest):
 
 
 def live_scheme():
+    """Which colour scheme kdeglobals is currently running.
+
+    `[General] ColorScheme` is the answer — but when this cannot find it the
+    whole script becomes a SILENT no-op: it mints happily, applies nothing, and
+    the desktop keeps the colours of the last successful push for ever. That is
+    what book was in on 2026-08-28 — every run printed "live scheme is '', not
+    one of ours" and the windows stayed on an accent two wallpapers old, through
+    logouts and reboots, while everything not driven by the KDE scheme (the
+    panel, kitty, the border) had moved. So there are two nets under it.
+
+    So fall back to the HASH. Plasma stores the sha1 of the .colors file it
+    applied, and our own push writes it; if it matches a candidate's file on
+    disk byte for byte, then that file IS what kdeglobals is running and the
+    scheme is ours whatever the name key says. It cannot adopt somebody else's
+    scheme by accident — a third-party scheme's hash is the hash of a file we
+    are not minting, so it matches nothing here. A successful push writes
+    `ColorScheme` back, which repairs the name for everything else that reads it.
+    """
+    # kreadconfig6 FIRST, because the name is usually not in ~/.config/kdeglobals
+    # at all. KConfig cascades: `~/.config/kdedefaults/kdeglobals` (written by
+    # plasma-apply-colorscheme and the global-theme KCM) already carries
+    # `ColorScheme=OxygenDarkFlat`, and KConfig never writes a key back into the
+    # user file when its value equals what it inherits — so our own push writes
+    # that key on every run and the user file never gains it. Reading the file
+    # by hand therefore answers "no scheme" on a perfectly ordinary Plasma
+    # install, which is why book stopped applying (2026-08-28). kreadconfig6
+    # reads the whole cascade, the way every KDE reader does.
+    kr = shutil.which("kreadconfig6")
+    if kr:
+        try:
+            out = subprocess.run([kr, "--file", "kdeglobals", "--group",
+                                  "General", "--key", "ColorScheme"],
+                                 capture_output=True, text=True, timeout=10)
+            name = out.stdout.strip()
+            if name:
+                return name
+        except (OSError, subprocess.SubprocessError):
+            pass
+
     try:
         with open(os.path.join(HOME, ".config", "kdeglobals")) as fh:
-            return scheme_name(fh.read())
+            kg = fh.read()
     except OSError:
         return ""
+
+    name = scheme_name(kg)
+    if name:
+        return name
+
+    m = re.search(r"^ColorSchemeHash=([0-9a-f]{40})$", kg, re.M)
+    if not m:
+        return ""
+    live_hash = m.group(1)
+    for path, forced in CANDIDATES:
+        try:
+            with open(path) as fh:
+                cand = forced or scheme_name(fh.read())
+        except OSError:
+            continue
+        if not cand:
+            continue
+        out = os.path.join(HOME, ".local", "share", "color-schemes",
+                           "%s.colors" % cand)
+        try:
+            with open(out) as fh:
+                body = fh.read()
+        except OSError:
+            continue
+        if hashlib.sha1(body.encode()).hexdigest() == live_hash:
+            print("plasma-scheme: kdeglobals has no ColorScheme key; "
+                  "identified '%s' by its hash" % cand, file=sys.stderr)
+            return cand
+    return ""
 
 
 def main():
