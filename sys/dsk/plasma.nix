@@ -28,11 +28,17 @@
       error_fg = "0x01DF8964";      # bold crit
     };
     desktopManager.plasma6.enable = true;
-    # Hyprland is the default session; aerotheme (when enabled) takes over instead.
-    # Plasma stays installed and selectable at the greeter — it also supplies
-    # dolphin on PATH and xdg-desktop-portal-kde, which the Hyprland setup uses.
-    displayManager.defaultSession =
-      if config.my.aerotheme.enable then "aerothemeplasma" else "hyprland";
+    # Hyprland is ALWAYS the default session. Plasma stays installed and
+    # selectable at the greeter — it also supplies dolphin on PATH and
+    # xdg-desktop-portal-kde, which the Hyprland setup uses.
+    #
+    # `my.aerotheme.enable` used to point this at "aerothemeplasma", which made
+    # trying the theme a rebuild and leaving it another one. It now only adds
+    # AeroThemePlasma to the session LIST [2026-08-28]: the aeroshell module
+    # registers its session through `services.displayManager.sessionPackages`,
+    # and ly reads that same `sessionData.desktops` path, so the entry appears
+    # in the greeter with nothing further to wire.
+    displayManager.defaultSession = "hyprland";
   };
 
   # Greeter theming at the system level: the ly module's config.ini is a
@@ -88,14 +94,29 @@
   systemd.user.paths."drkonqi-sentry-postman".enable = false;
   systemd.user.timers."drkonqi-sentry-postman".enable = false;
 
+  # AeroThemePlasma — a greeter CHOICE, not a mode the machine is in. Everything
+  # here is namespaced by upstream and cannot reach the Hyprland session: the
+  # patched libplasma installs as ATPlasma under `io.gitgud.wackyideas.plasma.*`
+  # with its `share/` stripped, and the forked shell installs as `aeroshell` /
+  # `plasma-aeroshell.service` gated on `ConditionEnvironment=PLASMA_DEFAULT_SHELL
+  # =io.gitgud.wackyideas.desktop`. So there is nothing to collide with, and no
+  # reason to keep this behind a rebuild.
+  #
+  # sddm.enable is off because the greeter is ly (see above): the ATP SDDM theme
+  # would pull kitemmodels in and point theme settings at a display manager that
+  # is not running. polkit.enable ships a drop-in for `plasma-polkit-agent`, so
+  # it reaches the Plasma sessions only — Hyprland never starts that unit.
+  # x11 is off outright; KDE drops the X11 session in 6.8 and building both
+  # doubles the kwin-effect compiles for a session that would never be picked.
   programs.aeroshell = lib.mkIf config.my.aerotheme.enable {
     enable = true;
     fonts.segoe.enable = true;
     fonts.lucida.enable = false;
     polkit.enable = true;
+    sessions.x11.enable = false;
     aerothemeplasma = {
       enable = true;
-      sddm.enable = true;
+      sddm.enable = false;
       plymouth.enable = false;
     };
   };

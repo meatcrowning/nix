@@ -19,10 +19,23 @@
 set -u
 
 CACHE="$HOME/.cache/wal"
-APPLETSRC="$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc"
 LOG="$CACHE/wallpaper-picker.log"
 
-[ -f "$APPLETSRC" ] || exit 0
+# A containment config is named after the SHELL package that owns it, so the
+# file to read depends on which Plasma session is running: stock Plasma writes
+# plasma-org.kde.plasma.desktop-appletsrc, AeroThemePlasma's forked shell writes
+# plasma-io.gitgud.wackyideas.desktop-appletsrc [2026-08-28]. Only one shell can
+# be up at a time, so take the most recently written of the two that exist —
+# the other is last session's, and reading it would re-theme from a stale image.
+APPLETSRC=""
+for f in "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" \
+         "$HOME/.config/plasma-io.gitgud.wackyideas.desktop-appletsrc"; do
+    [ -f "$f" ] || continue
+    if [ -z "$APPLETSRC" ] || [ "$f" -nt "$APPLETSRC" ]; then
+        APPLETSRC="$f"
+    fi
+done
+[ -n "$APPLETSRC" ] || exit 0
 
 # Every containment writes its own [Wallpaper][org.kde.image][General] Image=;
 # they are the same image in practice (one wallpaper across the desktops), so
