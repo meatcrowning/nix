@@ -44,15 +44,21 @@
   # book only: the gate above handles the startup race, but the chain breaks
   # again on idle. EasyEffects links easyeffects_sink:monitor ->
   # audio_effect.j313-convolver when it starts; that link (and its ports) is
-  # torn down ~25s after the last stream goes quiet, and a NEW stream does not
+  # torn down ~5-25s after the last stream goes quiet, and a NEW stream does not
   # bring it back — measured on book 2026-08-29: restart, link present and
-  # surviving active playback, gone 25s after idle, and a fresh pw-play into
+  # surviving active playback, gone ~25s after idle, and a fresh pw-play into
   # easyeffects_sink does not re-create it. Apps keep playing into
   # easyeffects_sink, so they are silent while the default-sink path (system
-  # chirp) still works. A self-healing watchdog restarts easyeffects when an
-  # app is actively playing into easyeffects_sink but the onward convolver link
-  # is missing — the only reliable heal. It never acts on idle, where no link
-  # is the normal state. See easyeffects-files/easyeffects-link-watch.py.
+  # chirp) still works. Neither WirePlumber config prevents it (EasyEffects owns
+  # the link and the ports are not externally linkable), so a restart of
+  # easyeffects is the only reliable heal. A daemon watches `pactl subscribe`
+  # and restarts easyeffects the moment an app is playing into easyeffects_sink
+  # while the onward link is missing — event-driven, so the heal lands in ~1s
+  # rather than on a poll tick (a poll-only version left up to 15s of silence
+  # at the start of each playback after idle). It never acts on idle, where no
+  # link is the normal state. When it fires, audio is ALREADY silent, so the
+  # restart restores sound rather than cutting it. See
+  # easyeffects-files/easyeffects-link-watch.py.
   xdg.configFile."scripts/easyeffects-link-watch.py" = {
     source = ./easyeffects-files/easyeffects-link-watch.py;
     executable = true;
@@ -60,30 +66,22 @@
   systemd.user.services.easyeffects-link-watch = {
     Unit = {
       Description = "Restart easyeffects if its sink loses the convolver link while audio plays";
-      # The timer fires while a stream is playing and while it is not; every run
-      # is cheap and a restart is bounded, so there is no limit to trip.
+      # Persistent daemon: restarts on failure, but never auto-restarts in a
+      # tight loop (the script is idempotent and only acts when both a playing
+      # stream and a missing link hold).
       StartLimitIntervalSec = 0;
     };
     Service = {
-      Type = "oneshot";
+      Type = "simple";
       # pactl on book is Fedora's /usr/bin/pactl — nixpkgs' libpulseaudio ships
       # no pactl binary at all, so the tail is load-bearing (see the board-watch
-      # PATH comment for the full per-host layout rationale).
+      # PATH comment for the full per-host layout rationale). systemctl comes
+      # from the same Fedora tail.
       Environment = [ "PATH=${lib.makeBinPath [ pkgs.coreutils pkgs.pipewire ]}:/usr/bin:/bin" ];
       ExecStart = "${pkgs.python3}/bin/python3 %h/.config/scripts/easyeffects-link-watch.py";
+      Restart = "on-failure";
+      RestartSec = 5;
     };
-  };
-  # The timer is the whole mechanism here — no path unit, because nothing
-  # writes a file when the link drops. It is the only trigger, and it runs
-  # often enough that a broken stream heals within a few seconds of starting.
-  systemd.user.timers.easyeffects-link-watch = {
-    Unit.Description = "Periodically re-check the easyeffects convolver link";
-    Timer = {
-      OnBootSec = "2min";
-      OnStartupSec = "2min";
-      OnUnitActiveSec = "15s";
-      Persistent = true;
-    };
-    Install.WantedBy = [ "timers.target" ];
+    Install.WantedBy = [ "default.target" ];
   };
 }
