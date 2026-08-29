@@ -97,6 +97,10 @@ SAT_REFERENCE = 0.30
 CANDIDATES = [
     (os.path.join(HOME, ".config", "scripts", "plasma-scheme-template.colors"), None),
     ("/run/current-system/sw/share/color-schemes/Aero.colors", "Aero"),
+    # book installs AeroThemePlasma from source into Fedora's own prefix, so the
+    # same scheme lives here instead. Both paths are listed unconditionally —
+    # a missing candidate is skipped, and no host has both.
+    ("/usr/share/color-schemes/Aero.colors", "Aero"),
 ]
 
 
