@@ -22,4 +22,22 @@
   # software — it is a settings window, not a game.
   systemd.user.services.easyeffects.Service.Environment =
     lib.mkIf (host == "air") [ "QT_QUICK_BACKEND=software" ];
+
+  # book only: easyeffects starts on graphical-session.target with no After= on
+  # pipewire/wireplumber, so at login it can race ahead of asahi-audio's
+  # convolver filter-chain (audio_effect.j313-convolver). If it starts first it
+  # logs "Could not find a node related to alsa_card.platform-audio.1.auto" and
+  # never creates its sink->convolver link, so program audio (which routes
+  # through easyeffects_sink) is silent while the default-sink path (system
+  # chirp, straight into the convolver) still works. Wait for the node before
+  # starting so easyeffects creates its links on the first try instead of
+  # needing a restart.
+  systemd.user.services.easyeffects.Service.ExecStartPre =
+    lib.mkIf (host == "air") [
+      (lib.concatStringsSep " " [
+        "${pkgs.bash}/bin/bash" "-c"
+        (lib.escapeShellArg
+          "for i in $(seq 1 30); do ${pkgs.pipewire}/bin/pw-cli list-objects Node 2>/dev/null | ${pkgs.gnugrep}/bin/grep -q audio_effect.j313-convolver && exit 0; ${pkgs.coreutils}/bin/sleep 1; done; echo 'convolver node not found after 30s' >&2; exit 1")
+      ])
+    ];
 }
