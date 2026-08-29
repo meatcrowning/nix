@@ -168,12 +168,26 @@ def push_to_kdeglobals(minted, name, digest):
     # `--` before the value, always: ColorAmount=-0.9 is otherwise parsed as
     # options ("Unknown options: 0, ., 9") and the inactive-effect group —
     # the one 7e659ba switched off — silently fails to write.
+    #
+    # `--notify` on EVERY write, not just the last one. The signal KConfig emits
+    # carries only the groups that invocation changed, and each of these is its
+    # own invocation — so notifying on the last write announced `[General]
+    # ColorSchemeHash` alone, and every listener that watches a COLOUR group
+    # (KColorScheme, the widget style, the Plasma theme) saw a signal about a
+    # key it does not care about and never re-read the file. That is why the
+    # whole scheme landed in kdeglobals and the Plasma panel and the Qt
+    # scrollbars stayed on the old colour until their next restart, while
+    # Konsole's terminal area — repainted out of band by konsole-theme.py's
+    # escape sequences — changed at once (2026-08-28).
+    #
+    # It costs nothing on a no-op run: kwriteconfig6 emits the signal only when
+    # the value it writes is actually different, so a re-apply of the palette
+    # that is already live is still silent.
     for grp, key, value in writes:
-        subprocess.run([kw, "--file", "kdeglobals", "--group", grp,
+        subprocess.run([kw, "--notify", "--file", "kdeglobals", "--group", grp,
                         "--key", key, "--", value], check=False)
     # Plasma stores the sha1 of the .colors file here; the KCM reads it to tell
-    # "this scheme" from "this scheme, edited". Last write carries --notify so
-    # every running KConfigWatcher re-reads the file exactly once.
+    # "this scheme" from "this scheme, edited".
     subprocess.run([kw, "--notify", "--file", "kdeglobals", "--group", "General",
                     "--key", "ColorSchemeHash", "--", digest], check=False)
     print("plasma-scheme: pushed %d keys into kdeglobals" % (len(writes) + 1))
