@@ -2677,6 +2677,13 @@ TOOL_COMPACT_FRACTION = 0.55
 TOOL_COMPACT_CHARS = 1800
 TOOL_COMPACT_KEEP = 4
 
+#: The share of a turn's real window that PAST conversation may occupy before
+#: the new prompt, system guidance, tool schemas and this turn's work arrive.
+#: The transcript on disk and on screen stays whole; only the request payload
+#: drops complete oldest turns. Keeping message groups intact matters because
+#: an orphaned tool result is not valid chat history.
+HISTORY_CTX_FRACTION = 0.40
+
 #: How full `CHAT_NUM_CTX` has to get before a round counts as having hit the
 #: ceiling (`_truncation_reason`). ollama's own accounting is prompt + generated
 #: tokens, so the last round before the wall lands a hair under it rather than
@@ -5054,10 +5061,16 @@ class Ollama(QObject):
         self._pending_users = self._user_texts(hist) + [prompt]
         self._synthetic = set()
         self._partial_prefix = ""
-        self._messages = ([{"role": "system",
-                            "content": self._system_prompt(budget["guidance"])}]
-                          + (carried if carried is not None else hist)
-                          + [user_msg])
+        past, dropped = self._fit_history(
+            carried if carried is not None else hist, self._num_ctx)
+        system = self._system_prompt(budget["guidance"])
+        if dropped:
+            system += ("\n\n%d older conversation turn%s were omitted from this "
+                       "request to leave room for the current task; the newest "
+                       "turns below are intact." %
+                       (dropped, "" if dropped == 1 else "s"))
+        self._messages = ([{"role": "system", "content": system}]
+                          + past + [user_msg])
         self._think_tokens = 0
         self._rounds = 0
         self._images_shown = set()   # every image URL already fetched this turn
@@ -5203,9 +5216,16 @@ class Ollama(QObject):
         # will not have it next turn, so the fingerprint stays the prompts.
         self._pending_users = (self._prior_users if carried is not None
                                else self._user_texts(hist))
-        self._messages = ([{"role": "system",
-                            "content": self._system_prompt(budget["guidance"])}]
-                          + (carried if carried is not None else hist)
+        past, dropped = self._fit_history(
+            carried if carried is not None else hist, self._num_ctx)
+        system = self._system_prompt(budget["guidance"])
+        if dropped:
+            system += ("\n\n%d older conversation turn%s were omitted from this "
+                       "request to leave room for the current task; the newest "
+                       "turns below are intact." %
+                       (dropped, "" if dropped == 1 else "s"))
+        self._messages = ([{"role": "system", "content": system}]
+                          + past
                           + prior
                           + [{"role": "user", "content": instruction}])
         # The partial answer and the instruction are the HARNESS talking, and
@@ -5709,6 +5729,35 @@ class Ollama(QObject):
             if role in ("user", "assistant") and isinstance(content, str) and content.strip():
                 out.append({"role": role, "content": content})
         return out
+
+    @staticmethod
+    def _fit_history(msgs, num_ctx):
+        """Keep newest complete conversational turns within a context budget.
+
+        A turn begins at a user message and includes every assistant/tool
+        message after it. Charging and dropping whole groups preserves Ollama's
+        required tool-call/result ordering. Returns ``(messages, dropped)``;
+        the caller puts the omission note in the existing system message so no
+        synthetic user turn is introduced.
+        """
+        limit = max(0, int(num_ctx * 4 * HISTORY_CTX_FRACTION))
+        groups = []
+        for msg in msgs:
+            if msg.get("role") == "user" or not groups:
+                groups.append([])
+            groups[-1].append(msg)
+        kept, spent = [], 0
+        for group in reversed(groups):
+            cost = sum(len(str(m.get("content") or "")) for m in group)
+            # Always keep the newest turn, even if it alone exceeds the share:
+            # it is the immediate working state and cannot be safely bisected.
+            if kept and spent + cost > limit:
+                break
+            kept.append(group)
+            spent += cost
+        kept.reverse()
+        flat = [m for group in kept for m in group]
+        return flat, len(groups) - len(kept)
 
     # ---- working memory: the tool rounds of the turns before this one -------
 
