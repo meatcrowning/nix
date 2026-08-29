@@ -297,6 +297,15 @@ newest text to the bottom only while he is already AT the bottom
 the position, and it re-arms when he scrolls back down to the bottom
 (docs/DESIGN.md §6.1 — never yank his position).
 
+**Streaming crosses into QML once per display frame, not once per token.**
+Ollama commonly emits one NDJSON frame for one token; rebuilding the markdown
+document, inline-media runs and bubble measurement for each one made the UI do
+quadratic-looking work on a long answer. `Ollama._stream_text` and
+`_stream_thinking` collect 33 ms at a time, `_flush_stream()` preserves the
+reasoning-to-answer boundary, and `_on_finished()` flushes synchronously before
+the row is settled or saved. The wire, accumulated answer and token accounting
+remain per-frame/exact; only the Python-to-QML repaint rate is batched.
+
 **Model stats** (the `statsRow` readout, under the server note): the selected
 model's **context ceiling** and the reply's **generation rate**, both true
 numbers not guesses (docs/DESIGN.md §10). `contextMax` is read from ollama's
@@ -642,6 +651,13 @@ that swap is worth it; nothing else does it.
   it was spawned to solve.
 - **One list for the payload and `describe_self`** — `Ollama._all_tools()`.
   Those were written out twice and had already started to drift.
+- **An exact failed or one-shot tool call is not run twice in one turn.**
+  `_tool_seen` reuses completed failures plus the deliberately small
+  `TOOL_ONCE_NAMES` set (edits/deletes, generation, jobs and durable writes),
+  with a result note telling the model to use what it has or change the
+  arguments. Successful reads and runners are never cached: reading after an
+  edit is verification, and rerunning a test can be intentional. Subagents
+  carry the same per-run cache. Harness: `tools/tool-repeat-test.py`.
 - **Harness**: `tools/subagent-test.py` — drives a real spawn through the real
   window (offscreen) against a stub ollama and reads all four request bodies:
   the subagent gets its own system prompt and its own restricted tool list, it
@@ -965,9 +981,13 @@ lets `book` drive jobs on `top` over the same ssh every other executor here
 uses, with no daemon and no port. The runner is detached in its own session,
 so `stop` can take the whole process group down rather than a shell.
 
-- **Verbs**: `job-run.py start|list|stop|clear|run <root>`. `list` is the only
-  one the window calls on a timer (2s while anything runs, 6s otherwise), and
-  it returns each job's tail as well as its state, so one poll draws everything.
+- **Verbs**: `job-run.py start|list|stop|clear|run <root>`. When jobs act on the
+  window's local host (the default on either machine), it watches the jobs root,
+  job directories, status files and logs through `QFileSystemWatcher`,
+  coalescing write bursts for 120 ms; a 60-second poll is only a missed-event
+  safety net. When `$ORACLE_TOOLS_HOST` points jobs across ssh, they cannot be
+  watched locally, so chatter keeps the 2s-running/6s-idle poll. `list` returns
+  each job's tail as well as its state, so one refresh draws everything.
 - **A job whose runner died is not "running" for ever** — `list` checks the pid,
   never the file alone (a reboot or an OOM leaves a stale status behind).
 - **Two limits protect the machine, not the job**: `MAX_SECONDS_DEFAULT` (12h)
