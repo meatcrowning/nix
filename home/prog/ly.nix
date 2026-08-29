@@ -57,7 +57,7 @@ lib.mkIf (host == "air") {
   # sitting correctly in /usr/share/wayland-sessions the whole time.
   home.activation.lySessionEntries = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     mkdir -p "$HOME/.config/ly/wayland-sessions"
-    for f in hyprland-uwsm.desktop plasma.desktop aerothemeplasma.desktop; do
+    for f in hyprland-uwsm.desktop plasma.desktop; do
       [ -f "/usr/share/wayland-sessions/$f" ] && cp -f "/usr/share/wayland-sessions/$f" "$HOME/.config/ly/wayland-sessions/$f"
     done
   '';
