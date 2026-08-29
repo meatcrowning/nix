@@ -48,9 +48,16 @@ lib.mkIf (host == "air") {
   # Fedora's other wayland sessions, refreshed into the same dir on every
   # switch so the greeter keeps offering them (a future dnf update that adds
   # or renames a session entry shows up at the next switch).
+  #
+  # This list is an ALLOWLIST, not a mirror: `waylandsessions` above points ly
+  # at this directory instead of /usr/share/wayland-sessions, so a session
+  # installed into Fedora's prefix does NOT appear in the greeter until its
+  # entry is named here. AeroThemePlasma (installed from source on book,
+  # 2026-08-28) was invisible for exactly that reason, with the .desktop file
+  # sitting correctly in /usr/share/wayland-sessions the whole time.
   home.activation.lySessionEntries = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     mkdir -p "$HOME/.config/ly/wayland-sessions"
-    for f in hyprland-uwsm.desktop plasma.desktop; do
+    for f in hyprland-uwsm.desktop plasma.desktop aerothemeplasma.desktop; do
       [ -f "/usr/share/wayland-sessions/$f" ] && cp -f "/usr/share/wayland-sessions/$f" "$HOME/.config/ly/wayland-sessions/$f"
     done
   '';
