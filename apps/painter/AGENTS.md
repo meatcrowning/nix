@@ -482,19 +482,57 @@ comes back mirrored on the first launch after the change.
 
 Above the history, off by default, toggled from the titlebar's `pv` cell
 (`PreviewPane.qml`, height dragged by the same grip a prompt box has, remembered
-as `preview.h`). **It is the RUNNING JOB, not a browser** — [his] *"it should
-only show the preview frames of the generating image or video and when complete
-should just show that image or video, no clicking on other outputs or
-anything"*. Two states, no controls:
+as `preview.h`). **It shows WHAT IS SELECTED — and the running job is one of the
+things that can be selected.**
 
-1. **the sampler's own preview frames** while a job runs — `main.py`'s
-   `LivePreview` (a `QQuickImageProvider`) fed from `ComfyClient.jobPreview`,
-   addressed as `image://livepreview/<tick>` because an `Image` whose URL never
-   changes never reloads.
-2. **what it made**, once it lands: the newest gallery row, full stop. A clip
-   plays looped and **muted** — a preview beside a music player, not playback.
-   Playback is viewer, on a double-click in the grid. A single click in the grid
-   does nothing at all, deliberately.
+It was the running job and nothing else until 2026-08-28, deliberately: [his]
+*"it should only show the preview frames of the generating image or video and
+when complete should just show that image or video, no clicking on other outputs
+or anything"*. What replaced that is his too, and it keeps both halves rather
+than trading one for the other — *"make it so the preview element displays the
+currently selected output, so the user can select what's being shown ... i
+propose that the preview of the current step of the currently processing
+generation get added to the history section and then get replaced with the full
+output when its finished"*. So:
+
+1. **the generation in flight is a ROW in the history** — `Gallery.begin_live()`
+   at `_on_started`, a sentinel path (`LIVE_PATH`, `live://generating`) that is
+   not a file, drawing the sampler's own preview frames in its tile. `main.py`'s
+   `LivePreview` (a `QQuickImageProvider`) feeds them from
+   `ComfyClient.jobPreview`, addressed as `image://livepreview/<tick>` because
+   an `Image` whose URL never changes never reloads.
+2. **the output it produced takes that row over** — `Gallery.add(path, job)`
+   ends the live row and inserts the file, `liveReplaced` moves the selection
+   with it. A job that produced nothing (cancelled, failed, no images) gives the
+   row back at `_on_finished`/`_on_failed`/`cancel` instead.
+3. **the pane draws the selection**: the running job's frames, one output, or —
+   with nothing selected, or a set — the newest output. A clip plays looped and
+   **muted**, a preview beside a music player, not playback. Playback is viewer,
+   on a double-click in the grid.
+
+Three rules hold that together, and each one is a bug that was found:
+
+- **A job in flight is not a file, and nothing may treat it as one.** Its path
+  exists nowhere, so `indexOf`/`has_path`/the thumbnail cache never match it —
+  and `Root.selOne` excludes it explicitly, which is what makes every verb that
+  needs a file (open, view, inject, reuse, copy prompt, the walk keys) grey out
+  with no branch of its own. Its tile has no drag, no double-click and a
+  one-verb menu: **cancel generation**.
+- **`followLive` is the way back.** The selection moves onto each job as it
+  starts and onto the file it produced when it lands, until he picks something
+  else himself; clicking the running job's tile re-arms it. `GalleryView`'s
+  `selectSingle` decides the flag, `followTo` is the automatic move and must
+  never touch it.
+- **`Gallery.isLive` is a CALL, not a notifying property**, so nothing may hold
+  a binding over it: `PreviewPane.selLive` is set inside `refresh()`, which runs
+  from the `selPath` change handler — one step before any binding on `selPath`
+  has re-run. A binding there drew the previous selection, which is exactly how
+  the sentinel path ended up in a `file://` URL.
+- **Neither a filter nor a rescan may take the job off the screen.** It has no
+  filename or prompt to match (`_matches` exempts it) and it is not in the
+  output directory (`load_existing` puts it back).
+
+Harness: `tools/ui-test.py` → `test_live_row`.
 
 **A video job WALKS the clip, and that walk is a local backend patch.** [his]
 *"why will sampling previews only show the first frame from the generation"* —
@@ -1281,6 +1319,44 @@ keep their underscores because they are not word separators: `score_*`, the
 emoticon tags (`^_^`, `>_<` — one character either side and nothing else), and
 whatever is inside a weight group, which is normalised tag by tag with the
 weight untouched, so `(lowres, low_quality:-1.0)` stays a weight group.
+
+## Tag completion in the prompt boxes
+
+[his, 2026-08-28] tag autocomplete *"a la those comfyui extensions and what the
+og cte does"*. The vocabulary was already here — the transform above spells a
+WRITTEN prompt with it — so this is the other half: the tag offered while it is
+being typed, so a near-miss is never written in the first place.
+
+- **The gate is the family's `prompt_transform`.** `danbooru` means this prompt
+  is written in the site's tags, which is the only prompt a tag list belongs
+  over; on Krea's `<think>` prose or a video shot description the whole feature
+  is off, not merely unhelpful. Both boxes get it — a negative is tags too.
+- **`Tags` (main.py) is the context property**, `pylib/boorutags` behind it. It
+  answers or it says nothing: until the index is built `complete()` returns
+  nothing and the popup is not there, and the build runs on a `QThreadPool`
+  worker started when a box that wants completions takes the keyboard — never in
+  front of him, and never in a session that types no Anima prompt.
+- **What it inserts is what will be SENT.** `graph.spell_tag` is the same
+  `_danbooru_tag` the transform uses, so the box and the wire cannot disagree:
+  underscores become spaces, `score_*` and the emoticon tags keep theirs, and an
+  artist is inserted as `@name`.
+- **The list is `TagPopup.qml`, one per scene** — same argument as `CtxMenu` and
+  `PickerOverlay` (a prompt box is 64-130px tall), reached through
+  `ParamsPane.tagPopup` the way the other two are. **It never takes the
+  keyboard**: `PromptBox` drives it from the editor's own key handler, because
+  the point is that typing continues underneath it.
+- **Escape is spent by whichever handler reaches it first.** A window-level
+  `Shortcut` fires AND the key still reaches the editor's `Keys.onEscapePressed`
+  — measured. That is invisible while the two agree and it is the bug when they
+  do not (the shortcut closes the list, the editor then sees no list and lets go
+  of the box he is typing in), so `TagPopup.justClosed` is true for the rest of
+  that event.
+- **Re-completing what was just accepted is suppressed by POSITION**, not by a
+  flag: `PromptBox.skipAt` is where the caret was left, and any key at all moves
+  off it. The flag it replaced swallowed whichever refresh came first, which was
+  sometimes the next word he typed.
+
+Harness: `tools/ui-test.py` → `test_tag_complete`.
 
 ## NegPip: the negative goes IN the positive
 

@@ -8,6 +8,28 @@ Rectangle {
     property bool negative: false
     signal edited(string text)
 
+    // ------------------------------------------------------ tag completion
+    //: The scene's one `TagPopup` (see Root.qml), and whether this family's
+    //: prompt is written in Danbooru tags at all. On a prose family — Krea's
+    //: `<think>` paragraphs, a video shot description — a tag list popping up
+    //: mid-sentence is noise, so the whole feature is off there rather than
+    //: merely unhelpful.
+    property Item tagPopup: null
+    property bool tagsEnabled: false
+    readonly property bool tagsOn: box.tagsEnabled && box.tagPopup !== null
+                                   && typeof Tags !== "undefined" && Tags && Tags.available
+    //: The last query sent, so an unchanged one does not reset the highlighted
+    //: row under him while he is arrowing through it.
+    property string lastQuery: ""
+    //: WHERE THE CARET WAS LEFT BY AN INSERTION. Completing writes the tag and
+    //: its comma, which is a text change like any other — and re-completing the
+    //: word that was just accepted would reopen the list on top of itself. A
+    //: POSITION rather than a flag: any key at all moves the caret off it, so
+    //: this cannot swallow the next query the way a "skip one refresh" flag did
+    //: (the refresh it skipped was whichever came first, which was sometimes
+    //: the next word he typed).
+    property int skipAt: -1
+
     // `value` is the MODEL's text; `input.text` is the editor's. They are synced
     // one way, on change, and never bound to each other — `text: root.gen.positive`
     // plus `onTextChanged -> root.set(...)` is a cycle, and the moment `gen`
@@ -26,9 +48,103 @@ Rectangle {
         syncing = true
         input.text = value
         syncing = false
+        box.closeCompletion()
     }
     // The editor's own text, for callers that want to read it back.
     readonly property alias text: input.text
+
+    //: THE TAG UNDER THE CARET. A prompt is comma-separated tags, weight groups
+    //: and (on Anima) the odd natural-language clause, so the token is whatever
+    //: lies between the nearest separators — and the caret has to be INSIDE it,
+    //: or "1girl, " with the caret after the space would offer completions for
+    //: the tag before it.
+    function tokenBounds() {
+        var t = input.text, pos = input.cursorPosition;
+        var seps = ",\n()|:";
+        var s = pos, e = pos;
+        while (s > 0 && seps.indexOf(t.charAt(s - 1)) < 0) s--;
+        while (e < t.length && seps.indexOf(t.charAt(e)) < 0) e++;
+        while (s < e && t.charAt(s) === " ") s++;
+        while (e > s && t.charAt(e - 1) === " ") e--;
+        var ok = pos >= s && pos <= e;
+        return { start: s, end: e, ok: ok, word: ok ? t.substring(s, e) : "" };
+    }
+
+    //: What is offered for it — or nothing, which is most of the time. Two
+    //: characters minimum (one letter matches thousands of tags and none of
+    //: them is the one meant), and a clause is left alone: a full stop or more
+    //: than four words is prose, exactly as `boorutags.check` reads it.
+    function completionQuery() {
+        if (!box.tagsOn || !input.activeFocus) return "";
+        var b = box.tokenBounds();
+        if (!b.ok) return "";
+        var w = b.word.replace(/^@/, "").trim();
+        if (w.length < 2 || w.indexOf(".") >= 0 || w.split(" ").length > 4) return "";
+        return w;
+    }
+
+    function refreshCompletion() {
+        if (!box.tagsOn) return;
+        if (input.cursorPosition === box.skipAt) { box.closeCompletion(); return }
+        box.skipAt = -1;
+        var q = box.completionQuery();
+        if (q === "") { box.closeCompletion(); return }
+        var rows = Tags.complete(q, 8);
+        if (!rows || rows.length === 0) { box.closeCompletion(); return }
+        var items = [];
+        for (var i = 0; i < rows.length; i++)
+            items.push({ tag: rows[i].tag, alias: rows[i].alias,
+                         category: rows[i].category, posts: rows[i].posts,
+                         insert: rows[i].insert,
+                         trigger: (function (e) { return function () { box.insertTag(e) } })(rows[i]) });
+        var r = input.positionToRectangle(input.cursorPosition);
+        var p = input.mapToItem(null, r.x, r.y);
+        box.lastQuery = q;
+        box.tagPopup.open(p.x, p.y, items, r.height);
+    }
+
+    function closeCompletion() {
+        box.lastQuery = "";
+        if (box.tagPopup && box.tagPopup.visible) box.tagPopup.close();
+    }
+
+    //: Whether the popup on screen belongs to THIS box — there is one of them
+    //: and two of these, and the keys must only be taken by the one being typed
+    //: in.
+    function completionMine() {
+        return box.tagsOn && box.tagPopup.visible && input.activeFocus
+    }
+
+    //: Replace the token with the tag, spelled the way it will be SENT
+    //: (`graph.spell_tag`, the same function the transform uses), and put the
+    //: comma in — a tag list is comma-separated and typing the separator by
+    //: hand after every completion is the thing being automated.
+    function insertTag(entry) {
+        var b = box.tokenBounds();
+        if (!b.ok) return;
+        var ins = entry.insert;
+        var tail = input.text.substring(b.end);
+        if (!/^\s*[,)\n]/.test(tail)) ins += ", ";
+        input.remove(b.start, b.end);
+        input.insert(b.start, ins);
+        input.cursorPosition = b.start + ins.length;
+        box.skipAt = input.cursorPosition;
+        box.closeCompletion();
+    }
+
+    //: The index costs ~0.6s to build, once, on a worker thread — started when
+    //: a box that WANTS completions takes the keyboard, so a session that never
+    //: types an Anima prompt never pays for it.
+    Connections {
+        target: (typeof Tags !== "undefined" && Tags) ? Tags : null
+        function onReadyChanged() { box.refreshCompletion() }
+    }
+
+    Timer {
+        id: completeSoon
+        interval: 80        // a keystroke's worth: this runs on the GUI thread
+        onTriggered: box.refreshCompletion()
+    }
 
     //: A prompt is prose, so it is spellchecked (`qmlcommon/SpellMarks.qml`) and
     //: right-clicking a marked word offers corrections. The MENU cannot live in
@@ -110,18 +226,55 @@ Rectangle {
             persistentSelection: true
             selectionColor: Theme.accent
             selectedTextColor: Theme.bg
-            onTextChanged: if (!box.syncing) box.edited(text)
+            onTextChanged: {
+                if (!box.syncing) box.edited(text);
+                if (box.tagsOn) completeSoon.restart();
+            }
+            onCursorPositionChanged: if (box.tagsOn) completeSoon.restart()
+            onActiveFocusChanged: {
+                if (activeFocus) { if (box.tagsOn) Tags.prepare() }
+                else box.closeCompletion();
+            }
             // Ctrl+Enter belongs to the window, not the editor.
+            //
+            // AND WHILE THE TAG LIST IS OPEN it owns the four keys a list owns:
+            // up/down walk it, Tab and Return take the highlighted row. Escape
+            // is NOT here — a window-level `Shortcut` sees a key before any
+            // focused item does (Root.qml), so closing the list on Escape has
+            // to be the first branch of the window's own chain or it would
+            // release the box instead.
             Keys.onPressed: function (e) {
                 if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter)
                         && (e.modifiers & Qt.ControlModifier)) {
                     e.accepted = false
+                    return
+                }
+                if (!box.completionMine()) return
+                if (e.key === Qt.Key_Down) { box.tagPopup.move(1); e.accepted = true }
+                else if (e.key === Qt.Key_Up) { box.tagPopup.move(-1); e.accepted = true }
+                else if (e.key === Qt.Key_Tab
+                         || e.key === Qt.Key_Return || e.key === Qt.Key_Enter) {
+                    box.tagPopup.accept()
+                    e.accepted = true
                 }
             }
             // Escape LETS GO of the box — the one thing it is for here. Handled
             // on the editor as well as at the window, because a focused text
             // item is exactly where a window-level Shortcut is least reliable.
+            //
+            // BOTH OF THEM RUN, measured: the window's `Shortcut` fires and the
+            // key still reaches this handler. That is invisible while the two
+            // agree (they both release the box) and it is exactly the bug when
+            // they do not — the shortcut closes the tag list, this one then
+            // sees no list and lets go of the box he is still typing in. So an
+            // Escape that DISMISSED a list is spent, whichever of the two got
+            // to it first: `justClosed` is true for the rest of this event.
             Keys.onEscapePressed: function (e) {
+                if (box.tagsOn && (box.tagPopup.visible || box.tagPopup.justClosed)) {
+                    box.closeCompletion()
+                    e.accepted = true
+                    return
+                }
                 root.releaseFocus()
                 e.accepted = true
             }

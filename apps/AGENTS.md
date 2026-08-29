@@ -235,6 +235,16 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
   `danbooru` transform does that conversion at generation time, so lookups here
   take either and answer in the site's form. Harness:
   `apps/painter/tools/anima-test.py`.
+    - **`search` is a completer's function since 2026-08-28**, so it carries an
+      INDEX: a word map plus a sorted name list, built by `build_index()` and
+      published as one tuple, which takes a query from **175ms to under 4ms** at
+      ~24 MB and one ~0.6s build. Build it on a worker thread (painter's `Tags`
+      object does) — never in front of him at the first keystroke. The ranking
+      is unchanged and that is checked, not assumed: the scanning path stopped
+      after `limit * 4` matches, and **that horizon is part of the ranking** —
+      without it a two-letter query answers with a dozen unheard-of artists who
+      happen to have `lo` as a whole word instead of with `long_hair`. The
+      indexed path reproduces the same cut.
 - **`clipfile.py`** — files onto the Wayland clipboard, AS FILES (and with
   `--image`, the picture too). Four callers now — viewer, filer, painter and
   chatter's log — and the module docstring is the authoritative statement of

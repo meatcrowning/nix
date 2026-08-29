@@ -13,6 +13,11 @@ Panel {
     PromptBox {
         id: positive
         width: parent.width
+        // TAG COMPLETION IS A DANBOORU-FAMILY FEATURE. `danbooru` is the
+        // transform that says this prompt is written in the site's tags, which
+        // is the only prompt a tag list belongs over (Anima's, today).
+        tagsEnabled: root.gen.promptTransform === "danbooru"
+        tagPopup: root.tagPopup
         // Dragged by its bottom edge and remembered, per box (Panel's own
         // collapsed state is persisted the same way).
         boxHeight: Prefs.get("prompt.posH") > 0 ? Prefs.get("prompt.posH") : 130
@@ -39,6 +44,10 @@ Panel {
     PromptBox {
         id: negative
         width: parent.width
+        // The negative is tags too — `lowres, worst quality` — so it completes
+        // on the same families the positive does.
+        tagsEnabled: root.gen.promptTransform === "danbooru"
+        tagPopup: root.tagPopup
         visible: !App.isVideo && !App.isEdit
         boxHeight: Prefs.get("prompt.negH") > 0 ? Prefs.get("prompt.negH") : 64
         placeholder: "negative"

@@ -1,19 +1,24 @@
 import QtQuick
 import QtMultimedia
 
-// THE JOB THAT IS RUNNING, and then what it made.  Off by default, toggled from
-// the titlebar ("pv"), and deliberately not a picker:
+// WHATEVER IS SELECTED — which, while a job runs, is the job.
 //
-//   [his] "when toggled it should only show the preview frames of the
-//          generating image or video and when complete should just show that
-//          image or video, no clicking on other outputs or anything"
+// It used to be the running job and nothing else, deliberately: [his] "when
+// toggled it should only show the preview frames of the generating image or
+// video and when complete should just show that image or video, no clicking on
+// other outputs or anything". That is superseded [his, 2026-08-28] — "make it
+// so the preview element displays the currently selected output, so the user
+// can select what's being shown" — and the way it keeps BOTH is his too: the
+// generation in flight takes a row in the history (main.py `Gallery.begin_live`)
+// and is replaced there by the output it produced, so "the job" and "an older
+// output" are the same kind of thing to select, and going back to the running
+// job is a click on its tile rather than a mode.
 //
-// So it has exactly two states and no controls. While a job runs it shows the
-// sampler's own preview frames (the ones ComfyUI pushes down the websocket,
-// `App.hasPreview`, fed by main.py's LivePreview image provider). When the job
-// lands it shows that output — the newest row in the gallery — and a clip plays
-// looped and MUTED, because it is a preview beside a music player, not
-// playback. Playback is `viewer`, on a double-click in the grid.
+// So: the selected row, or the newest output when nothing is selected. The
+// selected row being the RUNNING one is what draws the sampler's own preview
+// frames (`App.hasPreview`, fed by main.py's LivePreview image provider). A
+// clip plays looped and MUTED, because it is a preview beside a music player,
+// not playback. Playback is `viewer`, on a double-click in the grid.
 //
 // ComfyUI's video preview is a STILL FRAME PER STEP, not a moving clip:
 // Latent2RGBPreviewer takes x0[0, :, 0] out of a 5-D latent, i.e. the first
@@ -32,27 +37,53 @@ Item {
     readonly property int minHeight: 90
     readonly property int maxHeight: 900
 
-    // What the last finished job produced. Nothing else ever sets these — the
-    // pane follows the newest output, it is not a way to browse older ones.
+    //: What the results pane says is selected — one output, the running job's
+    //: row, or "" for none and a multiple selection alike (there is no single
+    //: thing to show for a set).
+    property string selPath: ""
+    //: Whether that selection IS the running job. Not a binding: `Gallery.isLive`
+    //: is a call, not a notifying property, so a binding over it would answer
+    //: with whatever it last evaluated — and it is read from `refresh()`, which
+    //: runs in the `selPath` change handler, i.e. one step BEFORE any binding on
+    //: `selPath` has re-run. It is set where it is decided instead.
+    property bool selLive: false
+    //: The sampler's frames, rather than a file: the running job is what is
+    //: selected, or nothing is and one is running.
+    readonly property bool showLive: App.hasPreview && (pane.selLive || pane.selPath === "")
+
+    // The file being drawn, derived from the selection — never written from
+    // anywhere else.
     property string source: ""
     property bool sourceIsVideo: false
 
-    function showNewest() {
-        if (Gallery.count > 0) {
-            pane.source = Gallery.pathAt(0)
-            pane.sourceIsVideo = Gallery.isVideoAt(0)
+    function refresh() {
+        pane.selLive = pane.selPath !== "" && Gallery.isLive(pane.selPath)
+        if (pane.selLive) { pane.source = ""; pane.sourceIsVideo = false; return }
+        var p = pane.selPath
+        if (p === "") {
+            // Nothing picked: the newest OUTPUT, which is row 0 unless a job is
+            // sampling in it.
+            for (var i = 0; i < Gallery.count; i++) {
+                if (!Gallery.isLiveAt(i)) { p = Gallery.pathAt(i); break }
+            }
         }
+        pane.source = p
+        pane.sourceIsVideo = p === "" ? false
+                                      : Gallery.isVideoAt(Gallery.indexOf(p))
     }
+    onSelPathChanged: pane.refresh()
 
     visible: open
     height: open ? paneHeight : 0
 
-    // A landed job is a new row 0, which is the thing to show.
+    // A row landing or going changes what "the newest output" is, and can also
+    // be the file this pane is drawing being deleted.
     Connections {
         target: Gallery
-        function onCountChanged() { pane.showNewest() }
+        function onCountChanged() { pane.refresh() }
+        function onLiveChanged() { pane.refresh() }
     }
-    Component.onCompleted: pane.showNewest()
+    Component.onCompleted: pane.refresh()
 
     Rectangle {
         id: frame
@@ -67,10 +98,10 @@ Item {
         Image {
             anchors.fill: parent
             anchors.margins: 1
-            visible: App.hasPreview
+            visible: pane.showLive
             // A provider image only reloads when the URL CHANGES, so the tick
             // is in it (main.py increments it per frame).
-            source: (pane.open && App.hasPreview)
+            source: (pane.open && pane.showLive)
                     ? ("image://livepreview/" + App.previewTick) : ""
             fillMode: Image.PreserveAspectFit
             cache: false
@@ -82,7 +113,7 @@ Item {
             id: finishedStill
             anchors.fill: parent
             anchors.margins: 1
-            visible: !App.hasPreview && pane.source !== "" && !pane.sourceIsVideo
+            visible: !pane.showLive && pane.source !== "" && !pane.sourceIsVideo
             // The pane being shut means the file is not decoded at all, not
             // merely not drawn — see the MediaPlayer below.
             source: (pane.open && visible) ? "file://" + pane.source : ""
@@ -107,7 +138,7 @@ Item {
         AudioOutput { id: silent; muted: true }
         MediaPlayer {
             id: player
-            source: (pane.open && !App.hasPreview
+            source: (pane.open && !pane.showLive
                      && pane.source !== "" && pane.sourceIsVideo)
                     ? "file://" + pane.source : ""
             videoOutput: videoOut
@@ -119,7 +150,7 @@ Item {
             id: videoOut
             anchors.fill: parent
             anchors.margins: 1
-            visible: !App.hasPreview && pane.source !== "" && pane.sourceIsVideo
+            visible: !pane.showLive && pane.source !== "" && pane.sourceIsVideo
             fillMode: VideoOutput.PreserveAspectFit
 
             // CLICK IT TO STOP IT. A looping clip is the right default for a
@@ -141,7 +172,7 @@ Item {
             width: parent.width - 16
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
-            visible: !App.hasPreview && pane.source === ""
+            visible: !pane.showLive && pane.source === ""
             // BE HONEST ABOUT THE LIKELY REASON. A backend started before the
             // --preview-method flag existed sends nothing at all, and "waiting"
             // would be a lie that never resolves. A first step can genuinely
@@ -164,7 +195,7 @@ Item {
             height: 18
             color: Theme.bg
             opacity: 0.85
-            visible: App.hasPreview || pane.source !== ""
+            visible: pane.showLive || pane.source !== ""
             PixelText {
                 id: tag
                 anchors.centerIn: parent
@@ -176,13 +207,13 @@ Item {
                 // metadata (apps/painter/AGENTS.md records both halves). With
                 // an unpatched backend `previewFrames` is 0 and this says
                 // "frame 1", which is what such a backend is showing.
-                text: App.hasPreview
+                text: pane.showLive
                       ? (App.previewFrames > 1
                          ? "sampling · frame " + App.previewFrame
                            + " of " + App.previewFrames
                          : (App.isVideo ? "sampling · frame 1" : "sampling"))
                       : (pane.sourceIsVideo ? "clip" : "still")
-                color: App.hasPreview ? Theme.accent : Theme.textDim
+                color: pane.showLive ? Theme.accent : Theme.textDim
             }
         }
     }
