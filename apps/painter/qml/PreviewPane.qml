@@ -76,6 +76,55 @@ Item {
     property string source: ""
     property bool sourceIsVideo: false
 
+    // ------------------------------------------------------------ zoom + pan
+    //
+    // WHEEL ZOOMS, WHEEL-CLICK-DRAG PANS [his, 2026-08-28]. The pane is a few
+    // hundred pixels tall and an output is a megapixel, so "is that hand right"
+    // used to mean opening it in View or in viewer; this is the same gesture
+    // every picture on this desktop takes (§6.4: a direct-manipulation drag has
+    // ZERO easing, so neither of these animates).
+    //
+    // The zoom is about the POINTER, not the middle of the pane — zooming into
+    // the corner you are looking at is the whole point of a wheel zoom.
+    property real zoom: 1.0
+    property real panX: 0
+    property real panY: 0
+    readonly property real maxZoom: 8.0
+
+    function resetView() {
+        pane.zoom = 1.0
+        pane.panX = 0
+        pane.panY = 0
+    }
+
+    function zoomAt(factor, cx, cy) {
+        var z = Math.max(1.0, Math.min(pane.maxZoom, pane.zoom * factor))
+        if (z === pane.zoom) return
+        // Keep the point under the cursor where it is: pan' = c - (c - pan)*k.
+        var k = z / pane.zoom
+        pane.panX = cx - (cx - pane.panX) * k
+        pane.panY = cy - (cy - pane.panY) * k
+        pane.zoom = z
+        pane.clampPan()
+    }
+
+    //: The picture may not be dragged off its own pane. At 1:1 there is nothing
+    //: to pan, so it is pinned — a picture that can be nudged around inside a
+    //: box it already fits is the loose kind of control this desktop does not
+    //: have (docs/DESIGN.md §10).
+    function clampPan() {
+        var w = frame.width - 2, h = frame.height - 2
+        var minX = w - w * pane.zoom, minY = h - h * pane.zoom
+        pane.panX = Math.min(0, Math.max(minX, pane.panX))
+        pane.panY = Math.min(0, Math.max(minY, pane.panY))
+    }
+
+    // A different picture starts at fit — a zoom belongs to the thing it was
+    // aimed at, and inheriting one is how a pane ends up showing a corner of
+    // something nobody asked to look at closely.
+    onSourceChanged: pane.resetView()
+    onShowLiveChanged: pane.resetView()
+
     function refresh() {
         pane.selLive = pane.selPath !== "" && Gallery.isLive(pane.selPath)
         if (pane.selLive) { pane.source = ""; pane.sourceIsVideo = false; return }
@@ -141,90 +190,154 @@ Item {
         border.width: Theme.ctrlBorder
         clip: true
 
-        // (1) the live sampler preview
-        Image {
+        // EVERYTHING DRAWN IS INSIDE THIS, and this is what zoom and pan move:
+        // one transform over the sampler frames, the still and the clip alike,
+        // so there is one place a zoom lives rather than three.
+        Item {
+            id: viewport
             anchors.fill: parent
             anchors.margins: 1
-            visible: pane.showLive
-            // A provider image only reloads when the URL CHANGES, so the tick
-            // is in it (main.py increments it per frame).
-            source: (pane.open && pane.showLive)
-                    ? ("image://livepreview/" + App.previewTick) : ""
-            fillMode: Image.PreserveAspectFit
-            cache: false
-            asynchronous: true
-        }
+            clip: true
 
-        // (2a) the finished still
-        Image {
-            id: finishedStill
-            anchors.fill: parent
-            anchors.margins: 1
-            visible: !pane.showLive && pane.source !== "" && !pane.sourceIsVideo
-            // LOADING IS NOT DRAWING. The pane being shut means the file is not
-            // decoded at all (see the MediaPlayer below) — but `visible` must
-            // NOT be in this condition: during the handover above this item is
-            // hidden on purpose while the file loads, and a source bound to
-            // `visible` would never start loading, so `status` would never
-            // reach Ready and the handover would only ever end on its timeout.
-            source: (pane.open && pane.source !== "" && !pane.sourceIsVideo)
-                    ? "file://" + pane.source : ""
-            fillMode: Image.PreserveAspectFit
-            cache: false
-            asynchronous: true
-            onStatusChanged: if (status === Image.Ready || status === Image.Error) {
-                                 pane.handover = false
-                                 pane.handoverPath = ""
-                             }
+            Item {
+                id: canvas
+                width: viewport.width
+                height: viewport.height
+                transformOrigin: Item.TopLeft
+                scale: pane.zoom
+                x: pane.panX
+                y: pane.panY
 
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.LeftButton
-                onDoubleClicked: if (pane.source !== "") pane.openRequested(pane.source)
+                // (1) the live sampler preview
+                Image {
+                    anchors.fill: parent
+                    visible: pane.showLive
+                    // A provider image only reloads when the URL CHANGES, so
+                    // the tick is in it (main.py increments it per frame).
+                    source: (pane.open && pane.showLive)
+                            ? ("image://livepreview/" + App.previewTick) : ""
+                    fillMode: Image.PreserveAspectFit
+                    cache: false
+                    asynchronous: true
+                }
+
+                // (2a) the finished still
+                Image {
+                    id: finishedStill
+                    anchors.fill: parent
+                    visible: !pane.showLive && pane.source !== "" && !pane.sourceIsVideo
+                    // LOADING IS NOT DRAWING. The pane being shut means the file
+                    // is not decoded at all (see the MediaPlayer below) — but
+                    // `visible` must NOT be in this condition: during the
+                    // handover above this item is hidden on purpose while the
+                    // file loads, and a source bound to `visible` would never
+                    // start loading, so `status` would never reach Ready and the
+                    // handover would only ever end on its timeout.
+                    source: (pane.open && pane.source !== "" && !pane.sourceIsVideo)
+                            ? "file://" + pane.source : ""
+                    fillMode: Image.PreserveAspectFit
+                    cache: false
+                    asynchronous: true
+                    onStatusChanged: if (status === Image.Ready || status === Image.Error) {
+                                         pane.handover = false
+                                         pane.handoverPath = ""
+                                     }
+                }
+
+                // (2b) the finished clip — looped, and muted on purpose (see the
+                // file header). The player itself is not a visual item and sits
+                // outside this transform; only its output is drawn here.
+                VideoOutput {
+                    id: videoOut
+                    anchors.fill: parent
+                    visible: !pane.showLive && pane.source !== "" && pane.sourceIsVideo
+                    fillMode: VideoOutput.PreserveAspectFit
+                }
             }
-        }
 
-        // (2b) the finished clip — looped, and muted on purpose (see above)
-        //
-        // `pane.open` is in the source condition, not just in `visible`: a
-        // closed pane is height 0 and invisible, but a MediaPlayer with a
-        // source is a decoder running a clip on a loop for as long as the app
-        // is open, whether or not anything draws it. On book that is a core
-        // spent on a pane that is not there.
-        AudioOutput { id: silent; muted: true }
-        MediaPlayer {
-            id: player
-            // Same as the still above: not gated on `showLive`, so the clip is
-            // already buffering while the last sampler frame is still up.
-            source: (pane.open && pane.source !== "" && pane.sourceIsVideo)
-                    ? "file://" + pane.source : ""
-            videoOutput: videoOut
-            audioOutput: silent
-            loops: MediaPlayer.Infinite
-            onSourceChanged: if (source != "") play()
-            onPlaybackStateChanged: if (playbackState === MediaPlayer.PlayingState) {
-                                        pane.handover = false
-                                        pane.handoverPath = ""
-                                    }
-        }
-        VideoOutput {
-            id: videoOut
-            anchors.fill: parent
-            anchors.margins: 1
-            visible: !pane.showLive && pane.source !== "" && pane.sourceIsVideo
-            fillMode: VideoOutput.PreserveAspectFit
-
-            // CLICK IT TO STOP IT. A looping clip is the right default for a
-            // thing that reports what just finished, and the wrong one when you
-            // want to look at a single frame of it.
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: player.playbackState === MediaPlayer.PlayingState
-                           ? player.pause() : player.play()
-                onDoubleClicked: if (pane.source !== "") pane.openRequested(pane.source)
+            // `pane.open` is in the source condition, not just in `visible`: a
+            // closed pane is height 0 and invisible, but a MediaPlayer with a
+            // source is a decoder running a clip on a loop for as long as the
+            // app is open, whether or not anything draws it. On book that is a
+            // core spent on a pane that is not there.
+            AudioOutput { id: silent; muted: true }
+            MediaPlayer {
+                id: player
+                // Same as the still above: not gated on `showLive`, so the clip
+                // is already buffering while the last sampler frame is still up.
+                source: (pane.open && pane.source !== "" && pane.sourceIsVideo)
+                        ? "file://" + pane.source : ""
+                videoOutput: videoOut
+                audioOutput: silent
+                loops: MediaPlayer.Infinite
+                onSourceChanged: if (source != "") play()
+                onPlaybackStateChanged: if (playbackState === MediaPlayer.PlayingState) {
+                                            pane.handover = false
+                                            pane.handoverPath = ""
+                                        }
             }
-        }
+
+            // ONE MOUSE AREA FOR THE WHOLE PICTURE. Wheel zooms, the wheel BUTTON
+            // drags it around, left-click stops a looping clip and a double-click
+            // opens the output properly — one item, because two overlapping ones
+            // meant the top one swallowed the wheel.
+            MouseArea {
+                id: viewMa
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+                hoverEnabled: false
+                cursorShape: panning ? Qt.ClosedHandCursor
+                           : (pane.sourceIsVideo && !pane.showLive) ? Qt.PointingHandCursor
+                           : Qt.ArrowCursor
+                property bool panning: false
+                property real fromX: 0
+                property real fromY: 0
+                property real startPanX: 0
+                property real startPanY: 0
+                property bool moved: false
+
+                onWheel: function (w) {
+                    // A notch is 120 units; anything is a fraction of one on a
+                    // touchpad, and the exponent keeps the two feeling the same.
+                    var steps = (w.angleDelta.y !== 0 ? w.angleDelta.y : w.pixelDelta.y * 4) / 120
+                    if (steps === 0) return
+                    pane.zoomAt(Math.pow(1.18, steps), w.x, w.y)
+                    w.accepted = true
+                }
+                onPressed: function (m) {
+                    if (m.button !== Qt.MiddleButton) return
+                    viewMa.panning = true
+                    viewMa.moved = false
+                    viewMa.fromX = m.x; viewMa.fromY = m.y
+                    viewMa.startPanX = pane.panX; viewMa.startPanY = pane.panY
+                }
+                onPositionChanged: function (m) {
+                    if (!viewMa.panning) return
+                    var dx = m.x - viewMa.fromX, dy = m.y - viewMa.fromY
+                    if (Math.abs(dx) + Math.abs(dy) > 2) viewMa.moved = true
+                    pane.panX = viewMa.startPanX + dx
+                    pane.panY = viewMa.startPanY + dy
+                    pane.clampPan()
+                }
+                onReleased: function (m) {
+                    if (m.button !== Qt.MiddleButton) return
+                    // A wheel CLICK that went nowhere puts it back to fit — the way
+                    // out of a zoom, without a control on a pane that has none.
+                    if (!viewMa.moved) pane.resetView()
+                    viewMa.panning = false
+                }
+                onClicked: function (m) {
+                    if (m.button !== Qt.LeftButton) return
+                    if (pane.sourceIsVideo && !pane.showLive)
+                        player.playbackState === MediaPlayer.PlayingState
+                            ? player.pause() : player.play()
+                }
+                onDoubleClicked: function (m) {
+                    if (m.button === Qt.LeftButton && pane.source !== "")
+                        pane.openRequested(pane.source)
+                }
+            }
+        }   // viewport
 
         // Nothing to show is a STATE, not a blank box: it says which of the two
         // is missing rather than looking broken.
@@ -274,7 +387,9 @@ Item {
                          ? "sampling · frame " + App.previewFrame
                            + " of " + App.previewFrames
                          : (App.isVideo ? "sampling · frame 1" : "sampling"))
-                      : (pane.sourceIsVideo ? "clip" : "still")
+                      : ((pane.sourceIsVideo ? "clip" : "still")
+                         + (pane.zoom > 1.001
+                            ? "  " + Math.round(pane.zoom * 100) + "%" : ""))
                 color: pane.showLive ? Theme.accent : Theme.textDim
             }
         }
