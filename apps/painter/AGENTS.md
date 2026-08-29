@@ -539,13 +539,25 @@ Three rules hold that together, and each one is a bug that was found:
   from the `selPath` change handler — one step before any binding on `selPath`
   has re-run. A binding there drew the previous selection, which is exactly how
   the sentinel path ended up in a `file://` URL.
-- **The last frame stays until the file lands.** `App.hasPreview` goes false
-  the moment the job reports finished, which is a beat before its output has
-  been downloaded — and `Gallery.add` inserts the new row BEFORE ending the
-  live one, so nothing ever hears "the job is over" while its replacement does
-  not exist. Both halves are the same bug [his]: *"when a gen finishes, it
-  briefly flashes the previous gen before showing the new output"*, which is
-  what a pane falling back to "the newest output" for two frames looks like.
+- **The last frame stays until the new file can be DRAWN, not until it
+  exists.** [his, twice] *"when a gen finishes, it briefly flashes the previous
+  gen before showing the new output"*. Three separate things produced that one
+  flash, and all three had to go:
+    - `App.hasPreview` goes false the moment the job reports finished, a beat
+      before its output has been downloaded;
+    - `Gallery.add` used to end the live row BEFORE inserting the file, so the
+      pane heard "the job is over" while its replacement did not exist and fell
+      back to the newest output — the previous one. It inserts first now, and
+      `refresh` never hands the `live://` sentinel to an `Image` either;
+    - and an `Image` whose source has just changed **still holds the last
+      picture it decoded**. Made visible in that gap it draws the previous
+      generation, whatever `source` says. So `PreviewPane.handover` keeps the
+      sampler's last frame up until the new file's `Image.status` is Ready (or
+      the clip is playing), with a 4s guard and a `handoverPath` so the
+      selection landing on that same file does not read as him picking
+      something else and cancel it. **The still's `source` must not be gated on
+      `visible`** — it is deliberately hidden while it loads, and a source bound
+      to `visible` would never load at all.
 - **Neither a filter nor a rescan may take the job off the screen.** It has no
   filename or prompt to match (`_matches` exempts it) and it is not in the
   output directory (`load_existing` puts it back).
