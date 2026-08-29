@@ -124,7 +124,19 @@ Rectangle {
         if (!b.ok) return;
         var ins = entry.insert;
         var tail = input.text.substring(b.end);
-        if (!/^\s*[,)\n]/.test(tail)) ins += ", ";
+        // THE COMMA COMES WITH THE TAG. A tag list is comma-separated and
+        // typing the separator after every completion is the thing being
+        // automated [his, 2026-08-28] — so a completion ends `tag, ` and the
+        // caret is already in the next tag.
+        //
+        // Three tails take no comma, because in all three one is already there
+        // or would be wrong: a comma already following, a weight (`:1.2` — the
+        // token ends at the colon, so this is `(lowres` inside a group), and a
+        // closing bracket. A completion at the end of a LINE takes the comma
+        // and not the space, so nothing trails the line.
+        if (/^\s*[,:)]/.test(tail)) { /* already separated */ }
+        else if (/^\n/.test(tail)) ins += ",";
+        else ins += ", ";
         input.remove(b.start, b.end);
         input.insert(b.start, ins);
         input.cursorPosition = b.start + ins.length;

@@ -1144,9 +1144,9 @@ class Gallery(QAbstractListModel):
     def _live_row(self):
         return {"path": LIVE_PATH, "url": "", "name": "generating",
                 "is_video": False, "poster": "", "key": LIVE_PATH, "ck": "",
-                "thumb": "", "live": True, "job": ""}
+                "thumb": "", "live": True, "job": "", "grab": False}
 
-    def begin_live(self, job=""):
+    def begin_live(self, job="", grab=False):
         """A job started: put its row at the top of the history.
 
         The row draws the sampler's own preview frames (GalleryView reads
@@ -1156,9 +1156,13 @@ class Gallery(QAbstractListModel):
         """
         if self._live is not None:
             self._live["job"] = str(job)
+            if grab:
+                self._live["grab"] = True
+                self.liveChanged.emit()
             return
         self._live = self._live_row()
         self._live["job"] = str(job)
+        self._live["grab"] = bool(grab)
         self._all.insert(0, self._live)
         self.beginInsertRows(QModelIndex(), 0, 0)
         self._rows.insert(0, self._live)
@@ -1196,6 +1200,10 @@ class Gallery(QAbstractListModel):
             self.liveReplaced.emit(str(replaced_by))
 
     livePath = Property(str, lambda self: LIVE_PATH if self._live else "",
+                        notify=liveChanged)
+    #: Whether THIS row is a newly queued batch, which takes the preview over
+    #: whatever was being looked at. False for the later jobs of one batch.
+    liveGrab = Property(bool, lambda self: bool(self._live and self._live.get("grab")),
                         notify=liveChanged)
 
     @Slot(int, result=bool)
@@ -1334,6 +1342,7 @@ class Painter(QObject):
         self._batch_saved = []            # the outputs it has written so far
         self._batch_pending = 0           # downloads still in the air
         self._batch_toasted = False       # this batch has had its one toast
+        self._live_grab = False           # the next job's row takes the preview
         self._pending_toast = None        # a clip toast waiting on its poster
         self._last_seed = -1              # the base seed the last batch actually
                                           # ran at, for "reuse last seed"; -1 = none
@@ -2340,6 +2349,12 @@ class Painter(QObject):
             self._batch_saved = []
             self._batch_pending = 0
             self._batch_toasted = False
+            # QUEUEING SOMETHING NEW TAKES THE PREVIEW, whatever was being
+            # looked at [his, 2026-08-28]. Armed here rather than at every job
+            # start: a batch of four is ONE thing he asked for, so its second
+            # and third jobs must not yank him back off an output he chose to
+            # look at while it ran.
+            self._live_grab = True
         base = dict(params)
         base["loras"] = self.loras.active()
         seed = int(base.get("seed", 0))
@@ -2422,7 +2437,9 @@ class Painter(QObject):
         # the preview viewport follow the SELECTION and still have a way back to
         # the generation in flight: it is a tile like any other [his,
         # 2026-08-28].
-        self.gallery.begin_live(getattr(job, "prompt_id", "") or "")
+        self.gallery.begin_live(getattr(job, "prompt_id", "") or "",
+                                grab=self._live_grab)
+        self._live_grab = False
         self._busy = True
         self._job_start = time.time()
         self._step = 0

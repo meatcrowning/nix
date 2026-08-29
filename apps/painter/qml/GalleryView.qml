@@ -121,8 +121,15 @@ Item {
     Connections {
         target: Gallery
         function onLiveChanged() {
-            if (view.followLive && Gallery.livePath !== "")
-                view.followTo(Gallery.livePath)
+            if (Gallery.livePath === "") return
+            // A NEWLY QUEUED BATCH TAKES THE PREVIEW BACK, whatever was being
+            // looked at [his, 2026-08-28] — pressing generate is a statement
+            // about what you want to watch. The later jobs of that same batch
+            // do not (`Gallery.liveGrab` is false for them): four images asked
+            // for in one press are one request, and being yanked off an output
+            // mid-batch is the thing this whole pane stopped doing.
+            if (Gallery.liveGrab) view.followLive = true
+            if (view.followLive) view.followTo(Gallery.livePath)
         }
         function onLiveReplaced(path) {
             if (view.followLive) view.followTo(path)

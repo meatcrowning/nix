@@ -518,9 +518,15 @@ Three rules hold that together, and each one is a bug that was found:
   needs a file (open, view, inject, reuse, copy prompt, the walk keys) grey out
   with no branch of its own. Its tile has no drag, no double-click and a
   one-verb menu: **cancel generation**.
-- **`followLive` is the way back.** The selection moves onto each job as it
-  starts and onto the file it produced when it lands, until he picks something
-  else himself; clicking the running job's tile re-arms it. `GalleryView`'s
+- **`followLive` is the way back, and QUEUEING RE-ARMS IT.** The selection
+  moves onto each job as it starts and onto the file it produced when it lands,
+  until he picks something else himself; clicking the running job's tile re-arms
+  it, and so does pressing generate — [his] *"ensure the live step/frame preview
+  replaces whatever is being previewed in the preview pane when the user queues
+  something new"*. That grab is armed **once per BATCH** (`_live_grab`, set
+  where `_batch_start` is, carried to QML as `Gallery.liveGrab`), not per job:
+  four images asked for in one press are one request, and yanking him off an
+  output mid-batch is what this pane stopped doing. `GalleryView`'s
   `selectSingle` decides the flag, `followTo` is the automatic move and must
   never touch it.
 - **`Gallery.isLive` is a CALL, not a notifying property**, so nothing may hold
@@ -1340,6 +1346,12 @@ being typed, so a near-miss is never written in the first place.
   `_danbooru_tag` the transform uses, so the box and the wire cannot disagree:
   underscores become spaces, `score_*` and the emoticon tags keep theirs, and an
   artist is inserted as `@name`.
+- **The comma and the space come with it** [his] — typing the separator after
+  every completion is the thing being automated. Three tails take none, because
+  in all three one is there already or would be wrong: a comma already
+  following, a weight (`(lowres` + `:-1.0)`, the token ending at the colon), and
+  a closing bracket. At the end of a LINE it takes the comma without the space,
+  so nothing trails the line.
 - **The list is `TagPopup.qml`, one per scene** — same argument as `CtxMenu` and
   `PickerOverlay` (a prompt box is 64-130px tall), reached through
   `ParamsPane.tagPopup` the way the other two are. **It never takes the
