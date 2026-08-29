@@ -60,14 +60,24 @@ Rectangle {
     //: the tag before it.
     function tokenBounds() {
         var t = input.text, pos = input.cursorPosition;
-        var seps = ",\n()|:";
         var s = pos, e = pos;
-        while (s > 0 && seps.indexOf(t.charAt(s - 1)) < 0) s--;
-        while (e < t.length && seps.indexOf(t.charAt(e)) < 0) e++;
+        while (s > 0 && !box.isSeparator(t, s - 1)) s--;
+        while (e < t.length && !box.isSeparator(t, e)) e++;
         while (s < e && t.charAt(s) === " ") s++;
         while (e > s && t.charAt(e - 1) === " ") e--;
         var ok = pos >= s && pos <= e;
         return { start: s, end: e, ok: ok, word: ok ? t.substring(s, e) : "" };
+    }
+
+    //: Where one tag ends and the next begins. An ESCAPED bracket is not one
+    //: of them: `rebecca \(cyberpunk\)` is a single tag whose name carries its
+    //: series, and treating its bracket as a separator would complete the word
+    //: `cyber` instead of the character.
+    function isSeparator(t, i) {
+        var c = t.charAt(i);
+        if (",\n()|:".indexOf(c) < 0) return false;
+        if ((c === "(" || c === ")") && i > 0 && t.charAt(i - 1) === "\\") return false;
+        return true;
     }
 
     //: What is offered for it — or nothing, which is most of the time. Two
@@ -78,7 +88,7 @@ Rectangle {
         if (!box.tagsOn || !input.activeFocus) return "";
         var b = box.tokenBounds();
         if (!b.ok) return "";
-        var w = b.word.replace(/^@/, "").trim();
+        var w = b.word.replace(/^@/, "").replace(/\\/g, "").trim();
         if (w.length < 2 || w.indexOf(".") >= 0 || w.split(" ").length > 4) return "";
         return w;
     }

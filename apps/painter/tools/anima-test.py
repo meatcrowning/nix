@@ -46,6 +46,12 @@ cases = [
     ("by the window, a cat sits", "by the window, a cat sits"),   # prose
     ("1girl,   multi\nline", "1girl, multi line"),
     ("(lowres, low_quality:-1.0), 1girl", "(lowres, low quality:-1.0), 1girl"),
+    # A BRACKET INSIDE A TAG IS PART OF ITS NAME. Danbooru qualifies half its
+    # characters that way, and a bare bracket in a prompt opens a weight group —
+    # so it is escaped, and an escaped one is not counted as a group.
+    ("1girl, rebecca_(cyberpunk)", "1girl, rebecca \\(cyberpunk\\)"),
+    ("1girl, rebecca \\(cyberpunk\\), solo", "1girl, rebecca \\(cyberpunk\\), solo"),
+    ("(rebecca_(cyberpunk):1.2)", "(rebecca \\(cyberpunk\\):1.2)"),
     ("a girl (smile:1.2) in the rain", "a girl (smile:1.2) in the rain"),
     ("", ""),
 ]
