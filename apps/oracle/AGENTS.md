@@ -585,6 +585,11 @@ no code change at all.
   never an affordance that is not there). A `guide` is resolved by **basename**
   against the skill's own files, so a crafted path cannot escape the skill
   directory — the jail shape `sessions-store.py` uses for a session id.
+- **A `_`/`-` spelling slip is repaired when unambiguous.** Skill directories
+  remain kebab-case and the live enum still names them exactly, but
+  `resolve_skill_name` accepts the common small-model call
+  `soulseek_acquisition` for `soulseek-acquisition`. It never fuzzy-matches any
+  other typo.
 
 ## Subagents (spawn_agent)
 
@@ -600,6 +605,12 @@ subagents?"*]. A turn has one 32k window (`CHAT_NUM_CTX`) and
 ones worth least afterwards: a `search_text` over `~/nix` or a `read_file` on a
 260 KB source costs thousands of tokens to establish one fact that fits in a
 line. A subagent reads all of that in ITS context and hands back the line.
+
+Custom-tool manifests may declare `"host": "top"` or `"host": "book"`.
+`_custom_tool_argv` carries stdin/stdout over the existing non-interactive SSH
+route when that is not the window's host; absent/invalid means local. This is
+what keeps `soulseek_album` on `top`, beside slskd and the canonical library,
+even when chatter is open on `book`.
 
 **So the default model is the parent's, deliberately.** Spawning
 `qwen3-coder:30b` from a `qwen3.6:35b-a3b` turn means ollama unloading 22.3 GiB
