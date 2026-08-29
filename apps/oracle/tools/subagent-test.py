@@ -213,6 +213,17 @@ else:
           "spawn_agent" not in oracle_main._tool_registry())
     check("the payload and describe_self read one list",
           "spawn_agent" in oracle_main.Ollama._offered_tool_names())
+    skills = [{"name": "music-library"}, {"name": "soulseek-acquisition"}]
+    check("skill names tolerate underscore-for-hyphen drift",
+          oracle_main.resolve_skill_name("soulseek_acquisition", skills)
+          == "soulseek-acquisition")
+    remote = oracle_main.Ollama._custom_tool_argv(
+        {"prog": "/tmp/tool.py", "host":
+         "book" if oracle_main.LOCAL_HOST == "top" else "top"})
+    check("a custom tool can declare the other host",
+          remote[0] == os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+          and remote[-2] != oracle_main.LOCAL_HOST
+          and remote[-1] == "/tmp/tool.py", str(remote))
     # A definition file replaces a built-in outright.
     d = Path(tempfile.mkdtemp(prefix="oracle-agentdefs-"))
     (d / "explorer.md").write_text(

@@ -1889,6 +1889,23 @@ def skill_catalog():
     return out
 
 
+def resolve_skill_name(name, catalog=None):
+    """Resolve the harmless spelling drift small models make in tool calls.
+
+    Skill directories use kebab-case, while models commonly copy a Python
+    tool-name habit and emit underscores. Accept that substitution only when
+    it identifies exactly one installed skill; every other typo remains an
+    honest unknown-skill error.
+    """
+    raw = str(name or "").strip()
+    names = [s["name"] for s in (skill_catalog() if catalog is None else catalog)]
+    if raw in names:
+        return raw
+    folded = raw.replace("_", "-")
+    hits = [known for known in names if known.replace("_", "-") == folded]
+    return hits[0] if len(hits) == 1 else ""
+
+
 def skill_tool(catalog=None):
     """The `use_skill` function tool, built from the skills actually present —
     the name enum and the description name them, so the model cannot call a
@@ -2093,6 +2110,7 @@ def tools_note(registry=None):
 #:     {"description": "What it does, written for the model.",
 #:      "parameters": {"type": "object", "properties": {...}, "required": [...]},
 #:      "run": "weather.sh",          // optional; default: <name>[.*] beside it
+#:      "host": "top",                // optional; top/book, local by default
 #:      "timeout": 30}                // optional seconds, capped at CUSTOM_MAX_SECS
 #:
 #: The program is run with the call's arguments as JSON on **stdin**; whatever
@@ -2154,7 +2172,10 @@ def custom_tools():
             secs = float(spec.get("timeout") or CUSTOM_DEFAULT_SECS)
         except (TypeError, ValueError):
             secs = CUSTOM_DEFAULT_SECS
-        out[name] = {"name": name, "prog": str(prog),
+        host = str(spec.get("host") or "").strip().lower()
+        if host not in ("top", "book"):
+            host = ""
+        out[name] = {"name": name, "prog": str(prog), "host": host,
                      "description": str(spec.get("description") or
                                         ("custom tool " + name)),
                      "parameters": params,
@@ -8231,11 +8252,28 @@ class Ollama(QObject):
         proc.finished.connect(finished)
         proc.errorOccurred.connect(failed)
         QTimer.singleShot(int(spec["timeout"] * 1000), expire)
-        proc.setWorkingDirectory(os.path.dirname(spec["prog"]) or ".")
-        proc.start(spec["prog"], [])
+        argv = self._custom_tool_argv(spec)
+        if not spec.get("host") or spec.get("host") == LOCAL_HOST:
+            proc.setWorkingDirectory(os.path.dirname(spec["prog"]) or ".")
+        proc.start(argv[0], argv[1:])
         proc.write(json.dumps(args if isinstance(args, dict) else {})
                    .encode("utf-8"))
         proc.closeWriteChannel()
+
+    @staticmethod
+    def _custom_tool_argv(spec):
+        """Run a custom tool on its declared host, or locally by default."""
+        host = str(spec.get("host") or "").strip().lower()
+        if not host or host == LOCAL_HOST:
+            return [spec["prog"]]
+        ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+        argv = [ssh, "-o", "BatchMode=yes"]
+        ctl = os.environ.get("OLLAMA_SSH_CTL")
+        if ctl:
+            argv += ["-o", "ControlMaster=auto", "-o", "ControlPersist=30",
+                     "-o", "ControlPath=" + ctl]
+        argv += [host, shlex.quote(spec["prog"])]
+        return argv
 
     # ---- media playback (control_media, over MPRIS + the PipeWire mixer) ----
 
@@ -11195,15 +11233,16 @@ class Ollama(QObject):
         whole guide comes back in ONE call rather than the model paging it
         through read_file, which is the point of it being a tool."""
         a = args if isinstance(args, dict) else {}
-        name = str(a.get("name", "")).strip()
+        requested_name = str(a.get("name", "")).strip()
         guide = str(a.get("guide", "")).strip()
         catalog = skill_catalog()
         known = {s["name"] for s in catalog}
+        name = resolve_skill_name(requested_name, catalog)
         self.fileToolStarted.emit(
-            ("reading %s guide %s" % (name, guide)) if guide
-            else ("loading skill " + (name or "?")))
-        if name not in known:
-            result = {"error": "unknown skill: " + (name or "(none given)"),
+            ("reading %s guide %s" % (name or requested_name, guide)) if guide
+            else ("loading skill " + (name or requested_name or "?")))
+        if not name:
+            result = {"error": "unknown skill: " + (requested_name or "(none given)"),
                       "available": sorted(known)}
             self._skill_done(result, "use_skill: " + result["error"], idx,
                              remaining, calls)
