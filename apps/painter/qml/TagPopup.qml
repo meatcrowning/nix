@@ -53,6 +53,16 @@ Item {
     property bool justClosed: false
     Timer { id: closedLatch; interval: 0; onTriggered: root.justClosed = false }
 
+    //: Follow the word. The prompt box scrolls, the column behind it scrolls,
+    //: and the window resizes — a list pinned where the word USED to be is the
+    //: loose feeling this whole file is trying not to have.
+    function moveTo(x, y, lineH) {
+        if (!root.visible) return
+        root.anchorX = x;
+        root.anchorY = y;
+        panel.place(x, y, lineH || 16);
+    }
+
     function close() {
         if (root.visible) { root.justClosed = true; closedLatch.restart() }
         root.visible = false;

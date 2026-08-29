@@ -29,6 +29,16 @@ Rectangle {
     //: (the refresh it skipped was whichever came first, which was sometimes
     //: the next word he typed).
     property int skipAt: -1
+    //: TYPING ASKS FOR THE LIST; MOVING THE CARET DOES NOT. True for the rest
+    //: of the event a text change happened in, which is how the caret move that
+    //: BELONGS to a keystroke is told from a bare one (see the editor's
+    //: `onCursorPositionChanged`).
+    property bool textTouch: false
+    //: The tag Escape was pressed on: where it starts, and what it said.
+    //: Dismissing means "not for this one", so typing MORE of it leaves the
+    //: list closed — but deleting it, or replacing it, asks again.
+    property int dismissedAt: -1
+    property string dismissedWord: ""
 
     // `value` is the MODEL's text; `input.text` is the editor's. They are synced
     // one way, on change, and never bound to each other — `text: root.gen.positive`
@@ -113,6 +123,11 @@ Rectangle {
         if (!box.tagsOn) return;
         if (input.cursorPosition === box.skipAt) { box.closeCompletion(); return }
         box.skipAt = -1;
+        var bd = box.tokenBounds();
+        if (box.dismissedAt >= 0 && bd.ok && bd.start === box.dismissedAt
+                && bd.word.indexOf(box.dismissedWord) === 0) return;
+        box.dismissedAt = -1;
+        box.dismissedWord = "";
         var q = box.completionQuery();
         if (q === "") { box.closeCompletion(); return }
         var rows = Tags.complete(q, 10);
@@ -136,7 +151,23 @@ Rectangle {
 
     function closeCompletion() {
         box.lastQuery = "";
+        box.dismissedAt = -1;
+        box.dismissedWord = "";
         if (box.tagPopup && box.tagPopup.visible) box.tagPopup.close();
+    }
+
+    //: Where the list should sit right now: at the start of the tag, in scene
+    //: coordinates. Recomputed while it is open (see `anchorWatch`) so it
+    //: follows the word rather than staying where the word was.
+    function reanchor() {
+        if (!box.completionMine()) return;
+        var b = box.tokenBounds();
+        var r = input.positionToRectangle(b.ok ? b.start : input.cursorPosition);
+        // Scrolled out of the box it belongs to: there is nothing to point at.
+        var top = r.y - flick.contentY;
+        if (top + r.height < 0 || top > flick.height) { box.closeCompletion(); return }
+        var p = input.mapToItem(null, r.x, r.y);
+        box.tagPopup.moveTo(p.x, p.y, r.height);
     }
 
     //: Whether the popup on screen belongs to THIS box — there is one of them
@@ -177,12 +208,80 @@ Rectangle {
         box.closeCompletion();
     }
 
+    //: CTRL+UP / CTRL+DOWN WEIGHTS WHAT IS UNDER THE CARET, the way ComfyUI's
+    //: own prompt boxes and every webui do it — the one thing a prompt editor
+    //: is expected to have that this did not [his, 2026-08-28]. It works on the
+    //: selection when there is one and on the tag under the caret otherwise,
+    //: reuses the group already around it rather than nesting a second one, and
+    //: takes the group away again at 1.0 so a prompt does not silt up with
+    //: `(x:1.00)`. 0.05 a step, which is ComfyUI's default; the range is what
+    //: the transform reads as a weight at all (`graph._WEIGHTED`, +/-4).
+    function adjustWeight(delta) {
+        var t = input.text
+        var s = input.selectionStart, e = input.selectionEnd
+        if (s === e) {
+            var b = box.tokenBounds()
+            if (!b.ok || b.start === b.end) return false
+            s = b.start; e = b.end
+        }
+        // Already inside a group? Its own bracket is the one to reuse. An
+        // ESCAPED bracket is part of a tag's name and is not a group (§ the tag
+        // completer), so it is skipped here too.
+        var open = -1, closeAt = -1, weight = 1.0
+        var i = s - 1
+        while (i >= 0 && t.charAt(i) === " ") i--
+        if (i >= 0 && t.charAt(i) === "(" && !(i > 0 && t.charAt(i - 1) === "\\")) {
+            var after = t.substring(e)
+            var m = /^\s*:\s*(-?\d*\.?\d+)\s*\)/.exec(after)
+            var bare = /^\s*\)/.exec(after)
+            if (m) { open = i; closeAt = e + m[0].length; weight = parseFloat(m[1]) }
+            else if (bare) { open = i; closeAt = e + bare[0].length; weight = 1.0 }
+        }
+        var body = t.substring(s, e)
+        if (body.trim() === "") return false
+        var w = Math.round((weight + delta) * 100) / 100
+        w = Math.max(-4, Math.min(4, w))
+        var from = open >= 0 ? open : s
+        var to = open >= 0 ? closeAt : e
+        var out = (w === 1) ? body : "(" + body + ":" + w.toFixed(2) + ")"
+        input.remove(from, to)
+        input.insert(from, out)
+        // The body stays selected, so the next press adjusts the same thing
+        // rather than whatever the caret happens to be beside now.
+        var at = from + (w === 1 ? 0 : 1)
+        input.select(at, at + body.length)
+        box.closeCompletion()
+        box.dismissedAt = at
+        return true
+    }
+
     //: The index costs ~0.6s to build, once, on a worker thread — started when
     //: a box that WANTS completions takes the keyboard, so a session that never
     //: types an Anima prompt never pays for it.
     Connections {
         target: (typeof Tags !== "undefined" && Tags) ? Tags : null
         function onReadyChanged() { box.refreshCompletion() }
+    }
+
+    Timer {
+        id: anchorWatch
+        interval: 60
+        repeat: true
+        running: box.tagsOn && box.tagPopup !== null && box.tagPopup.visible
+                 && input.activeFocus
+        onTriggered: box.reanchor()
+    }
+
+    Timer {
+        id: moveCheck
+        interval: 0
+        onTriggered: if (!box.textTouch) box.closeCompletion()
+    }
+
+    Timer {
+        id: touchLatch
+        interval: 0
+        onTriggered: box.textTouch = false
     }
 
     Timer {
@@ -275,11 +374,31 @@ Rectangle {
             persistentSelection: true
             selectionColor: Theme.accent
             selectedTextColor: Theme.bg
+            // THE LIST IS AN ANSWER TO TYPING, NOT TO THE CARET MOVING. Arrowing
+            // through a prompt, clicking into the middle of one, selecting —
+            // none of those are a question, and a list that opened on all of
+            // them (and re-aimed itself as the caret walked a word it had
+            // already been asked about) is most of what made this feel loose
+            // [his, 2026-08-28]. `textTouch` is true only for the rest of the
+            // event a text change happened in, which is how the cursor move
+            // that BELONGS to a keystroke is told from a bare one.
             onTextChanged: {
                 if (!box.syncing) box.edited(text);
-                if (box.tagsOn) completeSoon.restart();
+                if (!box.tagsOn) return;
+                // A write from the MODEL is not typing (see `syncing` above).
+                if (box.syncing) return;
+                box.textTouch = true;
+                touchLatch.restart();
+                completeSoon.restart();
             }
-            onCursorPositionChanged: if (box.tagsOn) completeSoon.restart()
+            // ...and the decision is DEFERRED by one turn, because Qt emits
+            // this BEFORE `textChanged` for an ordinary keystroke and the text
+            // is not updated yet when it does — measured, and it is why
+            // comparing the text here (or trusting the order) closed the list
+            // on every letter typed. Both timers are 0ms and fire in the order
+            // they were started, so `textTouch` is already set by the time this
+            // one runs if a text change belonged to this move.
+            onCursorPositionChanged: if (box.tagsOn) moveCheck.restart()
             onActiveFocusChanged: {
                 if (activeFocus) { if (box.tagsOn) Tags.prepare() }
                 else box.closeCompletion();
@@ -296,6 +415,14 @@ Rectangle {
                 if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter)
                         && (e.modifiers & Qt.ControlModifier)) {
                     e.accepted = false
+                    return
+                }
+                // Ctrl+Up/Down weights the tag, whether or not a list is open
+                // and on every family — it is prompt syntax, not a tag feature.
+                if ((e.key === Qt.Key_Up || e.key === Qt.Key_Down)
+                        && (e.modifiers & Qt.ControlModifier)) {
+                    if (box.adjustWeight(e.key === Qt.Key_Up ? 0.05 : -0.05))
+                        e.accepted = true
                     return
                 }
                 if (!box.completionMine()) return
@@ -320,7 +447,10 @@ Rectangle {
             // to it first: `justClosed` is true for the rest of this event.
             Keys.onEscapePressed: function (e) {
                 if (box.tagsOn && (box.tagPopup.visible || box.tagPopup.justClosed)) {
+                    var bd = box.tokenBounds()
                     box.closeCompletion()
+                    box.dismissedAt = bd.ok ? bd.start : -1
+                    box.dismissedWord = bd.ok ? bd.word : ""
                     e.accepted = true
                     return
                 }

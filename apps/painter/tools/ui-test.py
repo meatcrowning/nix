@@ -3820,6 +3820,66 @@ def test_tag_complete(win, ctl, keep):
           edit.property("text") == "rebecca \\(cyberpunk\\), ",
           repr(edit.property("text")))
 
+    # --- the caret is not a question --------------------------------------
+    # [his, 2026-08-28] "what about how the cursor functions and moves around
+    # and affects the autocomplete? it still feels loose". Typing asks for a
+    # list; moving the caret does not, and Escape means "not for this tag".
+    type_into("1girl, long_h")
+    check("typing opens the list", popup.property("visible") is True)
+    key(win, Qt.Key_Left)
+    check("moving the caret closes it", popup.property("visible") is False)
+    key(win, Qt.Key_Right)
+    check("...and does not reopen it", popup.property("visible") is False)
+    key(win, Qt.Key_A, Qt.NoModifier, "a")
+    check("typing again does", popup.property("visible") is True)
+    key(win, Qt.Key_Backspace)
+    check("...and so does deleting", popup.property("visible") is True)
+    key(win, Qt.Key_Escape)
+    check("escape closes it for THIS tag", popup.property("visible") is False)
+    key(win, Qt.Key_A, Qt.NoModifier, "a")
+    check("...and typing more of the same tag leaves it closed",
+          popup.property("visible") is False, edit.property("text"))
+    key(win, Qt.Key_Comma, Qt.NoModifier, ",")
+    key(win, Qt.Key_S, Qt.NoModifier, "s")
+    key(win, Qt.Key_O, Qt.NoModifier, "o")
+    check("...until the next tag, which is offered again",
+          popup.property("visible") is True, edit.property("text"))
+    key(win, Qt.Key_Escape)
+
+    # --- ctrl+up / ctrl+down weight what is under the caret -----------------
+    def caret_in(text, at):
+        edit.forceActiveFocus()
+        edit.setProperty("text", text)
+        edit.setProperty("cursorPosition", at)
+        spin(120)
+
+    caret_in("1girl, long hair", len("1girl, long h"))
+    key(win, Qt.Key_Up, Qt.ControlModifier)
+    check("ctrl+up weights the tag under the caret",
+          edit.property("text") == "1girl, (long hair:1.05)",
+          repr(edit.property("text")))
+    key(win, Qt.Key_Up, Qt.ControlModifier)
+    check("...and again, in the SAME group rather than a nested one",
+          edit.property("text") == "1girl, (long hair:1.10)",
+          repr(edit.property("text")))
+    key(win, Qt.Key_Down, Qt.ControlModifier)
+    key(win, Qt.Key_Down, Qt.ControlModifier)
+    check("...and 1.0 takes the group away again",
+          edit.property("text") == "1girl, long hair", repr(edit.property("text")))
+    key(win, Qt.Key_Down, Qt.ControlModifier)
+    check("...and it goes below 1 as well",
+          edit.property("text") == "1girl, (long hair:0.95)",
+          repr(edit.property("text")))
+
+    # A selection is what it acts on when there is one.
+    edit.setProperty("text", "a girl in the rain")
+    edit.metaObject().invokeMethod(edit, "select", Q_ARG(int, 2), Q_ARG(int, 6))
+    spin(80)
+    key(win, Qt.Key_Up, Qt.ControlModifier)
+    check("...and a selection is weighted as one thing",
+          edit.property("text") == "a (girl:1.05) in the rain",
+          repr(edit.property("text")))
+
     edit.setProperty("text", "")
     spin(100)
     unstage()
