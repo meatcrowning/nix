@@ -35,6 +35,12 @@
     Unit = {
       Description = "Regenerate Konsole's colour scheme from the system theme";
       After = [ "graphical-session.target" ];
+      # No start limit: the trigger is a burst (Theme.qml then kdeglobals, one
+      # wal-set pass), and systemd's default five-in-ten-seconds ceiling is
+      # tripped by it — leaving this unit and its path unit FAILED with the
+      # last write, the one carrying the new colour, unread. See chan-theme.nix
+      # for the same fix and the day it was found.
+      StartLimitIntervalSec = 0;
     };
     Service = {
       Type = "oneshot";
