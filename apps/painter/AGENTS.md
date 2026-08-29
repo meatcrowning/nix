@@ -562,7 +562,19 @@ Three rules hold that together, and each one is a bug that was found:
   filename or prompt to match (`_matches` exempts it) and it is not in the
   output directory (`load_existing` puts it back).
 
-Harness: `tools/ui-test.py` → `test_live_row`.
+**The wheel zooms it and the wheel BUTTON drags it** [his, 2026-08-28] — the
+pane is a few hundred pixels tall and an output is a megapixel, so this is the
+difference between "is that hand right" and opening the file in something else.
+One `viewport` clips, one `canvas` carries the scale and the offset over all
+three layers, and one `MouseArea` takes everything: two overlapping ones meant
+the top one swallowed the wheel. The zoom is about the POINTER (that is the
+whole point of a wheel zoom), 1.0-8.0, no easing (docs/DESIGN.md §6.4 — a
+direct-manipulation drag has none); the picture cannot be dragged off its own
+pane (`clampPan`, and at 1:1 it is pinned); a wheel click that went nowhere puts
+it back to fit; and a different picture starts at fit. The tag at the corner
+says the percentage while there is one.
+
+Harness: `tools/ui-test.py` → `test_live_row`, `test_preview_zoom`.
 
 **A video job WALKS the clip, and that walk is a local backend patch.** [his]
 *"why will sampling previews only show the first frame from the generation"* —

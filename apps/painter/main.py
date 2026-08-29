@@ -2591,11 +2591,21 @@ class Painter(QObject):
         if self._jobs == 0:
             self._busy = False
             # A job with no images at all — an interrupted sample, a graph that
-            # saved nothing — still has to give its row back, or the history
-            # keeps a tile sampling for ever. A job that DID produce something
-            # has already had its row replaced by the file (`Gallery.add`), and
-            # this is then a no-op.
-            self.gallery.end_live(getattr(job, "prompt_id", "") or "")
+            # saved nothing — has to give its row back, or the history keeps a
+            # tile sampling for ever.
+            #
+            # ONLY WHEN THERE IS NOTHING LEFT TO WAIT FOR. "Finished" arrives
+            # over the websocket a beat before the file it made has been
+            # downloaded, and ending the row here left the preview pane with a
+            # job that no longer exists and a file that does not exist yet — so
+            # it fell back to the newest output, which is the PREVIOUS
+            # generation, for the whole length of the download [his,
+            # 2026-08-28, three times; the flash got LONGER when the pane
+            # started holding the last frame, because this path was never
+            # reaching that code at all]. With downloads outstanding the row is
+            # ended by `Gallery.add`, which replaces it with the file itself.
+            if self._batch_pending == 0:
+                self.gallery.end_live(getattr(job, "prompt_id", "") or "")
             # The batch is over — hand the lease back so chatter can
             # have the memory without waiting it out.
             self.warden.done("comfy")
@@ -2675,6 +2685,12 @@ class Painter(QObject):
         """One toast per batch, once every job is done AND every output it made
         is on disk. Called from both ends — the last download to land and the
         last job to finish — because either can be the one that finishes it."""
+        if self._jobs == 0 and self._batch_pending == 0:
+            # THE BACKSTOP FOR THE ROW. Normally the file that lands takes the
+            # job's row over (`Gallery.add`); a download that produced nothing —
+            # no data, a write that failed — never gets that far, and this is
+            # the one place both ends of a batch report to.
+            self.gallery.end_live()
         if self._batch_toasted or self._jobs or self._batch_pending:
             return
         if not self._batch_saved:

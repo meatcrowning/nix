@@ -145,6 +145,35 @@ def click(win, item, dx=None, dy=None, button=None):
     spin(60)
 
 
+def wheel(win, item, dx, dy, notches):
+    """A real wheel event over a point inside `item`."""
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QGuiApplication, QWheelEvent
+    p = item.mapToScene(QPointF(dx, dy))
+    ev = QWheelEvent(QPointF(p.x(), p.y()), win.mapToGlobal(QPoint(int(p.x()), int(p.y()))),
+                     QPoint(0, 0), QPoint(0, int(120 * notches)),
+                     Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
+    QGuiApplication.sendEvent(win, ev)
+    spin(60)
+
+
+def drag(win, item, x1, y1, x2, y2, button=None):
+    """Press, move, release — a real drag inside `item`, in window coordinates."""
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtTest import QTest
+    b = button or Qt.LeftButton
+    a = item.mapToScene(QPointF(x1, y1))
+    z = item.mapToScene(QPointF(x2, y2))
+    QTest.mousePress(win, b, Qt.NoModifier, QPoint(int(a.x()), int(a.y())))
+    steps = 4
+    for i in range(1, steps + 1):
+        QTest.mouseMove(win, QPoint(int(a.x() + (z.x() - a.x()) * i / steps),
+                                    int(a.y() + (z.y() - a.y()) * i / steps)))
+        spin(20)
+    QTest.mouseRelease(win, b, Qt.NoModifier, QPoint(int(z.x()), int(z.y())))
+    spin(60)
+
+
 def menu_pick(win, item, label, dx=None, dy=None):
     """Right-click `item`, then click the row called `label` — the real path.
 
@@ -4049,6 +4078,76 @@ def test_live_row(win, ctl, tmp):
           ctl.gallery.rowCount())
     ctl.reg.build, ctl.client.submit, ctl._object_info = orig_build, orig_submit, orig_oi
 
+    # --- "finished" is not "downloaded" ------------------------------------
+    # [his, 2026-08-28, three times] the previous generation showing between the
+    # last sampler frame and the new output. `_on_finished` arrives over the
+    # websocket a beat BEFORE the file it made has been downloaded, and ending
+    # the job's row there left the pane with a job that no longer exists and a
+    # file that does not exist yet — so it drew the newest output it could find,
+    # which is the previous one, for the whole length of the download.
+    class SlowJob:
+        duration = 2.0
+        prompt_id = "pid-slow"
+
+        def __init__(self):
+            self.images = [{"filename": "live_00011_.png", "subfolder": ""}]
+            self.meta = {"params": {"seed": 1}, "pairing": None}
+
+    held = []
+    real_download = ctl.client.download
+    ctl.client.download = lambda img, cb: held.append(cb)
+    ctl.gallery.begin_live("pid-slow", grab=True)
+    spin(150)
+    ctl._busy = True
+    ctl._on_preview(None, frame, "png")
+    spin(80)
+    ctl._jobs = 1
+    ctl._batch_saved = []
+    ctl._batch_pending = 0
+    ctl._batch_toasted = True
+    ctl._on_finished(SlowJob())
+    spin(150)
+    check("a finished job keeps its row while its file is still downloading",
+          ctl.gallery.isLiveAt(0) is True, ctl.gallery.pathAt(0))
+    check("...so the pane never falls back to the previous output",
+          pane.property("showLive") is True and pane.property("source") == "",
+          (pane.property("showLive"), pane.property("source")))
+    # the download lands
+    with open(made[0], "rb") as fh:
+        blob = fh.read()
+    for cb in held:
+        cb(blob)
+    spin(300)
+    slow = os.path.join(tmp, "out", "live_00011_.png")
+    check("...and the file takes the row when it arrives",
+          ctl.gallery.isLiveAt(0) is False and ctl.gallery.pathAt(0) == slow,
+          ctl.gallery.pathAt(0))
+    check("...and the pane is on it", pane.property("source") == slow,
+          pane.property("source"))
+    ctl.client.download = real_download
+    ctl._jobs = 0
+    ctl._busy = False
+    spin(80)
+
+    # A batch whose download produces nothing at all still gives the row back.
+    ctl.client.download = lambda img, cb: cb(b"")
+    ctl.gallery.begin_live("pid-empty", grab=True)
+    spin(120)
+    ctl._jobs = 1
+    ctl._batch_pending = 0
+    ctl._batch_toasted = True
+    ctl._on_finished(SlowJob())
+    spin(250)
+    check("a download that produced nothing still gives the row back",
+          ctl.gallery.isLiveAt(0) is False, ctl.gallery.pathAt(0))
+    ctl.client.download = real_download
+    ctl._jobs = 0
+    # ...and put the history back where the checks below expect it.
+    try: os.remove(slow)
+    except OSError: pass
+    ctl.gallery.load_existing()
+    spin(200)
+
     # --- a job that produces nothing gives its row back --------------------
     ctl.gallery.begin_live("job-2")
     spin(120)
@@ -4089,6 +4188,86 @@ def test_live_row(win, ctl, tmp):
     APP.setProperty("showPreview", False)
     for p in made + [landed, stale]:
         try: os.remove(p)
+        except OSError: pass
+    ctl.gallery.load_existing()
+    spin(150)
+
+
+def test_preview_zoom(win, ctl, tmp):
+    """The wheel zooms the preview and the wheel BUTTON drags it around.
+
+    [his, 2026-08-28] "add panning and zooming via the mouse wheel and mouse
+    wheel click". The pane is a few hundred pixels tall and an output is a
+    megapixel, so this is the difference between "is that hand right" and
+    opening the file in something else.
+    """
+    from PySide6.QtCore import Qt
+    content = win.contentItem()
+    view = find(content, "GalleryView")
+    pane = find(content, "PreviewPane")
+    APP.setProperty("showPreview", True)
+    spin(150)
+
+    shot = noisy_png(os.path.join(tmp, "out", "zoom_00001_.png"), 200, 150)
+    ctl.gallery.load_existing()
+    spin(250)
+    invoke_str(view, "selectSingle", shot)
+    spin(200)
+    check("the pane is showing the picture to zoom",
+          pane.property("source") == shot, pane.property("source"))
+    check("...at 1:1, with nothing to pan",
+          pane.property("zoom") == 1.0 and pane.property("panX") == 0,
+          (pane.property("zoom"), pane.property("panX")))
+
+    # A drag at 1:1 must not move it: there is nothing off screen to reach.
+    drag(win, pane, 40, 40, 90, 70, Qt.MiddleButton)
+    check("a pan at 1:1 does nothing", pane.property("panX") == 0
+          and pane.property("panY") == 0,
+          (pane.property("panX"), pane.property("panY")))
+
+    wheel(win, pane, 40, 40, 3)
+    z = pane.property("zoom")
+    check("the wheel zooms in", z > 1.4, z)
+    # ...about the pointer, so what was under it stays there: with the cursor
+    # at (40,40) the pan has to move up and left by (z-1)*40.
+    check("...about the pointer, not the middle of the pane",
+          abs(pane.property("panX") - (40 - 40 * z)) < 1.5, pane.property("panX"))
+
+    px, py = pane.property("panX"), pane.property("panY")
+    drag(win, pane, 90, 70, 120, 95, Qt.MiddleButton)
+    check("the wheel button drags it",
+          pane.property("panX") > px and pane.property("panY") > py,
+          (px, pane.property("panX"), py, pane.property("panY")))
+    check("...and never off its own pane",
+          pane.property("panX") <= 0 and pane.property("panY") <= 0,
+          (pane.property("panX"), pane.property("panY")))
+
+    # A wheel click that goes nowhere is the way back to fit.
+    click(win, pane, 60, 60, Qt.MiddleButton)
+    check("a wheel click puts it back to fit",
+          pane.property("zoom") == 1.0 and pane.property("panX") == 0,
+          (pane.property("zoom"), pane.property("panX")))
+
+    wheel(win, pane, 40, 40, 40)
+    check("zoom has a ceiling", pane.property("zoom") == 8.0, pane.property("zoom"))
+    wheel(win, pane, 40, 40, -80)
+    check("...and a floor, which is fit", pane.property("zoom") == 1.0,
+          pane.property("zoom"))
+
+    # A different output is a different view of it.
+    wheel(win, pane, 40, 40, 3)
+    other = noisy_png(os.path.join(tmp, "out", "zoom_00002_.png"), 200, 150)
+    ctl.gallery.add(other)
+    spin(200)
+    invoke_str(view, "selectSingle", other)
+    spin(200)
+    check("picking another output starts it at fit",
+          pane.property("zoom") == 1.0, pane.property("zoom"))
+
+    view.metaObject().invokeMethod(view, "clearSelection")
+    APP.setProperty("showPreview", False)
+    for f in (shot, other):
+        try: os.remove(f)
         except OSError: pass
     ctl.gallery.load_existing()
     spin(150)
@@ -4140,6 +4319,7 @@ def main():
     print("== preset isolation ==");   test_preset_isolation(win, ctl, tmp)
     print("== tag complete ==");       test_tag_complete(win, ctl, keep)
     print("== live row ==");           test_live_row(win, ctl, tmp)
+    print("== preview zoom ==");       test_preview_zoom(win, ctl, tmp)
 
     real = [w for w in WARNINGS if "Qt Quick Layouts" not in w]
     for w in real:
