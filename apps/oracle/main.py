@@ -1711,21 +1711,25 @@ SESSION_TOOL_NAMES = {"list_sessions", "read_session"}
 MEMORY_TOOLS = [
     {"type": "function", "function": {
         "name": "save_memory",
-        "description": ("Save a durable fact you want to remember across all "
-                        "future conversations, or UPDATE one you already saved. "
-                        "Use this for lasting things about him (his name, his "
-                        "preferences, ongoing projects, decisions) — not for "
-                        "one-off details of the current chat. Omit id to create a "
+        "description": ("Save a lasting fact the USER EXPLICITLY STATED in his "
+                        "current message, or update one he just corrected. Never "
+                        "save your inference, a tool result, a generated summary, "
+                        "or mutable machine/library state as memory. source_quote "
+                        "must be a verbatim quote from his current message; the "
+                        "app rejects a quote it cannot find there. Omit id to create a "
                         "new memory; pass the id of an existing memory to replace "
                         "its text. Your current memories are listed for you in "
                         "your context each turn."),
         "parameters": {"type": "object", "properties": {
             "text": {"type": "string", "description": "The fact to remember, one "
                      "self-contained sentence or two."},
+            "source_quote": {"type": "string", "description": "A short verbatim "
+                             "quote from the user's CURRENT message that directly "
+                             "supports this fact."},
             "id": {"type": "string", "description": "Optional: the id of an "
                    "existing memory to update (from your memory list). Omit to "
                    "create a new one."}},
-            "required": ["text"]}}},
+            "required": ["text", "source_quote"]}}},
     {"type": "function", "function": {
         "name": "list_memories",
         "description": ("List every durable memory you have saved (id, text, when "
@@ -2753,12 +2757,15 @@ RECALL_GUIDANCE = (
 #: description). It is guidance, not a mechanism: a model with no tool support
 #: still cannot call the tool at all — point chatter at a tool-capable model.
 SAVE_GUIDANCE = (
-    "You may save durable facts to your memory on your own initiative — you do "
+    "You may save durable facts THE USER EXPLICITLY STATES to your memory on "
+    "your own initiative — you do "
     "not need to be asked. Whenever he tells you something lasting (his name, a "
-    "preference, an ongoing project, a decision) or you learn a fact worth "
-    "keeping across conversations, call save_memory to record it right then, "
-    "without announcing it. Save only lasting things, not one-off details of the "
-    "current chat, and update or delete a memory with save_memory/delete_memory "
+    "preference, an ongoing project, a decision), call save_memory to record it "
+    "right then, without announcing it. Save only lasting things, not one-off "
+    "details, your own inference, a tool result, a generated summary, or mutable "
+    "facts about files, software, hardware or the music library. Put a short "
+    "verbatim quote from his CURRENT message in source_quote; the app checks it. "
+    "Update or delete a memory with save_memory/delete_memory "
     "when it changes or turns out wrong.\n"
     "BEFORE YOU FINISH A TURN, ask yourself whether it contained anything of "
     "that kind, and if it did, call save_memory then — permission alone has not "
@@ -2872,7 +2879,11 @@ GROUNDING_NOTE = (
     "page, the file) so he can check it himself. Never invent a citation, a "
     "URL, a filename or a command line to look authoritative: a made-up source "
     "is worse than none. And never present a guess about HIS machine, his "
-    "files or his music as fact — look, with the tools you have.")
+    "files or his music as fact — look, with the tools you have. Claims about "
+    "mutable state — library contents or counts, files, installed software, "
+    "running services and hardware state — MUST be checked live with the "
+    "relevant tool even when a durable memory mentions them; a memory is not "
+    "evidence that mutable state is still true.")
 
 #: The app's own notes inside the conversation, and the rule that they are not
 #: his words. A turn that made a picture or a clip carries a
@@ -5097,6 +5108,16 @@ class Ollama(QObject):
                 r"\b(make|create|generate|animate|render)\b.{0,35}"
                 r"\b(video|clip|animation)\b", low):
             self._extra_tools.add("make_video")
+        # Library claims are mutable and a poisoned summary memory once made a
+        # nonexistent label sound like part of his collection. Put the live
+        # catalog schema directly in front of even a small model when the ask is
+        # about what he owns or library stats; do not make it discover the door.
+        if re.search(r"\b(music|audio) library\b|\b(library|collection) stats\b|"
+                     r"\b(what|which).{0,30}\b(albums?|artists?|tracks?|comps?)\b",
+                     low):
+            self._extra_tools.add("music_library")
+        if re.search(r"\blast\.?fm\b|\bscrobbl", low):
+            self._extra_tools.add("lastfm")
         self._resp_t0 = 0.0
         self._resp_tokens = 0
         self._set_tps(0.0)
@@ -5901,16 +5922,21 @@ class Ollama(QObject):
             text = str(m.get("text", "")).strip()
             if not text:
                 continue
-            line = "- [%s] %s" % (m.get("id", ""), text)
+            quote = str(m.get("source_quote", "")).strip()
+            provenance = ("user said: %s" % quote if quote else
+                          "unverified legacy memory — check before use")
+            line = "- [%s · %s] %s" % (m.get("id", ""), provenance, text)
             if used + len(line) > MEMORY_CTX_CHARS:
                 break
             lines.append(line)
             used += len(line)
         if not lines:
             return ""
-        return ("Durable memories you have saved (real facts you chose to "
-                "remember — trust them as true, and keep them current with "
-                "save_memory/delete_memory as you learn more):\n" + "\n".join(lines))
+        return ("Durable memories you have saved. Trust a `user said` entry as "
+                "a record of what he said; entries marked unverified are leads, "
+                "not facts, and must be checked before use. Mutable state must "
+                "always be checked live regardless of provenance. Keep entries "
+                "current with save_memory/delete_memory:\n" + "\n".join(lines))
 
     def _system_prompt(self, research=""):
         """A minimal system message that pins an unambiguous `now`. The model
@@ -10909,7 +10935,18 @@ class Ollama(QObject):
             req = {"op": "delete", "id": str(a.get("id", ""))}
             heading = "forgetting " + str(a.get("id", ""))
         else:
-            req = {"op": "save", "text": str(a.get("text", ""))}
+            quote = str(a.get("source_quote", "")).strip()
+            current = self._pending_users[-1] if self._pending_users else ""
+            if not quote or quote not in current:
+                result = {"error": ("source_quote must appear verbatim in the "
+                                    "user's current message; memory was not saved")}
+                remaining["sink"][idx] = {"role": "tool", "tool_name": name,
+                                           "content": json.dumps(result)}
+                self.fileToolDone.emit(self._memory_outcome(name, a, result), False)
+                self._tool_done(remaining, calls)
+                return
+            req = {"op": "save", "text": str(a.get("text", "")),
+                   "source_quote": quote}
             if a.get("id"):
                 req["id"] = str(a.get("id"))
             heading = ("updating a memory" if a.get("id") else "saving a memory")

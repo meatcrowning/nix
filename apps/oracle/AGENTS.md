@@ -757,24 +757,29 @@ last week" from being distrusted: the model no longer has to go re-read an old
 session to recall a durable fact, it saved one.
 
 - **`tools/memory-store.py`** is the store: ONE `memories.json` under a root, a
-  list of `{id,text,created,updated}`, pure stdlib, one JSON request on stdin →
+  list of `{id,text,source_quote,created,updated}`, pure stdlib, one JSON request on stdin →
   one JSON result on stdout. Ops: `list` (newest-updated first), `save`
-  (`{text}` mints a `mem-<ms>-<rand>` id; `{text,id}` updates that entry), and
+  (`{text,source_quote}` mints a `mem-<ms>-<rand>` id; adding `id` updates that entry), and
   `delete` (`{id}`). Writes are atomic (`os.replace`). Caps: ~4000 chars/entry,
   ~500 entries (a create past the cap drops the oldest-updated). Unlike the
   session store, the id is **minted here** so a create is one round-trip. Errors
   are `{"error": …}` with exit 0 — reported, never a crash (docs/DESIGN.md §10).
 - **The three tools** (`MEMORY_TOOLS` in `main.py`, offered every turn beside
-  the file/web/time/session tools): `save_memory(text, id?)`,
+  the file/web/time/session tools): `save_memory(text, source_quote, id?)`,
   `list_memories()`, `delete_memory(id)` (`MEMORY_TOOL_NAMES`, dispatched in
   `_run_tool_calls` via `_run_memory_tool`). It shells out to
   `tools/memory-store.py` over the same host branch as the session tools
   (`Ollama._memories_argv`, local on `top`, ssh from `book`) — the store lives
-  on `top` with oracle's compute, so both machines share one set.
+  on `top` with oracle's compute, so both machines share one set. A save is
+  accepted only when `source_quote` occurs verbatim in the current user prompt:
+  model inferences, tool-derived summaries and mutable library/machine scans do
+  not become durable personal facts.
 - **Recall is automatic, not a tool call.** `Ollama._memories` caches the list
   (`refreshMemories()` at launch, re-run after any `save_memory`/`delete_memory`
-  lands), and `_system_prompt` prepends it as a "durable memories you saved
-  (real facts, trust them)" block each turn — capped at `MEMORY_CTX_MAX` (60)
+  lands), and `_system_prompt` prepends it with provenance each turn. New
+  entries say `user said: …`; pre-provenance entries say `unverified legacy
+  memory — check before use`, and mutable state must always be checked live —
+  capped at `MEMORY_CTX_MAX` (60)
   entries / `MEMORY_CTX_CHARS` (8000) chars so a big store never crowds out the
   chat. So the model sees its memories every turn without calling
   `list_memories`; the tools are for writing and housekeeping.
