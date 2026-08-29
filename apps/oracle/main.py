@@ -2703,6 +2703,18 @@ TOOL_CARRY_CHARS = 12000
 TOOL_CARRY_STUB = ("[earlier output dropped to save context — the call above is "
                    "what you ran; call it again if you need the output back]")
 
+#: Exact repeats that must not happen twice in one turn. Successful reads and
+#: commands are deliberately absent: reading after an edit is verification,
+#: and rerunning a test can be intentional. Every failed call is reusable too
+#: (see `_remember_tool_result`): identical arguments cannot repair an invalid
+#: path/schema/request, and returning the same failure with a correction costs
+#: no subprocess, network request, render, or mutation.
+TOOL_ONCE_NAMES = {
+    "write_file", "edit_file", "move_path", "delete_path", "make_dir",
+    "make_image", "make_video", "run_job", "job_stop",
+    "save_memory", "delete_memory", "make_tool", "make_skill", "make_agent",
+}
+
 #: The recall guidance, on the system prompt of EVERY turn. Without it the model
 #: treats a fact it does not see in the CURRENT chat as unknown — or, worse, as
 #: something it must have made up — and denies it, even though he told it in an
@@ -3057,6 +3069,11 @@ JOBS_SCRIPT = str(HERE / "tools" / "job-run.py")
 #: window with no jobs in it asks a third as often.
 JOBS_POLL_MS = 2000
 JOBS_IDLE_POLL_MS = 6000
+#: Local jobs are watched through inotify; this is only a quiet safety net for
+#: a missed filesystem event. Remote jobs cannot be watched through ssh and
+#: keep the ordinary poll above.
+JOBS_WATCH_SAFETY_MS = 60000
+JOBS_WATCH_DEBOUNCE_MS = 120
 
 #: Lines of a job's log kept on its row.
 JOBS_TAIL = 12
@@ -3639,11 +3656,58 @@ class Jobs(QObject):
         self._rows = []
         self._states = {}          # id -> the state we last told anyone about
         self._proc = None          # the live `list` poll
+        self._refresh_again = False  # an event landed during that poll
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.refresh)
+        self._watch = None
+        self._watch_debounce = None
+        if not TOOLS_REMOTE:
+            # The runner creates the root lazily too. Creating this one empty
+            # directory lets QFileSystemWatcher observe the first job instead
+            # of requiring a six-second discovery poll.
+            try:
+                os.makedirs(JOBS_ROOT, exist_ok=True)
+                self._watch = QFileSystemWatcher([JOBS_ROOT], self)
+                self._watch.directoryChanged.connect(self._watch_event)
+                self._watch.fileChanged.connect(self._watch_event)
+                self._watch_debounce = QTimer(self)
+                self._watch_debounce.setSingleShot(True)
+                self._watch_debounce.setInterval(JOBS_WATCH_DEBOUNCE_MS)
+                self._watch_debounce.timeout.connect(self.refresh)
+            except OSError:
+                self._watch = None
+                self._watch_debounce = None
         self.jobFinished.connect(self.notify)
-        self._timer.start(JOBS_IDLE_POLL_MS)
+        self._timer.start(JOBS_WATCH_SAFETY_MS if self._watch is not None
+                          else JOBS_IDLE_POLL_MS)
         self.refresh()
+
+    @Slot(str)
+    def _watch_event(self, _path=""):
+        """Coalesce a burst of status/log writes into one directory read."""
+        if self._watch_debounce is not None:
+            self._watch_debounce.start()
+
+    def _sync_watch(self, rows):
+        """Watch the small set of files that can change a rendered job row."""
+        if self._watch is None:
+            return
+        wanted = {JOBS_ROOT}
+        for row in rows:
+            job_id = str(row.get("id") or "")
+            if not job_id:
+                continue
+            root = os.path.join(JOBS_ROOT, job_id)
+            wanted.add(root)
+            wanted.add(os.path.join(root, "status.json"))
+            wanted.add(os.path.join(root, "log"))
+        current = set(self._watch.directories()) | set(self._watch.files())
+        stale = list(current - wanted)
+        if stale:
+            self._watch.removePaths(stale)
+        missing = [p for p in wanted - current if os.path.exists(p)]
+        if missing:
+            self._watch.addPaths(missing)
 
     # ---- the argv, host-branched exactly like the file and exec tools ----
 
@@ -3685,6 +3749,7 @@ class Jobs(QObject):
     @Slot()
     def refresh(self):
         if self._proc is not None:
+            self._refresh_again = True
             return                              # one in flight is enough
         proc = QProcess(self)
         self._proc = proc
@@ -3696,6 +3761,7 @@ class Jobs(QObject):
         if proc is not self._proc:
             return                    # a duplicate `finished`, or a torn-down app
         self._proc = None
+        again, self._refresh_again = self._refresh_again, False
         # RuntimeError: the app is being torn down and the C++ QProcess is
         # already gone. A poll landing during teardown is not an error worth
         # printing at him.
@@ -3721,14 +3787,18 @@ class Jobs(QObject):
                                       int(r.get("exit") or 0))
         self._states = {r["id"]: r.get("state") for r in rows}
         running = any(r.get("state") in ("running", "starting") for r in rows)
+        self._sync_watch(rows)
         try:
-            self._timer.setInterval(JOBS_POLL_MS if running
-                                    else JOBS_IDLE_POLL_MS)
+            self._timer.setInterval(
+                (JOBS_WATCH_SAFETY_MS if self._watch is not None else
+                 (JOBS_POLL_MS if running else JOBS_IDLE_POLL_MS)))
         except RuntimeError:
             return                    # the app is going away underneath us
         if rows != self._rows:
             self._rows = rows
             self.rowsChanged.emit()
+        if again:
+            QTimer.singleShot(0, self.refresh)
 
     # ---- a finished job says so, when the window cannot ----
 
@@ -4230,6 +4300,16 @@ class Ollama(QObject):
         self.videoResult.connect(lambda _j: self._typed_video_done())
         self._reply = None       # the in-flight chat QNetworkReply, if any
         self._buf = b""          # partial NDJSON line carried between reads
+        # Ollama commonly delivers one NDJSON frame per token. Sending every
+        # frame through Python -> QML makes Qt rebuild the markdown document and
+        # the reply-flow model once per token. Accumulate one display-frame of
+        # text instead; the model wire and the saved answer remain exact.
+        self._stream_text = ""
+        self._stream_thinking = ""
+        self._stream_flush = QTimer(self)
+        self._stream_flush.setSingleShot(True)
+        self._stream_flush.setInterval(33)
+        self._stream_flush.timeout.connect(self._flush_stream)
         self._think_tokens = 0   # reasoning tokens seen this turn (one per delta)
         self._model = ""         # the model for the current turn
         self._messages = []      # the growing message list across a tool loop
@@ -4255,6 +4335,7 @@ class Ollama(QObject):
         self._squeezed = False   # this turn wrote its answer UNDER DURESS — see
                                  # `_truncation_reason`
         self._extra_tools = set()  # tools `get_tools` attached THIS turn
+        self._tool_seen = {}       # exact failed/one-shot calls already completed
         self._prior = []         # the LAST finished turn's messages, tool rounds
                                  # and all — see `_carry` (working memory)
         self._prior_users = []   # the RAW prompts behind it, for the match
@@ -4984,6 +5065,7 @@ class Ollama(QObject):
         self._no_tools = False       # not a wrap-up round
         self._squeezed = False       # …and nothing has squeezed it yet
         self._extra_tools = set()    # a fresh turn attaches its own tools
+        self._tool_seen = {}         # no result can leak into a later turn
         if gen:
             # The generator is not a CORE tool, so a turn that is plainly a
             # generation attaches it itself rather than spending a get_tools
@@ -5136,6 +5218,7 @@ class Ollama(QObject):
         self._no_tools = False
         self._squeezed = False
         self._extra_tools = set()
+        self._tool_seen = {}
         self._resp_t0 = 0.0
         self._resp_tokens = 0
         self._set_tps(0.0)
@@ -6123,6 +6206,9 @@ class Ollama(QObject):
                       "application/json")
         self._buf = b""
         self._acc_content = ""
+        self._stream_text = ""
+        self._stream_thinking = ""
+        self._stream_flush.stop()
         self._tool_calls = []
         self._done_reason = ""
         reply = self._nam.post(req, body)
@@ -6134,6 +6220,7 @@ class Ollama(QObject):
     def cancel(self):
         # Drops the whole turn: a pending tool fetch checks `busy` and bails, so
         # a search still in flight never re-posts to a cancelled turn.
+        self._flush_stream()
         self._set_busy(False)
         self._stop_generating()
         if self._reply is not None:
@@ -6219,7 +6306,9 @@ class Ollama(QObject):
             # dimmed) so the window is not blank while it reasons.
             think = msg.get("thinking", "")
             if think:
-                self.replyThinking.emit(think)
+                self._stream_thinking += think
+                if not self._stream_flush.isActive():
+                    self._stream_flush.start()
                 # ollama streams one token per NDJSON frame, so a running frame
                 # count is the reasoning's live token count — surfaced so the
                 # collapsed heading can show progress while it thinks.
@@ -6228,6 +6317,10 @@ class Ollama(QObject):
             piece = msg.get("content", "")
             if piece:
                 self._acc_content += piece
+                # Preserve the reasoning -> answer boundary even when both
+                # arrive inside one 33ms display batch.
+                if self._stream_thinking:
+                    self._flush_stream()
                 # A running tok/s estimate: clock from the first content frame,
                 # one frame ≈ one token (same assumption the reasoning counter
                 # uses). Settled to ollama's exact numbers on the done frame below.
@@ -6237,7 +6330,9 @@ class Ollama(QObject):
                 dt = time.monotonic() - self._resp_t0
                 if dt > 0.2 and self._resp_tokens > 1:
                     self._set_tps(self._resp_tokens / dt)
-                self.replyChunk.emit(piece)
+                self._stream_text += piece
+                if not self._stream_flush.isActive():
+                    self._stream_flush.start()
             # Tool calls arrive assembled by ollama (not partial deltas); a turn
             # may carry several. Accumulate them for the round.
             calls = msg.get("tool_calls")
@@ -6272,6 +6367,17 @@ class Ollama(QObject):
                     # about it.
                     if used >= self._num_ctx * CTX_FULL_FRACTION:
                         self._squeezed = True
+
+    @Slot()
+    def _flush_stream(self):
+        """Publish at most one reasoning and one answer update per UI frame."""
+        self._stream_flush.stop()
+        if self._stream_thinking:
+            text, self._stream_thinking = self._stream_thinking, ""
+            self.replyThinking.emit(text)
+        if self._stream_text:
+            text, self._stream_text = self._stream_text, ""
+            self.replyChunk.emit(text)
 
     #: Characters an answer can legitimately END on: sentence punctuation, a
     #: closed markdown span, a table row, a link, a symbol or an emoji. A reply
@@ -6328,6 +6434,9 @@ class Ollama(QObject):
             reply.deleteLater()
             return
         self._reply = None
+        # `finished` may arrive before the 33ms display timer. Settle the exact
+        # final text before QML closes/saves the row or starts another round.
+        self._flush_stream()
         err = reply.error()
         err_str = reply.errorString()
         reply.deleteLater()
@@ -6601,10 +6710,51 @@ class Ollama(QObject):
                 args = {}
         return name, args
 
+    @staticmethod
+    def _tool_key(name, args):
+        """Stable identity for one exact call, even with odd model arguments."""
+        try:
+            body = json.dumps(args, sort_keys=True, separators=(",", ":"),
+                              ensure_ascii=False)
+        except (TypeError, ValueError):
+            body = repr(args)
+        return str(name or ""), body
+
+    @staticmethod
+    def _reused_tool_result(result):
+        """Return a cached result with a direct next move for the model."""
+        try:
+            obj = json.loads(str(result.get("content") or "{}"))
+        except (TypeError, ValueError):
+            obj = {"result": str(result.get("content") or "")}
+        if not isinstance(obj, dict):
+            obj = {"result": obj}
+        obj["reused"] = True
+        obj["note"] = ("this exact call already completed in this turn; its "
+                       "result was reused. Use that result, or change the "
+                       "arguments if you need a different outcome.")
+        return {"role": "tool", "tool_name": result.get("tool_name", "tool"),
+                "content": json.dumps(obj)}
+
+    @staticmethod
+    def _remember_tool_result(name, args, result, cache):
+        """Cache failures and successful calls whose effects must occur once."""
+        if not isinstance(result, dict):
+            return
+        failed = False
+        try:
+            body = json.loads(str(result.get("content") or "{}"))
+            failed = isinstance(body, dict) and bool(body.get("error"))
+        except (TypeError, ValueError):
+            pass
+        if failed or name in TOOL_ONCE_NAMES:
+            cache[Ollama._tool_key(name, args)] = result
+
     def _run_tool_calls(self, calls):
         """Dispatch each tool call; when the last result is in, re-post the
         chat with the tool messages appended. Calls run concurrently."""
         remaining = self._new_round(calls)
+        remaining["cache"] = self._tool_seen
         reg = self._main_registry()
         for i, call in enumerate(calls):
             name, args = self._call_parts(call)
@@ -6617,6 +6767,11 @@ class Ollama(QObject):
             # Name every call in the transcript, whatever it is — the generic
             # indicator, so a tool with no richer disclosure is never silent.
             self.toolCallStarted.emit(name or "tool")
+            cached = self._tool_seen.get(self._tool_key(name, args))
+            if cached is not None:
+                remaining["sink"][i] = self._reused_tool_result(cached)
+                self._tool_done(remaining, calls)
+                continue
             self._dispatch_tool(name, args, i, remaining, calls)
 
     def _dispatch_tool(self, name, args, i, remaining, calls):
@@ -6741,6 +6896,7 @@ class Ollama(QObject):
             "rounds": 0,
             "ncalls": 0,
             "used": [],
+            "seen": {},
             "wrap": False,
             "idx": idx, "remaining": remaining, "calls": calls,
         }
@@ -6809,6 +6965,7 @@ class Ollama(QObject):
             run["wrap"] = True
         round_ = self._new_round(
             tool_calls, done=lambda sink, r=run: self._agent_round_done(r, sink))
+        round_["cache"] = run["seen"]
         for i, call in enumerate(tool_calls):
             name, cargs = self._call_parts(call)
             # Into the AGENT's disclosure, not the turn's own tool list — a
@@ -6825,6 +6982,11 @@ class Ollama(QObject):
                     "content": json.dumps({"error": "you were not given the "
                                            "tool %r; the tools you have are: %s"
                                            % (name, ", ".join(sorted(run["allowed"])))})}
+                self._tool_done(round_, tool_calls)
+                continue
+            cached = run["seen"].get(self._tool_key(name, cargs))
+            if cached is not None:
+                round_["sink"][i] = self._reused_tool_result(cached)
                 self._tool_done(round_, tool_calls)
                 continue
             self._dispatch_tool(name, cargs, i, round_, tool_calls)
@@ -7432,6 +7594,11 @@ class Ollama(QObject):
         remaining["n"] -= 1
         if remaining["n"] > 0 or not self._busy:
             return
+        cache = remaining.get("cache")
+        if cache is not None:
+            for call, result in zip(calls, remaining["sink"]):
+                name, args = self._call_parts(call)
+                self._remember_tool_result(name, args, result, cache)
         finish = remaining.get("done")
         if finish is not None:
             finish([tr for tr in remaining["sink"] if tr is not None])
