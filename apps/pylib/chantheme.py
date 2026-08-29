@@ -236,26 +236,35 @@ def _chrome_css(ch, i):
         "to bottom,%s,%s 320px)%s;background-repeat:no-repeat%s;"
         "background-attachment:fixed%s}"
         % (ch["windowBottom"], i, ch["windowTop"], ch["windowBottom"], i, i, i),
-        # Posts, dialogs, catalog cells and menus as the style's slabs:
+        # Dialogs, catalog cells, previews and menus as the style's slabs:
         # the panel gradient, a 1px light bevel along the top, a soft foot
-        # shadow and Oxygen's small corner radius.
-        ".reply,body.is_catalog .panel,:root.catalog-mode .panel,.dialog,"
-        ".tab-label,#post-preview,#tegaki,.boxbar,.inline,"
+        # shadow and Oxygen's small corner radius. POSTS are deliberately not
+        # in this list — see the rule below.
+        "body.is_catalog .panel,:root.catalog-mode .panel,.dialog,"
+        ".tab-label,#post-preview,#tegaki,.boxbar,"
         ":root.catalog-background #threads div.thread,"
         ":root.catalog-background .catalog-thread,"
-        ":root.op-background .postContainer.opContainer,"
         ".dd-menu ul{background:%s%s;border-radius:%dpx%s;"
         "box-shadow:inset 0 1px 0 %s,0 1px 2px %s%s}"
         % (panel, i, r, i, bevel, shade, i),
+        # Posts are NOT slabs. A thread is a column of them, so slabbing each
+        # one tiles the panel gradient down the page and the window gradient
+        # this layer's whole point is never seen. Posts (and their header
+        # strips and inline quotes) drop background, border and shadow
+        # instead, and the fixed body gradient reads through them.
+        ".reply,.inline,:root.op-background .postContainer.opContainer,"
+        ".postInfo{background:none%s;background-color:transparent%s;"
+        "border:none%s;box-shadow:none%s}" % (i, i, i, i),
+        # ...except the "you were quoted"/selection marker, which the rule
+        # above would take with it: it is the only border a post keeps.
+        ":root.hl-border .post.reply,"
+        ":root.op-background.hl-border .postContainer.opContainer{"
+        "border-left-style:solid%s;border-left-width:4px%s}" % (i, i),
         # The board header reads as the style's toolbar.
         ":root:not(.header-gradient) #header-bar,"
         ":root.header-gradient #header-bar{background:%s%s;"
         "box-shadow:inset 0 1px 0 %s,0 1px 3px %s%s}"
         % (grad("headerTop", "headerBottom"), i, bevel, shade, i),
-        # And each post's own header strip as that post's title bar — the
-        # separating border-bottom stays dropped by the flat layer, so the
-        # strip and the body still read as one slab.
-        ".postInfo{background:%s%s}" % (grad("headerTop", "headerBottom"), i),
         # Text fields are the style's HOLE: sunken, not raised — the bevel
         # goes to a shadow at the top and there is no foot highlight.
         "input:not(.jsColor),textarea,.riceCheck,#qr-filename-container,select,"
