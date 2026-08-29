@@ -285,6 +285,7 @@ Item {
                 id: viewMa
                 anchors.fill: parent
                 acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+                preventStealing: true
                 hoverEnabled: false
                 cursorShape: panning ? Qt.ClosedHandCursor
                            : (pane.sourceIsVideo && !pane.showLive) ? Qt.PointingHandCursor
@@ -296,12 +297,20 @@ Item {
                 property real startPanY: 0
                 property bool moved: false
 
+                // THE DESKTOP'S OWN WHEEL MATHS, not a second reading of the
+                // same hardware: viewer's `ImageViewer` and reader's `PdfView`
+                // both use this, and the comments there are the argument for
+                // it. `exp(ln(1.2)/120 · d)` makes one classic detent exactly
+                // x1.2 whatever the device, a touchpad's pixelDelta is worth
+                // three of it, and a sub-pixel event carries the same motion in
+                // angleDelta at 12x scale, so that one is divided rather than
+                // zooming four times faster when moving slowly.
                 onWheel: function (w) {
-                    // A notch is 120 units; anything is a fraction of one on a
-                    // touchpad, and the exponent keeps the two feeling the same.
-                    var steps = (w.angleDelta.y !== 0 ? w.angleDelta.y : w.pixelDelta.y * 4) / 120
-                    if (steps === 0) return
-                    pane.zoomAt(Math.pow(1.18, steps), w.x, w.y)
+                    var ad = w.angleDelta.y
+                    var d = w.pixelDelta.y !== 0 ? w.pixelDelta.y * 3
+                          : Math.abs(ad) >= 120  ? ad          // a real wheel detent
+                          :                        ad / 4      // touchpad sub-pixel
+                    if (d !== 0) pane.zoomAt(Math.exp(Math.log(1.2) / 120 * d), w.x, w.y)
                     w.accepted = true
                 }
                 onPressed: function (m) {
