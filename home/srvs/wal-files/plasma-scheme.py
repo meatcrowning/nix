@@ -190,7 +190,27 @@ def push_to_kdeglobals(minted, name, digest):
     # "this scheme" from "this scheme, edited".
     subprocess.run([kw, "--notify", "--file", "kdeglobals", "--group", "General",
                     "--key", "ColorSchemeHash", "--", digest], check=False)
-    print("plasma-scheme: pushed %d keys into kdeglobals" % (len(writes) + 1))
+
+    # ---- and the legacy broadcast, which is the one that actually repaints ---
+    #
+    # KConfig's ConfigChanged is not enough, measured on book 2026-08-28: with
+    # --notify on every colour key the Qt apps' own palettes did follow (Konsole's
+    # toolbar and titlebar went purple at once) while the PLASMA PANEL and every
+    # Oxygen-drawn SCROLLBAR stayed on the old colour until their process
+    # restarted. Both of those repaint on `KGlobalSettings::notifyChange`, the
+    # KDE4-era session-bus broadcast that KDE's own colour KCM still emits after
+    # it writes kdeglobals — nothing replaced it for these two consumers.
+    # Sending it here is what makes a wallpaper change land on the whole desktop
+    # rather than most of it. 0 = PaletteChanged, 2 = StyleChanged (Oxygen
+    # re-reads its own cached tiles on the second one).
+    ds = shutil.which("dbus-send")
+    if ds:
+        for change in ("0", "2"):
+            subprocess.run([ds, "--session", "--type=signal", "/KGlobalSettings",
+                            "org.kde.KGlobalSettings.notifyChange",
+                            "int32:" + change, "int32:0"], check=False)
+    print("plasma-scheme: pushed %d keys into kdeglobals%s"
+          % (len(writes) + 1, "" if ds else " (no dbus-send: no live repaint)"))
 
 
 def live_scheme():
