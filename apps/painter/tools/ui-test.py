@@ -3894,7 +3894,19 @@ def test_live_row(win, ctl, tmp):
     # --- it lands: the row becomes the file, and the selection with it ------
     landed = noisy_png(os.path.join(tmp, "out", "live_00009_.png"), 60, 40)
     ctl.gallery.add(landed, "job-1")
+    # NO SPIN: this is the frame the flash lived in. The job's row has just
+    # become its file and that file has not been decoded yet, so the pane must
+    # still be drawing the last sampler frame — anything else here is the
+    # PREVIOUS output showing through [his, 2026-08-28, twice].
+    check("a finish does not fall back to the previous output",
+          pane.property("source") == landed, pane.property("source"))
+    check("...it holds the last sampler frame until the new file can be drawn",
+          pane.property("showLive") is True and pane.property("handover") is True,
+          (pane.property("showLive"), pane.property("handover")))
     spin(250)
+    check("...and then hands over to the output itself",
+          pane.property("showLive") is False and pane.property("source") == landed,
+          (pane.property("showLive"), pane.property("source")))
     check("the finished output replaces the job's row",
           ctl.gallery.rowCount() == before + 1 and ctl.gallery.isLiveAt(0) is False
           and ctl.gallery.pathAt(0) == landed,

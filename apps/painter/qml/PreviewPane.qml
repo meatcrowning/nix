@@ -57,8 +57,19 @@ Item {
     //: 2026-08-28]. So a selected LIVE row keeps drawing its last frame for as
     //: long as the row exists; `_on_started` zeroes the tick, so a new job
     //: never shows the old one's.
-    readonly property bool showLive: (pane.selLive && App.previewTick > 0)
-                                     || (pane.selPath === "" && App.hasPreview)
+    //: THE HANDOVER. Between "the job finished" and "its file is decoded" there
+    //: is a gap, and an `Image` whose source has just changed still holds the
+    //: LAST picture it loaded — the previous generation. Made visible in that
+    //: gap it flashes it [his, 2026-08-28, twice]. So the sampler's last frame
+    //: is held until the new file is actually ready to draw.
+    property bool handover: false
+    //: ...and WHICH file it is waiting for, so the selection landing on that
+    //: file does not read as "he picked something else" and cancel it (the two
+    //: happen in the same signal, in whichever order the connections were made).
+    property string handoverPath: ""
+    readonly property bool showLive: App.previewTick > 0
+                                     && (pane.selLive || pane.handover
+                                         || (pane.selPath === "" && App.hasPreview))
 
     // The file being drawn, derived from the selection — never written from
     // anywhere else.
@@ -69,6 +80,11 @@ Item {
         pane.selLive = pane.selPath !== "" && Gallery.isLive(pane.selPath)
         if (pane.selLive) { pane.source = ""; pane.sourceIsVideo = false; return }
         var p = pane.selPath
+        // THE SENTINEL IS NOT A FILE. The selection can still name the running
+        // job's row for an instant after that row has gone (it is a path like
+        // any other to the view), and handing `live://generating` to an Image
+        // is a broken source that draws whatever the Image last held.
+        if (p !== "" && Gallery.indexOf(p) < 0 && p.indexOf("live:") === 0) p = ""
         if (p === "") {
             // Nothing picked: the newest OUTPUT, which is row 0 unless a job is
             // sampling in it.
@@ -80,7 +96,13 @@ Item {
         pane.sourceIsVideo = p === "" ? false
                                       : Gallery.isVideoAt(Gallery.indexOf(p))
     }
-    onSelPathChanged: pane.refresh()
+    onSelPathChanged: {
+        // A DELIBERATE PICK ENDS THE HANDOVER: he asked for that output, so the
+        // job's last frame has no claim on the pane any more.
+        if (pane.selPath !== pane.handoverPath && !Gallery.isLive(pane.selPath))
+            pane.handover = false
+        pane.refresh()
+    }
 
     visible: open
     height: open ? paneHeight : 0
@@ -91,6 +113,22 @@ Item {
         target: Gallery
         function onCountChanged() { pane.refresh() }
         function onLiveChanged() { pane.refresh() }
+        //: The job's row became its file: hold the last frame until that file
+        //: can actually be drawn (see `handover`).
+        function onLiveReplaced(path) {
+            pane.handoverPath = "" + path
+            pane.handover = true
+            handoverGuard.restart()
+        }
+    }
+
+    //: ...and never for longer than it takes to decode one output. A file that
+    //: fails to load, or a clip that never starts, must not leave the pane on a
+    //: frame from a job that finished.
+    Timer {
+        id: handoverGuard
+        interval: 4000
+        onTriggered: { pane.handover = false; pane.handoverPath = "" }
     }
     Component.onCompleted: pane.refresh()
 
@@ -123,12 +161,21 @@ Item {
             anchors.fill: parent
             anchors.margins: 1
             visible: !pane.showLive && pane.source !== "" && !pane.sourceIsVideo
-            // The pane being shut means the file is not decoded at all, not
-            // merely not drawn — see the MediaPlayer below.
-            source: (pane.open && visible) ? "file://" + pane.source : ""
+            // LOADING IS NOT DRAWING. The pane being shut means the file is not
+            // decoded at all (see the MediaPlayer below) — but `visible` must
+            // NOT be in this condition: during the handover above this item is
+            // hidden on purpose while the file loads, and a source bound to
+            // `visible` would never start loading, so `status` would never
+            // reach Ready and the handover would only ever end on its timeout.
+            source: (pane.open && pane.source !== "" && !pane.sourceIsVideo)
+                    ? "file://" + pane.source : ""
             fillMode: Image.PreserveAspectFit
             cache: false
             asynchronous: true
+            onStatusChanged: if (status === Image.Ready || status === Image.Error) {
+                                 pane.handover = false
+                                 pane.handoverPath = ""
+                             }
 
             MouseArea {
                 anchors.fill: parent
@@ -147,13 +194,18 @@ Item {
         AudioOutput { id: silent; muted: true }
         MediaPlayer {
             id: player
-            source: (pane.open && !pane.showLive
-                     && pane.source !== "" && pane.sourceIsVideo)
+            // Same as the still above: not gated on `showLive`, so the clip is
+            // already buffering while the last sampler frame is still up.
+            source: (pane.open && pane.source !== "" && pane.sourceIsVideo)
                     ? "file://" + pane.source : ""
             videoOutput: videoOut
             audioOutput: silent
             loops: MediaPlayer.Infinite
             onSourceChanged: if (source != "") play()
+            onPlaybackStateChanged: if (playbackState === MediaPlayer.PlayingState) {
+                                        pane.handover = false
+                                        pane.handoverPath = ""
+                                    }
         }
         VideoOutput {
             id: videoOut
