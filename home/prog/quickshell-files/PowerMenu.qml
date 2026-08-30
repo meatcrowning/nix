@@ -82,6 +82,14 @@ PanelWindow {
             const exitScript = Qt.resolvedUrl("scripts/session-exit.sh").toString().replace("file://", "");
             cmd = "'" + exitScript + "' ; " + item.cmd;
         }
+        // Vista's end-of-session sounds. Fired before the command because the
+        // endSession path runs session-exit.sh first (it blocks until every
+        // window is gone), which is exactly the gap the sound plays in; the
+        // player is detached and pipewire outlives the compositor, so a logout
+        // does not cut it short. Sleep gets none — it is not an end of session.
+        if (item.endSession)
+            Sounds.play(item.label === "logout" ? SettingsStore.d.soundLogout
+                                                : SettingsStore.d.soundShutdown);
         Quickshell.execDetached(["sh", "-c", cmd]);
         close();
     }
