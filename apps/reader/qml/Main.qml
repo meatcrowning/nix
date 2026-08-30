@@ -576,6 +576,7 @@ Window {
                             verticalCenter: parent.verticalCenter
                         }
                         font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
+                        font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
                         renderType: Text.NativeRendering
                         color: win.fgText
                         // accent/bg, not the near-black `highlight` fill: a
@@ -666,6 +667,7 @@ Window {
                             verticalCenter: parent.verticalCenter
                         }
                         font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
+                        font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
                         renderType: Text.NativeRendering
                         color: win.fgText
                         selectionColor: Theme.accent

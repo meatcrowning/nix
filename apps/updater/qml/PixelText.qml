@@ -8,6 +8,7 @@ Text {
 
     font.family: Theme.font
     font.pixelSize: Theme.fontSize
+    font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
     font.hintingPreference: Theme.fontTerminalCell ? Font.PreferVerticalHinting
                                                     : (Theme.fontSmooth ? Font.PreferNoHinting : Font.PreferFullHinting)
     renderType: Text.NativeRendering

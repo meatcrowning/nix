@@ -107,6 +107,7 @@ Item {
                                 color: Theme.accent
                                 font.family: Theme.font
                                 font.pixelSize: Theme.fontSize
+                font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
                                 renderType: Text.NativeRendering
                                 clip: true
                                 onAccepted: {

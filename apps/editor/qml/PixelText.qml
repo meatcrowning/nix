@@ -26,6 +26,7 @@ Text {
 
     font.family: Theme.font
     font.pixelSize: Theme.fontSize
+    font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
     // PIXEL-FACE settings — except when the live face is a smooth outline
     // (Theme.fontSmooth <- DeskStyle.smooth: Phenex, the cursive). Then the
     // crisp pipeline is exactly wrong (staircased curves, kinked joins):

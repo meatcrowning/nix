@@ -53,7 +53,18 @@ import Quickshell.Wayland
 PanelWindow {
     id: launcher
 
+    // Unlike the bar, this is one persistent surface rather than a per-output
+    // Variant. Letting PanelWindow choose its initial output left it attached
+    // to a removed eDP screen after the external DP output took over: Meta
+    // toggled `open` and the card reached x=0, but there was no qs-launcher
+    // surface mapped anywhere to draw it. Keep the singleton attached to the
+    // current primary output so an output switch remaps it with the panel.
+    screen: Quickshell.screens.length ? Quickshell.screens[0] : null
+
     property bool open: false
+
+    // Diagnostic only: bumped by shell.qml every time the Super tap arrives.
+    property int taps: 0
 
     readonly property bool barLeft: SettingsStore.d.barEdge === "left"
 
@@ -232,7 +243,13 @@ PanelWindow {
              + " edgeGap=" + (launcher.width - card.openW)
              + " faceOffset=" + launcher.faceOffset
              + " notchPx=" + ViewMode.notchPx
-             + " open=" + launcher.open;
+             + " open=" + launcher.open
+             // How many times the compositor's Super tap has reached the panel
+             // (RunnerShortcut.qml -> shell.qml). "Meta does nothing" has two
+             // halves — the shortcut never arriving, and the drawer not being
+             // drawn — and this is the only way to tell them apart without
+             // opening the runner on his screen.
+             + " taps=" + launcher.taps;
     }
 
     onOpenChanged: {
@@ -290,6 +307,7 @@ PanelWindow {
                 id: nameMetrics
                 font.family: Theme.font
                 font.pixelSize: Theme.fontSize
+                font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
                 font.hintingPreference: Font.PreferFullHinting
             }
             //
@@ -385,14 +403,9 @@ PanelWindow {
                     ? NotchModel.columnInsetFlush : NotchModel.columnInset
                 Behavior on inset { NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing } }
 
-                anchors {
-                    left: launcher.barLeft ? undefined : parent.left
-                    right: launcher.barLeft ? parent.right : undefined
-                    leftMargin: launcher.barLeft ? 0 : inset
-                    rightMargin: launcher.barLeft ? inset : 0
-                    verticalCenter: parent.verticalCenter
-                }
                 width: NotchModel.iconSize + NotchModel.gap + card.nameW
+                x: launcher.barLeft ? parent.width - inset - width : inset
+                anchors.verticalCenter: parent.verticalCenter
 
                 Repeater {
                     model: NotchModel.apps
@@ -418,10 +431,9 @@ PanelWindow {
 
                         AppIcon {
                             id: sealIcon
-                            anchors.left: launcher.barLeft ? undefined : parent.left
-                            anchors.right: launcher.barLeft ? parent.right : undefined
                             width: NotchModel.iconSize
                             height: NotchModel.iconSize
+                            x: launcher.barLeft ? parent.width - width : 0
                             iconName: seal.modelData.icon
                             // The focus colour, like every other program icon
                             // on this desktop (docs/DESIGN.md §12.2.1).
@@ -432,13 +444,10 @@ PanelWindow {
                         // so it comes out from behind the panel as the bar is
                         // pulled, rather than fading in on top of it.
                         PixelText {
-                            anchors {
-                                left: launcher.barLeft ? parent.left : sealIcon.right
-                                right: launcher.barLeft ? sealIcon.left : parent.right
-                                leftMargin: launcher.barLeft ? 0 : NotchModel.gap
-                                rightMargin: launcher.barLeft ? NotchModel.gap : 0
-                                verticalCenter: parent.verticalCenter
-                            }
+                            x: launcher.barLeft ? 0 : sealIcon.x + sealIcon.width + NotchModel.gap
+                            width: launcher.barLeft ? sealIcon.x - NotchModel.gap
+                                                    : parent.width - x
+                            anchors.verticalCenter: parent.verticalCenter
                             // Label only — `entry.command`, the argv that
                             // actually runs, never comes near this.
                             text: Glyphs.px(seal.modelData.name || "")
@@ -460,28 +469,22 @@ PanelWindow {
             // the divider between the two halves
             Rectangle {
                 id: split
-                anchors {
-                    left: launcher.barLeft ? undefined : seals.right
-                    right: launcher.barLeft ? seals.left : undefined
-                    leftMargin: launcher.barLeft ? 0 : card.pad
-                    rightMargin: launcher.barLeft ? card.pad : 0
-                    top: parent.top; bottom: parent.bottom
-                    topMargin: card.pad + card.lineW; bottomMargin: card.pad + card.lineW
-                }
                 width: 1
+                x: launcher.barLeft ? seals.x - card.pad - width
+                                  : seals.x + seals.width + card.pad
+                anchors { top: parent.top; bottom: parent.bottom
+                    topMargin: card.pad + card.lineW; bottomMargin: card.pad + card.lineW }
                 color: Theme.border
             }
 
             // ================= the runner: everything else =====================
             Column {
-                anchors {
-                    left: launcher.barLeft ? parent.left : split.right
-                    right: launcher.barLeft ? split.left : parent.right
-                    leftMargin: launcher.barLeft ? card.pad : card.pad
-                    rightMargin: launcher.barLeft ? card.pad : card.pad
-                    top: parent.top; topMargin: card.pad + card.lineW
-                    bottom: parent.bottom; bottomMargin: card.pad + card.lineW
-                }
+                id: runnerBody
+                x: launcher.barLeft ? card.pad : split.x + split.width + card.pad
+                width: launcher.barLeft ? split.x - card.pad
+                                        : parent.width - x - card.pad
+                anchors { top: parent.top; topMargin: card.pad + card.lineW
+                    bottom: parent.bottom; bottomMargin: card.pad + card.lineW }
                 spacing: 8
 
                 // search box
@@ -511,6 +514,7 @@ PanelWindow {
                             color: Theme.text
                             font.family: Theme.font
                             font.pixelSize: Theme.fontSize
+                font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
                             font.hintingPreference: Font.PreferFullHinting
                             renderType: Text.NativeRendering
                             clip: true

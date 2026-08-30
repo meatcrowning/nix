@@ -162,6 +162,7 @@ Item {
                        : (root.typed && !root.canAccept) ? Theme.crit
                        : root.canAccept ? Theme.text : Theme.textDim
                 font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
+                font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
                 renderType: Text.NativeRendering
                 selectByMouse: true
                 selectionColor: Theme.accent

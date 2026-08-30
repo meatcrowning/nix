@@ -801,7 +801,10 @@ Scope {
         source: "RunnerShortcut.qml"
         onStatusChanged: if (status === Loader.Error)
             console.warn("RunnerShortcut unavailable — the runner opens via the IPC bind only");
-        onLoaded: item.triggered.connect(() => launcher.open = !launcher.open)
+        onLoaded: item.triggered.connect(() => {
+            launcher.taps++;
+            launcher.open = !launcher.open;
+        })
     }
 
     // The seam between a maximized window's edge and the shortcut notch: the
@@ -1030,10 +1033,14 @@ Scope {
                 id: barBody
                 anchors {
                     top: parent.top; bottom: parent.bottom
-                    left: bar.barLeft ? parent.left : undefined
-                    right: bar.barLeft ? undefined : parent.right
                 }
                 width: ViewMode.liveWidth
+                // The layer surface is fixed at its maximum width. Keep the
+                // visible body in an explicit mirrored coordinate instead of
+                // switching anchors: a live left/right flip otherwise leaves
+                // the former anchor attached in this already-realized item,
+                // separating the painted edge from EdgeGrip's input strip.
+                x: bar.barLeft ? 0 : parent.width - width
 
                 // ...and NOT while the tree is settling after a reload. The
                 // panel is built from the shipped settings defaults — a 48px
@@ -1115,14 +1122,13 @@ Scope {
                     z: 1
                     anchors {
                         top: parent.top; bottom: parent.bottom
-                        left: bar.barLeft ? undefined : parent.left
-                        right: bar.barLeft ? parent.right : undefined
                     }
                     // the global border width, floored at 2: a 1px line pinned
                     // to a screen edge vanishes on a 1.0-scale monitor (see
                     // EdgeAccent's thickness note), and 0 must not erase the
                     // panel's face — this strip is the panel's one edge.
                     width: Math.max(2, Theme.windowBorderWidth)
+                    x: bar.barLeft ? parent.width - width : 0
                     color: Theme.accent
                 }
 

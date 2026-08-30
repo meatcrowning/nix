@@ -46,6 +46,7 @@ Item {
                     color: Theme.text
                     font.family: Theme.font
                     font.pixelSize: Theme.fontSize
+                font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
                     renderType: Text.NativeRendering
                     clip: true
                     onAccepted: { root.accepted(text); root.close(); }

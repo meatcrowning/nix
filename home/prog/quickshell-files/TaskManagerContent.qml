@@ -135,6 +135,7 @@ Item {
             // distance-field path — blurry, next to a panel of crisp text.
             font.family: Theme.font
             font.pixelSize: Theme.fontSize
+                font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
             font.hintingPreference: Font.PreferFullHinting
             renderType: Text.NativeRendering
             color: Theme.text

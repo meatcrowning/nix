@@ -2176,6 +2176,7 @@ def custom_tools():
         if host not in ("top", "book"):
             host = ""
         out[name] = {"name": name, "prog": str(prog), "host": host,
+                     "once": bool(spec.get("once")),
                      "description": str(spec.get("description") or
                                         ("custom tool " + name)),
                      "parameters": params,
@@ -3727,7 +3728,11 @@ class Titlebar(QObject):
         edge = option("plugin:hyprvtb:titlebar_edge", "str", "right")
         if edge not in ("right", "left", "top", "bottom"):
             edge = "right"
-        compact = bool(option("plugin:hyprvtb:compact", "int", 0))
+        compact = option("plugin:hyprvtb:compact", "int", 0)
+        if isinstance(compact, str):
+            compact = compact.strip().lower() not in ("", "0", "false", "no")
+        else:
+            compact = bool(compact)
         bar_width = max(8, int(option("plugin:hyprvtb:bar_width", "int", 40)))
         if edge != self._edge:
             self._edge = edge
@@ -6961,10 +6966,12 @@ class Ollama(QObject):
         failed = False
         try:
             body = json.loads(str(result.get("content") or "{}"))
-            failed = isinstance(body, dict) and bool(body.get("error"))
+            failed = (isinstance(body, dict)
+                      and bool(body.get("error") or body.get("timed_out")))
         except (TypeError, ValueError):
             pass
-        if failed or name in TOOL_ONCE_NAMES:
+        custom = custom_tools().get(name)
+        if failed or name in TOOL_ONCE_NAMES or (custom and custom.get("once")):
             cache[Ollama._tool_key(name, args)] = result
 
     def _run_tool_calls(self, calls):

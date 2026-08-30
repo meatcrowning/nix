@@ -120,7 +120,8 @@ let
     # Oxygen Mono is a smooth outline, but Kitty’s 10pt renderer grid-fits it
     # to an 8×14 terminal cell. Qt must therefore keep AA while requesting full
     # hinting; default/no hinting leaves a fractional 8.39px advance at 14px.
-    { family = "Oxygen Mono"; label = "oxygen mono"; smooth = true; terminalCell = true; }
+    { family = "Oxygen Mono"; label = "oxygen mono"; smooth = true; terminalCell = true;
+      advanceRatio = 0.60009765625; }
   ];
 
   # The Settings dropdown reads its options from a generated singleton rather
@@ -136,6 +137,7 @@ let
         readonly property var labels: ({${lib.concatMapStringsSep "," (f: " \"${f.family}\": \"${f.label}\"") selectableFaces} })
         readonly property var smooth: ({${lib.concatMapStringsSep "," (f: " \"${f.family}\": ${lib.boolToString f.smooth}") selectableFaces} })
         readonly property var terminalCell: ({${lib.concatMapStringsSep "," (f: " \"${f.family}\": ${lib.boolToString (f.terminalCell or false)}") selectableFaces} })
+        readonly property var advanceRatio: ({${lib.concatMapStringsSep "," (f: " \"${f.family}\": ${toString (f.advanceRatio or 0)}") selectableFaces} })
     }
   '';
 in
@@ -209,6 +211,7 @@ in
     (lib.listToAttrs (map (f: lib.nameValuePair f.family {
       inherit (f) smooth;
       terminalCell = f.terminalCell or false;
+      advanceRatio = f.advanceRatio or 0;
     }) selectableFaces));
 
   # "More Perfect DOS VGA" ships ONLY a Regular face. Without this, KDE/Qt apps
@@ -435,6 +438,24 @@ in
         <edit name="hintstyle"      mode="assign"><const>hintfull</const></edit>
         <edit name="rgba"           mode="assign"><const>none</const></edit>
         <edit name="embeddedbitmap" mode="assign"><bool>false</bool></edit>
+      </match>
+    </fontconfig>
+  '';
+
+  # Keep Oxygen Mono grayscale in both Hyprland and Plasma. Fedora's KDE rule
+  # otherwise appends rgb subpixel rendering only for the latter session.
+  xdg.configFile."fontconfig/conf.d/50-oxygen-mono.conf".text = ''
+    <?xml version="1.0"?>
+    <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+    <fontconfig>
+      <match target="font">
+        <test name="family"><string>Oxygen Mono</string></test>
+        <edit name="antialias" mode="assign"><bool>true</bool></edit>
+        <edit name="autohint" mode="assign"><bool>false</bool></edit>
+        <edit name="hinting" mode="assign"><bool>true</bool></edit>
+        <edit name="hintstyle" mode="assign"><const>hintslight</const></edit>
+        <edit name="rgba" mode="assign"><const>none</const></edit>
+        <edit name="lcdfilter" mode="assign"><const>none</const></edit>
       </match>
     </fontconfig>
   '';

@@ -3317,6 +3317,7 @@ Item {
                                                 visible: !fileAct.expanded && turn.agg.execRunning
                                                          && win.lastLine(turn.agg.execTail) !== ""
                                                 font: Theme.editorFont
+            font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
                                                 renderType: Text.NativeRendering
                                                 textFormat: Text.PlainText
                                                 elide: Text.ElideRight
@@ -3400,6 +3401,7 @@ Item {
                                                           leftMargin: 12 }
                                                 visible: turn.agg.execTail !== ""
                                                 font: Theme.editorFont
+            font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
                                                 renderType: Text.NativeRendering
                                                 textFormat: Text.PlainText
                                                 wrapMode: Text.Wrap
