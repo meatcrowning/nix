@@ -67,6 +67,13 @@ PanelWindow {
     property int taps: 0
 
     readonly property bool barLeft: SettingsStore.d.barEdge === "left"
+    // On a top/bottom bar the drawer comes out of the MIDDLE of the bar,
+    // downwards or upwards — the same one-rigid-card slide, on the other axis.
+    // Anchoring the surface to one horizontal edge and NEITHER side is what
+    // centres it: wlr-layer-shell centres a surface on any axis it is not
+    // anchored to.
+    readonly property bool hz: ViewMode.barHorizontal
+    readonly property bool barTop: SettingsStore.d.barEdge === "top"
 
     // THIS SURFACE IS NEVER UNMAPPED. It is transparent and empty while the
     // drawer is in, and the card inside it is what appears and disappears.
@@ -87,7 +94,9 @@ PanelWindow {
     // drawer is in, this window draws nothing, takes no input (the notch under
     // it keeps its own clicks and hover tooltips) and holds no focus.
     visible: true
-    readonly property bool out: open || Math.abs(card.x - card.closedX) > 1
+    readonly property bool out: open
+        || (launcher.hz ? Math.abs(card.y - card.closedY) > 1
+                        : Math.abs(card.x - card.closedX) > 1)
     color: "transparent"
 
     // No input region at all while the drawer is in — anything else would put a
@@ -106,11 +115,22 @@ PanelWindow {
     // second copy of the notch drawn next to the real one (measured on book:
     // reserved 359 of 1536, panel face at 1209, surface edge at 1177). Cancel
     // exactly what the zone added and the closed drawer lands ON the notch.
-    anchors { top: true; bottom: true; left: launcher.barLeft; right: !launcher.barLeft }
+    anchors {
+        top: launcher.hz ? launcher.barTop : true
+        bottom: launcher.hz ? !launcher.barTop : true
+        left: launcher.hz ? false : launcher.barLeft
+        right: launcher.hz ? false : !launcher.barLeft
+    }
     readonly property int faceOffset: -(ViewMode.notchPx - Theme.windowBorderWidth)
-    margins.right: launcher.barLeft ? 0 : launcher.faceOffset
-    margins.left: launcher.barLeft ? launcher.faceOffset : 0
+    margins.right: (!launcher.hz && !launcher.barLeft) ? launcher.faceOffset : 0
+    margins.left: (!launcher.hz && launcher.barLeft) ? launcher.faceOffset : 0
+    margins.top: (launcher.hz && launcher.barTop) ? launcher.faceOffset : 0
+    margins.bottom: (launcher.hz && !launcher.barTop) ? launcher.faceOffset : 0
     implicitWidth: card.openW
+    // Only read on a horizontal bar (anchored top AND bottom otherwise): the
+    // card's own height, so the surface is exactly the drawer and the closed
+    // card sits outside it, clipped away by `frame`.
+    implicitHeight: card.height
     exclusiveZone: 0
 
     WlrLayershell.layer: WlrLayer.Overlay
@@ -364,10 +384,7 @@ PanelWindow {
             // gives the widest name at the face the rows actually draw in.
             TextMetrics {
                 id: nameMetrics
-                font.family: Theme.font
-                font.pixelSize: Theme.fontSize
-                font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
-                font.hintingPreference: Font.PreferFullHinting
+                font: Theme.fontForScale(Screen.devicePixelRatio)
             }
             //
             // MEASURED IMPERATIVELY, never as a binding: driving `text` round
@@ -424,16 +441,29 @@ PanelWindow {
             //     y = -161 against the notch's 319 (`qs ipc call launcher
             //     geom`). It mapped that high and settled afterwards: [his]
             //     "its currently higher than the bar itself".
-            y: Math.round(((launcher.screen ? launcher.screen.height : parent.height) - height) / 2)
+            //
+            // On a horizontal bar this is the ANIMATED axis instead, and the
+            // card is centred by the surface rather than by arithmetic — so
+            // there is no fractional-centring trap to round away.
+            y: launcher.hz ? (launcher.open ? 0 : closedY)
+                           : Math.round(((launcher.screen ? launcher.screen.height : parent.height) - height) / 2)
 
             // Closed: pushed back until only the notch strip is this side of the
-            // panel's face. Open: fully out. The ONE animated property here.
+            // panel's face. Open: fully out. The ONE animated property here —
+            // x on a vertical bar, y on a horizontal one. With no notch on a
+            // horizontal edge, closedW is 0, so closed there is the card fully
+            // behind the bar rather than a strip of it left showing.
             readonly property real closedX: launcher.barLeft ? closedW - openW : openW - closedW
             readonly property real openX: 0
-            x: launcher.open ? openX : closedX
+            readonly property real closedY: launcher.barTop ? closedW - height : height - closedW
+            x: launcher.hz ? 0 : (launcher.open ? openX : closedX)
             // The desktop's own slide (docs/DESIGN.md §6.2) — the one a window
             // rolls at, and the one the notch's seals already move at.
             Behavior on x { NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing } }
+            Behavior on y {
+                enabled: launcher.hz
+                NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing }
+            }
 
             color: Theme.bg
 
@@ -571,10 +601,7 @@ PanelWindow {
                             anchors.verticalCenter: parent.verticalCenter
                             width: parent.width - 20
                             color: Theme.text
-                            font.family: Theme.font
-                            font.pixelSize: Theme.fontSize
-                font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
-                            font.hintingPreference: Font.PreferFullHinting
+                            font: Theme.fontForScale(Screen.devicePixelRatio)
                             renderType: Text.NativeRendering
                             clip: true
                             focus: true
