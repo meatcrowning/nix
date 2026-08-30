@@ -322,7 +322,16 @@ Item {
     }
     function clearAttachments() { attachments.clear(); }
 
-    Component.onCompleted: Titlebar.setFooter(ollamaHost.replace(/^https?:\/\//, ""))
+    // Server actions are transient feedback, but the compact chatter face has
+    // no header strip to spare. Put the result in hyprvtb's footer instead of
+    // opening an otherwise empty row above the conversation.
+    function syncTitlebarFooter() {
+        Titlebar.setFooter(win.serverNote !== ""
+                             ? win.serverNote
+                             : ollamaHost.replace(/^https?:\/\//, ""));
+    }
+    onServerNoteChanged: syncTitlebarFooter()
+    Component.onCompleted: syncTitlebarFooter()
 
     // Keep a model selected, and never point at a model that has gone away.
     // On a fresh launch (or when the current pick vanishes) default to the model
@@ -1331,6 +1340,8 @@ Item {
     // The content rows collapse under Hyprland, leaving these secondary
     // controls in the compositor-drawn titlebar like the other apps' buttons.
     readonly property var tbButtons: [
+        { id: "new-session",   label: "+", state: 0,
+          tip: "start a new conversation" },
         { id: "title-model",   label: "mo", state: picker.open ? 1 : 0,
           tip: "choose model" },
         { id: "title-session", label: "ss", state: sessionPicker.open ? 1 : 0,
@@ -1722,7 +1733,7 @@ Item {
         id: top
         anchors { top: parent.top; left: parent.left; right: parent.right
                   leftMargin: 10; rightMargin: 10
-                  topMargin: win.plasma ? 0 : 10 }
+                  topMargin: 0 }
         // Under Plasma the model is picked from a real combo on the toolbar and
         // this row stands down — kept in the tree at zero height so the
         // dropdown anchored to it still resolves.
@@ -1796,7 +1807,7 @@ Item {
     // session and persists; switching loads that transcript back into the log.
     Item {
         id: sessionRow
-        anchors { top: top.bottom; topMargin: win.plasma ? 0 : 8
+        anchors { top: top.bottom; topMargin: 0
                   left: parent.left; right: parent.right
                   leftMargin: 10; rightMargin: 10 }
         // Under Plasma: the File menu's session rows and the toolbar's combo.
@@ -1886,7 +1897,7 @@ Item {
     // (main.py `_system_prompt`); only this leading text swaps.
     Item {
         id: promptRow
-        anchors { top: sessionRow.bottom; topMargin: win.plasma ? 0 : 8
+        anchors { top: sessionRow.bottom; topMargin: 0
                   left: parent.left; right: parent.right
                   leftMargin: 10; rightMargin: 10 }
         // Under Plasma: the Settings menu's "Base Prompt: …" radio set.
@@ -1979,7 +1990,7 @@ Item {
     // controls on the right: unload the loaded model, and start/stop the daemon.
     Item {
         id: serverRow
-        anchors { top: promptRow.bottom; topMargin: win.plasma ? 0 : 8
+        anchors { top: promptRow.bottom; topMargin: 0
                   left: parent.left; right: parent.right
                   leftMargin: 10; rightMargin: 10 }
         // Under Plasma: observed state on the status bar's right, the two
@@ -2067,25 +2078,6 @@ Item {
         }
     }
 
-    // The last server-action result, drawn right under its controls so it is
-    // seen wherever the reply area happens to be (docs/DESIGN.md §10 — a failed
-    // or in-flight stop must be visible, not assumed). Collapsed until an action
-    // has spoken; "…" while one is in flight (textDim), crit on failure.
-    PixelText {
-        id: serverNoteText
-        anchors { top: serverRow.bottom; left: parent.left; right: parent.right
-                  leftMargin: 10; rightMargin: 10
-                  topMargin: (!win.plasma && win.serverNote !== "") ? 4 : 0 }
-        height: (!win.plasma && win.serverNote !== "") ? Theme.lineHeight : 0
-        // Under Plasma this is the status bar's left-hand message (statusLine).
-        visible: height > 0
-        clip: true
-        elide: Text.ElideRight
-        text: win.serverNote
-        color: win.serverNote.indexOf("failed") >= 0 ? Theme.crit
-               : (Backend.busy ? Theme.textDim : Theme.ok)
-    }
-
     // Model stats: the selected model's context ceiling and the last/live
     // generation rate, a subordinated readout (docs/DESIGN.md §9 — a stat line,
     // §9.1 — one step dim). Collapses to nothing until at least one stat is
@@ -2093,9 +2085,12 @@ Item {
     // window); `tok/s` is the estimate while a reply streams, exact once done.
     Row {
         id: statsRow
-        anchors { top: serverNoteText.bottom; left: parent.left; right: parent.right
+        // This is the footer of the conversation, immediately above the
+        // compose box, rather than a second header at the top of the window.
+        anchors { left: parent.left; right: parent.right
+                  bottom: attachBar.visible ? attachBar.top : promptBox.top
                   leftMargin: 10; rightMargin: 10
-                  topMargin: visible ? (win.plasma ? 8 : 4) : 0 }
+                  bottomMargin: visible ? 8 : 0 }
         spacing: 10
         readonly property bool hasCtx: Ollama.contextMax > 0
         readonly property bool hasTps: Ollama.tokensPerSec > 0
@@ -2232,8 +2227,8 @@ Item {
         visible: picker.open && Ollama.models.length > 0
         width: picker.width
         height: Math.min(Ollama.models.length * 22 + 2, 240)
-        x: win.popupX(0, width)
-        y: win.popupY(0, height)
+        x: win.popupX(1, width)
+        y: win.popupY(1, height)
         z: 50
         color: Theme.bgAlt
         radius: Theme.rounding
@@ -2287,29 +2282,21 @@ Item {
         id: sessionDropdown
         visible: sessionPicker.open
         width: sessionPicker.width
-        height: Math.min(Math.max(Sessions.sessions.length, 1) * 22 + 2, 240)
-        x: win.popupX(1, width)
-        y: win.popupY(1, height)
+        height: Math.min((Sessions.sessions.length + 1) * 22 + 2, 240)
+        x: win.popupX(2, width)
+        y: win.popupY(2, height)
         z: 50
         color: Theme.bgAlt
         radius: Theme.rounding
         border.width: Theme.ctrlBorder
         border.color: Theme.border
 
-        // The empty-state line, when no session has been saved yet.
-        PixelText {
-            anchors { centerIn: parent }
-            visible: Sessions.sessions.length === 0
-            text: "no saved sessions"
-            color: Theme.textDim
-        }
-
         KineticListView {
             id: sessionList
             anchors { fill: parent; margins: 1 }
             clip: true
-            visible: Sessions.sessions.length > 0
-            model: Sessions.sessions
+            model: [{ id: "__new__", title: "+ new session", turns: "" }]
+                    .concat(Sessions.sessions)
             delegate: Rectangle {
                 width: sessionList.width
                 height: 22
@@ -2320,7 +2307,8 @@ Item {
                               verticalCenter: parent.verticalCenter }
                     elide: Text.ElideRight
                     text: modelData.title
-                    color: modelData.id === win.sessionId ? Theme.accent : Theme.text
+                    color: modelData.id === win.sessionId ? Theme.accent
+                           : (modelData.id === "__new__" ? Theme.accent : Theme.text)
                 }
                 PixelText {
                     id: sessCount
@@ -2334,7 +2322,11 @@ Item {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: { Sessions.open(modelData.id); sessionPicker.open = false; }
+                    onClicked: {
+                        if (modelData.id === "__new__") win.newSession();
+                        else Sessions.open(modelData.id);
+                        sessionPicker.open = false;
+                    }
                 }
             }
             ScrollBar.vertical: VScroll {}
@@ -2371,8 +2363,8 @@ Item {
         readonly property int listH: Math.min(items.length * 22 + 2, 240)
         readonly property int previewH: 108
         height: listH + previewH
-        x: win.popupX(2, width)
-        y: win.popupY(2, height)
+        x: win.popupX(3, width)
+        y: win.popupY(3, height)
         z: 50
         color: Theme.bgAlt
         radius: Theme.rounding
@@ -2468,8 +2460,8 @@ Item {
         visible: serverMenuOpen
         width: 190
         height: 76
-        x: win.popupX(3, width)
-        y: win.popupY(3, height)
+        x: win.popupX(4, width)
+        y: win.popupY(4, height)
         z: 50
         color: Theme.bgAlt
         radius: Theme.rounding
@@ -2582,7 +2574,7 @@ Item {
     JobsTray {
         id: jobsTray
         objectName: "jobsTray"
-        anchors { top: statsRow.bottom; topMargin: visible ? 8 : 0
+        anchors { top: parent.top; topMargin: 0
                   left: parent.left; right: parent.right
                   leftMargin: 10; rightMargin: 10 }
     }
@@ -2592,7 +2584,7 @@ Item {
         anchors { top: jobsTray.bottom
                   topMargin: jobsTray.visible ? 8 : 10
                   left: parent.left; right: parent.right
-                  bottom: attachBar.top
+                  bottom: statsRow.top
                   leftMargin: 10; rightMargin: 10; bottomMargin: 10 }
 
         KineticFlickable {
