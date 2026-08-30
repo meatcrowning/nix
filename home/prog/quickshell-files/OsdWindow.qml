@@ -20,10 +20,16 @@ PanelWindow {
     screen: modelData
 
     // Which side the bar hugs — the card attaches to it, its mouth on that side.
-    readonly property bool barLeft: SettingsStore.d.barEdge === "left"
+    // On a top/bottom bar there is no vertical face to emerge from, so the card
+    // docks to the right screen edge with a plain gap instead of a mouth. That
+    // is what `effBar` is: the inset the card sits at, the panel's live width
+    // on a vertical bar and one gap on a horizontal one.
+    readonly property bool barLeft: !ViewMode.barHorizontal
+                                    && SettingsStore.d.barEdge === "left"
+    readonly property int effBar: ViewMode.barHorizontal ? Theme.gap : ViewMode.liveWidth
     // How far the card reaches under the bar body: the notch's own mouth depth,
     // so the OSD, the notch and the toasts read as one construction.
-    readonly property int mouth: NotchModel.overlap
+    readonly property int mouth: ViewMode.barHorizontal ? 0 : NotchModel.overlap
     // The card's DESKTOP-visible width; the mouth is added on top of it.
     readonly property int cardBodyW: 40
     readonly property int cardW: cardBodyW + mouth
@@ -37,7 +43,10 @@ PanelWindow {
     // at every panel width without the surface ever resizing (the EdgeAccent /
     // notification lesson). Docked near the bottom, a gap off the screen edge.
     anchors { bottom: true; left: w.barLeft; right: !w.barLeft }
+    // ...and clear of a bottom bar, which the ignored exclusive zone would
+    // otherwise let it sit under.
     margins.bottom: Theme.gap
+        + ((ViewMode.barHorizontal && !ViewMode.barAtStart) ? Theme.barWidth : 0)
 
     exclusionMode: ExclusionMode.Ignore
     implicitWidth: ViewMode.maxPx + cardW
@@ -62,8 +71,8 @@ PanelWindow {
         clip: true
         anchors { top: parent.top; bottom: parent.bottom }
         width: w.cardW
-        x: w.barLeft ? (ViewMode.liveWidth - w.mouth)
-                     : (parent.width - ViewMode.liveWidth - w.cardBodyW)
+        x: w.barLeft ? (w.effBar - w.mouth)
+                     : (parent.width - w.effBar - w.cardBodyW)
 
         Rectangle {
             id: card

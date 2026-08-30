@@ -36,7 +36,10 @@ PanelWindow {
     readonly property bool _top: SettingsStore.d.notifCorner.indexOf("top") === 0
     readonly property bool _left: SettingsStore.d.notifCorner.indexOf("left") >= 0
     readonly property bool barLeft: SettingsStore.d.barEdge === "left"
-    readonly property bool attached: _left === barLeft
+    // Attachment means "reaches under the bar's face", which only a vertical
+    // bar has an inner face for; on a top/bottom bar the stack simply floats in
+    // its corner (the branch that already exists for the other three corners).
+    readonly property bool attached: _left === barLeft && !ViewMode.barHorizontal
 
     // How far a card reaches under the bar body: the notch's own mouth depth,
     // so the two attachments read as one construction.

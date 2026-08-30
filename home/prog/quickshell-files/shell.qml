@@ -827,8 +827,19 @@ Scope {
     Variants {
         model: Quickshell.screens
         // the 2px stripe that sits OPPOSITE the bar — flips to the right screen
-        // edge when the bar is moved to the left.
-        EdgeAccent { edge: SettingsStore.d.barEdge === "left" ? "right" : "left" }
+        // edge when the bar is moved to the left. With the bar on a HORIZONTAL
+        // edge neither vertical stripe is the bar's, so both are drawn (this
+        // one and the extra Variants below) and the opposite edge is one of the
+        // top/bottom pair already here.
+        EdgeAccent { edge: ViewMode.barHorizontal ? "left"
+                         : (SettingsStore.d.barEdge === "left" ? "right" : "left") }
+    }
+    Variants {
+        model: Quickshell.screens
+        EdgeAccent {
+            edge: "right"
+            visible: ViewMode.barHorizontal && thickness > 0
+        }
     }
     Variants {
         model: Quickshell.screens
@@ -861,9 +872,24 @@ Scope {
 
             // barEdge picks which screen edge the bar hugs; the accent strip
             // below moves to the opposite (inner) edge to match.
+            //
+            // FOUR EDGES. left/right are the bar this config has always had;
+            // top/bottom turn it into a strip across the screen, where every
+            // "width" below is a height and the classic layout reads across
+            // (classicRow). Dock mode and the shortcut notch are vertical-only
+            // — ViewMode.dock is false on a horizontal edge and NotchModel
+            // reports a notch of zero size, so both simply fall out of the
+            // arithmetic here rather than being special-cased in it.
             readonly property bool barLeft: SettingsStore.d.barEdge === "left"
+            readonly property bool hz: ViewMode.barHorizontal
+            readonly property bool barTop: SettingsStore.d.barEdge === "top"
 
-            anchors { top: true; bottom: true; left: bar.barLeft; right: !bar.barLeft }
+            anchors {
+                top: bar.hz ? bar.barTop : true
+                bottom: bar.hz ? !bar.barTop : true
+                left: bar.hz ? true : bar.barLeft
+                right: bar.hz ? true : !bar.barLeft
+            }
 
             // THE SURFACE NEVER RESIZES. It is always as wide as the widest the
             // panel may ever be; the VISIBLE bar is `barBody` inside it, and
@@ -900,7 +926,10 @@ Scope {
             // edge and must have surface to paint on at every panel width,
             // including the widest. Still a CONSTANT — that is the invariant
             // above, and adding a constant to it does not break it.
+            // Ignored on whichever axis the surface is anchored to both edges
+            // of, so both are set and the anchors above pick.
             implicitWidth: ViewMode.maxPx + notch.width
+            implicitHeight: Theme.barWidth
             color: "transparent"
             // Explicit coordinates rather than `Region { item: barBody }`. Both
             // should work, but this is the identical form EdgeGrip.qml uses, and
@@ -908,9 +937,11 @@ Scope {
             // full-screen surface on the OVERLAY layer, so if masks did not
             // confine input, nothing on screen would be clickable at all.
             mask: Region {
-                x: bar.barLeft ? 0 : bar.width - ViewMode.liveWidth
+                // On a horizontal bar the surface IS the bar (it never has to
+                // hold a dock's worth of extra width), so the hole is all of it.
+                x: bar.hz ? 0 : (bar.barLeft ? 0 : bar.width - ViewMode.liveWidth)
                 y: 0
-                width: ViewMode.liveWidth
+                width: bar.hz ? bar.width : ViewMode.liveWidth
                 height: bar.height
 
                 // The notch hangs outside the bar rect, so its clicks need
@@ -1010,6 +1041,10 @@ Scope {
             DesktopNotch {
                 id: notch
                 z: 2
+                // No horizontal form of the notch yet; NotchModel already
+                // reports zero size on this edge, and this is the drawing half
+                // of the same statement.
+                visible: !bar.hz
                 barLeft: bar.barLeft
                 screen: bar.modelData
                 // A ROUNDED y, not a verticalCenter anchor: the seam patch is
@@ -1032,16 +1067,20 @@ Scope {
             // the collapse preview — which do glide.
             Item {
                 id: barBody
-                anchors {
-                    top: parent.top; bottom: parent.bottom
-                }
-                width: ViewMode.liveWidth
+                // Explicit geometry on both axes rather than anchors: the axis
+                // itself is a setting now, and a live flip would otherwise
+                // leave the former anchor attached (the same reason the x below
+                // was already a mirrored coordinate rather than an anchor
+                // swap).
+                y: bar.hz ? (bar.barTop ? 0 : parent.height - height) : 0
+                height: bar.hz ? ViewMode.liveWidth : parent.height
+                width: bar.hz ? parent.width : ViewMode.liveWidth
                 // The layer surface is fixed at its maximum width. Keep the
                 // visible body in an explicit mirrored coordinate instead of
                 // switching anchors: a live left/right flip otherwise leaves
                 // the former anchor attached in this already-realized item,
                 // separating the painted edge from EdgeGrip's input strip.
-                x: bar.barLeft ? 0 : parent.width - width
+                x: bar.hz ? 0 : (bar.barLeft ? 0 : parent.width - width)
 
                 // ...and NOT while the tree is settling after a reload. The
                 // panel is built from the shipped settings defaults — a 48px
@@ -1121,15 +1160,15 @@ Scope {
                 // edge at a fractional scale.
                 Rectangle {
                     z: 1
-                    anchors {
-                        top: parent.top; bottom: parent.bottom
-                    }
                     // the global border width, floored at 2: a 1px line pinned
                     // to a screen edge vanishes on a 1.0-scale monitor (see
                     // EdgeAccent's thickness note), and 0 must not erase the
                     // panel's face — this strip is the panel's one edge.
-                    width: Math.max(2, Theme.windowBorderWidth)
-                    x: bar.barLeft ? parent.width - width : 0
+                    readonly property int t: Math.max(2, Theme.windowBorderWidth)
+                    width: bar.hz ? parent.width : t
+                    height: bar.hz ? t : parent.height
+                    x: bar.hz ? 0 : (bar.barLeft ? parent.width - width : 0)
+                    y: bar.hz ? (bar.barTop ? parent.height - height : 0) : 0
                     color: Theme.accent
                 }
 
@@ -1150,7 +1189,10 @@ Scope {
                 // DesktopNotch's outline does with its own overlap.
                 Rectangle {
                     z: 2
-                    visible: launcher.out && !NotchModel.shown
+                    // Vertical bar only: on a top/bottom one the drawer comes
+                    // out of the screen's right edge, not the panel's face, so
+                    // there is no mouth for it to have.
+                    visible: launcher.out && !NotchModel.shown && !bar.hz
                     x: bar.barLeft ? barBody.width - width : 0
                     y: Math.round((bar.modelData.height - NotchModel.slabH0) / 2)
                        + Theme.windowBorderWidth
@@ -1196,7 +1238,7 @@ Scope {
                 Item {
                     id: classicLayout
                     anchors.fill: parent
-                    visible: opacity > 0
+                    visible: opacity > 0 && !bar.hz
                     opacity: ViewMode.showDock ? 0 : 1
                     // Gated on the settle for the same reason as the width
                     // above: showDock is false until the settings land, so
@@ -1320,6 +1362,154 @@ Scope {
                         onEntered: calendar.hoverChanged(true)
                         onExited: calendar.hoverChanged(false)
                     }
+                }
+
+                // ================= CLASSIC ROW =================
+                // The same bar, laid across a top or bottom screen edge. Read
+                // in the same order it reads top-to-bottom on a vertical one:
+                // running programs and the tray at the leading end, system
+                // status then the clock, the date and the reveal toggle at the
+                // trailing end.
+                //
+                // Its own Item rather than a rotation of classicLayout: every
+                // one of those children anchors to a vertical stack, and a
+                // layout that flips axis by ternary on each anchor is a layout
+                // nobody can read. The WIDGETS themselves are shared — Taskbar,
+                // Tray, StatusPanel, Clock and DateDisplay each take a
+                // `horizontal` flag and change their own positioner, so there
+                // is exactly one of each on screen and no behaviour is
+                // duplicated here.
+                Item {
+                    id: classicRow
+                    anchors.fill: parent
+                    visible: bar.hz
+
+                    // The strip's inner height, inside the accent line and the
+                    // usual gap at both ends. Everything here is centred in it.
+                    readonly property int inner:
+                        Math.max(8, height - 2 * Theme.gap - Math.max(2, Theme.windowBorderWidth))
+
+                    Row {
+                        id: leadRow
+                        anchors {
+                            left: parent.left; leftMargin: Theme.gap
+                            verticalCenter: parent.verticalCenter
+                        }
+                        spacing: Theme.gap
+
+                        Taskbar {
+                            horizontal: true
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        // divider
+                        Rectangle {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 1
+                            height: Theme.cell - 8
+                            color: Theme.border
+                        }
+
+                        Tray {
+                            horizontal: true
+                            anchors.verticalCenter: parent.verticalCenter
+                            hostWindow: bar
+                        }
+                    }
+
+                    Row {
+                        id: trailRow
+                        anchors {
+                            right: parent.right; rightMargin: Theme.gap
+                            verticalCenter: parent.verticalCenter
+                        }
+                        spacing: Theme.gap
+
+                        StatusPanel {
+                            id: statusRow
+                            horizontal: true
+                            vuHeight: classicRow.inner
+                            anchors.verticalCenter: parent.verticalCenter
+                            // A horizontal bar gives every module the same
+                            // scene-Y, so there is nothing to centre a popup on
+                            // — StatusPanel._cy answers -1 and they all
+                            // bottom-anchor, which is the same slot the
+                            // weather and disk panels already used.
+                            onWeatherHovered: (h, cy) => weatherPanel.hoverChanged(h)
+                            onDiskHovered: (h, cy) => diskPanel.hoverChanged(h)
+                            onMediaHovered: (h) => mediaPanel.hoverChanged(h)
+                            onCpuHovered: (h, cy) => cpuPanel.hoverChanged(h)
+                            onGpuHovered: (h, cy) => gpuPanel.hoverChanged(h)
+                            onEthHovered: (h, cy) => ethPanel.hoverChanged(h)
+                        }
+
+                        Rectangle {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 1
+                            height: Theme.cell - 8
+                            color: Theme.border
+                        }
+
+                        // The two time popups' hover bands are CHILDREN of the
+                        // widgets here, not siblings anchored across the row:
+                        // an anchor may only reach a parent or a sibling, and
+                        // these sit inside the Row. The negative margins give
+                        // each band the strip's full height, which is what the
+                        // classic bar's lower-strip zones do with its width.
+                        Clock {
+                            id: clockRow
+                            horizontal: true
+                            anchors.verticalCenter: parent.verticalCenter
+                            MouseArea {
+                                anchors.fill: parent
+                                anchors.topMargin: -Theme.gap * 2
+                                anchors.bottomMargin: -Theme.gap * 2
+                                hoverEnabled: true
+                                acceptedButtons: Qt.NoButton
+                                onEntered: analogClock.hoverChanged(true)
+                                onExited: analogClock.hoverChanged(false)
+                            }
+                        }
+
+                        DateDisplay {
+                            id: dateRow
+                            horizontal: true
+                            anchors.verticalCenter: parent.verticalCenter
+                            MouseArea {
+                                anchors.fill: parent
+                                anchors.topMargin: -Theme.gap * 2
+                                anchors.bottomMargin: -Theme.gap * 2
+                                hoverEnabled: true
+                                acceptedButtons: Qt.NoButton
+                                onEntered: calendar.hoverChanged(true)
+                                onExited: calendar.hoverChanged(false)
+                            }
+                        }
+
+                        Rectangle {
+                            id: revealBtnRow
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 16
+                            height: Theme.wsCell
+                            color: shell.allRevealed ? Theme.bgAlt : "transparent"
+                            radius: Theme.windowRounding
+                            border.width: shell.allRevealed ? Theme.ctrlBorder + 1 : Theme.ctrlBorder
+                            border.color: (shell.allRevealed || revealMaRow.containsMouse) ? Theme.accent : Theme.border
+                            PixelText {
+                                anchors.centerIn: parent
+                                text: shell.allRevealed ? "v" : "^"
+                                color: (shell.allRevealed || revealMaRow.containsMouse) ? Theme.accent : Theme.text
+                            }
+                            MouseArea {
+                                id: revealMaRow
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: shell.toggleRevealAll()
+                            }
+                        }
+                    }
+
                 }
 
                 // ================= DOCK LAYOUT =================

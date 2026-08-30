@@ -1,8 +1,9 @@
 import QtQuick
 import Quickshell
 
-// Vertical date display: month / day / year(2-digit) — bright month, dim
-// day and year under it. (The calendar hover zone lives in shell.qml — it
+// Date display: month / day / year(2-digit) — bright month, dim day and year.
+// Stacked on a vertical bar, read across with slashes on a horizontal one
+// (see Clock.qml for why). (The calendar hover zone lives in shell.qml — it
 // covers the whole lower strip of the bar, not just these glyphs.)
 Item {
     id: root
@@ -11,8 +12,12 @@ Item {
     property string yy: "00"
     property string dd: "01"
 
-    width: col.implicitWidth
-    height: col.implicitHeight
+    property bool horizontal: false
+
+    width: horizontal ? row.implicitWidth : col.implicitWidth
+    height: horizontal ? row.implicitHeight : col.implicitHeight
+
+    component Big: PixelText { font.pixelSize: Theme.clockSize }
 
     function pad(n) { return (n < 10 ? "0" : "") + n }
 
@@ -33,27 +38,24 @@ Item {
 
     Column {
         id: col
-        anchors.fill: parent
+        visible: !root.horizontal
+        anchors.centerIn: parent
         spacing: 2
+        Big { anchors.horizontalCenter: parent.horizontalCenter; text: root.mo; color: Theme.text }
+        Big { anchors.horizontalCenter: parent.horizontalCenter; text: root.dd; color: Theme.textDim }
+        Big { anchors.horizontalCenter: parent.horizontalCenter; text: root.yy; color: Theme.textDim }
+    }
 
-        PixelText {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: root.mo
-            color: Theme.text
-            font.pixelSize: Theme.clockSize
-        }
-        PixelText {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: root.dd
-            color: Theme.textDim
-            font.pixelSize: Theme.clockSize
-        }
-        PixelText {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: root.yy
-            color: Theme.textDim
-            font.pixelSize: Theme.clockSize
-        }
+    Row {
+        id: row
+        visible: root.horizontal
+        anchors.centerIn: parent
+        spacing: 0
+        Big { anchors.verticalCenter: parent.verticalCenter; text: root.mo; color: Theme.text }
+        Big { anchors.verticalCenter: parent.verticalCenter; text: "/"; color: Theme.textDim }
+        Big { anchors.verticalCenter: parent.verticalCenter; text: root.dd; color: Theme.textDim }
+        Big { anchors.verticalCenter: parent.verticalCenter; text: "/"; color: Theme.textDim }
+        Big { anchors.verticalCenter: parent.verticalCenter; text: root.yy; color: Theme.textDim }
     }
 
 }

@@ -4,9 +4,25 @@ import Quickshell
 // Text-only system status: a small dim label over a coloured value for each
 // metric. No icons, glyphs, or bars — just the pixel font and numbers. Colour
 // still carries state (weak signal equivalents, full disk, mute).
-Column {
+// A Grid rather than a Column, so the same modules can run ACROSS a top/bottom
+// bar: `columns` is the only thing that changes, and `horizontalItemAlignment`
+// keeps every module centred in its cell exactly as the horizontalCenter
+// anchors did (a positioner forbids anchors on the axis it owns, and the Grid
+// owns both). The inner label/value groups do the same thing one level down —
+// stacked on a vertical bar, inline on a horizontal one, since three stacked
+// lines do not fit in a 48px strip.
+Grid {
     id: root
     spacing: 6
+    horizontalItemAlignment: Grid.AlignHCenter
+    verticalItemAlignment: Grid.AlignVCenter
+
+    property bool horizontal: false
+    columns: horizontal ? 999 : 1
+
+    // A module spans the bar on a vertical panel and is its own width on a
+    // horizontal one.
+    function modW(implicitW) { return root.horizontal ? implicitW : root.width; }
 
     // centerY = the module's scene-Y center, so its popup lines up with it
     signal weatherHovered(bool hovering, real centerY)
@@ -18,7 +34,13 @@ Column {
 
     // scene-Y center of an item (bar spans full screen height, so scene Y
     // equals screen Y)
-    function _cy(item) { return item.mapToItem(null, item.width / 2, item.height / 2).y; }
+    // -1 on a horizontal bar: every module shares one Y there, so there is no
+    // module to centre a popup on and the popups fall back to bottom-anchored
+    // (SlidePopup's anchorCenterY < 0 case).
+    function _cy(item) {
+        if (root.horizontal) return -1;
+        return item.mapToItem(null, item.width / 2, item.height / 2).y;
+    }
 
     // one dim label + one coloured value, centred. onWheelUp/onWheelDown are
     // optional function-valued properties — set on "bri"/"vol" below for
@@ -37,21 +59,22 @@ Column {
         signal hovered(bool hovering, real centerY)
         // full bar width so the hover/scroll band covers the whole module
         // section, not just the centred text
-        width: parent.width
+        width: root.modW(col.implicitWidth)
         height: col.implicitHeight
 
-        Column {
+        Grid {
+            columns: root.horizontal ? 9 : 1
+            spacing: root.horizontal ? 4 : 1
+            horizontalItemAlignment: Grid.AlignHCenter
+            verticalItemAlignment: Grid.AlignVCenter
             id: col
             anchors.fill: parent
-            spacing: 1
             PixelText {
                 id: cap
-                anchors.horizontalCenter: parent.horizontalCenter
                 color: Theme.textDim
             }
             PixelText {
                 id: val
-                anchors.horizontalCenter: parent.horizontalCenter
                 color: valueColor
             }
         }
@@ -82,24 +105,24 @@ Column {
 
     // ---------- Network (down / up rates) ----------
     Item {
-        width: parent.width
+        width: root.modW(ethCol.implicitWidth)
         height: ethCol.implicitHeight
-        Column {
+        Grid {
+            columns: root.horizontal ? 9 : 1
+            spacing: root.horizontal ? 4 : 1
+            horizontalItemAlignment: Grid.AlignHCenter
+            verticalItemAlignment: Grid.AlignVCenter
             id: ethCol
             anchors.fill: parent
-            spacing: 1
             PixelText {
-                anchors.horizontalCenter: parent.horizontalCenter
                 text: "eth"
                 color: Theme.textDim
             }
             PixelText {
-                anchors.horizontalCenter: parent.horizontalCenter
                 text: SysInfo.fmtSpeed(SysInfo.rxSpeed)
                 color: Theme.info
             }
             PixelText {
-                anchors.horizontalCenter: parent.horizontalCenter
                 text: SysInfo.fmtSpeed(SysInfo.txSpeed)
                 color: Theme.warn
             }
@@ -115,25 +138,25 @@ Column {
 
     // ---------- CPU (usage / temp) ----------
     Item {
-        width: parent.width
+        width: root.modW(cpuCol.implicitWidth)
         height: cpuCol.implicitHeight
-        Column {
+        Grid {
+            columns: root.horizontal ? 9 : 1
+            spacing: root.horizontal ? 4 : 1
+            horizontalItemAlignment: Grid.AlignHCenter
+            verticalItemAlignment: Grid.AlignVCenter
             id: cpuCol
             anchors.fill: parent
-            spacing: 1
             PixelText {
-                anchors.horizontalCenter: parent.horizontalCenter
                 text: "cpu"
                 color: Theme.textDim
             }
             PixelText {
-                anchors.horizontalCenter: parent.horizontalCenter
                 text: SysInfo.cpuUsage < 0 ? "--" : SysInfo.cpuUsage + ""
                 color: SysInfo.cpuUsage >= SettingsStore.d.cpuCrit ? Theme.crit
                      : SysInfo.cpuUsage >= SettingsStore.d.cpuWarn ? Theme.warn : Theme.text
             }
             PixelText {
-                anchors.horizontalCenter: parent.horizontalCenter
                 text: SysInfo.cpuTemp < 0 ? "--" : SysInfo.cpuTemp + ""
                 color: SysInfo.cpuTemp >= SettingsStore.d.tempCrit ? Theme.crit
                      : SysInfo.cpuTemp >= SettingsStore.d.tempWarn ? Theme.warn : Theme.textDim
@@ -154,25 +177,25 @@ Column {
     // battery's visible check below.
     Item {
         visible: SysInfo.gpuUsage >= 0
-        width: parent.width
+        width: root.modW(gpuCol.implicitWidth)
         height: gpuCol.implicitHeight
-        Column {
+        Grid {
+            columns: root.horizontal ? 9 : 1
+            spacing: root.horizontal ? 4 : 1
+            horizontalItemAlignment: Grid.AlignHCenter
+            verticalItemAlignment: Grid.AlignVCenter
             id: gpuCol
             anchors.fill: parent
-            spacing: 1
             PixelText {
-                anchors.horizontalCenter: parent.horizontalCenter
                 text: "gpu"
                 color: Theme.textDim
             }
             PixelText {
-                anchors.horizontalCenter: parent.horizontalCenter
                 text: SysInfo.gpuUsage < 0 ? "--" : SysInfo.gpuUsage + ""
                 color: SysInfo.gpuUsage >= SettingsStore.d.cpuCrit ? Theme.crit
                      : SysInfo.gpuUsage >= SettingsStore.d.cpuWarn ? Theme.warn : Theme.text
             }
             PixelText {
-                anchors.horizontalCenter: parent.horizontalCenter
                 text: SysInfo.gpuTemp < 0 ? "--" : SysInfo.gpuTemp + ""
                 color: SysInfo.gpuTemp >= SettingsStore.d.tempCrit ? Theme.crit
                      : SysInfo.gpuTemp >= SettingsStore.d.tempWarn ? Theme.warn : Theme.textDim
@@ -230,7 +253,13 @@ Column {
     // ---------- Stereo output VU (left / right channel) ----------
     // Full bar width like the other modules; its bars/line stay centred.
     // Hovering it slides out the media widget popup.
+    // The one module with a fixed height of its own; on a horizontal bar it is
+    // given the strip's inner height instead (shell.qml).
+    property int vuHeight: 68
     VuMeter {
+        horizontal: root.horizontal
+        bandWidth: root.width
+        barH: root.vuHeight
         onHovered: (h) => root.mediaHovered(h)
     }
 
@@ -248,20 +277,21 @@ Column {
     // ("rain", "snow", "clr"...) and the value is the temperature — the
     // word itself does the icon's job. Hover slides out the 7-day forecast.
     Item {
-        width: parent.width
+        width: root.modW(wxCol.implicitWidth)
         height: wxCol.implicitHeight
 
-        Column {
+        Grid {
+            columns: root.horizontal ? 9 : 1
+            spacing: root.horizontal ? 4 : 1
+            horizontalItemAlignment: Grid.AlignHCenter
+            verticalItemAlignment: Grid.AlignVCenter
             id: wxCol
             anchors.fill: parent
-            spacing: 1
             PixelText {
-                anchors.horizontalCenter: parent.horizontalCenter
                 text: Weather.cond
                 color: Theme.textDim
             }
             PixelText {
-                anchors.horizontalCenter: parent.horizontalCenter
                 text: Weather.tempF === -999 ? "--" : Weather.tempF + ""
                 color: Weather.tempF !== -999 && Weather.tempF <= 32 ? Theme.info : Theme.text
             }

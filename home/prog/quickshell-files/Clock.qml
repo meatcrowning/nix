@@ -1,10 +1,19 @@
 import QtQuick
 import Quickshell
 
-// Vertical digital clock: two hour digits stacked over two minute digits.
-Column {
+// Digital clock. On a vertical bar it is two hour digits stacked over two
+// minute digits; on a horizontal one (barEdge top/bottom) the same two pairs
+// read across with a colon between them, because a 48px-thick strip cannot
+// hold two stacked lines at the clock size. Same colours either way: the hour
+// is the bright half.
+Item {
     id: root
-    spacing: 2
+    implicitWidth: horizontal ? row.implicitWidth : col.implicitWidth
+    implicitHeight: horizontal ? row.implicitHeight : col.implicitHeight
+
+    property bool horizontal: false
+
+    component Big: PixelText { font.pixelSize: Theme.clockSize }
 
     property string hh: "12"
     property string mm: "00"
@@ -39,16 +48,22 @@ Column {
 
     Component.onCompleted: refresh()
 
-    PixelText {
-        anchors.horizontalCenter: parent.horizontalCenter
-        text: root.hh
-        color: Theme.text
-        font.pixelSize: Theme.clockSize
+    Column {
+        id: col
+        visible: !root.horizontal
+        anchors.centerIn: parent
+        spacing: 2
+        Big { anchors.horizontalCenter: parent.horizontalCenter; text: root.hh; color: Theme.text }
+        Big { anchors.horizontalCenter: parent.horizontalCenter; text: root.mm; color: Theme.textDim }
     }
-    PixelText {
-        anchors.horizontalCenter: parent.horizontalCenter
-        text: root.mm
-        color: Theme.textDim
-        font.pixelSize: Theme.clockSize
+
+    Row {
+        id: row
+        visible: root.horizontal
+        anchors.centerIn: parent
+        spacing: 0
+        Big { anchors.verticalCenter: parent.verticalCenter; text: root.hh; color: Theme.text }
+        Big { anchors.verticalCenter: parent.verticalCenter; text: ":"; color: Theme.textDim }
+        Big { anchors.verticalCenter: parent.verticalCenter; text: root.mm; color: Theme.textDim }
     }
 }
