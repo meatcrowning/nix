@@ -65,6 +65,15 @@ Column {
             }
         }
         SetRow {
+            // Mirrors the drawn image only — the file and the palette it feeds
+            // are untouched.
+            label: "flip horizontally"
+            SetToggle {
+                checked: page.d.wallpaperFlip
+                onToggled: (v) => { page.d.wallpaperFlip = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
             label: "sort order"
             SetSelect {
                 options: ["name", "mtime", "random"]
