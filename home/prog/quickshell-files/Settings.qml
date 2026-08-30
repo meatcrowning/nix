@@ -224,7 +224,9 @@ Scope {
     function onVtbLine(line) {
         const s = (line || "").trim();
         if (s.indexOf("CLICK ") === 0) {
-            const id = s.substring(6).trim();
+            // the wire is `CLICK <id> <x> <y>` — the coordinates are ours to
+            // ignore, but they are not ours to leave on the id.
+            const id = s.substring(6).trim().split(/\s+/)[0];
             if (id === "reset") { confirmReset.open(); return; }
             for (const p of pages) if (p.key === id) { root.current = id; return; }
         } else if (s === "WAKE") {
