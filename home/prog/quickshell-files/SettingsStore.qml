@@ -258,6 +258,15 @@ Singleton {
         // binding never observes the momentary pure-disk state (no flicker on,
         // e.g., wallpaperSolid when the panel saves gamma).
         onLoaded: {
+            // Oxygen Mono was the first probe of the oxygen family. Keep an
+            // existing pick from leaving the ordinary desktop on the terminal
+            // face now that the selectable option is the proportional Oxygen
+            // face; apply-pixel-font.sh maps this canonical family to Oxygen
+            // Mono only for kitty.
+            if (file.adapter.fontFamily === "Oxygen Mono") {
+                file.adapter.fontFamily = "Oxygen-Sans";
+                file.writeAdapter();
+            }
             // Repair a stored logout command that cannot run (deadLogoutCmds)
             // before anything reads it. Runs on every load and is a no-op once
             // the repaired value is on disk.
