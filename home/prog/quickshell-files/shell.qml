@@ -1337,18 +1337,25 @@ Scope {
                         NumberAnimation { duration: ViewMode.ms(140); easing.type: ViewMode.slideEasing }
                     }
 
+                    // Hideable (settings > appearance > panel > "top bar"). Off
+                    // takes the divider with it and gives the grid the whole
+                    // panel: an empty strip and a rule across nothing would be
+                    // worse than either state.
                     DockHeader {
                         id: dockHeader
+                        visible: SettingsStore.d.dockHeader
+                        height: visible ? implicitHeight : 0
                         anchors { left: parent.left; right: parent.right; top: parent.top }
                     }
 
                     Rectangle {
                         id: dockDivider
+                        visible: dockHeader.visible
                         anchors {
                             left: parent.left; right: parent.right
-                            top: dockHeader.bottom; topMargin: Theme.gap
+                            top: dockHeader.bottom; topMargin: visible ? Theme.gap : 0
                         }
-                        height: 1
+                        height: visible ? 1 : 0
                         color: Theme.border
                     }
 

@@ -352,7 +352,8 @@ back and the artwork balloons for the last frames of the close.
 `ViewMode.qml`. `classic` is the 48px vertical bar this config has always had,
 with the desktop widgets pinned out on the wallpaper. `dock` turns the panel
 into a wide column (14–33% of screen, default 15%): `DockHeader.qml` (task icons
-flowing across and wrapping, uptime at the right) over `DockGrid.qml`
+flowing across and wrapping, uptime at the right — hideable, `dockHeader`, which
+takes its divider with it) over `DockGrid.qml`
 (the widget grid). There is no toggle button — you grab the bar's inner edge
 (`EdgeGrip.qml`, instantiated per screen in `shell.qml`) and pull. The grip's
 strip and its hover highlight follow the inner-edge border — shortcut-notch
