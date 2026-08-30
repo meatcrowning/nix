@@ -3668,13 +3668,15 @@ class Titlebar(QObject):
     """
 
     clicked = Signal(str)
+    clickedAt = Signal(str, float, float)
     edgeChanged = Signal()
     compactChanged = Signal()
     barWidthChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._client = VtbClient(on_click=self.clicked.emit)
+        self._client = VtbClient(on_click=self.clicked.emit,
+                                  on_click_at=self.clickedAt.emit)
         self._edge = "right"
         self._compact = False
         self._bar_width = 40
