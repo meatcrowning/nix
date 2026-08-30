@@ -151,14 +151,24 @@ Singleton {
     // monitor kept in its own NVRAM. settings.json is machine-local, so each
     // host remembers its own level.
     property int    brightness: -1      // 0-100, or -1 until first poll
-    // Which brightness backend to drive. "auto" uses whatever was detected at
-    // startup (_hasBacklight); the Settings "brightness backend" override forces
-    // backlight (brightnessctl) or ddc (ddcutil) regardless of detection.
+    // Which brightness backend to drive. "auto" uses DDC whenever an external
+    // output is attached, even on a laptop that also has a backlight; with only
+    // the internal panel it uses brightnessctl. The Settings override still
+    // forces either backend regardless of output topology.
     property bool   _hasBacklight: false
+    readonly property bool _hasExternalOutput: {
+        for (let i = 0; i < Quickshell.screens.length; ++i) {
+            if (Quickshell.screens[i].name !== "eDP-1") return true;
+        }
+        return false;
+    }
     readonly property bool useBacklight: {
         const be = SettingsStore.d.brightnessBackend;
-        return be === "backlight" ? true : be === "ddc" ? false : _hasBacklight;
+        return be === "backlight" ? true : be === "ddc" ? false
+            : _hasBacklight && !_hasExternalOutput;
     }
+    readonly property bool useGammaBrightness:
+        _hasExternalOutput && SettingsStore.d.brightnessBackend === "auto";
 
     // "Negative brightness". Once the hardware is at 0 and the user keeps
     // lowering, the extra steps come out of the compositor's gamma ramp
@@ -770,6 +780,14 @@ Singleton {
     property bool ddcBusy: false
 
     function adjustBrightness(step) {
+        if (useGammaBrightness) {
+            if (brightness < 0) brightness = SettingsStore.d.brightnessExternal;
+            brightness = Math.max(5, Math.min(100, brightness + step));
+            SettingsStore.d.brightnessExternal = brightness;
+            SettingsStore.save();
+            Osd.trigger("brightness");
+            return;
+        }
         if (brightness < 0) brightness = 50;
         // Below hardware zero, and back up again: lowering at 0 eats gamma,
         // and raising gives all of the gamma back BEFORE the hardware level
@@ -807,6 +825,7 @@ Singleton {
     }
 
     function fireBrightnessWrite() {
+        if (useGammaBrightness) return;
         ddcBusy = true;
         ddcutilWriteProc.command = useBacklight
             ? ["brightnessctl", "set", String(root.brightness) + "%"]
@@ -856,8 +875,9 @@ Singleton {
         }
     }
 
-    // Detect a real panel backlight once at startup; ddcutilProc/Write above
-    // pick brightnessctl vs ddcutil off this. Runs before the timer below
+    // Detect a real panel backlight once at startup; output topology then picks
+    // brightnessctl for the panel or ddcutil for an attached external display.
+    // Runs before the timer below
     // (triggeredOnStart) issues the first read.
     Process {
         id: backlightDetectProc
@@ -892,6 +912,10 @@ Singleton {
         // reading the store must pull it in first — see SettingsStore.loadNow().
         SettingsStore.loadNow();
         const want = SettingsStore.d.brightnessHw;
+        if (useGammaBrightness) {
+            brightness = Math.max(5, Math.min(100, SettingsStore.d.brightnessExternal));
+            return true;
+        }
         if (want < 0 || want > 100) return false;   // never set here: leave it be
         brightness = want;
         fireBrightnessWrite();
@@ -905,6 +929,7 @@ Singleton {
         triggeredOnStart: true
         onTriggered: {
             if (root._restorePending && root._restoreBrightness()) return;
+            if (root.useGammaBrightness) return;
             if (ddcBusy) return;
             ddcBusy = true;
             ddcutilProc.running = true;

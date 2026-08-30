@@ -771,7 +771,8 @@ Scope {
                  + " gamma=" + SysInfo.gamma
                  + " floor=" + Math.max(5, Math.min(100, SettingsStore.d.gammaFloor))
                  + " negative=" + SysInfo.negativeBrightness
-                 + " backend=" + (SysInfo.useBacklight ? "backlight" : "ddc")
+                 + " backend=" + (SysInfo.useGammaBrightness ? "gamma"
+                     : SysInfo.useBacklight ? "backlight" : "ddc")
                  + " step=" + SettingsStore.d.brightnessStep;
         }
     }

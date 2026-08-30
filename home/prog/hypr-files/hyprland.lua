@@ -29,6 +29,44 @@ if host.laptop then
     })
 end
 
+-- book is a one-screen-at-a-time laptop: an attached external display owns
+-- the desktop, and the panel comes back automatically when the last external
+-- output disappears.  Do this through wlr-output-management rather than
+-- `hyprctl keyword monitor` (the Lua parser rejects keyword changes).
+--
+-- Ignore eDP-1's own removal event: disabling it is what emits that event, and
+-- treating it as an unplug would immediately turn it back on.
+if host.laptop then
+    local function laptop_has_external()
+        for _, mon in ipairs(hl.get_monitors() or {}) do
+            if mon.name and mon.name ~= "eDP-1" then return true end
+        end
+        return false
+    end
+
+    local function laptop_sync_outputs()
+        if laptop_has_external() then
+            hl.exec_cmd("wlr-randr --output eDP-1 --off")
+        else
+            hl.exec_cmd("wlr-randr --output eDP-1 --on")
+        end
+    end
+
+    hl.on("monitor.added", function(mon)
+        if mon and mon.name and mon.name ~= "eDP-1" then
+            hl.timer(laptop_sync_outputs, { timeout = 250, type = "oneshot" })
+        end
+    end)
+    hl.on("monitor.removed", function(mon)
+        if mon and mon.name and mon.name ~= "eDP-1" then
+            hl.timer(laptop_sync_outputs, { timeout = 250, type = "oneshot" })
+        end
+    end)
+    -- Covers an external output that was already present before this config
+    -- registered its handlers (login and `hyprctl reload`).
+    hl.timer(laptop_sync_outputs, { timeout = 500, type = "oneshot" })
+end
+
 -- Windows come back when the screen does.
 --
 -- Powering the display off drops its DisplayPort link ENTIRELY — this is not
@@ -895,8 +933,9 @@ end, { description = "Previous window" })
 -- Volume: routed through quickshell's "volume" IpcHandler (optimistic
 -- panel update + wpctl + the Vista ding). No OSD — the VU meter's level
 -- line in the bar is the always-visible indicator.
--- Brightness: this display is external (DDC/CI via ddcutil, no laptop
--- backlight), and ddcutil takes ~1.5s/call — routed through Quickshell's
+-- Brightness: Quickshell chooses the laptop backlight while eDP-1 is alone and
+-- DDC/CI while an external output is attached. ddcutil takes ~1.5s/call, so it
+-- is routed through Quickshell's
 -- SysInfo.adjustBrightness (debounced write + its own OSD trigger) instead
 -- of calling ddcutil directly, so holding the key doesn't stack up several
 -- slow DDC calls. See quickshell/shell.qml's "brightness" IpcHandler.
