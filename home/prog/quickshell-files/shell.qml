@@ -1189,15 +1189,34 @@ Scope {
                 // DesktopNotch's outline does with its own overlap.
                 Rectangle {
                     z: 2
-                    // Vertical bar only: on a top/bottom one the drawer comes
-                    // out of the screen's right edge, not the panel's face, so
-                    // there is no mouth for it to have.
                     visible: launcher.out && !NotchModel.shown && !bar.hz
                     x: bar.barLeft ? barBody.width - width : 0
                     y: Math.round((bar.modelData.height - NotchModel.slabH0) / 2)
                        + Theme.windowBorderWidth
                     width: Math.max(2, Theme.windowBorderWidth)
                     height: NotchModel.slabH0 - 2 * Theme.windowBorderWidth
+                    color: Theme.bg
+                }
+
+                // THE SAME MOUTH ON A HORIZONTAL BAR. The drawer comes out of
+                // the middle of a top/bottom panel (Launcher.qml), so the accent
+                // line has to stop for its span there too — otherwise a line
+                // runs between the panel and the drawer and the drawer reads as
+                // a separate window sitting against it. There is never a notch
+                // on this edge, so this is the only thing that cuts the strip.
+                //
+                // The span is the drawer's surface (which is exactly the card,
+                // centred by the compositor), less one border at each end so the
+                // drawer's own left and right accent lines meet the panel's at
+                // the corners.
+                Rectangle {
+                    z: 2
+                    visible: launcher.out && bar.hz
+                    x: Math.round((barBody.width - launcher.width) / 2)
+                       + Theme.windowBorderWidth
+                    y: bar.barTop ? barBody.height - height : 0
+                    width: Math.max(0, launcher.width - 2 * Theme.windowBorderWidth)
+                    height: Math.max(2, Theme.windowBorderWidth)
                     color: Theme.bg
                 }
 
