@@ -14,6 +14,8 @@ QtObject {
     // it. Guarded like lineHeight below: harnesses stub DeskStyle.
     readonly property bool fontSmooth: (typeof DeskStyle !== "undefined" && DeskStyle)
                                        ? DeskStyle.smooth === true : false
+    readonly property bool fontTerminalCell: (typeof DeskStyle !== "undefined" && DeskStyle)
+                                             ? DeskStyle.terminalCell === true : false
     readonly property int fontSize: DeskStyle.fontSize
 
     // ONE TEXT ROW: the live FACE's cell (ascent + descent), which is only

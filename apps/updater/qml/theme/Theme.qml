@@ -10,6 +10,8 @@ QtObject {
 
     readonly property bool fontSmooth: (typeof DeskStyle !== "undefined" && DeskStyle)
                                        ? DeskStyle.smooth === true : false
+    readonly property bool fontTerminalCell: (typeof DeskStyle !== "undefined" && DeskStyle)
+                                             ? DeskStyle.terminalCell === true : false
 
     readonly property int fontSize: DeskStyle.fontSize
     readonly property int clockSize: DeskStyle.fontSize

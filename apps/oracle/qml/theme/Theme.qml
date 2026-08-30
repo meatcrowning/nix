@@ -27,6 +27,8 @@ QtObject {
     // it. Guarded like lineHeight below: harnesses stub DeskStyle.
     readonly property bool fontSmooth: (typeof DeskStyle !== "undefined" && DeskStyle)
                                        ? DeskStyle.smooth === true : false
+    readonly property bool fontTerminalCell: (typeof DeskStyle !== "undefined" && DeskStyle)
+                                             ? DeskStyle.terminalCell === true : false
 
     // Text size in PIXELS (not points), matched to kitty's on-screen size.
     // See PixelText.qml for why native rendering + integer pixel sizes matter.

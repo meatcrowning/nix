@@ -117,7 +117,10 @@ let
     { family = "CozetteVector"; label = "cozette"; smooth = false; }
     { family = "Terminus"; label = "terminus"; smooth = false; }
     { family = "Tahoma"; label = "tahoma"; smooth = true; }
-    { family = "Oxygen Mono"; label = "oxygen mono"; smooth = true; }
+    # Oxygen Mono is a smooth outline, but Kitty’s 10pt renderer grid-fits it
+    # to an 8×14 terminal cell. Qt must therefore keep AA while requesting full
+    # hinting; default/no hinting leaves a fractional 8.39px advance at 14px.
+    { family = "Oxygen Mono"; label = "oxygen mono"; smooth = true; terminalCell = true; }
   ];
 
   # The Settings dropdown reads its options from a generated singleton rather
@@ -132,6 +135,7 @@ let
         readonly property var families: [${lib.concatMapStringsSep "," (f: " \"${f.family}\"") selectableFaces} ]
         readonly property var labels: ({${lib.concatMapStringsSep "," (f: " \"${f.family}\": \"${f.label}\"") selectableFaces} })
         readonly property var smooth: ({${lib.concatMapStringsSep "," (f: " \"${f.family}\": ${lib.boolToString f.smooth}") selectableFaces} })
+        readonly property var terminalCell: ({${lib.concatMapStringsSep "," (f: " \"${f.family}\": ${lib.boolToString (f.terminalCell or false)}") selectableFaces} })
     }
   '';
 in
@@ -202,7 +206,10 @@ in
   # (plugin:hyprvtb:font_smooth), so the plugin's cairo AA choice follows the
   # face without hardcoding a family name anywhere outside this file.
   xdg.configFile."quickshell/font-faces.json".text = builtins.toJSON
-    (lib.listToAttrs (map (f: lib.nameValuePair f.family { inherit (f) smooth; }) selectableFaces));
+    (lib.listToAttrs (map (f: lib.nameValuePair f.family {
+      inherit (f) smooth;
+      terminalCell = f.terminalCell or false;
+    }) selectableFaces));
 
   # "More Perfect DOS VGA" ships ONLY a Regular face. Without this, KDE/Qt apps
   # faux-bold (and oblique-shear) it wherever the UI asks for bold/italic text —

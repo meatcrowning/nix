@@ -202,7 +202,7 @@ check("the Hyprland session always gets the panel theme",
 
 # --------------------------------------------------------------------------- #
 print("DeskStyle")
-from PySide6.QtGui import QFont, QGuiApplication  # noqa: E402
+from PySide6.QtGui import QFont, QFontMetricsF, QGuiApplication  # noqa: E402
 
 app = QGuiApplication([])   # needed for the DPI the point size converts at
 import deskstyle  # noqa: E402
@@ -226,8 +226,13 @@ settings.write_text('{"fontFamily": "Oxygen Mono", "fontSize": 14,'
                     ' "windowRounding": 7}')
 o = deskstyle.DeskStyle()
 check("hypr: Oxygen Mono is smooth", o.smooth is True)
-check("hypr: Oxygen Mono editor text drops hinting",
-      o.editorFont.hintingPreference() == QFont.PreferNoHinting)
+check("hypr: Oxygen Mono uses Kitty’s terminal-cell metrics", o.terminalCell is True)
+check("hypr: Oxygen Mono editor text grid-fits its Kitty cell",
+      o.editorFont.hintingPreference() == QFont.PreferFullHinting)
+o_metrics = QFontMetricsF(o.editorFont)
+check("hypr: Oxygen Mono keeps Kitty's measured 8×14 cell",
+      (round(o_metrics.horizontalAdvance("M")), round(o_metrics.height())) == (8, 14),
+      f"{o_metrics.horizontalAdvance('M'):.3f}×{o_metrics.height():.3f}")
 
 env(DESK_SESSION="plasma")
 k = deskstyle.DeskStyle()
