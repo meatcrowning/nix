@@ -240,13 +240,10 @@ Column {
     // "window decorations" are the desktop-wide chrome that is NOT the bar.
     SetSection {
         title: "titlebar"
-        // Side, orientation and compact are set two equivalent ways, both bound
-        // to the same three GLOBAL store keys: direct manipulation on the
-        // realistic preview above, and the plain dropdowns below it. (There is
-        // no global key for which app buttons show — they are per-app over the
-        // vtbclient socket.) Both write the store keys the old plain rows did,
-        // so SettingsApply.qml's live-apply is unchanged.
-        SetTitlebarMock { }
+        // The live titlebar preview (SetTitlebarMock.qml) used to head this
+        // section — direct manipulation of the same three keys the dropdowns
+        // below set. Taken out 2026-08-30: he did not want the visual. The
+        // component is still here, unreferenced, if it comes back.
         SetRow {
             label: "titlebar side"
             SetSelect {
@@ -366,7 +363,6 @@ Column {
         }
         SetRow {
             label: "spacing"
-            desc: "gap between bar clusters"
             SetSlider {
                 from: 2; to: 20; step: 1; unit: "px"
                 value: page.d.barGap
@@ -386,15 +382,23 @@ Column {
             // wide panel. Classic mode keeps its task icons in the Taskbar
             // column and is untouched either way.
             label: "top bar"
-            desc: "running program icons and uptime, in dock mode"
             SetToggle {
                 checked: page.d.dockHeader
                 onToggled: (v) => { page.d.dockHeader = v; SettingsStore.save(); }
             }
         }
         SetRow {
+            // The "up 3d4h" readout in the top bar's right corner. Off gives
+            // that width back to the program icons, which wrap against it.
+            label: "top bar uptime"
+            SetToggle {
+                enabled: page.d.dockHeader
+                checked: page.d.dockUptime
+                onToggled: (v) => { page.d.dockUptime = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
             label: "click active minimizes"
-            desc: "click a focused app's icon to minimize it"
             SetToggle {
                 checked: page.d.taskbarClickMinimizes
                 onToggled: (v) => { page.d.taskbarClickMinimizes = v; SettingsStore.save(); }

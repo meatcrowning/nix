@@ -409,6 +409,9 @@ Singleton {
             // the panel; classic mode is unaffected (its task icons are the
             // Taskbar column).
             property bool   dockHeader: true
+            // The uptime readout in that strip's right corner. Off widens the
+            // icon Flow to the full panel width.
+            property bool   dockUptime: true
             // Per-widget state the user sets by USING the widget rather than
             // through the Settings window — a clicked column heading, a repeat
             // toggle on a player that has no LoopStatus of its own. It lives
@@ -620,7 +623,7 @@ Singleton {
         wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",
         wallpaperSolid: false, wallpaperFlip: false,
         viewMode: "classic", dockWidthFrac: 0.15,
-        barWidth: 48, barEdge: "right", barGap: 8, barCell: 40, taskbarClickMinimizes: true, dockHeader: true,
+        barWidth: 48, barEdge: "right", barGap: 8, barCell: 40, taskbarClickMinimizes: true, dockHeader: true, dockUptime: true,
         procSort: "cpu", mediaLocalLoop: 0, mediaQueueOpen: false, topStatsOpen: false,
         fanShowFixed: false,
         fanStepMs: 300, defaultWidgets: ["clock", "weather", "disk", "media", "cpu", "gpu"],

@@ -17,8 +17,8 @@ import Quickshell.Wayland
 // an unconstrained Flow lays everything out on one infinitely-wide row and
 // never wraps at all.
 //
-// Uptime lives in the top-right corner, and the Flow's right edge stops short
-// of it — NOT overlapped and left to luck. The icons wrap as they fill, so with
+// Uptime lives in the top-right corner (when it is shown at all — dockUptime),
+// and the Flow's right edge stops short of it — NOT overlapped and left to luck. The icons wrap as they fill, so with
 // enough windows open they would otherwise reach the corner and draw straight
 // over the text.
 Item {
@@ -38,6 +38,10 @@ Item {
 
     PixelText {
         id: uptime
+        // Hideable (settings > appearance > panel > "top bar uptime"). Hidden,
+        // the Flow below anchors to the panel edge instead and the icons get
+        // the width back.
+        visible: SettingsStore.d.dockUptime
         anchors.right: parent.right
         // Centred on the FIRST ROW of icons, not on the header as a whole: the
         // Flow wraps onto further rows as windows accumulate, so centring on the
@@ -52,8 +56,8 @@ Item {
         id: icons
         anchors {
             left: parent.left
-            right: uptime.left
-            rightMargin: Theme.gap
+            right: uptime.visible ? uptime.left : parent.right
+            rightMargin: uptime.visible ? Theme.gap : 0
             top: parent.top
         }
         spacing: Theme.gap
