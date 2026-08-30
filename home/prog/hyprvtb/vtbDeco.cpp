@@ -1589,6 +1589,16 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     } else
         Hl::rect(barBox, bgColor, {.round = RND});
 
+    // The roll frame restores its rounded titlebar-side interior. Do that
+    // before the controls below: the old end-of-render placement put the
+    // restoration over buttons, while omitting it left the early frame's top
+    // corners masked by the square bar background.
+    if (m_bOpening) {
+        const float sT = ROLLANIM ? rollSlideT : 1.f;
+        drawRollBorder(barBox, SCALE, sT, accentColor, accentColor, a);
+    } else if (ROLLANIM && m_rollAnim == ROLL_OUT)
+        drawRollBorder(barBox, SCALE, rollSlideT, accentColor, inactiveColor, a);
+
     // local -> monitor-space helper for interior boxes (logical px in). The
     // whole layout below is bar-local (x across the bar, y along it) and this
     // is the ONLY mapping to the screen — so the same code draws a vertical
@@ -2075,26 +2085,6 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     if (ROLLANIM)
         drawRollSnapshot(barBox, SCALE, rollSlideT, a);
 
-    // roll-OUT only: the emerging window's border, crossfading unfocused->focused
-    // in step with the SLIDE, so unrolling looks like the window "coming to focus"
-    // as it emerges. The snapshot is clipped to the bare client rect (no border in
-    // it) and the hidden window draws none, so this is the only border shown for
-    // the whole reveal — it hands off to the live window's own border as it lands.
-    // NOT drawn on roll-UP: there the window ends hidden with no live border to
-    // hand off to, so the last frame's outline had nothing to clear it and sat
-    // stale until the bar was moved.
-    if (m_bOpening) {
-        // Open reveal: the outline is present the WHOLE reveal so it appears in step
-        // with the accent labels instead of popping in only once the roll starts.
-        // During the fade-in (ROLLANIM false) slideT is 1 → the border wraps just the
-        // lone bar; as the content rolls out it expands to wrap content+bar. Always
-        // accent (both endpoints accent → the crossfade is a no-op) since the window
-        // is coming up focused, then it hands off to the live window's accent border.
-        const float sT = ROLLANIM ? rollSlideT : 1.f;
-        drawRollBorder(barBox, SCALE, sT, accentColor, accentColor, a);
-    } else if (ROLLANIM && m_rollAnim == ROLL_OUT)
-        drawRollBorder(barBox, SCALE, rollSlideT, accentColor, inactiveColor, a);
-
     // NOTE: the hover tooltip is NOT drawn here — this pass element is an
     // UNDER-layer decoration (drawn before the window surface), and the tooltip
     // overhangs the window to the left, so drawing it here would put it behind
@@ -2554,6 +2544,17 @@ void CVtbDeco::drawRollBorder(const CBox& barBoxDev, float scale, float slideT, 
         rd.damage = &clipped;
         Hl::rect(CBox{cl - bs, ct - bs, fw + 2 * bs, ch + 2 * bs}.round(), bc, rd);
 
+        // At this point renderBar has not drawn its cells yet, so restore the
+        // bar's rounded interior normally. This keeps the top/titlebar corners
+        // visible from the first unroll frame without covering any controls.
+        auto bg = configColor(Cfg::bgColor());
+        bg.a *= a;
+        CRegion trailingClip = Hl::renderDamage().intersect(trailingCorners);
+        CHyprOpenGLImpl::SRectRenderData trailingData;
+        trailingData.round  = RND;
+        trailingData.damage = &trailingClip;
+        Hl::rect(inner.round(), bg, trailingData);
+
         // The snapshot may restore only the content-side interiors. Letting it
         // into the titlebar-side corner squares copied client pixels over the
         // bar's rounded top corners during the first part of an unroll, hiding
@@ -2561,8 +2562,6 @@ void CVtbDeco::drawRollBorder(const CBox& barBoxDev, float scale, float slideT, 
         if (m_rollSnapTex && m_rollSnapTex->m_texID != 0 && slideT < 0.999f) {
             drawRollSnapshotClipped(barBoxDev, scale, slideT, a, contentCorners);
         } else {
-            auto bg = configColor(Cfg::bgColor());
-            bg.a *= a;
             CRegion contentClip = Hl::renderDamage().intersect(contentCorners);
             CHyprOpenGLImpl::SRectRenderData bd;
             bd.round  = RND;
