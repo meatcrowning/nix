@@ -24,6 +24,14 @@ import QtQuick
 Text {
     font.family: Theme.font
     font.pixelSize: Theme.fontSize
+    // Kitty squeezes Oxygen Mono's 8.39px outline advance into its 8px cell.
+    // The matching 95% stretch preserves the lightly hinted stroke shape;
+    // full hinting changed the glyph itself to reach the same width.
+    transform: Scale {
+        origin.x: 0
+        origin.y: 0
+        xScale: Theme.fontTerminalCell ? 0.95 : 1.0
+    }
     // Oxygen Mono needs Kitty's lightly/vertically hinted outline.  Full
     // hinting happens to force an 8px Qt advance, but changes the actual glyph
     // shapes; Kitty packs its cells separately and keeps the lighter raster.

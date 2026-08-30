@@ -26,6 +26,7 @@ Text {
 
     font.family: Theme.font
     font.pixelSize: Theme.fontSize
+    transform: Scale { origin.x: 0; origin.y: 0; xScale: Theme.fontTerminalCell ? 0.95 : 1.0 }
     // PIXEL-FACE settings — except when the live face is a smooth outline
     // (Theme.fontSmooth <- DeskStyle.smooth: Phenex, the cursive). Then the
     // crisp pipeline is exactly wrong (staircased curves, kinked joins):

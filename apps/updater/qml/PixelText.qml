@@ -8,6 +8,7 @@ Text {
 
     font.family: Theme.font
     font.pixelSize: Theme.fontSize
+    transform: Scale { origin.x: 0; origin.y: 0; xScale: Theme.fontTerminalCell ? 0.95 : 1.0 }
     font.hintingPreference: Theme.fontTerminalCell ? Font.PreferVerticalHinting
                                                     : (Theme.fontSmooth ? Font.PreferNoHinting : Font.PreferFullHinting)
     renderType: Text.NativeRendering
