@@ -3712,7 +3712,12 @@ class Titlebar(QObject):
                     ["hyprctl", "getoption", key, "-j"],
                     capture_output=True, text=True, timeout=1,
                 )
-                value = json.loads(out.stdout).get(field)
+                payload = json.loads(out.stdout)
+                value = payload.get(field)
+                # CBoolValue has been exposed as either `int` or `bool` by
+                # different Hyprland releases; accept both representations.
+                if value is None and field == "int":
+                    value = payload.get("bool")
                 return value if value is not None else fallback
             except (OSError, subprocess.SubprocessError, ValueError, TypeError):
                 return fallback
