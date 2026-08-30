@@ -447,6 +447,56 @@ Singleton {
 
     FanAlarm { id: fanAlarmState }
 
+    // ---- battery thresholds ----------------------------------------------
+    // batteryWarn / batteryCrit already coloured the StatusPanel number and
+    // nothing else; a laptop that is about to die should say so out loud.
+    // Same shape as the fan alarm: a latch, so one crossing is one toast, and
+    // it only re-arms once the charge has come back ABOVE the threshold it
+    // fired at (plus hysteresis, so a reading flickering on the line cannot
+    // toast twice) or the machine is put on mains.
+    //
+    // `top` has no battery, so batteryPct is -1 there and none of this runs.
+    property int battRearmPct: 3            // hysteresis, percentage points
+    property string _battFired: ""          // "" | "low" | "crit"
+
+    function _battAlarm() {
+        if (batteryPct < 0 || batteryCharging) { _battFired = ""; return; }
+        const warn = SettingsStore.d.batteryWarn;
+        const crit = SettingsStore.d.batteryCrit;
+        if (batteryPct <= crit) {
+            if (_battFired !== "crit") {
+                _battFired = "crit";
+                _notifyBattery(true);
+            }
+        } else if (batteryPct <= warn) {
+            // Never step BACK to low from crit while still discharging — that
+            // would toast again on the way down through a raised threshold.
+            if (_battFired === "") {
+                _battFired = "low";
+                _notifyBattery(false);
+            }
+        } else if (batteryPct > warn + battRearmPct) {
+            _battFired = "";
+        }
+    }
+
+    // The toast names its own sound through `x-vista-sound` (Notifications.qml)
+    // so the card and the battery wav are one event, not a wav plus the
+    // urgency default on top of it. Critical urgency for the crit crossing
+    // buys the same four things the fan alarm uses it for — DND bypass, no
+    // eviction, no auto-expiry — and the low crossing stays a normal toast
+    // that goes away by itself.
+    function _notifyBattery(isCrit) {
+        const wav = isCrit ? SettingsStore.d.soundBatteryCrit
+                           : SettingsStore.d.soundBatteryLow;
+        const args = ["notify-send", "-a", "quickshell",
+                      "-h", "string:x-vista-sound:" + wav];
+        if (isCrit) args.push("-u", "critical", "-t", "0");
+        args.push("--", "battery " + batteryPct + "%",
+                  isCrit ? "plug in now." : "running on battery.");
+        Quickshell.execDetached(args);
+    }
+
     // The loud half of the pump alarm. Critical urgency is doing four separate
     // jobs here, all of them already built: it plays soundCritical rather than
     // the balloon, it bypasses Do Not Disturb, it is exempt from the toast
@@ -495,6 +545,7 @@ Singleton {
             gmu: gpuMemUsedMb, gmt: gpuMemTotalMb, mh: memHist,
             fns: fans, fph: fanPctHist, fvd: fanVaried, fhr: fanHadRpm,
             fsf: fanAlarmState.stoppedFor, fal: fanAlarmState.alerted,
+            bfd: _battFired,
             lh: loadHist, swh: swapHist, vh: vramHist,
             pc: psiCpu, pio: psiIo, pm: psiMem, pw: powerW,
             dr: dskRead, dw: dskWrite,
@@ -538,6 +589,8 @@ Singleton {
         // worse, re-fire a notification that has already been shown.
         fanAlarmState.stoppedFor = d.fsf || ({});
         fanAlarmState.alerted = d.fal || ({});
+        // A panel reload must not re-toast a threshold already crossed.
+        _battFired = d.bfd || "";
         loadHist = d.lh || []; swapHist = d.swh || [];
         vramHist = d.vh || [];
         psiCpu = d.pc === undefined ? -1 : d.pc;
@@ -626,6 +679,8 @@ Singleton {
         } else if (batteryPct >= 0) {
             batteryStatus = batteryCharging ? 2 : 5;
         }
+
+        _battAlarm();
 
         // One sample per battStepSec — see batteryHist. The first reading is
         // taken immediately so the card is not empty for the first 40s of a

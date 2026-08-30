@@ -437,6 +437,17 @@ Column {
         }
     }
 
+    // Is there a battery at all? Read from sysfs once, NOT from SysInfo —
+    // touching that singleton here would start the panel's 2-second poller
+    // inside the Settings process as well. Same shape as SetPgAppearance's
+    // rgb gate: absent until the answer arrives, never wrongly present.
+    property bool hasBattery: false
+    Process {
+        running: true
+        command: ["sh", "-c", "ls -d /sys/class/power_supply/BAT* 2>/dev/null | head -1"]
+        stdout: StdioCollector { onStreamFinished: page.hasBattery = (this.text || "").trim() !== "" }
+    }
+
     SetSection {
         title: "sounds"
         SetRow {
@@ -485,6 +496,44 @@ Column {
                 fieldWidth: 200
                 value: page.d.soundCritical
                 onCommitted: (t) => { page.d.soundCritical = t; SettingsStore.save(); }
+            }
+        }
+        SetRow {
+            label: "logout"
+            SetTextField {
+                fieldWidth: 200
+                value: page.d.soundLogout
+                onCommitted: (t) => { page.d.soundLogout = t; SettingsStore.save(); }
+            }
+        }
+        SetRow {
+            // reboot and poweroff both — the two that take the machine down
+            label: "shutdown"
+            SetTextField {
+                fieldWidth: 200
+                value: page.d.soundShutdown
+                onCommitted: (t) => { page.d.soundShutdown = t; SettingsStore.save(); }
+            }
+        }
+        SetRow {
+            // Drawn only where there IS a battery: on a desktop the two rows
+            // below can never fire, and an inert control is what
+            // docs/DESIGN.md §10 forbids.
+            label: "battery low"
+            visible: page.hasBattery
+            SetTextField {
+                fieldWidth: 200
+                value: page.d.soundBatteryLow
+                onCommitted: (t) => { page.d.soundBatteryLow = t; SettingsStore.save(); }
+            }
+        }
+        SetRow {
+            label: "battery critical"
+            visible: page.hasBattery
+            SetTextField {
+                fieldWidth: 200
+                value: page.d.soundBatteryCrit
+                onCommitted: (t) => { page.d.soundBatteryCrit = t; SettingsStore.save(); }
             }
         }
     }

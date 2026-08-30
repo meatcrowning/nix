@@ -519,6 +519,17 @@ Singleton {
             property string soundVolume: "Windows Ding.wav"
             property string soundNotify: "Windows Balloon.wav"
             property string soundCritical: "Windows Exclamation.wav"
+            // End of session. Logout and the two that take the machine down
+            // get different sounds because Vista gave them different sounds;
+            // sleep gets none (it is not an end of session).
+            property string soundLogout: "Windows Logoff Sound.wav"
+            property string soundShutdown: "Windows Shutdown.wav"
+            // Battery thresholds (batteryWarn / batteryCrit). SysInfo raises
+            // one toast per crossing and names the file on it, so the toast
+            // does not also play the urgency default — see the
+            // `x-vista-sound` hint in Notifications.qml.
+            property string soundBatteryLow: "Windows Battery Low.wav"
+            property string soundBatteryCrit: "Windows Battery Critical.wav"
 
             // ---- Apps & Utilities ----
             property string launcherTerminal: "kitty"
@@ -638,6 +649,8 @@ Singleton {
         soundsEnabled: true,
         soundTheme: "vista", soundLogin: "Windows Logon Sound.wav", soundVolume: "Windows Ding.wav",
         soundNotify: "Windows Balloon.wav", soundCritical: "Windows Exclamation.wav",
+        soundLogout: "Windows Logoff Sound.wav", soundShutdown: "Windows Shutdown.wav",
+        soundBatteryLow: "Windows Battery Low.wav", soundBatteryCrit: "Windows Battery Critical.wav",
         launcherTerminal: "kitty", launcherMaxResults: 0, launcherPlaceholder: "search programs",
         launcherProviderApps: true, fileBrowserStart: "/home/lam",
         fileBrowserHidden: false, fileBrowserDirsFirst: true, fileBrowserConfirmDelete: true,

@@ -314,8 +314,13 @@ Singleton {
         // it; `notify-send -h int:value:37` sends it): an int 0-100 that makes
         // a toast a PROGRESS toast, drawn as the card's bar. repo-updates ships
         // it on every step of a pull-and-rebuild.
+        // `x-vista-sound` names the .wav this toast should play INSTEAD of the
+        // urgency default, so a sender with a sound of its own (the battery
+        // alarm) does not have to choose between its own sound and a toast.
+        // Still silenceable exactly like the defaults — it is played on the
+        // same line, behind the same two gates.
         extraHints: ["x-kde-origin-name", "x-kdeconnect-source-device",
-                     "x-download-image", "x-open-path", "value"]
+                     "x-download-image", "x-open-path", "value", "x-vista-sound"]
 
         onNotification: function (n) {
             // Learn the sender before deciding anything, so an app whose
@@ -346,8 +351,11 @@ Singleton {
 
             // Vista sounds: critical vs. normal, both user-configurable, and
             // both silenceable per sender or globally without losing the toast.
-            if (rule.sound && !SettingsStore.d.notifSoundMute)
-                Sounds.playThrottled(critical ? SettingsStore.d.soundCritical : SettingsStore.d.soundNotify, 300);
+            if (rule.sound && !SettingsStore.d.notifSoundMute) {
+                const own = String((n.hints && n.hints["x-vista-sound"]) || "").trim();
+                Sounds.playThrottled(own || (critical ? SettingsStore.d.soundCritical
+                                                      : SettingsStore.d.soundNotify), 300);
+            }
 
             // Enforce maxVisible: retire the oldest expendable toast (lowest
             // id == earliest). Critical toasts and ones that asked never to
