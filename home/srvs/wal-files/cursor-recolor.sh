@@ -111,13 +111,26 @@ pin_env() {
 # recolour is fast now and the next hover picks it up.
 apply() { hyprctl setcursor "$NAME" "$SIZE" >/dev/null 2>&1 || true; }
 
-# Drop stale per-theme cursors (keep the current one and the GoogleDot-Black
-# base). Match a lowercase-hex suffix so "GoogleDot-Black" (capital B) is never
-# hit; the `*` also catches leftover 6-hex accent-only names from the old scheme.
+# Drop stale per-theme cursors, but keep themes still referenced by a running
+# process. Cursor theme names are inherited at process launch; deleting an old
+# directory while that process is alive makes its next shape request fall back
+# to the system cursor (which is why a GoogleDot wait cursor became Breeze).
+# Match a lowercase-hex suffix so "GoogleDot-Black" (capital B) is never hit;
+# the `*` also catches leftover 6-hex accent-only names from the old scheme.
+active_themes() {
+    for env in /proc/[0-9]*/environ; do
+        [ -r "$env" ] || continue
+        tr '\0' '\n' < "$env" 2>/dev/null \
+            | sed -n 's/^[A-Z_]*CURSOR_THEME=\(GoogleDot-[0-9a-f]*\)$/\1/p'
+    done | sort -u
+}
 prune() {
+    active="$(active_themes 2>/dev/null)"
     for d in "$HOME"/.icons/GoogleDot-[0-9a-f]*; do
         [ -d "$d" ] || continue
         [ "$d" = "$DST" ] && continue
+        name="${d##*/}"
+        printf '%s\n' "$active" | grep -Fqx "$name" && continue
         rm -rf "$d"
     done
 }
