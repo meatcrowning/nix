@@ -493,6 +493,12 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   state on book (`/etc/systemd/system/`, install line in the unit's header) —
   redo it after a reinstall. `top` is unaffected: its trackball is on the
   Logitech receiver and its bluetooth stack is not enabled at all.
+  `90-ddcutil-air.rules` is the matching Fedora-only hardware seam for external
+  monitor brightness: book's i2c-dev nodes otherwise come up `root:root 0600`,
+  so Quickshell can detect the USB-C display but every DDC read/write gets
+  EACCES. Install it at `/etc/udev/rules.d/90-ddcutil-air.rules` (command in the
+  file header), reload udev and trigger `i2c-dev`; it grants only user `lam`,
+  not a world-readable I2C bus. `top` gets its DDC permissions from NixOS.
 - `sys/remote-power.nix` — **rebooting and powering off `top` from away
   (`top` only).** It could not be done at all before 2026-08-26 and nothing said
   so: an ssh session is a remote, inactive seat, so logind's polkit answers

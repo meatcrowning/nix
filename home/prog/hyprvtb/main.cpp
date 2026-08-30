@@ -1307,7 +1307,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     const std::string HASH        = __hyprland_api_get_hash();
     const std::string CLIENT_HASH = __hyprland_api_get_client_hash();
 
-    if (HASH != CLIENT_HASH) {
+    // Fedora's stripped Hyprland rpm reports an `unknown` server hash even
+    // though it is ABI-compatible with the matching 0.56.2 headers.  Keep
+    // rejecting real hash mismatches, but allow that packaging omission.
+    const bool unknownServerHash = HASH.rfind("unknown_", 0) == 0;
+    const bool unknownClientHash = CLIENT_HASH.rfind("unknown_", 0) == 0;
+    if (HASH != CLIENT_HASH && !unknownServerHash && !unknownClientHash) {
         HyprlandAPI::addNotification(PHANDLE, "[hyprvtb] Failure in initialization: Version mismatch (headers ver is not equal to running hyprland ver)",
                                      CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
         throw std::runtime_error("[hyprvtb] Version mismatch");
@@ -1769,7 +1774,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / program icon / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.38"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / program icon / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.39"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

@@ -253,7 +253,7 @@ Two containment rules the nix `checkPhase` enforces:
 - A weak ref to a decoration must be a `CDecoRef`, never a raw
   `WP<CVtbDeco>` — a `lock()` over a unique-owned deco aborts the compositor.
 
-There is also a **temporary** third pin, `hyprland-air` (v0.55.4): book runs
+There is also a **temporary** third pin, `hyprland-air` (v0.56.2): book runs
 Fedora Asahi's rpm compositor (nix hyprland crashes on Asahi — no GBM), and its
 hyprvtb must be built against that exact version. So `vtbCompat.hpp` is
 dual-version (`#if VTB_HL_056`) and **seam changes must compile against BOTH

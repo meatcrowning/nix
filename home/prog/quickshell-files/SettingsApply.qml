@@ -247,9 +247,11 @@ Item {
     // restoring the ramp and throwing the screen back to full brightness for
     // the half-second until we relaunched. Now a reload just finds the daemon
     // already up and pushes the (persisted) values at it, so nothing flickers.
-    property bool sunsetWanted: SettingsStore.d.nightLight || SysInfo.gamma < 100
+    property bool sunsetWanted: SettingsStore.d.nightLight
+        || SysInfo.gamma < 100 || SysInfo.useGammaBrightness && SysInfo.brightness < 100
     readonly property int sunsetTemp: SettingsStore.d.nightLight ? SettingsStore.d.nightTemp : 6000
-    readonly property int sunsetGamma: SysInfo.gamma
+    readonly property int sunsetGamma: SysInfo.useGammaBrightness
+        ? SysInfo.brightness : SysInfo.gamma
 
     // Is a hyprsunset believed to be running, and is it one we drive? We only
     // ever kill a daemon we launched or adopted — an instance someone started

@@ -593,6 +593,7 @@ Singleton {
             // machine-local, so each host keeps its own. SysInfo owns the
             // writes and re-applies it once per session.
             property int    brightnessHw: -1
+            property int    brightnessExternal: 100
         }
     }
 
@@ -640,6 +641,7 @@ Singleton {
         weatherLon: -134.42, weatherPlace: "juneau", weatherUnit: "F", weatherRefreshMin: 20,
         worldClocks: ["America/Indiana/Indianapolis", "America/New_York", "Europe/London", "Asia/Tokyo"],
         brightnessStep: 5, brightnessBackend: "auto", nightLight: false,
-        nightTemp: 4000, gammaFloor: 20, gammaLevel: 100, brightnessHw: -1
+        nightTemp: 4000, gammaFloor: 20, gammaLevel: 100, brightnessHw: -1,
+        brightnessExternal: 100
     })
 }

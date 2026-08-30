@@ -27,16 +27,23 @@ let
   #
   # AND air needs a different VERSION entirely (the bridge — see flake.nix's
   # `hyprland-air` input and docs/book-hyprvtb-version-bridge.md): Fedora's
-  # rpm is 0.55.4 while top's pin is 0.56.0, and a plugin only loads into the
+  # Fedora rpm is 0.56.2 while top's pin is 0.56.0, and a plugin only loads into the
   # exact compositor version it was built against. So air's plugin builds
   # against the hyprland-air pin (matching Fedora, GIT_* forced to "unknown"
   # to match its stripped rpm) and top's against the main pin. vtbCompat.hpp
-  # branches on VTB_HL_056 to compile against both. TEMPORARY: when Fedora
-  # ships 0.56, drop hyprland-air and this branch collapses back to one line.
+  # branches on VTB_HL_056 to compile against both. Keep this bridge until the
+  # two hosts share one Hyprland pin.
   hyprlandPinned = inputs.hyprland.packages.${pkgs.stdenv.hostPlatform.system}.hyprland;
   hyprlandAir = inputs.hyprland-air.packages.${pkgs.stdenv.hostPlatform.system}.hyprland;
 
   hyprlandForVtb = if host == "air" then hyprlandAir.overrideAttrs (old: {
+    # Hyprland 0.56.2's CMake fallback tries FetchContent for glaze even
+    # though the flake already provides the packaged dependency. Keep the
+    # build hermetic (and offline) by making that dependency explicit.
+    buildInputs = (old.buildInputs or []) ++ [ pkgs.glaze ];
+    cmakeFlags = (old.cmakeFlags or []) ++ [
+      "-DCMAKE_INCLUDE_PATH=${pkgs.glaze}/include"
+    ];
     env = (old.env or { }) // {
       GIT_BRANCH = "unknown";
       GIT_COMMIT_DATE = "unknown";

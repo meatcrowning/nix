@@ -46,7 +46,7 @@ knowing when porting:
 
 - **All of it is pin-identical — not one `#if`.** `EventLoopManager.hpp`,
   `EventLoopTimer.hpp`, `IPointer.hpp` and `IKeyboard.hpp` are *byte-identical*
-  between 0.55.4 and 0.56.0; `SeatManager.hpp` differs only at `nextSerial` and
+  between 0.56.0 and 0.56.2; `SeatManager.hpp` differs only at `nextSerial` and
   below. That is not luck, it is a choice at two points: surface→window
   classification goes through the **view** indirection
   (`CWLSurface::fromResource` → `view()` → `CWindow::fromView`), which sidesteps
@@ -63,7 +63,7 @@ knowing when porting:
   bump makes something here *want* a serial, that is the moment to add a
   `#if VTB_HL_056` arm, and it should be the only one in the block.
 - **`HyprlandAPI::addEvent` is top-pin only.** Plugin-defined custom bus events
-  do not exist on 0.55.4. Nothing uses it; if anything ever does, it needs a
+  do not exist on 0.56.0. Nothing uses it; if anything ever does, it needs a
   guard.
 - **Hold gestures are per-device, not on the bus.** `Event::bus()`'s gesture
   group has `swipe.*` and `pinch.*` on both pins and no `hold` on either, so
@@ -123,10 +123,10 @@ overriding them would reintroduce the version skew the pin exists to remove.
 ### The second pin: `hyprland-air` (TEMPORARY — the book bridge)
 
 Since 2026-07-26 there is a **second** pin, `hyprland-air`
-(`github:hyprwm/Hyprland/v0.55.4`), used ONLY to build `air`/book's plugin.
+(`github:hyprwm/Hyprland/v0.56.2`), used ONLY to build `air`/book's plugin.
 book's compositor is Fedora Asahi's rpm (nix hyprland crashes there — no
-Apple-Silicon GBM in nixpkgs Mesa), Fedora is on 0.55.4 while `top` moved to
-0.56.0, and a plugin loads only into the exact version it was built against.
+Apple-Silicon GBM in nixpkgs Mesa), Fedora is on the 0.56 ABI like `top`, and a
+plugin loads only into the exact version it was built against.
 `vtbCompat.hpp` therefore carries `#if VTB_HL_056` branches (version detected
 from pkg-config via `CMakeLists.txt`'s `VTB_HL_VERSION`, with `__has_include`
 probes as fallback) and must keep compiling against BOTH pins — check both
@@ -174,9 +174,10 @@ the member which survives. (A `requires { Config::CONFIG_LEGACY; }` probe does
 NOT work — a missing name in a non-dependent scope is a hard error, not a
 failed constraint.)
 
-**As of v2.60 the plugin compiles unmodified against both the pinned v0.56.0
-and upstream `main`.** That is the whole thesis, demonstrated rather than
-asserted: the next bump is a tag edit and a smoke test, not a rewrite.
+**As of v2.60 the plugin compiles unmodified against the pinned v0.56.0,
+the book-only v0.56.2 bridge pin, and upstream `main`.** That is the whole
+thesis, demonstrated rather than asserted: the next bump is a tag edit and a
+smoke test, not a rewrite.
 
 ## Bump ritual
 

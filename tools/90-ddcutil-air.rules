@@ -1,0 +1,6 @@
+# book only (Fedora Asahi): let the desktop owner use DDC/CI on USB-C displays.
+# Install after a Fedora reinstall with:
+#   SUDO_ASKPASS_REASON="installing book's DDC monitor access rule" sudo -A \
+#     install -m 0644 /home/lam/nix/tools/90-ddcutil-air.rules \
+#     /etc/udev/rules.d/90-ddcutil-air.rules
+SUBSYSTEM=="i2c-dev", KERNEL=="i2c-[0-9]*", OWNER="lam", MODE="0600"
