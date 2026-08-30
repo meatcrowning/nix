@@ -229,9 +229,11 @@ check("hypr: Oxygen Mono is smooth", o.smooth is True)
 check("hypr: Oxygen Mono uses Kitty’s terminal-cell metrics", o.terminalCell is True)
 check("hypr: Oxygen Mono editor text keeps Kitty's vertical hinting",
       o.editorFont.hintingPreference() == QFont.PreferVerticalHinting)
+check("hypr: Oxygen Mono packs its glyph into Kitty's 8px cell",
+      round(o.editorFont.stretch()) == 95)
 o_metrics = QFontMetricsF(o.editorFont)
-check("hypr: Oxygen Mono keeps Kitty's 14px text cell",
-      round(o_metrics.height()) == 14,
+check("hypr: Oxygen Mono keeps Kitty's measured 8×14 cell",
+      (round(o_metrics.horizontalAdvance("M")), round(o_metrics.height())) == (8, 14),
       f"{o_metrics.horizontalAdvance('M'):.3f}×{o_metrics.height():.3f}")
 
 env(DESK_SESSION="plasma")
