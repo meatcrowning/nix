@@ -3668,10 +3668,82 @@ class Titlebar(QObject):
     """
 
     clicked = Signal(str)
+    edgeChanged = Signal()
+    compactChanged = Signal()
+    barWidthChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._client = VtbClient(on_click=self.clicked.emit)
+        self._edge = "right"
+        self._compact = False
+        self._bar_width = 40
+        self._read_layout()
+
+    @Property(str, notify=edgeChanged)
+    def edge(self):
+        return self._edge
+
+    @Property(bool, notify=compactChanged)
+    def compact(self):
+        return self._compact
+
+    @Property(int, notify=barWidthChanged)
+    def barWidth(self):
+        return self._bar_width
+
+    @Slot()
+    def refreshLayout(self):
+        self._read_layout()
+
+    def _read_layout(self):
+        """Read the compositor's live bar geometry without changing it."""
+        # Plasma and offscreen harnesses have no titlebar to query. Avoid
+        # waiting on hyprctl's socket timeout there; the shipped defaults are
+        # exactly the fallback geometry those faces need.
+        if (not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+                or os.environ.get("QT_QPA_PLATFORM") == "offscreen"):
+            return
+        import subprocess
+
+        def option(key, field, fallback):
+            try:
+                out = subprocess.run(
+                    ["hyprctl", "getoption", key, "-j"],
+                    capture_output=True, text=True, timeout=1,
+                )
+                value = json.loads(out.stdout).get(field)
+                return value if value is not None else fallback
+            except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+                return fallback
+
+        edge = option("plugin:hyprvtb:titlebar_edge", "str", "right")
+        if edge not in ("right", "left", "top", "bottom"):
+            edge = "right"
+        compact = bool(option("plugin:hyprvtb:compact", "int", 0))
+        bar_width = max(8, int(option("plugin:hyprvtb:bar_width", "int", 40)))
+        if edge != self._edge:
+            self._edge = edge
+            self.edgeChanged.emit()
+        if compact != self._compact:
+            self._compact = compact
+            self.compactChanged.emit()
+        if bar_width != self._bar_width:
+            self._bar_width = bar_width
+            self.barWidthChanged.emit()
+
+    @Slot(int, float, result=float)
+    def buttonCenter(self, index, length):
+        """Along-bar center of chatter's normal (non-separator) button."""
+        cell = self._bar_width - 4
+        gap = 2
+        pad = 2
+        if self._compact:
+            group = 4 * (cell + gap) - gap
+            start = max(float(pad), float(length) - pad - group)
+        else:
+            start = float(pad)
+        return start + int(index) * (cell + gap) + cell / 2.0
 
     @Slot("QVariantList")
     def setButtons(self, buttons):
