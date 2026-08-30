@@ -4387,7 +4387,9 @@ void CVtbDeco::handleUpEvent(Event::SCallbackInfo& info) {
             damageEntire();
         } else {
             flashCell(VTB_APPCELL + src); // activation feedback
-            VtbIpc::sendClick(appPid(), srcId);
+            const auto GLOBAL = Hl::mouse();
+            const auto BOX = assignedBoxGlobal();
+            VtbIpc::sendClick(appPid(), srcId, GLOBAL.x - BOX.x, GLOBAL.y - BOX.y);
         }
         m_bDragPending = false;
         if (CANCELLED)

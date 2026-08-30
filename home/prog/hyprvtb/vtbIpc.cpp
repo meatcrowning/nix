@@ -627,9 +627,11 @@ namespace {
     }
 }
 
-void VtbIpc::sendClick(pid_t pid, const std::string& id) {
+void VtbIpc::sendClick(pid_t pid, const std::string& id, double x, double y) {
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), " %.2f %.2f", x, y);
     std::lock_guard lk(g_lk);
-    sendLineLocked(pid, "CLICK " + id);
+    sendLineLocked(pid, "CLICK " + id + buf);
 }
 
 void VtbIpc::sendRClick(pid_t pid, const std::string& id, double x, double y) {
