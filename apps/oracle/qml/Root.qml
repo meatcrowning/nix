@@ -60,6 +60,9 @@ Item {
     // §10.6), never folded into the observed up/down above and never routed to
     // the reply area, where a finished answer would hide whether the stop worked.
     property string serverNote: ""
+    // Hyprland's `sv` titlebar button opens the same two server controls that
+    // live in this row under the content roof. Plasma keeps them in Tools.
+    property bool serverMenuOpen: false
 
     // The pixel font is monospace; one measurement gives the column advance.
     TextMetrics {
@@ -1226,13 +1229,10 @@ Item {
         replyFlick.toBottom();
     }
 
-    // ---- the Plasma chrome: one table, three widgets ----------------------
-    // chatter registers NO hyprvtb titlebar buttons — it never has, and the
-    // compositor draws only its title (§12). This table is the COMPLETE set of
-    // its verbs, published as `actions` for `kdeshell.bind_chrome`, which builds
-    // the menubar and the toolbar out of it in a Plasma session. Nothing here
-    // reaches the vtb socket (`Titlebar.setButtons` is never called), so the
-    // Hyprland face is exactly what it was.
+    // ---- the Plasma chrome and Hyprland secondary buttons -----------------
+    // `actions` is the COMPLETE set of verbs for the Plasma menus. The four
+    // compact selector/server entries below are also projected into hyprvtb's
+    // inner titlebar column; they use the same ids and tbAction handler.
     //
     //   menu:      which menu this verb belongs to
     //   menuText:  the menu's wording
@@ -1327,6 +1327,25 @@ Item {
                    menuText: "Edit Custom Prompt…", icon: "document-edit" });
         return out;
     }
+
+    // The content rows collapse under Hyprland, leaving these secondary
+    // controls in the compositor-drawn titlebar like the other apps' buttons.
+    readonly property var tbButtons: [
+        { id: "title-model",   label: "mo", state: picker.open ? 1 : 0,
+          tip: "choose model" },
+        { id: "title-session", label: "ss", state: sessionPicker.open ? 1 : 0,
+          tip: "choose session" },
+        { id: "title-prompt",  label: "pr", state: promptPicker.open ? 1 : 0,
+          tip: "choose system prompt" },
+        { id: "title-server",  label: "sv", state: serverMenuOpen ? 1 : 0,
+          tip: Backend.serverUp ? "server running" : "server down" }
+    ]
+    onTbButtonsChanged: if (!win.plasma) Titlebar.setButtons(tbButtons)
+
+    Connections {
+        target: Titlebar
+        function onClicked(id) { win.tbAction(id); }
+    }
     // chatter's own group ("chat") sits where kdeshell puts an app's invented
     // menus: after the ones KDE names, before Settings.
     readonly property var menuOrder: ["chat"]
@@ -1368,6 +1387,27 @@ Item {
             return;
         }
         switch (id) {
+        case "title-model":
+            picker.open = !picker.open;
+            sessionPicker.open = false; promptPicker.open = false;
+            serverMenuOpen = false;
+            break;
+        case "title-session":
+            if (!sessionPicker.open) Sessions.refresh();
+            sessionPicker.open = !sessionPicker.open;
+            picker.open = false; promptPicker.open = false;
+            serverMenuOpen = false;
+            break;
+        case "title-prompt":
+            promptPicker.open = !promptPicker.open;
+            picker.open = false; sessionPicker.open = false;
+            serverMenuOpen = false;
+            break;
+        case "title-server":
+            serverMenuOpen = !serverMenuOpen;
+            picker.open = false; sessionPicker.open = false;
+            promptPicker.open = false;
+            break;
         case "new-session":    win.newSession();                break;
         case "delete-session": win.deleteCurrentSession();      break;
         case "send":           if (Ollama.busy) win.stopReply();
@@ -1647,7 +1687,7 @@ Item {
         // this row stands down — kept in the tree at zero height so the
         // dropdown anchored to it still resolves.
         visible: !win.plasma
-        height: win.plasma ? 0 : 28
+        height: win.plasma ? 0 : 0
 
         PixelText {
             id: modelLabel
@@ -1721,7 +1761,7 @@ Item {
                   leftMargin: 10; rightMargin: 10 }
         // Under Plasma: the File menu's session rows and the toolbar's combo.
         visible: !win.plasma
-        height: win.plasma ? 0 : 24
+        height: win.plasma ? 0 : 0
 
         PixelText {
             id: sessionLabel
@@ -1811,7 +1851,7 @@ Item {
                   leftMargin: 10; rightMargin: 10 }
         // Under Plasma: the Settings menu's "Base Prompt: …" radio set.
         visible: !win.plasma
-        height: win.plasma ? 0 : 24
+        height: win.plasma ? 0 : 0
 
         // The label of the active base: the chosen preset's label, or "custom".
         function activeLabel() {
@@ -1905,7 +1945,7 @@ Item {
         // Under Plasma: observed state on the status bar's right, the two
         // controls in the Tools menu.
         visible: !win.plasma
-        height: win.plasma ? 0 : 22
+        height: win.plasma ? 0 : 0
 
         PixelText {
             id: serverLabel
@@ -2379,6 +2419,81 @@ Item {
         }
     }
 
+    // The server status/control line becomes one `sv` titlebar button under
+    // Hyprland. Its popup keeps both existing actions available without
+    // leaving a duplicate content row behind.
+    Rectangle {
+        id: serverDropdown
+        visible: serverMenuOpen
+        x: Math.max(8, parent.width - width - 8)
+        y: 8
+        width: 190
+        height: 76
+        z: 50
+        color: Theme.bgAlt
+        radius: Theme.rounding
+        border.width: Theme.ctrlBorder
+        border.color: Theme.border
+
+        PixelText {
+            anchors { left: parent.left; top: parent.top; leftMargin: 8; topMargin: 6 }
+            text: Backend.serverUp
+                  ? (Backend.loadedModels.length > 0
+                     ? "server up · " + Backend.loadedModels.join(", ")
+                     : "server up · idle")
+                  : "server down"
+            color: Backend.serverUp
+                   ? (Backend.loadedModels.length > 0 ? Theme.ok : Theme.textDim)
+                   : Theme.crit
+            elide: Text.ElideRight
+            width: parent.width - 16
+        }
+
+        Rectangle {
+            anchors { left: parent.left; bottom: parent.bottom; leftMargin: 6; bottomMargin: 6 }
+            width: 78; height: 24
+            radius: Theme.rounding
+            border.width: Theme.ctrlBorder; border.color: Theme.border
+            color: serverUnloadMouse.containsMouse && Backend.loadedModels.length > 0
+                   ? Theme.highlight : Theme.bg
+            PixelText {
+                anchors.centerIn: parent
+                text: "unload"
+                color: Backend.loadedModels.length > 0 ? Theme.accent : Theme.dim
+            }
+            MouseArea {
+                id: serverUnloadMouse
+                anchors.fill: parent; hoverEnabled: true
+                cursorShape: Backend.loadedModels.length > 0
+                             ? Qt.PointingHandCursor : Qt.ArrowCursor
+                onClicked: if (Backend.loadedModels.length > 0) Backend.unloadModels()
+            }
+        }
+        Rectangle {
+            anchors { right: parent.right; bottom: parent.bottom; rightMargin: 6; bottomMargin: 6 }
+            width: 92; height: 24
+            radius: Theme.rounding
+            border.width: Theme.ctrlBorder; border.color: Theme.border
+            color: serverPowerMouse.containsMouse && !Backend.busy ? Theme.highlight : Theme.bg
+            PixelText {
+                anchors.centerIn: parent
+                text: Backend.busy ? "…" : (Backend.serverUp ? "stop server" : "start server")
+                color: Backend.busy ? Theme.textDim
+                       : (Backend.serverUp ? Theme.warn : Theme.accent)
+            }
+            MouseArea {
+                id: serverPowerMouse
+                anchors.fill: parent; hoverEnabled: true
+                cursorShape: Backend.busy ? Qt.ArrowCursor : Qt.PointingHandCursor
+                onClicked: {
+                    if (Backend.busy) return;
+                    if (Backend.serverUp) Backend.stopServer();
+                    else Backend.startServer();
+                }
+            }
+        }
+    }
+
     // The custom-prompt editor — a floating panel over the conversation, in
     // this session's own face: `PromptEditor.qml` under Hyprland, the KStyle's
     // Frame/TextArea/DialogButtonBox under Plasma (`+plasma/PromptEditor.qml`).
@@ -2406,9 +2521,9 @@ Item {
     MouseArea {
         anchors.fill: parent
         z: 40
-        visible: picker.open || sessionPicker.open || promptPicker.open
+        visible: picker.open || sessionPicker.open || promptPicker.open || serverMenuOpen
         onClicked: { picker.open = false; sessionPicker.open = false;
-                     promptPicker.open = false; }
+                     promptPicker.open = false; serverMenuOpen = false; }
     }
 
     // --------------------------------------------------------- the reply area
