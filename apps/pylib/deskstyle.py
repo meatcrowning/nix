@@ -105,13 +105,6 @@ KDE_MAX_FONT_SIZE = 64
 # PixelText's renderType/antialiasing, and editorFont's style strategy below.
 SMOOTH_FAMILIES = {"Phenex", "Tahoma", "Oxygen Mono"}
 
-# Oxygen Mono is smooth, but unlike the deliberately unhinted cursive it has
-# native TrueType hints. Kitty honours them, while the existing smooth-face
-# path explicitly threw them away in Qt; that is why the same family had
-# different stem weight and spacing across the desktop. This is a rendering
-# policy, not a second font choice.
-NATIVE_HINT_FAMILIES = {"Oxygen Mono"}
-
 # The other side of the same list, and it is needed only for the KDE branch:
 # there the family is whatever System Settings holds, so `smooth` cannot be an
 # allowlist of this desktop's own faces — a KDE font is a normal outline unless
@@ -169,7 +162,6 @@ class DeskStyle(QObject):
         self._border = 2
         self._rounding = 0
         self._smooth = self._family in SMOOTH_FAMILIES
-        self._native_hinting = self._family in NATIVE_HINT_FAMILIES
         self._plasma = is_plasma()
         # Resolved once here and refreshed in _load; is_oxygen() also reads
         # kdeglobals, so the style can change under us without a relaunch.
@@ -258,8 +250,6 @@ class DeskStyle(QObject):
             bar = "flat"   # beveled/win31 chrome inside a Breeze window is the
                            # one thing that would still read as "not themed"
 
-        native_hinting = family in NATIVE_HINT_FAMILIES
-
         # The widget style's own store, on top of the scheme's. Read after the
         # KDE branch because it can VETO motion: Oxygen's AnimationsEnabled is
         # a second master switch and a window whose real widgets have stopped
@@ -273,15 +263,15 @@ class DeskStyle(QObject):
                 reduce_motion = True
 
         now = (family, size, reduce_motion, speed, bar, border, rounding, smooth,
-               native_hinting, oxygen, tuple(sorted(ox_m.items())), tuple(sorted(ox_x.items())))
+               oxygen, tuple(sorted(ox_m.items())), tuple(sorted(ox_x.items())))
         was = (self._family, self._size, self._reduce, self._speed,
                self._scrollbar, self._border, self._rounding, self._smooth,
-               self._native_hinting, self._oxygen, tuple(sorted(self._ox_motion.items())),
+               self._oxygen, tuple(sorted(self._ox_motion.items())),
                tuple(sorted(self._ox_metrics.items())))
         if now != was:
             (self._family, self._size, self._reduce, self._speed,
              self._scrollbar, self._border, self._rounding, self._smooth,
-             self._native_hinting, self._oxygen) = now[:10]
+             self._oxygen) = now[:9]
             self._ox_motion, self._ox_metrics = ox_m, ox_x
             self.changed.emit()
 
@@ -349,13 +339,6 @@ class DeskStyle(QObject):
         known pixel designs."""
         return self._smooth
 
-    @Property(bool, notify=changed)
-    def nativeHinting(self):
-        """True when the selected smooth face has native TrueType hints that
-        must be kept for parity with kitty rather than discarded as a cursive
-        outline's would be."""
-        return self._native_hinting
-
     @Property(QFont, notify=changed)
     def editorFont(self):
         """The desktop font as a QFont with the rasterisation pinned — for
@@ -377,9 +360,7 @@ class DeskStyle(QObject):
         kitty uses its native TrueType hints, so Qt keeps them too."""
         f = QFont(self._family)
         f.setPixelSize(self._size)
-        if self._native_hinting:
-            f.setHintingPreference(QFont.PreferDefaultHinting)
-        elif self._smooth:
+        if self._smooth:
             f.setHintingPreference(QFont.PreferNoHinting)
         else:
             f.setHintingPreference(QFont.PreferFullHinting)

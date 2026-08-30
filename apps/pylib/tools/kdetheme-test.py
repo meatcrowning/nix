@@ -226,9 +226,8 @@ settings.write_text('{"fontFamily": "Oxygen Mono", "fontSize": 14,'
                     ' "windowRounding": 7}')
 o = deskstyle.DeskStyle()
 check("hypr: Oxygen Mono is smooth", o.smooth is True)
-check("hypr: Oxygen Mono keeps native hints", o.nativeHinting is True)
-check("hypr: Oxygen Mono editor text keeps default hinting",
-      o.editorFont.hintingPreference() == QFont.PreferDefaultHinting)
+check("hypr: Oxygen Mono editor text drops hinting",
+      o.editorFont.hintingPreference() == QFont.PreferNoHinting)
 
 env(DESK_SESSION="plasma")
 k = deskstyle.DeskStyle()
