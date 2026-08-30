@@ -69,6 +69,7 @@ normalize() {
                    -e 's/(\["font"\][[:space:]]*=[[:space:]]*)"[^"]*"/\1<WAL>/g' \
                    -e 's/(\["font_size"\][[:space:]]*=[[:space:]]*)[0-9]+/\1<WAL>/g' \
                    -e 's/(\["font_smooth"\][[:space:]]*=[[:space:]]*)(true|false)/\1<WAL>/g' \
+                   -e 's/(\["font_terminal_cell"\][[:space:]]*=[[:space:]]*)(true|false)/\1<WAL>/g' \
                    -e 's/^([[:space:]]*border_size[[:space:]]*=[[:space:]]*)[0-9]+/\1<WAL>/' \
                    -e 's/^([[:space:]]*rounding[[:space:]]+=[[:space:]]*)[0-9]+/\1<WAL>/'
             ;;

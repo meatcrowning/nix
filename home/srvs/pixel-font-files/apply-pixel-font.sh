@@ -101,8 +101,11 @@ SMOOTH=false
 FACES="$CONFIG/quickshell/font-faces.json"
 [ -f "$FACES" ] && SMOOTH="$(jq -r --arg f "$FAMILY" '.[$f].smooth // false' "$FACES" 2>/dev/null)"
 case "$SMOOTH" in true|false) ;; *) SMOOTH=false ;; esac
-hyprctl eval "hl.config({ plugin = { hyprvtb = { [\"font\"] = \"$FAMILY\", [\"font_size\"] = $SIZE, [\"font_smooth\"] = $SMOOTH } } })" >/dev/null 2>&1 || true
-# Persist the three keys into hyprland.lua (same pattern as wal-set.sh's
+TERMINAL_CELL=false
+[ -f "$FACES" ] && TERMINAL_CELL="$(jq -r --arg f "$FAMILY" '.[$f].terminalCell // false' "$FACES" 2>/dev/null)"
+case "$TERMINAL_CELL" in true|false) ;; *) TERMINAL_CELL=false ;; esac
+hyprctl eval "hl.config({ plugin = { hyprvtb = { [\"font\"] = \"$FAMILY\", [\"font_size\"] = $SIZE, [\"font_smooth\"] = $SMOOTH, [\"font_terminal_cell\"] = $TERMINAL_CELL } } })" >/dev/null 2>&1 || true
+# Persist the four keys into hyprland.lua (same pattern as wal-set.sh's
 # shadow_alpha/title_rotated): Hyprland AUTO-RELOADS its config whenever that
 # file changes — and wal-set.sh seds the palette into it on EVERY theme apply —
 # so a key living only in the runtime override above reverted to the C++
@@ -118,6 +121,7 @@ if [ -f "$LUA" ]; then
     lua_kv font "\"$FAMILY\""
     lua_kv font_size "$SIZE"
     lua_kv font_smooth "$SMOOTH"
+    lua_kv font_terminal_cell "$TERMINAL_CELL"
 fi
 # refresh_fonts AFTER the family set (plugin >= 3.19): pango caches the
 # process's font map, so a face INSTALLED after the compositor started

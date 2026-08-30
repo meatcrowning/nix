@@ -101,6 +101,7 @@ case "$KIND" in
     carry '[[:space:]]*\["font"\][[:space:]]*=[[:space:]]*' '"[^"]*"'
     carry '[[:space:]]*\["font_size"\][[:space:]]*=[[:space:]]*' '[0-9]+'
     carry '[[:space:]]*\["font_smooth"\][[:space:]]*=[[:space:]]*' 'true|false'
+    carry '[[:space:]]*\["font_terminal_cell"\][[:space:]]*=[[:space:]]*' 'true|false'
     carry '[[:space:]]*border_size[[:space:]]*=[[:space:]]*' '[0-9]+'
     carry '[[:space:]]*rounding[[:space:]]+=[[:space:]]*' '[0-9]+'
     # apply-window-frame.sh: titlebar anchor edge, the unfocus dim (both the
