@@ -94,7 +94,16 @@ Singleton {
         return out;
     }
 
-    readonly property bool shown: enabled && apps.length > 0
+    // The notch protrudes from a VERTICAL bar's inner edge; there is no
+    // horizontal form of it yet, so a top/bottom bar has none. Read straight
+    // off the store rather than through ViewMode.barHorizontal — ViewMode pulls
+    // `protrusion` out of here, and a singleton that reads back into the one
+    // reading it is a cycle waiting to be tripped.
+    readonly property bool horizontalBar: {
+        const e = SettingsStore.d.barEdge;
+        return e === "top" || e === "bottom";
+    }
+    readonly property bool shown: enabled && apps.length > 0 && !horizontalBar
 
     // The whole slab, overlap included...
     readonly property int protrusion0: columnInset + iconSize + gapRight

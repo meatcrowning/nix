@@ -108,10 +108,14 @@ PanelWindow {
     // drag's worth of frames.
     Item {
         id: visibleArea
-        y: 0
-        height: parent.height
-        x: root.barLeft ? ViewMode.barWidth : 0
-        width: Math.max(1, parent.width - ViewMode.barWidth)
+        y: (ViewMode.barHorizontal && ViewMode.barAtStart) ? ViewMode.barWidth : 0
+        height: ViewMode.barHorizontal ? Math.max(1, parent.height - ViewMode.barWidth)
+                                       : parent.height
+        // The bar takes a strip off one edge; which edge is the only thing
+        // that changes between the four barEdge values.
+        x: (!ViewMode.barHorizontal && root.barLeft) ? ViewMode.barWidth : 0
+        width: ViewMode.barHorizontal ? parent.width
+                                      : Math.max(1, parent.width - ViewMode.barWidth)
         clip: true
         // "No wallpaper" mode fades the image away and the window's Theme.bg
         // shows through. `visible` follows the fade's END so the layers drop

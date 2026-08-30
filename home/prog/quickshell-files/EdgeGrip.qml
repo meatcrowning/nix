@@ -50,6 +50,12 @@ PanelWindow {
     exclusionMode: ExclusionMode.Ignore
     color: "transparent"
 
+    // Nothing to grab on a top/bottom bar: dock mode is vertical-only, so the
+    // drag would have no destination. Unmapped rather than merely masked out —
+    // an inert full-screen Overlay surface is exactly the thing this file's
+    // own comments warn about.
+    visible: !ViewMode.barHorizontal
+
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "qs-edge-grip"
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None

@@ -4,10 +4,15 @@ import Quickshell
 import Quickshell.Widgets
 import Quickshell.Services.SystemTray
 
-// Vertical, interactable system tray (StatusNotifierItem).
-Column {
+// Interactable system tray (StatusNotifierItem).
+// Grid, not Column, for the same reason Taskbar.qml is one: `columns` is what
+// turns the stack into a row on a top/bottom bar.
+Grid {
     id: root
     spacing: Theme.gap
+
+    property bool horizontal: false
+    columns: horizontal ? 999 : 1
 
     // the PanelWindow that hosts this tray, needed to anchor menus
     property var hostWindow

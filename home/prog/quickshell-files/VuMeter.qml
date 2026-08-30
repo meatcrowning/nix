@@ -24,7 +24,9 @@ Item {
     readonly property int levelL: SysInfo.vuL
     readonly property int levelR: SysInfo.vuR
 
-    readonly property int barH: 68
+    // Settable, not readonly: on a top/bottom bar the meter is only as tall as
+    // the strip is (StatusPanel.vuHeight).
+    property int barH: 68
     // Unchanged overall width, so the panel's layout doesn't move: what used to
     // be 5px + 4px gap + 5px is now one 14px track box holding two gapless
     // fills. Deliberately still ONE bucket per channel — cava's stereo mode is
@@ -37,7 +39,12 @@ Item {
     // Full bar width so the click/drag/scroll band covers the whole module
     // section, not just the narrow pair of bars — same treatment as the
     // eth/cpu/disk/weather text modules. The bars + volume line stay centred.
-    width: parent.width
+    // The click/drag/scroll band. On a vertical bar that is the whole panel
+    // width; on a horizontal one it is just the meter, since a module there is
+    // its own width.
+    property bool horizontal: false
+    property real bandWidth: -1
+    width: horizontal ? meterW : (bandWidth >= 0 ? bandWidth : parent.width)
     height: barH
 
     // The cava process itself lives in SysInfo, NOT here. This item is

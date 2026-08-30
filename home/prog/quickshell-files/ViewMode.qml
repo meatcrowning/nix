@@ -54,7 +54,27 @@ Singleton {
     readonly property real screenWidth: Quickshell.screens.length
         ? Quickshell.screens[0].width : 1920
 
-    readonly property bool dock: SettingsStore.d.viewMode === "dock"
+    // ---- which axis the bar runs on --------------------------------------
+    // barEdge is left | right | top | bottom. The two horizontal edges turn the
+    // panel into a strip across the screen; everything that used to be a width
+    // is then a HEIGHT, and the classic layout reads left-to-right instead of
+    // top-to-bottom (shell.qml).
+    //
+    // Dock mode and the shortcut notch are vertical-only for now, and this is
+    // where that is decided rather than in each of their files: `dock` is
+    // false on a horizontal edge, so liveWidth is simply Theme.barWidth, the
+    // grip has nothing to drag, and NotchModel reports a notch of zero size —
+    // which is the case every consumer downstream already handles.
+    readonly property bool barHorizontal: {
+        const e = SettingsStore.d.barEdge;
+        return e === "top" || e === "bottom";
+    }
+    readonly property bool barAtStart: {
+        const e = SettingsStore.d.barEdge;
+        return e === "left" || e === "top";
+    }
+
+    readonly property bool dock: SettingsStore.d.viewMode === "dock" && !barHorizontal
 
     function clampFrac(f) {
         const v = Number(f);
@@ -341,7 +361,8 @@ Singleton {
     readonly property int notchPx: NotchModel.protrusion
     readonly property int notchH: NotchModel.slabH
     function applyReserve() {
-        const edge = SettingsStore.d.barEdge === "left" ? "left" : "right";
+        const raw = SettingsStore.d.barEdge;
+        const edge = (raw === "left" || raw === "top" || raw === "bottom") ? raw : "right";
         const px = dock ? barWidth + notchPx : 0;
         const grew = px > _lastReservePx && _lastReservePx >= 0;
         _lastReservePx = px;

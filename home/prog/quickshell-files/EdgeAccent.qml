@@ -38,6 +38,14 @@ PanelWindow {
                             ? 0 : Math.max(2, Theme.windowBorderWidth)
     visible: thickness > 0
 
+    // Keep a vertical stripe clear of a top/bottom bar, which shares its
+    // layer and would otherwise paint the stripe's last 48px in Theme.bg
+    // depending on which surface mapped last.
+    margins.top: (ViewMode.barHorizontal && ViewMode.barAtStart && !horizontal)
+                 ? ViewMode.barWidth : 0
+    margins.bottom: (ViewMode.barHorizontal && !ViewMode.barAtStart && !horizontal)
+                    ? ViewMode.barWidth : 0
+
     // The horizontal stripes span the desktop the panel does NOT cover, so they
     // have to follow the panel edge exactly while it is dragged.
     //
@@ -82,7 +90,11 @@ PanelWindow {
             left: root.barLeft ? undefined : parent.left
             right: root.barLeft ? parent.right : undefined
         }
-        width: Math.max(0, parent.width - ViewMode.liveWidth)
+        // On a horizontal bar the panel takes a whole edge, not a strip off
+        // the side, so these run the full width — and the one on the bar's own
+        // edge is behind it, which is why only its opposite number is visible.
+        width: ViewMode.barHorizontal ? parent.width
+                                      : Math.max(0, parent.width - ViewMode.liveWidth)
     }
 
     WlrLayershell.layer: WlrLayer.Bottom

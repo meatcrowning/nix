@@ -18,9 +18,16 @@ import Quickshell.Wayland
 // Uses the Wayland foreign-toplevel list (works standalone on this build; it's
 // only the Hyprland IPC *mapping* protocol that's missing, which we don't need
 // here since appId/title/activated all ride the Wayland list).
-Column {
+// A Grid rather than a Column so the same list can run ACROSS a top/bottom
+// bar: one column stacks it, a column count past any plausible window count
+// lays it in one row. (Not a Row/Column pair — the delegate is stateful, and
+// two instantiations of it would mean two tooltips and two menus per window.)
+Grid {
     id: root
     spacing: Theme.gap
+
+    property bool horizontal: false
+    columns: horizontal ? 999 : 1
 
     Repeater {
         model: ToplevelManager.toplevels

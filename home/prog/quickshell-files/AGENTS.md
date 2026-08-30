@@ -347,6 +347,36 @@ back and the artwork balloons for the last frames of the close.
 
 ---
 
+## Four screen edges, and only two of them take a dock
+
+`barEdge` is `left | right | top | bottom`. The first two are the vertical bar
+everything here was written around; the other two lay the same bar across the
+screen. **The axis is decided in ONE place** — `ViewMode.barHorizontal` /
+`ViewMode.barAtStart` — and every consumer reads those rather than re-deriving
+the edge (`shell.qml`'s `bar.hz`, `WallpaperLayer`, `EdgeAccent`, `EdgeGrip`,
+`OsdWindow`, `NotificationWindow`).
+
+**Dock mode and the shortcut notch are vertical-only, and neither is
+special-cased downstream.** `ViewMode.dock` is false on a horizontal edge, so
+`liveWidth` is simply `Theme.barWidth` and the grip unmaps; `NotchModel.shown`
+is false, so `protrusion` and `slabH` are 0 — which is the no-notch case every
+consumer (the exclusive zone, `NotchSeam`, `Launcher`'s face offset) already
+handled. The runner still opens on its keybind; with no notch it comes out of
+the screen edge instead of the panel's face.
+
+**The classic layout has a second form, not a rotation.** `classicRow` in
+`shell.qml` is its own Item: the vertical children each anchor into a stack, and
+a layout that flips axis by ternary on every anchor is unreadable. The WIDGETS
+are shared — `Taskbar`, `Tray`, `StatusPanel`, `Clock` and `DateDisplay` each
+take a `horizontal` flag and change their own positioner — so there is one of
+each on screen and no behaviour is duplicated. `Taskbar`/`Tray`/`StatusPanel`
+are `Grid`s for exactly this reason (`columns: horizontal ? 999 : 1`), which is
+also why their children can no longer carry `anchors.horizontalCenter`: a Grid
+owns both axes, and `horizontalItemAlignment` does that job instead.
+
+`StatusPanel._cy` returns -1 on a horizontal bar — every module shares one
+scene-Y there, so the popups bottom-anchor rather than centre on a module.
+
 ## Two view modes, and the drag handle IS the switch
 
 `ViewMode.qml`. `classic` is the 48px vertical bar this config has always had,

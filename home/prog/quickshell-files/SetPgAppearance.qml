@@ -354,9 +354,12 @@ Column {
             }
         }
         SetRow {
+            // top/bottom lay the bar across the screen (shell.qml's classicRow).
+            // Dock mode and the shortcut notch are vertical-only, so choosing
+            // one of them puts the panel back in classic and drops the notch.
             label: "screen edge"
             SetSelect {
-                options: ["left", "right"]
+                options: ["left", "right", "top", "bottom"]
                 value: page.d.barEdge
                 onChanged: (v) => { page.d.barEdge = v; SettingsStore.save(); }
             }
