@@ -42,7 +42,5 @@ def _read_pick():
 
 
 _fam, _pt = _read_pick()
-_mono_fam = "Oxygen Mono" if _fam == "Oxygen-Sans" else _fam
 config.set("fonts.default_family", _fam)
-config.set("fonts.monospace_family", _mono_fam)
 config.set("fonts.default_size", "{}pt".format(_pt))
