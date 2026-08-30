@@ -3,7 +3,9 @@ import Quickshell.Io
 
 // Appearance = Paper (the embedded chooser + every wallpaper knob) + Theme
 // (accent, font, palette + the swatch picker, rgb) + Titlebar + Window
-// decorations + Motion.
+// decorations + Motion + Panel (the bar surface and its taskbar, folded in at
+// the bottom — it was its own page until 2026-08-30). The desktop-widget set
+// and the monitoring widget's thresholds/sensors are still the Widgets page.
 // (The wallpaper DRIVES this palette via wal, so it leads: it is the top
 // section, not a separate page.)
 Column {
@@ -337,6 +339,65 @@ Column {
                 from: 0.5; to: 2.0; step: 0.1; unit: "x"
                 value: page.d.animSpeed
                 onMoved: (v) => { page.d.animSpeed = v; SettingsStore.save(); }
+            }
+        }
+    }
+
+    // The bar surface itself and the task icons on it. Last, because it is the
+    // one surface here that is ours alone — everything above reaches the whole
+    // desktop.
+    SetSection {
+        title: "panel"
+        SetRow {
+            label: "width"
+            SetSlider {
+                from: 32; to: 80; step: 1; unit: "px"
+                value: page.d.barWidth
+                onMoved: (v) => { page.d.barWidth = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
+            label: "screen edge"
+            SetSelect {
+                options: ["left", "right"]
+                value: page.d.barEdge
+                onChanged: (v) => { page.d.barEdge = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
+            label: "spacing"
+            desc: "gap between bar clusters"
+            SetSlider {
+                from: 2; to: 20; step: 1; unit: "px"
+                value: page.d.barGap
+                onMoved: (v) => { page.d.barGap = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
+            label: "button size"
+            SetSlider {
+                from: 28; to: 56; step: 1; unit: "px"
+                value: page.d.barCell
+                onMoved: (v) => { page.d.barCell = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
+            // Dock layout only — DockHeader.qml, the strip across the top of the
+            // wide panel. Classic mode keeps its task icons in the Taskbar
+            // column and is untouched either way.
+            label: "top bar"
+            desc: "running program icons and uptime, in dock mode"
+            SetToggle {
+                checked: page.d.dockHeader
+                onToggled: (v) => { page.d.dockHeader = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
+            label: "click active minimizes"
+            desc: "click a focused app's icon to minimize it"
+            SetToggle {
+                checked: page.d.taskbarClickMinimizes
+                onToggled: (v) => { page.d.taskbarClickMinimizes = v; SettingsStore.save(); }
             }
         }
     }

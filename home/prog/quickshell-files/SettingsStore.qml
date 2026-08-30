@@ -404,6 +404,11 @@ Singleton {
             property int    barGap: 8
             property int    barCell: 40
             property bool   taskbarClickMinimizes: true
+            // The dock layout's top strip (DockHeader.qml): the running-program
+            // icons and the uptime readout. Off leaves the widget grid alone in
+            // the panel; classic mode is unaffected (its task icons are the
+            // Taskbar column).
+            property bool   dockHeader: true
             // Per-widget state the user sets by USING the widget rather than
             // through the Settings window — a clicked column heading, a repeat
             // toggle on a player that has no LoopStatus of its own. It lives
@@ -615,7 +620,7 @@ Singleton {
         wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",
         wallpaperSolid: false, wallpaperFlip: false,
         viewMode: "classic", dockWidthFrac: 0.15,
-        barWidth: 48, barEdge: "right", barGap: 8, barCell: 40, taskbarClickMinimizes: true,
+        barWidth: 48, barEdge: "right", barGap: 8, barCell: 40, taskbarClickMinimizes: true, dockHeader: true,
         procSort: "cpu", mediaLocalLoop: 0, mediaQueueOpen: false, topStatsOpen: false,
         fanShowFixed: false,
         fanStepMs: 300, defaultWidgets: ["clock", "weather", "disk", "media", "cpu", "gpu"],
