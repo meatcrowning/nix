@@ -1,7 +1,7 @@
 import QtQuick
 import Quickshell.Io
 
-// Appearance = Paper + theme (the embedded chooser) + Wallpaper + Theme
+// Appearance = Paper (the embedded chooser + every wallpaper knob) + Theme
 // (accent, font, palette + the swatch picker, rgb) + Titlebar + Window
 // decorations + Motion.
 // (The wallpaper DRIVES this palette via wal, so it leads: it is the top
@@ -19,7 +19,7 @@ Column {
     // theme — in solid mode ("display wallpaper" off) the palette changes and
     // the image simply stays hidden (WallpaperLayer.qml), same as the picker.
     SetSection {
-        title: "paper + theme"
+        title: "paper"
         SetPaperGrid { }
         SetRow {
             // Right-click any tile above (or in the Meta+W picker) to hide a
@@ -32,10 +32,6 @@ Column {
                 onToggled: (v) => { page.d.wallpaperShowHidden = v; SettingsStore.save(); }
             }
         }
-    }
-
-    SetSection {
-        title: "wallpaper"
         SetRow {
             // The ONE control for this feature: show the wallpaper image, or fill
             // the desktop with a solid block of the theme's background colour
