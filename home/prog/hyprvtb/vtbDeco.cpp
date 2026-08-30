@@ -2323,18 +2323,15 @@ void CVtbDeco::drawRollSnapshot(const CBox& barBoxDev, float scale, float slideT
 }
 
 // The radius the sliding content carries: the window's own rounding, clamped to
-// half the emerged strip — the two corner arcs of a barely-emerged strip would
-// otherwise overlap and the shader draws a lens instead of a rounded rect. So the
-// radius grows over the first `rounding` px of the reveal, which is also what
-// Hyprland does to a window narrower than its own rounding.
-int CVtbDeco::rollSnapRounding(const CBox& barBoxDev, float scale, float slideT) {
+// the fixed cross-axis of the frame. It deliberately does NOT ramp with the
+// emerged strip: that made the first part of an unroll square, then visibly
+// switched to the configured corner radius once enough content was exposed.
+// The overshoot at the bar seam keeps the trailing corners out of view, while
+// the leading corners have their final radius from the first visible frame.
+int CVtbDeco::rollSnapRounding(const CBox& barBoxDev, float scale, float /*slideT*/) {
     const int    WANT    = std::max(0, (int)std::round(Hl::windowRounding(m_pWindow.lock()) * scale));
-    // Client extent along the slide axis; the limit is the bar's extent across
-    // it (the strip's short dimension) — h for a vertical bar, w for a horizontal.
-    const double clientC = barVertical() ? m_rollWinBox.w : m_rollWinBox.h;
-    const double drawC   = clientC * scale * (1.f - slideT) + WANT;
     const double limitC  = barVertical() ? barBoxDev.h : barBoxDev.w;
-    return std::min(WANT, (int)std::floor(std::min(drawC, limitC) / 2.0));
+    return std::min(WANT, (int)std::floor(limitC / 2.0));
 }
 
 void CVtbDeco::drawRollSnapshotClipped(const CBox& barBoxDev, float scale, float slideT, float a, const CRegion& clip) {
@@ -2491,95 +2488,94 @@ void CVtbDeco::drawRollBorder(const CBox& barBoxDev, float scale, float slideT, 
                             unfocused.b + (focused.b - unfocused.b) * revealT, unfocused.a + (focused.a - unfocused.a) * revealT};
     bc.a *= a;
 
-    // The frame's LEADING corners follow the desktop's rounding, like the content
-    // they wrap: with rounding on, four straight segments left an accent right-angle
-    // sticking out past the sliding content's arc for the whole animation (his
-    // report — "the roll struggles with keeping the corner rounding"). The ring is
-    // built the only way the render API allows, since a rect cannot be punched out:
-    // an outer rounded rect in the border colour, then the window's own rounded
-    // corner painted back over its inside — both clipped to the corner squares, so
-    // nothing else on the frame is touched. The TRAILING corners stay square: that
-    // edge abuts the bar, and the frame is continuous through it.
+    // The composite's FOUR outer corners follow the desktop's rounding. The
+    // content-side pair needs it for the sliding snapshot, and the titlebar-side
+    // pair needs it just as much: leaving those square made a rolling window
+    // visibly change shape when the normal decoration took over at the end.
+    // The ring is built the only way the render API allows, since a rect cannot
+    // be punched out: an outer rounded rect in the border colour, then the
+    // content/bar interiors painted back over it, all clipped to the corner
+    // squares so nothing else on the frame is touched.
     const int RND = rollSnapRounding(barBoxDev, scale, slideT);
     if (RND > 0) {
         const double CS    = RND + bs; // corner square: the outer arc's bounding box
         const int    OUTRND = std::min((int)std::round(CS), (int)std::floor(std::min(fw + 2 * bs, ch + 2 * bs) / 2.0));
-        // the leading (content) corners: left of the frame for a right bar, right
-        // of it for a left, bottom for a top, top for a bottom
-        CRegion      corners;
+        CRegion corners;
+        CRegion trailingCorners;
         switch (SIDE) {
             case eBarSide::RIGHT:
                 corners.add(CBox{cl - bs, ct - bs, CS, CS}.round());
                 corners.add(CBox{cl - bs, ct + ch + bs - CS, CS, CS}.round());
+                trailingCorners.add(CBox{cr + bs - CS, ct - bs, CS, CS}.round());
+                trailingCorners.add(CBox{cr + bs - CS, ct + ch + bs - CS, CS, CS}.round());
+                corners.add(CBox{cr + bs - CS, ct - bs, CS, CS}.round());
+                corners.add(CBox{cr + bs - CS, ct + ch + bs - CS, CS, CS}.round());
                 break;
             case eBarSide::LEFT:
                 corners.add(CBox{cr + bs - CS, ct - bs, CS, CS}.round());
                 corners.add(CBox{cr + bs - CS, ct + ch + bs - CS, CS, CS}.round());
+                trailingCorners.add(CBox{cl - bs, ct - bs, CS, CS}.round());
+                trailingCorners.add(CBox{cl - bs, ct + ch + bs - CS, CS, CS}.round());
+                corners.add(CBox{cl - bs, ct - bs, CS, CS}.round());
+                corners.add(CBox{cl - bs, ct + ch + bs - CS, CS, CS}.round());
                 break;
             case eBarSide::TOP:
                 corners.add(CBox{cl - bs, ct + ch + bs - CS, CS, CS}.round());
                 corners.add(CBox{cr + bs - CS, ct + ch + bs - CS, CS, CS}.round());
+                trailingCorners.add(CBox{cl - bs, ct - bs, CS, CS}.round());
+                trailingCorners.add(CBox{cr + bs - CS, ct - bs, CS, CS}.round());
+                corners.add(CBox{cl - bs, ct - bs, CS, CS}.round());
+                corners.add(CBox{cr + bs - CS, ct - bs, CS, CS}.round());
                 break;
             case eBarSide::BOTTOM:
                 corners.add(CBox{cl - bs, ct - bs, CS, CS}.round());
                 corners.add(CBox{cr + bs - CS, ct - bs, CS, CS}.round());
+                trailingCorners.add(CBox{cl - bs, ct + ch + bs - CS, CS, CS}.round());
+                trailingCorners.add(CBox{cr + bs - CS, ct + ch + bs - CS, CS, CS}.round());
+                corners.add(CBox{cl - bs, ct + ch + bs - CS, CS, CS}.round());
+                corners.add(CBox{cr + bs - CS, ct + ch + bs - CS, CS, CS}.round());
                 break;
         }
+        // Paint only the trailing corner's BORDER, never its interior: renderBar
+        // already painted that interior (including its buttons), and repainting
+        // it here as a background slab covered controls during the unroll.
+        CBox    inner = {cl, ct, fw, ch};
+        CRegion trailingInner = CRegion{inner.round()}.intersect(trailingCorners);
+        CRegion ring          = corners;
+        ring.subtract(trailingInner);
         // clipRegion is not a field on SRectRenderData; renderRect clips to the
         // damage it is handed, so intersect the corner squares into that instead.
-        CRegion clipped = Hl::renderDamage().intersect(corners);
+        CRegion clipped = Hl::renderDamage().intersect(ring);
 
         CHyprOpenGLImpl::SRectRenderData rd;
         rd.round  = OUTRND;
         rd.damage = &clipped;
         Hl::rect(CBox{cl - bs, ct - bs, fw + 2 * bs, ch + 2 * bs}.round(), bc, rd);
 
-        // ...and the interior back over the ring's inside. That is the sliding
-        // content whenever there is any; on the lone bar (the open reveal's fade,
-        // before the content starts moving) it is the bar's own background, which
-        // renderBar has already drawn with this same radius.
-        if (m_rollSnapTex && m_rollSnapTex->m_texID != 0 && slideT < 0.999f)
+        // The snapshot restores the content-side interiors. The titlebar-side
+        // interiors were left out of `ring` above, preserving renderBar's button
+        // and background pixels rather than drawing a black rectangle over them.
+        if (m_rollSnapTex && m_rollSnapTex->m_texID != 0 && slideT < 0.999f) {
             drawRollSnapshotClipped(barBoxDev, scale, slideT, a, corners);
-        else {
+        } else {
             auto bg = configColor(Cfg::bgColor());
             bg.a *= a;
+            CRegion contentCorners = corners;
+            contentCorners.subtract(trailingCorners);
+            CRegion contentClip = Hl::renderDamage().intersect(contentCorners);
             CHyprOpenGLImpl::SRectRenderData bd;
             bd.round  = RND;
-            bd.damage = &clipped;
-            Hl::rect(CBox{cl, ct, fw, ch}.round(), bg, bd);
+            bd.damage = &contentClip;
+            Hl::rect(inner.round(), bg, bd);
         }
     }
 
-    // The straight runs, held clear of the corner squares so they cannot re-square
-    // what the ring just rounded (no-op at RND 0, where they meet as before). The
-    // leading (content) side carries the RND insets; the trailing (bar) side is a
-    // full square edge — sides swap per edge.
-    switch (SIDE) {
-        case eBarSide::RIGHT:
-            Hl::rect(CBox{cl - bs + RND, ct - bs, fw + 2 * bs - RND, bs}.round(), bc, {});            // top
-            Hl::rect(CBox{cl - bs + RND, ct + ch, fw + 2 * bs - RND, bs}.round(), bc, {});            // bottom
-            Hl::rect(CBox{cl - bs, ct - bs + RND, bs, ch + 2 * bs - 2 * RND}.round(), bc, {});        // content edge
-            Hl::rect(CBox{cr, ct - bs, bs, ch + 2 * bs}.round(), bc, {});                             // bar's outer edge
-            break;
-        case eBarSide::LEFT:
-            Hl::rect(CBox{cl - bs, ct - bs, fw + 2 * bs - RND, bs}.round(), bc, {});                 // top
-            Hl::rect(CBox{cl - bs, ct + ch, fw + 2 * bs - RND, bs}.round(), bc, {});                 // bottom
-            Hl::rect(CBox{cr, ct - bs + RND, bs, ch + 2 * bs - 2 * RND}.round(), bc, {});            // content edge
-            Hl::rect(CBox{cl - bs, ct - bs, bs, ch + 2 * bs}.round(), bc, {});                       // bar's outer edge
-            break;
-        case eBarSide::TOP:
-            Hl::rect(CBox{cl - bs, ct - bs, fw + 2 * bs, bs}.round(), bc, {});                       // bar's outer edge
-            Hl::rect(CBox{cl - bs + RND, ct + ch, fw + 2 * bs - 2 * RND, bs}.round(), bc, {});       // content edge
-            Hl::rect(CBox{cl - bs, ct - bs, bs, ch + 2 * bs - RND}.round(), bc, {});                 // left (held clear at the leading bottom corner)
-            Hl::rect(CBox{cr, ct - bs, bs, ch + 2 * bs - RND}.round(), bc, {});                      // right
-            break;
-        case eBarSide::BOTTOM:
-            Hl::rect(CBox{cl - bs, ct + ch, fw + 2 * bs, bs}.round(), bc, {});                       // bar's outer edge
-            Hl::rect(CBox{cl - bs + RND, ct - bs, fw + 2 * bs - 2 * RND, bs}.round(), bc, {});       // content edge
-            Hl::rect(CBox{cl - bs, ct - bs + RND, bs, ch + 2 * bs - RND}.round(), bc, {});           // left
-            Hl::rect(CBox{cr, ct - bs + RND, bs, ch + 2 * bs - RND}.round(), bc, {});                // right
-            break;
-    }
+    // Straight runs are clear of EVERY corner square so none can re-square the
+    // arc the ring just drew. At RND 0 these join exactly as the old four lines.
+    Hl::rect(CBox{cl - bs + RND, ct - bs, fw + 2 * bs - 2 * RND, bs}.round(), bc, {});
+    Hl::rect(CBox{cl - bs + RND, ct + ch, fw + 2 * bs - 2 * RND, bs}.round(), bc, {});
+    Hl::rect(CBox{cl - bs, ct - bs + RND, bs, ch + 2 * bs - 2 * RND}.round(), bc, {});
+    Hl::rect(CBox{cr, ct - bs + RND, bs, ch + 2 * bs - 2 * RND}.round(), bc, {});
 }
 
 // Hover text for a cell: fixed strings for the five system cells, the

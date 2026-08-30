@@ -473,8 +473,8 @@ class CVtbDeco : public IHyprWindowDecoration {
     // The same draw, clipped to a caller's region — drawRollBorder re-paints the
     // window's rounded leading corners over its own corner ring.
     void                 drawRollSnapshotClipped(const CBox& barBoxDev, float scale, float slideT, float a, const CRegion& clip);
-    // Radius (device px) the sliding content is clipped to, i.e. the window's own
-    // rounding clamped to what the emerged strip can carry.
+    // Radius (device px) the sliding content is clipped to: its final window
+    // rounding from the first visible frame, clamped only to the fixed cross-axis.
     int                  rollSnapRounding(const CBox& barBoxDev, float scale, float slideT);
     void                 drawRollBorder(const CBox& barBoxDev, float scale, float slideT, const CHyprColor& focused, const CHyprColor& unfocused, float a);
 
