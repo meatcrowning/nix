@@ -187,19 +187,58 @@ PanelWindow {
         for (let i = 0; i < apps.length; i++) {
             const a = apps[i];
             if (a.noDisplay || bespoke(a)) continue;
-            out.push({ entry: a, lname: (a.name || "").toLowerCase() });
+            out.push({
+                entry: a,
+                lname: (a.name || "").toLowerCase(),
+                alias: aliasOf(a)
+            });
         }
         out.sort((x, y) => (x.entry.name || "").localeCompare(y.entry.name || ""));
         return out;
     }
 
+    // What ELSE a program answers to. `Name` alone is not what a person types:
+    // gimp's entry is called "GNU Image Manipulation Program", vlc's generic
+    // name is "Media player", steam's id is `steam.desktop` while its name is
+    // "Steam". So each row carries a second lowercased haystack — generic name,
+    // desktop id, the executable's basename and the entry's own Keywords — built
+    // ONCE with the corpus, never per keystroke. Every field is read
+    // defensively: a DesktopEntry that lacks one gives undefined, not an error.
+    function aliasOf(a) {
+        let bits = [];
+        if (a.genericName) bits.push(String(a.genericName));
+        if (a.id) bits.push(String(a.id).replace(/\.desktop$/, ""));
+        // The binary, not the whole command line — `%U` and flags are noise, and
+        // matching them would make "u" hit half the system.
+        const cmd = a.command;
+        if (cmd && cmd.length)
+            bits.push(String(cmd[0]).split("/").pop());
+        const kw = a.keywords || [];
+        for (let i = 0; i < kw.length; i++) bits.push(String(kw[i]));
+        return bits.join(" ").toLowerCase();
+    }
+
+    // Three tiers, in this order: the name STARTS with what he typed, the name
+    // contains it, an alias contains it. Without the tiers an alias hit could
+    // outrank an exact name — typing "gimp" would put a program whose Keywords
+    // mention gimp above GIMP itself. Within a tier the corpus order (alphabetical)
+    // survives, because the tiers are appended whole.
     function rebuild() {
         const q = input.text.trim().toLowerCase();
         const src = corpus;
         let list = [];
-        for (let i = 0; i < src.length; i++)
-            if (q === "" || src[i].lname.includes(q))
-                list.push(src[i].entry);
+        if (q === "") {
+            for (let i = 0; i < src.length; i++) list.push(src[i].entry);
+        } else {
+            let pre = [], mid = [], ali = [];
+            for (let i = 0; i < src.length; i++) {
+                const r = src[i];
+                if (r.lname.startsWith(q)) pre.push(r.entry);
+                else if (r.lname.includes(q)) mid.push(r.entry);
+                else if (r.alias.includes(q)) ali.push(r.entry);
+            }
+            list = pre.concat(mid, ali);
+        }
         // Cap the result count (0 = unlimited).
         const cap = SettingsStore.d.launcherMaxResults;
         if (cap > 0 && list.length > cap)
@@ -225,6 +264,26 @@ PanelWindow {
 
     function close() {
         open = false;
+    }
+
+    // What WOULD the runner show for a query, without opening it on his screen.
+    // Corpus size first (0 there means DesktopEntries found nothing, which is an
+    // XDG_DATA_DIRS problem, not a search one), then the hits, then the first few
+    // names in the order they would be drawn. `qs ipc call launcher query gimp`.
+    function queryReport(q) {
+        const src = corpus;
+        const s = String(q || "").trim().toLowerCase();
+        let pre = [], mid = [], ali = [];
+        for (let i = 0; i < src.length; i++) {
+            const r = src[i];
+            if (s === "") pre.push(r.entry.name);
+            else if (r.lname.startsWith(s)) pre.push(r.entry.name);
+            else if (r.lname.includes(s)) mid.push(r.entry.name);
+            else if (r.alias.includes(s)) ali.push(r.entry.name);
+        }
+        const hits = pre.concat(mid, ali);
+        return "corpus=" + src.length + " hits=" + hits.length
+             + " [" + hits.slice(0, 8).join(" | ") + "]";
     }
 
     // "Is the closed drawer exactly the notch?" — answerable without opening it

@@ -598,15 +598,32 @@ beside the notch, then the slab growing outward — because each of them is what
   — it proves the appid:name and the delivery, not the key path. Disconnect the
   toggle first, or the probe opens the runner on his screen.
 - **Opening does no scanning.** The runner's corpus — every non-seal,
-  non-`NoDisplay` entry, sorted, each with its lowercased name — is a binding on
-  `DesktopEntries.applications.values`, so it is rebuilt when the SYSTEM's
-  programs change, not per open and not per keystroke. `rebuild()` only filters
-  it. (And `onOpenChanged` must not both clear the box and call `rebuild()`:
-  clearing already rebuilds through `onTextChanged`.)
+  non-`NoDisplay` entry, sorted, each with its lowercased name AND its alias
+  haystack — is a binding on `DesktopEntries.applications.values`, so it is
+  rebuilt when the SYSTEM's programs change, not per open and not per keystroke.
+  `rebuild()` only filters it. (And `onOpenChanged` must not both clear the box
+  and call `rebuild()`: clearing already rebuilds through `onTextChanged`.)
+- **`Name` is not what he types.** gimp's entry is called "GNU Image
+  Manipulation Program", so a name-only search found nothing for `gimp`. Each
+  corpus row carries `aliasOf(entry)` beside the name — generic name, desktop id,
+  the executable's basename, the entry's own `Keywords` — and `rebuild()` scores
+  in three tiers: name-prefix, name-substring, alias. The tiers exist so an alias
+  hit can never outrank the program actually called that.
+- **An empty runner is an `XDG_DATA_DIRS` problem, not a search one.**
+  `DesktopEntries` scans that variable, and the panel inherits it from the
+  systemd USER MANAGER, which is not a login shell. On `book` the manager's copy
+  is Fedora's three dirs and nothing else, so every nix-profile program
+  (nicotine+ among them) was invisible — and its icon unresolvable — while the
+  same list was complete in any terminal. `quickshell.nix`'s `panelEnv` wrapper
+  appends the two nix profile dirs if they are missing; `top` already has them
+  system-wide. `qs ipc call launcher query <text>` prints `corpus=` first for
+  exactly this reason: 0 or a short corpus is that bug, `hits=0` is this one.
 - **What is left is not ours.** The bind fires on RELEASE — that is what makes a
   bare Super tap distinguishable from Super-as-a-modifier — so the human hold
   time is in the path and no code here can take it out. Firing on press would
   open the runner on every Super chord.
+- **Check the SEARCH without opening it** — `qs ipc call launcher query gimp`
+  prints the corpus size, the hit count and the first eight names in draw order.
 - **Check it without opening it** — `qs ipc call launcher geom` prints the card's
   y/height beside the notch's own arithmetic plus the edge gap. `cardY==notchY`,
   `cardH==slabH`, `edgeGap==0`. Opening it to look is not available: it is on his
