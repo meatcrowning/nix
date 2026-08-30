@@ -117,7 +117,7 @@ let
     { family = "CozetteVector"; label = "cozette"; smooth = false; }
     { family = "Terminus"; label = "terminus"; smooth = false; }
     { family = "Tahoma"; label = "tahoma"; smooth = true; }
-    { family = "Oxygen Mono"; label = "oxygen mono"; smooth = true; }
+    { family = "Oxygen Mono"; label = "oxygen mono"; smooth = true; nativeHinting = true; }
   ];
 
   # The Settings dropdown reads its options from a generated singleton rather
@@ -132,6 +132,7 @@ let
         readonly property var families: [${lib.concatMapStringsSep "," (f: " \"${f.family}\"") selectableFaces} ]
         readonly property var labels: ({${lib.concatMapStringsSep "," (f: " \"${f.family}\": \"${f.label}\"") selectableFaces} })
         readonly property var smooth: ({${lib.concatMapStringsSep "," (f: " \"${f.family}\": ${lib.boolToString f.smooth}") selectableFaces} })
+        readonly property var nativeHinting: ({${lib.concatMapStringsSep "," (f: " \"${f.family}\": ${lib.boolToString (f.nativeHinting or false)}") selectableFaces} })
     }
   '';
 in
@@ -202,7 +203,10 @@ in
   # (plugin:hyprvtb:font_smooth), so the plugin's cairo AA choice follows the
   # face without hardcoding a family name anywhere outside this file.
   xdg.configFile."quickshell/font-faces.json".text = builtins.toJSON
-    (lib.listToAttrs (map (f: lib.nameValuePair f.family { inherit (f) smooth; }) selectableFaces));
+    (lib.listToAttrs (map (f: lib.nameValuePair f.family {
+      inherit (f) smooth;
+      nativeHinting = f.nativeHinting or false;
+    }) selectableFaces));
 
   # "More Perfect DOS VGA" ships ONLY a Regular face. Without this, KDE/Qt apps
   # faux-bold (and oblique-shear) it wherever the UI asks for bold/italic text —
@@ -428,6 +432,27 @@ in
         <edit name="hintstyle"      mode="assign"><const>hintfull</const></edit>
         <edit name="rgba"           mode="assign"><const>none</const></edit>
         <edit name="embeddedbitmap" mode="assign"><bool>false</bool></edit>
+      </match>
+    </fontconfig>
+  '';
+
+  # Oxygen Mono — kitty's reference rendering is this face at its native
+  # TrueType hinting: grayscale AA, no autohinter substitution, and slight
+  # grid fitting. Pin that exact fontconfig profile so Pango/Cairo titlebars,
+  # Qt widgets, GTK and Chromium-derived surfaces do not each choose their own
+  # defaults. Qt/QML's matching half is DeskStyle.nativeHinting.
+  xdg.configFile."fontconfig/conf.d/50-oxygen-mono.conf".text = ''
+    <?xml version="1.0"?>
+    <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+    <fontconfig>
+      <match target="font">
+        <test name="family"><string>Oxygen Mono</string></test>
+        <edit name="antialias"      mode="assign"><bool>true</bool></edit>
+        <edit name="autohint"       mode="assign"><bool>false</bool></edit>
+        <edit name="hinting"        mode="assign"><bool>true</bool></edit>
+        <edit name="hintstyle"      mode="assign"><const>hintslight</const></edit>
+        <edit name="rgba"           mode="assign"><const>none</const></edit>
+        <edit name="embeddedbitmap" mode="assign"><bool>true</bool></edit>
       </match>
     </fontconfig>
   '';

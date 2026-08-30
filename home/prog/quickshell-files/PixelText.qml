@@ -24,7 +24,8 @@ import QtQuick
 Text {
     font.family: Theme.font
     font.pixelSize: Theme.fontSize
-    font.hintingPreference: Theme.fontSmooth ? Font.PreferNoHinting : Font.PreferFullHinting
+    font.hintingPreference: Theme.fontNativeHinting ? Font.PreferDefaultHinting
+                                                  : (Theme.fontSmooth ? Font.PreferNoHinting : Font.PreferFullHinting)
     renderType: Text.NativeRendering
     antialiasing: Theme.fontSmooth
 
