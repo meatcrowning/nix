@@ -22,6 +22,7 @@ Rectangle {
     }
     height: 22
     radius: Theme.windowRounding
+    opacity: enabled ? 1.0 : 0.4
     color: ma.pressed ? Theme.bgAlt : "transparent"
     border.width: Theme.ctrlBorder
     border.color: (ma.containsMouse || ma.pressed) ? Theme.accent : Theme.border
@@ -39,6 +40,7 @@ Rectangle {
     MouseArea {
         id: ma
         anchors.fill: parent
+        enabled: root.enabled
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
         onClicked: root.clicked()

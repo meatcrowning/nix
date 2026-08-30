@@ -139,26 +139,4 @@ in
     Keywords=bespoke;ollama;chat;llm;ai;
   '';
 
-  # THE FACE BEFORE THE OXYGEN PASS, still launchable [his, 2026-08-25: "i feel
-  # its significant enough to warrant two versions of the program, and old one
-  # and a new one ... perhaps do a side by side if needed"]. It is the same
-  # binary and the same live source, forced to the generic KStyle face with
-  # `--face=plasma`, so there is no second copy of chatter to keep in step and a
-  # side-by-side is two windows of one program. The frozen point is also the git
-  # tag `chatter-pre-oxygen`, for the source rather than the look.
-  #
-  # `NoDisplay` is deliberately NOT set: it is in the runner on purpose, which
-  # is the whole point of it existing.
-  home.file.".local/share/applications/oracle-legacy.desktop".text = ''
-    [Desktop Entry]
-    Type=Application
-    Name=chatter (legacy)
-    GenericName=Ollama Chat
-    Comment=chatter as it was before the Oxygen pass
-    Exec=${oracle}/bin/oracle --face=plasma
-    Icon=oracle
-    Terminal=false
-    Categories=Utility;
-    Keywords=bespoke;ollama;chat;llm;ai;legacy;
-  '';
 }
