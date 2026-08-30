@@ -226,6 +226,7 @@ Scope {
                                     color: Theme.text
                                     font.family: Theme.font
                                     font.pixelSize: Theme.fontSize
+                font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
                                     font.hintingPreference: Font.PreferFullHinting
                                     renderType: Text.NativeRendering
                                     clip: true

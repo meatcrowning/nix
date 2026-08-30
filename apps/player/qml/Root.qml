@@ -526,6 +526,7 @@ Item {
             anchors.rightMargin: 5
             verticalAlignment: TextInput.AlignVCenter
             font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
+            font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
             renderType: Text.NativeRendering
             color: win.fgText
             clip: true

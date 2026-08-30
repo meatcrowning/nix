@@ -142,6 +142,7 @@ Rectangle {
                 verticalAlignment: TextInput.AlignVCenter
                 color: root.winActive ? Theme.text : Theme.inactive
                 font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
+                font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
                 renderType: Text.NativeRendering
                 clip: true
                 selectByMouse: true

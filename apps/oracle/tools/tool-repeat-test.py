@@ -42,6 +42,7 @@ ran = []
 def dispatch(name, args, idx, remaining, calls):
     ran.append((name, args))
     result = ({"error": "no such path"} if args.get("fail")
+              else {"timed_out": True} if args.get("timeout")
               else {"ok": True, "value": len(ran)})
     remaining["sink"][idx] = {
         "role": "tool", "tool_name": name, "content": json.dumps(result)}
@@ -62,15 +63,32 @@ check("an identical failed call runs once", len(ran) == 1)
 check("the reused failure tells the model to change its arguments",
       again.get("reused") is True and "change the arguments" in again.get("note", ""))
 
+call("run_bash", {"command": "slow", "timeout": True})
+timed = call("run_bash", {"command": "slow", "timeout": True})
+check("an identical timed-out runner runs once", len(ran) == 2)
+check("the reused timeout tells the model to change course",
+      timed.get("reused") is True)
+
+real_custom_tools = oracle.custom_tools
+oracle.custom_tools = lambda: {"custom_once": {
+    "name": "custom_once", "once": True, "prog": "/tmp/custom_once",
+    "description": "test", "parameters": {"type": "object"},
+    "host": "", "timeout": 1}}
+call("custom_once", {"record": "one"})
+custom = call("custom_once", {"record": "one"})
+oracle.custom_tools = real_custom_tools
+check("a manifest-marked custom effect runs once", len(ran) == 3)
+check("the repeated custom result is reused", custom.get("reused") is True)
+
 call("read_file", {"path": "/changing"})
 call("read_file", {"path": "/changing"})
-check("a successful read still reruns for verification", len(ran) == 3)
+check("a successful read still reruns for verification", len(ran) == 5)
 
 call("edit_file", {"path": "/x", "old": "a", "new": "b"})
 edited = call("edit_file", {"path": "/x", "old": "a", "new": "b"})
-check("an identical successful mutation runs once", len(ran) == 4)
+check("an identical successful mutation runs once", len(ran) == 6)
 check("the mutation's completed result is reused", edited.get("reused") is True)
-check("every completed round still advances the chat loop", len(posts) == 6)
+check("every completed round still advances the chat loop", len(posts) == 10)
 
 print("FAILED: " + ", ".join(fails) if fails else "OK")
 sys.exit(1 if fails else 0)

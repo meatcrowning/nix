@@ -61,6 +61,7 @@ Rectangle {
                 id: editorArea
                 width: editorFlick.width
                 font: Theme.editorFont
+            font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
                 renderType: Text.NativeRendering
                 color: Theme.text
                 selectionColor: Theme.accent

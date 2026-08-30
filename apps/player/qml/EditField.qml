@@ -57,6 +57,7 @@ Rectangle {
         anchors.margins: 4
         verticalAlignment: TextInput.AlignVCenter
         font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
+        font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
         renderType: Text.NativeRendering
         color: root.fgText
         clip: true

@@ -324,6 +324,7 @@ Item {
                     // pixel font grey-fringed; only the font's style strategy
                     // reaches the rasteriser (docs/DESIGN.md §2.2).
                     font: Theme.editorFont
+            font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
                     renderType: Text.NativeRendering
                     color: card.fgText
                     selectionColor: Theme.highlight

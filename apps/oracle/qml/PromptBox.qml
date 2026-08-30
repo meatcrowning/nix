@@ -67,6 +67,7 @@ Rectangle {
             // blurry while every label around it was crisp. Same pairing as
             // editor's CodeView and board's InputBox.
             font: Theme.editorFont
+            font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
             renderType: Text.NativeRendering
             color: Theme.text
             selectionColor: Theme.accent

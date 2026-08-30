@@ -195,6 +195,7 @@ Window {
                 clip: true
 
                 font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
+                font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
                 renderType: Text.NativeRendering
                 color: Theme.text
                 selectionColor: Theme.accent

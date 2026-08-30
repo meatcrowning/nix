@@ -36,6 +36,19 @@ Singleton {
     // A face whose desktop metrics are pinned to Kitty’s terminal cell. It
     // remains antialiased; only its advances and stems are grid-fitted.
     readonly property bool fontTerminalCell: FontFaces.terminalCell[font] === true
+    readonly property real fontAdvanceRatio: Number(FontFaces.advanceRatio[font]) || 0
+
+    // Round terminal-cell advances in device pixels, then map that result back
+    // to the item's logical units. At scale 1 Oxygen Mono becomes an 8px cell;
+    // at book's 5/3 internal scale it remains the already-integral 14px cell.
+    function fontLetterSpacing(deviceScale) {
+        const ratio = fontAdvanceRatio;
+        const scale = Number(deviceScale);
+        if (!(ratio > 0) || !(scale > 0) || !isFinite(scale))
+            return 0;
+        const advance = fontSize * ratio;
+        return Math.round(advance * scale) / scale - advance;
+    }
 
     // Text size in PIXELS (not points). Matched to kitty's on-screen size:
     // kitty is font_size 11pt, which at 96 DPI (1080p, scale 1.0) rasterises to

@@ -227,6 +227,8 @@ settings.write_text('{"fontFamily": "Oxygen Mono", "fontSize": 14,'
 o = deskstyle.DeskStyle()
 check("hypr: Oxygen Mono is smooth", o.smooth is True)
 check("hypr: Oxygen Mono uses Kitty’s terminal-cell metrics", o.terminalCell is True)
+check("hypr: Oxygen Mono publishes its fractional advance ratio",
+      abs(o.advanceRatio - (1229 / 2048)) < 1e-12, str(o.advanceRatio))
 check("hypr: Oxygen Mono editor text keeps Kitty's vertical hinting",
       o.editorFont.hintingPreference() == QFont.PreferVerticalHinting)
 o_metrics = QFontMetricsF(o.editorFont)

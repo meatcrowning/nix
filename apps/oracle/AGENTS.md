@@ -685,7 +685,10 @@ that swap is worth it; nothing else does it.
   with a result note telling the model to use what it has or change the
   arguments. Successful reads and runners are never cached: reading after an
   edit is verification, and rerunning a test can be intentional. Subagents
-  carry the same per-run cache. Harness: `tools/tool-repeat-test.py`.
+  carry the same per-run cache. A runner timeout counts as a failure, and a
+  custom-tool manifest can declare `"once": true` when an exact repeat would
+  duplicate an external effect (downloads are the motivating case). Harness:
+  `tools/tool-repeat-test.py`.
 - **Harness**: `tools/subagent-test.py` — drives a real spawn through the real
   window (offscreen) against a stub ollama and reads all four request bodies:
   the subagent gets its own system prompt and its own restricted tool list, it

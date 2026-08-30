@@ -16,6 +16,16 @@ QtObject {
                                        ? DeskStyle.smooth === true : false
     readonly property bool fontTerminalCell: (typeof DeskStyle !== "undefined" && DeskStyle)
                                              ? DeskStyle.terminalCell === true : false
+
+    readonly property real fontAdvanceRatio: (typeof DeskStyle !== "undefined" && DeskStyle)
+                                           ? Number(DeskStyle.advanceRatio) || 0 : 0
+    function fontLetterSpacing(deviceScale) {
+        const scale = Number(deviceScale);
+        if (!(fontAdvanceRatio > 0) || !(scale > 0) || !isFinite(scale))
+            return 0;
+        const advance = fontSize * fontAdvanceRatio;
+        return Math.round(advance * scale) / scale - advance;
+    }
     readonly property int fontSize: DeskStyle.fontSize
 
     // ONE TEXT ROW: the live FACE's cell (ascent + descent), which is only
