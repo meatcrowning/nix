@@ -3661,15 +3661,28 @@ class MdFormat(QObject):
 
 
 class Titlebar(QObject):
-    """hyprvtb app-button bridge — oracle draws no chrome of its own, so the
-    compositor draws the titlebar (docs/DESIGN.md §12). oracle has no history and
-    no view modes, so it registers with the defaults and no buttons; the window
-    title is still drawn by the plugin. The one thing it publishes is a FOOTER
-    naming the connected daemon."""
+    """chatter's secondary selectors and server control in hyprvtb's inner bar.
+
+    The callbacks arrive on vtbclient's I/O thread; the Signal hops them to QML
+    on the GUI thread. Plasma still uses the same ids through its menus.
+    """
+
+    clicked = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._client = VtbClient()
+        self._client = VtbClient(on_click=self.clicked.emit)
+
+    @Slot("QVariantList")
+    def setButtons(self, buttons):
+        out = []
+        for b in buttons:
+            if isinstance(b, str):
+                out.append("-")
+            else:
+                out.append((str(b["id"]), str(b["label"]), int(b.get("state", 0)),
+                            str(b.get("tip", ""))))
+        self._client.set_buttons(out)
 
     @Slot(str)
     def setFooter(self, text):

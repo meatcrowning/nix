@@ -59,12 +59,13 @@ exactly what it always was.
   right-hand slot. They stay in the tree at zero height, not branched away, so
   every id they carry (the three dropdowns, the prompt editor) still resolves
   and one file still serves both faces.
-- **`actions` is the table, and it reaches no socket.** chatter registers no
-  hyprvtb buttons — the compositor draws only its title — so this table exists
-  for the KDE chrome alone (`bind_chrome(None)`, bound to `actionsChanged`).
-  `Titlebar.setButtons` is never called; adding a row here cannot change the
-  Hyprland window. `tbAction(id)` answers every id, including the `session:` and
-  `prompt:` prefixes the two radio sets are built from.
+- **`actions` is the table for Plasma, and `tbButtons` is its compact Hyprland
+  projection.** chatter's model/session/system-prompt selectors and server
+  status/controls are secondary `mo`/`ss`/`pr`/`sv` buttons in the compositor's
+  inner titlebar. They call the same `tbAction(id)` path as the menus; the
+  server button opens a small popup containing unload and start/stop. Plasma
+  keeps the full menus and toolbar pickers, while the four content rows stay in
+  the tree at zero height under Hyprland.
 - **Deleting a session is asked about first** — the one row that destroys
   something of his, with no undo in the store. A constructed `QMessageBox` with
   `DontUseNativeDialog`, shown modelessly: the static helpers segfault this
