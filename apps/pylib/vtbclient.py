@@ -18,7 +18,8 @@ the server side):
                                                  empty falls back to the title
     -> LOADING <0|1>                             page loading (draws a spinner)
     -> PLAYBAR <0|1> <pos>                       media scrub bar + playback fraction
-    <- CLICK <id>                                a button was clicked
+    <- CLICK <id> <x> <y>                        a button was clicked;
+                                                 x/y are window-local logical px
     <- RCLICK <id> <x> <y>                       a button was right-clicked
                                                  (x/y window-local, for a menu)
     <- REORDER <srcId> <dstId>                   a draggable button was dropped
@@ -79,8 +80,9 @@ class VtbClient:
     _RETRY_MAX = 3.0
 
     def __init__(self, on_click=None, on_rclick=None, pid=None, on_reorder=None, on_addr=None,
-                 on_wake=None, on_seek=None, buttons=None, title_edit=False):
+                 on_wake=None, on_seek=None, buttons=None, title_edit=False, on_click_at=None):
         self._on_click = on_click
+        self._on_click_at = on_click_at
         self._on_rclick = on_rclick
         self._on_reorder = on_reorder
         self._on_addr = on_addr
@@ -360,8 +362,19 @@ class VtbClient:
                 line, buf = buf.split(b"\n", 1)
                 text = line.decode(errors="replace").strip()
                 try:
-                    if text.startswith("CLICK ") and self._on_click:
-                        self._on_click(text[6:])
+                    if text.startswith("CLICK ") and (self._on_click or self._on_click_at):
+                        parts = text[6:].split(" ", 2)
+                        if len(parts) == 3:
+                            try:
+                                if self._on_click_at:
+                                    self._on_click_at(parts[0], float(parts[1]), float(parts[2]))
+                                elif self._on_click:
+                                    self._on_click(parts[0])
+                            except ValueError:
+                                pass
+                        else:
+                            if self._on_click:
+                                self._on_click(text[6:])
                     elif text.startswith("RCLICK ") and self._on_rclick:
                         parts = text[7:].split(" ", 2)
                         if len(parts) == 3:

@@ -46,7 +46,8 @@
 //         playback fraction 0..1 (fill runs top->bottom). Clicking/dragging or
 //         scrolling the track sends SEEK back. 0 hides it (viewer's images).
 //   server -> client:
-//     CLICK <id>                a button was clicked (fires on release)
+//     CLICK <id> <x> <y>        a button was clicked (fires on release);
+//                               x/y are WINDOW-LOCAL logical px
 //     RCLICK <id> <x> <y>       a button was right-clicked (fires on press);
 //                               x/y are WINDOW-LOCAL logical px, the point the
 //                               client should pop its context menu at
@@ -129,9 +130,9 @@ namespace VtbIpc {
     // copying the button vector to read one bool is not free.
     bool titleTextEnabled(pid_t pid);
 
-    // Send CLICK <id> to whoever registered pid's buttons. Non-blocking; a
-    // wedged client just misses clicks, it can never stall the compositor.
-    void sendClick(pid_t pid, const std::string& id);
+    // Send CLICK <id> <x> <y> to whoever registered pid's buttons. Non-blocking;
+    // a wedged client just misses clicks, it can never stall the compositor.
+    void sendClick(pid_t pid, const std::string& id, double x, double y);
 
     // Send RCLICK <id> <x> <y> — a button was right-clicked, with the
     // window-local point of the press. Same non-blocking guarantees.

@@ -1348,9 +1348,15 @@ Item {
     // compact bars and all four titlebar edges.
     readonly property bool titlebarVertical:
         Titlebar.edge === "right" || Titlebar.edge === "left"
+    property real popupAnchorX: 0
+    property real popupAnchorY: 0
+    property bool popupAnchorValid: false
     function popupX(index, popupWidth) {
         if (titlebarVertical)
             return Titlebar.edge === "left" ? 8 : win.width - popupWidth - 8;
+        if (popupAnchorValid)
+            return Math.max(0, Math.min(win.width - popupWidth,
+                                        popupAnchorX - popupWidth / 2));
         return Math.max(0, Math.min(win.width - popupWidth,
                                     Titlebar.buttonCenter(index, win.width)
                                     - popupWidth / 2));
@@ -1358,6 +1364,9 @@ Item {
     function popupY(index, popupHeight) {
         if (!titlebarVertical)
             return Titlebar.edge === "top" ? 8 : win.height - popupHeight - 8;
+        if (popupAnchorValid)
+            return Math.max(0, Math.min(win.height - popupHeight,
+                                        popupAnchorY - popupHeight / 2));
         return Math.max(0, Math.min(win.height - popupHeight,
                                     Titlebar.buttonCenter(index, win.height)
                                     - popupHeight / 2));
@@ -1366,6 +1375,12 @@ Item {
     Connections {
         target: Titlebar
         function onClicked(id) { win.tbAction(id); }
+        function onClickedAt(id, x, y) {
+            win.popupAnchorX = x;
+            win.popupAnchorY = y;
+            win.popupAnchorValid = true;
+            win.tbAction(id);
+        }
     }
     // chatter's own group ("chat") sits where kdeshell puts an app's invented
     // menus: after the ones KDE names, before Settings.
