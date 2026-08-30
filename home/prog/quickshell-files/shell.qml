@@ -1126,6 +1126,32 @@ Scope {
                     color: Theme.accent
                 }
 
+                // THE DRAWER'S MOUTH, when there is no notch to be it. With the
+                // shortcut notch on, the notch itself hides the stretch of the
+                // accent strip behind its mouth (it reaches `overlap` under the
+                // bar and paints Theme.bg there), so the runner reads as the bar
+                // pulling open. With `desktopIcons` off there is no notch and
+                // the strip ran uncut across the drawer's span — a line between
+                // the panel and the drawer, and the drawer read as a separate
+                // window beside it. So the bar paints that stretch out itself.
+                //
+                // The span is the drawer's own (Launcher.qml's card height,
+                // NotchModel.slabH0, centred the same rounded way), less one
+                // border at each end: the drawer's top and bottom accent lines
+                // stop at this face, and leaving the strip painted there is what
+                // makes the corner where the two outlines meet — exactly what
+                // DesktopNotch's outline does with its own overlap.
+                Rectangle {
+                    z: 2
+                    visible: launcher.out && !NotchModel.shown
+                    x: bar.barLeft ? barBody.width - width : 0
+                    y: Math.round((bar.modelData.height - NotchModel.slabH0) / 2)
+                       + Theme.windowBorderWidth
+                    width: Math.max(2, Theme.windowBorderWidth)
+                    height: NotchModel.slabH0 - 2 * Theme.windowBorderWidth
+                    color: Theme.bg
+                }
+
                 // THE UAC SCRIM. While a `vista-askpass` window is up, Hyprland's
                 // `dim_around` rule dims the desktop and every window — but not
                 // this panel: `qs-bar` is a layer surface on the `top` layer,
