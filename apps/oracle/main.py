@@ -3698,11 +3698,11 @@ class Titlebar(QObject):
 
     def _read_layout(self):
         """Read the compositor's live bar geometry without changing it."""
-        # Plasma and offscreen harnesses have no titlebar to query. Avoid
-        # waiting on hyprctl's socket timeout there; the shipped defaults are
-        # exactly the fallback geometry those faces need.
-        if (not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
-                or os.environ.get("QT_QPA_PLATFORM") == "offscreen"):
+        # Offscreen harnesses have no titlebar to query. Avoid waiting on
+        # hyprctl's socket timeout there; the shipped defaults are exactly the
+        # fallback geometry that face needs. Real sessions query the live
+        # compositor even if a launcher failed to copy its signature variable.
+        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
             return
         import subprocess
 
