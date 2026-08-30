@@ -21,7 +21,10 @@
 # `/etc/xdg-desktop-portal/hyprland-portals.conf` (top, from
 # sys/dsk/hyprland.nix) both resolve fine already, so a `filer.portal` sitting
 # on disk is inert. `filer-portal-switch on` is the whole activation, and it
-# writes exactly one user-level file that `off` deletes again.
+# writes exactly one user-level file, which `off` rewrites without the picker
+# line rather than deleting — that same file also carries the Secret-portal
+# routing every Chromium on the box depends on (see `secretLine` below), so it
+# has to survive the switch being off.
 #
 # Why a script rather than a nix option: turning this OFF must not require a
 # rebuild. A file dialog that fails to appear is the kind of breakage you want
@@ -58,21 +61,53 @@ let
   # merging with it, so anything omitted here silently reverts to xdp's
   # defaults. These lines mirror what each host resolves to today, with
   # FileChooser pointed at filer and the previous answer kept behind it.
+  #
+  # `Secret` is here for a reason that has nothing to do with the file picker,
+  # and it is why `off` now writes a file rather than deleting one. Chromium
+  # (and so the flatpak Vivaldi) asks the Secret portal for the key it encrypts
+  # cookies and saved passwords with. `kwallet.portal` is the only backend that
+  # answers that interface and it declares `UseIn=kde`, so in a Hyprland
+  # session — where the shipped hyprland-portals.conf names only `hyprland;gtk`,
+  # neither of which implements Secret — the call fails and Chromium silently
+  # falls back to its hardcoded `peanuts` key (`v10` blobs). Log back into
+  # Plasma, the portal answers, it switches to the real key (`v11`), and
+  # everything written under the other session is undecryptable and gets
+  # DELETED: `password_manager.clearing_undecryptable_passwords`. That flip cost
+  # him his logins on 2026-08-30. Naming the backend explicitly overrides its
+  # `UseIn`, which is the whole fix.
+  secretLine = "org.freedesktop.impl.portal.Secret=kwallet";
+
+  # The routing with the file picker left alone — what `off` restores. It is a
+  # FILE, not an absence, because the Secret line above has to hold either way.
+  baseConf = if host == "air" then ''
+    [preferred]
+    default=hyprland;gtk
+    ${secretLine}
+  '' else ''
+    [preferred]
+    default=hyprland;gtk
+    org.freedesktop.impl.portal.Settings=kde
+    ${secretLine}
+  '';
+
   preferred = if host == "air" then ''
     [preferred]
     default=hyprland;gtk
     org.freedesktop.impl.portal.FileChooser=filer;gtk
+    ${secretLine}
   '' else ''
     [preferred]
     default=hyprland;gtk
     org.freedesktop.impl.portal.FileChooser=filer;kde
     org.freedesktop.impl.portal.Settings=kde
+    ${secretLine}
   '';
 
   # …materialised into the store, so the switch script is a `cp` and there is no
   # heredoc whose indentation has to survive both nix's string stripping and the
   # shell's.
   preferredFile = pkgs.writeText "filer-hyprland-portals.conf" preferred;
+  baseFile = pkgs.writeText "base-hyprland-portals.conf" baseConf;
 
   filer-portal-switch = pkgs.writeShellScriptBin "filer-portal-switch" ''
     set -euo pipefail
@@ -103,18 +138,18 @@ let
         echo "revert at any time with: filer-portal-switch off"
         ;;
       off)
-        rm -f "$conf"
-        rmdir "$(dirname "$conf")" 2>/dev/null || true
+        mkdir -p "$(dirname "$conf")"
+        install -m 0644 ${baseFile} "$conf"
         echo "reverted to the system default FileChooser backend"
         reload
         ;;
       status)
-        if [ -f "$conf" ]; then
+        if [ -f "$conf" ] && grep -q 'FileChooser=filer' "$conf"; then
           echo "ON  — $conf:"
-          sed 's/^/    /' "$conf"
         else
-          echo "OFF — no $conf; the system default is in effect"
+          echo "OFF — the system default FileChooser backend is in effect"
         fi
+        [ -f "$conf" ] && sed 's/^/    /' "$conf"
         echo
         echo "backend service: ${filer-portal}/bin/filer-portal"
         echo "to see what xdp actually picks:"
@@ -130,6 +165,20 @@ let
 in
 {
   home.packages = [ filer-portal filer-portal-switch ];
+
+  # The conf has to be in place for a session that never runs the switch, and
+  # it cannot be a `home.file` — that would make the path a read-only store
+  # symlink and `filer-portal-switch` could no longer write it. So: seed it when
+  # absent, and repair an older one that predates the Secret line.
+  home.activation.secretPortalRouting = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    conf="$HOME/.config/xdg-desktop-portal/hyprland-portals.conf"
+    if [ ! -f "$conf" ]; then
+      $DRY_RUN_CMD mkdir -p "$(dirname "$conf")"
+      $DRY_RUN_CMD install -m 0644 ${baseFile} "$conf"
+    elif ! grep -q '^${secretLine}$' "$conf"; then
+      $DRY_RUN_CMD printf '%s\n' '${secretLine}' >> "$conf"
+    fi
+  '';
 
   # The backend declaration. Inert until a portals.conf names `filer` — see the
   # header. xdp searches $XDG_DATA_HOME/xdg-desktop-portal/portals regardless of

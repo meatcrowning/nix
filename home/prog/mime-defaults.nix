@@ -1,4 +1,4 @@
-{ pkgs, lib, ... }:
+{ pkgs, lib, host, ... }:
 
 # The desktop's default handlers — one place, both machines.
 #
@@ -153,13 +153,20 @@ let
   # home/pkgs/desktop/kde.nix) and http/html to vivaldi, both his call
   # 2026-08-18. There is no KDE markdown *reader*, so .md joins the source
   # types in kate rather than going to okular's md backend.
+  # Which Vivaldi is installed differs by host: nix's `vivaldi-stable.desktop`
+  # on `top`, the flatpak's `com.vivaldi.Vivaldi.desktop` on `book` (see
+  # home/pkgs/desktop/net.nix). Naming the wrong one leaves the association
+  # pointing at a .desktop that is not there.
+  vivaldiDesktop =
+    if host == "air" then "com.vivaldi.Vivaldi.desktop" else "vivaldi-stable.desktop";
+
   kdeAssoc =
     (map (t: "${t}=org.kde.dolphin.desktop") filerTypes)
     ++ (map (t: "${t}=${if lib.hasPrefix "video/" t
                         then "org.kde.haruna.desktop"
                         else "org.kde.gwenview.desktop"}") viewerTypes)
     ++ (map (t: "${t}=org.kde.elisa.desktop") playerTypes)
-    ++ (map (t: "${t}=vivaldi-stable.desktop") surferTypes)
+    ++ (map (t: "${t}=${vivaldiDesktop}") surferTypes)
     ++ (map (t: "${t}=${if t == "application/pdf"
                         then "org.kde.okular.desktop"
                         else "org.kde.kate.desktop"}") readerTypes)
@@ -177,7 +184,7 @@ let
   sessionDefaults = pkgs.writeShellScriptBin "desktop-session-defaults" ''
     set -u
     case ":$(printf '%s' "''${XDG_CURRENT_DESKTOP:-}" | tr '[:lower:]' '[:upper:]'):" in
-      *:KDE:*) browser=vivaldi-stable.desktop ;;
+      *:KDE:*) browser=${vivaldiDesktop} ;;
       *)       browser=surfer.desktop ;;
     esac
     exec ${setDefaults} --file kdeglobals --section General --only-if-exists \
