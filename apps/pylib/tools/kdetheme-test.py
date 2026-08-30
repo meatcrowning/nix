@@ -202,7 +202,7 @@ check("the Hyprland session always gets the panel theme",
 
 # --------------------------------------------------------------------------- #
 print("DeskStyle")
-from PySide6.QtGui import QGuiApplication  # noqa: E402
+from PySide6.QtGui import QFont, QGuiApplication  # noqa: E402
 
 app = QGuiApplication([])   # needed for the DPI the point size converts at
 import deskstyle  # noqa: E402
@@ -221,6 +221,15 @@ check("hypr: scrollbar is the panel's", s.scrollbarStyle == "win31")
 check("hypr: animSpeed is the panel's", s.animSpeed == 2.0)
 check("hypr: geometry is the panel's", (s.borderWidth, s.rounding) == (3, 7))
 
+settings.write_text('{"fontFamily": "Oxygen Mono", "fontSize": 14,'
+                    ' "scrollbarStyle": "win31", "windowBorderWidth": 3,'
+                    ' "windowRounding": 7}')
+o = deskstyle.DeskStyle()
+check("hypr: Oxygen Mono is smooth", o.smooth is True)
+check("hypr: Oxygen Mono keeps native hints", o.nativeHinting is True)
+check("hypr: Oxygen Mono editor text keeps default hinting",
+      o.editorFont.hintingPreference() == QFont.PreferDefaultHinting)
+
 env(DESK_SESSION="plasma")
 k = deskstyle.DeskStyle()
 dpi = QGuiApplication.primaryScreen().logicalDotsPerInch()
@@ -228,7 +237,6 @@ check("plasma: family is KDE's", k.fontFamily == "Oxygen-Sans", k.fontFamily)
 check("plasma: 10pt converted at the screen DPI",
       k.fontSize == round(10 * dpi / 72.0), f"{k.fontSize} vs dpi {dpi}")
 check("plasma: an outline face is smooth", k.smooth is True)
-from PySide6.QtGui import QFont  # noqa: E402
 check("plasma: the editor font drops NoAntialias",
       k.editorFont.styleStrategy() != QFont.NoAntialias)
 check("plasma: scrollbar is flat", k.scrollbarStyle == "flat")

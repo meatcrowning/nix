@@ -33,6 +33,9 @@ Singleton {
     // face is antialiased and unhinted (the pixel pipeline turns cursive
     // curves into a jagged staircase).
     readonly property bool fontSmooth: FontFaces.smooth[font] === true
+    // Oxygen Mono keeps the TrueType hints kitty uses; the smooth cursive does
+    // not. FontFaces carries that distinction with the selected face.
+    readonly property bool fontNativeHinting: FontFaces.nativeHinting[font] === true
 
     // Text size in PIXELS (not points). Matched to kitty's on-screen size:
     // kitty is font_size 11pt, which at 96 DPI (1080p, scale 1.0) rasterises to
