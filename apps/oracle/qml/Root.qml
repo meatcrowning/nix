@@ -1342,6 +1342,27 @@ Item {
     ]
     onTbButtonsChanged: if (!win.plasma) Titlebar.setButtons(tbButtons)
 
+    // Popups are client-surface children, while the buttons live in the
+    // compositor decoration outside that surface. Mirror the plugin's button
+    // stack so a popup opens beside the button that summoned it, including
+    // compact bars and all four titlebar edges.
+    readonly property bool titlebarVertical:
+        Titlebar.edge === "right" || Titlebar.edge === "left"
+    function popupX(index, popupWidth) {
+        if (titlebarVertical)
+            return Titlebar.edge === "left" ? 8 : win.width - popupWidth - 8;
+        return Math.max(0, Math.min(win.width - popupWidth,
+                                    Titlebar.buttonCenter(index, win.width)
+                                    - popupWidth / 2));
+    }
+    function popupY(index, popupHeight) {
+        if (!titlebarVertical)
+            return Titlebar.edge === "top" ? 8 : win.height - popupHeight - 8;
+        return Math.max(0, Math.min(win.height - popupHeight,
+                                    Titlebar.buttonCenter(index, win.height)
+                                    - popupHeight / 2));
+    }
+
     Connections {
         target: Titlebar
         function onClicked(id) { win.tbAction(id); }
@@ -1388,22 +1409,26 @@ Item {
         }
         switch (id) {
         case "title-model":
+            Titlebar.refreshLayout();
             picker.open = !picker.open;
             sessionPicker.open = false; promptPicker.open = false;
             serverMenuOpen = false;
             break;
         case "title-session":
+            Titlebar.refreshLayout();
             if (!sessionPicker.open) Sessions.refresh();
             sessionPicker.open = !sessionPicker.open;
             picker.open = false; promptPicker.open = false;
             serverMenuOpen = false;
             break;
         case "title-prompt":
+            Titlebar.refreshLayout();
             promptPicker.open = !promptPicker.open;
             picker.open = false; sessionPicker.open = false;
             serverMenuOpen = false;
             break;
         case "title-server":
+            Titlebar.refreshLayout();
             serverMenuOpen = !serverMenuOpen;
             picker.open = false; sessionPicker.open = false;
             promptPicker.open = false;
@@ -1686,7 +1711,7 @@ Item {
         // Under Plasma the model is picked from a real combo on the toolbar and
         // this row stands down — kept in the tree at zero height so the
         // dropdown anchored to it still resolves.
-        visible: !win.plasma
+        visible: false
         height: win.plasma ? 0 : 0
 
         PixelText {
@@ -1760,7 +1785,7 @@ Item {
                   left: parent.left; right: parent.right
                   leftMargin: 10; rightMargin: 10 }
         // Under Plasma: the File menu's session rows and the toolbar's combo.
-        visible: !win.plasma
+        visible: false
         height: win.plasma ? 0 : 0
 
         PixelText {
@@ -1850,7 +1875,7 @@ Item {
                   left: parent.left; right: parent.right
                   leftMargin: 10; rightMargin: 10 }
         // Under Plasma: the Settings menu's "Base Prompt: …" radio set.
-        visible: !win.plasma
+        visible: false
         height: win.plasma ? 0 : 0
 
         // The label of the active base: the chosen preset's label, or "custom".
@@ -1944,7 +1969,7 @@ Item {
                   leftMargin: 10; rightMargin: 10 }
         // Under Plasma: observed state on the status bar's right, the two
         // controls in the Tools menu.
-        visible: !win.plasma
+        visible: false
         height: win.plasma ? 0 : 0
 
         PixelText {
@@ -2190,9 +2215,10 @@ Item {
     Rectangle {
         id: dropdown
         visible: picker.open && Ollama.models.length > 0
-        anchors { top: top.bottom; topMargin: -6; right: top.right }
         width: picker.width
         height: Math.min(Ollama.models.length * 22 + 2, 240)
+        x: win.popupX(0, width)
+        y: win.popupY(0, height)
         z: 50
         color: Theme.bgAlt
         radius: Theme.rounding
@@ -2245,10 +2271,10 @@ Item {
     Rectangle {
         id: sessionDropdown
         visible: sessionPicker.open
-        x: sessionRow.x + sessionPicker.x
-        y: sessionRow.y + sessionRow.height - 6
         width: sessionPicker.width
         height: Math.min(Math.max(Sessions.sessions.length, 1) * 22 + 2, 240)
+        x: win.popupX(1, width)
+        y: win.popupY(1, height)
         z: 50
         color: Theme.bgAlt
         radius: Theme.rounding
@@ -2306,8 +2332,6 @@ Item {
     Rectangle {
         id: promptDropdown
         visible: promptPicker.open
-        x: promptRow.x + promptPicker.x
-        y: promptRow.y + promptRow.height - 6
         width: promptPicker.width
         // presets + the one "custom…" row, each carrying its `text` so the
         // preview pane below can show what a base actually instructs before
@@ -2332,6 +2356,8 @@ Item {
         readonly property int listH: Math.min(items.length * 22 + 2, 240)
         readonly property int previewH: 108
         height: listH + previewH
+        x: win.popupX(2, width)
+        y: win.popupY(2, height)
         z: 50
         color: Theme.bgAlt
         radius: Theme.rounding
@@ -2425,10 +2451,10 @@ Item {
     Rectangle {
         id: serverDropdown
         visible: serverMenuOpen
-        x: Math.max(8, parent.width - width - 8)
-        y: 8
         width: 190
         height: 76
+        x: win.popupX(3, width)
+        y: win.popupY(3, height)
         z: 50
         color: Theme.bgAlt
         radius: Theme.rounding
