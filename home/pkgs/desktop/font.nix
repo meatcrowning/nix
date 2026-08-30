@@ -107,8 +107,8 @@ let
     # The three faces added with per-type rendering tuning above. CozetteVector
     # and Terminus are pixel/bitmap designs — crisp, pixel-snapped, so
     # smooth=false like the other pixel faces (the fc family is "CozetteVector"
-    # / "Terminus", confirmed by fc-list). Tahoma and Oxygen-Sans are normal
-    # antialiased proportional faces, so smooth=true (mirror them in
+    # / "Terminus", confirmed by fc-list). Tahoma and Oxygen Mono are normal
+    # antialiased scalable faces, so smooth=true (mirror them in
     # SMOOTH_FAMILIES in
     # apps/pylib/deskstyle.py). Tahoma's binary is only present where the user
     # has placed ~/.local/share/fonts/tahoma.ttf (installed on top, by-hand on
@@ -117,7 +117,7 @@ let
     { family = "CozetteVector"; label = "cozette"; smooth = false; }
     { family = "Terminus"; label = "terminus"; smooth = false; }
     { family = "Tahoma"; label = "tahoma"; smooth = true; }
-    { family = "Oxygen-Sans"; label = "oxygen"; smooth = true; }
+    { family = "Oxygen Mono"; label = "oxygen mono"; smooth = true; }
   ];
 
   # The Settings dropdown reads its options from a generated singleton rather
