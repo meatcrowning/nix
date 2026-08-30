@@ -1041,10 +1041,10 @@ Scope {
             DesktopNotch {
                 id: notch
                 z: 2
-                // No horizontal form of the notch yet; NotchModel already
-                // reports zero size on this edge, and this is the drawing half
-                // of the same statement.
-                visible: !bar.hz
+                // No `visible` override here: DesktopNotch binds its own to
+                // NotchModel.shown, which is already false on a horizontal bar
+                // AND with desktopIcons off. Setting it from here replaced that
+                // binding and put the seals back on a hidden notch.
                 barLeft: bar.barLeft
                 screen: bar.modelData
                 // A ROUNDED y, not a verticalCenter anchor: the seam patch is
