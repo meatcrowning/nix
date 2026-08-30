@@ -375,10 +375,6 @@ class DeskStyle(QObject):
         f = QFont(self._family)
         f.setPixelSize(self._size)
         if self._terminal_cell:
-            # Kitty packs Oxygen Mono's 8.39px outline into an 8px cell.  A
-            # 95% stretch reproduces that raster without full-hinting the
-            # glyph into a different, heavier shape.
-            f.setStretch(95)
             f.setHintingPreference(QFont.PreferVerticalHinting)
         elif self._smooth:
             f.setHintingPreference(QFont.PreferNoHinting)
