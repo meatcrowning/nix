@@ -48,7 +48,7 @@
     # ships Hyprland 0.56 (check: `dnf list --installed hyprland` on book vs
     # the pin above). book cannot run the nix hyprland (nixpkgs Mesa has no
     # Apple-Silicon GBM; it crashes on Asahi), so its compositor is Fedora's
-    # rpm — currently 0.55.4 — and a plugin only loads into the exact version
+    # rpm — currently 0.56.2 (plugin ABI 0.56) — and a plugin only loads into the exact version
     # it was built against. This second pin exists ONLY so hyprvtb.nix can
     # build book's plugin against the compositor book actually runs, while
     # `top` stays on the pin above. vtbCompat.hpp carries the matching
@@ -56,7 +56,7 @@
     # Same no-follows rationale as `hyprland` above: keep the tuple upstream
     # actually shipped (hyprutils 0.13.1 etc. — mixing generations is silent
     # ABI corruption, see the tripwire static_asserts in vtbCompat.hpp).
-    hyprland-air.url = "github:hyprwm/Hyprland/v0.55.4";
+    hyprland-air.url = "github:hyprwm/Hyprland/v0.56.0";
 
     # Quickshell, frozen the same way and for the same reason as Hyprland
     # above — it is the other half of this desktop (the panel, the lock
