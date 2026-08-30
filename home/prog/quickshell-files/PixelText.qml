@@ -24,9 +24,10 @@ import QtQuick
 Text {
     font.family: Theme.font
     font.pixelSize: Theme.fontSize
-    // Oxygen Mono at 14px: Kitty is an 8×14 cell. Qt reaches the same measured
-    // 8px advance only with full hinting; AA remains enabled through fontSmooth.
-    font.hintingPreference: Theme.fontTerminalCell ? Font.PreferFullHinting
+    // Oxygen Mono needs Kitty's lightly/vertically hinted outline.  Full
+    // hinting happens to force an 8px Qt advance, but changes the actual glyph
+    // shapes; Kitty packs its cells separately and keeps the lighter raster.
+    font.hintingPreference: Theme.fontTerminalCell ? Font.PreferVerticalHinting
                                                     : (Theme.fontSmooth ? Font.PreferNoHinting : Font.PreferFullHinting)
     renderType: Text.NativeRendering
     antialiasing: Theme.fontSmooth

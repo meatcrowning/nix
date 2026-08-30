@@ -8,7 +8,7 @@ Text {
 
     font.family: Theme.font
     font.pixelSize: Theme.fontSize
-    font.hintingPreference: Theme.fontTerminalCell ? Font.PreferFullHinting
+    font.hintingPreference: Theme.fontTerminalCell ? Font.PreferVerticalHinting
                                                     : (Theme.fontSmooth ? Font.PreferNoHinting : Font.PreferFullHinting)
     renderType: Text.NativeRendering
     antialiasing: Theme.fontSmooth

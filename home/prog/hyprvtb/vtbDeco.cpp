@@ -458,9 +458,9 @@ static int countCp(const std::string& s, size_t byteLen) {
     return n;
 }
 
-// Kitty's Oxygen Mono at the live 10pt setting is an 8×14 cell. Pango at a
-// nominal 14px instead produces an 8×15 glyph box; render at 13px, with full
-// hinting, inside the unchanged 14px titlebar cell to match the terminal.
+// Kitty packs Oxygen Mono into an 8×14 terminal cell, but retains the face's
+// lightly hinted outline. Pango's nominal 14px box is one pixel taller, so keep
+// the raster inside the unchanged 14px titlebar cell at 13px.
 static int terminalRasterSize(int cellSize) {
     return Vtb::Cfg::fontTerminalCell() ? std::max(1, cellSize - 1) : cellSize;
 }
@@ -472,7 +472,7 @@ static void applyTextFontOptions(cairo_font_options_t* options) {
     }
     if (Vtb::Cfg::fontTerminalCell()) {
         cairo_font_options_set_antialias(options, CAIRO_ANTIALIAS_GRAY);
-        cairo_font_options_set_hint_style(options, CAIRO_HINT_STYLE_FULL);
+        cairo_font_options_set_hint_style(options, CAIRO_HINT_STYLE_SLIGHT);
         cairo_font_options_set_hint_metrics(options, CAIRO_HINT_METRICS_ON);
     }
 }
