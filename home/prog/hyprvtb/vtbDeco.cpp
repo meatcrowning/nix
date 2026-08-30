@@ -2540,6 +2540,8 @@ void CVtbDeco::drawRollBorder(const CBox& barBoxDev, float scale, float slideT, 
         // already painted that interior (including its buttons), and repainting
         // it here as a background slab covered controls during the unroll.
         CBox    inner = {cl, ct, fw, ch};
+        CRegion contentCorners = corners;
+        contentCorners.subtract(trailingCorners);
         CRegion trailingInner = CRegion{inner.round()}.intersect(trailingCorners);
         CRegion ring          = corners;
         ring.subtract(trailingInner);
@@ -2552,16 +2554,15 @@ void CVtbDeco::drawRollBorder(const CBox& barBoxDev, float scale, float slideT, 
         rd.damage = &clipped;
         Hl::rect(CBox{cl - bs, ct - bs, fw + 2 * bs, ch + 2 * bs}.round(), bc, rd);
 
-        // The snapshot restores the content-side interiors. The titlebar-side
-        // interiors were left out of `ring` above, preserving renderBar's button
-        // and background pixels rather than drawing a black rectangle over them.
+        // The snapshot may restore only the content-side interiors. Letting it
+        // into the titlebar-side corner squares copied client pixels over the
+        // bar's rounded top corners during the first part of an unroll, hiding
+        // the arcs and making the remaining outline look too thin.
         if (m_rollSnapTex && m_rollSnapTex->m_texID != 0 && slideT < 0.999f) {
-            drawRollSnapshotClipped(barBoxDev, scale, slideT, a, corners);
+            drawRollSnapshotClipped(barBoxDev, scale, slideT, a, contentCorners);
         } else {
             auto bg = configColor(Cfg::bgColor());
             bg.a *= a;
-            CRegion contentCorners = corners;
-            contentCorners.subtract(trailingCorners);
             CRegion contentClip = Hl::renderDamage().intersect(contentCorners);
             CHyprOpenGLImpl::SRectRenderData bd;
             bd.round  = RND;
