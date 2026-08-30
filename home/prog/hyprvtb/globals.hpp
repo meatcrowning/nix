@@ -152,6 +152,10 @@ struct SGlobalState {
         // option outranks the face's own fontconfig AA rule. Set alongside
         // `font` by apply-pixel-font.sh from font.nix's selectableFaces.
         SP<Config::Values::CBoolValue>   fontSmooth;
+        // Smooth outlines normally keep Pango/fontconfig's metrics. Terminal
+        // cell faces (Oxygen Mono) instead use Kitty-matched full hinting and
+        // a one-pixel-smaller Pango raster inside the unchanged cell pitch.
+        SP<Config::Values::CBoolValue>   fontTerminalCell;
         SP<Config::Values::CColorValue>  bgColor;
         SP<Config::Values::CColorValue>  bgAltColor;
         SP<Config::Values::CColorValue>  textColor;
@@ -268,6 +272,9 @@ namespace Vtb::Cfg {
     }
     inline auto fontSmooth() {
         return g_pGlobalState->config.fontSmooth->value();
+    }
+    inline auto fontTerminalCell() {
+        return g_pGlobalState->config.fontTerminalCell->value();
     }
     inline auto bgColor() {
         return g_pGlobalState->config.bgColor->value();

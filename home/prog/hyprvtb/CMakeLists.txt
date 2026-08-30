@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.27)
 
 project(hyprvtb
     DESCRIPTION "vertical titlebar plugin for Hyprland"
-    VERSION 0.1
+    VERSION 0.1.1
 )
 
 set(CMAKE_CXX_STANDARD 23)

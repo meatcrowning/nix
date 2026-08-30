@@ -458,6 +458,25 @@ static int countCp(const std::string& s, size_t byteLen) {
     return n;
 }
 
+// Kitty's Oxygen Mono at the live 10pt setting is an 8×14 cell. Pango at a
+// nominal 14px instead produces an 8×15 glyph box; render at 13px, with full
+// hinting, inside the unchanged 14px titlebar cell to match the terminal.
+static int terminalRasterSize(int cellSize) {
+    return Vtb::Cfg::fontTerminalCell() ? std::max(1, cellSize - 1) : cellSize;
+}
+
+static void applyTextFontOptions(cairo_font_options_t* options) {
+    if (!Vtb::Cfg::fontSmooth()) {
+        cairo_font_options_set_antialias(options, CAIRO_ANTIALIAS_NONE);
+        return;
+    }
+    if (Vtb::Cfg::fontTerminalCell()) {
+        cairo_font_options_set_antialias(options, CAIRO_ANTIALIAS_GRAY);
+        cairo_font_options_set_hint_style(options, CAIRO_HINT_STYLE_FULL);
+        cairo_font_options_set_hint_metrics(options, CAIRO_HINT_METRICS_ON);
+    }
+}
+
 CVtbDeco::~CVtbDeco() {
     // Nothing deferred may outlive this object: the callbacks' code is in this
     // .so, and this destructor is also the path PLUGIN_EXIT's detachOurDecos()
@@ -696,15 +715,14 @@ SP<Render::ITexture> CVtbDeco::renderStackedTex(const std::string& text, int run
     // grayscale-AA/no-hinting pin decides — measured, NONE turned the cursive
     // into a staircase on the bars while every other surface antialiased it.
     cairo_font_options_t* fo = cairo_font_options_create();
-    if (!Vtb::Cfg::fontSmooth())
-        cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_NONE);
+    applyTextFontOptions(fo);
 
     PangoLayout* layout = pango_cairo_create_layout(CR);
     pango_cairo_context_set_font_options(pango_layout_get_context(layout), fo);
 
     PangoFontDescription* fd = pango_font_description_new();
     pango_font_description_set_family(fd, FONT.c_str());
-    pango_font_description_set_absolute_size(fd, SIZE * PANGO_SCALE);
+    pango_font_description_set_absolute_size(fd, terminalRasterSize(SIZE) * PANGO_SCALE);
     pango_layout_set_font_description(layout, fd);
     pango_layout_set_width(layout, BARW * PANGO_SCALE);
     pango_layout_set_alignment(layout, PANGO_ALIGN_CENTER);
@@ -816,8 +834,7 @@ SP<Render::ITexture> CVtbDeco::renderRotatedTex(const std::string& text, int run
 
     // mono for pixel faces only — see renderStackedTex for the rule
     cairo_font_options_t* fo = cairo_font_options_create();
-    if (!Vtb::Cfg::fontSmooth())
-        cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_NONE);
+    applyTextFontOptions(fo);
 
     // user -> device: the reading direction runs DOWN the bar, line height
     // from the right edge leftward — the whole line turned 90° clockwise.
@@ -829,7 +846,7 @@ SP<Render::ITexture> CVtbDeco::renderRotatedTex(const std::string& text, int run
 
     PangoFontDescription* fd = pango_font_description_new();
     pango_font_description_set_family(fd, FONT.c_str());
-    pango_font_description_set_absolute_size(fd, SIZE * PANGO_SCALE);
+    pango_font_description_set_absolute_size(fd, terminalRasterSize(SIZE) * PANGO_SCALE);
     pango_layout_set_font_description(layout, fd);
     pango_layout_set_width(layout, runLenPx * PANGO_SCALE);
     pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
@@ -886,15 +903,14 @@ SP<Render::ITexture> CVtbDeco::renderHorizTex(const std::string& text, int runLe
     auto CR   = cairo_create(SURF);
 
     cairo_font_options_t* fo = cairo_font_options_create();
-    if (!Vtb::Cfg::fontSmooth())
-        cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_NONE);
+    applyTextFontOptions(fo);
 
     PangoLayout* layout = pango_cairo_create_layout(CR);
     pango_cairo_context_set_font_options(pango_layout_get_context(layout), fo);
 
     PangoFontDescription* fd = pango_font_description_new();
     pango_font_description_set_family(fd, FONT.c_str());
-    pango_font_description_set_absolute_size(fd, SIZE * PANGO_SCALE);
+    pango_font_description_set_absolute_size(fd, terminalRasterSize(SIZE) * PANGO_SCALE);
     pango_layout_set_font_description(layout, fd);
     pango_layout_set_width(layout, runLenPx * PANGO_SCALE);
     pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
@@ -958,15 +974,14 @@ SP<Render::ITexture> CVtbDeco::renderEditLineTex(const std::string& text, int ru
 
     // mono for pixel faces only — see renderStackedTex for the rule
     cairo_font_options_t* fo = cairo_font_options_create();
-    if (!Vtb::Cfg::fontSmooth())
-        cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_NONE);
+    applyTextFontOptions(fo);
 
     PangoLayout* layout = pango_cairo_create_layout(CR);
     pango_cairo_context_set_font_options(pango_layout_get_context(layout), fo);
 
     PangoFontDescription* fd = pango_font_description_new();
     pango_font_description_set_family(fd, FONT.c_str());
-    pango_font_description_set_absolute_size(fd, SIZE * PANGO_SCALE);
+    pango_font_description_set_absolute_size(fd, terminalRasterSize(SIZE) * PANGO_SCALE);
     pango_layout_set_font_description(layout, fd);
 
     cairo_set_source_rgba(CR, COLOR.r, COLOR.g, COLOR.b, COLOR.a);
@@ -1021,12 +1036,11 @@ SP<Render::ITexture> CVtbDeco::renderQuarterGlyph(const std::string& glyph, cons
         return nullptr;
 
     cairo_font_options_t* fo = cairo_font_options_create();
-    if (!Vtb::Cfg::fontSmooth())
-        cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_NONE);
+    applyTextFontOptions(fo);
 
     PangoFontDescription* fd = pango_font_description_new();
     pango_font_description_set_family(fd, FONT.c_str());
-    pango_font_description_set_absolute_size(fd, SIZE * PANGO_SCALE);
+    pango_font_description_set_absolute_size(fd, terminalRasterSize(SIZE) * PANGO_SCALE);
 
     // measure the upright glyph on a scratch surface
     auto  MSURF = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
