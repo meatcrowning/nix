@@ -33,6 +33,9 @@ Singleton {
     // face is antialiased and unhinted (the pixel pipeline turns cursive
     // curves into a jagged staircase).
     readonly property bool fontSmooth: FontFaces.smooth[font] === true
+    // A face whose desktop metrics are pinned to Kitty’s terminal cell. It
+    // remains antialiased; only its advances and stems are grid-fitted.
+    readonly property bool fontTerminalCell: FontFaces.terminalCell[font] === true
 
     // Text size in PIXELS (not points). Matched to kitty's on-screen size:
     // kitty is font_size 11pt, which at 96 DPI (1080p, scale 1.0) rasterises to

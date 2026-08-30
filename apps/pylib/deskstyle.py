@@ -105,6 +105,12 @@ KDE_MAX_FONT_SIZE = 64
 # PixelText's renderType/antialiasing, and editorFont's style strategy below.
 SMOOTH_FAMILIES = {"Phenex", "Tahoma", "Oxygen Mono"}
 
+# Oxygen Mono is antialiased but terminal-cell aligned: Kitty renders the live
+# 10pt choice as an 8×14 cell, whereas Qt’s default/no hinting leaves a
+# fractional 8.39px advance at the corresponding 14px size. Twin of
+# terminalCell in font.nix.
+TERMINAL_CELL_FAMILIES = {"Oxygen Mono"}
+
 # The other side of the same list, and it is needed only for the KDE branch:
 # there the family is whatever System Settings holds, so `smooth` cannot be an
 # allowlist of this desktop's own faces — a KDE font is a normal outline unless
@@ -162,6 +168,7 @@ class DeskStyle(QObject):
         self._border = 2
         self._rounding = 0
         self._smooth = self._family in SMOOTH_FAMILIES
+        self._terminal_cell = self._family in TERMINAL_CELL_FAMILIES
         self._plasma = is_plasma()
         # Resolved once here and refreshed in _load; is_oxygen() also reads
         # kdeglobals, so the style can change under us without a relaunch.
@@ -238,6 +245,7 @@ class DeskStyle(QObject):
             rounding = 0
         rounding = max(0, min(20, int(rounding)))
         smooth = family in SMOOTH_FAMILIES
+        terminal_cell = family in TERMINAL_CELL_FAMILIES
 
         if self._plasma:
             # The KDE global theme owns type, motion and the scrollbar in this
@@ -246,6 +254,7 @@ class DeskStyle(QObject):
             # surfaces are framed, KDE publishes no equivalent, and a window
             # that changed shape between sessions would be the surprise.
             family, size, smooth = self._kde_type(family, size, smooth)
+            terminal_cell = family in TERMINAL_CELL_FAMILIES
             reduce_motion, speed = kde_motion(self._ini)
             bar = "flat"   # beveled/win31 chrome inside a Breeze window is the
                            # one thing that would still read as "not themed"
@@ -262,16 +271,16 @@ class DeskStyle(QObject):
             if not ox_m["generic"]:
                 reduce_motion = True
 
-        now = (family, size, reduce_motion, speed, bar, border, rounding, smooth,
+        now = (family, size, reduce_motion, speed, bar, border, rounding, smooth, terminal_cell,
                oxygen, tuple(sorted(ox_m.items())), tuple(sorted(ox_x.items())))
         was = (self._family, self._size, self._reduce, self._speed,
-               self._scrollbar, self._border, self._rounding, self._smooth,
+               self._scrollbar, self._border, self._rounding, self._smooth, self._terminal_cell,
                self._oxygen, tuple(sorted(self._ox_motion.items())),
                tuple(sorted(self._ox_metrics.items())))
         if now != was:
             (self._family, self._size, self._reduce, self._speed,
-             self._scrollbar, self._border, self._rounding, self._smooth,
-             self._oxygen) = now[:9]
+             self._scrollbar, self._border, self._rounding, self._smooth, self._terminal_cell,
+             self._oxygen) = now[:10]
             self._ox_motion, self._ox_metrics = ox_m, ox_x
             self.changed.emit()
 
@@ -339,6 +348,11 @@ class DeskStyle(QObject):
         known pixel designs."""
         return self._smooth
 
+    @Property(bool, notify=changed)
+    def terminalCell(self):
+        """True for a smooth face whose Qt advances must match Kitty’s cell."""
+        return self._terminal_cell
+
     @Property(QFont, notify=changed)
     def editorFont(self):
         """The desktop font as a QFont with the rasterisation pinned — for
@@ -360,7 +374,9 @@ class DeskStyle(QObject):
         kitty uses its native TrueType hints, so Qt keeps them too."""
         f = QFont(self._family)
         f.setPixelSize(self._size)
-        if self._smooth:
+        if self._terminal_cell:
+            f.setHintingPreference(QFont.PreferFullHinting)
+        elif self._smooth:
             f.setHintingPreference(QFont.PreferNoHinting)
         else:
             f.setHintingPreference(QFont.PreferFullHinting)
