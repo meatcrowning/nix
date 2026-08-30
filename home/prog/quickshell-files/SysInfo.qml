@@ -194,7 +194,8 @@ Singleton {
     readonly property bool negativeBrightness: gamma < 100
     // Signed level for display: the hardware value normally, gamma-below-100
     // once negative.
-    readonly property int brightnessLevel: gamma < 100 ? gamma - 100 : brightness
+    readonly property int brightnessLevel: useGammaBrightness
+        ? brightness : (gamma < 100 ? gamma - 100 : brightness)
 
     // Stereo VU levels (0-100), fed by VuMeter.qml's cava instance. They live
     // here rather than in VuMeter because the bar is instantiated per-monitor

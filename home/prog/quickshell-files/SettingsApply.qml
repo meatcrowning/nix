@@ -143,6 +143,7 @@ Item {
         applyVtb(true);
         applyFrame();
         sunsetProbe.running = true;
+        syncSunset();
     }
 
     Connections {
@@ -248,10 +249,13 @@ Item {
     // the half-second until we relaunched. Now a reload just finds the daemon
     // already up and pushes the (persisted) values at it, so nothing flickers.
     property bool sunsetWanted: SettingsStore.d.nightLight
-        || SysInfo.gamma < 100 || SysInfo.useGammaBrightness && SysInfo.brightness < 100
+        || SysInfo.gamma < 100
+        || SysInfo.useGammaBrightness && SysInfo.brightness >= 0 && SysInfo.brightness < 100
     readonly property int sunsetTemp: SettingsStore.d.nightLight ? SettingsStore.d.nightTemp : 6000
     readonly property int sunsetGamma: SysInfo.useGammaBrightness
-        ? SysInfo.brightness : SysInfo.gamma
+        ? Math.max(5, Math.min(100, SysInfo.brightness < 0
+            ? SettingsStore.d.brightnessExternal : SysInfo.brightness))
+        : SysInfo.gamma
 
     // Is a hyprsunset believed to be running, and is it one we drive? We only
     // ever kill a daemon we launched or adopted — an instance someone started
@@ -294,10 +298,13 @@ Item {
         }
         root._sunsetOurs = true;
         if (!root._sunsetUp) {
+            // Put the daemon in its own user scope: Quickshell's service is
+            // restarted during a panel reload, while the gamma controller
+            // must survive that handoff without being reaped with the panel.
             Quickshell.execDetached(["sh", "-c",
                 "pkill -x hyprsunset; sleep 0.3; " + NixPath.sh
-                + "exec hyprsunset -t "
-                + root.sunsetTemp + " -g " + root.sunsetGamma]);
+                + "exec systemd-run --user --quiet --collect --scope -- "
+                + "hyprsunset -t " + root.sunsetTemp + " -g " + root.sunsetGamma]);
             root._sunsetUp = true;
         } else {
             pushSunset();
@@ -322,4 +329,5 @@ Item {
     onSunsetWantedChanged: syncSunset()
     onSunsetTempChanged: if (sunsetWanted) syncSunset()
     onSunsetGammaChanged: if (sunsetWanted) syncSunset()
+
 }
