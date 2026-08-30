@@ -710,23 +710,40 @@ PanelWindow {
 
             // ---- the outline: three sides, the notch's own ------------------
             // Drawn last, so it frames the whole drawer as ONE object. The
-            // panel-facing side carries no line — the drawer opens INTO the
-            // panel, exactly as the notch does (DesktopNotch.qml).
-            Rectangle {   // the desktop-facing side: the drawer's leading edge
+            // PANEL-FACING side carries no line — the drawer opens INTO the
+            // panel, exactly as the notch does (DesktopNotch.qml) — and which
+            // side that is turns with the bar: the panel-side vertical edge on
+            // a left/right bar, the bottom edge on a bottom bar, the top edge
+            // on a top one. The bar paints its own accent line out across the
+            // drawer's span to match (shell.qml), so the two outlines meet at
+            // the corners and the pair reads as one piece.
+            Rectangle {   // vertical: the desktop-facing edge on a vertical bar,
+                          // the LEFT edge on a horizontal one
                 z: 2
-                x: launcher.barLeft ? card.width - card.lineW : 0
+                x: launcher.hz ? 0
+                               : (launcher.barLeft ? card.width - card.lineW : 0)
+                width: card.lineW
+                height: card.height
+                color: Theme.accent
+            }
+            Rectangle {   // the RIGHT edge — a horizontal bar has both verticals
+                z: 2
+                visible: launcher.hz
+                x: card.width - card.lineW
                 width: card.lineW
                 height: card.height
                 color: Theme.accent
             }
             Rectangle {   // top
                 z: 2
+                visible: !(launcher.hz && launcher.barTop)
                 width: card.width
                 height: card.lineW
                 color: Theme.accent
             }
             Rectangle {   // bottom
                 z: 2
+                visible: !(launcher.hz && !launcher.barTop)
                 y: card.height - card.lineW
                 width: card.width
                 height: card.lineW
