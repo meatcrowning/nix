@@ -97,13 +97,13 @@ KDE_MIN_FONT_SIZE = 6
 KDE_MAX_FONT_SIZE = 64
 
 # Faces that are normal smooth outlines and must be ANTIALIASED, never
-# pixel-snapped (Phenex the hand-authored cursive, and Tahoma the proportional
-# MS TrueType). Twin of the `smooth` flag in home/pkgs/desktop/font.nix
+# pixel-snapped (Phenex the hand-authored cursive, Tahoma the proportional MS
+# TrueType, and Oxygen Mono). Twin of the `smooth` flag in home/pkgs/desktop/font.nix
 # selectableFaces / the generated FontFaces.qml — keep the two in step.
 # CozetteVector and Terminus are pixel/bitmap designs and stay OUT (crisp,
 # pixel-snapped). Everything font-rendering branches on `DeskStyle.smooth`:
 # PixelText's renderType/antialiasing, and editorFont's style strategy below.
-SMOOTH_FAMILIES = {"Phenex", "Tahoma"}
+SMOOTH_FAMILIES = {"Phenex", "Tahoma", "Oxygen Mono"}
 
 # The other side of the same list, and it is needed only for the KDE branch:
 # there the family is whatever System Settings holds, so `smooth` cannot be an
@@ -549,4 +549,3 @@ class DeskStyle(QObject):
         """`MM_DARK` / `MM_SUBTLE` / `MM_STRONG`, or "" — how hard the style
         paints the highlight under the menu row the pointer is on."""
         return str(self._ox_metrics.get("menuHighlight", ""))
-
