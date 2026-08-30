@@ -31,7 +31,7 @@ Text {
     // crisp pipeline is exactly wrong (staircased curves, kinked joins):
     // keep NativeRendering but antialias and drop hinting, matching the
     // face's fontconfig rule and docs/DESIGN.md 2.2.
-    font.hintingPreference: Theme.fontTerminalCell ? Font.PreferFullHinting
+    font.hintingPreference: Theme.fontTerminalCell ? Font.PreferVerticalHinting
                                                     : (Theme.fontSmooth ? Font.PreferNoHinting : Font.PreferFullHinting)
     renderType: Text.NativeRendering
     antialiasing: Theme.fontSmooth

@@ -375,7 +375,7 @@ class DeskStyle(QObject):
         f = QFont(self._family)
         f.setPixelSize(self._size)
         if self._terminal_cell:
-            f.setHintingPreference(QFont.PreferFullHinting)
+            f.setHintingPreference(QFont.PreferVerticalHinting)
         elif self._smooth:
             f.setHintingPreference(QFont.PreferNoHinting)
         else:
