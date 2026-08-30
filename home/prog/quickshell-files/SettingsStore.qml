@@ -383,6 +383,10 @@ Singleton {
             // from a wallpaper — the meta+w picker chooses which — so this only
             // changes whether the IMAGE is drawn. Honoured in WallpaperLayer.qml.
             property bool   wallpaperSolid: false
+            // Draw the wallpaper mirrored left-to-right. Render-side only: the
+            // file on disk and the palette derived from it are untouched, so
+            // flipping is free and reversible.
+            property bool   wallpaperFlip: false
 
             // ---- Panel & Widgets ----
             // The desktop's view mode, and the dock panel's width as a fraction
@@ -609,7 +613,7 @@ Singleton {
         wallpaperHidden: [], wallpaperShowHidden: false,
         rgbFollowTheme: true, reduceMotion: false, animSpeed: 1.0,
         wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",
-        wallpaperSolid: false,
+        wallpaperSolid: false, wallpaperFlip: false,
         viewMode: "classic", dockWidthFrac: 0.15,
         barWidth: 48, barEdge: "right", barGap: 8, barCell: 40, taskbarClickMinimizes: true,
         procSort: "cpu", mediaLocalLoop: 0, mediaQueueOpen: false, topStatsOpen: false,

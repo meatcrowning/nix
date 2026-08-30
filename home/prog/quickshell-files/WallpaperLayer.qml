@@ -81,6 +81,9 @@ PanelWindow {
         // PreserveAspectCrop over the FULL monitor, so the blur reads as a
         // continuation of the sharp copy rather than a squashed one.
         fillMode: Image.PreserveAspectCrop
+        // Flip with the sharp copy, or the blur showing through the drag gap
+        // would be the un-mirrored picture.
+        mirror: SettingsStore.d.wallpaperFlip
         // The cached blur is already tiny and already smooth — decode it at its
         // natural size. Only the fallback needs shrinking to fake a blur.
         sourceSize.width: root.haveBlur ? 0 : root.fallbackBlurSize
