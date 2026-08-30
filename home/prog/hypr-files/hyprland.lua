@@ -424,10 +424,10 @@ hl.config({
             -- that file, so `hyprctl reload` after changing this retunes the
             -- whole desktop at once with nothing restarted.
             --
-            -- Temporarily slow the reference motion for visual diagnosis. The
-            -- settings slider currently reaches only panel/app animations; it
-            -- does not yet write this compositor-owned key.
-            slide_duration_ms  = 2000,  -- 20..4000
+            -- The canonical desktop motion duration. The settings slider
+            -- currently reaches only panel/app animations; it does not yet
+            -- write this compositor-owned key.
+            slide_duration_ms  = 260,   -- 20..4000
             -- roll_slide_frac    = 0.55,  -- slide beat vs set-down beat
             -- macOS-style momentum scrolling: content keeps gliding after the
             -- fingers leave the pad, decelerating exponentially. Synthesized by
