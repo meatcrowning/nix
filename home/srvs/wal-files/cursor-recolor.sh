@@ -111,33 +111,24 @@ pin_env() {
 # recolour is fast now and the next hover picks it up.
 apply() { hyprctl setcursor "$NAME" "$SIZE" >/dev/null 2>&1 || true; }
 
-# Drop stale per-theme cursors, but keep themes still referenced by a running
-# process. Cursor theme names are inherited at process launch; deleting an old
+# Generated theme names are inherited at process launch. Removing an old
 # directory while that process is alive makes its next shape request fall back
 # to the system cursor (which is why a GoogleDot wait cursor became Breeze).
-# Match a lowercase-hex suffix so "GoogleDot-Black" (capital B) is never hit;
-# the `*` also catches leftover 6-hex accent-only names from the old scheme.
-active_themes() {
-    for env in /proc/[0-9]*/environ; do
-        [ -r "$env" ] || continue
-        tr '\0' '\n' < "$env" 2>/dev/null \
-            | sed -n 's/^[A-Z_]*CURSOR_THEME=\(GoogleDot-[0-9a-f]*\)$/\1/p'
-    done | sort -u
-}
-prune() {
-    active="$(active_themes 2>/dev/null)"
+# Keep every generated name, and refresh its artwork below, so this remains
+# correct even when /proc hides another user's process environment.
+sync_generated() {
     for d in "$HOME"/.icons/GoogleDot-[0-9a-f]*; do
         [ -d "$d" ] || continue
         [ "$d" = "$DST" ] && continue
         name="${d##*/}"
-        printf '%s\n' "$active" | grep -Fqx "$name" && continue
         rm -rf "$d"
+        cp -a "$DST" "$d"
     done
 }
 
 # already generated for this (accent, bg)? just re-pin + re-apply and stop.
 if [ "$(cat "$STAMP" 2>/dev/null)" = "$ACCENT$BG" ] && [ -f "$DST/cursors/left_ptr" ]; then
-    pin_env; apply; prune
+    pin_env; apply; sync_generated
     exit 0
 fi
 
@@ -205,5 +196,5 @@ rm -rf "$DST"
 mv "$WORK/theme" "$DST"
 
 printf '%s' "$ACCENT$BG" > "$STAMP"
-pin_env; apply; prune
+pin_env; apply; sync_generated
 echo "cursor-recolor: $NAME core #$BG / outline #$ACCENT, applied at ${SIZE}px"
