@@ -663,6 +663,7 @@ Scope {
         // thing this file's illusion depends on, and the only way to check it
         // without putting it on his screen. See Launcher.geomReport.
         function geom(): string { return launcher.geomReport(); }
+        function query(q: string): string { return launcher.queryReport(q); }
         function show(): void { launcher.open = true; }
         function hide(): void { launcher.open = false; }
     }

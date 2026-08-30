@@ -15,6 +15,32 @@ let
       inherit (pkgs.stdenv.hostPlatform) system;
     }).quickshell}/bin/qs";
 
+  # THE PANEL MUST SEE THE NIX PROFILE'S PROGRAMS. `DesktopEntries` scans
+  # `XDG_DATA_DIRS`, and the panel inherits it from the SYSTEMD USER MANAGER,
+  # which is not a login shell — on `book` (Fedora + home-manager only) the
+  # manager's copy is Fedora's `/var/lib/flatpak…:/usr/local/share/:/usr/share/`
+  # and nothing else, while the shell's has the two nix profile dirs appended by
+  # nix's own profile script. Measured 2026-08-30: every nix-installed program
+  # (nicotine+ among them) was absent from the runner for exactly that reason,
+  # and their icons were unresolvable for the same one. `top` sets this
+  # system-wide so it is already correct there; prepending a dir that is already
+  # in the list is a no-op, so this stays host-neutral.
+  #
+  # Not `Environment=` on the unit: systemd cannot APPEND to an inherited value,
+  # and a literal would drop whatever the session legitimately put there
+  # (flatpak's exports). So a wrapper reads the live value and adds what is
+  # missing. Apps launched from the runner inherit this, which is the point.
+  panelEnv = pkgs.writeShellScript "quickshell-panel-env" ''
+    for d in "$HOME/.nix-profile/share" /nix/var/nix/profiles/default/share; do
+      case ":''${XDG_DATA_DIRS-}:" in
+        *":$d:"*) ;;
+        *) XDG_DATA_DIRS="''${XDG_DATA_DIRS:+$XDG_DATA_DIRS:}$d" ;;
+      esac
+    done
+    export XDG_DATA_DIRS
+    exec "$@"
+  '';
+
   # `settings` — launcher for the standalone Settings program (Settings.qml).
   # It is its OWN Quickshell instance, run from the same config directory as the
   # panel (so it reuses the Theme/PixelText/SettingsStore singletons and
@@ -274,7 +300,7 @@ in
     };
     Service = {
       Environment = [ "QS_NO_RELOAD_POPUP=1" ];
-      ExecStart = "%h/.config/scripts/hypr-session-env.sh ${qsBin}";
+      ExecStart = "%h/.config/scripts/hypr-session-env.sh ${panelEnv} ${qsBin}";
       Restart = "always";
       RestartSec = 1;
       # OOMPolicy=continue, because the panel's cgroup is not just the panel.
