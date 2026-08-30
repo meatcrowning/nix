@@ -330,7 +330,13 @@ PanelWindow {
             // it, over any window that happens to cover the notch.
             visible: launcher.out
             width: openW
-            height: NotchModel.shown ? NotchModel.slabH : 300
+            // The notch's height whether or not the notch is DRAWN. `slabH` is
+            // 0 while the notch is off, and the 300 that used to stand in for it
+            // was shorter than the seal column the drawer draws either way (measured
+            // 385 for the current seal set), so the card's background and outline cut
+            // through the icons. `slabH0` is the same arithmetic without the
+            // `shown` gate, so the drawer is one size in both states.
+            height: NotchModel.slabH0
             // A ROUNDED y OFF THE SCREEN, not a verticalCenter anchor and not
             // `parent.height`. Two traps, both measured:
             //   * the notch rounds its own centring (fractional logical pixels
