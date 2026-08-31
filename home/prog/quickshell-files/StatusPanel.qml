@@ -273,14 +273,91 @@ Grid {
     // The feed is the Media singleton's and only runs while something declares
     // it wants it, so this one declares itself exactly while it is on screen —
     // otherwise a horizontal bar would leave cava running with nothing drawing.
+    // The strip has width where the vertical bar had none, so the module says
+    // WHAT is playing as well as that something is: a cover thumbnail the
+    // module's own height, the title over the artist elided to a fixed column,
+    // then the spectrum. The three are one hover band — the whole thing opens
+    // the media widget, exactly as the VU meter does.
+    //
+    // Cover and text appear only while there is a track; with nothing playing
+    // the module is the spectrum alone (flat, since cava stops on silence)
+    // rather than an empty frame and two blank lines.
     Item {
         id: specMod
         visible: root.horizontal
-        width: 72
+        width: mediaRow.implicitWidth
         height: root.vuHeight
 
-        SpectrumBars {
+        readonly property bool hasTrack: Media.dispTitle !== "" || Media.dispArtist !== ""
+
+        Row {
+            id: mediaRow
             anchors.fill: parent
+            spacing: 6
+
+            // ---- cover thumbnail ----
+            Item {
+                width: specMod.hasTrack ? specMod.height : 0
+                height: specMod.height
+                visible: specMod.hasTrack
+
+                Rectangle {
+                    anchors.fill: parent
+                    color: Theme.bgAlt
+                    border.width: Theme.ctrlBorder
+                    border.color: Theme.border
+                }
+                Image {
+                    id: miniArt
+                    anchors { fill: parent; margins: Theme.ctrlBorder }
+                    source: Media.dispArt
+                    fillMode: Image.PreserveAspectCrop
+                    asynchronous: true
+                    cache: true
+                    clip: true
+                    // A fixed decode size, never the item's: the strip's height
+                    // is a setting and would re-decode the cover on every step
+                    // of the slider.
+                    sourceSize.width: 96
+                    sourceSize.height: 96
+                    visible: status === Image.Ready
+                }
+                // CP437 note glyph when there is no cover art, same placeholder
+                // the media widget uses.
+                PixelText {
+                    anchors.centerIn: parent
+                    visible: !miniArt.visible
+                    text: "\u266b"
+                    color: Theme.textDim
+                }
+            }
+
+            // ---- title over artist, elided ----
+            Column {
+                width: specMod.hasTrack ? 104 : 0
+                visible: specMod.hasTrack
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 1
+
+                PixelText {
+                    width: parent.width
+                    text: Media.dispTitle
+                    color: Theme.text
+                    elide: Text.ElideRight
+                }
+                PixelText {
+                    width: parent.width
+                    text: Media.dispArtist
+                    color: Theme.textDim
+                    elide: Text.ElideRight
+                }
+            }
+
+            // ---- the spectrum ----
+            SpectrumBars {
+                width: 72
+                height: specMod.height
+            }
         }
 
         onVisibleChanged: Media.watch(specMod, visible)
