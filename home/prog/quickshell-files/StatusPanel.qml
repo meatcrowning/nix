@@ -257,10 +257,43 @@ Grid {
     // given the strip's inner height instead (shell.qml).
     property int vuHeight: 68
     VuMeter {
-        horizontal: root.horizontal
+        visible: !root.horizontal
         bandWidth: root.width
         barH: root.vuHeight
         onHovered: (h) => root.mediaHovered(h)
+    }
+
+    // ---------- ...and the SPECTRUM in its place, on a horizontal bar --------
+    // The VU is a two-channel column: 14px wide and 68 tall, which is the one
+    // shape a 48px strip cannot hold. The media widget's spectrum is the same
+    // signal drawn the other way round — wide and short — so on a top/bottom
+    // panel the audio module is that instead, at the strip's height. Same hover,
+    // same popup.
+    //
+    // The feed is the Media singleton's and only runs while something declares
+    // it wants it, so this one declares itself exactly while it is on screen —
+    // otherwise a horizontal bar would leave cava running with nothing drawing.
+    Item {
+        id: specMod
+        visible: root.horizontal
+        width: 72
+        height: root.vuHeight
+
+        SpectrumBars {
+            anchors.fill: parent
+        }
+
+        onVisibleChanged: Media.watch(specMod, visible)
+        Component.onCompleted: Media.watch(specMod, visible)
+        Component.onDestruction: Media.watch(specMod, false)
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
+            onEntered: root.mediaHovered(true)
+            onExited: root.mediaHovered(false)
+        }
     }
 
     // ---------- Volume ----------

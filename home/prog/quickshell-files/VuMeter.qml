@@ -39,12 +39,12 @@ Item {
     // Full bar width so the click/drag/scroll band covers the whole module
     // section, not just the narrow pair of bars — same treatment as the
     // eth/cpu/disk/weather text modules. The bars + volume line stay centred.
-    // The click/drag/scroll band. On a vertical bar that is the whole panel
-    // width; on a horizontal one it is just the meter, since a module there is
-    // its own width.
-    property bool horizontal: false
+    // The click/drag/scroll band: the whole panel width. Set explicitly rather
+    // than read off `parent`, because the status panel is a positioner now and
+    // its width is its content's on a horizontal bar — where this meter is not
+    // drawn at all (the spectrum takes its place; StatusPanel.qml).
     property real bandWidth: -1
-    width: horizontal ? meterW : (bandWidth >= 0 ? bandWidth : parent.width)
+    width: bandWidth >= 0 ? bandWidth : parent.width
     height: barH
 
     // The cava process itself lives in SysInfo, NOT here. This item is
