@@ -409,10 +409,10 @@ class ComfyClient(QtCore.QObject):
         if len(raw) < 8:
             return
         event = int.from_bytes(raw[0:4], "big")
-        job = self._active
-        if job is None:
-            return
         if event == 1:
+            job = self._active
+            if job is None:
+                return
             fmt = int.from_bytes(raw[4:8], "big")
             self.jobPreview.emit(job, raw[8:], "jpeg" if fmt == 1 else "png", {})
             return
@@ -425,6 +425,13 @@ class ComfyClient(QtCore.QObject):
             meta = json.loads(raw[8:8 + mlen].decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             meta = {}
+        # Modern ComfyUI previews name their prompt in event-4 metadata. Use it
+        # rather than trusting `_active`: a delayed `executing` completion for
+        # another queued job can clear `_active` while this job is still sending
+        # frames, which silently discarded every otherwise-valid preview.
+        job = self._job_for(meta)
+        if job is None:
+            return
         fmt = "png" if str(meta.get("image_type", "")).endswith("png") else "jpeg"
         self.jobPreview.emit(job, raw[8 + mlen:], fmt, meta)
 
