@@ -275,13 +275,13 @@ Grid {
     // otherwise a horizontal bar would leave cava running with nothing drawing.
     // The strip has width where the vertical bar had none, so the module says
     // WHAT is playing as well as that something is: a cover thumbnail the
-    // module's own height, the title over the artist elided to a fixed column,
-    // then the spectrum. The three are one hover band — the whole thing opens
+    // module's own height, the track name elided to a fixed column, then the
+    // spectrum. The three are one hover band — the whole thing opens
     // the media widget, exactly as the VU meter does.
     //
-    // Cover and text appear only while there is a track; with nothing playing
+    // Cover and name appear only while there is a track; with nothing playing
     // the module is the spectrum alone (flat, since cava stops on silence)
-    // rather than an empty frame and two blank lines.
+    // rather than an empty frame and a blank line.
     Item {
         id: specMod
         visible: root.horizontal
@@ -332,25 +332,17 @@ Grid {
                 }
             }
 
-            // ---- title over artist, elided ----
-            Column {
+            // ---- the track name, elided ----
+            // Title only: the artist was here for one commit and taken out —
+            // two 15px lines in a 48px strip left the pair cramped against the
+            // cover, and the widget one hover away says both.
+            PixelText {
                 width: specMod.hasTrack ? 104 : 0
                 visible: specMod.hasTrack
                 anchors.verticalCenter: parent.verticalCenter
-                spacing: 1
-
-                PixelText {
-                    width: parent.width
-                    text: Media.dispTitle
-                    color: Theme.text
-                    elide: Text.ElideRight
-                }
-                PixelText {
-                    width: parent.width
-                    text: Media.dispArtist
-                    color: Theme.textDim
-                    elide: Text.ElideRight
-                }
+                text: Media.dispTitle
+                color: Theme.text
+                elide: Text.ElideRight
             }
 
             // ---- the spectrum ----
