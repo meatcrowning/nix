@@ -805,10 +805,25 @@ Item {
     readonly property var menuOrder: ["file", "edit", "view", "go", "tools", "settings"]
 
     // What the hyprvtb titlebar column gets: the six cells it had before this
-    // table grew a menubar's worth of rows around them. Nothing about the
-    // Hyprland face changed.
-    readonly property var tbButtons: root.actions.filter(
-        (a) => a === "-" || a.tb === true)
+    // table grew a menubar's worth of rows around them. Keep a separator only
+    // when it actually sits between two titlebar cells: `actions` also holds
+    // the menubar's group dividers, and sending those through made hyprvtb draw
+    // orphan hairlines in the titlebar column.
+    readonly property var tbButtons: {
+        const out = []
+        let pendingSeparator = false
+        for (const action of root.actions) {
+            if (action === "-") {
+                pendingSeparator = out.length > 0
+            } else if (action.tb === true) {
+                if (pendingSeparator)
+                    out.push("-")
+                out.push(action)
+                pendingSeparator = false
+            }
+        }
+        return out
+    }
 
     // The selected output, for the rows above that act on one. A multi-select
     // has no single answer, so it counts as none (the gallery's own right-click
