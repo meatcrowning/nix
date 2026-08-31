@@ -635,6 +635,14 @@ def test_chrome(win, ctl):
     """The bits of furniture: the badge, the grips, the bars, the bottom strip."""
     content = win.contentItem()
 
+    # The action table also feeds menus, whose separators must not turn into
+    # empty dividers in hyprvtb's much smaller titlebar column.
+    titlebar = ["-" if isinstance(a, str) else a["id"]
+                for a in prop(APP, "tbButtons")]
+    check("the titlebar has no orphan menu separators",
+          titlebar == ["gen", "stop", "-", "p", "g", "pv", "-", "set"],
+          titlebar)
+
     # A panel badge can be a filename, and it must not run out of its panel.
     panel = find(content, "ModelPicker")
     panel.setProperty("collapsed", True)
