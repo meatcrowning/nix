@@ -214,11 +214,19 @@ def main(argv=None):
             try:
                 built = reg.build(
                     entry,
-                    {"positive": PROMPT, "negative": "", "seed": 1, "steps": 4,
+                    {"positive": PROMPT, "negative": "negative test", "seed": 1, "steps": 4,
                      "toggles": toggles},
                     object_info=oi,
                 )
                 probs = check_structure(built, toggles, fam)
+                roles = _roles_of(built["prompt"])
+                pos = built["prompt"][roles["encode_pos"]]["inputs"]["text"]
+                neg = built["prompt"][roles["encode_neg"]]["inputs"]["text"]
+                if toggles["negpip"]:
+                    if "(negative test:-1)" not in pos or neg != "":
+                        probs.append("NegPip did not fold the negative prompt into positive")
+                elif neg != "negative test":
+                    probs.append("ordinary negative prompting was changed")
                 if probs:
                     raise G.ValidationError(probs)
                 line += f" {tag}:ok"

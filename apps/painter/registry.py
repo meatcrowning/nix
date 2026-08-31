@@ -484,6 +484,20 @@ class Registry:
         transform = fam.get("prompt_transform")
         pos = G.apply_prompt_transform(p.get("positive", ""), transform)
         neg = G.apply_prompt_transform(p.get("negative", ""), transform)
+        # NegPip makes a negative weight meaningful inside the positive
+        # conditioning. Keep the two editors independent while composing, then
+        # fold the negative into the submitted positive at the family's chosen
+        # weight and leave the raw-CLIP negative encoder empty. This belongs at
+        # graph build time, not in QML: every caller (the GUI and command-line
+        # tools alike) must submit the same conditioning.
+        if toggles.get("negpip", False) and neg.strip():
+            spec = fam.get("negpip") or {}
+            weight = float(spec.get("weight", -1.0) if isinstance(spec, dict)
+                           else -1.0)
+            neg = neg.strip().rstrip(",")
+            pos = pos.strip().rstrip(",")
+            pos = ((pos + ", ") if pos else "") + "(%s:%g)" % (neg, weight)
+            neg = ""
         g.set_input("encode_pos", "text", pos)
         g.set_input("encode_neg", "text", neg)
 
