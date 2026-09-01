@@ -84,6 +84,11 @@ PanelWindow {
         // Flip with the sharp copy, or the blur showing through the drag gap
         // would be the un-mirrored picture.
         mirror: SettingsStore.d.wallpaperFlip
+        transform: Scale {
+            origin.x: width / 2
+            origin.y: height / 2
+            yScale: SettingsStore.d.wallpaperFlipVertical ? -1 : 1
+        }
         // The cached blur is already tiny and already smooth — decode it at its
         // natural size. Only the fallback needs shrinking to fake a blur.
         sourceSize.width: root.haveBlur ? 0 : root.fallbackBlurSize

@@ -28,6 +28,13 @@ Image {
     // Horizontal flip (Settings > wallpaper). Image.mirror is a sampling flag,
     // not a transform: it costs nothing per frame and does not re-decode.
     mirror: SettingsStore.d.wallpaperFlip
+    // The vertical counterpart needs a transform because Image exposes only
+    // horizontal mirroring. It changes sampling after the image is decoded.
+    transform: Scale {
+        origin.x: root.width / 2
+        origin.y: root.height / 2
+        yScale: SettingsStore.d.wallpaperFlipVertical ? -1 : 1
+    }
     asynchronous: true                 // never block the panel on a big decode
     cache: false                       // one big image; the cache would just
                                        // hold a second copy of it in memory
