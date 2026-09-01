@@ -458,9 +458,10 @@ static int countCp(const std::string& s, size_t byteLen) {
     return n;
 }
 
-// Keep the titlebar on the same 14px glyph raster as the desktop setting.
+// Pango's nominal 14px Oxygen line box is one pixel taller than the fixed
+// titlebar cell. Keep the 13px raster so the title remains vertically centred.
 static int terminalRasterSize(int cellSize) {
-    return cellSize;
+    return Vtb::Cfg::fontTerminalCell() ? std::max(1, cellSize - 1) : cellSize;
 }
 
 static void applyTextFontOptions(cairo_font_options_t* options) {
