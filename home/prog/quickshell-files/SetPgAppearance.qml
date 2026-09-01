@@ -72,6 +72,14 @@ Column {
             }
         }
         SetRow {
+            // Matches the horizontal flip: only the rendered image changes.
+            label: "flip vertically"
+            SetToggle {
+                checked: page.d.wallpaperFlipVertical
+                onToggled: (v) => { page.d.wallpaperFlipVertical = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
             label: "sort order"
             SetSelect {
                 options: ["name", "mtime", "random"]

@@ -387,6 +387,10 @@ Singleton {
             // file on disk and the palette derived from it are untouched, so
             // flipping is free and reversible.
             property bool   wallpaperFlip: false
+            // The matching top-to-bottom mirror. Like wallpaperFlip, this only
+            // changes sampling in the panel; the source image and its palette
+            // stay untouched.
+            property bool   wallpaperFlipVertical: false
 
             // ---- Panel & Widgets ----
             // The desktop's view mode, and the dock panel's width as a fraction
@@ -632,7 +636,7 @@ Singleton {
         wallpaperHidden: [], wallpaperShowHidden: false,
         rgbFollowTheme: true, reduceMotion: false, animSpeed: 1.0,
         wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",
-        wallpaperSolid: false, wallpaperFlip: false,
+        wallpaperSolid: false, wallpaperFlip: false, wallpaperFlipVertical: false,
         viewMode: "classic", dockWidthFrac: 0.15,
         barWidth: 48, barEdge: "right", barGap: 8, barCell: 40, taskbarClickMinimizes: true, dockHeader: true, dockUptime: true,
         procSort: "cpu", mediaLocalLoop: 0, mediaQueueOpen: false, topStatsOpen: false,
