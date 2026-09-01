@@ -59,6 +59,7 @@ Singleton {
             family: font,
             pixelSize: fontSize,
             letterSpacing: fontLetterSpacing(deviceScale),
+            weight: fontTerminalCell ? Font.Medium : Font.Normal,
             hintingPreference: fontTerminalCell ? Font.PreferVerticalHinting
                                                 : (fontSmooth ? Font.PreferNoHinting
                                                               : Font.PreferFullHinting)
@@ -71,12 +72,7 @@ Singleton {
     // is 16px, so 15 is slightly off-grid and a touch softer than 16 would be —
     // intentional, it's the price of matching kitty rather than the pixel grid.
     // See PixelText.qml.
-    // Kitty receives this setting in points. At the 14px Oxygen Mono pick its
-    // 10pt cell resolves to 13 Qt pixels, not the raw 14. Keep kitty as the
-    // reference rather than making every non-terminal surface one pixel taller.
-    readonly property int fontSize: fontTerminalCell
-                                   ? Math.max(1, SettingsStore.d.fontSize - 1)
-                                   : SettingsStore.d.fontSize
+    readonly property int fontSize: SettingsStore.d.fontSize
     readonly property int clockSize: fontSize
 
     // The height of ONE text row in the LIVE face — measured, never assumed to
