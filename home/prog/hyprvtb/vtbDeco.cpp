@@ -458,8 +458,8 @@ static int countCp(const std::string& s, size_t byteLen) {
     return n;
 }
 
-// Match the desktop's 14px Oxygen raster. Horizontal titlebars compensate the
-// one-pixel Pango line-box offset when positioning the resulting layout.
+// Match the desktop's 14px Oxygen raster. Horizontal titlebars centre the
+// visible Pango ink rather than its asymmetric line box.
 static int terminalRasterSize(int cellSize) {
     return cellSize;
 }
@@ -930,12 +930,13 @@ SP<Render::ITexture> CVtbDeco::renderHorizTex(const std::string& text, int runLe
     pango_layout_set_single_paragraph_mode(layout, true);
     pango_layout_set_text(layout, text.c_str(), -1);
 
-    // centre the line vertically across the bar's thickness
-    int lh = 0;
-    pango_layout_get_pixel_size(layout, nullptr, &lh);
+    // Centre the visible ink, not Pango's ascent/descent line box: Oxygen's
+    // 14px line has unequal leading and line-box centring leaves its title
+    // visibly high beside the button glyphs.
+    PangoRectangle ink{};
+    pango_layout_get_pixel_extents(layout, &ink, nullptr);
     cairo_set_source_rgba(CR, COLOR.r, COLOR.g, COLOR.b, COLOR.a);
-    const double y = std::max(0.0, (BARW - lh) / 2.0)
-                   + (Cfg::fontTerminalCell() ? 1.0 : 0.0);
+    const double y = (BARW - ink.height) / 2.0 - ink.y;
     cairo_move_to(CR, 0, y);
     showTextLayout(CR, layout, COLOR);
 
