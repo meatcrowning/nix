@@ -71,7 +71,7 @@ import math
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QFileSystemWatcher, QObject, Property, Signal
+from PySide6.QtCore import QFileSystemWatcher, QObject, Property, Signal, Slot
 from PySide6.QtGui import QFont, QFontMetrics
 
 from kdetheme import is_plasma, kde_font, kde_motion, kdeglobals_path, read_ini
@@ -392,6 +392,28 @@ class DeskStyle(QObject):
         else:
             f.setHintingPreference(QFont.PreferFullHinting)
             f.setStyleStrategy(QFont.NoAntialias)
+        return f
+
+    @Slot(float, result=QFont)
+    def editorFontAt(self, deviceScale):
+        """`editorFont` with the per-scale advance correction baked in.
+
+        The QML `font` group and a `font.letterSpacing:` sub-property cannot
+        both be assigned on one item ("Property has already been assigned a
+        value" — a FATAL component error), so the two cannot be combined in
+        QML. They are combined here instead. Same maths as Theme.qml's
+        `fontLetterSpacing()`; a scale of 0/NaN just returns the plain font."""
+        f = self.editorFont
+        try:
+            scale = float(deviceScale)
+        except (TypeError, ValueError):
+            return f
+        if not (self._advance_ratio > 0) or not (scale > 0) or not math.isfinite(scale):
+            return f
+        advance = self._size * self._advance_ratio
+        spacing = round(advance * scale) / scale - advance
+        if spacing:
+            f.setLetterSpacing(QFont.AbsoluteSpacing, spacing)
         return f
 
     @Property(int, notify=changed)

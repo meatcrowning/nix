@@ -194,8 +194,7 @@ Window {
                 verticalAlignment: TextInput.AlignVCenter
                 clip: true
 
-                font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
-                font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
+                font: Theme.editorFontAt(Screen.devicePixelRatio)   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
                 renderType: Text.NativeRendering
                 color: Theme.text
                 selectionColor: Theme.accent

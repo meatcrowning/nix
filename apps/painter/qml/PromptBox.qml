@@ -352,8 +352,7 @@ Rectangle {
             height: Math.max(implicitHeight, flick.height)
             wrapMode: TextEdit.Wrap
             color: box.negative ? Theme.textDim : Theme.text
-            font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
-            font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
+            font: Theme.editorFontAt(Screen.devicePixelRatio)   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
             renderType: Text.NativeRendering
             // NO lineHeight/lineHeightMode HERE. They are Text-only properties;
             // QQuickTextEdit does not have them, so assigning them is a

@@ -2926,8 +2926,7 @@ Component {
                     color: win.fgText
                     // Whole QFont: an editable item draws a scalable pixel font
                     // grey-fringed otherwise (docs/DESIGN.md §2.2).
-                    font: Theme.editorFont
-            font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
+                    font: Theme.editorFontAt(Screen.devicePixelRatio)
                     renderType: Text.NativeRendering
                     clip: true
                     selectByMouse: true

@@ -128,8 +128,7 @@ Rectangle {
                     anchors { fill: parent; margins: 4 }
                     verticalAlignment: TextInput.AlignVCenter
                     color: root.winActive ? Theme.text : Theme.inactive
-                    font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
-                    font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
+                    font: Theme.editorFontAt(Screen.devicePixelRatio)   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
                     renderType: Text.NativeRendering
                     clip: true
                     selectByMouse: true
@@ -236,8 +235,7 @@ Rectangle {
                     anchors { fill: parent; margins: 4 }
                     verticalAlignment: TextInput.AlignVCenter
                     color: root.winActive ? Theme.text : Theme.inactive
-                    font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
-                    font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
+                    font: Theme.editorFontAt(Screen.devicePixelRatio)   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
                     renderType: Text.NativeRendering
                     clip: true
                     selectByMouse: true
