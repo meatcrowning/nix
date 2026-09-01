@@ -24,19 +24,25 @@ Text {
     // (the panel's Notifications.plain()) strips tags instead.
     textFormat: Text.PlainText
 
-    font.family: Theme.font
-    font.pixelSize: Theme.fontSize
-    font.weight: Theme.fontTerminalCell ? Font.Bold : Font.Normal
-    font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
+    font: (typeof DeskStyle !== "undefined" && DeskStyle
+           && typeof DeskStyle.labelFontForScale === "function")
+          ? DeskStyle.labelFontForScale(Screen.devicePixelRatio)
+          : Qt.font({ family: Theme.font, pixelSize: Theme.fontSize,
+                      hintingPreference: Theme.fontTerminalCell
+                                         ? Font.PreferVerticalHinting
+                                         : (Theme.fontSmooth ? Font.PreferNoHinting
+                                                             : Font.PreferFullHinting) })
     // PIXEL-FACE settings — except when the live face is a smooth outline
     // (Theme.fontSmooth <- DeskStyle.smooth: Phenex, the cursive). Then the
     // crisp pipeline is exactly wrong (staircased curves, kinked joins):
     // keep NativeRendering but antialias and drop hinting, matching the
     // face's fontconfig rule and docs/DESIGN.md 2.2.
-    font.hintingPreference: Theme.fontTerminalCell ? Font.PreferVerticalHinting
-                                                    : (Theme.fontSmooth ? Font.PreferNoHinting : Font.PreferFullHinting)
     renderType: Text.NativeRendering
     antialiasing: Theme.fontSmooth
+    readonly property bool oxygenExternal: Theme.font === "Oxygen Mono"
+                                        && Screen.devicePixelRatio <= 1.01
+    style: oxygenExternal ? Text.Outline : Text.Normal
+    styleColor: oxygenExternal ? Qt.rgba(color.r, color.g, color.b, 0.12) : color
 
     // Match kitty's line packing. The font's line box is exactly 1 em, but Qt
     // rounds ascent/descent UP separately (at 15px: 11.25→12 + 3.75→4 = 16px per

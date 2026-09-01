@@ -22,17 +22,13 @@ import QtQuick
 // no hinting — the same rasterisation kitty and the titlebar give it) but
 // with antialiasing on and hinting off.
 Text {
-    font.family: Theme.font
-    font.pixelSize: Theme.fontSize
-    font.weight: Theme.fontTerminalCell ? Font.Bold : Font.Normal
-    font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
-    // Oxygen Mono needs Kitty's lightly/vertically hinted outline.  Full
-    // hinting happens to force an 8px Qt advance, but changes the actual glyph
-    // shapes; Kitty packs its cells separately and keeps the lighter raster.
-    font.hintingPreference: Theme.fontTerminalCell ? Font.PreferVerticalHinting
-                                                    : (Theme.fontSmooth ? Font.PreferNoHinting : Font.PreferFullHinting)
+    font: Theme.fontForScale(Screen.devicePixelRatio)
     renderType: Text.NativeRendering
     antialiasing: Theme.fontSmooth
+    readonly property bool oxygenExternal: Theme.font === "Oxygen Mono"
+                                        && Screen.devicePixelRatio <= 1.01
+    style: oxygenExternal ? Text.Outline : Text.Normal
+    styleColor: oxygenExternal ? Qt.rgba(color.r, color.g, color.b, 0.12) : color
 
     // Text defaults to AutoText, which SNIFFS for HTML and renders it as rich
     // text. Nearly everything the panel draws is a string from somewhere else —
