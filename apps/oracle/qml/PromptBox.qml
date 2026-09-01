@@ -66,8 +66,7 @@ Rectangle {
             // alone, which is why the box he types into came out aliased and
             // blurry while every label around it was crisp. Same pairing as
             // editor's CodeView and board's InputBox.
-            font: Theme.editorFont
-            font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
+            font: Theme.editorFontAt(Screen.devicePixelRatio)
             renderType: Text.NativeRendering
             color: Theme.text
             selectionColor: Theme.accent

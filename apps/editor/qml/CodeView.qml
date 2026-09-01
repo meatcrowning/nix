@@ -327,8 +327,7 @@ Item {
             // Qt's own ascent+descent — which is exactly `Theme.lineHeight`,
             // the same quantity the gutter asks the document's layout for, so
             // the two stay lined up on any face.
-            font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
-            font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
+            font: Theme.editorFontAt(Screen.devicePixelRatio)   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
             renderType: Text.NativeRendering
 
             // PLAIN TEXT, ALWAYS — §2.6, and here it is not merely a security

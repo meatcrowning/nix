@@ -24,8 +24,7 @@ TextEdit {
     textFormat: TextEdit.PlainText
     wrapMode: TextEdit.Wrap
 
-    font: Theme.editorFont
-            font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
+    font: Theme.editorFontAt(Screen.devicePixelRatio)
     renderType: Text.NativeRendering
     selectionColor: Theme.highlight
     selectedTextColor: Theme.accent

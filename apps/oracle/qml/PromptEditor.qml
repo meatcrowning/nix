@@ -60,8 +60,7 @@ Rectangle {
             TextEdit {
                 id: editorArea
                 width: editorFlick.width
-                font: Theme.editorFont
-            font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
+                font: Theme.editorFontAt(Screen.devicePixelRatio)
                 renderType: Text.NativeRendering
                 color: Theme.text
                 selectionColor: Theme.accent
