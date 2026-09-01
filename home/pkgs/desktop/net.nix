@@ -32,6 +32,25 @@ in
         (vivaldi.override {
           proprietaryCodecs = isx86;
           enableWidevine = isx86;
+          # Pin the password store instead of letting Chromium guess it.
+          #
+          # Chromium keeps the key it encrypts cookies and saved passwords
+          # with in the desktop keyring, and picks WHICH keyring slot from
+          # $XDG_CURRENT_DESKTOP: a KDE session -> kwallet, folder
+          # `Chrome Keys`, entry `Chrome Safe Storage`; an unknown desktop
+          # (Hyprland is one) -> libsecret, or the hardcoded `peanuts` key if
+          # nothing answers. A slot it finds EMPTY gets a fresh random key
+          # written into it, and every blob written under the old one is then
+          # undecryptable and deleted on the next start
+          # (`clearing_undecryptable_passwords`).
+          #
+          # That is not hypothetical: on 2026-08-31 a Hyprland launch minted a
+          # brand-new key at `Secret Service/Chrome Safe Storage` while 490 of
+          # 685 cookies and 27 of 31 logins were still `v11` under the January
+          # kwallet key. Verified by test-decryption
+          # (`apps/pylib/tools/chromium-key-recover.py`): the real key is the
+          # kwallet one, so name that backend and the session stops mattering.
+          commandLineArgs = "--password-store=kwallet6";
         })
   ];
 }
