@@ -50,6 +50,10 @@ if [ -f "$SETTINGS" ]; then
     case "$SIZE" in ''|*[!0-9]*) SIZE=15 ;; esac
     case "$FAMILY" in ''|null) FAMILY="More Perfect DOS VGA" ;; esac
 fi
+# The Qt surfaces use kitty's resolved Oxygen Mono cell, not its nominal
+# settings value.  Keep the compositor titlebar on that same 13px cell.
+RENDER_SIZE="$SIZE"
+[ "$FAMILY" = "Oxygen Mono" ] && RENDER_SIZE=$(( SIZE - 1 ))
 # The kitty/kdeglobals/qutebrowser size is in POINTS, and the desktop's is in
 # PIXELS (DESIGN §2.1: 15px == 11pt at 96 DPI). Convert, keeping the default
 # exact (1080/96 = 11.25 -> 11).
@@ -88,7 +92,7 @@ pkill -USR1 -x kitty >/dev/null 2>&1 || true
 # ---- 2. hyprvtb titlebar ---------------------------------------------------
 # Same live-config path wal-set.sh uses for the titlebar colours. The titlebar
 # font_size is in PIXELS (matches the panel/Theme), unlike kitty's points, so
-# the raw pick size is used here. Set via the running compositor; re-applied at
+# the resolved render size is used here. Set via the running compositor; re-applied at
 # each login by the autostart call, so it survives a restart without touching
 # the seed-once hyprland.lua.
 #
@@ -104,7 +108,7 @@ case "$SMOOTH" in true|false) ;; *) SMOOTH=false ;; esac
 TERMINAL_CELL=false
 [ -f "$FACES" ] && TERMINAL_CELL="$(jq -r --arg f "$FAMILY" '.[$f].terminalCell // false' "$FACES" 2>/dev/null)"
 case "$TERMINAL_CELL" in true|false) ;; *) TERMINAL_CELL=false ;; esac
-hyprctl eval "hl.config({ plugin = { hyprvtb = { [\"font\"] = \"$FAMILY\", [\"font_size\"] = $SIZE, [\"font_smooth\"] = $SMOOTH, [\"font_terminal_cell\"] = $TERMINAL_CELL } } })" >/dev/null 2>&1 || true
+hyprctl eval "hl.config({ plugin = { hyprvtb = { [\"font\"] = \"$FAMILY\", [\"font_size\"] = $RENDER_SIZE, [\"font_smooth\"] = $SMOOTH, [\"font_terminal_cell\"] = $TERMINAL_CELL } } })" >/dev/null 2>&1 || true
 # Persist the four keys into hyprland.lua (same pattern as wal-set.sh's
 # shadow_alpha/title_rotated): Hyprland AUTO-RELOADS its config whenever that
 # file changes — and wal-set.sh seds the palette into it on EVERY theme apply —
@@ -119,7 +123,7 @@ if [ -f "$LUA" ]; then
         sed -i -E "s|(\[\"$1\"\][[:space:]]*=[[:space:]]*)[^,]*,|\1$2,|" "$LUA"
     }
     lua_kv font "\"$FAMILY\""
-    lua_kv font_size "$SIZE"
+    lua_kv font_size "$RENDER_SIZE"
     lua_kv font_smooth "$SMOOTH"
     lua_kv font_terminal_cell "$TERMINAL_CELL"
 fi

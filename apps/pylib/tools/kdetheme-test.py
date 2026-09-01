@@ -232,8 +232,8 @@ check("hypr: Oxygen Mono publishes its fractional advance ratio",
 check("hypr: Oxygen Mono editor text keeps Kitty's vertical hinting",
       o.editorFont.hintingPreference() == QFont.PreferVerticalHinting)
 o_metrics = QFontMetricsF(o.editorFont)
-check("hypr: Oxygen Mono keeps Kitty's 14px text cell",
-      round(o_metrics.height()) == 14,
+check("hypr: Oxygen Mono keeps Kitty's 13px resolved text cell",
+      round(o_metrics.height()) == 13,
       f"{o_metrics.horizontalAdvance('M'):.3f}×{o_metrics.height():.3f}")
 
 env(DESK_SESSION="plasma")
