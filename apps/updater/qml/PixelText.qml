@@ -8,7 +8,7 @@ Text {
 
     font.family: Theme.font
     font.pixelSize: Theme.fontSize
-    font.weight: Theme.fontTerminalCell ? Font.Medium : Font.Normal
+    font.weight: Theme.fontTerminalCell ? Font.Bold : Font.Normal
     font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
     font.hintingPreference: Theme.fontTerminalCell ? Font.PreferVerticalHinting
                                                     : (Theme.fontSmooth ? Font.PreferNoHinting : Font.PreferFullHinting)

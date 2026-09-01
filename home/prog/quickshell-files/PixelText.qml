@@ -24,7 +24,7 @@ import QtQuick
 Text {
     font.family: Theme.font
     font.pixelSize: Theme.fontSize
-    font.weight: Theme.fontTerminalCell ? Font.Medium : Font.Normal
+    font.weight: Theme.fontTerminalCell ? Font.Bold : Font.Normal
     font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
     // Oxygen Mono needs Kitty's lightly/vertically hinted outline.  Full
     // hinting happens to force an 8px Qt advance, but changes the actual glyph
