@@ -283,6 +283,17 @@ Singleton {
             // ---- Appearance ----
             property string themeMode: "auto"          // auto (wal) | manual
             property string accentOverride: "#5c9fcc"  // used when themeMode = manual
+            // The theme section's own colour: what the desktop is built around
+            // when the wallpaper is not supplying it. Today it tints the
+            // colour-agnostic background (see customBackground); it is stored
+            // as "#rrggbb" whatever the user typed (a name is normalised on
+            // commit, SetColor.qml).
+            property string baseColor: "#5c9fcc"
+            // On: the paper section's wallpaper and its theme apply as picked.
+            // Off: the same picture is drawn colour-agnostic — desaturated and
+            // recoloured from baseColor above (WallpaperLayer.qml), so the
+            // desktop follows the theme section instead of the photograph.
+            property bool   customBackground: true
             property string fontFamily: "More Perfect DOS VGA"
             property int    fontSize: 15               // matches kitty's on-screen cell (11pt@96dpi ≈ 14.67px); see Theme.qml
             // Last-used size per font family, family -> px. Written only by
@@ -628,7 +639,8 @@ Singleton {
     // the adapter block above.
     readonly property var defaults: ({
         schemaVersion: 1,
-        themeMode: "auto", accentOverride: "#5c9fcc", fontFamily: "More Perfect DOS VGA",
+        themeMode: "auto", accentOverride: "#5c9fcc", baseColor: "#5c9fcc", customBackground: true,
+        fontFamily: "More Perfect DOS VGA",
         fontSize: 15, fontSizeByFamily: ({}), paletteColorCount: 16, pureBlackBg: true, pureBlackBgDark: true, lightMode: false,
         paletteVariant: "pastel", windowBorderWidth: 2,
         windowRounding: 0, trayTint: true, desktopIcons: true, shadowAlpha: 0.6, titleOrientation: "vertical", dimUnfocused: true, titlebarEdge: "right", compact: false, scrollbarStyle: "win31",
