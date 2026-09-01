@@ -50,14 +50,34 @@ Singleton {
         return Math.round(advance * scale) / scale - advance;
     }
 
+    // A complete font for controls which take a QFont (`TextInput` and
+    // `TextMetrics`) rather than the `PixelText` font group.  Keeping the
+    // terminal-cell correction here means those controls and ordinary labels
+    // use the same Oxygen Mono advances as kitty.
+    function fontForScale(deviceScale) {
+        return Qt.font({
+            family: font,
+            pixelSize: fontSize,
+            letterSpacing: fontLetterSpacing(deviceScale),
+            hintingPreference: fontTerminalCell ? Font.PreferVerticalHinting
+                                                : (fontSmooth ? Font.PreferNoHinting
+                                                              : Font.PreferFullHinting)
+        });
+    }
+
     // Text size in PIXELS (not points). Matched to kitty's on-screen size:
     // kitty is font_size 11pt, which at 96 DPI (1080p, scale 1.0) rasterises to
     // ~14.67px, so 15px here matches the terminal. NOTE: the font's native cell
     // is 16px, so 15 is slightly off-grid and a touch softer than 16 would be —
     // intentional, it's the price of matching kitty rather than the pixel grid.
     // See PixelText.qml.
-    readonly property int fontSize: SettingsStore.d.fontSize
-    readonly property int clockSize: SettingsStore.d.fontSize   // same size as the rest of the panel
+    // Kitty receives this setting in points. At the 14px Oxygen Mono pick its
+    // 10pt cell resolves to 13 Qt pixels, not the raw 14. Keep kitty as the
+    // reference rather than making every non-terminal surface one pixel taller.
+    readonly property int fontSize: fontTerminalCell
+                                   ? Math.max(1, SettingsStore.d.fontSize - 1)
+                                   : SettingsStore.d.fontSize
+    readonly property int clockSize: fontSize
 
     // The height of ONE text row in the LIVE face — measured, never assumed to
     // be `fontSize`. `fontSize` is the em size we ask for; the cell it actually

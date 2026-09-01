@@ -319,13 +319,24 @@ class DeskStyle(QObject):
         size = max(KDE_MIN_FONT_SIZE, min(KDE_MAX_FONT_SIZE, int(round(size))))
         return (fam, size, fam not in PIXEL_FAMILIES)
 
+    def _render_size(self):
+        """The Qt pixel cell that corresponds to kitty's configured cell.
+
+        Settings stores the desktop's nominal pixel size, but kitty receives
+        it in whole points.  Oxygen Mono at the selected 14 therefore becomes
+        kitty's 10pt/13px cell; forcing Qt to 14px made every QML surface one
+        pixel taller and visibly a different raster.  The other faces already
+        resolve to the nominal cell unchanged.
+        """
+        return max(1, self._size - 1) if self._terminal_cell else self._size
+
     @Property(str, notify=changed)
     def fontFamily(self):
         return self._family
 
     @Property(int, notify=changed)
     def fontSize(self):
-        return self._size
+        return self._render_size()
 
     @Property(int, notify=changed)
     def borderWidth(self):
@@ -384,7 +395,7 @@ class DeskStyle(QObject):
         no NoAntialias and no hinting. Oxygen Mono is the explicit exception:
         kitty uses its native TrueType hints, so Qt keeps them too."""
         f = QFont(self._family)
-        f.setPixelSize(self._size)
+        f.setPixelSize(self._render_size())
         if self._terminal_cell:
             f.setHintingPreference(QFont.PreferVerticalHinting)
         elif self._smooth:
@@ -410,7 +421,7 @@ class DeskStyle(QObject):
             return f
         if not (self._advance_ratio > 0) or not (scale > 0) or not math.isfinite(scale):
             return f
-        advance = self._size * self._advance_ratio
+        advance = self._render_size() * self._advance_ratio
         spacing = round(advance * scale) / scale - advance
         if spacing:
             f.setLetterSpacing(QFont.AbsoluteSpacing, spacing)
@@ -445,7 +456,7 @@ class DeskStyle(QObject):
         only for an actual font size.
         """
         f = QFont(self._family)
-        f.setPixelSize(self._size)
+        f.setPixelSize(self._render_size())
         f.setHintingPreference(QFont.PreferFullHinting)
         return max(1, QFontMetrics(f).height())
 
