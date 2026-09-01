@@ -458,10 +458,10 @@ static int countCp(const std::string& s, size_t byteLen) {
     return n;
 }
 
-// Match the desktop's 14px Oxygen raster. Horizontal titlebars centre the
-// visible Pango ink rather than its asymmetric line box.
+// Qt's 10pt Oxygen raster occupies a 13px cell at this desktop scale. Keep
+// Pango on that same raster while the titlebar itself retains its 14px cell.
 static int terminalRasterSize(int cellSize) {
-    return cellSize;
+    return Vtb::Cfg::fontTerminalCell() ? std::max(1, cellSize - 1) : cellSize;
 }
 
 static void applyTextFontOptions(cairo_font_options_t* options) {
@@ -471,18 +471,18 @@ static void applyTextFontOptions(cairo_font_options_t* options) {
     }
     if (Vtb::Cfg::fontTerminalCell()) {
         cairo_font_options_set_antialias(options, CAIRO_ANTIALIAS_GRAY);
-        cairo_font_options_set_hint_style(options, CAIRO_HINT_STYLE_FULL);
+        cairo_font_options_set_hint_style(options, CAIRO_HINT_STYLE_SLIGHT);
         cairo_font_options_set_hint_metrics(options, CAIRO_HINT_METRICS_ON);
     }
 }
 
-// Oxygen Mono ships only a Regular cut. Match Qt's subtle current-colour
-// outline with a 0.44px Cairo stroke (0.22px per edge).
+// Oxygen Mono ships only a Regular cut. Match Qt PixelText's subtle
+// current-colour outline with a 0.24px Cairo stroke (0.12px per edge).
 static void showTextLayout(cairo_t* cr, PangoLayout* layout, const CHyprColor& color) {
     if (Vtb::Cfg::fontTerminalCell()) {
         cairo_save(cr);
-        cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a * 0.22);
-        cairo_set_line_width(cr, 0.44);
+        cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a * 0.12);
+        cairo_set_line_width(cr, 0.24);
         pango_cairo_layout_path(cr, layout);
         cairo_stroke(cr);
         cairo_restore(cr);
@@ -930,14 +930,12 @@ SP<Render::ITexture> CVtbDeco::renderHorizTex(const std::string& text, int runLe
     pango_layout_set_single_paragraph_mode(layout, true);
     pango_layout_set_text(layout, text.c_str(), -1);
 
-    // Centre the visible ink, not Pango's ascent/descent line box: Oxygen's
-    // 14px line has unequal leading and line-box centring leaves its title
-    // visibly high beside the button glyphs.
-    PangoRectangle ink{};
-    pango_layout_get_pixel_extents(layout, &ink, nullptr);
+    // Preserve the titlebar's established line-box placement. The titlebar's
+    // fixed 14px cell deliberately contains this 13px terminal raster.
+    int lh = 0;
+    pango_layout_get_pixel_size(layout, nullptr, &lh);
     cairo_set_source_rgba(CR, COLOR.r, COLOR.g, COLOR.b, COLOR.a);
-    const double y = (BARW - ink.height) / 2.0 - ink.y;
-    cairo_move_to(CR, 0, y);
+    cairo_move_to(CR, 0, std::max(0.0, (BARW - lh) / 2.0));
     showTextLayout(CR, layout, COLOR);
 
     pango_font_description_free(fd);
