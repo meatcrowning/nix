@@ -322,13 +322,9 @@ class DeskStyle(QObject):
     def _render_size(self):
         """The Qt pixel cell that corresponds to kitty's configured cell.
 
-        Settings stores the desktop's nominal pixel size, but kitty receives
-        it in whole points.  Oxygen Mono at the selected 14 therefore becomes
-        kitty's 10pt/13px cell; forcing Qt to 14px made every QML surface one
-        pixel taller and visibly a different raster.  The other faces already
-        resolve to the nominal cell unchanged.
+        The nominal desktop setting is the size every QML surface draws at.
         """
-        return max(1, self._size - 1) if self._terminal_cell else self._size
+        return self._size
 
     @Property(str, notify=changed)
     def fontFamily(self):
@@ -397,6 +393,7 @@ class DeskStyle(QObject):
         f = QFont(self._family)
         f.setPixelSize(self._render_size())
         if self._terminal_cell:
+            f.setWeight(QFont.Medium)
             f.setHintingPreference(QFont.PreferVerticalHinting)
         elif self._smooth:
             f.setHintingPreference(QFont.PreferNoHinting)

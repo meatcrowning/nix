@@ -35,6 +35,7 @@ Text {
 
     font.family: Theme.font
     font.pixelSize: Theme.fontSize
+    font.weight: Theme.fontTerminalCell ? Font.Medium : Font.Normal
     font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
     // PIXEL-FACE settings — except when the live face is a smooth outline
     // (Theme.fontSmooth <- DeskStyle.smooth: Phenex, the cursive). Then the
