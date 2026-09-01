@@ -458,10 +458,10 @@ static int countCp(const std::string& s, size_t byteLen) {
     return n;
 }
 
-// Pango's nominal 14px Oxygen line box is one pixel taller than the fixed
-// titlebar cell. Keep the 13px raster so the title remains vertically centred.
+// Match the desktop's 14px Oxygen raster. Horizontal titlebars compensate the
+// one-pixel Pango line-box offset when positioning the resulting layout.
 static int terminalRasterSize(int cellSize) {
-    return Vtb::Cfg::fontTerminalCell() ? std::max(1, cellSize - 1) : cellSize;
+    return cellSize;
 }
 
 static void applyTextFontOptions(cairo_font_options_t* options) {
@@ -934,7 +934,9 @@ SP<Render::ITexture> CVtbDeco::renderHorizTex(const std::string& text, int runLe
     int lh = 0;
     pango_layout_get_pixel_size(layout, nullptr, &lh);
     cairo_set_source_rgba(CR, COLOR.r, COLOR.g, COLOR.b, COLOR.a);
-    cairo_move_to(CR, 0, std::max(0.0, (BARW - lh) / 2.0));
+    const double y = std::max(0.0, (BARW - lh) / 2.0)
+                   + (Cfg::fontTerminalCell() ? 1.0 : 0.0);
+    cairo_move_to(CR, 0, y);
     showTextLayout(CR, layout, COLOR);
 
     pango_font_description_free(fd);
