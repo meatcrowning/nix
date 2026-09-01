@@ -11,6 +11,7 @@
     home-manager
     cava
     killall
+    codex
     # claude-code, off numtide/llm-agents.nix instead of nixpkgs so it tracks
     # Anthropic's releases (nixpkgs' copy lags days behind). system is derived
     # from pkgs so this resolves on both `top` (x86_64) and `air` (aarch64).
