@@ -72,7 +72,7 @@ import os
 from pathlib import Path
 
 from PySide6.QtCore import QFileSystemWatcher, QObject, Property, Signal, Slot
-from PySide6.QtGui import QFont, QFontMetrics
+from PySide6.QtGui import QFont, QFontMetrics, QFontMetricsF
 
 from kdetheme import is_plasma, kde_font, kde_motion, kdeglobals_path, read_ini
 from oxygenstyle import is_oxygen, metrics as ox_metrics, motion as ox_motion, \
@@ -391,15 +391,39 @@ class DeskStyle(QObject):
         no NoAntialias and no hinting. Oxygen Mono is the explicit exception:
         kitty uses its native TrueType hints, so Qt keeps them too."""
         f = QFont(self._family)
-        f.setPixelSize(self._render_size())
         if self._terminal_cell:
-            f.setWeight(QFont.Bold)
-            f.setHintingPreference(QFont.PreferVerticalHinting)
-        elif self._smooth:
-            f.setHintingPreference(QFont.PreferNoHinting)
+            f.setPointSizeF(max(1, math.floor(self._size * 72 / 96)))
+            f.setWeight(QFont.Medium)
+            f.setHintingPreference(QFont.PreferDefaultHinting)
         else:
-            f.setHintingPreference(QFont.PreferFullHinting)
+            f.setPixelSize(self._size)
+        if not self._terminal_cell and self._smooth:
+            f.setHintingPreference(QFont.PreferNoHinting)
+        elif not self._terminal_cell:
+            f.setHintingPreference(QFont.PreferDefaultHinting)
             f.setStyleStrategy(QFont.NoAntialias)
+        return f
+
+    @Slot(float, result=QFont)
+    def labelFontForScale(self, device_scale):
+        """Return the label QFont with Kitty's terminal-cell raster."""
+        f = QFont(self._family)
+        if self._terminal_cell:
+            f.setPointSizeF(max(1, math.floor(self._size * 72 / 96)))
+            f.setWeight(QFont.Medium)
+            f.setHintingPreference(QFont.PreferFullHinting)
+        else:
+            f.setPixelSize(self._size)
+            f.setHintingPreference(QFont.PreferNoHinting if self._smooth
+                                   else QFont.PreferFullHinting)
+        try:
+            scale = float(device_scale)
+        except (TypeError, ValueError):
+            return f
+        if self._terminal_cell and math.isfinite(scale) and scale > 0:
+            advance = QFontMetricsF(f).horizontalAdvance("M")
+            f.setLetterSpacing(QFont.AbsoluteSpacing,
+                               round(advance * scale) / scale - advance)
         return f
 
     @Slot(float, result=QFont)
@@ -418,10 +442,9 @@ class DeskStyle(QObject):
             return f
         if not (self._advance_ratio > 0) or not (scale > 0) or not math.isfinite(scale):
             return f
-        advance = self._render_size() * self._advance_ratio
-        spacing = round(advance * scale) / scale - advance
-        if spacing:
-            f.setLetterSpacing(QFont.AbsoluteSpacing, spacing)
+        advance = QFontMetricsF(f).horizontalAdvance("M")
+        f.setLetterSpacing(QFont.AbsoluteSpacing,
+                           round(advance * scale) / scale - advance)
         return f
 
     @Property(int, notify=changed)

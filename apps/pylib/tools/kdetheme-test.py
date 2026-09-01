@@ -229,10 +229,10 @@ check("hypr: Oxygen Mono is smooth", o.smooth is True)
 check("hypr: Oxygen Mono uses Kitty’s terminal-cell metrics", o.terminalCell is True)
 check("hypr: Oxygen Mono publishes its fractional advance ratio",
       abs(o.advanceRatio - (1229 / 2048)) < 1e-12, str(o.advanceRatio))
-check("hypr: Oxygen Mono editor text keeps Kitty's vertical hinting",
-      o.editorFont.hintingPreference() == QFont.PreferVerticalHinting)
+check("hypr: Oxygen Mono editor text keeps Kitty's fontconfig hinting",
+      o.editorFont.hintingPreference() == QFont.PreferDefaultHinting)
 o_metrics = QFontMetricsF(o.editorFont)
-check("hypr: Oxygen Mono keeps Kitty's 13px resolved text cell",
+check("hypr: Oxygen Mono keeps Kitty's 13px text cell",
       round(o_metrics.height()) == 13,
       f"{o_metrics.horizontalAdvance('M'):.3f}×{o_metrics.height():.3f}")
 

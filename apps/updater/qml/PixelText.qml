@@ -6,14 +6,20 @@ import QtQuick
 Text {
     textFormat: Text.PlainText
 
-    font.family: Theme.font
-    font.pixelSize: Theme.fontSize
-    font.weight: Theme.fontTerminalCell ? Font.Bold : Font.Normal
-    font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
-    font.hintingPreference: Theme.fontTerminalCell ? Font.PreferVerticalHinting
-                                                    : (Theme.fontSmooth ? Font.PreferNoHinting : Font.PreferFullHinting)
+    font: (typeof DeskStyle !== "undefined" && DeskStyle
+           && typeof DeskStyle.labelFontForScale === "function")
+          ? DeskStyle.labelFontForScale(Screen.devicePixelRatio)
+          : Qt.font({ family: Theme.font, pixelSize: Theme.fontSize,
+                      hintingPreference: Theme.fontTerminalCell
+                                         ? Font.PreferVerticalHinting
+                                         : (Theme.fontSmooth ? Font.PreferNoHinting
+                                                             : Font.PreferFullHinting) })
     renderType: Text.NativeRendering
     antialiasing: Theme.fontSmooth
+    readonly property bool oxygenExternal: Theme.font === "Oxygen Mono"
+                                        && Screen.devicePixelRatio <= 1.01
+    style: oxygenExternal ? Text.Outline : Text.Normal
+    styleColor: oxygenExternal ? Qt.rgba(color.r, color.g, color.b, 0.12) : color
 
     lineHeight: Theme.lineHeight
     lineHeightMode: Text.FixedHeight
