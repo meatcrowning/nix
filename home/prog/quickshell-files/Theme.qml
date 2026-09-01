@@ -59,7 +59,7 @@ Singleton {
             family: font,
             pixelSize: fontSize,
             letterSpacing: fontLetterSpacing(deviceScale),
-            weight: fontTerminalCell ? Font.Medium : Font.Normal,
+            weight: fontTerminalCell ? Font.Bold : Font.Normal,
             hintingPreference: fontTerminalCell ? Font.PreferVerticalHinting
                                                 : (fontSmooth ? Font.PreferNoHinting
                                                               : Font.PreferFullHinting)
