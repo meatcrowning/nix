@@ -457,7 +457,8 @@ class DeskStyle(QObject):
             return f
         if not (self._advance_ratio > 0) or not (scale > 0) or not math.isfinite(scale):
             return f
-        advance = QFontMetricsF(f).horizontalAdvance("M")
+        advance = (QFontMetricsF(f).horizontalAdvance("M")
+                   if self.topFontTreatment else self._size * self._advance_ratio)
         f.setLetterSpacing(QFont.AbsoluteSpacing,
                            round(advance * scale) / scale - advance)
         return f
