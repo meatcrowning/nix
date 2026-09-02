@@ -37,6 +37,8 @@ Singleton {
     // remains antialiased; only its advances and stems are grid-fitted.
     readonly property bool fontTerminalCell: FontFaces.terminalCell[font] === true
     readonly property real fontAdvanceRatio: Number(FontFaces.advanceRatio[font]) || 0
+    readonly property bool topFontTreatment: FontFaces.topFontTreatment === true
+    readonly property bool airFontTreatment: FontFaces.airFontTreatment === true
 
     // Kitty receives the desktop slider as points (the generated kitty.conf
     // uses this exact conversion).  Oxygen Mono must begin from that same
@@ -56,10 +58,15 @@ Singleton {
     }
 
     function fontForScale(deviceScale) {
-        if (fontTerminalCell)
+        if (fontTerminalCell && airFontTreatment)
             return Qt.font({ family: font, pointSize: kittyPointSize,
                              letterSpacing: fontLetterSpacing(deviceScale),
                              hintingPreference: Font.PreferFullHinting,
+                             weight: Font.Medium });
+        if (fontTerminalCell && topFontTreatment)
+            return Qt.font({ family: font, pointSize: Math.max(1, Math.floor(fontSize * 72 / 96)),
+                             letterSpacing: fontLetterSpacing(deviceScale),
+                             hintingPreference: Font.PreferDefaultHinting,
                              weight: Font.Medium });
         return Qt.font({ family: font, pixelSize: fontSize,
                          hintingPreference: fontSmooth ? Font.PreferNoHinting
@@ -73,7 +80,7 @@ Singleton {
     // intentional, it's the price of matching kitty rather than the pixel grid.
     // See PixelText.qml.
     readonly property int fontSize: SettingsStore.d.fontSize
-    readonly property int clockSize: SettingsStore.d.fontSize   // same size as the rest of the panel
+    readonly property int clockSize: fontSize
 
     // The height of ONE text row in the LIVE face — measured, never assumed to
     // be `fontSize`. `fontSize` is the em size we ask for; the cell it actually

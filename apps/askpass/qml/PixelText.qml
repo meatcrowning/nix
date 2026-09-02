@@ -37,9 +37,9 @@ Text {
     // face's fontconfig rule and docs/DESIGN.md 2.2.
     renderType: Text.NativeRendering
     antialiasing: Theme.fontSmooth
-    readonly property bool oxygenExternal: Theme.font === "Oxygen Mono" && Screen.devicePixelRatio <= 1.01
+    readonly property bool oxygenExternal: (typeof DeskStyle !== "undefined" && DeskStyle && (DeskStyle.topFontTreatment || DeskStyle.airFontTreatment)) && Theme.font === "Oxygen Mono" && Screen.devicePixelRatio <= 1.01
     style: oxygenExternal ? Text.Outline : Text.Normal
-    styleColor: oxygenExternal ? Qt.rgba(color.r, color.g, color.b, 0.22) : color
+    styleColor: oxygenExternal ? Qt.rgba(color.r, color.g, color.b, (typeof DeskStyle !== "undefined" && DeskStyle && DeskStyle.airFontTreatment) ? 0.22 : 0.12) : color
 
     // Match kitty's line packing. The font's line box is exactly 1 em, but Qt
     // rounds ascent/descent UP separately (at 15px: 11.25→12 + 3.75→4 = 16px per

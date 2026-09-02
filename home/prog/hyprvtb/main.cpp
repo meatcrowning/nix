@@ -1502,6 +1502,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // apply-pixel-font.sh from the generated font-faces.json.
     g_pGlobalState->config.fontSmooth        = makeShared<Config::Values::CBoolValue>("plugin:hyprvtb:font_smooth", "Titlebar font is a smooth (antialiased) face, not a pixel one", false);
     g_pGlobalState->config.fontTerminalCell  = makeShared<Config::Values::CBoolValue>("plugin:hyprvtb:font_terminal_cell", "Titlebar font uses Kitty-matched terminal-cell raster metrics", false);
+    g_pGlobalState->config.fontTopTreatment  = makeShared<Config::Values::CBoolValue>("plugin:hyprvtb:font_top_treatment", "Use top's measured Oxygen Mono treatment", false);
     g_pGlobalState->config.bgColor           = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:bg_color", "Bar background", 0xff000000);
     g_pGlobalState->config.bgAltColor        = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.bg_alt", "Hovered button fill", 0xff080e12);
     g_pGlobalState->config.textColor         = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.text", "Title / glyph colour", 0xff3f6d8c);
@@ -1557,6 +1558,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.font);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.fontSmooth);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.fontTerminalCell);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.fontTopTreatment);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.bgColor);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.bgAltColor);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.textColor);

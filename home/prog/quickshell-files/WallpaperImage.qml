@@ -22,12 +22,28 @@ Image {
     property int decodeW: 1920
     property int decodeH: 1080
 
+    // "custom background" off (Settings > Appearance > theme): this frame is
+    // not drawn directly — it is rendered to a texture and a MultiEffect in
+    // WallpaperLayer draws the desaturated, base-coloured version of it. The
+    // layer is what keeps the texture alive while the item itself is hidden;
+    // an effect over a plain `visible: false` item has nothing to read.
+    property bool agnostic: false
+    visible: !agnostic
+    layer.enabled: agnostic
+
     signal ready()
 
     fillMode: mode === "tile" ? Image.Tile : Image.PreserveAspectCrop
     // Horizontal flip (Settings > wallpaper). Image.mirror is a sampling flag,
     // not a transform: it costs nothing per frame and does not re-decode.
     mirror: SettingsStore.d.wallpaperFlip
+    // The vertical counterpart needs a transform because Image exposes only
+    // horizontal mirroring. It changes sampling after the image is decoded.
+    transform: Scale {
+        origin.x: root.width / 2
+        origin.y: root.height / 2
+        yScale: SettingsStore.d.wallpaperFlipVertical ? -1 : 1
+    }
     asynchronous: true                 // never block the panel on a big decode
     cache: false                       // one big image; the cache would just
                                        // hold a second copy of it in memory

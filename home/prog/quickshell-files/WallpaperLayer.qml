@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Wayland
 
@@ -36,6 +37,19 @@ PanelWindow {
     // the settle gate. The palette — and therefore Theme.bg — still comes from
     // a wallpaper picked in the meta+w switcher; only the IMAGE is suppressed.
     readonly property bool solid: SettingsStore.d.wallpaperSolid
+
+    // ---- the colour-agnostic desktop -------------------------------------
+    // "custom background" off: the same picture, stripped of its own colour and
+    // recoloured from the theme section's base colour, so the desktop follows
+    // the theme instead of the photograph. Everything else about the wallpaper
+    // — which file, the fit, the flips, the cross-fade, the blurred backdrop —
+    // is unchanged; only the pixels' colour is.
+    //
+    // MultiEffect over the frame's own layer texture, not a re-decode: the
+    // wallpaper is static, so the texture is produced once and the recolour
+    // costs one full-screen pass per changed frame rather than per frame.
+    readonly property bool agnostic: !SettingsStore.d.customBackground
+    readonly property color tint: SettingsStore.d.baseColor
     // Re-load the image when the user turns the image back on. While solid, _apply
     // no-ops on every Wall change, so the front frame is either EMPTY (a reload
     // happened while solid — picking a colour theme rewrites Theme.qml) or still
@@ -73,6 +87,7 @@ PanelWindow {
     readonly property bool haveBlur: Wall.blurUrl.length > 0
 
     Image {
+        id: blurImg
         anchors.fill: parent
         z: -1
         // Source stays bound while solid (it keeps tracking Wall, so the fade
@@ -84,18 +99,35 @@ PanelWindow {
         // Flip with the sharp copy, or the blur showing through the drag gap
         // would be the un-mirrored picture.
         mirror: SettingsStore.d.wallpaperFlip
+        transform: Scale {
+            origin.x: width / 2
+            origin.y: height / 2
+            yScale: SettingsStore.d.wallpaperFlipVertical ? -1 : 1
+        }
         // The cached blur is already tiny and already smooth — decode it at its
         // natural size. Only the fallback needs shrinking to fake a blur.
         sourceSize.width: root.haveBlur ? 0 : root.fallbackBlurSize
         smooth: true
         asynchronous: true
         cache: false
-        visible: source.toString().length > 0 && opacity > 0
+        visible: !root.agnostic && source.toString().length > 0 && opacity > 0
+        layer.enabled: root.agnostic
         opacity: root.solid ? 0 : 1
         Behavior on opacity {
             enabled: !ViewMode.settling
             NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing }
         }
+    }
+
+    MultiEffect {
+        anchors.fill: blurImg
+        z: -1
+        source: blurImg
+        visible: root.agnostic && blurImg.source.toString().length > 0 && blurImg.opacity > 0
+        opacity: blurImg.opacity
+        saturation: -1.0
+        colorization: 1.0
+        colorizationColor: root.tint
     }
 
     // The desktop the user can actually see. Everything is centred in HERE.
@@ -149,6 +181,7 @@ PanelWindow {
             id: imgA
             anchors.fill: parent
             showing: root._showA
+            agnostic: root.agnostic
             decodeW: root.screen ? root.screen.width : 1920
             decodeH: root.screen ? root.screen.height : 1080
         }
@@ -156,8 +189,30 @@ PanelWindow {
             id: imgB
             anchors.fill: parent
             showing: !root._showA
+            agnostic: root.agnostic
             decodeW: root.screen ? root.screen.width : 1920
             decodeH: root.screen ? root.screen.height : 1080
+        }
+
+        // The recoloured faces of the two cross-fade frames. Each tracks its
+        // frame's own fade opacity, so the swap looks identical either way.
+        MultiEffect {
+            anchors.fill: imgA
+            source: imgA
+            visible: root.agnostic
+            opacity: imgA.opacity
+            saturation: -1.0
+            colorization: 1.0
+            colorizationColor: root.tint
+        }
+        MultiEffect {
+            anchors.fill: imgB
+            source: imgB
+            visible: root.agnostic
+            opacity: imgB.opacity
+            saturation: -1.0
+            colorization: 1.0
+            colorizationColor: root.tint
         }
     }
 

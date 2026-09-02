@@ -283,6 +283,17 @@ Singleton {
             // ---- Appearance ----
             property string themeMode: "auto"          // auto (wal) | manual
             property string accentOverride: "#5c9fcc"  // used when themeMode = manual
+            // The theme section's own colour: what the desktop is built around
+            // when the wallpaper is not supplying it. Today it tints the
+            // colour-agnostic background (see customBackground); it is stored
+            // as "#rrggbb" whatever the user typed (a name is normalised on
+            // commit, SetColor.qml).
+            property string baseColor: "#5c9fcc"
+            // On: the paper section's wallpaper and its theme apply as picked.
+            // Off: the same picture is drawn colour-agnostic — desaturated and
+            // recoloured from baseColor above (WallpaperLayer.qml), so the
+            // desktop follows the theme section instead of the photograph.
+            property bool   customBackground: true
             property string fontFamily: "More Perfect DOS VGA"
             property int    fontSize: 15               // matches kitty's on-screen cell (11pt@96dpi ≈ 14.67px); see Theme.qml
             // Last-used size per font family, family -> px. Written only by
@@ -387,6 +398,10 @@ Singleton {
             // file on disk and the palette derived from it are untouched, so
             // flipping is free and reversible.
             property bool   wallpaperFlip: false
+            // The matching top-to-bottom mirror. Like wallpaperFlip, this only
+            // changes sampling in the panel; the source image and its palette
+            // stay untouched.
+            property bool   wallpaperFlipVertical: false
 
             // ---- Panel & Widgets ----
             // The desktop's view mode, and the dock panel's width as a fraction
@@ -624,7 +639,8 @@ Singleton {
     // the adapter block above.
     readonly property var defaults: ({
         schemaVersion: 1,
-        themeMode: "auto", accentOverride: "#5c9fcc", fontFamily: "More Perfect DOS VGA",
+        themeMode: "auto", accentOverride: "#5c9fcc", baseColor: "#5c9fcc", customBackground: true,
+        fontFamily: "More Perfect DOS VGA",
         fontSize: 15, fontSizeByFamily: ({}), paletteColorCount: 16, pureBlackBg: true, pureBlackBgDark: true, lightMode: false,
         paletteVariant: "pastel", windowBorderWidth: 2,
         windowRounding: 0, trayTint: true, desktopIcons: true, shadowAlpha: 0.6, titleOrientation: "vertical", dimUnfocused: true, titlebarEdge: "right", compact: false, scrollbarStyle: "win31",
@@ -632,7 +648,7 @@ Singleton {
         wallpaperHidden: [], wallpaperShowHidden: false,
         rgbFollowTheme: true, reduceMotion: false, animSpeed: 1.0,
         wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",
-        wallpaperSolid: false, wallpaperFlip: false,
+        wallpaperSolid: false, wallpaperFlip: false, wallpaperFlipVertical: false,
         viewMode: "classic", dockWidthFrac: 0.15,
         barWidth: 48, barEdge: "right", barGap: 8, barCell: 40, taskbarClickMinimizes: true, dockHeader: true, dockUptime: true,
         procSort: "cpu", mediaLocalLoop: 0, mediaQueueOpen: false, topStatsOpen: false,

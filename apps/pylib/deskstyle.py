@@ -319,13 +319,34 @@ class DeskStyle(QObject):
         size = max(KDE_MIN_FONT_SIZE, min(KDE_MAX_FONT_SIZE, int(round(size))))
         return (fam, size, fam not in PIXEL_FAMILIES)
 
+    def _render_size(self):
+        """The Qt pixel cell that corresponds to kitty's configured cell.
+
+        The nominal desktop setting is the size every QML surface draws at.
+        """
+        return self._size
+
+    @Property(bool, constant=True)
+    def topFontTreatment(self):
+        """Whether this host uses the measured Oxygen Mono treatment.
+
+        The series is calibrated on top's scale-one Qt/Kitty stack.  book
+        keeps the renderer it had before that series until it is measured on
+        its own display.
+        """
+        return os.uname().nodename == "top"
+
+    @Property(bool, constant=True)
+    def airFontTreatment(self):
+        return os.uname().nodename == "book"
+
     @Property(str, notify=changed)
     def fontFamily(self):
         return self._family
 
     @Property(int, notify=changed)
     def fontSize(self):
-        return self._size
+        return self._render_size()
 
     @Property(int, notify=changed)
     def borderWidth(self):
@@ -388,7 +409,7 @@ class DeskStyle(QObject):
     def _editor_font(self):
         """Build one editable-font value without screen-specific spacing."""
         f = QFont(self._family)
-        if self._terminal_cell:
+        if self._terminal_cell and self.airFontTreatment:
             # Kitty receives this control's size in POINTS (the generated
             # kitty.conf uses floor(px * 72 / 96)).  Asking Qt for the old
             # literal pixel size produced a different FreeType bitmap, then
@@ -398,8 +419,14 @@ class DeskStyle(QObject):
             f.setPointSizeF(self._size * 72 / 96)
             f.setHintingPreference(QFont.PreferFullHinting)
             f.setWeight(QFont.Medium)
+        elif self._terminal_cell and self.topFontTreatment:
+            f.setPointSizeF(max(1, math.floor(self._size * 72 / 96)))
+            f.setWeight(QFont.Medium)
+            f.setHintingPreference(QFont.PreferDefaultHinting)
         else:
             f.setPixelSize(self._size)
+            if self._terminal_cell:
+                f.setHintingPreference(QFont.PreferVerticalHinting)
         if not self._terminal_cell and self._smooth:
             f.setHintingPreference(QFont.PreferNoHinting)
         elif not self._terminal_cell:
@@ -417,14 +444,20 @@ class DeskStyle(QObject):
         glyph raster, hinting and physical-cell advance as one value.
         """
         f = QFont(self._family)
-        if self._terminal_cell:
+        if self._terminal_cell and self.airFontTreatment:
             f.setPointSizeF(self._size * 72 / 96)
+            f.setHintingPreference(QFont.PreferFullHinting)
+            f.setWeight(QFont.Medium)
+        elif self._terminal_cell and self.topFontTreatment:
+            f.setPointSizeF(max(1, math.floor(self._size * 72 / 96)))
             f.setHintingPreference(QFont.PreferFullHinting)
             f.setWeight(QFont.Medium)
         else:
             f.setPixelSize(self._size)
-            f.setHintingPreference(QFont.PreferNoHinting if self._smooth
+            f.setHintingPreference(QFont.PreferVerticalHinting if self._terminal_cell
+                                   else (QFont.PreferNoHinting if self._smooth
                                    else QFont.PreferFullHinting)
+                                   )
         scale = float(device_scale)
         if self._terminal_cell and math.isfinite(scale) and scale > 0:
             advance = QFontMetricsF(f).horizontalAdvance("M")

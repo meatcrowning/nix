@@ -75,6 +75,17 @@ QtObject {
                          hintingPreference: Font.PreferFullHinting });
     }
 
+    // `editorFont` plus the per-scale advance correction. NOT expressible in
+    // QML: assigning `font:` and `font.letterSpacing:` on one item is a fatal
+    // "Property has already been assigned a value", which is what took surfer,
+    // askpass and six other apps down on 2026-08-31. DeskStyle bakes both into
+    // one QFont; the fallback loses only the correction.
+    function editorFontAt(deviceScale) {
+        if (typeof DeskStyle !== "undefined" && DeskStyle && DeskStyle.editorFontAt)
+            return DeskStyle.editorFontAt(deviceScale);
+        return editorFont;
+    }
+
     readonly property int barWidth: 48
     readonly property int cell: 40
     readonly property int gap: 8

@@ -462,7 +462,8 @@ static int countCp(const std::string& s, size_t byteLen) {
 // Reducing Pango's raster to 13px was an attempted terminal-cell correction,
 // but it left the titlebar visibly lighter and smaller than Kitty.
 static int terminalRasterSize(int cellSize) {
-    return cellSize;
+    return Vtb::Cfg::fontTerminalCell() && !Vtb::Cfg::fontTopTreatment()
+        ? cellSize : std::max(1, cellSize - 1);
 }
 
 static void applyTextFontOptions(cairo_font_options_t* options) {
@@ -472,7 +473,8 @@ static void applyTextFontOptions(cairo_font_options_t* options) {
     }
     if (Vtb::Cfg::fontTerminalCell()) {
         cairo_font_options_set_antialias(options, CAIRO_ANTIALIAS_GRAY);
-        cairo_font_options_set_hint_style(options, CAIRO_HINT_STYLE_FULL);
+        cairo_font_options_set_hint_style(options, Vtb::Cfg::fontTopTreatment()
+            ? CAIRO_HINT_STYLE_SLIGHT : CAIRO_HINT_STYLE_FULL);
         cairo_font_options_set_hint_metrics(options, CAIRO_HINT_METRICS_ON);
     }
 }
@@ -486,8 +488,9 @@ static void applyTextFontOptions(cairo_font_options_t* options) {
 static void showTextLayout(cairo_t* cr, PangoLayout* layout, const CHyprColor& color) {
     if (Vtb::Cfg::fontTerminalCell()) {
         cairo_save(cr);
-        cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a * 0.22);
-        cairo_set_line_width(cr, 0.44);
+        const bool top = Vtb::Cfg::fontTopTreatment();
+        cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a * (top ? 0.12 : 0.22));
+        cairo_set_line_width(cr, top ? 0.24 : 0.44);
         pango_cairo_layout_path(cr, layout);
         cairo_stroke(cr);
         cairo_restore(cr);
@@ -935,7 +938,8 @@ SP<Render::ITexture> CVtbDeco::renderHorizTex(const std::string& text, int runLe
     pango_layout_set_single_paragraph_mode(layout, true);
     pango_layout_set_text(layout, text.c_str(), -1);
 
-    // centre the line vertically across the bar's thickness
+    // Preserve the titlebar's established line-box placement. The titlebar's
+    // fixed 14px cell deliberately contains this 13px terminal raster.
     int lh = 0;
     pango_layout_get_pixel_size(layout, nullptr, &lh);
     cairo_set_source_rgba(CR, COLOR.r, COLOR.g, COLOR.b, COLOR.a);
