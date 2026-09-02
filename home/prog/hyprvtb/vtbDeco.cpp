@@ -469,7 +469,7 @@ static void applyTextFontOptions(cairo_font_options_t* options) {
         cairo_font_options_set_antialias(options, CAIRO_ANTIALIAS_NONE);
         return;
     }
-    if (Vtb::Cfg::fontTerminalCell() && Vtb::Cfg::fontTopTreatment()) {
+    if (Vtb::Cfg::fontTerminalCell()) {
         cairo_font_options_set_antialias(options, CAIRO_ANTIALIAS_GRAY);
         cairo_font_options_set_hint_style(options, CAIRO_HINT_STYLE_SLIGHT);
         cairo_font_options_set_hint_metrics(options, CAIRO_HINT_METRICS_ON);
@@ -479,7 +479,7 @@ static void applyTextFontOptions(cairo_font_options_t* options) {
 // Oxygen Mono ships only a Regular cut. Match Qt PixelText's subtle
 // current-colour outline with a 0.24px Cairo stroke (0.12px per edge).
 static void showTextLayout(cairo_t* cr, PangoLayout* layout, const CHyprColor& color) {
-    if (Vtb::Cfg::fontTerminalCell()) {
+    if (Vtb::Cfg::fontTerminalCell() && Vtb::Cfg::fontTopTreatment()) {
         cairo_save(cr);
         cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a * 0.12);
         cairo_set_line_width(cr, 0.24);
