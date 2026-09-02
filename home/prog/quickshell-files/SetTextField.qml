@@ -41,9 +41,7 @@ Rectangle {
         verticalAlignment: TextInput.AlignVCenter
         clip: true
         color: Theme.text
-        font.family: Theme.font
-        font.pixelSize: Theme.fontSize
-                font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
+        font: Theme.fontForScale(Screen.devicePixelRatio)
         renderType: Text.NativeRendering
         selectByMouse: true
         selectionColor: Theme.highlight

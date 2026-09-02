@@ -38,16 +38,32 @@ Singleton {
     readonly property bool fontTerminalCell: FontFaces.terminalCell[font] === true
     readonly property real fontAdvanceRatio: Number(FontFaces.advanceRatio[font]) || 0
 
-    // Round terminal-cell advances in device pixels, then map that result back
-    // to the item's logical units. At scale 1 Oxygen Mono becomes an 8px cell;
-    // at book's 5/3 internal scale it remains the already-integral 14px cell.
+    // Kitty receives the desktop slider as points (the generated kitty.conf
+    // uses this exact conversion).  Oxygen Mono must begin from that same
+    // FreeType raster, not from a similarly-sized Qt pixel font: the latter
+    // has different glyph outlines before advance correction even begins.
+    readonly property real kittyPointSize: Math.max(1, fontSize * 72 / 96)
+
+    // Round the actual terminal-cell glyph advance in device pixels, then map
+    // it back to the item's logical units.  The old font-table ratio described
+    // the 14px Qt raster; this is measured from the point raster Kitty uses.
     function fontLetterSpacing(deviceScale) {
-        const ratio = fontAdvanceRatio;
         const scale = Number(deviceScale);
-        if (!(ratio > 0) || !(scale > 0) || !isFinite(scale))
+        if (!fontTerminalCell || !(scale > 0) || !isFinite(scale))
             return 0;
-        const advance = fontSize * ratio;
+        const advance = metrics.advanceWidth("M");
         return Math.round(advance * scale) / scale - advance;
+    }
+
+    function fontForScale(deviceScale) {
+        if (fontTerminalCell)
+            return Qt.font({ family: font, pointSize: kittyPointSize,
+                             letterSpacing: fontLetterSpacing(deviceScale),
+                             hintingPreference: Font.PreferFullHinting,
+                             weight: Font.Medium });
+        return Qt.font({ family: font, pixelSize: fontSize,
+                         hintingPreference: fontSmooth ? Font.PreferNoHinting
+                                                       : Font.PreferFullHinting });
     }
 
     // Text size in PIXELS (not points). Matched to kitty's on-screen size:
@@ -70,8 +86,7 @@ Singleton {
     // actual font size binds `fontSize`. Rebinds live with the face, like the
     // rest of this file.
     readonly property FontMetrics metrics: FontMetrics {
-        font.family: root.font
-        font.pixelSize: root.fontSize
+        font: root.fontForScale(1)
     }
     readonly property int lineHeight: Math.max(1, Math.round(metrics.height))
 

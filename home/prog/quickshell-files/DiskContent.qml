@@ -105,9 +105,7 @@ Item {
                                 anchors { fill: parent; leftMargin: 3; rightMargin: 3 }
                                 verticalAlignment: TextInput.AlignVCenter
                                 color: Theme.accent
-                                font.family: Theme.font
-                                font.pixelSize: Theme.fontSize
-                font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
+                                font: Theme.fontForScale(Screen.devicePixelRatio)
                                 renderType: Text.NativeRendering
                                 clip: true
                                 onAccepted: {

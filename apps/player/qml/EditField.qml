@@ -56,8 +56,10 @@ Rectangle {
         anchors.fill: parent
         anchors.margins: 4
         verticalAlignment: TextInput.AlignVCenter
-        font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
-        font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
+        font: (typeof DeskStyle !== "undefined" && DeskStyle
+                       && typeof DeskStyle.editorFontForScale === "function")
+                      ? DeskStyle.editorFontForScale(Screen.devicePixelRatio)
+                      : Theme.editorFontForScale(Screen.devicePixelRatio) // whole QFont, including Kitty cell spacing
         renderType: Text.NativeRendering
         color: root.fgText
         clip: true

@@ -224,10 +224,7 @@ Scope {
                                     anchors.verticalCenter: parent.verticalCenter
                                     width: parent.width - 20
                                     color: Theme.text
-                                    font.family: Theme.font
-                                    font.pixelSize: Theme.fontSize
-                font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
-                                    font.hintingPreference: Font.PreferFullHinting
+                                    font: Theme.fontForScale(Screen.devicePixelRatio)
                                     renderType: Text.NativeRendering
                                     clip: true
                                     focus: true
