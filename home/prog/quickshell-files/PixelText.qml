@@ -31,10 +31,11 @@ Text {
     // weight to Regular, whereas Kitty's glyph shader carries a visibly fuller
     // edge. Its same-colour outline supplies that missing edge without changing
     // the family or touching the other selectable faces.
-    readonly property bool oxygenExternal: Theme.font === "Oxygen Mono"
+    readonly property bool oxygenExternal: (Theme.topFontTreatment || Theme.airFontTreatment) && Theme.font === "Oxygen Mono"
                                         && Screen.devicePixelRatio <= 1.01
     style: oxygenExternal ? Text.Outline : Text.Normal
-    styleColor: oxygenExternal ? Qt.rgba(color.r, color.g, color.b, 0.22) : color
+    styleColor: oxygenExternal ? Qt.rgba(color.r, color.g, color.b,
+                                         Theme.airFontTreatment ? 0.22 : 0.12) : color
 
     // Text defaults to AutoText, which SNIFFS for HTML and renders it as rich
     // text. Nearly everything the panel draws is a string from somewhere else —

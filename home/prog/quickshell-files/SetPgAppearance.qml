@@ -2,7 +2,8 @@ import QtQuick
 import Quickshell.Io
 
 // Appearance = Paper (the embedded chooser + every wallpaper knob) + Theme
-// (accent, font, palette + the swatch picker, rgb) + Titlebar + Window
+// (the live colour bar, the custom-background switch, the base colour, then
+// accent, palette + the swatch picker, rgb) + Font + Titlebar + Window
 // decorations + Motion + Panel (the bar surface and its taskbar, folded in at
 // the bottom — it was its own page until 2026-08-30). The desktop-widget set
 // and the monitoring widget's thresholds/sensors are still the Widgets page.
@@ -72,6 +73,14 @@ Column {
             }
         }
         SetRow {
+            // Matches the horizontal flip: only the rendered image changes.
+            label: "flip vertically"
+            SetToggle {
+                checked: page.d.wallpaperFlipVertical
+                onToggled: (v) => { page.d.wallpaperFlipVertical = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
             label: "sort order"
             SetSelect {
                 options: ["name", "mtime", "random"]
@@ -95,6 +104,34 @@ Column {
 
     SetSection {
         title: "theme"
+        // The live strip of what the theme currently is (SetThemeBar.qml),
+        // centred over the controls that produce it.
+        SetThemeBar { }
+        SetRow {
+            // On: the paper section decides the desktop — its wallpaper and the
+            // palette that wallpaper derives, as picked. Off: the SAME picture
+            // is drawn colour-agnostic, desaturated and recoloured from the base
+            // colour below (WallpaperLayer.qml), so the desktop takes its colour
+            // from this section instead of from the photograph. The image, the
+            // fit and the flips are untouched either way — this is only where
+            // the colour comes from.
+            label: "custom background"
+            SetToggle {
+                checked: page.d.customBackground
+                onToggled: (v) => { page.d.customBackground = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
+            // The colour this section is built around. A hex or a colour name
+            // typed into the field, or picked off the grid behind the swatch —
+            // either way it is stored as hex (SetColor.qml normalises).
+            label: "base colour"
+            SetColor {
+                picker: true
+                value: page.d.baseColor
+                onChanged: (h) => { page.d.baseColor = h; SettingsStore.save(); }
+            }
+        }
         SetRow {
             // The stored key is still themeMode ("auto"/"manual") — the toggle
             // is just its face: on = manual, the fixed accent below; off =
@@ -116,38 +153,6 @@ Column {
                 enabled: page.d.themeMode === "manual"
                 value: page.d.accentOverride
                 onChanged: (h) => { page.d.accentOverride = h; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            // The desktop's pixel font. One key (fontFamily) drives Theme.font in
-            // the panel AND DeskStyle.fontFamily in the apps, so flipping it here
-            // switches the whole desktop live via settings.json. The faces offered
-            // are enumerated from home/pkgs/desktop/font.nix (the selectableFaces
-            // list) through the generated FontFaces singleton, so a face added to
-            // font.nix appears here automatically — including Botis 4x6.
-            label: "font"
-            SetSelect {
-                options: FontFaces.families
-                labels: FontFaces.labels
-                // the values are the family names themselves, so every row of
-                // the dropdown is a specimen of the face it picks
-                optionsAreFonts: true
-                value: page.d.fontFamily
-                // Through the store, not a direct write: it remembers the
-                // size per face (fontSizeByFamily) across switches.
-                onChanged: (v) => SettingsStore.setFontFamily(v)
-            }
-        }
-        SetRow {
-            label: "font size"
-            SetSelect {
-                options: {
-                    const a = [];
-                    for (let s = 10; s <= 24; s++) a.push(String(s));
-                    return a;
-                }
-                value: String(page.d.fontSize)
-                onChanged: (v) => { page.d.fontSize = parseInt(v, 10); SettingsStore.save(); }
             }
         }
         SetRow {
@@ -230,6 +235,43 @@ Column {
             SetToggle {
                 checked: page.d.rgbFollowTheme
                 onToggled: (v) => { page.d.rgbFollowTheme = v; SettingsStore.save(); }
+            }
+        }
+    }
+
+    // Type, on its own. One key (fontFamily) drives Theme.font in the panel AND
+    // DeskStyle.fontFamily in the apps, so both rows here reach the whole
+    // desktop live through settings.json.
+    SetSection {
+        title: "font"
+        SetRow {
+            // The faces offered are enumerated from home/pkgs/desktop/font.nix
+            // (the selectableFaces list) through the generated FontFaces
+            // singleton, so a face added to font.nix appears here automatically
+            // — including Botis 4x6.
+            label: "font"
+            SetSelect {
+                options: FontFaces.families
+                labels: FontFaces.labels
+                // the values are the family names themselves, so every row of
+                // the dropdown is a specimen of the face it picks
+                optionsAreFonts: true
+                value: page.d.fontFamily
+                // Through the store, not a direct write: it remembers the
+                // size per face (fontSizeByFamily) across switches.
+                onChanged: (v) => SettingsStore.setFontFamily(v)
+            }
+        }
+        SetRow {
+            label: "font size"
+            SetSelect {
+                options: {
+                    const a = [];
+                    for (let s = 10; s <= 24; s++) a.push(String(s));
+                    return a;
+                }
+                value: String(page.d.fontSize)
+                onChanged: (v) => { page.d.fontSize = parseInt(v, 10); SettingsStore.save(); }
             }
         }
     }
