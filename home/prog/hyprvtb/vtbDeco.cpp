@@ -469,7 +469,7 @@ static void applyTextFontOptions(cairo_font_options_t* options) {
         cairo_font_options_set_antialias(options, CAIRO_ANTIALIAS_NONE);
         return;
     }
-    if (Vtb::Cfg::fontTerminalCell()) {
+    if (Vtb::Cfg::fontTerminalCell() && Vtb::Cfg::fontTopTreatment()) {
         cairo_font_options_set_antialias(options, CAIRO_ANTIALIAS_GRAY);
         cairo_font_options_set_hint_style(options, CAIRO_HINT_STYLE_SLIGHT);
         cairo_font_options_set_hint_metrics(options, CAIRO_HINT_METRICS_ON);
