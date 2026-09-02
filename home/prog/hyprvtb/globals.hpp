@@ -156,6 +156,9 @@ struct SGlobalState {
         // cell faces (Oxygen Mono) instead use Kitty-matched full hinting and
         // a one-pixel-smaller Pango raster inside the unchanged cell pitch.
         SP<Config::Values::CBoolValue>   fontTerminalCell;
+        // The Oxygen Mono treatment is measured on top only.  This remains
+        // false on book so its established titlebar renderer is unchanged.
+        SP<Config::Values::CBoolValue>   fontTopTreatment;
         SP<Config::Values::CColorValue>  bgColor;
         SP<Config::Values::CColorValue>  bgAltColor;
         SP<Config::Values::CColorValue>  textColor;
@@ -275,6 +278,9 @@ namespace Vtb::Cfg {
     }
     inline auto fontTerminalCell() {
         return g_pGlobalState->config.fontTerminalCell->value();
+    }
+    inline auto fontTopTreatment() {
+        return g_pGlobalState->config.fontTopTreatment->value();
     }
     inline auto bgColor() {
         return g_pGlobalState->config.bgColor->value();

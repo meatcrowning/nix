@@ -133,6 +133,10 @@ let
     import QtQuick
 
     QtObject {
+        // The Oxygen Mono raster experiments are measured against top's
+        // scale-one display and Kitty build.  book deliberately retains its
+        // established pixel-size path until it has its own measurements.
+        readonly property bool topFontTreatment: ${lib.boolToString (pkgs.stdenv.hostPlatform.system == "x86_64-linux")}
         readonly property var families: [${lib.concatMapStringsSep "," (f: " \"${f.family}\"") selectableFaces} ]
         readonly property var labels: ({${lib.concatMapStringsSep "," (f: " \"${f.family}\": \"${f.label}\"") selectableFaces} })
         readonly property var smooth: ({${lib.concatMapStringsSep "," (f: " \"${f.family}\": ${lib.boolToString f.smooth}") selectableFaces} })

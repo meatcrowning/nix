@@ -25,7 +25,7 @@ Text {
     font: Theme.fontForScale(Screen.devicePixelRatio)
     renderType: Text.NativeRendering
     antialiasing: Theme.fontSmooth
-    readonly property bool oxygenExternal: Theme.font === "Oxygen Mono"
+    readonly property bool oxygenExternal: Theme.topFontTreatment && Theme.font === "Oxygen Mono"
                                         && Screen.devicePixelRatio <= 1.01
     style: oxygenExternal ? Text.Outline : Text.Normal
     styleColor: oxygenExternal ? Qt.rgba(color.r, color.g, color.b, 0.12) : color

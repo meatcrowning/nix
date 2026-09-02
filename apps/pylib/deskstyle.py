@@ -326,6 +326,16 @@ class DeskStyle(QObject):
         """
         return self._size
 
+    @Property(bool, constant=True)
+    def topFontTreatment(self):
+        """Whether this host uses the measured Oxygen Mono treatment.
+
+        The series is calibrated on top's scale-one Qt/Kitty stack.  book
+        keeps the renderer it had before that series until it is measured on
+        its own display.
+        """
+        return os.uname().nodename == "top"
+
     @Property(str, notify=changed)
     def fontFamily(self):
         return self._family
@@ -391,13 +401,15 @@ class DeskStyle(QObject):
         no NoAntialias and no hinting. Oxygen Mono is the explicit exception:
         kitty uses its native TrueType hints, so Qt keeps them too."""
         f = QFont(self._family)
-        if self._terminal_cell:
+        if self._terminal_cell and self.topFontTreatment:
             f.setPointSizeF(max(1, math.floor(self._size * 72 / 96)))
             f.setWeight(QFont.Medium)
             f.setHintingPreference(QFont.PreferDefaultHinting)
         else:
             f.setPixelSize(self._size)
-        if not self._terminal_cell and self._smooth:
+        if self._terminal_cell and not self.topFontTreatment:
+            f.setHintingPreference(QFont.PreferVerticalHinting)
+        elif not self._terminal_cell and self._smooth:
             f.setHintingPreference(QFont.PreferNoHinting)
         elif not self._terminal_cell:
             f.setHintingPreference(QFont.PreferDefaultHinting)
@@ -408,20 +420,23 @@ class DeskStyle(QObject):
     def labelFontForScale(self, device_scale):
         """Return the label QFont with Kitty's terminal-cell raster."""
         f = QFont(self._family)
-        if self._terminal_cell:
+        if self._terminal_cell and self.topFontTreatment:
             f.setPointSizeF(max(1, math.floor(self._size * 72 / 96)))
             f.setWeight(QFont.Medium)
             f.setHintingPreference(QFont.PreferFullHinting)
         else:
             f.setPixelSize(self._size)
-            f.setHintingPreference(QFont.PreferNoHinting if self._smooth
-                                   else QFont.PreferFullHinting)
+            f.setHintingPreference(QFont.PreferVerticalHinting
+                                   if self._terminal_cell else
+                                   (QFont.PreferNoHinting if self._smooth
+                                    else QFont.PreferFullHinting))
         try:
             scale = float(device_scale)
         except (TypeError, ValueError):
             return f
-        if self._terminal_cell and math.isfinite(scale) and scale > 0:
-            advance = QFontMetricsF(f).horizontalAdvance("M")
+        if self._advance_ratio > 0 and math.isfinite(scale) and scale > 0:
+            advance = (QFontMetricsF(f).horizontalAdvance("M")
+                       if self.topFontTreatment else self._size * self._advance_ratio)
             f.setLetterSpacing(QFont.AbsoluteSpacing,
                                round(advance * scale) / scale - advance)
         return f

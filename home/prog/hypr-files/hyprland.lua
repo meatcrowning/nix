@@ -414,6 +414,7 @@ hl.config({
             ["font_size"]         = 15,
             ["font_smooth"]       = false,
             ["font_terminal_cell"] = false,
+            ["font_top_treatment"] = false,
             -- THE DESKTOP'S MOTION. This is not just the window roll: the roll
             -- is the REFERENCE every sliding animation on this machine is
             -- matched to (docs/DESIGN.md 6.2), so this one number is also the

@@ -39,7 +39,7 @@ Text {
     // face's fontconfig rule and docs/DESIGN.md 2.2.
     renderType: Text.NativeRendering
     antialiasing: Theme.fontSmooth
-    readonly property bool oxygenExternal: Theme.font === "Oxygen Mono"
+    readonly property bool oxygenExternal: (typeof DeskStyle !== "undefined" && DeskStyle && DeskStyle.topFontTreatment) && Theme.font === "Oxygen Mono"
                                         && Screen.devicePixelRatio <= 1.01
     style: oxygenExternal ? Text.Outline : Text.Normal
     styleColor: oxygenExternal ? Qt.rgba(color.r, color.g, color.b, 0.12) : color

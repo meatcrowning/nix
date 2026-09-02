@@ -37,6 +37,7 @@ Singleton {
     // remains antialiased; only its advances and stems are grid-fitted.
     readonly property bool fontTerminalCell: FontFaces.terminalCell[font] === true
     readonly property real fontAdvanceRatio: Number(FontFaces.advanceRatio[font]) || 0
+    readonly property bool topFontTreatment: FontFaces.topFontTreatment === true
 
     // Kitty receives the desktop slider as points. Terminal-cell faces must
     // start from that same glyph raster rather than a similarly sized Qt pixel
@@ -49,7 +50,8 @@ Singleton {
         const scale = Number(deviceScale);
         if (!fontTerminalCell || !(scale > 0) || !isFinite(scale))
             return 0;
-        const advance = metrics.advanceWidth("M");
+        const advance = topFontTreatment ? metrics.advanceWidth("M")
+                                         : fontSize * fontAdvanceRatio;
         return Math.round(advance * scale) / scale - advance;
     }
 
@@ -58,14 +60,15 @@ Singleton {
     // terminal-cell correction here means those controls and ordinary labels
     // use the same Oxygen Mono advances as kitty.
     function fontForScale(deviceScale) {
-        if (fontTerminalCell)
+        if (fontTerminalCell && topFontTreatment)
             return Qt.font({ family: font, pointSize: kittyPointSize,
                              letterSpacing: fontLetterSpacing(deviceScale),
                              hintingPreference: Font.PreferDefaultHinting,
                              weight: Font.Medium });
         return Qt.font({ family: font, pixelSize: fontSize,
-                         hintingPreference: fontSmooth ? Font.PreferNoHinting
-                                                       : Font.PreferFullHinting });
+                         hintingPreference: fontTerminalCell ? Font.PreferVerticalHinting
+                                                              : (fontSmooth ? Font.PreferNoHinting
+                                                                            : Font.PreferFullHinting) });
     }
 
     // Text size in PIXELS (not points). Matched to kitty's on-screen size:

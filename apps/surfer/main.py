@@ -3061,7 +3061,9 @@ class DarkMode(QObject):
         # native Qt and titlebar renderers use instead of requesting a
         # nonexistent Bold cut.
         edge = ("-webkit-text-stroke:0.22px currentColor;"
-                if self._fam() == "Oxygen Mono" else "")
+                if self._fam() == "Oxygen Mono"
+                and self._style is not None
+                and self._style.topFontTreatment else "")
         return (el + "," + el + "::before," + el + "::after{"
                 "font-family:" + f + ",monospace!important;"
                 "font-synthesis:none!important;" + edge + "}")
