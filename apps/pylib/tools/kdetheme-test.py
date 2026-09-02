@@ -231,10 +231,22 @@ check("hypr: Oxygen Mono publishes its fractional advance ratio",
       abs(o.advanceRatio - (1229 / 2048)) < 1e-12, str(o.advanceRatio))
 check("hypr: Oxygen Mono editor text keeps Kitty's vertical hinting",
       o.editorFont.hintingPreference() == QFont.PreferVerticalHinting)
-o_metrics = QFontMetricsF(o.editorFont)
-check("hypr: Oxygen Mono keeps Kitty's 14px text cell",
-      round(o_metrics.height()) == 14,
-      f"{o_metrics.horizontalAdvance('M'):.3f}×{o_metrics.height():.3f}")
+check("hypr: Oxygen Mono starts from Kitty's 10pt raster, not a 14px Qt raster",
+      o.editorFont.pixelSize() == -1 and o.editorFont.pointSize() == 10,
+      f"px={o.editorFont.pixelSize()} pt={o.editorFont.pointSizeF():.3f}")
+o_external = o.editorFontForScale(1.25)
+o_external_advance = QFontMetricsF(o_external).horizontalAdvance("M") * 1.25
+check("hypr: Oxygen Mono editor text lands on external-display cell pixels",
+      abs(o_external_advance - round(o_external_advance)) < 1e-9,
+      str(o_external_advance))
+o_label_external = o.labelFontForScale(1.25)
+o_label_advance = QFontMetricsF(o_label_external).horizontalAdvance("M") * 1.25
+check("hypr: Oxygen Mono labels land on external-display cell pixels",
+      abs(o_label_advance - round(o_label_advance)) < 1e-9,
+      str(o_label_advance))
+check("hypr: Oxygen Mono labels use the same 10pt Kitty raster",
+      o_label_external.pixelSize() == -1 and o_label_external.pointSize() == 10,
+      f"px={o_label_external.pixelSize()} pt={o_label_external.pointSizeF():.3f}")
 
 env(DESK_SESSION="plasma")
 k = deskstyle.DeskStyle()

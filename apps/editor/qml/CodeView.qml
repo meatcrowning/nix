@@ -327,8 +327,10 @@ Item {
             // Qt's own ascent+descent — which is exactly `Theme.lineHeight`,
             // the same quantity the gutter asks the document's layout for, so
             // the two stay lined up on any face.
-            font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
-            font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
+            font: (typeof DeskStyle !== "undefined" && DeskStyle
+                       && typeof DeskStyle.editorFontForScale === "function")
+                      ? DeskStyle.editorFontForScale(Screen.devicePixelRatio)
+                      : Theme.editorFontForScale(Screen.devicePixelRatio) // whole QFont, including Kitty cell spacing
             renderType: Text.NativeRendering
 
             // PLAIN TEXT, ALWAYS — §2.6, and here it is not merely a security

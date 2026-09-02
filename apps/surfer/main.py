@@ -3057,9 +3057,16 @@ class DarkMode(QObject):
         # face is never synthetically embossed, whatever the page declares.
         f = self._adj_fam()
         el = "*:not(:is(" + DarkMode._ICON_CARVE + "))"
+        # Oxygen Mono is Regular-only.  Qt's shared PixelText and hyprvtb's
+        # Pango path therefore add the same 0.22px current-colour edge rather
+        # than asking for a nonexistent Bold cut; otherwise Chromium's page
+        # ink is visibly lighter beside either native surface.  Keep this
+        # Chromium-specific treatment off every other selectable family.
+        edge = ("-webkit-text-stroke:0.22px currentColor;"
+                if self._fam() == "Oxygen Mono" else "")
         return (el + "," + el + "::before," + el + "::after{"
                 "font-family:" + f + ",monospace!important;"
-                "font-synthesis:none!important}")
+                "font-synthesis:none!important;" + edge + "}")
 
     @Slot(str, result=str)
     def css(self, url):

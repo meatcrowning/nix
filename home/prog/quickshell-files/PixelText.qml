@@ -10,9 +10,9 @@ import QtQuick
 // device pixels, honouring hinting and the font's native strikes, giving the
 // same crisp, hard-edged pixels kitty draws.
 //
-// Sizes are pixels (Theme.fontSize), not points: point sizes get scaled by DPI
-// to a fractional pixel height that lands between the font's design grid and
-// reintroduces blur. Integer pixel sizes on the 16px grid stay sharp.
+// Pixel faces use the desktop's integer pixel size.  Terminal-cell faces use
+// Kitty's generated point size instead, because that is the glyph raster the
+// terminal actually draws; Theme then measures and snaps the resulting cell.
 //
 // ALL OF THAT IS FOR PIXEL FACES. When the live face is a smooth outline
 // (Theme.fontSmooth — Phenex, the cursive), the same settings are exactly
@@ -22,16 +22,19 @@ import QtQuick
 // no hinting — the same rasterisation kitty and the titlebar give it) but
 // with antialiasing on and hinting off.
 Text {
-    font.family: Theme.font
-    font.pixelSize: Theme.fontSize
-    font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
-    // Oxygen Mono needs Kitty's lightly/vertically hinted outline.  Full
-    // hinting happens to force an 8px Qt advance, but changes the actual glyph
-    // shapes; Kitty packs its cells separately and keeps the lighter raster.
-    font.hintingPreference: Theme.fontTerminalCell ? Font.PreferVerticalHinting
-                                                    : (Theme.fontSmooth ? Font.PreferNoHinting : Font.PreferFullHinting)
+    // A complete value avoids QML retaining the preceding pixel size when the
+    // terminal-cell branch supplies Kitty's point size.
+    font: Theme.fontForScale(Screen.devicePixelRatio)
     renderType: Text.NativeRendering
     antialiasing: Theme.fontSmooth
+    // Oxygen Mono has no real bold face. Qt silently resolves every requested
+    // weight to Regular, whereas Kitty's glyph shader carries a visibly fuller
+    // edge. Its same-colour outline supplies that missing edge without changing
+    // the family or touching the other selectable faces.
+    readonly property bool oxygenExternal: Theme.font === "Oxygen Mono"
+                                        && Screen.devicePixelRatio <= 1.01
+    style: oxygenExternal ? Text.Outline : Text.Normal
+    styleColor: oxygenExternal ? Qt.rgba(color.r, color.g, color.b, 0.22) : color
 
     // Text defaults to AutoText, which SNIFFS for HTML and renders it as rich
     // text. Nearly everything the panel draws is a string from somewhere else —

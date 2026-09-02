@@ -458,11 +458,11 @@ static int countCp(const std::string& s, size_t byteLen) {
     return n;
 }
 
-// Kitty packs Oxygen Mono into an 8×14 terminal cell, but retains the face's
-// lightly hinted outline. Pango's nominal 14px box is one pixel taller, so keep
-// the raster inside the unchanged 14px titlebar cell at 13px.
+// Keep the titlebar on the same 14px glyph raster as the desktop setting.
+// Reducing Pango's raster to 13px was an attempted terminal-cell correction,
+// but it left the titlebar visibly lighter and smaller than Kitty.
 static int terminalRasterSize(int cellSize) {
-    return Vtb::Cfg::fontTerminalCell() ? std::max(1, cellSize - 1) : cellSize;
+    return cellSize;
 }
 
 static void applyTextFontOptions(cairo_font_options_t* options) {
@@ -472,9 +472,27 @@ static void applyTextFontOptions(cairo_font_options_t* options) {
     }
     if (Vtb::Cfg::fontTerminalCell()) {
         cairo_font_options_set_antialias(options, CAIRO_ANTIALIAS_GRAY);
-        cairo_font_options_set_hint_style(options, CAIRO_HINT_STYLE_SLIGHT);
+        cairo_font_options_set_hint_style(options, CAIRO_HINT_STYLE_FULL);
         cairo_font_options_set_hint_metrics(options, CAIRO_HINT_METRICS_ON);
     }
+}
+
+// Qt's shared PixelText adds a 22%-opacity, sub-pixel Oxygen edge because the
+// face ships only a Regular cut and its Qt weight requests resolve identically.
+// Pango/Cairo has the same limitation, so titlebars need the equivalent path
+// before filling the glyph.  A 0.44px stroke extends the outline by 0.22px on
+// each side; it is deliberately not the full one-pixel outline that made the
+// panel text cartoonishly bold.
+static void showTextLayout(cairo_t* cr, PangoLayout* layout, const CHyprColor& color) {
+    if (Vtb::Cfg::fontTerminalCell()) {
+        cairo_save(cr);
+        cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a * 0.22);
+        cairo_set_line_width(cr, 0.44);
+        pango_cairo_layout_path(cr, layout);
+        cairo_stroke(cr);
+        cairo_restore(cr);
+    }
+    pango_cairo_show_layout(cr, layout);
 }
 
 CVtbDeco::~CVtbDeco() {
@@ -789,7 +807,7 @@ SP<Render::ITexture> CVtbDeco::renderStackedTex(const std::string& text, int run
             topInkDone = true;
         }
         cairo_move_to(CR, 0, y);
-        pango_cairo_show_layout(CR, layout);
+        showTextLayout(CR, layout, COLOR);
 
         // advance by whole cells, not by the run's ink height — the last line
         // of a run still carries its full (rounded-up) descent, which would
@@ -858,7 +876,7 @@ SP<Render::ITexture> CVtbDeco::renderRotatedTex(const std::string& text, int run
     pango_layout_get_pixel_size(layout, nullptr, &lh);
     cairo_set_source_rgba(CR, COLOR.r, COLOR.g, COLOR.b, COLOR.a);
     cairo_move_to(CR, 0, std::max(0.0, (BARW - lh) / 2.0));
-    pango_cairo_show_layout(CR, layout);
+    showTextLayout(CR, layout, COLOR);
 
     pango_font_description_free(fd);
     g_object_unref(layout);
@@ -922,7 +940,7 @@ SP<Render::ITexture> CVtbDeco::renderHorizTex(const std::string& text, int runLe
     pango_layout_get_pixel_size(layout, nullptr, &lh);
     cairo_set_source_rgba(CR, COLOR.r, COLOR.g, COLOR.b, COLOR.a);
     cairo_move_to(CR, 0, std::max(0.0, (BARW - lh) / 2.0));
-    pango_cairo_show_layout(CR, layout);
+    showTextLayout(CR, layout, COLOR);
 
     pango_font_description_free(fd);
     g_object_unref(layout);
@@ -994,7 +1012,7 @@ SP<Render::ITexture> CVtbDeco::renderEditLineTex(const std::string& text, int ru
         const double cx = (double)i * SIZE + std::max(0.0, (SIZE - gw) / 2.0);
         const double cy = std::max(0.0, (BARW - gh) / 2.0);
         cairo_move_to(CR, cx, cy);
-        pango_cairo_show_layout(CR, layout);
+        showTextLayout(CR, layout, COLOR);
     }
 
     pango_font_description_free(fd);
@@ -1077,7 +1095,7 @@ SP<Render::ITexture> CVtbDeco::renderQuarterGlyph(const std::string& glyph, cons
     pango_layout_set_text(layout, glyph.c_str(), -1);
     cairo_set_source_rgba(CR, COLOR.r, COLOR.g, COLOR.b, COLOR.a);
     cairo_move_to(CR, 0, 0);
-    pango_cairo_show_layout(CR, layout);
+    showTextLayout(CR, layout, COLOR);
 
     pango_font_description_free(fd);
     g_object_unref(layout);

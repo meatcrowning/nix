@@ -91,6 +91,12 @@ QtObject {
         return Qt.font({ family: font, pixelSize: fontSize,
                          hintingPreference: Font.PreferFullHinting });
     }
+    function editorFontForScale(deviceScale) {
+        if (typeof DeskStyle !== "undefined" && DeskStyle
+                && typeof DeskStyle.editorFontForScale === "function")
+            return DeskStyle.editorFontForScale(deviceScale);
+        return editorFont;
+    }
 
     // Panel geometry (logical px) — kept for component compatibility.
     readonly property int barWidth: 48

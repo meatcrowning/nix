@@ -11782,6 +11782,17 @@ def main():
 
     palette = Palette(theme_source(PANEL_THEME))
     style = DeskStyle()
+    # Chatter's Plasma/Oxygen roof substitutes Qt Quick Controls and QLabel-like
+    # items for much of the Hyprland tree. Those inherit QApplication's font,
+    # not our QML PixelText component; without this they silently remain on the
+    # platform default while every other app follows Settings > font. Use the
+    # primary output's scale at launch, matching the QML components' per-screen
+    # `labelFontForScale(Screen.devicePixelRatio)` path.
+    plasma_face = is_plasma() if not face else face in ("plasma", "oxygen")
+    if plasma_face:
+        screen = app.primaryScreen()
+        scale = screen.devicePixelRatio() if screen is not None else 1.0
+        app.setFont(style.labelFontForScale(scale))
     titlebar = Titlebar()
     ollama = Ollama()
     jobs = Jobs()
@@ -11799,7 +11810,7 @@ def main():
     # `Root.qml` is the central widget of a real QMainWindow, so the menubar,
     # the toolbar (with the model and session pickers on it) and the status bar
     # are KDE widgets and the window background is the system style's.
-    plasma = is_plasma() if not face else face in ("plasma", "oxygen")
+    plasma = plasma_face
     # OXYGEN IS A SECOND, NARROWER GATE. `is_oxygen()` is Plasma AND the widget
     # style actually being Oxygen — a Plasma session wearing Breeze gets the
     # generic KStyle face and none of the Oxygen-specific drawing, because that

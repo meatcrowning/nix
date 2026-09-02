@@ -148,8 +148,10 @@ Item {
             // and NOT `antialiasing: false`. An editable item ignores those and
             // draws a scalable pixel font grey-fringed; only the font's style
             // strategy reaches the rasteriser (docs/DESIGN.md §2.2).
-            font: Theme.editorFont
-            font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
+            font: (typeof DeskStyle !== "undefined" && DeskStyle
+                       && typeof DeskStyle.editorFontForScale === "function")
+                      ? DeskStyle.editorFontForScale(Screen.devicePixelRatio)
+                      : Theme.editorFontForScale(Screen.devicePixelRatio)
             renderType: Text.NativeRendering
             color: box.fgText
             selectionColor: Theme.highlight

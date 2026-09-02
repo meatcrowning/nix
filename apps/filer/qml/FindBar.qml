@@ -86,8 +86,10 @@ Rectangle {
                 color: bar.fgText
                 // Whole QFont: an editable item draws a scalable pixel font
                 // grey-fringed otherwise (docs/DESIGN.md §2.2).
-                font: Theme.editorFont
-            font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
+                font: (typeof DeskStyle !== "undefined" && DeskStyle
+                       && typeof DeskStyle.editorFontForScale === "function")
+                      ? DeskStyle.editorFontForScale(Screen.devicePixelRatio)
+                      : Theme.editorFontForScale(Screen.devicePixelRatio)
                 renderType: Text.NativeRendering
                 clip: true
                 selectByMouse: true

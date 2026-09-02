@@ -161,8 +161,10 @@ Item {
                 color: !root.winActive ? Theme.inactive
                        : (root.typed && !root.canAccept) ? Theme.crit
                        : root.canAccept ? Theme.text : Theme.textDim
-                font: Theme.editorFont   // whole QFont: NoAntialias (docs/DESIGN.md 2.2)
-                font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
+                font: (typeof DeskStyle !== "undefined" && DeskStyle
+                       && typeof DeskStyle.editorFontForScale === "function")
+                      ? DeskStyle.editorFontForScale(Screen.devicePixelRatio)
+                      : Theme.editorFontForScale(Screen.devicePixelRatio) // whole QFont, including Kitty cell spacing
                 renderType: Text.NativeRendering
                 selectByMouse: true
                 selectionColor: Theme.accent

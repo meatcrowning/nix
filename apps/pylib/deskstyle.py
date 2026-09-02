@@ -71,8 +71,8 @@ import math
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QFileSystemWatcher, QObject, Property, Signal
-from PySide6.QtGui import QFont, QFontMetrics
+from PySide6.QtCore import QFileSystemWatcher, QObject, Property, Signal, Slot
+from PySide6.QtGui import QFont, QFontMetrics, QFontMetricsF
 
 from kdetheme import is_plasma, kde_font, kde_motion, kdeglobals_path, read_ini
 from oxygenstyle import is_oxygen, metrics as ox_metrics, motion as ox_motion, \
@@ -383,15 +383,77 @@ class DeskStyle(QObject):
         already antialias, which is exactly what a cursive outline wants — so
         no NoAntialias and no hinting. Oxygen Mono is the explicit exception:
         kitty uses its native TrueType hints, so Qt keeps them too."""
+        return self._editor_font()
+
+    def _editor_font(self):
+        """Build one editable-font value without screen-specific spacing."""
         f = QFont(self._family)
-        f.setPixelSize(self._size)
         if self._terminal_cell:
-            f.setHintingPreference(QFont.PreferVerticalHinting)
-        elif self._smooth:
-            f.setHintingPreference(QFont.PreferNoHinting)
+            # Kitty receives this control's size in POINTS (the generated
+            # kitty.conf uses floor(px * 72 / 96)).  Asking Qt for the old
+            # literal pixel size produced a different FreeType bitmap, then
+            # letter spacing merely hid the advance mismatch.  Keep the
+            # layout's logical px setting elsewhere; the glyph raster itself
+            # has to start from Kitty's point size.
+            f.setPointSizeF(self._size * 72 / 96)
+            f.setHintingPreference(QFont.PreferFullHinting)
+            f.setWeight(QFont.Medium)
         else:
+            f.setPixelSize(self._size)
+        if not self._terminal_cell and self._smooth:
+            f.setHintingPreference(QFont.PreferNoHinting)
+        elif not self._terminal_cell:
             f.setHintingPreference(QFont.PreferFullHinting)
             f.setStyleStrategy(QFont.NoAntialias)
+        return f
+
+    @Slot(float, result=QFont)
+    def labelFontForScale(self, device_scale):
+        """The label font, using Kitty's point-size raster for cell faces.
+
+        `Text` can honour QML's rendering flags, but its grouped `font`
+        properties cannot both carry an exact cell correction and switch from
+        a pixel to a point size.  Returning the complete QFont keeps the
+        glyph raster, hinting and physical-cell advance as one value.
+        """
+        f = QFont(self._family)
+        if self._terminal_cell:
+            f.setPointSizeF(self._size * 72 / 96)
+            f.setHintingPreference(QFont.PreferFullHinting)
+            f.setWeight(QFont.Medium)
+        else:
+            f.setPixelSize(self._size)
+            f.setHintingPreference(QFont.PreferNoHinting if self._smooth
+                                   else QFont.PreferFullHinting)
+        scale = float(device_scale)
+        if self._terminal_cell and math.isfinite(scale) and scale > 0:
+            advance = QFontMetricsF(f).horizontalAdvance("M")
+            spacing = round(advance * scale) / scale - advance
+            f.setLetterSpacing(QFont.AbsoluteSpacing, spacing)
+        return f
+
+    @Slot(float, result=QFont)
+    def editorFontForScale(self, device_scale):
+        """The editable font snapped to Kitty's physical-pixel cell grid.
+
+        QML cannot combine ``font: DeskStyle.editorFont`` with
+        ``font.letterSpacing``: assigning a value type and one of its children
+        is a parse error.  Reconstructing it in QML with ``Qt.font`` avoids the
+        parse error but drops this QFont's hinting/style strategy, which is the
+        very part that makes editable text match Kitty.  Keep both attributes
+        in one QFont instead.
+        """
+        f = self._editor_font()
+        scale = float(device_scale)
+        if self._advance_ratio > 0 and math.isfinite(scale) and scale > 0:
+            # QFont stores absolute spacing in 1/64 px steps.  Start from the
+            # actual hinted advance, not the font-table ratio published to QML:
+            # the latter is useful before an item has a QFont, but its ideal
+            # fractional value can be truncated by QFont one step short of the
+            # intended physical-pixel cell on the external display.
+            advance = QFontMetricsF(f).horizontalAdvance("M")
+            spacing = round(advance * scale) / scale - advance
+            f.setLetterSpacing(QFont.AbsoluteSpacing, spacing)
         return f
 
     @Property(int, notify=changed)
@@ -422,9 +484,7 @@ class DeskStyle(QObject):
         `lineHeight` for anything that means "one text row"; bind `fontSize`
         only for an actual font size.
         """
-        f = QFont(self._family)
-        f.setPixelSize(self._size)
-        f.setHintingPreference(QFont.PreferFullHinting)
+        f = self._editor_font()
         return max(1, QFontMetrics(f).height())
 
     @Property(bool, constant=True)

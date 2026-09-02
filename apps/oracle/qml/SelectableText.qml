@@ -24,8 +24,10 @@ TextEdit {
     textFormat: TextEdit.PlainText
     wrapMode: TextEdit.Wrap
 
-    font: Theme.editorFont
-            font.letterSpacing: Theme.fontLetterSpacing(Screen.devicePixelRatio)
+    font: (typeof DeskStyle !== "undefined" && DeskStyle
+                       && typeof DeskStyle.editorFontForScale === "function")
+                      ? DeskStyle.editorFontForScale(Screen.devicePixelRatio)
+                      : Theme.editorFontForScale(Screen.devicePixelRatio)
     renderType: Text.NativeRendering
     selectionColor: Theme.highlight
     selectedTextColor: Theme.accent
