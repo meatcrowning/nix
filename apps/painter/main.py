@@ -2811,6 +2811,20 @@ class Painter(QObject):
 
         self._run_async(["wl-copy", "-n", "--", str(seed)], done)
 
+    @Slot(str)
+    def copyImage(self, path):
+        """Copy a completed still as image MIME only, never text or a URI."""
+        src = str(path or "")
+
+        def done(rc, out):
+            if rc != 0:
+                detail = (out.splitlines() or [f"exit {rc}"])[-1]
+                self.toast.emit(f"could not copy it: {detail}", True)
+                return
+            self.toast.emit("image copied", False)
+
+        self._run_async([sys.executable, str(CLIPFILE), "--image-only", src], done)
+
     # -- a soundless copy, on the clipboard ---------------------------------
 
     @Slot(str)

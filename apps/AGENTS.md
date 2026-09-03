@@ -246,7 +246,8 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
       happen to have `lo` as a whole word instead of with `long_hair`. The
       indexed path reproduces the same cut.
 - **`clipfile.py`** — files onto the Wayland clipboard, AS FILES (and with
-  `--image`, the picture too). Four callers now — viewer, filer, painter and
+  `--image`, the picture too; `--image-only` advertises strictly image MIME).
+  Four callers now — viewer, filer, painter and
   chatter's log — and the module docstring is the authoritative statement of
   why it is a subprocess speaking `zwlr_data_control_manager_v1` rather than
   `QClipboard`: a Wayland selection dies with the process that offered it, and
@@ -528,6 +529,10 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
       the file rather than being handed a lie. Ignored for a multi-file copy
       (two images cannot both be *the* image on the clipboard) and above
       `IMAGE_MAX`, the holder keeping every payload resident.
+    - **`--image-only` offers no text and no file interpretation.** Painter's
+      completed-still preview uses it so a browser post editor receives an
+      image attachment without also inserting a pathname into the text body.
+      One supported image under `IMAGE_MAX` is required; otherwise it fails.
     - `wl-copy --type text/uri-list` is what painter used, and it is one MIME
       type short: wl-copy offers exactly one (plus the text/plain aliases it
       guesses for a `text/*` type), while GTK — and Chromium/Electron behind

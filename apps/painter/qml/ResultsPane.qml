@@ -85,6 +85,7 @@ Item {
         open: root.showPreview && !root.inView
         // Double-click a finished result to open it properly.
         onOpenRequested: (path) => { if (root.app) root.app.enterView(path) }
+        onMenuRequested: (sx, sy, items) => root.ctxMenu.open(sx, sy, items)
     }
 
     // Margins shrink with the pane: 10px either side of a 220px column is
