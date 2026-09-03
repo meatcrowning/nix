@@ -351,11 +351,12 @@ be a box to drop the image in and a prompt box"*:
   one of the ones `visible: !App.isEdit` hides. `SeedPanel.qml` (edit-only)
   brings just that one row back, using the shared `SeedField.qml` the sampling
   panel also uses, so the seed behaves identically in every preset.
-  `SeedField` also carries **reuse last**: `_start_jobs` remembers the base seed
-  each batch actually ran at (`App.lastSeed`, persisted as the `lastSeed` pref),
-  and `gen.reuseSeed` re-runs at exactly it — overriding a random/negative seed —
-  so a result can be reproduced without hunting for the number. The toggle is
-  dead until there IS a prior seed (§10 honesty).
+  `SeedField` follows rgthree's three explicit seed choices: **random** writes
+  `-1` (fresh seed on every queued batch), **new fixed** rolls one concrete
+  number into the box, and **last** writes the previous queued base seed.
+  `_start_jobs` remembers that base as `App.lastSeed` (persisted as `lastSeed`);
+  **last** is absent until it exists and differs from the displayed seed (§10
+  honesty). `gen.reuseSeed` remains the command/API compatibility route.
 - **The PRIMARY image is the same slot as the video first frame**
   (`App.inputImage`), uploaded the same way, and required: with nothing dropped
   `generate()` refuses before uploading anything.

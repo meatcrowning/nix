@@ -192,6 +192,18 @@ Item {
         gen = g
     }
 
+    // `reuseSeed` was the old checkbox UI's representation of "last". Keep
+    // old saved presets honest by materialising that remembered seed into the
+    // number box once it is available; the new seed row has no hidden mode.
+    function materializeReusedSeed() {
+        if (!gen.reuseSeed || App.lastSeed < 0) return
+        var g = clone(gen)
+        g.seed = App.lastSeed
+        g.randomSeed = false
+        g.reuseSeed = false
+        gen = g
+    }
+
     // "3:2" -> [3, 2], and anything unparseable -> 1:1 rather than a NaN that
     // would propagate into the size and out into the graph.
     function parseAspect(s) {
@@ -1338,6 +1350,7 @@ Item {
         catch (e) { /* a corrupt list just leaves the extras empty */ }
         App.restoreLastImage(Prefs.get("lastImage") || "")
         var ls = Prefs.get("lastSeed"); if (ls !== undefined && ls !== null) App.restoreLastSeed(ls)
+        materializeReusedSeed()
         root.restored = true
     }
 }

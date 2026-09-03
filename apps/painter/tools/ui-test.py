@@ -3438,6 +3438,42 @@ def test_seed(win, ctl):
     check("...and App.lastSeed remembers exactly it",
           ctl.property("lastSeed") == rolled, (ctl.property("lastSeed"), rolled))
 
+    # The visible control follows rgthree's three seed choices. They are QML
+    # functions so this exercises the same writes the buttons make, without a
+    # real desktop click.
+    field = find(win.contentItem(), "SeedField")
+    check("the shared seed field is present", field is not None)
+    if field is not None:
+        g = prop(APP, "gen")
+        g.update({"seed": 123, "randomSeed": False, "reuseSeed": False})
+        APP.setProperty("gen", g)
+        spin(60)
+        field.metaObject().invokeMethod(field, "randomSeed")
+        spin(60)
+        g = prop(APP, "gen")
+        check("random writes -1 into the seed box",
+              g.get("seed") == -1 and g.get("randomSeed") is True
+              and g.get("reuseSeed") is False,
+              {k: g.get(k) for k in ("seed", "randomSeed", "reuseSeed")})
+        check("last appears when a different queued seed exists",
+              field.property("lastAvailable") is True, field.property("lastAvailable"))
+        field.metaObject().invokeMethod(field, "newFixedSeed")
+        spin(60)
+        g = prop(APP, "gen")
+        check("new fixed rolls one concrete seed",
+              isinstance(g.get("seed"), int) and g.get("seed") >= 0
+              and g.get("randomSeed") is False and g.get("reuseSeed") is False,
+              {k: g.get(k) for k in ("seed", "randomSeed", "reuseSeed")})
+        field.metaObject().invokeMethod(field, "useLastSeed")
+        spin(60)
+        g = prop(APP, "gen")
+        check("last restores the queued base seed as fixed",
+              g.get("seed") == rolled and g.get("randomSeed") is False
+              and g.get("reuseSeed") is False,
+              {k: g.get(k) for k in ("seed", "randomSeed", "reuseSeed")})
+        check("last is absent when it would repeat the current seed",
+              field.property("lastAvailable") is False, field.property("lastAvailable"))
+
     # "reuse last" re-runs at that seed, overriding random, without drifting.
     g = prop(APP, "gen")
     g.update({"randomSeed": True, "reuseSeed": True})
@@ -3449,6 +3485,13 @@ def test_seed(win, ctl):
           sent.get("seed") == rolled, (sent.get("seed"), rolled))
     check("...and reusing does not drift the remembered seed",
           ctl.property("lastSeed") == rolled, (ctl.property("lastSeed"), rolled))
+    APP.metaObject().invokeMethod(APP, "materializeReusedSeed")
+    spin(60)
+    g = prop(APP, "gen")
+    check("a saved legacy reuse choice migrates to the visible last seed",
+          g.get("seed") == rolled and g.get("randomSeed") is False
+          and g.get("reuseSeed") is False,
+          {k: g.get(k) for k in ("seed", "randomSeed", "reuseSeed")})
 
     ctl.reg.build, ctl.client.submit, ctl._object_info = orig_build, orig_submit, orig_oi
     # A STUBBED SUBMIT STILL QUEUES A ROW. `_start_jobs` puts the job in the

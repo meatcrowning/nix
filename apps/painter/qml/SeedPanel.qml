@@ -9,8 +9,7 @@ import QtQuick
 Panel {
     id: panel
     title: "seed"
-    badge: root.gen.reuseSeed ? "reuse last"
-                              : (root.gen.randomSeed ? "random" : "fixed")
+    badge: root.gen.seed < 0 ? "random" : "fixed"
 
     SeedField {}
 }
