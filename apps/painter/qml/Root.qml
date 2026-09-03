@@ -131,7 +131,7 @@ Item {
         positive: "", negative: "",
         steps: 20, cfg: 1.0, denoise: 1.0,
         sampler_name: "euler", scheduler: "simple",
-        seed: 0, randomSeed: true, reuseSeed: false, batch_size: 1, count: 1,
+        seed: -1, randomSeed: true, reuseSeed: false, batch_size: 1, count: 1,
         // The aspect is two integers the user types; `aspect` is the "w:h"
         // string they compose, which is what App.dims (registry.calc_dims)
         // parses. Width and height are DERIVED — never set by hand, so there is
@@ -192,14 +192,21 @@ Item {
         gen = g
     }
 
-    // `reuseSeed` was the old checkbox UI's representation of "last". Keep
-    // old saved presets honest by materialising that remembered seed into the
-    // number box once it is available; the new seed row has no hidden mode.
-    function materializeReusedSeed() {
-        if (!gen.reuseSeed || App.lastSeed < 0) return
+    // The old checkbox UI stored its policy beside a positive seed, which can
+    // otherwise make the visible box disagree with what will be queued. Turn
+    // that legacy state into the new explicit representation: -1 for random,
+    // or the actual last seed as a fixed number. No hidden seed mode remains.
+    function materializeSeedPolicy() {
         var g = clone(gen)
-        g.seed = App.lastSeed
-        g.randomSeed = false
+        if (g.reuseSeed && App.lastSeed >= 0) {
+            g.seed = App.lastSeed
+            g.randomSeed = false
+        } else if (g.randomSeed || g.seed < 0) {
+            g.seed = -1
+            g.randomSeed = true
+        } else {
+            g.randomSeed = false
+        }
         g.reuseSeed = false
         gen = g
     }
@@ -284,6 +291,7 @@ Item {
             var d = App.modelDefaults()
             if (d && d.promptTransform !== undefined) g.promptTransform = d.promptTransform
             gen = g
+            materializeSeedPolicy()
             recomputeDims()
             if (root.restored) saveSoon.restart()
             return
@@ -1350,7 +1358,7 @@ Item {
         catch (e) { /* a corrupt list just leaves the extras empty */ }
         App.restoreLastImage(Prefs.get("lastImage") || "")
         var ls = Prefs.get("lastSeed"); if (ls !== undefined && ls !== null) App.restoreLastSeed(ls)
-        materializeReusedSeed()
+        materializeSeedPolicy()
         root.restored = true
     }
 }

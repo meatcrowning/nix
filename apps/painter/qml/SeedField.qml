@@ -8,11 +8,7 @@ import QtQuick
 // can change something — a state, not a missing control (docs/DESIGN.md §10).
 Field {
     id: field
-    // The seed's own panel/title supplies its name. Unlike ordinary paired
-    // form rows, this is a compact control group: reserve no label gutter so
-    // its number box can use the whole controls column.
-    label: ""
-    labelWidth: 0
+    label: "seed"
     hint: "-1 is random for every queued batch. new fixed rolls one concrete "
           + "seed now; last restores the previous queued seed."
 
@@ -41,11 +37,9 @@ Field {
     }
 
     Column {
-        // Field keeps a 6px gap after any label. This component has none, so
-        // reclaim that gap: both the seed box and button row span the whole
-        // controls column rather than ending short of its left edge.
-        x: -6
-        width: parent.width + 6
+        // `parent` is Field's right-hand holder: this is the same control
+        // column every other sampling row uses, after the 96px label gutter.
+        width: parent.width
         spacing: 4
         Spin {
             width: parent.width
@@ -60,25 +54,31 @@ Field {
         Row {
             id: buttons
             width: parent.width
-            spacing: 8
+            spacing: 4
             TextButton {
-                label: "[ random ]"
+                width: Math.floor((buttons.width - buttons.spacing * 2) / 3)
+                label: "[ rnd ]"
                 lit: root.gen.seed < 0
                 anchors.verticalCenter: parent.verticalCenter
                 onClicked: field.randomSeed()
+                ToolTipArea { anchors.fill: parent; text: "random every queued batch" }
             }
             TextButton {
-                label: "[ new fixed ]"
+                width: Math.floor((buttons.width - buttons.spacing * 2) / 3)
+                label: "[ new ]"
                 anchors.verticalCenter: parent.verticalCenter
                 onClicked: field.newFixedSeed()
+                ToolTipArea { anchors.fill: parent; text: "new fixed seed" }
             }
             TextButton {
                 id: lastButton
                 objectName: "seedLast"
+                width: buttons.width - x
                 label: "[ last ]"
                 enabled: field.lastAvailable
                 anchors.verticalCenter: parent.verticalCenter
                 onClicked: field.useLastSeed()
+                ToolTipArea { anchors.fill: parent; text: "use last queued seed" }
             }
         }
     }
