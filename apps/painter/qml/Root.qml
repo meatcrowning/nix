@@ -247,7 +247,15 @@ Item {
         if (saved) {
             if (root.defaultsFor) root.genByModel[root.defaultsFor] = snapshotGen()
             root.defaultsFor = App.selectedName
-            gen = mergeGen(gen, saved)
+            var g = mergeGen(gen, saved)
+            // `promptTransform` is the family's wire contract, not a setting:
+            // Anima changed from `single_line` to `danbooru` after old presets
+            // had already persisted the former. Letting that stale derived
+            // value win disables completion and loses the tag spelling pass.
+            // `danbooru_prompt` remains single-line itself.
+            var d = App.modelDefaults()
+            if (d && d.promptTransform !== undefined) g.promptTransform = d.promptTransform
+            gen = g
             recomputeDims()
             if (root.restored) saveSoon.restart()
             return
