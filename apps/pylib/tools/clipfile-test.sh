@@ -170,6 +170,24 @@ if n wl-paste --no-newline --type image/png > "$RUN/pasted.png" 2>/dev/null \
 else
   bad "image/png did not round-trip"
 fi
+
+printf '\n\033[1m== --image-only: pixels, and absolutely no text ==\033[0m\n'
+if n python3 "$CLIPFILE" --image-only "$PIC" 2>"$RUN/err"; then
+  ok "clipfile --image-only exits 0"
+else
+  bad "clipfile --image-only failed: $(cat "$RUN/err")"
+fi
+types="$(n wl-paste --list-types 2>/dev/null)"
+case "$types" in
+  *image/png*) ok "offers image/png" ;;
+  *) bad "does NOT offer image/png (offered: $(echo "$types" | tr '\n' ' '))" ;;
+esac
+for unwanted in text/plain text/uri-list x-special/gnome-copied-files UTF8_STRING STRING TEXT; do
+  case "$types" in
+    *"$unwanted"*) bad "image-only leaked $unwanted" ;;
+    *) ok "offers no $unwanted" ;;
+  esac
+done
 # ...and without the flag it is a file copy exactly as before
 n python3 "$CLIPFILE" "$PIC" 2>/dev/null
 case "$(n wl-paste --list-types 2>/dev/null)" in

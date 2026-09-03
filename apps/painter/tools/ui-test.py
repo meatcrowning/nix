@@ -409,7 +409,7 @@ def build(tmp):
     real_async = P.Painter._run_async
 
     def recorded(self, argv, done=None):
-        if os.path.basename(argv[-2] if len(argv) > 1 else argv[0]) == "clipfile.py" \
+        if any(os.path.basename(a) == "clipfile.py" for a in argv) \
            or os.path.basename(argv[0]) in ("wl-copy", "ffmpeg"):
             RAN.append(list(argv))
             if done:
@@ -4385,6 +4385,28 @@ def test_preview_zoom(win, ctl, tmp):
     spin(200)
     check("the pane is showing the picture to zoom",
           pane.property("source") == shot, pane.property("source"))
+
+    # Only a completed still owns this menu. Its copy is intentionally pixels
+    # alone: a browser post field must attach it without receiving a pathname
+    # as text as well.
+    preview_mouse = next((it for it in walk(pane)
+                          if it.property("objectName") == "previewMouse"), None)
+    if preview_mouse is not None:
+        click(win, preview_mouse, button=Qt.RightButton)
+        menus = find_all(content, "CtxMenu")
+        offered = next((prop(m, "items") for m in menus if prop(m, "items")), [])
+        labels = [i.get("label") for i in offered if i.get("label")]
+        check("a completed still preview offers copy image", labels == ["copy image"], labels)
+        for menu in menus:
+            menu.metaObject().invokeMethod(menu, "close")
+    else:
+        check("a completed still preview has a right-click target", False)
+    RAN.clear()
+    ctl.copyImage(shot)
+    spin(120)
+    copied = [a for a in RAN if any(os.path.basename(x) == "clipfile.py" for x in a)]
+    check("copy image asks clipfile for image MIME only",
+          copied and copied[-1][-2:] == ["--image-only", shot], copied)
     check("...at 1:1, with nothing to pan",
           pane.property("zoom") == 1.0 and pane.property("panX") == 0,
           (pane.property("zoom"), pane.property("panX")))
@@ -4454,9 +4476,13 @@ def main():
     os.environ["PAINTER_PEER_OUT"] = os.path.join(tmp, "peer-out")
 
     app, engine, win, ctl, keep = build(tmp)
-    if os.environ.get("PAINTER_UI_ONLY") == "seed":
-        print("== seed ==")
-        test_seed(win, ctl)
+    only = os.environ.get("PAINTER_UI_ONLY")
+    if only in ("seed", "preview"):
+        print("== %s ==" % only)
+        if only == "seed":
+            test_seed(win, ctl)
+        else:
+            test_preview_zoom(win, ctl, tmp)
         real = [w for w in WARNINGS if "Qt Quick Layouts" not in w]
         for w in real:
             print("QML WARNING: " + w)

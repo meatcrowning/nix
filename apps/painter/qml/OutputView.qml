@@ -193,6 +193,8 @@ Item {
                     view.menuRequested(pt.x, pt.y, [
                         { label: "open in viewer",
                           trigger: () => App.openExternally(view.source) },
+                        { label: "copy image", enabled: !view.isVideo,
+                          trigger: () => App.copyImage(view.source) },
                         { label: "fit", trigger: () => view.zoomFit() },
                         { label: "actual size", trigger: () => view.zoomActual() }
                     ])

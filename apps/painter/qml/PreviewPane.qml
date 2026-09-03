@@ -32,6 +32,7 @@ Item {
     //: Only when this pane is showing an OUTPUT — a live sampler frame is not
     //: a file and there is nothing to open.
     signal openRequested(string path)
+    signal menuRequested(real sx, real sy, var items)
     // The height is dragged and remembered, exactly like a prompt box.
     property int paneHeight: Prefs.get("preview.h") > 0 ? Prefs.get("preview.h") : 260
     readonly property int minHeight: 90
@@ -284,7 +285,8 @@ Item {
             MouseArea {
                 id: viewMa
                 anchors.fill: parent
-                acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+                objectName: "previewMouse"
+                acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
                 preventStealing: true
                 hoverEnabled: false
                 cursorShape: panning ? Qt.ClosedHandCursor
@@ -336,8 +338,16 @@ Item {
                     viewMa.panning = false
                 }
                 onClicked: function (m) {
-                    if (m.button !== Qt.LeftButton) return
-                    if (pane.sourceIsVideo && !pane.showLive)
+                    if (m.button === Qt.RightButton) {
+                        if (pane.source === "" || pane.showLive || pane.sourceIsVideo) return
+                        var pt = mapToItem(null, m.x, m.y)
+                        pane.menuRequested(pt.x, pt.y, [
+                            { label: "copy image",
+                              trigger: () => App.copyImage(pane.source) }
+                        ])
+                        return
+                    }
+                    if (m.button === Qt.LeftButton && pane.sourceIsVideo && !pane.showLive)
                         player.playbackState === MediaPlayer.PlayingState
                             ? player.pause() : player.play()
                 }

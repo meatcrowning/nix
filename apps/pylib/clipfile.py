@@ -3,6 +3,7 @@
 
     python3 clipfile.py FILE [FILE...]      # exit 0 once the selection is ours
     python3 clipfile.py --image IMAGE       # ...and as the picture itself
+    python3 clipfile.py --image-only IMAGE  # image mime only; no text/file
 
 Why this exists instead of `wl-copy --type text/uri-list`, which is what
 painter used until it turned out that pasting the copy gave TEXT rather than
@@ -35,6 +36,12 @@ understands pixels (an image editor, a canvas) now gets the picture instead of
 nothing. The bytes are the file's, unconverted, because this is stdlib-only and
 has no decoder: a JPEG is offered as `image/jpeg`, so a consumer that insists on
 `image/png` falls back to the file paste rather than being handed a lie.
+
+`--image-only` instead offers exactly the image MIME and nothing else. It is
+for browser text editors whose paste handler turns an image offer into an
+attachment but would insert `text/plain` into the post body if the path were
+also advertised. Unsupported, oversized and multiple inputs fail rather than
+claiming a clipboard selection with no picture in it.
 
 It forks once the compositor has acknowledged the selection: the parent exits
 0 (so a caller can report success or failure honestly) and the child stays on
@@ -81,7 +88,18 @@ def image_mime(path):
 # list and takes the first thing it understands should land on the file
 # interpretation, not on the text one; the image type sits between the file
 # types and the text ones, so `--image` never costs an app the file paste.
-def payloads(paths, as_image=False):
+def payloads(paths, as_image=False, image_only=False):
+    if image_only:
+        if len(paths) != 1:
+            return {}
+        mime = image_mime(paths[0])
+        try:
+            if mime and os.path.getsize(paths[0]) <= IMAGE_MAX:
+                return {mime: open(paths[0], "rb").read()}
+        except OSError:
+            pass
+        return {}
+
     uris = ["file://" + quote(os.path.abspath(p), safe="/") for p in paths]
     text = "\n".join(os.path.abspath(p) for p in paths)
     body = {
@@ -183,8 +201,10 @@ class Wire:
 MANAGERS = ("zwlr_data_control_manager_v1", "ext_data_control_manager_v1")
 
 
-def copy(paths, as_image=False):
-    body = payloads(paths, as_image)
+def copy(paths, as_image=False, image_only=False):
+    body = payloads(paths, as_image, image_only)
+    if not body:
+        raise ValueError("no supported image to copy")
     w = Wire()
 
     registry = w.nid()
@@ -258,16 +278,17 @@ def serve(w, source, body):
 def main(argv):
     args = argv[1:]
     as_image = "--image" in args
+    image_only = "--image-only" in args
     paths = [a for a in args if not a.startswith("-")]
     if not paths:
-        print("usage: clipfile.py [--image] FILE [FILE...]", file=sys.stderr)
+        print("usage: clipfile.py [--image|--image-only] FILE [FILE...]", file=sys.stderr)
         return 2
     missing = [p for p in paths if not os.path.exists(p)]
     if missing:
         print("no such file: " + ", ".join(missing), file=sys.stderr)
         return 1
     try:
-        w, source, body = copy(paths, as_image)
+        w, source, body = copy(paths, as_image, image_only)
     except Exception as exc:                              # noqa: BLE001
         print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
         return 1

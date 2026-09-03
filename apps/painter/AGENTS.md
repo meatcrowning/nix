@@ -174,6 +174,11 @@ here:
   output viewed is an edit"*). That is `hidden:` on the row plus the `actions`
   filter in `Root.qml`; kdeshell rebuilds its chrome when the SET of rows
   changes, since a state flip alone cannot remove a button (apps/AGENTS.md).
+- **A completed still in either preview has `copy image` on right-click.** It
+  runs `clipfile.py --image-only`: the clipboard advertises only the file's
+  image MIME, never text, a URI or the filename, so pasting into a browser post
+  editor attaches the picture without adding anything to the post body. Live
+  sampler frames and videos do not offer the row.
 - **The before-image is filed beside the output, because a recorded path was
   not enough.** [his] *"the compare mode just doesnt work in general"* —
   measured 2026-08-22: the slider itself is fine (the harness drives it end to
