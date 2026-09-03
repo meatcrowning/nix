@@ -351,6 +351,13 @@ Item {
             // What the press decided this drag carries — the selection when the
             // tile is part of one, otherwise this file alone.
             property var dragPaths: []
+            // Metadata is only read when this tile is hovered. Half the history
+            // may be over sshfs, so asking every realised tile for its seed
+            // just to hide most of the answers would make scrolling expensive.
+            readonly property var outputParams:
+                (!tile.live && tileMa.containsMouse) ? Gallery.paramsAt(index) : null
+            readonly property var outputSeed:
+                outputParams && outputParams.seed !== undefined ? outputParams.seed : null
 
             Rectangle {
                 anchors.fill: parent
@@ -500,6 +507,19 @@ Item {
                     // looking like one that is producing nothing.
                     text: App.busy ? "waiting for the first frame" : "queued"
                     color: Theme.dim
+                }
+
+                // A small, deliberate left-click target: a history entry owns
+                // the seed that made it, and copying that number should not
+                // mean right-clicking through an unrelated menu or changing
+                // the current selection. It appears with the other hover facts.
+                TextButton {
+                    id: seedChip
+                    anchors { right: parent.right; top: parent.top; margins: 5 }
+                    z: 2
+                    label: "[ seed " + tile.outputSeed + " ]"
+                    visible: tileMa.containsMouse && tile.outputSeed !== null
+                    onClicked: App.copySeed(path)
                 }
 
                 Rectangle {
