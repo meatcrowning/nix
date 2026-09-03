@@ -3635,6 +3635,14 @@ def test_preset_isolation(win, ctl, tmp):
     g["promptTransform"] = "single_line"
     APP.setProperty("gen", g)
     spin(80)
+    # At relaunch restoreState() has already set defaultsFor to this model, so
+    # the normal preset path is deliberately skipped. It must still migrate the
+    # family-owned transform through that fast path.
+    APP.metaObject().invokeMethod(APP, "applyDefaults")
+    spin(80)
+    check("restoring an already-current preset updates Anima's tag grammar",
+          prop(APP, "gen").get("promptTransform") == "danbooru",
+          prop(APP, "gen").get("promptTransform"))
     ctl.selectModelByName("krea2_raw_fp8_scaled.safetensors")
     spin(150)
     edit("KREA", 16, 9, 1.1, 33)

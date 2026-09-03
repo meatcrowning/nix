@@ -239,7 +239,23 @@ Item {
     }
 
     function applyDefaults() {
-        if (App.selectedName === root.defaultsFor) return
+        if (App.selectedName === root.defaultsFor) {
+            // Startup restores both `gen` and `defaultsFor` before the model
+            // list arrives. That normally avoids resetting a remembered
+            // preset, but it also used to leave an obsolete family grammar
+            // untouched forever. Reconcile this derived wire contract even on
+            // that fast path; ordinary prompt/sampler settings still remain
+            // exactly as saved.
+            var current = App.modelDefaults()
+            if (current && current.promptTransform !== undefined
+                    && gen.promptTransform !== current.promptTransform) {
+                var known = clone(gen)
+                known.promptTransform = current.promptTransform
+                gen = known
+                if (root.restored) saveSoon.restart()
+            }
+            return
+        }
 
         // A preset we already have settings for: restore them wholesale. This is
         // the round-trip case, and (via the persisted map) the relaunch case too.
