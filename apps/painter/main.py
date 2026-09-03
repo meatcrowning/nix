@@ -1540,9 +1540,9 @@ class Painter(QObject):
 
     @Slot(result="QVariant")
     def freshSeed(self):
-        """A new concrete seed for the seed panel's ``new fixed`` action."""
+        """A new concrete seed using rgthree's exact positive random range."""
         import secrets
-        return secrets.randbelow(2**53)
+        return secrets.randbelow(2**50)
 
     def _family_kind(self):
         entry = self.models.entry_at(self._selected)
@@ -2408,7 +2408,9 @@ class Painter(QObject):
             elif randomise or seed < 0:
                 import secrets
 
-                p["seed"] = secrets.randbelow(2**53)
+                # Match rgthree Seed's randomMax. Keeping generated values at
+                # 2**50 also survives QML's JS-number boundary exactly.
+                p["seed"] = secrets.randbelow(2**50)
             else:
                 p["seed"] = seed + n
             # Remember the base seed this batch ran at, so the UI can offer to
