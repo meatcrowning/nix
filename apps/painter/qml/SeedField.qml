@@ -4,8 +4,8 @@ import QtQuick
 //
 // It follows rgthree's useful distinction: random is the literal -1 in the
 // box, new fixed rolls one concrete number NOW, and last restores the seed the
-// last queued batch actually got. The last action is absent until it can change
-// something — a drawn-but-dead action would violate docs/DESIGN.md §10.
+// last queued batch actually got. Last remains legible but is disabled until it
+// can change something — a state, not a missing control (docs/DESIGN.md §10).
 Field {
     id: field
     label: "seed"
@@ -36,8 +36,8 @@ Field {
         root.set("reuseSeed", false)
     }
 
-    Row {
-        spacing: 8
+    Column {
+        spacing: 4
         Spin {
             width: 150
             value: root.gen.seed
@@ -48,22 +48,27 @@ Field {
                 root.set("reuseSeed", false)
             }
         }
-        TextButton {
-            label: "[ random ]"
-            lit: root.gen.seed < 0
-            anchors.verticalCenter: parent.verticalCenter
-            onClicked: field.randomSeed()
-        }
-        TextButton {
-            label: "[ new fixed ]"
-            anchors.verticalCenter: parent.verticalCenter
-            onClicked: field.newFixedSeed()
-        }
-        TextButton {
-            label: "[ last ]"
-            visible: field.lastAvailable
-            anchors.verticalCenter: parent.verticalCenter
-            onClicked: field.useLastSeed()
+        Row {
+            spacing: 8
+            TextButton {
+                label: "[ random ]"
+                lit: root.gen.seed < 0
+                anchors.verticalCenter: parent.verticalCenter
+                onClicked: field.randomSeed()
+            }
+            TextButton {
+                label: "[ new fixed ]"
+                anchors.verticalCenter: parent.verticalCenter
+                onClicked: field.newFixedSeed()
+            }
+            TextButton {
+                id: lastButton
+                objectName: "seedLast"
+                label: "[ last ]"
+                enabled: field.lastAvailable
+                anchors.verticalCenter: parent.verticalCenter
+                onClicked: field.useLastSeed()
+            }
         }
     }
 }

@@ -2746,7 +2746,7 @@ def test_copy_prompt(win, ctl, tmp):
     import main as P
 
     params = {"positive": "a lighthouse in a storm", "negative": "blurry",
-              "steps": 12}
+              "steps": 12, "seed": 4242}
     path = fake_png(os.path.join(tmp, "out", "prompt_00001_.png"), params)
     ctl.gallery.add(path)
     spin(120)
@@ -2765,13 +2765,18 @@ def test_copy_prompt(win, ctl, tmp):
     grid.setProperty("contentY", 0)
     spin(80)
 
-    def row0_menu():
+    def row0_cell():
         cells = [c for c in walk(grid)
                  if c.metaObject().className().startswith("QQuickItem")
                  and c.width() == grid.property("cellWidth")]
         if not cells:
             return None
-        cell = min(cells, key=lambda c: (round(c.y()), round(c.x())))
+        return min(cells, key=lambda c: (round(c.y()), round(c.x())))
+
+    def row0_menu():
+        cell = row0_cell()
+        if cell is None:
+            return None
         click(win, cell, dx=cell.width() / 2, dy=cell.height() / 2, button=Qt.RightButton)
         spin(150)
         out = [i.get("label") for i in (prop(menu, "items") or []) if i.get("label")]
@@ -2794,6 +2799,26 @@ def test_copy_prompt(win, ctl, tmp):
           copied and copied[-1][-1] == params["positive"], RAN)
     check("...with no newline glued to the end", copied and "-n" in copied[-1],
           copied[-1] if copied else RAN)
+
+    # The history exposes its seed as a left-click chip on hover, rather than
+    # hiding this common copy-out behind the output's context menu.
+    cell = row0_cell()
+    if cell is not None:
+        from PySide6.QtCore import QPoint, QPointF
+        from PySide6.QtTest import QTest
+        point = cell.mapToScene(QPointF(cell.width() / 2, cell.height() / 2))
+        QTest.mouseMove(win, QPoint(int(point.x()), int(point.y())))
+        spin(150)
+        chip = find(cell, "TextButton",
+                    pred=lambda it: it.property("label") == "[ seed 4242 ]")
+        check("a hovered history output exposes its seed as a left-click item",
+              chip is not None and chip.isVisible(), chip)
+        RAN.clear()
+        if chip is not None:
+            click(win, chip)
+        copied = [r for r in RAN if os.path.basename(r[0]) == "wl-copy"]
+        check("clicking the history seed copies its recorded number",
+              copied and copied[-1][-1] == "4242", RAN)
 
     # A PNG that never went through painter has no prompt to give, and must say
     # so rather than put an empty selection over whatever was on the clipboard.
@@ -3457,6 +3482,11 @@ def test_seed(win, ctl):
               {k: g.get(k) for k in ("seed", "randomSeed", "reuseSeed")})
         check("last appears when a different queued seed exists",
               field.property("lastAvailable") is True, field.property("lastAvailable"))
+        last_button = find(field, "TextButton",
+                           pred=lambda it: it.property("objectName") == "seedLast")
+        check("last remains visible and enabled when it can restore a seed",
+              last_button is not None and last_button.isVisible() and last_button.isEnabled(),
+              None if last_button is None else (last_button.isVisible(), last_button.isEnabled()))
         field.metaObject().invokeMethod(field, "newFixedSeed")
         spin(60)
         g = prop(APP, "gen")
@@ -3471,8 +3501,11 @@ def test_seed(win, ctl):
               g.get("seed") == rolled and g.get("randomSeed") is False
               and g.get("reuseSeed") is False,
               {k: g.get(k) for k in ("seed", "randomSeed", "reuseSeed")})
-        check("last is absent when it would repeat the current seed",
+        check("last is unavailable when it would repeat the current seed",
               field.property("lastAvailable") is False, field.property("lastAvailable"))
+        check("last stays visible but is disabled when it would repeat the seed",
+              last_button is not None and last_button.isVisible() and not last_button.isEnabled(),
+              None if last_button is None else (last_button.isVisible(), last_button.isEnabled()))
 
     # "reuse last" re-runs at that seed, overriding random, without drifting.
     g = prop(APP, "gen")

@@ -2787,6 +2787,28 @@ class Painter(QObject):
 
         self._run_async(["wl-copy", "-n", "--", text], done)
 
+    @Slot(str)
+    def copySeed(self, path):
+        """Put this output's recorded seed on the clipboard."""
+        params = outmeta.params_for(path) or {}
+        try:
+            seed = int(params.get("seed"))
+        except (TypeError, ValueError):
+            self.toast.emit("no seed stored in this file", True)
+            return
+        if seed < 0:
+            self.toast.emit("no fixed seed stored in this file", True)
+            return
+
+        def done(rc, out):
+            if rc != 0:
+                detail = (out.splitlines() or [f"exit {rc}"])[-1]
+                self.toast.emit(f"could not copy it: {detail}", True)
+                return
+            self.toast.emit("seed copied", False)
+
+        self._run_async(["wl-copy", "-n", "--", str(seed)], done)
+
     # -- a soundless copy, on the clipboard ---------------------------------
 
     @Slot(str)
