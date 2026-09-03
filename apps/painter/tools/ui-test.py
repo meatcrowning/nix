@@ -3628,6 +3628,13 @@ def test_preset_isolation(win, ctl, tmp):
         spin(80)
 
     edit("ANIMA", 3, 2, 1.7, 27)
+    # Simulate the state written before Anima's transform gained its Danbooru
+    # spelling/completion behaviour. This is family-owned wire grammar, never
+    # a user preference: restoring it must not turn the feature back off.
+    g = prop(APP, "gen")
+    g["promptTransform"] = "single_line"
+    APP.setProperty("gen", g)
+    spin(80)
     ctl.selectModelByName("krea2_raw_fp8_scaled.safetensors")
     spin(150)
     edit("KREA", 16, 9, 1.1, 33)
@@ -3641,6 +3648,8 @@ def test_preset_isolation(win, ctl, tmp):
           and a.get("aspectH") == 2 and abs(a.get("megapixels") - 1.7) < 1e-6
           and a.get("steps") == 27,
           {k: a.get(k) for k in ("positive", "aspectW", "aspectH", "megapixels", "steps")})
+    check("a stale preset cannot override Anima's Danbooru grammar",
+          a.get("promptTransform") == "danbooru", a.get("promptTransform"))
 
     ctl.selectModelByName("krea2_raw_fp8_scaled.safetensors")
     spin(150)
