@@ -3469,6 +3469,18 @@ def test_seed(win, ctl):
     field = find(win.contentItem(), "SeedField")
     check("the shared seed field is present", field is not None)
     if field is not None:
+        seed_spin = find(field, "Spin")
+        check("the seed box spans the control column",
+              seed_spin is not None and abs(seed_spin.width() - field.width()) < 1,
+              None if seed_spin is None else (seed_spin.width(), field.width()))
+        seed_buttons = find_all(field, "TextButton")
+        fx, _fy, fw, _fh = scene_rect(field)
+        button_bounds = [scene_rect(b) for b in seed_buttons]
+        check("the three seed buttons fit the controls column",
+              len(button_bounds) == 3
+              and min(x for x, _y, _w, _h in button_bounds) >= fx - 1
+              and max(x + w for x, _y, w, _h in button_bounds) <= fx + fw + 1,
+              button_bounds)
         g = prop(APP, "gen")
         g.update({"seed": 123, "randomSeed": False, "reuseSeed": False})
         APP.setProperty("gen", g)
