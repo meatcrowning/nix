@@ -1538,6 +1538,12 @@ class Painter(QObject):
     lastSeed = Property("QVariant", lambda self: self._last_seed,
                         notify=lastSeedChanged)
 
+    @Slot(result="QVariant")
+    def freshSeed(self):
+        """A new concrete seed for the seed panel's ``new fixed`` action."""
+        import secrets
+        return secrets.randbelow(2**53)
+
     def _family_kind(self):
         entry = self.models.entry_at(self._selected)
         if entry is None or self.reg is None:

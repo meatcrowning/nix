@@ -2,47 +2,68 @@ import QtQuick
 
 // The seed row, shared so every preset chooses the seed the same way.
 //
-// Three controls, and the honesty rule (docs/DESIGN.md §10) decides which are
-// live: the number is editable unless "random" or "reuse last" is driving it;
-// "random" rolls a fresh seed each batch; "reuse last" re-runs at the exact
-// seed the previous batch used (App.lastSeed) and so is dead until there IS a
-// previous batch. The edit preset uses this too (SeedPanel), because its graph
-// honours the seed exactly like the image presets do — it just had no control.
+// It follows rgthree's useful distinction: random is the literal -1 in the
+// box, new fixed rolls one concrete number NOW, and last restores the seed the
+// last queued batch actually got. The last action is absent until it can change
+// something — a drawn-but-dead action would violate docs/DESIGN.md §10.
 Field {
+    id: field
     label: "seed"
-    hint: "The starting noise. 'reuse last' re-runs the previous batch's seed; "
-          + "with both off, the number is used as-is (batches walk up from it)."
+    hint: "-1 is random for every queued batch. new fixed rolls one concrete "
+          + "seed now; last restores the previous queued seed."
+
+    readonly property bool lastAvailable: App.lastSeed >= 0
+                                        && App.lastSeed !== root.gen.seed
+
+    function randomSeed() {
+        root.set("seed", -1)
+        root.set("randomSeed", true)
+        root.set("reuseSeed", false)
+    }
+
+    function newFixedSeed() {
+        var seed = App.freshSeed()
+        if (seed < 0) return
+        root.set("seed", seed)
+        root.set("randomSeed", false)
+        root.set("reuseSeed", false)
+    }
+
+    function useLastSeed() {
+        if (!field.lastAvailable) return
+        root.set("seed", App.lastSeed)
+        root.set("randomSeed", false)
+        root.set("reuseSeed", false)
+    }
+
     Row {
         spacing: 8
         Spin {
             width: 150
-            // While "reuse last" is on, show the seed that will actually run
-            // (the remembered one), not the stale typed value beneath it.
-            value: (root.gen.reuseSeed && App.lastSeed >= 0) ? App.lastSeed
-                                                             : root.gen.seed
-            from: 0; to: 9007199254740992; step: 1
-            enabled: !root.gen.randomSeed && !root.gen.reuseSeed
-            opacity: enabled ? 1 : 0.45
-            onEdited: function (v) { root.set("seed", v) }
-        }
-        Toggle {
-            label: "random"
-            checked: root.gen.randomSeed
-            enabled: !root.gen.reuseSeed
-            opacity: enabled ? 1 : 0.45
-            anchors.verticalCenter: parent.verticalCenter
-            onToggled: function (v) { root.set("randomSeed", v) }
-        }
-        Toggle {
-            label: "reuse"
-            checked: root.gen.reuseSeed
-            enabled: App.lastSeed >= 0
-            opacity: enabled ? 1 : 0.45
-            anchors.verticalCenter: parent.verticalCenter
-            onToggled: function (v) {
-                root.set("reuseSeed", v)
-                if (v) root.set("randomSeed", false)   // reuse overrides random
+            value: root.gen.seed
+            from: -1; to: 9007199254740992; step: 1
+            onEdited: function (v) {
+                root.set("seed", v)
+                root.set("randomSeed", v < 0)
+                root.set("reuseSeed", false)
             }
+        }
+        TextButton {
+            label: "[ random ]"
+            lit: root.gen.seed < 0
+            anchors.verticalCenter: parent.verticalCenter
+            onClicked: field.randomSeed()
+        }
+        TextButton {
+            label: "[ new fixed ]"
+            anchors.verticalCenter: parent.verticalCenter
+            onClicked: field.newFixedSeed()
+        }
+        TextButton {
+            label: "[ last ]"
+            visible: field.lastAvailable
+            anchors.verticalCenter: parent.verticalCenter
+            onClicked: field.useLastSeed()
         }
     }
 }
