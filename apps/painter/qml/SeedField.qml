@@ -42,7 +42,12 @@ Field {
         width: parent.width
         spacing: 4
         Spin {
-            width: parent.width
+            // Name the relationship directly: the box is exactly as wide as
+            // the button strip below, from rnd's left edge through last's
+            // right edge. This also keeps the Plasma and pixel faces honest
+            // when their buttons have different implicit widths.
+            anchors.left: buttons.left
+            anchors.right: buttons.right
             value: root.gen.seed
             from: -1; to: 9007199254740992; step: 1
             onEdited: function (v) {
