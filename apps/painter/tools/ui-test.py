@@ -2788,8 +2788,10 @@ def test_copy_prompt(win, ctl, tmp):
     if labels is not None:
         check("a still with a prompt offers to copy it",
               "copy prompt" in labels, labels)
-        check("...below the inject items, beside the other copy-out",
+        check("...below the inject items, beside the other copy-outs",
               labels.index("copy prompt") > labels.index("inject params"), labels)
+        check("an output with a fixed seed offers to copy it",
+              "copy seed" in labels, labels)
 
     RAN.clear()
     ctl.copyPrompt(path)
@@ -2800,25 +2802,14 @@ def test_copy_prompt(win, ctl, tmp):
     check("...with no newline glued to the end", copied and "-n" in copied[-1],
           copied[-1] if copied else RAN)
 
-    # The history exposes its seed as a left-click chip on hover, rather than
-    # hiding this common copy-out behind the output's context menu.
-    cell = row0_cell()
-    if cell is not None:
-        from PySide6.QtCore import QPoint, QPointF
-        from PySide6.QtTest import QTest
-        point = cell.mapToScene(QPointF(cell.width() / 2, cell.height() / 2))
-        QTest.mouseMove(win, QPoint(int(point.x()), int(point.y())))
-        spin(150)
-        chip = find(cell, "TextButton",
-                    pred=lambda it: it.property("label") == "[ seed 4242 ]")
-        check("a hovered history output exposes its seed as a left-click item",
-              chip is not None and chip.isVisible(), chip)
-        RAN.clear()
-        if chip is not None:
-            click(win, chip)
-        copied = [r for r in RAN if os.path.basename(r[0]) == "wl-copy"]
-        check("clicking the history seed copies its recorded number",
-              copied and copied[-1][-1] == "4242", RAN)
+    RAN.clear()
+    ctl.copySeed(path)
+    spin(150)
+    copied = [r for r in RAN if os.path.basename(r[0]) == "wl-copy"]
+    check("copy seed puts only the recorded number on the clipboard",
+          copied and copied[-1][-1] == "4242", RAN)
+    check("...with no newline glued to the end",
+          copied and "-n" in copied[-1], copied[-1] if copied else RAN)
 
     # A PNG that never went through painter has no prompt to give, and must say
     # so rather than put an empty selection over whatever was on the clipboard.

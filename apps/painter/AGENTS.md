@@ -356,8 +356,8 @@ be a box to drop the image in and a prompt box"*:
   number into the box, and **last** writes the previous queued base seed. The
   number spans the right-hand controls column above three equal-width compact
   buttons (`rnd`, `new`, `last`); **last** stays visible but disabled until it
-  exists and differs from the displayed seed. A hovered history tile also
-  exposes its recorded `[ seed N ]` as a left-click copy target.
+  exists and differs from the displayed seed. An output's right-click menu
+  offers **copy seed**, which puts only its recorded number on the clipboard.
   `_start_jobs` remembers that base as `App.lastSeed` (persisted as `lastSeed`);
   `gen.reuseSeed` remains the command/API compatibility route.
 - **The PRIMARY image is the same slot as the video first frame**

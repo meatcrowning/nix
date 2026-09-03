@@ -185,6 +185,11 @@ Item {
             items.push({ label: "copy prompt",
                          trigger: () => App.copyPrompt(path) })
         }
+        var seed = params ? Number(params.seed) : -1
+        if (Number.isFinite(seed) && seed >= 0) {
+            items.push({ label: "copy seed",
+                         trigger: () => App.copySeed(path) })
+        }
         if (isVideo) {
             items.push({ label: "copy muted copy",
                          trigger: () => App.copyMuted(path) })
@@ -507,19 +512,6 @@ Item {
                     // looking like one that is producing nothing.
                     text: App.busy ? "waiting for the first frame" : "queued"
                     color: Theme.dim
-                }
-
-                // A small, deliberate left-click target: a history entry owns
-                // the seed that made it, and copying that number should not
-                // mean right-clicking through an unrelated menu or changing
-                // the current selection. It appears with the other hover facts.
-                TextButton {
-                    id: seedChip
-                    anchors { right: parent.right; top: parent.top; margins: 5 }
-                    z: 2
-                    label: "[ seed " + tile.outputSeed + " ]"
-                    visible: tileMa.containsMouse && tile.outputSeed !== null
-                    onClicked: App.copySeed(path)
                 }
 
                 Rectangle {
