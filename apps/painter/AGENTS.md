@@ -354,8 +354,9 @@ be a box to drop the image in and a prompt box"*:
   `SeedField` follows rgthree's three explicit seed choices: **random** writes
   `-1` (fresh seed on every queued batch), **new fixed** rolls one concrete
   number into the box, and **last** writes the previous queued base seed. The
-  number spans the controls column above the three buttons; **last** stays
-  visible but disabled until it exists and differs from the displayed seed. A hovered history tile also
+  number spans the right-hand controls column above three equal-width compact
+  buttons (`rnd`, `new`, `last`); **last** stays visible but disabled until it
+  exists and differs from the displayed seed. A hovered history tile also
   exposes its recorded `[ seed N ]` as a left-click copy target.
   `_start_jobs` remembers that base as `App.lastSeed` (persisted as `lastSeed`);
   `gen.reuseSeed` remains the command/API compatibility route.

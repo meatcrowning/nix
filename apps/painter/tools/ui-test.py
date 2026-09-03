@@ -3470,15 +3470,17 @@ def test_seed(win, ctl):
     check("the shared seed field is present", field is not None)
     if field is not None:
         seed_spin = find(field, "Spin")
-        check("the seed box spans the control column",
-              seed_spin is not None and abs(seed_spin.width() - field.width()) < 1,
-              None if seed_spin is None else (seed_spin.width(), field.width()))
-        seed_buttons = find_all(field, "TextButton")
+        sx, _sy, sw, _sh = scene_rect(seed_spin) if seed_spin is not None else (0, 0, 0, 0)
         fx, _fy, fw, _fh = scene_rect(field)
+        check("the seed box spans the right-hand control column",
+              seed_spin is not None and sx > fx and abs((sx + sw) - (fx + fw)) < 1,
+              None if seed_spin is None else ((sx, sw), (fx, fw)))
+        seed_input = find(seed_spin, "QQuickTextInput") if seed_spin is not None else None
+        seed_buttons = find_all(field, "TextButton")
         button_bounds = [scene_rect(b) for b in seed_buttons]
         check("the three seed buttons fit the controls column",
               len(button_bounds) == 3
-              and min(x for x, _y, _w, _h in button_bounds) >= fx - 1
+              and min(x for x, _y, _w, _h in button_bounds) >= sx - 1
               and max(x + w for x, _y, w, _h in button_bounds) <= fx + fw + 1,
               button_bounds)
         g = prop(APP, "gen")
@@ -3502,10 +3504,14 @@ def test_seed(win, ctl):
         field.metaObject().invokeMethod(field, "newFixedSeed")
         spin(60)
         g = prop(APP, "gen")
+        fixed = g.get("seed")
         check("new fixed rolls one concrete seed",
-              isinstance(g.get("seed"), int) and g.get("seed") >= 0
+              isinstance(fixed, int) and fixed >= 0
               and g.get("randomSeed") is False and g.get("reuseSeed") is False,
               {k: g.get(k) for k in ("seed", "randomSeed", "reuseSeed")})
+        check("new fixed puts that concrete seed in the visible box",
+              seed_input is not None and seed_input.property("text") == str(fixed),
+              None if seed_input is None else seed_input.property("text"))
         field.metaObject().invokeMethod(field, "useLastSeed")
         spin(60)
         g = prop(APP, "gen")
@@ -3513,6 +3519,9 @@ def test_seed(win, ctl):
               g.get("seed") == rolled and g.get("randomSeed") is False
               and g.get("reuseSeed") is False,
               {k: g.get(k) for k in ("seed", "randomSeed", "reuseSeed")})
+        check("last puts the queued seed in the visible box",
+              seed_input is not None and seed_input.property("text") == str(rolled),
+              None if seed_input is None else seed_input.property("text"))
         check("last is unavailable when it would repeat the current seed",
               field.property("lastAvailable") is False, field.property("lastAvailable"))
         check("last stays visible but is disabled when it would repeat the seed",
@@ -3530,11 +3539,20 @@ def test_seed(win, ctl):
           sent.get("seed") == rolled, (sent.get("seed"), rolled))
     check("...and reusing does not drift the remembered seed",
           ctl.property("lastSeed") == rolled, (ctl.property("lastSeed"), rolled))
-    APP.metaObject().invokeMethod(APP, "materializeReusedSeed")
+    APP.metaObject().invokeMethod(APP, "materializeSeedPolicy")
     spin(60)
     g = prop(APP, "gen")
     check("a saved legacy reuse choice migrates to the visible last seed",
           g.get("seed") == rolled and g.get("randomSeed") is False
+          and g.get("reuseSeed") is False,
+          {k: g.get(k) for k in ("seed", "randomSeed", "reuseSeed")})
+    g.update({"seed": 987, "randomSeed": True, "reuseSeed": False})
+    APP.setProperty("gen", g)
+    APP.metaObject().invokeMethod(APP, "materializeSeedPolicy")
+    spin(60)
+    g = prop(APP, "gen")
+    check("a saved legacy random choice becomes the visible -1",
+          g.get("seed") == -1 and g.get("randomSeed") is True
           and g.get("reuseSeed") is False,
           {k: g.get(k) for k in ("seed", "randomSeed", "reuseSeed")})
 
