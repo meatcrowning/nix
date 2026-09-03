@@ -8,7 +8,11 @@ import QtQuick
 // can change something — a state, not a missing control (docs/DESIGN.md §10).
 Field {
     id: field
-    label: "seed"
+    // The seed's own panel/title supplies its name. Unlike ordinary paired
+    // form rows, this is a compact control group: reserve no label gutter so
+    // its number box can use the whole controls column.
+    label: ""
+    labelWidth: 0
     hint: "-1 is random for every queued batch. new fixed rolls one concrete "
           + "seed now; last restores the previous queued seed."
 
@@ -37,9 +41,14 @@ Field {
     }
 
     Column {
+        // Field keeps a 6px gap after any label. This component has none, so
+        // reclaim that gap: both the seed box and button row span the whole
+        // controls column rather than ending short of its left edge.
+        x: -6
+        width: parent.width + 6
         spacing: 4
         Spin {
-            width: 150
+            width: parent.width
             value: root.gen.seed
             from: -1; to: 9007199254740992; step: 1
             onEdited: function (v) {
@@ -49,6 +58,8 @@ Field {
             }
         }
         Row {
+            id: buttons
+            width: parent.width
             spacing: 8
             TextButton {
                 label: "[ random ]"
