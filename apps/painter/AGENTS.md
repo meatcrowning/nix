@@ -360,6 +360,10 @@ be a box to drop the image in and a prompt box"*:
   differs from the displayed seed. The numeric editor has ordinary
   cut/copy/paste/select-all actions. An output's right-click menu
   offers **copy seed**, which puts only its recorded number on the clipboard.
+  Plasma's `SeedInput` is deliberately a styled `TextField`, not its native
+  `SpinBox`: that control is 32-bit and Comfy seeds are safe 53-bit integers.
+  Painter-generated random seeds use rgthree's `2**50` positive range; pasted
+  fixed seeds remain accepted through the full safe-integer range.
   `_start_jobs` remembers that base as `App.lastSeed` (persisted as `lastSeed`);
   `gen.reuseSeed` remains the command/API compatibility route.
 - **The PRIMARY image is the same slot as the video first frame**

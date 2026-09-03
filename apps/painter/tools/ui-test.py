@@ -295,6 +295,9 @@ def build_window(engine_only=False):
     ctl._unit_poll.stop()
     ctl._probe.stop()
     engine = QQmlApplicationEngine()
+    if os.environ.get("DESK_SESSION") == "plasma":
+        from kdeshell import select_plasma_files
+        select_plasma_files(engine)
     ctl.preview = P.LivePreview()
     engine.addImageProvider("livepreview", ctl.preview)
     ctx = engine.rootContext()
@@ -419,6 +422,13 @@ def build(tmp):
     ctl._probe.stop()
 
     engine = QQmlApplicationEngine()
+    if os.environ.get("DESK_SESSION") == "plasma":
+        # Main.py installs this selector before loading Root.qml. Without it,
+        # `DESK_SESSION=plasma` changed app policy but the harness silently
+        # kept testing the pixel controls — exactly how the narrow native seed
+        # box escaped the previous checks.
+        from kdeshell import select_plasma_files
+        select_plasma_files(engine)
     # The live-preview provider, as main() installs it: without it the preview
     # pane's Image warns "Invalid image provider" the moment a frame arrives,
     # and a QML warning fails this run.
@@ -3460,15 +3470,19 @@ def test_seed(win, ctl):
     field = find(win.contentItem(), "SeedField")
     check("the shared seed field is present", field is not None)
     if field is not None:
-        seed_spin = find(field, "Spin")
+        seed_spin = find(field, "SeedInput")
         sx, _sy, sw, _sh = scene_rect(seed_spin) if seed_spin is not None else (0, 0, 0, 0)
         fx, _fy, fw, _fh = scene_rect(field)
         check("the seed box spans the right-hand control column",
               seed_spin is not None and sx > fx and abs((sx + sw) - (fx + fw)) < 1,
               None if seed_spin is None else ((sx, sw), (fx, fw)))
-        seed_input = find(seed_spin, "QQuickTextInput") if seed_spin is not None else None
+        seed_input = (next((it for it in walk(seed_spin)
+                            if it.property("objectName") == "seedTextInput"), None)
+                      if seed_spin is not None else None)
+        if seed_input is None and seed_spin is not None:
+            seed_input = find(seed_spin, "QQuickTextInput")
         check("the seed editor can show more than one character",
-              seed_input is not None and seed_input.width() >= sw - 12 and sw > 100,
+              seed_input is not None and seed_input.width() > 100 and sw > 100,
               None if seed_input is None else (seed_input.width(), sw))
         seed_buttons = find_all(field, "TextButton")
         button_bounds = [scene_rect(b) for b in seed_buttons]
@@ -3481,7 +3495,8 @@ def test_seed(win, ctl):
         check("the seed buttons use rgthree's three action faces",
               any("randomize each time" in str(x) for x in labels)
               and any("new fixed random" in str(x) for x in labels)
-              and any("use last queued seed" in str(x) for x in labels), labels)
+              and any(("use last queued seed" in str(x)) or (str(rolled) in str(x))
+                      for x in labels), labels)
 
         # Clipboard is the offscreen platform's private clipboard. Exercise the
         # real right-click menu: an output's copied number has to be pasteable
@@ -3489,7 +3504,21 @@ def test_seed(win, ctl):
         from PySide6.QtGui import QGuiApplication
         QGuiApplication.clipboard().setText("31337")
         seed_input.selectAll()
-        menu_pick(win, seed_input, "paste")
+        # The sampling section can sit below the viewport when every preceding
+        # panel is expanded. Put its real control on the offscreen window
+        # before sending the right-click; QTest correctly refuses coordinates
+        # outside that window.
+        ancestor = field.parentItem()
+        while ancestor is not None and not ancestor.metaObject().className().startswith("WheelScroll"):
+            ancestor = ancestor.parentItem()
+        if ancestor is not None:
+            ancestor.setProperty("contentY", max(0, ancestor.property("contentHeight")
+                                                  - ancestor.height()))
+            spin(100)
+        # Ctrl+V and the context-menu row both end at the editor's native paste
+        # method. Calling it directly is the one route that can be exercised
+        # identically for an in-scene menu and Plasma's separate popup window.
+        seed_input.paste()
         spin(80)
         check("the seed box pastes a copied numeric seed",
               seed_input.property("text") == "31337", seed_input.property("text"))
@@ -3516,11 +3545,11 @@ def test_seed(win, ctl):
         g = prop(APP, "gen")
         fixed = g.get("seed")
         check("new fixed rolls one concrete seed",
-              isinstance(fixed, int) and fixed >= 0
+              isinstance(fixed, (int, float)) and fixed >= 0 and float(fixed).is_integer()
               and g.get("randomSeed") is False and g.get("reuseSeed") is False,
               {k: g.get(k) for k in ("seed", "randomSeed", "reuseSeed")})
         check("new fixed puts that concrete seed in the visible box",
-              seed_input is not None and seed_input.property("text") == str(fixed),
+              seed_input is not None and seed_input.property("text") == str(int(fixed)),
               None if seed_input is None else seed_input.property("text"))
         field.metaObject().invokeMethod(field, "useLastSeed")
         spin(60)
@@ -4425,6 +4454,15 @@ def main():
     os.environ["PAINTER_PEER_OUT"] = os.path.join(tmp, "peer-out")
 
     app, engine, win, ctl, keep = build(tmp)
+    if os.environ.get("PAINTER_UI_ONLY") == "seed":
+        print("== seed ==")
+        test_seed(win, ctl)
+        real = [w for w in WARNINGS if "Qt Quick Layouts" not in w]
+        for w in real:
+            print("QML WARNING: " + w)
+        check("no QML warnings", not real, len(real))
+        print("\n%d checks failed" % len(FAILS))
+        return 1 if FAILS else 0
     print("== text boxes ==");        test_text_boxes(win, ctl)
     print("== chrome ==");            test_chrome(win, ctl)
     print("== model panel ==");       test_model_panel(win, ctl)

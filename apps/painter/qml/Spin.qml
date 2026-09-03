@@ -23,6 +23,7 @@ Rectangle {
 
     function clamp(v) { return Math.max(from, Math.min(to, v)) }
     function fmt(v) { return decimals > 0 ? v.toFixed(decimals) : String(Math.round(v)) }
+    function showValue(v) { input.text = fmt(v) }
     // NEVER assign `value` here. It is bound to the model (`root.gen.steps` and
     // friends), and writing a bound property in QML DESTROYS the binding — so
     // the first edit of a box permanently disconnected it, and every later
@@ -63,7 +64,6 @@ Rectangle {
                       : Theme.editorFontForScale(Screen.devicePixelRatio) // whole QFont, including Kitty cell spacing
         renderType: Text.NativeRendering
         selectByMouse: true
-        persistentSelection: true
         selectionColor: Theme.accent
         text: spin.fmt(spin.value)
         onEditingFinished: spin.commit(parseFloat(text) || 0)
@@ -75,27 +75,6 @@ Rectangle {
             input.text = spin.fmt(spin.value)
             root.releaseFocus()
             e.accepted = true
-        }
-
-        // A seed copied from an output is clipboard text, so this editor must
-        // offer the same ordinary editing path as the prompt boxes. Ctrl+V is
-        // already native TextInput behaviour; this supplies the discoverable
-        // right-click route and preserves a selection while the menu has focus.
-        MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.RightButton
-            onPressed: function (m) {
-                input.forceActiveFocus()
-                var hasSel = input.selectionEnd > input.selectionStart
-                var items = [
-                    { label: "cut", enabled: hasSel, trigger: () => input.cut() },
-                    { label: "copy", enabled: hasSel, trigger: () => input.copy() },
-                    { label: "paste", trigger: () => input.paste() },
-                    { label: "select all", trigger: () => input.selectAll() }
-                ]
-                var p = mapToItem(null, m.x, m.y)
-                root.ctxMenu.open(p.x, p.y, items)
-            }
         }
     }
 

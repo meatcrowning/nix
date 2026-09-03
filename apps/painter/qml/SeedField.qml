@@ -19,6 +19,7 @@ Field {
         root.set("seed", -1)
         root.set("randomSeed", true)
         root.set("reuseSeed", false)
+        seedInput.showValue(-1)
     }
 
     function newFixedSeed() {
@@ -27,6 +28,7 @@ Field {
         root.set("seed", seed)
         root.set("randomSeed", false)
         root.set("reuseSeed", false)
+        seedInput.showValue(seed)
     }
 
     function useLastSeed() {
@@ -34,6 +36,7 @@ Field {
         root.set("seed", App.lastSeed)
         root.set("randomSeed", false)
         root.set("reuseSeed", false)
+        seedInput.showValue(App.lastSeed)
     }
 
     Column {
@@ -41,14 +44,13 @@ Field {
         // column every other sampling row uses, after the 96px label gutter.
         width: parent.width
         spacing: 4
-        Spin {
-            // Same explicit rectangle as the strip below. Anchoring this to a
-            // later sibling collapsed QQuickWidget's editor to its minimum on
-            // Plasma — enough for one glyph — despite the frame looking wider.
-            x: buttons.x
+        SeedInput {
+            id: seedInput
+            // A seed is a 53-bit integer. Qt's native SpinBox is 32-bit, so
+            // Plasma uses SeedInput's styled text editor instead; both faces
+            // still share this exact width and editing API.
             width: buttons.width
             value: root.gen.seed
-            from: -1; to: 9007199254740992; step: 1
             onEdited: function (v) {
                 root.set("seed", v)
                 root.set("randomSeed", v < 0)
