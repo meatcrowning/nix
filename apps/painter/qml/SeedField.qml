@@ -42,12 +42,11 @@ Field {
         width: parent.width
         spacing: 4
         Spin {
-            // Name the relationship directly: the box is exactly as wide as
-            // the button strip below, from rnd's left edge through last's
-            // right edge. This also keeps the Plasma and pixel faces honest
-            // when their buttons have different implicit widths.
-            anchors.left: buttons.left
-            anchors.right: buttons.right
+            // Same explicit rectangle as the strip below. Anchoring this to a
+            // later sibling collapsed QQuickWidget's editor to its minimum on
+            // Plasma — enough for one glyph — despite the frame looking wider.
+            x: buttons.x
+            width: buttons.width
             value: root.gen.seed
             from: -1; to: 9007199254740992; step: 1
             onEdited: function (v) {
@@ -62,28 +61,27 @@ Field {
             spacing: 4
             TextButton {
                 width: Math.floor((buttons.width - buttons.spacing * 2) / 3)
-                label: "[ rnd ]"
+                label: "[ 🎲 randomize each time ]"
                 lit: root.gen.seed < 0
                 anchors.verticalCenter: parent.verticalCenter
                 onClicked: field.randomSeed()
-                ToolTipArea { anchors.fill: parent; text: "random every queued batch" }
             }
             TextButton {
                 width: Math.floor((buttons.width - buttons.spacing * 2) / 3)
-                label: "[ new ]"
+                label: "[ 🎲 new fixed random ]"
                 anchors.verticalCenter: parent.verticalCenter
                 onClicked: field.newFixedSeed()
-                ToolTipArea { anchors.fill: parent; text: "new fixed seed" }
             }
             TextButton {
                 id: lastButton
                 objectName: "seedLast"
                 width: buttons.width - x
-                label: "[ last ]"
+                label: field.lastAvailable
+                       ? "[ ♻ " + App.lastSeed + " ]"
+                       : "[ ♻ use last queued seed ]"
                 enabled: field.lastAvailable
                 anchors.verticalCenter: parent.verticalCenter
                 onClicked: field.useLastSeed()
-                ToolTipArea { anchors.fill: parent; text: "use last queued seed" }
             }
         }
     }

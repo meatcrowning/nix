@@ -3467,6 +3467,9 @@ def test_seed(win, ctl):
               seed_spin is not None and sx > fx and abs((sx + sw) - (fx + fw)) < 1,
               None if seed_spin is None else ((sx, sw), (fx, fw)))
         seed_input = find(seed_spin, "QQuickTextInput") if seed_spin is not None else None
+        check("the seed editor can show more than one character",
+              seed_input is not None and seed_input.width() >= sw - 12 and sw > 100,
+              None if seed_input is None else (seed_input.width(), sw))
         seed_buttons = find_all(field, "TextButton")
         button_bounds = [scene_rect(b) for b in seed_buttons]
         check("the three seed buttons fit the controls column",
@@ -3474,6 +3477,22 @@ def test_seed(win, ctl):
               and min(x for x, _y, _w, _h in button_bounds) >= sx - 1
               and max(x + w for x, _y, w, _h in button_bounds) <= fx + fw + 1,
               button_bounds)
+        labels = [b.property("label") for b in seed_buttons]
+        check("the seed buttons use rgthree's three action faces",
+              any("randomize each time" in str(x) for x in labels)
+              and any("new fixed random" in str(x) for x in labels)
+              and any("use last queued seed" in str(x) for x in labels), labels)
+
+        # Clipboard is the offscreen platform's private clipboard. Exercise the
+        # real right-click menu: an output's copied number has to be pasteable
+        # into this box, not merely retrievable through Ctrl+V in theory.
+        from PySide6.QtGui import QGuiApplication
+        QGuiApplication.clipboard().setText("31337")
+        seed_input.selectAll()
+        menu_pick(win, seed_input, "paste")
+        spin(80)
+        check("the seed box pastes a copied numeric seed",
+              seed_input.property("text") == "31337", seed_input.property("text"))
         g = prop(APP, "gen")
         g.update({"seed": 123, "randomSeed": False, "reuseSeed": False})
         APP.setProperty("gen", g)
