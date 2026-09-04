@@ -544,6 +544,39 @@ def test_text_boxes(win, ctl):
     key(win, Qt.Key_Backspace)
     check("a plain Backspace deletes one character",
           edit.property("text") == "x", edit.property("text"))
+
+    # The caret must take the prompt viewport with it when typing crosses its
+    # bottom, both for a newline he enters and one produced by wrapping. A
+    # TextEdit does not do this for an enclosing Flickable automatically.
+    box.setProperty("boxHeight", 54)
+    edit.setProperty("text", "one\ntwo\nthree")
+    edit.setProperty("cursorPosition", len(edit.property("text")))
+    edit.forceActiveFocus()
+    spin(60)
+    flick.setProperty("contentY", flick.property("originY"))
+    key(win, Qt.Key_Return)
+    key(win, Qt.Key_X, Qt.NoModifier, "x")
+    spin(80)
+    caret = edit.property("cursorRectangle")
+    check("pressing Enter scrolls the new line into view",
+          (flick.property("contentY") > flick.property("originY")
+           and caret.bottom() <= flick.property("contentY") + flick.height() + 0.5),
+          (flick.property("contentY"), caret.bottom(), flick.height()))
+
+    edit.setProperty("text", "wrap " * 40)
+    edit.setProperty("cursorPosition", len(edit.property("text")))
+    spin(60)
+    flick.setProperty("contentY", flick.property("originY"))
+    key(win, Qt.Key_X, Qt.NoModifier, "x")
+    spin(80)
+    caret = edit.property("cursorRectangle")
+    check("typing on a wrapped line scrolls it into view",
+          (flick.property("contentY") > flick.property("originY")
+           and caret.bottom() <= flick.property("contentY") + flick.height() + 0.5),
+          (flick.property("contentY"), caret.bottom(), flick.height()))
+    box.setProperty("boxHeight", 130)
+    spin(60)
+
     # Select-all is also a menu item, and it must mean the same thing.
     edit.setProperty("text", "one two three")
     spin(60)
