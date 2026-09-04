@@ -321,6 +321,29 @@ Rectangle {
     border.color: input.activeFocus ? Theme.accent : Theme.border
     border.width: Theme.ctrlBorder
 
+    // Keep the insertion point inside the viewport while typing. TextEdit does
+    // not scroll an enclosing Flickable for itself: once a wrapped or explicit
+    // newline falls below the box, the caret otherwise continues offscreen.
+    // Defer one event so both cursorRectangle and implicitHeight describe the
+    // newly laid-out line before the contentY clamp is calculated.
+    function revealCursor() {
+        if (!input.activeFocus || flick.height <= 0) return
+        var r = input.cursorRectangle
+        var lo = flick.originY
+        var hi = lo + Math.max(0, flick.contentHeight - flick.height)
+        var y = flick.contentY
+        if (r.y < y) y = r.y
+        else if (r.y + r.height > y + flick.height)
+            y = r.y + r.height - flick.height
+        flick.contentY = Math.max(lo, Math.min(hi, y))
+    }
+
+    Timer {
+        id: revealCursorSoon
+        interval: 0
+        onTriggered: box.revealCursor()
+    }
+
     KineticFlickable {
         id: flick
         anchors.fill: parent
@@ -401,7 +424,12 @@ Rectangle {
             // on every letter typed. Both timers are 0ms and fire in the order
             // they were started, so `textTouch` is already set by the time this
             // one runs if a text change belonged to this move.
-            onCursorPositionChanged: if (box.tagsOn) moveCheck.restart()
+            onCursorPositionChanged: {
+                revealCursorSoon.restart()
+                if (box.tagsOn) moveCheck.restart()
+            }
+            onCursorRectangleChanged: revealCursorSoon.restart()
+            onImplicitHeightChanged: if (activeFocus) revealCursorSoon.restart()
             onActiveFocusChanged: {
                 if (activeFocus) { if (box.tagsOn) Tags.prepare() }
                 else box.closeCompletion();

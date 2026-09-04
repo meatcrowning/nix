@@ -829,6 +829,12 @@ empty space to Qt itself — caret at the nearest position, drag-select from
 nowhere — rather than to a MouseArea imitating it. `Spin` covers its own padding
 strips with an I-beam MouseArea under the input.
 
+The caret keeps itself visible while typing. `TextEdit` does not scroll an
+enclosing `Flickable`, so `PromptBox.revealCursor()` follows
+`cursorRectangle`/`implicitHeight` one event after layout and moves only enough
+to reveal the new wrapped or explicit line. A manual wheel scroll does not move
+the caret and therefore is not snapped back.
+
 **A panel follows its content DOWN as well as up.** `Panel.qml` sizes itself
 from the inner Column's `implicitHeight`, never from `childrenRect.height`: an
 invisible child keeps the y the Column last laid it out at and `childrenRect`
