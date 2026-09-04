@@ -227,6 +227,10 @@ def main(argv=None):
                         probs.append("NegPip did not fold the negative prompt into positive")
                 elif neg != "negative test":
                     probs.append("ordinary negative prompting was changed")
+                if built["params"].get("prompt_boxes") != {
+                    "positive": PROMPT, "negative": "negative test"
+                }:
+                    probs.append("recorded prompt boxes do not preserve the editor values")
                 if probs:
                     raise G.ValidationError(probs)
                 line += f" {tag}:ok"
@@ -301,8 +305,14 @@ def main(argv=None):
         fam = reg.family_of(entry) or {}
         if fam.get("kind") == "video":
             continue          # one prompt, no negative, no transform
-        want_flat = fam.get("prompt_transform") == "single_line"
-        built = reg.build(entry, {"positive": MULTILINE, "negative": MULTILINE, "seed": 1})
+        want_flat = fam.get("prompt_transform") in ("single_line", "danbooru")
+        # This section measures only the per-family text transform. Families
+        # which default NegPip on would otherwise append the negative and make
+        # the transform check fail for an unrelated, intentional graph change.
+        built = reg.build(entry, {
+            "positive": MULTILINE, "negative": MULTILINE, "seed": 1,
+            "toggles": {"negpip": False},
+        })
         sent = built["params"]["positive"]
         flat = "\n" not in sent and "  " not in sent
         ok = flat if want_flat else (sent == MULTILINE)

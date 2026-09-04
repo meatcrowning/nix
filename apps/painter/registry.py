@@ -532,7 +532,15 @@ class Registry:
         return {
             "prompt": prompt,
             "pairing": pairing,
+            # `positive` / `negative` describe what the graph actually ran: on
+            # NegPip that is the folded positive and an empty negative. Keep
+            # the two editor values as well so gallery injection can restore
+            # the boxes without trying to reverse an ambiguous weight group.
             "params": {**p, "positive": pos, "negative": neg,
+                       "prompt_boxes": {
+                           "positive": p.get("positive", ""),
+                           "negative": p.get("negative", ""),
+                       },
                        "width": int(w), "height": int(h), "toggles": toggles},
         }
 

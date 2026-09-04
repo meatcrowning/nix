@@ -887,6 +887,14 @@ actions live on the window (`injectPrompt` / `injectParams` / `injectAll`), so
 the menu has no logic of its own; `injectParams` restores size as **aspect +
 MP**, never raw pixels (see above).
 
+For a NegPip image, `positive` / `negative` in the `painter` chunk still say
+what the graph actually ran — the folded positive and an empty negative — but
+`prompt_boxes` carries the two editor values from before that fold.
+`injectPrompt` prefers `prompt_boxes`, so a new output restores both boxes; an
+older output without it falls back to the execution prompt it has always
+carried. Do not try to unfold old text: a real negative-weight group in the
+positive prompt is indistinguishable from one Painter appended for NegPip.
+
 Because a left-click LAUNCHES something, `tools/ui-test.py` replaces
 `main.subprocess` with a recorder — it spawned two real `viewer` windows on his
 desktop the first time that click was exercised, which is the one thing a
@@ -1493,7 +1501,9 @@ family, unless `--no-negpip-fold`. The caller writes a prompt and a negative
 like anywhere else; the syntax — and the SIGN, since a positive weight there
 emphasises the very thing it was meant to remove — is done here rather than
 asked for. **painter's own window is unchanged**: the fold is the headless
-path's, so the two boxes on screen still mean what they always did.
+path's, so the two boxes on screen still mean what they always did. The
+execution prompt and the original boxes are both recorded; see the gallery
+injection contract above.
 
 ## Adding a family
 
