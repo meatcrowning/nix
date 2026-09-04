@@ -1175,8 +1175,12 @@ Item {
     // `set` above) — mutating in place would change nothing on screen.
     function injectPrompt(p) {
         var g = clone(gen)
-        if (p.positive !== undefined) g.positive = p.positive
-        if (p.negative !== undefined) g.negative = p.negative
+        // NegPip's execution metadata has both editor prompts folded into its
+        // positive conditioning. New outputs also carry the original boxes;
+        // old outputs fall back to the execution values they have always had.
+        var words = p.prompt_boxes || p
+        if (words.positive !== undefined) g.positive = words.positive
+        if (words.negative !== undefined) g.negative = words.negative
         gen = g
     }
 

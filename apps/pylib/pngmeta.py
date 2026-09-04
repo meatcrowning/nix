@@ -2,7 +2,9 @@
 
 Every image painter saves carries a `painter` chunk holding the exact parameters
 that produced it -- including the prompt as actually sent, after any per-family
-transform -- so a result can be reproduced or reloaded into the UI later.
+transform -- so a result can be reproduced or reloaded into the UI later. For
+NegPip images it also carries `prompt_boxes`, the positive and negative editor
+values from before the graph-time fold, so injection can restore both boxes.
 
 It lives in pylib because it has two callers: painter WRITES those chunks and
 filer's metadata filter READS them, along with whatever ComfyUI (`prompt`,

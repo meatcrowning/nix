@@ -2583,7 +2583,9 @@ def test_compare_and_columns(win, ctl, tmp):
 
 def test_inject(win, ctl, tmp):
     """Left-click an output -> inject all / prompt / params."""
-    params = {"positive": "injected positive", "negative": "injected negative",
+    params = {"positive": "injected positive, (injected negative:-1)", "negative": "",
+              "prompt_boxes": {"positive": "injected positive",
+                               "negative": "injected negative"},
               "steps": 44, "cfg": 3.5, "denoise": 0.5, "sampler_name": "heun",
               "scheduler": "beta", "seed": 99, "width": 1216, "height": 832,
               "batch_size": 2,
