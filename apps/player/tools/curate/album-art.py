@@ -100,23 +100,34 @@ def discogs_front(album, artist):
 
 
 def itunes_front(album, artist):
-    """Front cover URL from the iTunes Search API, or None. Single-only fallback
-    for the releases that are absent from both CAA and Discogs."""
+    """Front cover URL from the iTunes Search API, at the source's full size,
+    or None. The album-entity hit (not song) is the one that carries the whole
+    release's art and returns it under the romanised title a lot of this
+    library's Japanese/small-label releases are tagged with — the fallback for
+    releases absent from both CAA and Discogs. mzstatic URLs are only size-
+    capped by the thumb token, so asking for a big one returns the source's
+    own full resolution."""
     try:
         q = urllib.parse.quote(f"{artist} {album}".strip())
         req = urllib.request.Request(
-            f"https://itunes.apple.com/search?term={q}&entity=song&limit=10",
+            f"https://itunes.apple.com/search?term={q}&entity=album&limit=10",
             headers={"User-Agent": C.UA})
         with urllib.request.urlopen(req, timeout=30) as f:
             data = json.loads(f.read())
     except Exception:
         return None
+    falb = C.fold(album)
+    fart = C.fold(artist)
     for res in (data.get("results") or []):
-        if C.fold(res.get("collectionName") or "") == C.fold(album):
-            art = res.get("artworkUrl100")
-            if art:
-                # request the 600x600 source rather than the 100x100 thumb
-                return art.replace("100x100bb", "600x600bb")
+        if C.fold(res.get("collectionName") or "") != falb:
+            continue
+        rart = C.fold(res.get("artistName") or "")
+        if fart and not (fart in rart or rart in fart):
+            continue
+        art = res.get("artworkUrl100")
+        if art:
+            # request the source's own size, not the 100x100 thumbnail
+            return art.replace("100x100bb", "3000x3000bb")
     return None
 
 

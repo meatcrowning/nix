@@ -621,9 +621,45 @@ def art_from_discogs(artist, album):
     return None, "discogs had no matching release with art"
 
 
+def art_from_itunes(artist, album):
+    """The cover the iTunes/Apple Music store serves for the record, fetched
+    at the source's full resolution. Keyless iTunes Search API.
+
+    The Cover Art Archive and Discogs both fail a class this library actually
+    has a lot of: Japanese/small-label records whose romanised title differs
+    from the English one MusicBrainz prefers. A file tagged album="Tasogare"
+    is release "Twilight" on MusicBrainz (which has no CAA art for it at
+    all), while iTunes holds the release under ITS romanised title and returns
+    it as an `entity=album` hit. mzstatic art URLs are size-capped only by the
+    thumb token in the path, so asking for a large token returns the source's
+    own full size (the Mai Yamane 1980 cover is 1400px at 3000x3000).
+    """
+    q = urllib.parse.quote(f"{artist} {album}".strip())
+    data = _json_get("https://itunes.apple.com/search"
+                     f"?term={q}&entity=album&limit=10")
+    falb, fart = fold(album), fold(artist)
+    for res in ((data or {}).get("results") or []):
+        if fold(res.get("collectionName") or "") != falb:
+            continue  # the "Tasogare - Single" / other-artist hits fall here
+        rart = fold(res.get("artistName") or "")
+        if fart and not (fart in rart or rart in fart):
+            continue
+        art = res.get("artworkUrl100") or ""
+        if not art:
+            continue
+        big = art.replace("100x100bb", "3000x3000bb")
+        try:
+            return _http(big, timeout=60), None
+        except Exception:                                   # noqa: BLE001
+            continue
+    return None, "iTunes had no matching album with art"
+
+
 def fetch_art(spec, artist, album, paths):
-    """(bytes, mime, source, error). `source: auto` is last.fm, then the Cover
-    Art Archive, then Discogs — best-quality-first for this library."""
+    """(bytes, mime, source, error). `source: auto` is the Cover Art Archive,
+    then iTunes, then Discogs, then last.fm — best-quality-first (CAA fronts
+    are 1200px, iTunes mzstatic serves the source's own full size, Discogs
+    ~600, Last.fm's largest is 300px)."""
     src = (spec.get("source") or "").strip().lower()
     if spec.get("file"):
         p = Path(os.path.expanduser(str(spec["file"])))
@@ -638,17 +674,21 @@ def fetch_art(spec, artist, album, paths):
             return None, None, "url", "fetch failed: " + str(e)
         return data, _mime_of(data), "url", None
     #: `auto` is BIGGEST-first, not alphabetical: the Cover Art Archive serves
-    #: 1200px fronts, Discogs ~600, and Last.fm's largest is a 300px thumbnail
-    #: (13 KB, measured). Ask for last.fm by name and you get last.fm's — that
-    #: is what "the one from lastfm" means — but nothing picks it by default.
+    #: 1200px fronts, iTunes mzstatic the source's own full size (usually
+    #: >=1400px), Discogs ~600, and Last.fm's largest is a 300px thumbnail (13
+    #: KB, measured). Ask for last.fm by name and you get last.fm's — that is
+    #: what "the one from lastfm" means — but nothing picks it by default.
     order = {"lastfm": ["lastfm"], "caa": ["caa"], "musicbrainz": ["caa"],
-             "discogs": ["discogs"]}.get(src, ["caa", "discogs", "lastfm"])
+             "itunes": ["itunes"], "discogs": ["discogs"]}.get(
+                 src, ["caa", "itunes", "discogs", "lastfm"])
     errs = []
     for s in order:
         if s == "lastfm":
             data, err = art_from_lastfm(artist, album)
         elif s == "caa":
             data, err = art_from_caa(artist, album, paths)
+        elif s == "itunes":
+            data, err = art_from_itunes(artist, album)
         else:
             data, err = art_from_discogs(artist, album)
         if data and len(data) > 2000:
@@ -1109,7 +1149,7 @@ def main():
     ap.add_argument("--dir")
     ap.add_argument("--path", action="append", default=[])
     ap.add_argument("--source", default="auto",
-                    help="art: auto | lastfm | caa | discogs")
+                    help="art: auto | lastfm | caa | itunes | discogs")
     ap.add_argument("--url", help="art: fetch the cover from this URL")
     ap.add_argument("--file", help="art: use this local image")
     ap.add_argument("--no-embed", action="store_true")
