@@ -127,7 +127,8 @@ check("the Twitter/X sheet keeps post copy at the primary ink and themes compose
       '[data-testid="tweetText"] *, [data-testid="UserName"]' in twitter_sheet
       and 'div:has(> [data-testid="tweetTextarea_0"])' in twitter_sheet
       and '[data-testid="sidebarColumn"] > div' in twitter_sheet
-      and '[data-testid="sidebarColumn"] *' in twitter_sheet)
+      and '[data-testid="sidebarColumn"] *' in twitter_sheet
+      and '[aria-label="Add a tab"]' in twitter_sheet)
 twitter_text, _ = twitter_gen.build("plasma", TMP / "twitter.user.js")
 check("the Twitter/X script covers both current and legacy domains",
       "*://x.com/*" in twitter_text and "*://twitter.com/*" in twitter_text)
