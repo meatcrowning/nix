@@ -1,4 +1,4 @@
-{ pkgs, lib, host, ... }:
+{ pkgs, lib, hostProfile, ... }:
 
 # oracle — a minimal chat window for the local ollama daemon (source at
 # ~/nix/apps/oracle). A model selector filled from /api/tags and a prompt box
@@ -52,7 +52,7 @@ let
   '';
 
   oracle =
-    if host == "air" then
+    if hostProfile.isBook then
       pkgs.writeShellScriptBin "oracle" ''
         exec /home/lam/nix/apps/oracle/tools/ollama-tunnel.sh -- \
              /usr/bin/python3 /home/lam/nix/apps/oracle/main.py "$@"

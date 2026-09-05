@@ -1,4 +1,4 @@
-{ pkgs, lib, host, ... }:
+{ pkgs, lib, hostProfile, ... }:
 
 # goetia — what needs him, what is moving, what landed (source at ~/nix/apps/board).
 #
@@ -27,7 +27,7 @@ let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
 
   goetia =
-    if host == "air" then
+    if hostProfile.isBook then
       pkgs.writeShellScriptBin "goetia" ''
         exec /usr/bin/python3 /home/lam/nix/apps/board/main.py "$@"
       ''
