@@ -1090,8 +1090,10 @@ top same as painter's ComfyUI, so `home/prog/oracle.nix`'s `air` branch execs
 modelled directly on painter's `comfy-tunnel.sh` (probe `top`/`top.local`,
 forward the port over ssh, reuse an already-open forward). No sshfs mounts:
 oracle has no model files or output gallery of its own to peer. `ollama` is a
-SYSTEM unit (unlike `--user` `comfy-painter`) and already `enable = true` at
-boot, so the tunnel script only reports its state, never starts it. The
+SYSTEM unit (unlike `--user` `comfy-painter`) but is not boot-started: chatter
+and painter each hold a renewable ai-warden client lease, the first client
+starts its backend, and only the last close plus a short grace stops it. The
+tunnel forwards the same warden, so book and top share one client count. The
 `Backend.startServer()`/`stopServer()` buttons in `main.py` are host-branched:
 on top they run a *local* `sudo -A systemctl {start,stop} ollama.service`; on
 book, which has no local unit, they run the same command over ssh to top —
