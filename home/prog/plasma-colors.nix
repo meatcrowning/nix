@@ -1,7 +1,7 @@
-{ lib, host, ... }:
+{ lib, ... }:
 
-# The Plasma colour scheme, on book: OxygenDark with the UNFOCUSED palette baked
-# in as the only palette.
+# The Plasma colour scheme on both hosts: OxygenDark with the UNFOCUSED palette
+# baked in as the only palette.
 #
 # OxygenDark distinguishes an unfocused window by a KColorScheme *effect* rather
 # than by a second set of colours — `[ColorEffects:Inactive]` ColorEffect=1
@@ -15,10 +15,10 @@
 # background, which is the greying he asked to lose, and `[WM]` is white on both
 # states so the titlebar title reads the same white as the window's body text.
 #
-# book only, like the Oxygen look-and-feel it derives from (home/plasma.nix):
-# top's Plasma session is stock Breeze or the aerotheme one. The scheme FILE is
-# installed on both hosts — it is inert until something picks it, and that is
-# the same call home/prog/oxygen.nix makes about oxygenrc.
+# The Oxygen look-and-feel itself remains book-only (home/plasma.nix), but the
+# colour result is desktop-wide: top was still selecting raw OxygenDark, so its
+# unfocused windows were brighter than its focused ones after book had already
+# been flattened. Both hosts select this scheme now.
 #
 # plasma-manager applies this with `plasma-apply-colorscheme` from its one-shot
 # login script, ordered after the `plasma-apply-lookandfeel` that would
@@ -47,5 +47,5 @@
     fi
   '';
 
-  programs.plasma.workspace.colorScheme = lib.mkIf (host == "air") "OxygenDarkFlat";
+  programs.plasma.workspace.colorScheme = "OxygenDarkFlat";
 }
