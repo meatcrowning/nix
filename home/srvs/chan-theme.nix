@@ -1,6 +1,6 @@
 { pkgs, lib, config, ... }:
 
-# The loopback courier behind the Vivaldi 4chan re-skin — what makes it LIVE.
+# The loopback courier behind Vivaldi's live 4chan and Twitter/X page themes.
 #
 # surfer serves that sheet to its own pages in-process (`surferonee://`).
 # Vivaldi is somebody else's browser: the only injection seat is Tampermonkey,
@@ -28,7 +28,7 @@
 {
   systemd.user.services.chan-theme = {
     Unit = {
-      Description = "Serve this desktop's 4chan re-skin CSS on 127.0.0.1";
+      Description = "Serve this desktop's live browser-theme CSS on 127.0.0.1";
       After = [ "graphical-session.target" ];
     };
     Service = {

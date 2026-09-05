@@ -37,6 +37,10 @@ import importlib.util                                               # noqa: E402
 _spec = importlib.util.spec_from_file_location("gen", HERE / "chan-userscript.py")
 gen = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gen)
+_tspec = importlib.util.spec_from_file_location("twitter_gen", HERE / "twitter-userscript.py")
+twitter_gen = importlib.util.module_from_spec(_tspec)
+_tspec.loader.exec_module(twitter_gen)
+import twittertheme                                                 # noqa: E402
 
 PAL = {"bg": "#102030", "bgAlt": "#203040", "border": "#304050", "accent": "#ff0088",
        "dim": "#8800ff", "text": "#00ff88", "textDim": "#445566", "highlight": "#123456",
@@ -108,6 +112,20 @@ check("adopts rather than appends (cascades after ch4SS)",
       "adoptedStyleSheets" in text)
 check("a <style> fallback exists for no constructable stylesheets",
       "desk-chan-theme" in text)
+
+# Twitter/X is the ungated sibling: it shares the live courier/runtime but has
+# no third-party userscript state to wait for. Its selectors are semantic hooks,
+# never X's generated classes, so a CSS-bundle churn degrades one region rather
+# than breaking the whole page palette.
+twitter_sheet = twittertheme.css(PAL.__getitem__)
+check("the Twitter/X sheet carries the base palette", "--desk-bg:#102030" in twitter_sheet)
+check("the Twitter/X sheet targets semantic X hooks, not generated classes",
+      '[data-testid="tweet"]' in twitter_sheet and "css-" not in twitter_sheet)
+twitter_text, _ = twitter_gen.build("plasma", TMP / "twitter.user.js")
+check("the Twitter/X script covers both current and legacy domains",
+      "*://x.com/*" in twitter_text and "*://twitter.com/*" in twitter_text)
+check("the Twitter/X script is ungated and polls the live route",
+      'var GATE = null' in twitter_text and "/twitter.css" in twitter_text)
 
 # --- the live half: the script must ASK, not only wear what it was baked with
 check("the script polls the loopback courier",
@@ -195,7 +213,7 @@ try:
 
     # The update seat: Tampermonkey's updater fetches the SCRIPT over http,
     # never file://, so the courier has to hand out the script itself.
-    for name in ("chan", "scrollbar"):
+    for name in ("chan", "scrollbar", "twitter"):
         with urllib.request.urlopen(base + "/%s.user.js" % name, timeout=5) as r:
             body, jtype = r.read().decode("utf-8"), r.headers.get("Content-Type")
         check("the courier serves /%s.user.js" % name, "==UserScript==" in body)
@@ -210,6 +228,11 @@ try:
         check("  carrying the same version the script does",
               re.search(r"@version\s+(\S+)", meta).group(1)
               == re.search(r"@version\s+(\S+)", body).group(1))
+
+    with urllib.request.urlopen(base + "/twitter.css", timeout=5) as r:
+        twitter_served = r.read().decode("utf-8")
+    check("the courier serves Twitter/X from the live palette",
+          "--desk-bg:#28222a" in twitter_served and '[data-testid="tweet"]' in twitter_served)
 
     # An extension asking cross-origin sends a preflight first, and the stdlib
     # answers an unhandled method with 501 — which is what Tampermonkey's

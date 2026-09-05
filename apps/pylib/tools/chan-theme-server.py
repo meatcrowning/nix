@@ -15,6 +15,7 @@ to invalidate and no hook into wal-set.sh to keep in step:
     GET /scrollbar.css  ->  the desktop's scrollbar (pylib/scrollcss.py):
                             Oxygen's own bar under Plasma, the win31/beveled/
                             flat variant otherwise
+    GET /twitter.css    ->  Twitter/X's page sheet (pylib/twittertheme.py)
     GET /chan.user.js   ->  the Tampermonkey script itself, so its @updateURL
     GET /scrollbar.user.js  is one the extension will actually fetch (it never
                             updates from a file:// URL)
@@ -53,6 +54,7 @@ sys.path.insert(0, str(HERE.parent))
 import chansource                                               # noqa: E402
 import scrollcss                                                # noqa: E402
 import userscript                                               # noqa: E402
+import twittertheme                                             # noqa: E402
 
 
 def _generator(filename):
@@ -67,6 +69,13 @@ def _generator(filename):
 
 chan_script = _generator("chan-userscript.py")
 scrollbar_script = _generator("scrollbar-userscript.py")
+twitter_script = _generator("twitter-userscript.py")
+
+
+def _twitter_css(source):
+    """Build Twitter/X's sheet from the same source as every other web face."""
+    pal, provenance = chansource.palette(source)
+    return twittertheme.css(pal.__getitem__), provenance
 
 
 # --------------------------------------------------------------------------- #
@@ -162,8 +171,10 @@ class Handler(BaseHTTPRequestHandler):
         "/": (lambda src: chansource.build_css(src), CSS),
         "/css": (lambda src: chansource.build_css(src), CSS),
         "/scrollbar.css": (lambda src: scrollcss.build(src), CSS),
+        "/twitter.css": (lambda src: _twitter_css(src), CSS),
         "/chan.user.js": (lambda src: chan_script.build(src), JS),
         "/scrollbar.user.js": (lambda src: scrollbar_script.build(src), JS),
+        "/twitter.user.js": (lambda src: twitter_script.build(src), JS),
         # The update CHECK, which is all a `.meta.js` is: the header block on
         # its own, so the daily poll costs a few hundred bytes rather than the
         # whole baked sheet. Greasyfork's shape, and what @updateURL points at.
@@ -171,6 +182,8 @@ class Handler(BaseHTTPRequestHandler):
             chan_script.build(src)[0]), "meta"), JS),
         "/scrollbar.meta.js": (lambda src: (userscript.metadata_block(
             scrollbar_script.build(src)[0]), "meta"), JS),
+        "/twitter.meta.js": (lambda src: (userscript.metadata_block(
+            twitter_script.build(src)[0]), "meta"), JS),
     }
 
     # A browser extension asking for a cross-origin URL with headers of its own
@@ -198,9 +211,9 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         route = self.ROUTES.get(path)
         if route is None and path != "/version":
-            self._send(404, head=head, body=b"chan-theme: /chan.css, /scrollbar.css, "
-                            b"/chan.user.js, /scrollbar.user.js, /chan.meta.js, "
-                            b"/scrollbar.meta.js or /version\n")
+            self._send(404, head=head, body=b"chan-theme: /chan.css, /scrollbar.css, /twitter.css, "
+                            b"/chan.user.js, /scrollbar.user.js, /twitter.user.js, "
+                            b"/chan.meta.js, /scrollbar.meta.js, /twitter.meta.js or /version\n")
             return
         try:
             if path == "/version":
@@ -255,7 +268,7 @@ def main():
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
     srv.verbose = a.verbose
     srv.daemon_threads = True
-    sys.stderr.write("chan-theme: http://127.0.0.1:%d/{chan,scrollbar}.css\n" % a.port)
+    sys.stderr.write("chan-theme: http://127.0.0.1:%d/{chan,scrollbar,twitter}.css\n" % a.port)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

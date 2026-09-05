@@ -40,8 +40,13 @@ def panel_palette(path=PANEL_THEME) -> dict:
     return out
 
 
-def build_css(source=None):
-    """(css, provenance) for the requested session face."""
+def palette(source=None):
+    """(twelve-token palette, provenance) for the requested session face.
+
+    Web sheets other than OneeChan need the same live source decision but not
+    OneeChan's optional KStyle-relief block.  Keep that decision here so a
+    second browser theme cannot quietly diverge from the desktop/4chan source.
+    """
     plasma = kdetheme.is_plasma() if source is None else (source == "plasma")
     if plasma:
         colors = kdetheme.kde_palette()
@@ -49,15 +54,21 @@ def build_css(source=None):
             pal = {k: kdetheme._hex(v) for k, v in colors.items()}
             chrome = kdetheme.kde_chrome()
             style = chrome["style"] if chrome else kdetheme.kde_widget_style()
-            return (chantheme.css(pal.__getitem__, chrome),
-                    "KDE colour scheme (%s, %s)"
+            return (pal, "KDE colour scheme (%s, %s)"
                     % (style or "unknown style",
                        "with the style's relief" if chrome else "flat style"))
     pal = panel_palette()
     if not pal:
         raise SystemExit("no palette: neither a readable kdeglobals nor %s" % PANEL_THEME)
-    return (chantheme.css(pal.__getitem__, None),
-            "panel wallpaper palette (flat, per DESIGN.md §2)")
+    return (pal, "panel wallpaper palette (flat, per DESIGN.md §2)")
+
+
+def build_css(source=None):
+    """(OneeChan CSS, provenance) for the requested session face."""
+    pal, provenance = palette(source)
+    chrome = kdetheme.kde_chrome() if (kdetheme.is_plasma() if source is None
+                                       else source == "plasma") else None
+    return chantheme.css(pal.__getitem__, chrome), provenance
 
 
 def stamp(css: str) -> str:
