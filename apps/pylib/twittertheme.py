@@ -37,8 +37,7 @@ html, body, #react-root, [data-testid="primaryColumn"], [data-testid="sidebarCol
 [data-testid="UserName"] *, [role="heading"], [data-testid="app-bar-back"] {{ color:var(--desk-text)!important; }}
 [data-testid="tweetText"] a, [data-testid="UserName"] a, a[role="link"] {{ color:var(--desk-accent)!important; }}
 [data-testid="tweetText"] a:hover, a[role="link"]:hover {{ color:var(--desk-info)!important; }}
-[data-testid="tweetText"] span, [data-testid="UserName"] span, time,
-[data-testid="socialContext"], [data-testid="app-text-transition-container"] {{ color:var(--desk-muted)!important; }}
+time, [data-testid="socialContext"], [data-testid="app-text-transition-container"] {{ color:var(--desk-muted)!important; }}
 [data-testid="tweet"] [data-testid="reply"], [data-testid="tweet"] [data-testid="retweet"],
 [data-testid="tweet"] [data-testid="like"], [data-testid="tweet"] [data-testid="analytics"] {{ color:var(--desk-dim)!important; }}
 [data-testid="tweet"] [data-testid="reply"]:hover {{ color:var(--desk-info)!important; }}
@@ -51,6 +50,14 @@ html, body, #react-root, [data-testid="primaryColumn"], [data-testid="sidebarCol
   border-color:var(--desk-border)!important; caret-color:var(--desk-accent)!important; }}
 [data-testid="SearchBox_Search_Input"]:focus-within, [data-testid="tweetTextarea_0"]:focus-within,
 [contenteditable="true"]:focus {{ outline-color:var(--desk-accent)!important; border-color:var(--desk-accent)!important; }}
+/* X puts its opaque black on structural wrappers, not the text editor itself:
+   recolour those wrappers without touching attached media/cards inside them. */
+[data-testid="tweetTextarea_0"]:not(input),
+div:has(> [data-testid="tweetTextarea_0"]),
+div:has(> div > [data-testid="tweetTextarea_0"]),
+[data-testid="sidebarColumn"] > div,
+[data-testid="sidebarColumn"] > div > div,
+aside[role="complementary"] {{ background-color:var(--desk-bg)!important; }}
 [role="dialog"] > div, [data-testid="sheetDialog"], [data-testid="Dropdown"], [role="menu"] {{
   background-color:var(--desk-alt)!important; color:var(--desk-text)!important;
   border-color:var(--desk-border)!important; }}
