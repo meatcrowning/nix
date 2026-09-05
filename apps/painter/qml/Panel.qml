@@ -27,6 +27,9 @@ Rectangle {
     }
     property bool collapsible: true
     property string badge: ""
+    property string headerActionLabel: ""
+    property bool headerActionLit: false
+    signal headerAction()
     default property alias content: inner.data
 
     // WHICH SECTION THIS IS, and whether the column lets you move it. Both are
@@ -181,8 +184,8 @@ Rectangle {
         // (the quant, the variant) is the half worth keeping.
         PixelText {
             anchors.verticalCenter: parent.verticalCenter
-            anchors.right: parent.right
-            anchors.rightMargin: 8
+            anchors.right: headerButton.visible ? headerButton.left : parent.right
+            anchors.rightMargin: headerButton.visible ? 4 : 8
             anchors.left: titleText.right
             anchors.leftMargin: 10
             horizontalAlignment: Text.AlignRight
@@ -191,8 +194,22 @@ Rectangle {
             color: Theme.textDim
         }
 
+        TextButton {
+            id: headerButton
+            z: 2
+            visible: panel.headerActionLabel !== ""
+            anchors.right: parent.right
+            anchors.rightMargin: 4
+            anchors.verticalCenter: parent.verticalCenter
+            label: panel.headerActionLabel
+            lit: panel.headerActionLit
+            winActive: root.winActive
+            onClicked: panel.headerAction()
+        }
+
         MouseArea {
             id: headerDrag
+            z: 1
             anchors.fill: parent
             enabled: panel.collapsible || panel.reorderable
             hoverEnabled: true

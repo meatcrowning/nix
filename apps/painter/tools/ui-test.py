@@ -4141,6 +4141,105 @@ def test_tag_complete(win, ctl, keep):
     unstage()
 
 
+def test_prompt_pills(win, ctl):
+    """Tag view is a lossless view of both prompt strings, not a formatter.
+
+    The separators occupy fixed slots while tags move through them.  That is
+    what lets a deliberately laid-out prompt survive a visit to tag view while
+    still making drag reorder useful.
+    """
+    from PySide6.QtCore import Q_ARG, QMetaObject, Qt
+
+    content = win.contentItem()
+    panel = find(content, "PromptEditor")
+    boxes = find_all(panel, "PromptBox") if panel is not None else []
+    check("the prompt panel owns two boxes for tag view", len(boxes) == 2, len(boxes))
+    if panel is None or len(boxes) != 2 or ctl.reg is None:
+        return
+
+    root = os.environ["PAINTER_MODELS"]
+    staged = {k: MODE_FAKES[k] for k in
+              ("unet/anima-base-v1.0.safetensors",
+               "unet/krea2_raw_fp8_scaled.safetensors")}
+    for rel, keys in staged.items():
+        write_safetensors(os.path.join(root, rel), keys)
+    import fingerprint as fp
+    fp.save_cache({}); ctl.setMode(""); ctl.rescan(); spin(200)
+
+    def set_prompt(key, value):
+        APP.metaObject().invokeMethod(APP, "set", Q_ARG("QVariant", key),
+                                      Q_ARG("QVariant", value))
+        spin(100)
+
+    ctl.selectModelByName("krea2_raw_fp8_scaled.safetensors")
+    spin(180)
+    panel.setProperty("pillsWanted", True)
+    spin(80)
+    check("a prose family does not offer or enter tag view",
+          panel.property("pillsAvailable") is False
+          and panel.property("headerActionLabel") == ""
+          and all(b.property("pillMode") is False for b in boxes))
+
+    ctl.selectModelByName("anima-base-v1.0.safetensors")
+    spin(180)
+    if prop(APP, "gen").get("promptTransform") != "danbooru":
+        print("SKIP  prompt pills (models not recognised)")
+    else:
+        check("a Danbooru family offers tag view for both prompts",
+              panel.property("pillsAvailable") is True
+              and all(b.property("pillMode") is True for b in boxes))
+        positive = "  1girl,  solo, looking at viewer,\n\nnight, neon city, rain  "
+        negative = "lowres,   worst quality,\n jpeg artifacts"
+        set_prompt("positive", positive)
+        set_prompt("negative", negative)
+        views = find_all(panel, "PromptPills")
+        check("positive and negative each have their own tag view", len(views) == 2,
+              len(views))
+        if len(views) == 2:
+            check("merely entering tag view preserves every separator byte",
+                  views[0].property("value") == positive
+                  and views[1].property("value") == negative,
+                  (repr(views[0].property("value")), repr(views[1].property("value"))))
+
+            tags = prop(views[0], "tags")
+            rain = next((t for t in tags if str(t.get("raw", "")).strip() == "rain"), None)
+            if rain is not None:
+                QMetaObject.invokeMethod(views[0], "moveTag", Qt.DirectConnection,
+                                         Q_ARG("QVariant", rain["id"]),
+                                         Q_ARG("QVariant", 1))
+                spin(100)
+            # A drag is an ordinary stable move, not a swap: the tags between
+            # the old and new positions shift by one. The formatting slots do
+            # not, so the blank line remains after the same ordinal slot.
+            moved = "  1girl,  rain, solo,\n\nlooking at viewer, night, neon city  "
+            check("reorder moves tag text through fixed separator slots",
+                  rain is not None and prop(APP, "gen")["positive"] == moved,
+                  repr(prop(APP, "gen")["positive"]))
+            check("reordering positive leaves negative byte-for-byte alone",
+                  prop(APP, "gen")["negative"] == negative,
+                  repr(prop(APP, "gen")["negative"]))
+
+            panel.setProperty("pillsWanted", False)
+            spin(100)
+            edits = [find(b, "QQuickTextEdit") for b in boxes]
+            check("returning to text shows the exact reordered and untouched text",
+                  edits[0].property("text") == moved
+                  and edits[1].property("text") == negative,
+                  (repr(edits[0].property("text")), repr(edits[1].property("text"))))
+            edits[0].setProperty("text", moved + "\nnew idea")
+            spin(100)
+            check("normal text editing still reaches the prompt model",
+                  prop(APP, "gen")["positive"] == moved + "\nnew idea",
+                  repr(prop(APP, "gen")["positive"]))
+
+    panel.setProperty("pillsWanted", False)
+    ctl.setMode("")
+    for rel in staged:
+        try: os.remove(os.path.join(root, rel))
+        except OSError: pass
+    fp.save_cache({}); ctl.rescan(); spin(120)
+
+
 def test_live_row(win, ctl, tmp):
     """The generation in flight is a ROW, and the preview shows what is SELECTED.
 
@@ -4600,6 +4699,7 @@ def main():
     print("== restore ==");           keep2 = test_restore(tmp)
     print("== startup ==");           test_startup(ctl)
     print("== wiring ==");            test_wiring(win, ctl)
+    print("== prompt pills ==");       test_prompt_pills(win, ctl)
     print("== seed reuse ==");        test_seed(win, ctl)
     print("== preset sampling ==");   test_preset_sampling(win, ctl, tmp)
     print("== section order ==");      test_section_order(win, ctl, tmp)
