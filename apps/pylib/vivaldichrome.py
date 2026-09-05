@@ -221,8 +221,14 @@ def relief_css(pal, chrome=None) -> str:
         ".menu,.menubar,.observer,.dialog,.OmniDropdown,.PanelGroup{"
         "background:%s!important;border-radius:%s!important;border:1px solid %s!important}"
         % (bg, r, border),
-        # Ink that Vivaldi hardcodes in a couple of places.
-        "#browser{color:%s}" % fg,
+        # Vivaldi leaves its own 1px client frame around the entire UI and
+        # paints the exposed gutters (including the 6px beside
+        # #webpage-stack) with the theme's background image.  That is the
+        # otherwise-light seam between hyprvtb and the page view.  Keep the
+        # frame, but make both it and the surface use our structural colours.
+        "#browser{color:%s!important;background:%s!important;"
+        "background-image:none!important;border-color:%s!important}"
+        % (fg, bg, border),
     ])
 
 
