@@ -1,4 +1,4 @@
-{ pkgs, lib, host, config, ... }:
+{ pkgs, lib, hostProfile, config, ... }:
 
 # A desktop notification when a spirit's completion lands on this host's
 # board (`docs/board.<hostname>.md`).
@@ -41,11 +41,7 @@
 # Must run under the board's python: board-notify.py imports the board module set
 # (boardparse -> glyphs -> PySide6). Bare pkgs.python3 crash-looped it (Type=simple
 # + Restart=on-failure => hundreds of restarts). Same host split as board.nix.
-let
-  boardPython =
-    if host == "top"
-    then "${pkgs.python3.withPackages (ps: [ ps.pyside6 ])}/bin/python3"
-    else "/usr/bin/python3";
+let boardPython = hostProfile.boardPython pkgs;
 in
 {
   xdg.configFile."scripts/board-notify.py" = {
@@ -72,7 +68,7 @@ in
       # NOT `%h`: systemd expands specifiers in ExecStart but NOT in
       # Environment=, so the real home directory is interpolated here.
       Environment = [
-        "PATH=${lib.makeBinPath [ pkgs.coreutils pkgs.util-linux pkgs.libnotify ]}:${config.home.homeDirectory}/.nix-profile/bin:/run/current-system/sw/bin:/etc/profiles/per-user/lam/bin:/usr/bin:/bin"
+        "PATH=${lib.makeBinPath [ pkgs.coreutils pkgs.util-linux pkgs.libnotify ]}:${hostProfile.profilePathTail config.home.homeDirectory}"
       ];
       ExecStart = "${boardPython} %h/.config/scripts/board-notify.py";
     };

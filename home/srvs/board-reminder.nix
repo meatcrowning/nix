@@ -1,4 +1,4 @@
-{ pkgs, lib, host, config, ... }:
+{ pkgs, lib, hostProfile, config, ... }:
 
 # Put a bullet on this host's board (`docs/board.<hostname>.md`) when a
 # condition he named comes true, and then shut up about it.
@@ -36,11 +36,7 @@
 # the whole board module set (boardparse -> glyphs -> PySide6). Bare pkgs.python3
 # has no PySide6, so this failed at import on every tick. Same host split as
 # home/prog/board.nix (nixpkgs python3+PySide6 on top, Fedora's on book).
-let
-  reminderPython =
-    if host == "top"
-    then "${pkgs.python3.withPackages (ps: [ ps.pyside6 ])}/bin/python3"
-    else "/usr/bin/python3";
+let reminderPython = hostProfile.boardPython pkgs;
 in
 {
   xdg.configFile."scripts/board-reminder.py" = {
@@ -64,7 +60,7 @@ in
       # NOT `%h`: systemd expands specifiers in ExecStart but not in
       # Environment=, so the home directory is interpolated here.
       Environment = [
-        "PATH=${lib.makeBinPath [ pkgs.coreutils ]}:${config.home.homeDirectory}/.nix-profile/bin:/run/current-system/sw/bin:/etc/profiles/per-user/lam/bin:/usr/bin:/bin"
+        "PATH=${lib.makeBinPath [ pkgs.coreutils ]}:${hostProfile.profilePathTail config.home.homeDirectory}"
       ];
       ExecStart = "${reminderPython} %h/.config/scripts/board-reminder.py";
       TimeoutStartSec = "2min";

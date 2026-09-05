@@ -1,14 +1,10 @@
-{ pkgs, lib, host, config, ... }:
+{ pkgs, lib, hostProfile, config, ... }:
 
 # The reminder shells out to boardctl.py, which imports the whole board module
 # set (boardparse -> glyphs -> PySide6), so it must run under the board's python,
 # NOT bare pkgs.python3. Same host split as home/prog/board.nix: nixpkgs
 # python3+PySide6 on top, Fedora's system python3 (with python3-pyside6) on book.
-let
-  reminderPython =
-    if host == "top"
-    then "${pkgs.python3.withPackages (ps: [ ps.pyside6 ])}/bin/python3"
-    else "/usr/bin/python3";
+let reminderPython = hostProfile.boardPython pkgs;
 in
 
 # Put a bullet on this host's board when ~/nix's package snapshot has gone stale,
@@ -38,7 +34,7 @@ in
       # this, and both machines' profile layouts are named so it deploys to book
       # too. NOT %h in Environment — systemd expands specifiers in ExecStart only.
       Environment = [
-        "PATH=${lib.makeBinPath [ pkgs.coreutils ]}:${config.home.homeDirectory}/.nix-profile/bin:/run/current-system/sw/bin:/etc/profiles/per-user/lam/bin:/usr/bin:/bin"
+        "PATH=${lib.makeBinPath [ pkgs.coreutils ]}:${hostProfile.profilePathTail config.home.homeDirectory}"
       ];
       ExecStart = "${reminderPython} %h/.config/scripts/patch-reminder.py";
       TimeoutStartSec = "2min";

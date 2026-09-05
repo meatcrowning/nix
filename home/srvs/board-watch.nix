@@ -1,4 +1,4 @@
-{ pkgs, lib, host, config, ... }:
+{ pkgs, lib, hostProfile, config, ... }:
 
 # Act on his answers to this host's board (`docs/board.<hostname>.md`) without
 # waiting for him to mention them.
@@ -111,15 +111,12 @@ let
   # `air`) — every runtime writer of the store derives it from
   # `os.uname().nodename` and nothing else, so the mapping is done here, once,
   # where the flake attribute is the only name available.
-  boardHost = if host == "air" then "book" else host;
+  boardHost = hostProfile.hostname;
   boardFile = "%h/nix/docs/board.${boardHost}.md";
   # Must run under the board's python: board-watch.py imports the whole board
   # module set (boardparse -> glyphs -> PySide6), so bare pkgs.python3 crashed it
   # on every trigger. Same host split as home/prog/board.nix.
-  boardPython =
-    if host == "top"
-    then "${pkgs.python3.withPackages (ps: [ ps.pyside6 ])}/bin/python3"
-    else "/usr/bin/python3";
+  boardPython = hostProfile.boardPython pkgs;
 in
 {
   xdg.configFile."scripts/board-watch.py" = {
@@ -240,7 +237,7 @@ in
           pkgs.git
           pkgs.gh
           pkgs.nix
-        ] ++ lib.optionals (host == "top") [ pkgs.systemd pkgs.openssh ])}:/run/wrappers/bin:${config.home.homeDirectory}/.nix-profile/bin:/run/current-system/sw/bin:/etc/profiles/per-user/lam/bin:${config.home.homeDirectory}/.local/bin:/usr/bin:/bin"
+        ] ++ lib.optionals hostProfile.isTop [ pkgs.systemd pkgs.openssh ])}:/run/wrappers/bin:${config.home.homeDirectory}/.nix-profile/bin:/run/current-system/sw/bin:/etc/profiles/per-user/lam/bin:${config.home.homeDirectory}/.local/bin:/usr/bin:/bin"
       ];
       ExecStart = "${boardPython} %h/.config/scripts/board-watch.py";
       # Outer guard only. The script caps the agent itself at 45 minutes so the
