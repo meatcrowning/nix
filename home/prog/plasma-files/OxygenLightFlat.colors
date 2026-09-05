@@ -4,6 +4,16 @@
 # surfaces and dark text, but disables the inactive colour effect so a window
 # does not change palette when it loses focus.  plasma-scheme.py moves only the
 # wallpaper-derived hue family; contrast and semantic colours remain Oxygen's.
+#
+# [Colors:View] IS NOT WHITE, unlike stock Oxygen. That group is this desktop's
+# inset surface in three separate places at once — `bgAlt` in every app's
+# twelve-token palette (kdetheme.py), QPalette.Base behind painter's viewer and
+# history (deskstyle.py `viewBg`), and the slab/hole stops surfer's 4chan
+# re-skin imitates (kdetheme.py `kde_chrome`) — so a document white lands as a
+# glaring panel behind an image grid, a chat prompt and a thread watcher rather
+# than as a page under text. A soft off-white a shade above the window colour
+# keeps Oxygen's view-vs-window distinction without the glare, and unlike white
+# it has enough saturation to take the wallpaper's hue.
 [ColorEffects:Disabled]
 ChangeSelectionColor=
 Color=56,56,56
@@ -83,8 +93,8 @@ ForegroundPositive=0,110,40
 ForegroundVisited=150,111,232
 
 [Colors:View]
-BackgroundAlternate=248,247,246
-BackgroundNormal=255,255,255
+BackgroundAlternate=222,219,217
+BackgroundNormal=229,226,224
 DecorationFocus=58,167,221
 DecorationHover=110,214,255
 ForegroundActive=146,76,157
