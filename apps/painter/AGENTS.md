@@ -1188,8 +1188,10 @@ ComfyUI stays the venv+`nix-shell` checkout at `/home/lam/comfy` (symlink →
 installs torch cu128 and patchelfs Triton's `ptxas` for NixOS, which is the
 hard-won part. `home/prog/painter.nix` only adds a `systemd --user` unit
 `comfy-painter.service` (no `[Install]`, never starts at boot) that painter
-starts on demand and deliberately does **not** stop on exit, so 8-16G of weights
-stay warm between launches. Logs: `journalctl --user -u comfy-painter -f`.
+starts for the first renewable painter client lease and stops after the last
+window closes plus ai-warden's short grace. Multiple windows and book/top share
+that one lease set, so one close cannot stop another client's backend. Logs:
+`journalctl --user -u comfy-painter -f`.
 
 **Upgrading it** is a rebase, not a pull — the checkout carries three local
 `shell.nix` commits that must stay on top: `git fetch && git rebase v<tag>`.

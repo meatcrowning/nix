@@ -142,8 +142,8 @@ in
 {
   home.packages = [ painter ];
 
-  # The inference backend. Started on demand by painter (systemctl --user start),
-  # left running afterwards so model weights stay warm.
+  # The inference backend. ai-warden starts it for painter's first renewable
+  # client lease and stops it after the last window closes plus a short grace.
   systemd.user.services.comfy-painter = lib.mkIf (host != "air") {
     Unit = {
       Description = "ComfyUI headless inference backend (painter)";

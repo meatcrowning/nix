@@ -57,7 +57,7 @@ from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font set
 from kdetheme import theme_source, is_plasma  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
 import kdeshell  # noqa: E402  (pylib; the Plasma session's real QtWidgets window)
 from spellcheck import SpellCheck  # noqa: E402  (pylib; the prompt boxes' spelling)
-from warden import Warden  # noqa: E402  (pylib; the AI-backend memory arbiter)
+from warden import BackendClientLease, Warden  # noqa: E402  (arbiter + daemon lifetime)
 # The QBuffer-safe encoder (see its docstring for the SEGV that shape avoids);
 # collage.py already pulls it in, so this costs nothing new.
 import imgfit  # noqa: E402
@@ -1402,7 +1402,6 @@ class Painter(QObject):
 
         self._procs = []                  # live QProcesses, so none is GC'd mid-run
         self._want_model = ""             # a remembered selection, until the rows land
-        QTimer.singleShot(0, self.startBackend)
         # THE MODEL LIST DOES NOT NEED THE BACKEND. It used to be built only when
         # /object_info landed, so painter opened to an empty picker and sat there
         # until ComfyUI had finished loading — on a cold start, minutes of
@@ -3376,6 +3375,18 @@ def main():
     spell = SpellCheck()
     tags = Tags()
 
+    # The backend belongs to live painter processes, not to whichever window
+    # happened to start it. Selftests never acquire a lease or touch the live
+    # unit (root AGENTS.md, testing without interfering with the user).
+    backend_lease = None
+    if not selftest:
+        ctl._set_status("starting ComfyUI...")
+        backend_lease = BackendClientLease(ctl.warden, "comfy", app)
+        backend_lease.start(lambda ok, _why: None if ok else ctl.startBackend())
+        ctl._probe.start()
+        ctl._poll_backend()
+        app.aboutToQuit.connect(backend_lease.close)
+
     # TWO ROOFS, ONE APP (docs/DESIGN.md §7.6). Under Hyprland the QML tree IS
     # the window. Under Plasma it is the central widget of a real QMainWindow,
     # so the menubar/toolbar/statusbar are KDE widgets and the window background
@@ -3638,7 +3649,6 @@ def main():
         return rc[0]
 
     app.exec()
-    # Leave the backend running so weights stay warm for the next launch.
     return 0
 
 
