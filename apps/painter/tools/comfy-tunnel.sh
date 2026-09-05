@@ -3,9 +3,10 @@
 #
 # This is also painter's LAUNCHER on book: home/prog/painter.nix's `air` branch
 # execs `comfy-tunnel.sh -- python3 main.py`, so opening painter from the runner
-# does the whole thing by itself — probe top, forward 8188 and mount top's model
-# and output roots at the same time, start the backend there if it is not already
-# up, run the app as soon as the port is bound, and tear it all down after. (The
+# does the whole thing by itself — probe top, forward ComfyUI plus ai-warden and
+# mount top's model and output roots at the same time, run the app as soon as
+# the ports bind, and tear the tunnel and mounts down after. ai-warden starts
+# the backend for the first live painter lease. (The
 # output root is what makes book's history the WHOLE history: top's backend files
 # every result it produces on top, whichever machine asked for it.) It does NOT wait
 # for ComfyUI to finish loading: the window opens now and says what it is waiting
@@ -42,6 +43,7 @@ set -uo pipefail
 trap '' PIPE
 
 PORT="${COMFY_PORT:-8188}"
+WPORT="${PAINTER_WARDEN_PORT:-8200}"
 SSH="${COMFY_SSH:-/usr/bin/ssh}"   # Fedora's ssh: nix-built binaries on book
                                    # cannot resolve .local names (nss-mdns).
 # Same reason for sshfs and fusermount3 — Fedora's, under /usr/sbin.
@@ -91,6 +93,11 @@ comfy_answers() {
     read -r -t 5 line <&3
     exec 3<&- 3>&-
     [[ "$line" == *" 200 "* ]]
+} 2>/dev/null
+
+port_open() {
+    exec 3<>"/dev/tcp/127.0.0.1/$1" || return 1
+    exec 3<&- 3>&-
 } 2>/dev/null
 
 # The app to run, if any: everything after `--`.
@@ -150,6 +157,9 @@ say "reaching top as '$HOST'"
 export PAINTER_BACKEND_SSH="$HOST"
 export PAINTER_BACKEND_SSH_BIN="$SSH"
 export PAINTER_BACKEND_SSH_CTL="$SSH_CTL"
+# Chatter already uses local 8199 for this same remote warden. Painter gets its
+# own local port so either launcher can own or reuse its forward independently.
+export AI_WARDEN_URL="http://127.0.0.1:$WPORT"
 
 # THE MODELS ARE TOP'S TOO, and painter identifies them by READING THEM: the
 # registry fingerprints every file's tensor header (fingerprint.py), and LoRA
@@ -254,8 +264,19 @@ fi
 # the answer it got was our own tunnel one moment old — so the branch killed the
 # forward it had just started, the app found nothing on 8188, and painter sat on
 # "backend is not ready yet" for ever.
+FWD_SPECS=()
 if comfy_answers; then
     say "127.0.0.1:$PORT already answers - using it"
+else
+    FWD_SPECS+=("$PORT:$PORT")
+fi
+if port_open "$WPORT"; then
+    say "127.0.0.1:$WPORT already bound - using it for the warden"
+else
+    FWD_SPECS+=("$WPORT:8199")
+fi
+
+if [ ${#FWD_SPECS[@]} -eq 0 ]; then
     if [ ${#APP[@]} -gt 0 ]; then
         # Run, do not `exec`: exec replaces this shell and the EXIT trap never
         # fires, so the sshfs mount we just made would outlive the app.
@@ -270,7 +291,13 @@ fi
 # than a tunnel that silently forwards nothing.
 FWD=("$SSH" -o BatchMode=yes -o ExitOnForwardFailure=yes
      -o ServerAliveInterval=20 -o ServerAliveCountMax=3
-     -N -L "127.0.0.1:$PORT:127.0.0.1:$PORT" "$HOST")
+     -N)
+for spec in "${FWD_SPECS[@]}"; do
+    local_port="${spec%%:*}"
+    remote_port="${spec##*:}"
+    FWD+=(-L "127.0.0.1:$local_port:127.0.0.1:$remote_port")
+done
+FWD+=("$HOST")
 
 # Backgrounded, so the app starts as soon as the port is bound rather than after
 # a full handshake — the window opens in about a quarter of a second and must not
@@ -285,10 +312,10 @@ if [ ${#APP[@]} -gt 0 ]; then
 fi
 
 # STARTING THE BACKEND IS THE APP'S JOB, NOT THIS SCRIPT'S — when there is an
-# app. main.py fires startBackend() on its first tick, over this same ssh
-# connection and without blocking its GUI thread, and reports progress in the
-# window where he can see it. Doing it here as well only added an ssh round trip
-# in front of the window, to say the same thing in a toast.
+# app. main.py acquires a renewable lease through the forwarded warden, which
+# starts ComfyUI for the first painter and keeps multiple windows/machines from
+# stopping one another. Its direct systemctl path is the fallback if the warden
+# cannot answer.
 #
 # With no app (`comfy-tunnel.sh` holding a forward by hand) there is nobody else
 # to ask, so it still starts it here.
@@ -316,7 +343,7 @@ fi
 # The app opens now and says "waiting for ComfyUI..." while it polls; its model
 # list does not need the backend either, so there is something to do meanwhile.
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-    (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null && break
+    port_open "${FWD_SPECS[0]%%:*}" && break
     kill -0 "$TUN" 2>/dev/null ||
         die "ssh forward to $HOST died - on top: journalctl --user -u comfy-painter -n50"
     sleep 0.1

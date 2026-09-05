@@ -16,16 +16,17 @@
 # arbitrated them against EACH OTHER, which is the collision he actually hits.
 # This does, by admission control rather than by reacting to pressure: both apps
 # ask before they load or queue, and the warden frees the other backend's
-# weights (never stopping either daemon, never interrupting work in flight) or
-# refuses with a reason the app can draw. The whole design, the three rules he
-# set, and why the cgroup rather than `/api/ps`, are in the script's docstring.
+# weights or refuses with a reason the app can draw. It also owns renewable GUI
+# client leases: first chatter/painter starts its daemon, and only the last
+# client disappearing plus a grace stops it. Work in flight is never stopped.
+# The whole design and why the cgroup rather than `/api/ps` are in the script.
 #
 # `top` only, deliberately: it is the machine the backends run on. book reaches
 # ollama over the tunnel to top, where top's own warden already governs it, and
 # a second warden there would arbitrate a machine it cannot measure. The
 # clients fail open when nothing answers, so book needs no branch of its own —
 # but that fail-open is also why book must actually be able to REACH it:
-# `apps/oracle/tools/ollama-tunnel.sh` forwards 8199 beside 11434, because
+# chatter forwards 8199 and painter forwards it on local port 8200, because
 # until 2026-08-24 it did not, and every reserve chatter made from book was an
 # instant unarbitrated yes.
 #

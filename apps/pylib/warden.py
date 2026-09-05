@@ -26,8 +26,12 @@ fault, not a wait.
 """
 import json
 import os
+import socket
+import urllib.error
+import urllib.request
+import uuid
 
-from PySide6.QtCore import QObject, QUrl
+from PySide6.QtCore import QObject, QTimer, QUrl
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
 WARDEN = os.environ.get("AI_WARDEN_URL", "http://127.0.0.1:8199")
@@ -36,6 +40,7 @@ WARDEN = os.environ.get("AI_WARDEN_URL", "http://127.0.0.1:8199")
 #: warden's own ceiling on waiting for the memory to come back), short enough
 #: that a wedged daemon is a two-breath pause and not a hang.
 TIMEOUT_MS = 40000
+CLIENT_RENEW_MS = 5000
 
 
 class Warden(QObject):
@@ -62,6 +67,31 @@ class Warden(QObject):
             reply.finished.connect(reply.deleteLater)
             return
         reply.finished.connect(lambda: self._done(reply, cb, self.last))
+
+    def _post_strict(self, path, payload, cb):
+        """Lifecycle cannot fail open: if the daemon is absent, the app must
+        fall back to its direct systemctl path or it would never start."""
+        req = QNetworkRequest(QUrl(WARDEN + path))
+        req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
+                      "application/json")
+        req.setTransferTimeout(2000)
+        reply = self._nam.post(req, json.dumps(payload).encode("utf-8"))
+        reply.finished.connect(lambda: self._strict_done(reply, cb))
+
+    @staticmethod
+    def _strict_done(reply, cb):
+        try:
+            if reply.error() != QNetworkReply.NetworkError.NoError:
+                cb(False, "")
+                return
+            try:
+                doc = json.loads(bytes(reply.readAll().data()) or b"{}")
+            except (ValueError, TypeError):
+                cb(False, "")
+                return
+            cb(bool(doc.get("ok", False)), str(doc.get("reason") or ""))
+        finally:
+            reply.deleteLater()
 
     @staticmethod
     def _done(reply, cb, box):
@@ -119,3 +149,61 @@ class Warden(QObject):
         release sees a live lease and stands back from weights already given up.
         Chain the reserve off this instead."""
         self._post("/done", {"backend": backend}, cb and (lambda ok, why: cb()))
+
+    def client_acquire(self, backend, client_id, cb=None):
+        """Register one live app process and start its backend if this is the
+        first client. This is separate from a generation lease: an open window
+        is not itself a reply or render in flight."""
+        self._post_strict("/client/acquire",
+                          {"backend": backend, "client": client_id},
+                          cb or (lambda ok, why: None))
+
+    def client_renew(self, backend, client_id):
+        self._post("/client/renew", {"backend": backend, "client": client_id})
+
+    def client_release(self, backend, client_id):
+        self._post("/client/release", {"backend": backend, "client": client_id})
+
+
+class BackendClientLease(QObject):
+    """A renewable claim held for the lifetime of one GUI process."""
+
+    def __init__(self, warden, backend, parent=None):
+        super().__init__(parent)
+        self.warden = warden
+        self.backend = backend
+        self.client_id = "%s:%d:%s" % (
+            socket.gethostname(), os.getpid(), uuid.uuid4().hex)
+        self._active = False
+        self._timer = QTimer(self)
+        self._timer.setInterval(CLIENT_RENEW_MS)
+        self._timer.timeout.connect(self._renew)
+
+    def start(self, cb=None):
+        if self._active:
+            return
+        self._active = True
+        self.warden.client_acquire(self.backend, self.client_id, cb)
+        self._timer.start()
+
+    def _renew(self):
+        if self._active:
+            self.warden.client_renew(self.backend, self.client_id)
+
+    def close(self):
+        if not self._active:
+            return
+        self._active = False
+        self._timer.stop()
+        # aboutToQuit ends Qt's network loop immediately after this slot. Send
+        # the tiny release ourselves so a clean close starts the grace now;
+        # expiry remains the net if this bounded request cannot get through.
+        body = json.dumps({"backend": self.backend,
+                           "client": self.client_id}).encode("utf-8")
+        req = urllib.request.Request(WARDEN + "/client/release", data=body,
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=0.4) as reply:
+                reply.read()
+        except (OSError, urllib.error.URLError):
+            pass
