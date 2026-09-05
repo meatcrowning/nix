@@ -131,6 +131,42 @@ r = w.reserve("comfy", hint=int(12 * GiB))
 check("comfy goes ahead", r["ok"], r.get("reason", ""))
 check("nothing was freed", world.freed == [], str(world.freed))
 
+print("\nan empty ollama cgroup cache is pressure, not loaded weights")
+world = World(avail_gb=28, ollama_gb=3, ollama_models=[])
+w = world.install()
+r = w.reserve("comfy", hint=int(12 * GiB))
+check("painter does not unload an empty ollama", world.freed == [], str(world.freed))
+check("the snapshot still counts its reclaimable file cache",
+      w.footprint("ollama") == int(3 * GiB), W.gb(w.footprint("ollama")))
+check("but no weights are attributed to it", w.reclaimable("ollama") == 0)
+
+# Exercise the real free loop, not World's decision-table replacement. An
+# empty /api/ps must return without even one sleep; with a model, /api/ps going
+# empty ends the wait although the cgroup's inactive file cache remains 3G.
+posts, sleeps = [], []
+old_post, old_sleep, old_log = W._post, W.time.sleep, W.log
+try:
+    W.log = lambda *_a, **_k: None
+    W._post = lambda *_a, **_k: posts.append((_a, _k))
+    W.time.sleep = lambda seconds: sleeps.append(seconds)
+    real = W.Warden()
+    check("freeing an empty ollama returns immediately",
+          real.free("ollama") == 0 and posts == [] and sleeps == [],
+          (posts, sleeps))
+
+    world.models = [("mid:12b", 9.0)]
+
+    def unload(url, body):
+        posts.append((url, body))
+        world.models = []
+
+    W._post = unload
+    check("a real model unload ends when /api/ps is empty",
+          real.free("ollama") == int(9 * GiB) and len(sleeps) == 1,
+          (posts, sleeps))
+finally:
+    W._post, W.time.sleep, W.log = old_post, old_sleep, old_log
+
 print("\nHIS CASE: chatter holds 24G, painter wants a 12G model")
 world = World(avail_gb=6, ollama_gb=24, ollama_models=[("big:35b", 24.0)],
               tags={"big:35b": 24.0})
@@ -260,7 +296,8 @@ finally:
     W.OFF = W.STATE_DIR / "off"
 
 print("\nthe watchdog frees the biggest IDLE backend under pressure")
-world = World(avail_gb=2, ollama_gb=20, comfy_gb=6)
+world = World(avail_gb=2, ollama_gb=20, comfy_gb=6,
+              ollama_models=[("big:20b", 20.0)])
 w = world.install()
 w.watchdog()
 check("freed ollama", world.freed == ["ollama"], str(world.freed))
@@ -278,14 +315,16 @@ check("froze nobody out", world.freed == [], str(world.freed))
 print("\n...but a busy-but-LOADING ollama under pressure IS freed")
 # A lease held with the GPU not yet generating is a model mid-load: a reload
 # is cheap and re-runnable where a freeze is not, so the watchdog frees it.
-world = World(avail_gb=2, ollama_gb=20, comfy_gb=6, comfy_queue=1)
+world = World(avail_gb=2, ollama_gb=20, comfy_gb=6, comfy_queue=1,
+              ollama_models=[("big:20b", 20.0)])
 w = world.install()
 w.leases["ollama"] = W.time.time() + 300
 w.watchdog()
 check("freed the loading ollama", world.freed == ["ollama"], str(world.freed))
 
 print("\nPSI trips the watchdog even with bytes apparently free")
-world = World(avail_gb=20, psi=45.0, ollama_gb=18)
+world = World(avail_gb=20, psi=45.0, ollama_gb=18,
+              ollama_models=[("mid:18b", 18.0)])
 w = world.install()
 w.watchdog()
 check("freed on pressure alone", world.freed == ["ollama"], str(world.freed))
