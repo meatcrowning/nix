@@ -66,6 +66,23 @@ OPENED = []          # what the app would have launched (see _NoLaunch in build)
 RAN = []             # ...and what it would have run (wl-copy / ffmpeg)
 
 
+class StubWarden:
+    """The UI harness must never ask the live memory arbiter for anything."""
+
+    last = {}
+
+    def reserve(self, _backend, model="", nbytes=0, cb=None, lease=0):
+        if cb:
+            cb(True, "")
+
+    def renew(self, _backend, lease=0):
+        pass
+
+    def done(self, _backend, cb=None):
+        if cb:
+            cb()
+
+
 def check(name, cond, detail=""):
     print(("PASS  " if cond else "FAIL  ") + name + ("  " + str(detail) if detail else ""))
     if not cond:
@@ -292,6 +309,7 @@ def build_window(engine_only=False):
     import main as P
 
     ctl = P.Painter()
+    ctl.warden = StubWarden()
     ctl._unit_poll.stop()
     ctl._probe.stop()
     engine = QQmlApplicationEngine()
@@ -418,6 +436,7 @@ def build(tmp):
         return real_async(self, argv, done)
     P.Painter._run_async = recorded
     ctl = P.Painter()
+    ctl.warden = StubWarden()
     ctl._unit_poll.stop()
     ctl._probe.stop()
 
@@ -4172,6 +4191,14 @@ def test_live_row(win, ctl, tmp):
     spin(120)
     check("a sampler frame is what the pane draws",
           pane.property("showLive") is True, pane.property("showLive"))
+    live_pane = next((it for it in walk(content)
+                      if it.objectName() == "livePreviewImage"), None)
+    live_tile = next((it for it in walk(content)
+                      if it.objectName() == "liveHistoryImage"), None)
+    check("the preview pane retains a step while its replacement loads",
+          live_pane is not None and live_pane.property("retainWhileLoading") is True)
+    check("the history tile retains a step while its replacement loads",
+          live_tile is not None and live_tile.property("retainWhileLoading") is True)
 
     # --- and he can look at something else meanwhile -----------------------
     invoke_str(view, "selectSingle", made[2])
@@ -4263,7 +4290,21 @@ def test_live_row(win, ctl, tmp):
     g.update({"positive": "x", "count": 1, "randomSeed": False, "seed": 7})
     APP.setProperty("gen", g)
     spin(80)
+    class HeldWarden(StubWarden):
+        def reserve(self, _backend, model="", nbytes=0, cb=None, lease=0):
+            self.cb = cb
+
+    old_warden = ctl.warden
+    held_warden = HeldWarden()
+    ctl.warden = held_warden
     APP.metaObject().invokeMethod(APP, "submit")
+    spin(80)
+    check("a memory reservation says what the press is waiting for",
+          ctl.property("status") == "making room..."
+          and APP.property("statusLine") == "making room..."
+          and ctl.property("busy") is False,
+          (ctl.property("status"), APP.property("statusLine"), ctl.property("busy")))
+    held_warden.cb(True, "")
     spin(250)
     check("pressing generate takes the preview at once, before the job starts",
           prop(view, "selection") == [P_LIVE] and pane.property("selLive") is True,
@@ -4280,6 +4321,7 @@ def test_live_row(win, ctl, tmp):
     check("...with the prompt id it now has",
           ctl.gallery._live.get("job") == "pid-submit", ctl.gallery._live)
     ctl.cancel()
+    ctl.warden = old_warden
     spin(150)
     check("cancelling takes the row away",
           ctl.gallery.isLiveAt(0) is False and ctl.gallery.rowCount() == before + 1,
@@ -4515,12 +4557,14 @@ def main():
 
     app, engine, win, ctl, keep = build(tmp)
     only = os.environ.get("PAINTER_UI_ONLY")
-    if only in ("seed", "preview"):
+    if only in ("seed", "preview", "live"):
         print("== %s ==" % only)
         if only == "seed":
             test_seed(win, ctl)
-        else:
+        elif only == "preview":
             test_preview_zoom(win, ctl, tmp)
+        else:
+            test_live_row(win, ctl, tmp)
         real = [w for w in WARNINGS if "Qt Quick Layouts" not in w]
         for w in real:
             print("QML WARNING: " + w)

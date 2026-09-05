@@ -481,6 +481,21 @@ class Warden:
             return max(api, ollama_cgroup())
         return comfy_cgroup()
 
+    def reclaimable(self, backend):
+        """Bytes that asking this backend to unload can actually give back.
+
+        Ollama's cgroup keeps file cache charged to it after the last model is
+        gone.  That is real pressure and belongs in `footprint()`/the snapshot,
+        but it is not a loaded model: another keep_alive=0 cannot release it,
+        and waiting for the cgroup to shrink turns every painter press into a
+        full timeout.  `/api/ps` is authoritative only for the EMPTY case.  A
+        non-empty answer still uses the pessimistic footprint because the API
+        under-reports while a model is loading.
+        """
+        if backend == "ollama" and not ollama_ps():
+            return 0
+        return self.footprint(backend)
+
     def busy(self, backend):
         """(bool, why). Work in flight is never interrupted, so this is the one
         reading that can turn a reserve into a refusal."""
@@ -510,11 +525,13 @@ class Warden:
         with self.lock:
             return self.leases.get(backend, 0) > time.time()
 
-    def wait_idle(self, backend, wait=IDLE_WAIT):
+    def wait_idle(self, backend, wait=None):
         """Wait, briefly, for an ADVISORY busy to clear. Returns whether it is
         still busy. Waiting is not interrupting: if the other side really is
         mid-job it stays busy and the caller falls back to what it did before.
         """
+        if wait is None:
+            wait = IDLE_WAIT
         deadline = time.time() + wait
         while time.time() < deadline:
             bsy, _ = self.busy(backend)
@@ -570,7 +587,7 @@ class Warden:
         Already-resident work costs nothing either way: re-sending to the model
         that is loaded, or re-queueing at a comfy already warm with the same
         weights, needs no room made for it."""
-        held = self.footprint(backend)
+        held = self.reclaimable(backend)
         if backend == "ollama":
             if model:
                 for m in ollama_ps():
@@ -603,7 +620,10 @@ class Warden:
     def free(self, backend, wait=25):
         """Drop a backend's weights, leaving the daemon up. Returns bytes
         released, measured rather than assumed."""
-        before = self.footprint(backend)
+        before = self.reclaimable(backend)
+        if before <= 0:
+            log("free skipped for %s: no loaded weights" % backend)
+            return 0
         if backend == "ollama":
             for m in ollama_ps():
                 name = m.get("name") or m.get("model")
@@ -614,14 +634,14 @@ class Warden:
         deadline = time.time() + wait
         while time.time() < deadline:
             time.sleep(1)
-            now = self.footprint(backend)
+            now = self.reclaimable(backend)
             if now <= max(before * 0.4, 2 * GiB):
                 break
         with self.lock:
             self.last_free[backend] = time.time()
-        released = max(0, before - self.footprint(backend))
+        released = max(0, before - self.reclaimable(backend))
         log("freed %s: %s -> %s (released %s)"
-            % (backend, gb(before), gb(self.footprint(backend)), gb(released)))
+            % (backend, gb(before), gb(self.reclaimable(backend)), gb(released)))
         return released
 
     # -- the answer -------------------------------------------------------
@@ -657,7 +677,7 @@ class Warden:
         # estimate()). We mark ollama as already-freed here so the existing free
         # path below does not free it a second time.
         freed_other = False
-        held = self.footprint(other)
+        held = self.reclaimable(other)
         if backend == "comfy" and held >= 1 * GiB and (ram_ok or not vram_ok):
             bsy, _ = self.busy(other)
             # A GPU THAT IS FULL IS THE SYMPTOM, NOT A REASON TO STAND BACK.
@@ -691,7 +711,7 @@ class Warden:
         if ram_ok and vram_ok:
             return self._admit(backend, lease, freed, need, avail, "room for it")
 
-        held = self.footprint(other)
+        held = self.reclaimable(other)
         if held < 1 * GiB:
             # Nothing of ours to give back. Refuse only if RAM is the problem —
             # a VRAM squeeze still goes ahead.
@@ -816,7 +836,7 @@ class Warden:
         # sank to 2.5G the box was already dead; gating the interrupt on bytes
         # would have missed the very window it exists for.
         for b in BACKENDS:
-            held = self.footprint(b)
+            held = self.reclaimable(b)
             if held < 1 * GiB:
                 continue
             bsy, _ = self.busy(b)

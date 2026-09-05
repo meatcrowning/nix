@@ -573,6 +573,12 @@ Three rules hold that together, and each one is a bug that was found:
       something else and cancel it. **The still's `source` must not be gated on
       `visible`** — it is deliberately hidden while it loads, and a source bound
       to `visible` would never load at all.
+- **A new sampler tick retains the old tick while it loads.** Both the pane and
+  the live history tile use an asynchronous, uncached provider URL whose tick
+  changes every frame. Without `retainWhileLoading`, that source change clears
+  the drawable for the provider's Loading beat and both surfaces flash their
+  empty backgrounds together. The old step is the honest picture until the new
+  one is Ready, so both live Images retain it.
 - **Neither a filter nor a rescan may take the job off the screen.** It has no
   filename or prompt to match (`_matches` exempts it) and it is not in the
   output directory (`load_existing` puts it back).
@@ -993,6 +999,10 @@ there, and each was worth measuring:
 - **Nothing blocks the GUI thread.** `systemctl` is an ssh round trip on book,
   so `startBackend`/`stopBackend`/`is-active` all go through `QProcess`
   (`_run_async`), never `subprocess.run`.
+- **A memory reservation is visible.** Painter does not claim `busy` until a
+  job is actually submitted (cancel cannot cancel an in-flight warden HTTP
+  request), but the status bar says `making room...` while `/reserve` is
+  pending and `queueing...` while the accepted graph is being submitted.
 - **The model list does not need the backend.** The registry scan runs on the
   first tick and retries while it comes up empty, because the sshfs mount may
   still be landing.
@@ -1099,7 +1109,7 @@ behind. Re-run it after touching `comfy-tunnel.sh`.
 
 ## `tools/ui-test.py` — the offscreen UI harness
 
-257 checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
+Hundreds of checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
 synthetic model root and no backend (`unit_cmd` neutered, client stubbed), so it
 can never start ComfyUI on top or open a window on his screen:
 

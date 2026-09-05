@@ -648,11 +648,17 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   says so** (a toast naming what went — his call, 2026-08-22; a question per
   turn would be intolerable). A watchdog on `MemAvailable` + PSI is the net
   behind it, for memory admission control cannot see coming.
-    - **Read the cgroup, not `/api/ps`.** Measured: ollama's endpoint returned
+    - **Read the cgroup for PRESSURE; use `/api/ps` to prove it is EMPTY.**
+      Measured: ollama's endpoint returned
       `{"models":[]}` while `llama-server` already held 14.4 GiB RSS and 10.7
       GiB of VRAM — it is blind for the whole duration of a load, which is
       exactly the window a freeze happens in. `memory.current` was correct
-      throughout, so every footprint is `max(API, cgroup)`.
+      throughout, so every pressure footprint is `max(API, cgroup)`. The other
+      direction matters too: after the last model is gone, Ollama has only
+      ~38 MiB RSS but its cgroup can retain ~3 GiB of inactive file cache. That
+      remains real, reclaimable pressure, but another `keep_alive=0` cannot
+      free it. Admission therefore treats an empty `/api/ps` as zero loaded
+      weights while snapshots still report the cgroup footprint.
     - **A refusal is measured against what will sit in RAM, not the file
       size.** A model's tag size is its whole file, but the layers ollama
       offloads live in VRAM and the pages it read them through are file-backed

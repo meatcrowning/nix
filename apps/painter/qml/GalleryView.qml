@@ -381,6 +381,7 @@ Item {
                 // rather than trying to decode an mp4 as an image.
                 Image {
                     id: still
+                    objectName: tile.live ? "liveHistoryImage" : "historyImage"
                     anchors.fill: parent
                     anchors.margins: 1
                     // THE CACHED THUMBNAIL, not the output. Half this history
@@ -400,6 +401,10 @@ Item {
                             : (isVideo ? poster : thumb)
                     fillMode: Image.PreserveAspectFit
                     asynchronous: true
+                    // Live ticks replace this URL asynchronously; the old
+                    // step remains the honest preview until the new one is
+                    // ready instead of flashing the empty tile background.
+                    retainWhileLoading: tile.live
                     // CACHED, and decoded at the size actually drawn.
                     //
                     // This was `cache: false` at a fixed 420px, and it is what
