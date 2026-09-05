@@ -29,6 +29,7 @@ Rectangle {
     property string badge: ""
     property string headerActionLabel: ""
     property bool headerActionLit: false
+    property bool headerActionPill: false
     signal headerAction()
     default property alias content: inner.data
 
@@ -202,6 +203,7 @@ Rectangle {
             anchors.rightMargin: 4
             anchors.verticalCenter: parent.verticalCenter
             label: panel.headerActionLabel
+            pillIcon: panel.headerActionPill
             lit: panel.headerActionLit
             winActive: root.winActive
             onClicked: panel.headerAction()

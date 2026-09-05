@@ -5,11 +5,36 @@ Panel {
     title: "prompt"
     property bool pillsWanted: Prefs.get("prompt.pills") === true
     readonly property bool pillsAvailable: root.gen.promptTransform === "danbooru"
-    headerActionLabel: pillsAvailable ? (pillsWanted ? "[ text ]" : "[ tags ]") : ""
+    // The compact capsule is clearer than spending the little header on two
+    // words, and it never crowds the title or model-status badge.
+    headerActionLabel: pillsAvailable ? "pill view" : ""
     headerActionLit: pillsWanted
+    headerActionPill: true
     onHeaderAction: {
         pillsWanted = !pillsWanted
         Prefs.set("prompt.pills", pillsWanted)
+    }
+
+    // CTRL+Z IN TAG VIEW. The text boxes have TextEdit's own undo; the pill
+    // views have none of that machinery, and while they are showing there is no
+    // TextEdit on screen for the key to belong to. One shortcut for both views,
+    // aimed at whichever was edited last, so the two can never be ambiguous.
+    function undoTarget() {
+        var best = null
+        var all = [positive.pills, negative.pills]
+        for (var i = 0; i < all.length; i++) {
+            var v = all[i]
+            if (!v || !v.visible || !v.canUndo || v.editingId !== -1) continue
+            if (!best || v.touchedAt > best.touchedAt) best = v
+        }
+        return best
+    }
+
+    Shortcut {
+        sequences: ["Ctrl+Z"]
+        enabled: panel.pillsAvailable && panel.pillsWanted
+                 && panel.undoTarget() !== null
+        onActivated: { var v = panel.undoTarget(); if (v) v.undo() }
     }
 
     //: Forwarded from both boxes to Main.qml, which owns the one context menu.

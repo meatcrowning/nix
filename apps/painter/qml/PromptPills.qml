@@ -20,6 +20,31 @@ Item {
     property int dragId: -1
     property int dropSlot: -1
 
+    // UNDO IS PART OF EDITING, not a text-box feature. Tag view has no
+    // TextEdit behind it, so deleting or reordering a pill had nothing to take
+    // back until this stack existed. It holds the tag/separator pair, which is
+    // the whole document — a snapshot is cheap and cannot half-apply.
+    property var history: []
+    readonly property bool canUndo: history.length > 0
+    property real touchedAt: 0
+
+    function snapshot() {
+        var h = history.slice()
+        h.push({ tags: tags.slice(), separators: separators.slice() })
+        while (h.length > 50) h.shift()
+        history = h
+        touchedAt = Date.now()
+    }
+
+    function undo() {
+        if (!history.length) return
+        var h = history.slice(), was = h.pop()
+        history = h
+        tags = was.tags; separators = was.separators
+        editingId = -1; dragId = -1; dropSlot = -1
+        rebuildDisplay(); commit()
+    }
+
     function parse(text) {
         var pieces = [], cuts = [], out = [], i = 0, start = 0
         var parenDepth = 0, bracketDepth = 0
@@ -73,6 +98,7 @@ Item {
     onValueChanged: {
         if (syncing || value === serialize()) return
         editingId = -1; dragId = -1; dropSlot = -1
+        history = []
         parse(value)
     }
     Component.onCompleted: parse(value)
@@ -106,12 +132,14 @@ Item {
         return -1
     }
     function replaceTag(id, raw) {
+        snapshot()
         var a = tags.slice(), i = tagIndex(id)
         if (i < 0) return
         a[i] = { id: a[i].id, raw: raw }; tags = a
         editingId = -1; rebuildDisplay(); commit()
     }
     function removeTag(id) {
+        snapshot()
         var a = tags.slice(), s = separators.slice(), i = tagIndex(id)
         if (i < 0) return
         a.splice(i, 1)
@@ -124,6 +152,7 @@ Item {
         tags = a; separators = s; rebuildDisplay(); commit()
     }
     function moveTag(id, slot) {
+        snapshot()
         var a = tags.slice(), from = tagIndex(id)
         if (from < 0) return
         var one = a.splice(from, 1)[0]
@@ -134,6 +163,7 @@ Item {
     }
 
     function addTag() {
+        snapshot()
         if (tags.length === 1 && tags[0].raw === "" && serialize().trim() === "") {
             editingId = tags[0].id
             return
@@ -232,8 +262,15 @@ Item {
                             visible: cell.kind === "tag"
                             width: implicitWidth
                             height: implicitHeight
-                            implicitWidth: Math.min(flow.width,
-                                Math.max(28, label.implicitWidth + 8 + 6 + 14))
+                            // Tags are prompt text, not a filename: never
+                            // elide them. A long tag grows the pill downward
+                            // and wraps at the real field edge instead.
+                            // 6 left, 4 gap, 12 for the delete glyph. The
+                            // glyph is always drawn, so that space is never a
+                            // blank margin and the pill never changes width
+                            // under the pointer.
+                            implicitWidth: Math.max(24, Math.min(flow.width,
+                                label.implicitWidth + 6 + 4 + 12))
                             implicitHeight: Math.max(Theme.lineHeight + 4, label.implicitHeight + 4)
                             color: hover.hovered ? Theme.highlight : Theme.bgAlt
                             border.width: 1
@@ -243,11 +280,10 @@ Item {
                             PixelText {
                                 id: label
                                 anchors.left: parent.left
-                                anchors.leftMargin: 8
-                                anchors.right: remove.left
-                                anchors.rightMargin: 6
+                                anchors.leftMargin: 6
                                 anchors.verticalCenter: parent.verticalCenter
-                                elide: Text.ElideRight
+                                width: parent.width - 6 - 4 - remove.width
+                                wrapMode: Text.WrapAnywhere
                                 text: String(cell.modelData.raw).trim() || "..."
                                 color: pills.negative ? Theme.textDim : Theme.text
                                 visible: pills.editingId !== cell.tagId
@@ -255,9 +291,9 @@ Item {
                             TextInput {
                                 id: edit
                                 anchors.left: parent.left
-                                anchors.leftMargin: 8
+                                anchors.leftMargin: 6
                                 anchors.right: remove.left
-                                anchors.rightMargin: 6
+                                anchors.rightMargin: 4
                                 anchors.verticalCenter: parent.verticalCenter
                                 visible: pills.editingId === cell.tagId
                                 text: cell.kind === "tag" ? String(cell.modelData.raw) : ""
@@ -274,17 +310,35 @@ Item {
                                 onActiveFocusChanged: if (!activeFocus && visible)
                                                           pills.replaceTag(cell.tagId, text)
                             }
-                            TextButton {
+                            // FLAT, NOT A BUTTON. In the Plasma session a
+                            // TextButton is a real KDE button, and a framed
+                            // button inside a 20px pill reads as a second
+                            // control rather than as the pill's own delete
+                            // glyph — so this one is drawn text on both faces.
+                            Item {
                                 id: remove
                                 z: 2
                                 anchors.right: parent.right
                                 anchors.rightMargin: 2
                                 anchors.verticalCenter: parent.verticalCenter
-                                width: 14
-                                label: "x"
-                                tone: Theme.crit
-                                visible: hover.hovered && pills.editingId !== cell.tagId
-                                onClicked: pills.removeTag(cell.tagId)
+                                width: 12
+                                height: parent.height
+                                visible: pills.editingId !== cell.tagId
+
+                                PixelText {
+                                    anchors.centerIn: parent
+                                    // A cross, not the letter: "x" reads as a
+                                    // tag that happens to be one character.
+                                    // U+00D7 is in the pixel font (U+2715,
+                                    // cte's glyph, is not) and is that shape.
+                                    text: "\u00d7"
+                                    color: xhover.hovered ? Theme.crit : Theme.dim
+                                }
+                                HoverHandler { id: xhover }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: pills.removeTag(cell.tagId)
+                                }
                             }
                             HoverHandler { id: hover }
                             Item { id: proxy; visible: false }

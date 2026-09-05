@@ -29,8 +29,19 @@ Item {
     property bool pillIcon: false
     signal clicked()
 
-    implicitWidth: root.pillIcon ? pill.implicitWidth : btn.implicitWidth
-    implicitHeight: root.pillIcon ? pill.implicitHeight : btn.implicitHeight
+    // SIZED LIKE PAINTER'S OWN ROWS, not like a dialog button. A KDE button's
+    // implicit size carries the style's minimum (measured 100x40 under
+    // qqc2-desktop-style), which in a 24px panel header does not fit at all and
+    // in a prompt pill leaves a finger of empty space after every label. The
+    // frame is still the style's; only the box it is asked to fill is ours.
+    implicitWidth: root.pillIcon ? 22 : Math.max(22, Math.ceil(tm.width) + 14)
+    implicitHeight: Theme.lineHeight + 5
+
+    TextMetrics {
+        id: tm
+        font: btn.font
+        text: btn.text
+    }
     width: implicitWidth
     height: implicitHeight
 
@@ -38,6 +49,9 @@ Item {
         id: btn
         visible: !root.pillIcon
         anchors.fill: parent
+        padding: 1
+        leftPadding: 6
+        rightPadding: 6
         text: String(root.label).replace(/^\s*\[\s*/, "").replace(/\s*\]\s*$/, "")
         enabled: root.enabled
         checkable: root.lit
@@ -58,6 +72,7 @@ Item {
         id: pill
         visible: root.pillIcon
         anchors.fill: parent
+        padding: 1
         enabled: root.enabled
         checkable: root.lit
         checked: root.lit
