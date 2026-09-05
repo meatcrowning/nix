@@ -12237,6 +12237,20 @@ def run_selftest(app, shell, win, plasma, warnings, fleet_pane=None):
         # above: a ListView has no delegates until something polishes it.
         from PySide6.QtCore import QMetaObject, QObject
         _root = shell.root if plasma else win.findChild(QObject, "content")
+        if os.environ.get("ORACLE_LAYOUT"):
+            _stats = _root.findChild(QObject, "statsRow") if _root else None
+            _reply = _root.findChild(QObject, "replyBox") if _root else None
+            _prompt = _root.findChild(QObject, "promptBox") if _root else None
+
+            def _span(item):
+                if item is None:
+                    return "missing"
+                y = float(item.property("y") or 0)
+                return "%.1f..%.1f" % (y, y + float(item.property("height") or 0))
+
+            print("layout: face=%s stats=%s reply=%s prompt=%s"
+                  % ("plasma" if plasma else "hypr",
+                     _span(_stats), _span(_reply), _span(_prompt)))
         _tray = _root.findChild(QObject, "jobsTray") if _root else None
         if _tray is not None:
             # The rows are ListView delegates: they exist one layout pass
