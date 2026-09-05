@@ -172,6 +172,21 @@ def main():
         check("costs no rebuild", "no rebuild" in p.stdout, True)
         check("toast offered", "offered 1 commits" in sb.offer(), True)
 
+        case("patch-equivalent delivery commits and README-only pushes")
+        sbe = Sandbox(root / "equiv")
+        (root / "equiv" / "settings.json").write_text(json.dumps({"notifActions": True}))
+        # Land the same patch independently on both sides, as the safe delivery
+        # worktree does when this live checkout contains unrelated dirty work.
+        sbe.local_commit({"apps/x.py": "same\n"}, "local form")
+        sbe.push({"apps/x.py": "same\n"}, "delivered form")
+        sbe.push({"README.md": "words\n"}, "update readme")
+        p, _ = sbe.pyrun("import json; print(json.dumps(m.survey()))")
+        report = json.loads(p.stdout)
+        check("equivalent patches are not waiting", report["behind"], 1)
+        check("equivalent local patches are not unpushed", report["ahead"], 0)
+        check("only the real tree difference is classified", report["files"], ["README.md"])
+        check("README-only changes do not toast", "offered" in sbe.offer(), False)
+
         case("the compositor pin moves (book)")
         sb2 = Sandbox(root / "b")
         (root / "b" / "settings.json").write_text(json.dumps({"notifActions": True}))

@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, lib, config, ... }:
 
 # Pulls Plasma's notification popups back up against the panel.
 #
@@ -39,16 +39,14 @@
 # 44px gap became 16px (our 8 + the panel's own 8, which now reads as one
 # margin). Nothing else moved; inter-popup spacing is a separate constant.
 #
-# The widget has to be ADDED to a panel once per machine — deploying the package
-# alone does nothing:
+# The package alone does nothing: the widget must exist in a panel so Plasma
+# instantiates its QML. `plasma-notif-gap.service` below adds it idempotently
+# once plasmashell owns its bus name. This used to be a hand-run qdbus command,
+# so a fresh panel (including top's KDE panel) silently kept the stock 36px.
 #
-#   qdbus org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript \
-#     'panelById(panelIds[0]).addWidget("org.kde.lam.notifgap")'
-#
-# It draws a 1x1 item and reports PassiveStatus, so it is invisible in a panel
-# and lives in the drawer in a system tray. Remove it the same way you would any
-# widget. If a future Plasma renames the module the import throws, the retry
-# timer keeps failing quietly and you get the stock 36px back — it cannot break
+# It draws a 1x1 item and reports PassiveStatus, so it is invisible in a panel.
+# If a future Plasma renames the module the import throws, the retry timer keeps
+# failing quietly and you get the stock 36px back — it cannot break
 # notifications.
 
 #
@@ -128,4 +126,43 @@ let
 in
 {
   xdg.dataFile."plasma/plasmoids/${pkgId}".source = package;
+
+  # Plasma does not have a declarative setting for adding this controller, and
+  # merely installing a plasmoid package never instantiates it. Run only in a
+  # Plasma session, wait for the shell's scripting API, then add exactly one to
+  # the first panel. The scan makes restarts and rebuilds harmless.
+  systemd.user.services.plasma-notif-gap = {
+    Unit = {
+      Description = "Keep Plasma notification popups against the panel";
+      After = [ "graphical-session.target" ];
+      ConditionEnvironment = "KDE_FULL_SESSION=true";
+    };
+    Service = {
+      Type = "oneshot";
+      Environment = [
+        "PATH=${lib.makeBinPath [ pkgs.coreutils ]}:${config.home.homeDirectory}/.nix-profile/bin:/run/current-system/sw/bin:/etc/profiles/per-user/lam/bin:/usr/bin:/bin"
+      ];
+      ExecStart = pkgs.writeShellScript "plasma-notif-gap-install" ''
+        for attempt in $(seq 1 60); do
+          if qdbus org.kde.plasmashell /PlasmaShell \
+              org.kde.PlasmaShell.evaluateScript ${lib.escapeShellArg ''
+                var found = false;
+                for (var i = 0; i < panelIds.length; ++i) {
+                    var widgets = panelById(panelIds[i]).widgets();
+                    for (var j = 0; j < widgets.length; ++j) {
+                        if (widgets[j].type === "${pkgId}") found = true;
+                    }
+                }
+                if (!found && panelIds.length > 0)
+                    panelById(panelIds[0]).addWidget("${pkgId}");
+              ''} >/dev/null 2>&1; then
+            exit 0
+          fi
+          sleep 1
+        done
+        exit 1
+      '';
+    };
+    Install.WantedBy = [ "graphical-session.target" ];
+  };
 }
