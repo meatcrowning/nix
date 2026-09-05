@@ -110,82 +110,17 @@
   let
     user = "lam";
     system = "x86_64-linux";
+    vcv-rack-overlay = import ./overlays/vcv-rack.nix;
 
-    vcv-rack-overlay = (final: prev: {
-      vcv-rack = prev.vcv-rack.overrideAttrs (oldAttrs: {
-        patches = builtins.filter (p: !(p ? name && p.name == "fix-segfault-on-linux.patch")) (oldAttrs.patches or []);
-      });
-    });
+    breeze-square-overlay = import ./overlays/breeze-square.nix;
 
-    # Square off Breeze: its widget corner radius is a hardcoded compile-time
-    # constant (kstyle/breezemetrics.h), with no runtime/breezerc setting — so
-    # the only way to get square corners while keeping Breeze (and its
-    # kdeglobals-driven, wal-following colours) is to patch that constant to 0
-    # and rebuild. CheckBox_Radius is defined as Frame_FrameRadius - 1, so it's
-    # pinned to 0 explicitly rather than left at -1. Merge-override (not
-    # overrideScope) so only breeze itself rebuilds, not the whole Plasma stack
-    # that build-depends on it — the style is loaded at runtime, so the patched
-    # top-level kdePackages.breeze that lands in systemPackages is what matters.
-    breeze-square-overlay = (final: prev: {
-      kdePackages = prev.kdePackages // {
-        breeze = prev.kdePackages.breeze.overrideAttrs (old: {
-          postPatch = (old.postPatch or "") + ''
-            substituteInPlace kstyle/breezemetrics.h \
-              --replace-fail "Frame_FrameRadius = 5" "Frame_FrameRadius = 0" \
-              --replace-fail "CheckBox_Radius = Frame_FrameRadius - 1" "CheckBox_Radius = 0"
-          '';
-        });
-      };
-    });
-
-    # Roll up ("shade") a window from its titlebar, in the Plasma session.
-    # KWin removed shading, but only its own half of the seam: KDecoration3
-    # still has DecorationButtonType::Shade, and Breeze and Oxygen both still
-    # build the button, draw its icon and render a shaded frame. What is gone is
-    # three stubs in src/decorations/decoratedwindow.cpp (isShadeable/isShaded/
-    # requestToggleShade, answering false/false/nothing) and the 'L' character in
-    # the two button tables, so the button cannot be placed or listed. The patch
-    # restores exactly that: roll the frame down to the decoration's top border,
-    # remember the height, roll back — a rolled-up window is an ordinary resized
-    # window — plus 'L' and a "Roll up window" entry in the decoration KCM's
-    # draggable palette. Costs a from-source kwin build on every nixpkgs bump,
-    # and a patch refresh whenever upstream touches those files. Merge-override
-    # for the same reason as breeze above: the session runs the kwin_wayland
-    # binary the plasma6 module puts in systemPackages, so only kwin itself has
-    # to rebuild, not the Plasma stack that build-depends on it.
-    kwin-rollup-overlay = (final: prev: {
-      kdePackages = prev.kdePackages // {
-        kwin = prev.kdePackages.kwin.overrideAttrs (old: {
-          patches = (old.patches or []) ++ [ ./sys/dsk/kwin-roll-up-button.patch ];
-        });
-      };
-    });
+    kwin-rollup-overlay = import ./overlays/kwin-rollup.nix;
 
     # (The easyeffects per-channel IPC backport that used to live here is gone:
     # easyeffects 8.2.8 ships wwmm/easyeffects 76a3f9a5 itself, so the patch
     # applied in reverse and failed the build on the 2026-08-18 nixpkgs roll.)
 
-    # Backport nixpkgs 7990e968cb8d (2026-07-25; our pin is 2026-07-18, so it
-    # is not in the tree): setup-cuda-hook's setupCUDAToolkit_ROOT builds
-    # CUDAToolkit_ROOT from the marked redist paths (cudart, libcublas, cccl)
-    # but never adds nvcc's dir, so any child cmake build that inherits the env
-    # var and does find_package(CUDAToolkit) fails with "CUDA Toolkit not
-    # found" at ggml-cuda/CMakeLists.txt:268 — which is exactly the ollama-cuda
-    # failure (llama.cpp is a cmake ExternalProject child). Upstream appends
-    # the nvcc dir to CUDAToolkit_ROOT in the hook itself; mirroring it at the
-    # ollama level keeps the blast radius to this one package. Drop the overlay
-    # when the nixpkgs input rolls past 2026-07-25 (the hook fix arrives in the
-    # same bump).
-    ollama-cuda-overlay = (final: prev: {
-      ollama-cuda = prev.ollama-cuda.overrideAttrs (old: {
-        preBuild = ''
-          local nvccExe
-          if nvccExe="$(type -P nvcc)"; then
-            export CUDAToolkit_ROOT="''${nvccExe%/bin/nvcc}''${CUDAToolkit_ROOT:+;$CUDAToolkit_ROOT}"
-          fi
-        '' + (old.preBuild or "");
-      });
-    });
+    ollama-cuda-overlay = import ./overlays/ollama-cuda.nix;
 
     overlays = [ vcv-rack-overlay breeze-square-overlay ollama-cuda-overlay kwin-rollup-overlay ];
 
