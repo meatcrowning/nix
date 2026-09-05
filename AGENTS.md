@@ -995,9 +995,10 @@ X11 in 6.8, and building it doubles the kwin-effect compiles).
 
 **The wallpaper palette follows into that session, as far as config can carry
 it.** Three pieces, all in `home/srvs/wal-files/`:
-`plasma-scheme.py` now templates TWO schemes — `OxygenDarkFlat` and ATP's
-`Aero`, read out of `/run/current-system/sw/share/color-schemes/` rather than
-vendored — and applies whichever one kdeglobals currently names; `wal-set.sh`
+`plasma-scheme.py` now templates THREE schemes — `OxygenDarkFlat`,
+`OxygenLightFlat`, and ATP's `Aero`, read out of
+`/run/current-system/sw/share/color-schemes/` rather than vendored — and applies
+whichever one kdeglobals currently names; `wal-set.sh`
 writes the `aeroglassblur` effect's `AeroHue`/`AeroSaturation`/`AeroBrightness`
 into `kwinrc` and pokes `reconfigureEffect`, which is Win7's Window Color panel
 and colorizes the decoration region too (smod's frame tiles are neutral greys,
