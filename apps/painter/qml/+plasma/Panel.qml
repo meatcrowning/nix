@@ -27,6 +27,7 @@ Item {
     property string badge: ""
     property string headerActionLabel: ""
     property bool headerActionLit: false
+    property bool headerActionPill: false
     signal headerAction()
     default property alias content: inner.data
 
@@ -212,6 +213,7 @@ Item {
             anchors.rightMargin: 6
             anchors.verticalCenter: parent.verticalCenter
             label: panel.headerActionLabel
+            pillIcon: panel.headerActionPill
             lit: panel.headerActionLit
             onClicked: panel.headerAction()
         }

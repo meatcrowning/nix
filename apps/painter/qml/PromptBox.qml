@@ -7,6 +7,8 @@ Rectangle {
     property string placeholder: ""
     property bool negative: false
     property bool pillMode: false
+    // The tag view, so the panel above can reach its undo stack.
+    readonly property alias pills: pillView
     signal edited(string text)
 
     // ------------------------------------------------------ tag completion
