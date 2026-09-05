@@ -573,6 +573,39 @@ tools/queue-ops-test.py   # headless; a Player built without __init__ (so no
                           # playlist. The LIVE player is never touched.
 ```
 
+## A deleted file leaves the library; an unplugged drive only greys
+
+A track whose file is gone is **pruned, not greyed** — the row disappears from
+the album, the playlist and the search, and the DB row goes with it. Deleting
+the extra copies of a track outside the player (a dedupe pass over `aud/`) used
+to leave them listed, greyed out, until the next full scan came round.
+
+The greying is still there and still load-bearing: it is what an **unplugged
+drive** looks like, and that case must never prune — with the drive gone every
+path in the DB stats missing, so a blanket prune would erase the library,
+ratings and all. `Library.prune_missing` is where both halves live:
+
+- a **remote** library never prunes (`library_is_remote_cached` — its DB is
+  authoritative and the per-track stat is skipped there anyway, see the `air`
+  section), so those rows never even go grey;
+- a **local** one prunes only while `library_mounted()` — the root is a
+  directory **with something in it**, because an unmounted mountpoint can
+  linger as an empty dir and `is_dir()` alone would wave the erase through;
+- it re-stats the paths under that proven mount before deleting, and
+  `rebuild_albums` runs after, so an album that lost its last track goes too;
+- `changed` is emitted through `QTimer.singleShot(0, …)`: it drives the very
+  listing refresh the prune is called from.
+
+`Bridge._track_rows` is the one door — the three listings that stat their files
+(`openAlbum`, `openSmart`, `search`) all build their rows through it, so the
+behaviour cannot drift between them. A prune it was refused leaves the rows in
+place, greyed, exactly as before.
+
+```bash
+player-qtenv python3 tools/prune-missing-test.py   # scratch DB + scratch root;
+                                                   # the live library is untouched
+```
+
 ## Opening a file by path (`%F`)
 
 `player /path/to/track.flac` plays that track, and so does double-clicking one
