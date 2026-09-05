@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import re
 import os
+import configparser
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -14,6 +15,7 @@ from pathlib import Path
 HOME = Path.home()
 THEME_QML = HOME / ".config/quickshell/Theme.qml"
 PREFIX = HOME / ".wine"
+KDEGLOBALS = HOME / ".config/kdeglobals"
 LIVE = PREFIX / "drive_c/ProgramData/Ableton/Live 11 Suite"
 THEMES = LIVE / "Resources/Themes"
 PREFERENCES = (
@@ -54,6 +56,17 @@ def rgb(value: str) -> str:
     return " ".join(str(int(value[i:i + 2], 16)) for i in (1, 3, 5))
 
 
+def kde_color(group: str, key: str) -> str:
+    """Read the same KColorScheme role the desktop's Qt apps use."""
+    ini = configparser.ConfigParser(interpolation=None)
+    ini.optionxform = str
+    ini.read(KDEGLOBALS, encoding="utf-8")
+    values = [int(value) for value in ini[group][key].split(",")]
+    if len(values) != 3 or not all(0 <= value <= 255 for value in values):
+        raise ValueError(f"invalid {group}/{key} in kdeglobals")
+    return "#" + "".join(f"{value:02x}" for value in values)
+
+
 def apply_wine(p: dict[str, str]) -> None:
     groups = {
         "ActiveBorder": "accent", "ActiveTitle": "accent",
@@ -91,6 +104,15 @@ def apply_ableton(p: dict[str, str]) -> None:
     theme = tree.getroot().find("Theme")
     if theme is None:
         raise RuntimeError(f"no Theme element in {source}")
+
+    # Match the exact surfaces the other desktop apps use. kdetheme.py maps
+    # their outer window to Colors:Window and inset views to Colors:View; the
+    # panel palette is intentionally different in a Plasma session.
+    p = {
+        **p,
+        "bg": kde_color("Colors:Window", "BackgroundNormal"),
+        "bgAlt": kde_color("Colors:View", "BackgroundNormal"),
+    }
 
     mapping = {
         "bg": ("MeterBackground", "SurfaceArea", "Desktop", "ScrollbarInnerTrack",
