@@ -5,15 +5,20 @@
 # does not change palette when it loses focus.  plasma-scheme.py moves only the
 # wallpaper-derived hue family; contrast and semantic colours remain Oxygen's.
 #
-# [Colors:View] IS NOT WHITE, unlike stock Oxygen. That group is this desktop's
-# inset surface in three separate places at once — `bgAlt` in every app's
-# twelve-token palette (kdetheme.py), QPalette.Base behind painter's viewer and
-# history (deskstyle.py `viewBg`), and the slab/hole stops surfer's 4chan
-# re-skin imitates (kdetheme.py `kde_chrome`) — so a document white lands as a
-# glaring panel behind an image grid, a chat prompt and a thread watcher rather
-# than as a page under text. A soft off-white a shade above the window colour
-# keeps Oxygen's view-vs-window distinction without the glare, and unlike white
-# it has enough saturation to take the wallpaper's hue.
+# [Colors:View] IS DARKER THAN [Colors:Window], unlike stock Oxygen, where it is
+# white. That group is this desktop's INSET surface in three separate places at
+# once — `bgAlt` in every app's twelve-token palette (kdetheme.py),
+# QPalette.Base behind a results pane, and the slab/hole stops surfer's 4chan
+# re-skin imitates (kdetheme.py `kde_chrome`) — and an inset here is a WELL: on
+# OxygenDarkFlat the view sits ~0.034 of HLS lightness BELOW the window, and
+# every app is drawn on that reading. A stock light scheme inverts it, so the
+# same panel becomes a raised slab brighter than the chrome above it: measured
+# 2026-09-05, Oxygen's window gradient runs 222 at the titlebar down to 184 at
+# the foot of the window while a white view sat at 255, which is why "the
+# titlebar is dimmer than the top part of the window" and why the viewer, the
+# chat prompt and the thread watcher glared. The same lightness step as the
+# dark scheme's puts it back — and unlike white it has the saturation to take
+# the wallpaper's hue.
 [ColorEffects:Disabled]
 ChangeSelectionColor=
 Color=56,56,56
@@ -93,8 +98,8 @@ ForegroundPositive=0,110,40
 ForegroundVisited=150,111,232
 
 [Colors:View]
-BackgroundAlternate=222,219,217
-BackgroundNormal=229,226,224
+BackgroundAlternate=196,192,190
+BackgroundNormal=203,199,197
 DecorationFocus=58,167,221
 DecorationHover=110,214,255
 ForegroundActive=146,76,157
