@@ -46,7 +46,7 @@ time, [data-testid="socialContext"], [data-testid="app-text-transition-container
 [data-testid="tweet"] [data-testid="analytics"]:hover {{ color:var(--desk-accent)!important; }}
 [data-testid="SearchBox_Search_Input"], [data-testid="SearchBox_Search_Input"] input,
 [data-testid="tweetTextarea_0"], [contenteditable="true"], input, textarea {{
-  background-color:var(--desk-alt)!important; color:var(--desk-text)!important;
+  background-color:var(--desk-bg)!important; color:var(--desk-text)!important;
   border-color:var(--desk-border)!important; caret-color:var(--desk-accent)!important; }}
 [data-testid="SearchBox_Search_Input"]:focus-within, [data-testid="tweetTextarea_0"]:focus-within,
 [contenteditable="true"]:focus {{ outline-color:var(--desk-accent)!important; border-color:var(--desk-accent)!important; }}
@@ -64,7 +64,12 @@ aside[role="complementary"] {{ background-color:var(--desk-bg)!important; }}
 [data-testid="sidebarColumn"],
 [data-testid="sidebarColumn"] * {{ background-color:var(--desk-bg)!important; }}
 [data-testid="SearchBox_Search_Input"],
-[data-testid="SearchBox_Search_Input"] * {{ background-color:var(--desk-alt)!important; }}
+[data-testid="SearchBox_Search_Input"] * {{ background-color:var(--desk-bg)!important; }}
+/* The tab-strip's add-tab control is a separate header button, outside the
+   sidebar and composer trees.  X has used both labels across releases. */
+[data-testid="primaryColumn"] [aria-label="Add a tab"],
+[data-testid="primaryColumn"] [aria-label="Add tab"],
+[data-testid="primaryColumn"] [data-testid="addButton"] {{ background-color:var(--desk-bg)!important; }}
 [role="dialog"] > div, [data-testid="sheetDialog"], [data-testid="Dropdown"], [role="menu"] {{
   background-color:var(--desk-alt)!important; color:var(--desk-text)!important;
   border-color:var(--desk-border)!important; }}
