@@ -122,8 +122,8 @@ class PainterSamplerCustom(custom.SamplerCustom):
                     callback=_callback(model, sigmas.shape[-1] - 1, x0),
                     disable_pbar=not comfy.utils.PROGRESS_BAR_ENABLED, seed=noise_seed)
             except _StopHere as stop:
-                samples = stop.latent
-                x0["x0"] = samples
+                x0["x0"] = stop.latent
+                samples = model.model.process_latent_out(stop.latent.cpu())
             return _out(latent, samples, x0, model)
         finally:
             STATE.end()
@@ -157,8 +157,8 @@ class PainterSamplerCustomAdvanced(custom.SamplerCustomAdvanced):
                     callback=_callback(guider.model_patcher, sigmas.shape[-1] - 1, x0),
                     disable_pbar=not comfy.utils.PROGRESS_BAR_ENABLED, seed=noise.seed)
             except _StopHere as stop:
-                samples = stop.latent
-                x0["x0"] = samples
+                x0["x0"] = stop.latent
+                samples = guider.model_patcher.model.process_latent_out(stop.latent.cpu())
             samples = samples.to(comfy.model_management.intermediate_device())
             return _out(latent, samples, x0, guider.model_patcher)
         finally:
