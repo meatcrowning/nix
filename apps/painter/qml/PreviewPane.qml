@@ -186,7 +186,7 @@ Item {
         id: frame
         anchors.fill: parent
         anchors.bottomMargin: 6           // the grab strip below
-        color: Theme.bgAlt
+        color: Theme.paneFill
         border.color: Theme.border
         border.width: Theme.ctrlBorder
         clip: true

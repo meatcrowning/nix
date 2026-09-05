@@ -16,9 +16,6 @@ Item {
     readonly property color fgAccent: app ? app.fgAccent : Theme.accent
     readonly property bool winActive: app ? app.winActive : true
     readonly property bool showPreview: app ? app.showPreview : false
-    readonly property string viewBg:
-        (typeof DeskStyle !== "undefined" && DeskStyle) ? DeskStyle.viewBg : ""
-
     // The gallery's inject rows switch to the parameters view after injecting,
     // so this one travels in both directions. Guarded on both sides: an echo
     // assigning the value already held would fight the other end for a frame.
@@ -57,17 +54,14 @@ Item {
     readonly property string viewPath: app ? app.selOne : ""
     readonly property bool viewIsVideo: app ? app.selIsVideo : false
 
-    // The view's own background — `QPalette.Base`, which is the colour Dolphin
-    // paints its file list with, Gwenview its thumbnail grid and Okular its
-    // page area. The WINDOW's background is the style's gradient and the two
-    // are deliberately not the same: the drag band above this pane (Root.qml)
-    // keeps the gradient, because it is chrome. Empty — and so invisible —
-    // outside a Plasma session, where every pane takes the wallpaper palette.
-    Rectangle {
-        anchors.fill: parent
-        visible: root.viewBg !== ""
-        color: root.viewBg === "" ? "transparent" : root.viewBg
-    }
+    // NO BACKGROUND OF ITS OWN. This pane used to paint `QPalette.Base` — the
+    // colour Dolphin fills its file list with — on the reasoning that a view is
+    // not a window. On a LIGHT scheme that is a white slab over most of the
+    // window, and the titlebar and toolbar above it are drawn from the style's
+    // gradient, so the window stops reading as one object [2026-09-05]. The
+    // gradient `StyledBackground` draws at the back of Root.qml shows through
+    // instead, and the viewer and the history grid are transparent over it
+    // (`Theme.paneFill`); only the tiles and controls keep an inset colour.
 
     PreviewPane {
         id: preview

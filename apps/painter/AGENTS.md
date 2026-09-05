@@ -80,10 +80,16 @@ here:
   `WindowDragMode=WD_MINIMAL`, upstream's supported "chrome only" — but the
   MouseArea stays: it is session-independent and it is the only guard on a
   machine where that rc has not been applied.
-- **Under Plasma the results pane paints `QPalette.Base`** — `DeskStyle.viewBg`,
-  the colour Dolphin paints its file list with. The window\'s own background is
-  the style\'s gradient and the two are deliberately different: the band keeps
-  the gradient because it is chrome. Empty string outside Plasma.
+- **Under Plasma the results side paints NOTHING of its own** — the viewer's
+  frame and the history grid are transparent (`Theme.paneFill`) over the
+  `StyledBackground` at the back of `Root.qml`, so the style's gradient runs
+  unbroken from the titlebar down through the toolbar and behind both. It used
+  to fill `QPalette.Base` (`DeskStyle.viewBg`, the colour Dolphin gives its file
+  list) on the reasoning that a view is not a window; on a LIGHT scheme that is
+  a white slab over most of the window and it stopped reading as one object
+  [2026-09-05], so both the property and the fill are gone. `paneFill` is
+  `bgAlt` under Hyprland, where the window is ours and the inset is the point —
+  tiles, fields and menus keep `bgAlt` in both roofs.
 - **The grid shows EVERY output** — `load_existing` was capped at 60, a number
   from when the results were a strip, and the history simply stopped partway
   with nothing saying so. A `GridView` only builds what it can see, so the rest
@@ -1510,8 +1516,8 @@ Harness: `tools/ui-test.py` → `test_tag_complete`.
 
 ## Prompt pills are a lossless view, not a formatter
 
-On a `danbooru` family the prompt panel's `[ tags ]` header action changes both
-prompt boxes from their ordinary `TextEdit` to `PromptPills.qml`; the choice is
+On a `danbooru` family the prompt panel's compact pill-icon header action changes
+both prompt boxes from their ordinary `TextEdit` to `PromptPills.qml`; the choice is
 remembered as `Prefs["prompt.pills"]`. Prose families neither show nor enter the
 mode. The interaction follows Physton Prompt All-in-One and the old CTE editor:
 compact wrapping tags, hover remove, double-click inline edit, an end add
