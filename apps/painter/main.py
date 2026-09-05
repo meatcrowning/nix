@@ -2495,6 +2495,17 @@ class Painter(QObject):
         self.statusChanged.emit()
 
     @Slot()
+    def stopAndSave(self):
+        def done(stopping, detail):
+            if stopping:
+                self.toast.emit("stopping after this step", False)
+            else:
+                self.toast.emit("nothing sampling to stop" if not detail
+                                else f"stop failed: {detail}", True)
+
+        self.client.stop_and_save(done)
+
+    @Slot()
     def unloadModels(self):
         # Wait for the reply. POSTing /free at a backend that is not there is a
         # perfect silent no-op, and the old code toasted success either way.
@@ -3313,6 +3324,7 @@ class Titlebar(QObject):
     """
 
     clicked = Signal(str)
+    rclicked = Signal(str, float, float)
     buttonsChanged = Signal()
     footerChanged = Signal(str)
     loadingChanged = Signal(bool)
@@ -3322,7 +3334,8 @@ class Titlebar(QObject):
         self._client = None
         if VtbClient is not None:
             try:
-                self._client = VtbClient(on_click=self.clicked.emit)
+                self._client = VtbClient(on_click=self.clicked.emit,
+                                         on_rclick=lambda i, x, y: self.rclicked.emit(i, x, y))
             except Exception:  # noqa: BLE001 - running outside hyprvtb is fine
                 self._client = None
 
