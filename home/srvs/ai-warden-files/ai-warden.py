@@ -27,12 +27,14 @@ queue anything, and the warden either makes room or says no:
 A passive watchdog runs behind that as the net, for the memory this cannot see
 coming (an agent's `nix build`, a browser, cte).
 
-THE THREE RULES, from him (2026-08-22):
+THE THREE RULES, from him (2026-08-22), govern admission and work in flight:
 
-  1. **Free, never stop.** Unloading weights is cheap and reloadable — ollama
-     takes a zero `keep_alive`, ComfyUI takes `POST /free` — and both daemons
-     stay up. Stopping a unit costs a cold start; the warden never does it.
-     (`tools/heavy-gate.sh` may, for a rebuild, because he answers a toast.)
+  1. **Free, never stop a live job.** Unloading weights is cheap and reloadable —
+     ollama takes a zero `keep_alive`, ComfyUI takes `POST /free` — so admission
+     only unloads weights and leaves both daemons up. It never stops a unit to
+     make room (`tools/heavy-gate.sh` may, because he answers a rebuild toast).
+     Separately, renewable GUI-client leases own daemon lifetime: the first
+     chatter/painter starts it and the last close stops it after a short grace.
   2. **Never interrupt work in flight.** If the other backend is busy, the
      answer is a refusal with a reason, not a cut render or a killed reply.
   3. **Act on its own judgement, and say so.** Freeing is silent-until-done
@@ -149,6 +151,11 @@ COMFY_DEFAULT = int(14 * GiB)      # no hint from painter: assume a big family
 #: on reply end so its lease is only a crash backstop; painter's is short
 #: because comfy's own queue takes over as the busy signal the moment it submits.
 LEASE_DEFAULT = {"ollama": 900, "comfy": 120}
+# A GUI process renews this separate lease while its window exists. Once the
+# last client is gone, wait long enough for a quick close/reopen not to churn a
+# CUDA process, then stop the daemon and its baseline memory too.
+CLIENT_LEASE = int(os.environ.get("AI_WARDEN_CLIENT_LEASE", "15"))
+CLIENT_GRACE = int(os.environ.get("AI_WARDEN_CLIENT_GRACE", "20"))
 
 STATE_DIR = Path.home() / ".local" / "state" / "ai-warden"
 OFF = STATE_DIR / "off"
@@ -427,6 +434,23 @@ def unit_active(unit, user=False):
         return False
 
 
+def unit_control(backend, verb):
+    """Start/stop one backend. The warden is lam's user service; Ollama is the
+    deliberate exception and uses the exact passwordless systemctl command
+    granted in sys/ai/ollama.nix."""
+    if backend == "comfy":
+        cmd = ["systemctl", "--user", verb, "comfy-painter.service"]
+    else:
+        cmd = ["/run/wrappers/bin/sudo", "-n",
+               "/run/current-system/sw/bin/systemctl", verb, "ollama.service"]
+    try:
+        run = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, str(exc)
+    reason = (run.stderr or run.stdout or "").strip().splitlines()
+    return run.returncode == 0, (reason[-1] if reason else "")
+
+
 def ollama_ps():
     doc = _get(OLLAMA + "/api/ps") or {}
     return doc.get("models") or []
@@ -467,6 +491,12 @@ class Warden:
     def __init__(self):
         self.lock = threading.RLock()
         self.leases = {}          # backend -> unix ts the lease expires
+        self.clients = {b: {} for b in BACKENDS}  # backend -> id -> expiry
+        self.client_idle = {}     # backend -> when its no-client grace ends
+        # Only a backend claimed since this daemon started is ours to stop. A
+        # warden restart must not kill work belonging to an older app before
+        # that app's next heartbeat has had a chance to re-register.
+        self.client_managed = set()
         self.last_free = {}       # backend -> unix ts we last freed it
         self.last_watchdog = 0.0
 
@@ -559,11 +589,111 @@ class Warden:
             bsy, why = self.busy(b)
             with self.lock:
                 lease = max(0, int(self.leases.get(b, 0) - time.time()))
+                clients = sum(until > time.time()
+                              for until in self.clients[b].values())
+                idle = max(0, int(self.client_idle.get(b, 0) - time.time()))
             snap["backends"][b] = {
                 "app": NICE[b], "up": up, "held": self.footprint(b),
                 "busy": bsy, "busy_why": why, "lease_s": lease,
+                "clients": clients, "stop_in_s": idle,
             }
         return snap
+
+    # -- daemon lifetime -------------------------------------------------
+
+    def client_acquire(self, backend, client):
+        if backend not in BACKENDS or not client:
+            return {"ok": False, "reason": "bad backend or client"}
+        now = time.time()
+        with self.lock:
+            live = self.clients[backend]
+            for ident, until in list(live.items()):
+                if until <= now:
+                    live.pop(ident, None)
+            first = not live
+            live[client] = now + CLIENT_LEASE
+            self.client_idle.pop(backend, None)
+            self.client_managed.add(backend)
+        if first and not self._unit_up(backend):
+            ok, reason = unit_control(backend, "start")
+            log("client start %s: %s%s" %
+                (backend, "ok" if ok else "failed", ": " + reason if reason else ""))
+            if not ok:
+                with self.lock:
+                    self.clients[backend].pop(client, None)
+                return {"ok": False, "reason": reason or "backend did not start"}
+        return {"ok": True, "lease_s": CLIENT_LEASE}
+
+    def client_renew(self, backend, client):
+        if backend not in BACKENDS or not client:
+            return {"ok": False, "reason": "bad backend or client"}
+        with self.lock:
+            known = self.clients[backend].get(client, 0) > time.time()
+            if known:
+                self.clients[backend][client] = time.time() + CLIENT_LEASE
+                return {"ok": True, "lease_s": CLIENT_LEASE}
+        # The daemon may have restarted since this process acquired. Treat its
+        # next heartbeat as a fresh claim so the lifecycle heals by itself.
+        return self.client_acquire(backend, client)
+
+    def client_release(self, backend, client):
+        if backend not in BACKENDS:
+            return {"ok": False, "reason": "unknown backend"}
+        with self.lock:
+            self.clients[backend].pop(client, None)
+            if not self.clients[backend]:
+                self.client_idle[backend] = time.time() + CLIENT_GRACE
+        return {"ok": True, "grace_s": CLIENT_GRACE}
+
+    @staticmethod
+    def _unit_up(backend):
+        return (unit_active("ollama.service") if backend == "ollama" else
+                unit_active("comfy-painter.service", user=True))
+
+    def client_lifecycle(self):
+        """Expire dead GUI claims and stop only a managed, idle backend."""
+        now = time.time()
+        due = []
+        with self.lock:
+            for backend in BACKENDS:
+                live = self.clients[backend]
+                for ident, until in list(live.items()):
+                    if until <= now:
+                        live.pop(ident, None)
+                if live:
+                    self.client_idle.pop(backend, None)
+                    continue
+                if backend not in self.client_managed:
+                    continue
+                deadline = self.client_idle.setdefault(backend, now + CLIENT_GRACE)
+                if now >= deadline:
+                    due.append(backend)
+
+        for backend in due:
+            bsy, why = self.busy(backend)
+            if bsy:
+                with self.lock:
+                    self.client_idle[backend] = time.time() + CLIENT_GRACE
+                log("client stop postponed for %s: %s" % (backend, why))
+                continue
+            with self.lock:
+                # Keep this lock across the unit transition. Otherwise a new
+                # client can land after the empty check, see an active unit and
+                # decline to start it, then have this thread stop it underneath
+                # that fresh claim. Its acquire waits a moment instead, sees the
+                # stopped unit, and starts it normally.
+                if (self.clients[backend] or
+                        self.leases.get(backend, 0) > time.time()):
+                    self.client_idle[backend] = time.time() + CLIENT_GRACE
+                    continue
+                if self._unit_up(backend):
+                    ok, reason = unit_control(backend, "stop")
+                    log("client stop %s: %s%s" %
+                        (backend, "ok" if ok else "failed",
+                         ": " + reason if reason else ""))
+                # Keep checking at the grace cadence. This catches a backend
+                # manually restarted while it still has no owning client.
+                self.client_idle[backend] = time.time() + CLIENT_GRACE
 
     # -- estimating -------------------------------------------------------
 
@@ -873,6 +1003,7 @@ def watchdog_loop():
     while True:
         try:
             WARDEN.watchdog()
+            WARDEN.client_lifecycle()
         except Exception as exc:              # a net must not die of its own bug
             log("watchdog error: %r" % (exc,))
         time.sleep(10)
@@ -920,6 +1051,15 @@ class Handler(BaseHTTPRequestHandler):
             self._send(WARDEN.done(backend))
         elif path == "/free":
             self._send({"ok": True, "released": WARDEN.free(backend)})
+        elif path == "/client/acquire":
+            self._send(WARDEN.client_acquire(backend,
+                                             str(doc.get("client") or "")))
+        elif path == "/client/renew":
+            self._send(WARDEN.client_renew(backend,
+                                           str(doc.get("client") or "")))
+        elif path == "/client/release":
+            self._send(WARDEN.client_release(backend,
+                                             str(doc.get("client") or "")))
         else:
             self._send({"error": "no such path"}, 404)
 

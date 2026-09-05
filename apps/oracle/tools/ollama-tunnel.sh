@@ -10,10 +10,10 @@
 # EPIPE trap, exec 3<>). This script only carries what differs:
 #
 #   * ollama is a SYSTEM unit (sys/ai/ollama.nix), not a `--user` one like
-#     comfy-painter, and it is `enable = true` (started at boot) rather than
-#     started on demand. So there is nothing here to start over ssh — that
-#     runs from oracle's own Backend (apps/oracle/main.py): on book its
-#     start/stop buttons `ssh $HOST sudo -n systemctl {start,stop}
+#     comfy-painter, but it no longer starts at boot. Chatter acquires a
+#     renewable ai-warden lease through the second forward below; the first
+#     client starts Ollama and the last close stops it after a grace. Its
+#     start/stop buttons still run `ssh $HOST sudo -n systemctl {start,stop}
 #     ollama.service`, which is why this script exports OLLAMA_SSH_HOST /
 #     OLLAMA_SSH / OLLAMA_SSH_CTL below (the Backend reuses this master).
 #     top grants lam passwordless sudo for exactly those two commands
@@ -170,9 +170,9 @@ if [ ${#APP[@]} -gt 0 ]; then
     trap 'kill "$TUN" 2>/dev/null' EXIT
 fi
 
-# Say (not start) ollama's state on top. Nothing here starts the SYSTEM unit —
-# see the header comment: that is root's job and oracle's own start button
-# already shells out to it (and fails visibly on book, which is correct).
+# Say (not start) ollama's state on top. The app acquires its lifecycle lease
+# through the forwarded warden after the window exists; its direct systemctl
+# button path is also the fallback if that lease service cannot answer.
 STATE="$("$SSH" "${SSH_MUX[@]}" -o BatchMode=yes "$HOST" \
          'systemctl is-active ollama.service' 2>/dev/null)"
 say "ollama.service is ${STATE:-unknown} on $HOST"

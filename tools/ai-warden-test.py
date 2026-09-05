@@ -356,6 +356,56 @@ print("\nan unknown backend is not gated at all")
 w = World().install()
 check("passes through", w.reserve("something-else")["ok"])
 
+print("\nGUI clients jointly own backend lifetime")
+old_active, old_control = W.unit_active, W.unit_control
+states = {"ollama": False, "comfy": False}
+controls = []
+
+def fake_active(unit, user=False):
+    return states["comfy" if user else "ollama"]
+
+def fake_control(backend, verb):
+    controls.append((backend, verb))
+    states[backend] = verb == "start"
+    return True, ""
+
+try:
+    W.unit_active = fake_active
+    W.unit_control = fake_control
+    w = W.Warden()
+    check("first chatter starts ollama", w.client_acquire("ollama", "top:1")["ok"]
+          and controls == [("ollama", "start")], str(controls))
+    w.client_acquire("ollama", "book:2")
+    check("a second chatter does not start it twice",
+          controls == [("ollama", "start")], str(controls))
+    w.client_release("ollama", "top:1")
+    w.client_idle["ollama"] = W.time.time() - 1
+    w.client_lifecycle()
+    check("closing one chatter leaves the other's backend up",
+          states["ollama"] and len(controls) == 1, str(controls))
+    w.client_release("ollama", "book:2")
+    w.client_idle["ollama"] = W.time.time() - 1
+    w.client_lifecycle()
+    check("the last close stops ollama after grace",
+          not states["ollama"] and controls[-1] == ("ollama", "stop"),
+          str(controls))
+
+    states["comfy"] = False
+    w = W.Warden()
+    w.client_renew("comfy", "book:9")
+    check("a heartbeat heals a warden restart and starts ComfyUI",
+          states["comfy"] and controls[-1] == ("comfy", "start"),
+          str(controls))
+    w.client_release("comfy", "book:9")
+    w.leases["comfy"] = W.time.time() + 60
+    w.client_idle["comfy"] = W.time.time() - 1
+    w.client_lifecycle()
+    check("a generation lease postpones the last-client stop",
+          states["comfy"] and w.client_idle["comfy"] > W.time.time(),
+          str(controls))
+finally:
+    W.unit_active, W.unit_control = old_active, old_control
+
 print()
 if FAILS:
     print("FAILED: %d" % len(FAILS))

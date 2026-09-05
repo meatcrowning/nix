@@ -77,7 +77,7 @@ if "--selftest" in sys.argv:
 
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
-from warden import Warden  # noqa: E402  (same)
+from warden import BackendClientLease, Warden  # noqa: E402  (arbiter + daemon lifetime)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
 from kdetheme import theme_source, is_plasma  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
 from oxygenstyle import is_oxygen, read_oxygen  # noqa: E402  (pylib; Plasma AND the widget style is Oxygen, and its settings)
@@ -11894,6 +11894,12 @@ def main():
         sys.exit(run_selftest(app, shell, win, plasma, warnings,
                               fleet_pane=fleet_pane if plasma else None))
 
+    # Ollama is client-owned: the first chatter process starts it, renewals
+    # distinguish multiple windows/machines, and the warden stops it only after
+    # the last process closes plus a short grace. A crashed client just expires.
+    backend_lease = BackendClientLease(ollama._warden, "ollama", app)
+    backend_lease.start(lambda ok, _why: None if ok else backend.startServer())
+    app.aboutToQuit.connect(backend_lease.close)
     ollama.refreshModels()
     backend.pollStatus()
     sessions.refresh()
