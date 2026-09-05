@@ -43,6 +43,21 @@ CHROMA_MAX    = 0.12   # absolute (max-min), NOT relative saturation: Oxygen's
 CHROMA_RASTER = 0.10
 LUM_SPREAD    = 0.02   # above this a gradient is a colour ramp, not an alpha ramp
 ALPHA_SPREAD  = 0.05
+# What to do with an alpha ramp (72% of Oxygen's gradients). See convert().
+#   flip      (default) the same ramp, reversed along its axis
+#   faithful  keep it exactly -- but Oxygen's ramps run TOWARD opaque black, and
+#             an opaque end stays opaque whatever the scheme is, so the panel
+#             keeps a black band and panel text becomes unreadable on a light
+#             scheme. That is what `flip` exists to fix: Oxygen shades away from
+#             the edge it darkens, so reversing it puts the scheme colour where
+#             the text sits and the dark end on the panel's outer border.
+#   centre    recentre on the ramp's own mean and cap the swing, so the mid-tone
+#             IS the scheme colour and shading moves both ways around it
+#
+# Only alpha ramps are affected. Button/frame/lineedit bodies are COLOUR ramps
+# and render identically under all three.
+ALPHA_MODE = os.environ.get('OXYSCHEME_ALPHA_MODE', 'flip')
+CENTRE_AMPLITUDE = float(os.environ.get('OXYSCHEME_AMPLITUDE', '0.35'))
 
 ROLES = [
     ("Text",             "#31363b"), ("Background",       "#eff0f1"),
@@ -184,6 +199,41 @@ def gloss_gradient(doc, src_gid, stops):
         st = ET.SubElement(new, S+'stop')
         st.set('offset', off)
         st.set('style', f"stop-color:{col};stop-opacity:{max(0.0,min(1.0,a))*o:.4f}")
+    gid = doc.uid(src_gid); new.set('id', gid); doc.defs.append(new)
+    return gid
+
+def respin_alpha(doc, src_gid, stops, mode):
+    """Rebuild an alpha-ramp gradient under `flip` or `centre`."""
+    src = doc.idx.get(src_gid)
+    new = ET.Element(src.tag if src is not None else S+'linearGradient')
+    if src is not None:
+        for k, v in src.attrib.items():
+            if k not in ('id', X+'href', 'href'): new.set(k, v)
+        href = src.get(X+'href') or src.get('href')
+        if href and not any(a in src.attrib for a in ('x1','x2','y1','y2','cx','cy','r')):
+            par = doc.idx.get(href[1:])
+            if par is not None:
+                for k, v in par.attrib.items():
+                    if k not in ('id', X+'href', 'href') and k not in new.attrib:
+                        new.set(k, v)
+    offs   = [float(o) for o, _, _ in stops]
+    alphas = [a for _, _, a in stops]
+    cols   = [c for _, c, _ in stops]
+    if mode == 'flip':
+        lo, hi = min(offs), max(offs)
+        pairs = [(lo + hi - o, c, a) for o, c, a in zip(offs, cols, alphas)]
+        pairs.sort(key=lambda t: t[0])
+    else:  # centre
+        m = sum(alphas)/len(alphas)
+        dev = max(abs(a - m) for a in alphas) or 1.0
+        pairs = []
+        for o, a in zip(offs, alphas):
+            amt = abs(a - m)/dev * CENTRE_AMPLITUDE
+            pairs.append((o, '#000000' if a > m else '#ffffff', amt))
+    for o, c, a in pairs:
+        st = ET.SubElement(new, S+'stop')
+        st.set('offset', f"{o:.4f}")
+        st.set('style', f"stop-color:{c};stop-opacity:{max(0.0,min(1.0,a)):.4f}")
     gid = doc.uid(src_gid); new.set('id', gid); doc.defs.append(new)
     return gid
 
@@ -339,13 +389,18 @@ def convert(src, dst, report=None):
                 p = parents[body]; p.insert(list(p).index(body), base)
                 stats['based_colour'] += 1
             elif da > ALPHA_SPREAD:
-                # alpha ramp: it IS the shading. Keep it verbatim, put the
-                # scheme colour underneath so it tints instead of flattening.
+                # alpha ramp: it IS the shading. Put the scheme colour
+                # underneath so it tints instead of flattening, then treat the
+                # ramp itself according to ALPHA_MODE.
                 base = copy.deepcopy(body); base.attrib.pop('id', None)
                 bd = style_dict(base); bd['fill'] = 'currentColor'
                 bd.pop('fill-opacity', None); set_style(base, bd)
                 base.set('class', role)
                 p = parents[body]; p.insert(list(p).index(body), base)
+                if ALPHA_MODE in ('flip', 'centre'):
+                    gid = respin_alpha(doc, fill[5:-1], stops, ALPHA_MODE)
+                    od = style_dict(body); od['fill'] = f'url(#{gid})'
+                    set_style(body, od)
                 stats['based_alpha'] += 1
             else:
                 stats['untouched_art'] += 1
