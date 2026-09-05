@@ -2085,12 +2085,19 @@ Item {
     // window); `tok/s` is the estimate while a reply streams, exact once done.
     Row {
         id: statsRow
-        // This is the footer of the conversation, immediately above the
-        // compose box, rather than a second header at the top of the window.
+        objectName: "statsRow"
+        // Plasma puts this immediately below its toolbar (whose first line
+        // carries New Session), before the conversation and compose box. The
+        // compact Hyprland face has no toolbar/status roof, so it remains the
+        // conversation footer immediately above the compose box.
         anchors { left: parent.left; right: parent.right
-                  bottom: attachBar.visible ? attachBar.top : promptBox.top
+                  top: win.plasma ? parent.top : undefined
+                  bottom: win.plasma ? undefined
+                                      : (attachBar.visible ? attachBar.top
+                                                           : promptBox.top)
                   leftMargin: 10; rightMargin: 10
-                  bottomMargin: visible ? 8 : 0 }
+                  topMargin: win.plasma && visible ? 8 : 0
+                  bottomMargin: !win.plasma && visible ? 8 : 0 }
         spacing: 10
         readonly property bool hasCtx: Ollama.contextMax > 0
         readonly property bool hasTps: Ollama.tokensPerSec > 0
@@ -2187,6 +2194,7 @@ Item {
     // reflect the actual selected model and update when it changes.
     Row {
         id: capsRow
+        objectName: "capsRow"
         visible: Ollama.capabilities.length > 0
         anchors { right: parent.right; rightMargin: 10
                   verticalCenter: statsRow.verticalCenter }
@@ -2574,17 +2582,21 @@ Item {
     JobsTray {
         id: jobsTray
         objectName: "jobsTray"
-        anchors { top: parent.top; topMargin: 0
+        anchors { top: win.plasma ? statsRow.bottom : parent.top
+                  topMargin: win.plasma && statsRow.visible ? 8 : 0
                   left: parent.left; right: parent.right
                   leftMargin: 10; rightMargin: 10 }
     }
 
     ViewFrame {
         id: replyBox
+        objectName: "replyBox"
         anchors { top: jobsTray.bottom
                   topMargin: jobsTray.visible ? 8 : 10
                   left: parent.left; right: parent.right
-                  bottom: statsRow.top
+                  bottom: win.plasma
+                          ? (attachBar.visible ? attachBar.top : promptBox.top)
+                          : statsRow.top
                   leftMargin: 10; rightMargin: 10; bottomMargin: 10 }
 
         KineticFlickable {
