@@ -25,6 +25,9 @@ Item {
     property bool collapsed: false
     property bool collapsible: true
     property string badge: ""
+    property string headerActionLabel: ""
+    property bool headerActionLit: false
+    signal headerAction()
     default property alias content: inner.data
 
     Component.onCompleted: {
@@ -193,13 +196,24 @@ Item {
         Label {
             anchors.left: titleLabel.right
             anchors.leftMargin: 8
-            anchors.right: parent.right
-            anchors.rightMargin: 10
+            anchors.right: headerButton.visible ? headerButton.left : parent.right
+            anchors.rightMargin: headerButton.visible ? 4 : 10
             anchors.verticalCenter: parent.verticalCenter
             text: panel.badge
             elide: Text.ElideMiddle
             opacity: 0.7
             horizontalAlignment: Text.AlignRight
+        }
+        TextButton {
+            id: headerButton
+            z: 2
+            visible: panel.headerActionLabel !== ""
+            anchors.right: parent.right
+            anchors.rightMargin: 6
+            anchors.verticalCenter: parent.verticalCenter
+            label: panel.headerActionLabel
+            lit: panel.headerActionLit
+            onClicked: panel.headerAction()
         }
         // Click folds. Drag moves the section. Right-click offers the way back
         // to the built-in order. Handlers rather than a MouseArea so the drag

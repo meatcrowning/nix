@@ -6,6 +6,7 @@ Rectangle {
     id: box
     property string placeholder: ""
     property bool negative: false
+    property bool pillMode: false
     signal edited(string text)
 
     // ------------------------------------------------------ tag completion
@@ -346,6 +347,7 @@ Rectangle {
 
     KineticFlickable {
         id: flick
+        visible: !box.pillMode
         anchors.fill: parent
         anchors.margins: 5
         anchors.bottomMargin: 7          // clear of the grab strip
@@ -537,6 +539,15 @@ Rectangle {
             text: box.placeholder
             color: Theme.dim
         }
+    }
+
+    PromptPills {
+        id: pillView
+        anchors.fill: parent
+        visible: box.pillMode
+        value: box.value
+        negative: box.negative
+        onEdited: function(t) { box.edited(t) }
     }
 
     // The grab strip. 5px drawn, ±3px of grab margin across it — the same

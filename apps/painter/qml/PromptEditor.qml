@@ -3,6 +3,14 @@ import QtQuick
 Panel {
     id: panel
     title: "prompt"
+    property bool pillsWanted: Prefs.get("prompt.pills") === true
+    readonly property bool pillsAvailable: root.gen.promptTransform === "danbooru"
+    headerActionLabel: pillsAvailable ? (pillsWanted ? "[ text ]" : "[ tags ]") : ""
+    headerActionLit: pillsWanted
+    onHeaderAction: {
+        pillsWanted = !pillsWanted
+        Prefs.set("prompt.pills", pillsWanted)
+    }
 
     //: Forwarded from both boxes to Main.qml, which owns the one context menu.
     signal menuRequested(real sx, real sy, var items)
@@ -17,6 +25,7 @@ Panel {
         // transform that says this prompt is written in the site's tags, which
         // is the only prompt a tag list belongs over (Anima's, today).
         tagsEnabled: root.gen.promptTransform === "danbooru"
+        pillMode: panel.pillsAvailable && panel.pillsWanted
         tagPopup: root.tagPopup
         // Dragged by its bottom edge and remembered, per box (Panel's own
         // collapsed state is persisted the same way).
@@ -47,6 +56,7 @@ Panel {
         // The negative is tags too — `lowres, worst quality` — so it completes
         // on the same families the positive does.
         tagsEnabled: root.gen.promptTransform === "danbooru"
+        pillMode: panel.pillsAvailable && panel.pillsWanted
         tagPopup: root.tagPopup
         visible: !App.isVideo && !App.isEdit
         boxHeight: Prefs.get("prompt.negH") > 0 ? Prefs.get("prompt.negH") : 64

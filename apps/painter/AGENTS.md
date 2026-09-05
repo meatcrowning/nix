@@ -1508,6 +1508,31 @@ in every prompt box on every family: it is prompt syntax, not a tag feature.
 
 Harness: `tools/ui-test.py` → `test_tag_complete`.
 
+## Prompt pills are a lossless view, not a formatter
+
+On a `danbooru` family the prompt panel's `[ tags ]` header action changes both
+prompt boxes from their ordinary `TextEdit` to `PromptPills.qml`; the choice is
+remembered as `Prefs["prompt.pills"]`. Prose families neither show nor enter the
+mode. The interaction follows Physton Prompt All-in-One and the old CTE editor:
+compact wrapping tags, hover remove, double-click inline edit, an end add
+control, open/closed-hand dragging after a 10px threshold, and an insertion
+rule at the target pill's midpoint.
+
+**The literal prompt remains the source of truth.** `PromptPills` keeps stable
+tag payloads separate from the exact separators between their slots. Commas,
+spaces, CR/LF and blank lines are serialized unchanged; newline separators are
+also drawn as first-class row breaks. A drag performs a stable move of tag
+payloads through those fixed slots, so the line structure stays where the user
+wrote it. Merely switching text → tags → text must be byte-for-byte inert.
+Never replace this with split/trim/`", ".join()`; that is the old CTE behavior
+this model exists to avoid. External model writes reparse the pill view, while
+pill edits emit through `PromptBox.edited` and come back through the existing
+guarded model binding rather than assigning the bound `value` locally.
+
+Pure lossless-model coverage is `tools/promptdoc-test.py`; the actual two-box,
+family-gated view and return to ordinary editing are in `tools/ui-test.py` →
+`test_prompt_pills`. Both are offscreen only.
+
 ## NegPip: the negative goes IN the positive
 
 `CLIPNegPip` is what makes a NEGATIVE weight work inside the positive prompt,
