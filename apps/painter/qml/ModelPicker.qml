@@ -7,7 +7,7 @@ import "../../qmlcommon"
 // the bottom with a family dropdown attached.
 Panel {
     id: panel
-    title: "model"
+    title: "Model"
     // Collapsed, the badge is the only thing left saying what is selected, so
     // it carries the name rather than just the count.
     badge: panel.collapsed ? App.selectedName : (Models.count + " found")
@@ -80,7 +80,7 @@ Panel {
                     Row {
                         visible: !known
                         spacing: 6
-                        PixelText { text: "family:"; color: Theme.textDim }
+                        PixelText { text: "Family:"; color: Theme.textDim }
                         Picker {
                             width: 150
                             options: App.familyIds()

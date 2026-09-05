@@ -111,7 +111,7 @@ Column {
         visible: sw.anyMissing
         width: sw.width
         wrapMode: Text.Wrap
-        text: "a greyed mode has no model on this machine"
+        text: "A Greyed Mode Has No Model on This Machine"
         color: Theme.dim
     }
 }

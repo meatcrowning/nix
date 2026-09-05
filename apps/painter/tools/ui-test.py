@@ -615,7 +615,7 @@ def test_text_boxes(win, ctl):
     # left the text looking selected and Backspace doing nothing — the whole bug.
     edit.setProperty("text", "one two three")
     spin(60)
-    menu_pick(win, box, "select all")
+    menu_pick(win, box, "Select All")
     check("the menu row selects the whole prompt",
           edit.property("selectedText") == "one two three",
           edit.property("selectedText"))
@@ -630,7 +630,7 @@ def test_text_boxes(win, ctl):
     edit.setProperty("text", "one two")
     spin(60)
     edit.metaObject().invokeMethod(edit, "selectAll")
-    menu_pick(win, box, "copy")
+    menu_pick(win, box, "Copy")
     check("copy leaves the editor focused", edit.property("activeFocus") is True)
     key(win, Qt.Key_Z, Qt.NoModifier, "z")
     check("...and the next keystroke goes into the box",
@@ -641,7 +641,7 @@ def test_text_boxes(win, ctl):
     edit.setProperty("text", "cut me")
     spin(60)
     edit.metaObject().invokeMethod(edit, "selectAll")
-    menu_pick(win, box, "cut")
+    menu_pick(win, box, "Cut")
     check("the menu's cut takes the selection with it",
           edit.property("text") == "", edit.property("text"))
 
@@ -961,11 +961,11 @@ def test_video(win, ctl, tmp):
     spin(120)
     check("the patches panel is not", not find(content, "TogglePanel").isVisible())
     cfg = find(find(content, "ParamsPanel"), "Field",
-               pred=lambda it: it.property("label") == "cfg")
+               pred=lambda it: it.property("label") == "CFG")
     check("there is no CFG to set", not cfg.isVisible())
 
     res = find(content, "ResolutionPanel")
-    aspect = find(res, "Field", pred=lambda it: it.property("label") == "aspect")
+    aspect = find(res, "Field", pred=lambda it: it.property("label") == "Aspect")
     g = prop(APP, "gen")
     g["useInputImage"] = True
     APP.setProperty("gen", g)
@@ -1188,7 +1188,7 @@ def test_paste(win, ctl, tmp):
     well = find(find(content, "VideoPanel"), "FrameWell",
                 pred=lambda it: it.property("emptyText").endswith("to start from here"))
     check("the first-frame well is there", well is not None and well.isVisible())
-    btn = find(well, "TextButton", pred=lambda it: it.property("label") == "[ paste ]")
+    btn = find(well, "TextButton", pred=lambda it: it.property("label") == "[ Paste ]")
     check("...with a [ paste ] button in it", btn is not None and btn.isVisible())
 
     # ---- a FILE on the clipboard (filer, viewer, a browser) ----
@@ -2685,7 +2685,7 @@ def test_inject(win, ctl, tmp):
         labels = [i.get("label") for i in (prop(menu, "items") or []) if i.get("label")]
         check("right-clicking one opens the menu", menu.isVisible(), menu.isVisible())
         check("...offering inject all / prompt / params",
-              labels[:3] == ["inject all", "inject prompt", "inject params"], labels)
+              labels[:3] == ["Inject All", "Inject Prompt", "Inject Parameters"], labels)
         menu.metaObject().invokeMethod(menu, "close")
         spin(60)
 
@@ -2851,11 +2851,11 @@ def test_copy_prompt(win, ctl, tmp):
     labels = row0_menu()
     if labels is not None:
         check("a still with a prompt offers to copy it",
-              "copy prompt" in labels, labels)
+              "Copy Prompt" in labels, labels)
         check("...below the inject items, beside the other copy-outs",
-              labels.index("copy prompt") > labels.index("inject params"), labels)
+              labels.index("Copy Prompt") > labels.index("Inject Parameters"), labels)
         check("an output with a fixed seed offers to copy it",
-              "copy seed" in labels, labels)
+              "Copy Seed" in labels, labels)
 
     RAN.clear()
     ctl.copyPrompt(path)
@@ -2896,7 +2896,7 @@ def test_copy_prompt(win, ctl, tmp):
     labels = row0_menu()
     if labels is not None:
         check("a clip with no metadata is not offered a prompt to copy",
-              "copy prompt" not in labels, labels)
+              "Copy Prompt" not in labels, labels)
     os.unlink(vid)
     os.unlink(plain)
 
@@ -2977,9 +2977,9 @@ def test_clip_params(win, ctl, tmp):
         menu.metaObject().invokeMethod(menu, "close")
         spin(60)
         check("a clip is offered inject all / prompt / params",
-              labels[:3] == ["inject all", "inject prompt", "inject params"], labels)
+              labels[:3] == ["Inject All", "Inject Prompt", "Inject Parameters"], labels)
         check("...and its own prompt to copy, beside the muted copy",
-              "copy prompt" in labels and "copy muted copy" in labels, labels)
+              "Copy Prompt" in labels and "Copy Muted Copy" in labels, labels)
 
     RAN.clear()
     ctl.copyPrompt(tagged)
@@ -4575,7 +4575,7 @@ def test_preview_zoom(win, ctl, tmp):
         menus = find_all(content, "CtxMenu")
         offered = next((prop(m, "items") for m in menus if prop(m, "items")), [])
         labels = [i.get("label") for i in offered if i.get("label")]
-        check("a completed still preview offers copy image", labels == ["copy image"], labels)
+        check("a completed still preview offers copy image", labels == ["Copy Image"], labels)
         for menu in menus:
             menu.metaObject().invokeMethod(menu, "close")
     else:

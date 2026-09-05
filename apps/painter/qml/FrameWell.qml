@@ -82,7 +82,7 @@ Item {
             anchors.right: parent.right
             anchors.rightMargin: 6
             anchors.verticalCenter: parent.verticalCenter
-            label: "[ paste ]"
+            label: "[ Paste ]"
             tone: Theme.textDim
             winActive: root_well.winActive
             onClicked: root_well.paste()

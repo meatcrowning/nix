@@ -16,7 +16,7 @@ import QtQuick
 // the size is coming from instead of quoting numbers painter did not decide.
 Panel {
     id: panel
-    title: "resolution"
+    title: "Resolution"
     // Whether the image, not this panel, is deciding the shape.
     // EITHER dropped frame decides it — the workflow measures whichever one is
     // there (the first when both are), so the aspect goes for both modes.
@@ -25,7 +25,7 @@ Panel {
     badge: fromImage ? "from the image" : (root.gen.width + "x" + root.gen.height)
 
     Field {
-        label: "aspect"
+        label: "Aspect"
         // The inner Column skips invisible children, so this leaves no gap.
         visible: !panel.fromImage
         hint: "Any two whole numbers - 3:2, 5:3, 21:9. The pixel size comes from this and MP."

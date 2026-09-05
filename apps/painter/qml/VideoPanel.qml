@@ -13,19 +13,19 @@ import QtQuick
 // Drop the same file in both wells for a clip that loops.
 Panel {
     id: panel
-    title: "video"
+    title: "Video"
     badge: App.videoFrames(root.gen.duration) + "f"
            + (root.gen.useInputImage ? " first" : "")
            + (root.gen.useLastFrame ? " last" : "")
 
     Toggle {
-        label: "first frame"
+        label: "First Frame"
         checked: root.gen.useInputImage
         onToggled: function (v) { root.set("useInputImage", v) }
     }
 
     Toggle {
-        label: "last frame"
+        label: "Last Frame"
         checked: root.gen.useLastFrame
         onToggled: function (v) { root.set("useLastFrame", v) }
     }
@@ -66,7 +66,7 @@ Panel {
         spacing: 8
         visible: root.gen.useInputImage && App.inputImage !== ""
         TextButton {
-            label: "[ clear ]"
+            label: "[ Clear ]"
             tone: Theme.textDim
             winActive: root.winActive
             onClicked: App.clearInputImage()
@@ -99,7 +99,7 @@ Panel {
         spacing: 8
         visible: root.gen.useLastFrame && App.lastImage !== ""
         TextButton {
-            label: "[ clear ]"
+            label: "[ Clear ]"
             tone: Theme.textDim
             winActive: root.winActive
             onClicked: App.clearLastImage()
@@ -107,7 +107,7 @@ Panel {
     }
 
     Field {
-        label: "duration"
+        label: "Duration"
         hint: "Seconds. The model takes frames in groups, so the count lands on the nearest length it accepts."
         Row {
             spacing: 6

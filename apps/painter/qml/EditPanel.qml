@@ -17,7 +17,7 @@ import QtQuick
 // The extras are their own list (App.editExtraImages).
 Panel {
     id: panel
-    title: "images"
+    title: "Images"
     badge: App.inputImage === "" ? "drop one" : ""
 
     // The primary — it decides the output size, the rest are references.
@@ -41,7 +41,7 @@ Panel {
         spacing: 8
         visible: App.inputImage !== ""
         TextButton {
-            label: "[ clear ]"
+            label: "[ Clear ]"
             tone: Theme.textDim
             winActive: root.winActive
             onClicked: { App.clearInputImage(); App.clearEditImages() }
@@ -69,7 +69,7 @@ Panel {
             Row {
                 spacing: 8
                 TextButton {
-                    label: "[ remove ]"
+                    label: "[ Remove ]"
                     tone: Theme.textDim
                     winActive: root.winActive
                     onClicked: App.removeEditImage(index)

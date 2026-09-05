@@ -510,15 +510,15 @@ Rectangle {
                     var pos = input.positionAt(m.x, m.y)
                     var hasSel = input.selectionEnd > input.selectionStart
                     var items = marks.menuItems(pos).concat([
-                        { label: "undo", enabled: input.canUndo,
+                        { label: "Undo", enabled: input.canUndo,
                           trigger: () => input.undo() },
-                        { label: "redo", enabled: input.canRedo,
+                        { label: "Redo", enabled: input.canRedo,
                           trigger: () => input.redo() },
                         { separator: true },
-                        { label: "cut", enabled: hasSel, trigger: () => input.cut() },
-                        { label: "copy", enabled: hasSel, trigger: () => input.copy() },
-                        { label: "paste", trigger: () => input.paste() },
-                        { label: "select all", trigger: () => input.selectAll() }
+                        { label: "Cut", enabled: hasSel, trigger: () => input.cut() },
+                        { label: "Copy", enabled: hasSel, trigger: () => input.copy() },
+                        { label: "Paste", trigger: () => input.paste() },
+                        { label: "Select All", trigger: () => input.selectAll() }
                     ])
                     var p = mapToItem(null, m.x, m.y)
                     box.menuRequested(p.x, p.y, items)

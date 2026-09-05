@@ -2,7 +2,7 @@ import QtQuick
 
 Panel {
     id: panel
-    title: "prompt"
+    title: "Prompt"
     property bool pillsWanted: Prefs.get("prompt.pills") === true
     readonly property bool pillsAvailable: root.gen.promptTransform === "danbooru"
     // The compact capsule is clearer than spending the little header on two
@@ -55,7 +55,7 @@ Panel {
         // Dragged by its bottom edge and remembered, per box (Panel's own
         // collapsed state is persisted the same way).
         boxHeight: Prefs.get("prompt.posH") > 0 ? Prefs.get("prompt.posH") : 130
-        placeholder: "positive"
+        placeholder: "Positive"
         value: root.gen.positive
         onEdited: function (t) { root.set("positive", t) }
         onResized: function (h) { Prefs.set("prompt.posH", h) }
@@ -85,7 +85,7 @@ Panel {
         tagPopup: root.tagPopup
         visible: !App.isVideo && !App.isEdit
         boxHeight: Prefs.get("prompt.negH") > 0 ? Prefs.get("prompt.negH") : 64
-        placeholder: "negative"
+        placeholder: "Negative"
         negative: true
         value: root.gen.negative
         onEdited: function (t) { root.set("negative", t) }

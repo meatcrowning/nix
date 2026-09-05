@@ -5,7 +5,7 @@ import QtQuick
 // values from the workflow this was built from.
 Panel {
     id: panel
-    title: "patches"
+    title: "Patches"
     badge: (root.gen.negpip ? "negpip " : "") + (root.gen.modelSampling ? "shift" : "")
 
     Toggle {
@@ -34,7 +34,7 @@ Panel {
         spacing: 4
 
         Field {
-            label: "shift"
+            label: "Shift"
             hint: "Shift moves from start to end across the denoise window."
             Row {
                 spacing: 6
@@ -53,7 +53,7 @@ Panel {
         }
 
         Field {
-            label: "window"
+            label: "Window"
             hint: "Fraction of the denoise run over which the shift transition happens."
             Row {
                 spacing: 6
@@ -72,7 +72,7 @@ Panel {
         }
 
         Field {
-            label: "curve"
+            label: "Curve"
             Picker {
                 width: 150
                 options: App.curves
@@ -82,7 +82,7 @@ Panel {
         }
 
         Field {
-            label: "outside"
+            label: "Outside"
             hint: "What the shift does before start_percent and after end_percent."
             Picker {
                 width: 150
@@ -93,7 +93,7 @@ Panel {
         }
 
         Field {
-            label: "multiplier"
+            label: "Multiplier"
             Spin {
                 value: root.gen.ms.multiplier; from: 0; to: 10; step: 0.01; decimals: 2
                 onEdited: function (v) { root.setMs("multiplier", v) }

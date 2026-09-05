@@ -14,12 +14,12 @@ import QtQuick
 // aligned by construction — see registry._build_edit and graphs/edit_flux2.json.
 Panel {
     id: panel
-    title: "output size"
+    title: "Output Size"
     badge: root.gen.editNoScale ? "original size"
                                 : ((+root.gen.editMegapixels).toFixed(1) + "MP")
 
     Toggle {
-        label: "no scaling (keep the original's size)"
+        label: "No Scaling (Keep the Original Size)"
         checked: root.gen.editNoScale
         onToggled: function (v) { root.set("editNoScale", v) }
     }
