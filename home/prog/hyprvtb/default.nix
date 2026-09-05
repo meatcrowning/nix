@@ -13,7 +13,7 @@
 }:
 hyprlandPlugins.mkHyprlandPlugin {
   pluginName = "hyprvtb";
-  version = "0.1.1";
+  version = "0.1.2";
   src = ./.;
 
   inherit (hyprland) nativeBuildInputs;

@@ -226,9 +226,9 @@ def contrast_ratio(a, b):
 MIN_CONTRAST = 3.0
 # Primary body text carries a stricter floor than the 3.0 large-text/UI one:
 # WCAG AA normal-text is 4.5:1. The balanced `normal` variant holds its
-# `accent`/`text` to this so the thing you read most is never the hardest to
-# read (§3.1.2). `fidelity` keeps the looser 3.0 — reading AS the picture is its
-# whole point, so it rescues only as far as legibility, not comfort.
+# `accent` to this so active coloured controls still read. Neutral main text is
+# always the white-or-black contrast pole; `fidelity` keeps the looser 3.0 for
+# its accent — reading AS the picture is its whole point.
 BODY_CONTRAST = 4.5
 
 
@@ -253,6 +253,13 @@ def legible_over(rgb, bg_hex, floor=MIN_CONTRAST):
         if contrast_ratio(cand, bg) >= floor:
             break
     return "%02x%02x%02x" % cand
+
+
+def neutral_ink(bg_hex):
+    """Exact white or black — whichever has more contrast on `bg_hex`."""
+    bg = _hex_rgb(bg_hex)
+    return "ffffff" if contrast_ratio((255, 255, 255), bg) >= \
+        contrast_ratio((0, 0, 0), bg) else "000000"
 
 
 def full_palette(h, s, v, clusters, pure_bg, variant, light=False,
@@ -284,15 +291,16 @@ def full_palette(h, s, v, clusters, pure_bg, variant, light=False,
             # to carry more chroma instead of hitting the pastel ceiling.
             return hsv_hex(h2, min(s2 * smul, cap * (smul if smul > 1 else 1.0)), val)
 
+        bg = "ffffff" if pure_bg else lstruct(0.10, 0.965)
         return {
             "ACCENT":    accent,
-            "TEXT":      accent,
+            "TEXT":      neutral_ink(bg),
             "TEXTDIM":   hsv_hex(h, min(s, lcap * 1.15), 0.46),
             "DIM":       lstruct(0.30, 0.60),
             "BORDER":    lstruct(0.28, 0.72),
             "BGALT":     lstruct(0.12, 0.94),
             "HIGHLIGHT": lstruct(0.28, 0.85),
-            "BG":        "ffffff" if pure_bg else lstruct(0.10, 0.965),
+            "BG":        bg,
             "OK":        status_color(0.34, 0.10, clusters, ss,            0.55, 0.30, 0.66, True),
             "WARN":      status_color(0.12, 0.05, clusters, ss,            0.60, 0.30, 0.68, True),
             "CRIT":      status_color(0.00, 0.05, clusters, max(ss, 0.65), 0.48, 0.55, 0.56, True),
@@ -319,8 +327,8 @@ def full_palette(h, s, v, clusters, pure_bg, variant, light=False,
     # exact inverse of light mode — its background is what light mode paints as
     # the FOREGROUND (the dark ink) and its foreground is light mode's paper
     # (near-white). One recursive light-branch call so the two derivations can
-    # never drift apart. TEXT tracks the accent so body text stays the accent
-    # (§3.1.1). docs/DESIGN.md §3.1.2.
+    # never drift apart. TEXT is the neutral pole with stronger measured
+    # contrast against BG; accent remains the semantic focus colour.
     if pure_bg:
         FG, BG = accent, "000000"
     else:
@@ -335,7 +343,7 @@ def full_palette(h, s, v, clusters, pure_bg, variant, light=False,
     # reads even in the muted variant. See status_color().
     out = {
         "ACCENT":    FG,
-        "TEXT":      FG,       # body text is still the accent (§3.1.1 focus rule)
+        "TEXT":      neutral_ink(BG),
         "TEXTDIM":   hsv_hex(h, min(s, lcap * 1.15), 0.60),
         "DIM":       struct(0.50, 0.33),
         "BORDER":    struct(0.60, 0.22),
@@ -369,23 +377,21 @@ def full_palette(h, s, v, clusters, pure_bg, variant, light=False,
                 and rel_lum(dark_rgb) < 0.15):
             out["BG"] = "%02x%02x%02x" % dark_rgb
         if vp.get("main_exact") and dom_rgb is not None:
-            out["ACCENT"] = out["TEXT"] = legible_over(dom_rgb, out["BG"])
+            out["ACCENT"] = legible_over(dom_rgb, out["BG"])
 
     # The balanced `normal` variant GUARANTEES every foreground reads on the
     # background, so the thing you read most is never the hardest to read and the
     # blue `info` slot never sinks below the floor a green `ok` clears easily
     # (§3.1.2). Every rescue preserves hue and moves tone the smallest distance —
-    # the same `legible_over` machinery, applied to the whole foreground set
-    # rather than the accent alone. Ladder guard: `text` is held no dimmer than
-    # `textDim` (on either polarity, higher contrast on the shared bg == the
-    # correct end of the ramp), so the reading hierarchy can never invert.
+    # the same `legible_over` machinery, applied to every coloured foreground.
+    # Main text is already the white-or-black contrast pole and stays exact.
     if vp.get("contrast_safe"):
         bg = out["BG"]
         bg_rgb = _hex_rgb(bg)
         for k in ("TEXTDIM", "OK", "WARN", "CRIT", "INFO"):
             out[k] = legible_over(_hex_rgb(out[k]), bg, MIN_CONTRAST)
         floor = max(BODY_CONTRAST, contrast_ratio(_hex_rgb(out["TEXTDIM"]), bg_rgb))
-        out["ACCENT"] = out["TEXT"] = legible_over(_hex_rgb(out["ACCENT"]), bg, floor)
+        out["ACCENT"] = legible_over(_hex_rgb(out["ACCENT"]), bg, floor)
     return out
 
 

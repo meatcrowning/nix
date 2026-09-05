@@ -188,9 +188,8 @@ Item {
                                 }
                             }
 
-                            // The palette is ONE HUE and body text IS the accent
-                            // (§3.1), so there is no brighter colour to promote
-                            // a link to. It is underlined instead — a property
+                            // Main text is neutral (§3.1), while accent is the
+                            // semantic focus colour. A link is underlined — a property
                             // of the type, not a new colour — and says so on
                             // hover with the same selection fill a menu row
                             // takes (§7.2 — hover lightens, one step up the

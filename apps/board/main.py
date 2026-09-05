@@ -2217,7 +2217,7 @@ def sync_now(path):
 # clean vector SVG in home/prog/board-files/ and installed into the hicolor
 # theme by home/prog/board.nix (the desktop entry's `Icon=goetia` resolves the
 # same file). ONE transparent variant, drawn in `currentColor` — the sigil IS
-# the theme's foreground (body text = the accent, docs/DESIGN.md §3.1), not a
+# the theme's foreground (neutral main text, docs/DESIGN.md §3.1), not a
 # baked light/dark hue, so it tracks the live palette instead of flipping
 # between two files. QSvgRenderer has no API for the CSS current colour, so the
 # token is substituted textually with the live `text` colour before the SVG is

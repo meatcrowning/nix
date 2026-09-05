@@ -1505,7 +1505,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pGlobalState->config.fontTopTreatment  = makeShared<Config::Values::CBoolValue>("plugin:hyprvtb:font_top_treatment", "Use top's measured Oxygen Mono treatment", false);
     g_pGlobalState->config.bgColor           = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:bg_color", "Bar background", 0xff000000);
     g_pGlobalState->config.bgAltColor        = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.bg_alt", "Hovered button fill", 0xff080e12);
-    g_pGlobalState->config.textColor         = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.text", "Title / glyph colour", 0xff3f6d8c);
+    g_pGlobalState->config.textColor         = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.text", "Title / glyph colour", 0xffffffff);
     g_pGlobalState->config.buttonBorderColor = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.button_border", "Button outline colour", 0xff192c38);
     g_pGlobalState->config.accentColor       = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.accent", "Accent (maximize/minimize hover) colour", 0xff5c9fcc);
     g_pGlobalState->config.critColor         = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.crit", "Close-hover colour", 0xff70c3fa);

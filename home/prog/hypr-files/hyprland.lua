@@ -371,7 +371,7 @@ hl.config({
         hyprvtb = {
             -- colour lines rewritten by wal-set.sh alongside active_border
             ["bg_color"]          = "rgba(000000ff)",
-            ["col.text"]          = "rgba(8c7138ff)",
+            ["col.text"]          = "rgba(ffffffff)",
             ["col.button_border"] = "rgba(382d16ff)",
             ["col.accent"]        = "rgba(d99c1fff)",
             ["col.bg_alt"]        = "rgba(120f08ff)",
