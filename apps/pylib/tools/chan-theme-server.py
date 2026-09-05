@@ -47,6 +47,7 @@ import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -76,6 +77,14 @@ def _twitter_css(source):
     """Build Twitter/X's sheet from the same source as every other web face."""
     pal, provenance = chansource.palette(source)
     return twittertheme.css(pal.__getitem__), provenance
+
+
+def _page_css(source, page_url):
+    """The one installed page script's host-sensitive live sheet."""
+    host = urlparse(page_url).hostname or ""
+    if host == "x.com" or host.endswith(".x.com") or host == "twitter.com" or host.endswith(".twitter.com"):
+        return _twitter_css(source)
+    return chansource.build_css(source)
 
 
 # --------------------------------------------------------------------------- #
@@ -210,7 +219,7 @@ class Handler(BaseHTTPRequestHandler):
         refresh_session_env()
         path = self.path.split("?", 1)[0]
         route = self.ROUTES.get(path)
-        if route is None and path != "/version":
+        if route is None and path not in ("/version", "/web.css"):
             self._send(404, head=head, body=b"chan-theme: /chan.css, /scrollbar.css, /twitter.css, "
                             b"/chan.user.js, /scrollbar.user.js, /twitter.user.js, "
                             b"/chan.meta.js, /scrollbar.meta.js, /twitter.meta.js or /version\n")
@@ -227,8 +236,13 @@ class Handler(BaseHTTPRequestHandler):
                            [("ETag", '"%s"' % chansource.stamp(css + bar))],
                            head=head)
                 return
-            build, ctype = route
-            css, _prov = build(self.source)
+            if path == "/web.css":
+                css, _prov = _page_css(
+                    self.source, parse_qs(urlparse(self.path).query).get("u", [""])[0])
+                ctype = self.CSS
+            else:
+                build, ctype = route
+                css, _prov = build(self.source)
         except SystemExit as e:
             self._send(503, str(e).encode("utf-8"), head=head)
             return

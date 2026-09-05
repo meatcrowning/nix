@@ -17,9 +17,9 @@ the same behaviour, so the behaviour lives here rather than in each generator:
   — the cascade is what wins here, not specificity — with a `<style>` appended
   last as the fallback where constructable stylesheets are missing.
 
-`gate` is the one difference between the two: the 4chan sheet must ride only
-while OneeChan is actually on (`html.oneechan`), and the scrollbar rides
-everywhere.
+`gate` is the one difference between the sheets: it may be a class name (all
+matched hosts), or a hostname-suffix -> class map.  The latter lets the
+already-installed 4chan script also cover X without waiting for OneeChan there.
 """
 from __future__ import annotations
 
@@ -106,18 +106,30 @@ BODY = r"""
     } catch(e){}                                     // no grant: stay embedded
   }
 
+  function gateForPage(){
+    if (!GATE || typeof GATE === 'string') return GATE;
+    var host = '';
+    try { host = location.hostname || ''; } catch(e) {}
+    for (var suffix in GATE){
+      if (host === suffix || host.slice(-(suffix.length + 1)) === '.' + suffix)
+        return GATE[suffix];
+    }
+    return null;
+  }
+
   function start(){
     apply(CSS);                                      // never a frame unstyled
     pull();
     setInterval(pull, POLL);                         // live: repaint on change
   }
 
-  if (!GATE){ start(); return; }
+  var PAGE_GATE = gateForPage();
+  if (!PAGE_GATE){ start(); return; }
 
   function gated(){
     try {
       return !!(document.documentElement &&
-                document.documentElement.classList.contains(GATE));
+                document.documentElement.classList.contains(PAGE_GATE));
     } catch(e){ return false; }
   }
 

@@ -94,8 +94,9 @@ baked = json.loads(css_line.group(1)) if css_line else ""
 # THE seam: what Vivaldi gets and what surfer serves must be the same bytes for
 # the same palette + chrome. If this fails, one browser has drifted.
 kpal = {k: kdetheme._hex(v) for k, v in kdetheme.kde_palette().items()}
-check("baked CSS == the sheet surfer serves for the same palette",
-      baked == chantheme.css(kpal.__getitem__, kdetheme.kde_chrome()))
+check("the 4chan fallback includes the sheet surfer serves plus Twitter/X",
+      baked == chantheme.css(kpal.__getitem__, kdetheme.kde_chrome())
+      + "\n" + twittertheme.css(kpal.__getitem__))
 check("plasma + oxygen: the baked sheet carries the KStyle relief",
       "background-attachment:fixed" in baked and "box-shadow:inset" in baked)
 check("the live 4chan sheet has no window-inactive colour override",
@@ -106,8 +107,9 @@ for want in ("@run-at       document-start", "@match        *://boards.4chan.org
              "@grant        GM_xmlhttpRequest", "@connect      127.0.0.1"):
     check("header carries %r" % want.split()[0] + " " + want.split()[-1],
           want in text)
-check("self-gate on html.oneechan survives",
-      'var GATE = "oneechan"' in text and "classList.contains(GATE)" in text)
+check("self-gate on html.oneechan survives for 4chan while X is ungated",
+      '"4chan.org": "oneechan"' in text and "classList.contains(PAGE_GATE)" in text
+      and "*://x.com/*" in text)
 check("adopts rather than appends (cascades after ch4SS)",
       "adoptedStyleSheets" in text)
 check("a <style> fallback exists for no constructable stylesheets",
@@ -132,8 +134,8 @@ check("the Twitter/X script is ungated and polls the live route",
       'var GATE = null' in twitter_text and "/twitter.css" in twitter_text)
 
 # --- the live half: the script must ASK, not only wear what it was baked with
-check("the script polls the loopback courier",
-      "http://127.0.0.1:%d/chan.css" % chansource.PORT in text)
+check("the already-installed script polls the host-sensitive loopback courier",
+      "http://127.0.0.1:%d/web.css" % chansource.PORT in text)
 check("it asks through GM_xmlhttpRequest (a 4chan page is https)",
       "GM_xmlhttpRequest({" in text)
 check("it sends If-None-Match, so an unmoved palette costs a 304",
@@ -195,7 +197,8 @@ try:
         served = r.read().decode("utf-8")
         etag = r.headers.get("ETag")
         ctype = r.headers.get("Content-Type")
-    check("the courier serves the same bytes the userscript bakes", served == baked)
+    check("the dedicated 4chan courier stays byte-identical to surfer's sheet",
+          served == chantheme.css(kpal.__getitem__, kdetheme.kde_chrome()))
     check("it is text/css", (ctype or "").startswith("text/css"))
     check("it carries an ETag", bool(etag))
 
@@ -237,6 +240,14 @@ try:
         twitter_served = r.read().decode("utf-8")
     check("the courier serves Twitter/X from the live palette",
           "--desk-bg:#28222a" in twitter_served and '[data-testid="tweet"]' in twitter_served)
+    with urllib.request.urlopen(base + "/web.css?u=https%3A%2F%2Fx.com%2Fhome", timeout=5) as r:
+        combined_twitter = r.read().decode("utf-8")
+    with urllib.request.urlopen(base + "/web.css?u=https%3A%2F%2Fboards.4chan.org%2Fg%2F", timeout=5) as r:
+        combined_chan = r.read().decode("utf-8")
+    check("the shared installed-script route selects Twitter/X by page host",
+          '[data-testid="tweet"]' in combined_twitter and "#header-bar" not in combined_twitter)
+    check("the shared installed-script route retains the OneeChan sheet on 4chan",
+          "#header-bar" in combined_chan and '[data-testid="tweet"]' not in combined_chan)
 
     # An extension asking cross-origin sends a preflight first, and the stdlib
     # answers an unhandled method with 501 — which is what Tampermonkey's

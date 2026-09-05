@@ -44,6 +44,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
 import chansource                                               # noqa: E402
+import twittertheme                                             # noqa: E402
 import userscript                                               # noqa: E402
 
 build_css = chansource.build_css
@@ -55,25 +56,32 @@ OUT = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share")
 
 def build(source=None, path=OUT, port=None):
     css, prov = build_css(source)
+    pal, _ = chansource.palette(source)
+    # One installed desktop-page script serves both sites.  The host-sensitive
+    # live route below replaces this fallback on first poll; concatenating the
+    # two here keeps either site dressed if the courier is temporarily down.
+    css += "\n" + twittertheme.css(pal.__getitem__)
     port = port or chansource.PORT
     # Moves when the SCRIPT does — the sheet, this generator or the shared
     # runtime — and never backwards, which is what Tampermonkey's updater
     # needs. A palette change moves nothing here on purpose: the installed
     # script polls the courier for that and must not be reinstalled for it.
     version = userscript.source_version(
-        (HERE.parent / "chantheme.py", HERE.parent / "chansource.py",
+        (HERE.parent / "chantheme.py", HERE.parent / "twittertheme.py", HERE.parent / "chansource.py",
          HERE.parent / "userscript.py", HERE / "chan-userscript.py"), major=3)
     return userscript.build(
         name="desktop 4chan",
-        description=("Re-skins OneeChan's 4chan theme to this desktop's LIVE "
+        description=("Re-skins OneeChan and Twitter/X to this desktop's LIVE "
                      "palette (%s), polling the loopback courier." % prov),
-        matches=("*://boards.4chan.org/*", "*://boards.4channel.org/*"),
+        matches=("*://boards.4chan.org/*", "*://boards.4channel.org/*",
+                 "*://twitter.com/*", "*://*.twitter.com/*", "*://x.com/*", "*://*.x.com/*"),
         css=css, version=version,
-        url="http://127.0.0.1:%d/chan.css" % port,
+        url="http://127.0.0.1:%d/web.css" % port,
         update_url="http://127.0.0.1:%d/chan.meta.js" % port,
         download_url="http://127.0.0.1:%d/chan.user.js" % port,
         key="__deskChanTheme", style_id="desk-chan-theme",
-        gate="oneechan", path=path, tool="chan-userscript.py"), prov
+        gate={"4chan.org": "oneechan", "4channel.org": "oneechan"},
+        path=path, tool="chan-userscript.py"), prov
 
 
 def main():
