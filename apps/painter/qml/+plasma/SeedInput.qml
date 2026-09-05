@@ -41,6 +41,7 @@ Item {
         objectName: "seedTextInput"
         selectByMouse: true
         persistentSelection: true
+        horizontalAlignment: TextInput.AlignRight
         validator: RegularExpressionValidator { regularExpression: /^-?[0-9]*$/ }
         onEditingFinished: seed.commit()
 
