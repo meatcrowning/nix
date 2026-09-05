@@ -62,7 +62,7 @@ in
   # live wal palette in apps/board/main.py (_window_icon substitutes
   # currentColor for the theme foreground and renders through QSvgRenderer), so
   # the sigil tracks the theme on every change (docs/DESIGN.md §3.1: the sigil
-  # IS body text, which follows the accent, not a baked light/dark hue).
+  # follows the neutral main-text colour, not a baked light/dark hue).
   home.file.".local/share/icons/hicolor/scalable/apps/goetia.svg".source =
     ./board-files/goetia.svg;
   # …and declare it a SEAL, so the panel paints its currentColor strokes in

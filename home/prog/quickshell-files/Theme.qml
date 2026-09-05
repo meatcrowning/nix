@@ -114,7 +114,7 @@ Singleton {
     readonly property color border:    "#192c38"
     readonly property color accent:    "#5c9fcc"   // active / occupied
     readonly property color dim:       "#2a4354"      // empty & unviewed
-    readonly property color text:      "#6dbdf2"
+    readonly property color text:      "#ffffff"
     readonly property color textDim:   "#3f6d8c"
     readonly property color highlight: "#0f1a21"   // selection bg
     readonly property color ok:        "#65afe0"

@@ -15,10 +15,9 @@ theme" — which one that means is a property of the session, not a setting.
     ~/.local/share/konsole/Dynamic.colorscheme    <- written here, ours
     ~/.local/share/konsole/<default>.profile      <- one key patched: ColorScheme
 
-The ANSI mapping is kitty's, deliberately (wal-set.sh step 4): foreground and
-the two "white" slots are ACCENT rather than TEXT, so terminal body text
-matches the focused window's titlebar, and the ramp is monochrome on the
-wallpaper's hue with only the four status colours breaking out.
+The ANSI mapping is kitty's: foreground and the two "white" slots are TEXT,
+the palette's neutral reading pole, while accent stays semantic and the ramp
+uses the wallpaper hue with only the four status colours breaking out.
 
 Terminals that are ALREADY OPEN are repainted too, over the xterm
 dynamic-colour escapes written to each session's pty — konsole caches a
@@ -100,7 +99,7 @@ def tones(pal: dict) -> dict:
     white = _mix(bg, (255, 255, 255), 0.98)
 
     t = {"bg": bg, "bgFaint": bg, "bgIntense": bgAlt,
-         "fg": accent, "fgFaint": textDim, "fgIntense": _mix(accent, white, 0.35)}
+         "fg": text, "fgFaint": textDim, "fgIntense": _mix(text, white, 0.35)}
 
     def slot(n, color, faint=None, intense=None):
         t[str(n)] = color
@@ -114,7 +113,7 @@ def tones(pal: dict) -> dict:
     slot(4, info)
     slot(5, textDim, intense=text)              # magenta -> the text tone
     slot(6, accent)
-    slot(7, accent, faint=border, intense=accent)   # white == body text, as in kitty
+    slot(7, text, faint=border, intense=text)       # white == body text, as in kitty
     return t
 
 

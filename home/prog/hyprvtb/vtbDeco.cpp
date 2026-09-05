@@ -1508,9 +1508,9 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     // right). Pre-multiplying here too made the button outlines fade as a^2,
     // vanishing faster than the bar during the close fade-out.
 
-    // Buttons + title follow the window's frame: accent (active-border
-    // colour) when focused, the inactive-border grey otherwise.
-    auto textColor = TINT_FOCUSED ? accentColor : inactiveColor;
+    // Main text is neutral high-contrast ink; focus remains visible through
+    // the border and control fills. Unfocused bars still dim as one object.
+    auto textColor = TINT_FOCUSED ? configColor(Cfg::textColor()) : inactiveColor;
 
     // ...except a window rolled up AT REST: its text reads in the unfocused
     // grey, same as the tucked end of the roll animation below (rollSlideT->1).
@@ -1535,12 +1535,12 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
         // so the window is coming up focused — hold accent through the whole reveal.
         // (Without this the ROLLANIM crossfade below restarts the tint at inactive
         // the instant the roll begins, flashing the accent labels dark then back.)
-        textColor = accentColor;
+        textColor = configColor(Cfg::textColor());
     } else if (ROLLANIM) {
         auto lerp = [](const CHyprColor& x, const CHyprColor& y, float t) {
             return CHyprColor{x.r + (y.r - x.r) * t, x.g + (y.g - x.g) * t, x.b + (y.b - x.b) * t, x.a + (y.a - x.a) * t};
         };
-        textColor = lerp(accentColor, inactiveColor, rollSlideT);
+        textColor = lerp(configColor(Cfg::textColor()), inactiveColor, rollSlideT);
     }
 
     if (m_fLastScale != SCALE || m_lastTextColor != (uint64_t)textColor.getAsHex() || m_bLastFocus != FOCUSED) {
@@ -3087,7 +3087,7 @@ void CVtbDeco::prewarmGlyphs() {
     const auto accentColor   = configColor(Cfg::accentColor());
     const auto inactiveColor = configColor(Cfg::inactiveColor());
     const auto bgColor       = configColor(Cfg::bgColor());
-    const auto textColor     = FOCUSED ? accentColor : inactiveColor;
+    const auto textColor     = FOCUSED ? configColor(Cfg::textColor()) : inactiveColor;
 
     SVtbAppReg reg;
     if (!appReg(reg))
