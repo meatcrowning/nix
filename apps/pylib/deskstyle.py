@@ -532,26 +532,6 @@ class DeskStyle(QObject):
         moves a running window between the two."""
         return self._plasma
 
-    @Property(str, constant=True)
-    def viewBg(self):
-        """The colour a KDE program paints its VIEW with — Dolphin's file list,
-        Gwenview's thumbnail grid, Okular's page area.
-
-        That is `QPalette.Base`, which the KDE platform theme fills in from
-        `[Colors:View] BackgroundNormal` in kdeglobals; the window's own
-        background is the style's gradient, and the two are deliberately
-        different. Empty string outside a Plasma session, where there is no such
-        distinction and every pane takes the wallpaper palette instead.
-        """
-        if not self._plasma:
-            return ""
-        try:
-            from PySide6.QtGui import QGuiApplication
-            app = QGuiApplication.instance()
-            return app.palette().base().color().name() if app else ""
-        except Exception:  # noqa: BLE001
-            return ""
-
     @Property(bool, notify=changed)
     def reduceMotion(self):
         return self._reduce

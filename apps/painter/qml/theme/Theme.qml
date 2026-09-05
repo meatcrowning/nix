@@ -128,6 +128,18 @@ QtObject {
     readonly property color windowFill: (typeof DeskStyle !== "undefined" && DeskStyle
                                          && DeskStyle.plasma === true) ? "transparent" : bg
 
+    // A PANE IS WINDOW, NOT INSET. `bgAlt` is the right fill for a control-sized
+    // inset — a field, a menu, a list row, a thumbnail's mat. It is the wrong
+    // one for the two big surfaces on the results side (the viewer's frame and
+    // the history grid behind its tiles): under Plasma those are most of the
+    // window, and filling them flat covers the style's gradient that the
+    // titlebar and the toolbar above them are drawn from, so the window reads
+    // as two objects. They bind this instead — transparent under Plasma so
+    // `StyledBackground` shows through, `bgAlt` under Hyprland where the window
+    // is ours and the inset is the point.
+    readonly property color paneFill: (typeof DeskStyle !== "undefined" && DeskStyle
+                                       && DeskStyle.plasma === true) ? "transparent" : bgAlt
+
     readonly property color bg:        WalPalette.bg
     readonly property color bgAlt:     WalPalette.bgAlt
     readonly property color border:    WalPalette.border
