@@ -142,6 +142,9 @@ check("the theme is installed and made current", changed and themes["current"] =
 check("his own theme is left in the list", any(t["id"] == "his-own" for t in themes["user"]))
 check("exactly one of ours, never a pile",
       sum(1 for t in themes["user"] if t["id"] == gen.THEME_ID) == 1)
+ours = next(t for t in themes["user"] if t["id"] == gen.THEME_ID)
+check("Vivaldi does not dim or recolour its chrome when blurred",
+      ours["dimBlurred"] is False)
 # THE thing that makes it apply at all: themes.current alone is ignored at
 # startup (measured, Vivaldi 8.1) — the engine resolves through the schedule.
 sched = data["vivaldi"]["theme"]["schedule"]

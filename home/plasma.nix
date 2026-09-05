@@ -39,9 +39,10 @@ in
     # docs/DESIGN.md §"In a PLASMA session none of this applies": the apps'
     # colours already follow whatever KDE global theme is picked, so this is
     # just picking Oxygen as that theme rather than adding a new mechanism.
-    # Not on top: top's Plasma session defaults to stock Breeze (or, when
-    # `my.aerotheme.enable` is set, the separate aerothemeplasma session) and
-    # nobody asked for Oxygen there.
+    # The LOOK-AND-FEEL is not set on top: its Plasma session defaults to stock
+    # Breeze (or the separate aerothemeplasma session). The colour scheme is a
+    # separate desktop-wide choice in home/prog/plasma-colors.nix: both hosts
+    # use the brighter, focus-invariant OxygenDarkFlat palette.
     # soundTheme is NOT declared [2026-08-29]: plasma-manager re-asserted it on
     # every Plasma login, so a pack picked in System Settings was silently put
     # back to oxygen at the next session start, with nothing saying why. His
