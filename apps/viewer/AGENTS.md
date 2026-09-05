@@ -121,8 +121,8 @@ clamp, the empty chrome and the quit. Run it the same way `split-test.py` is
 
 viewer's only context menu, one row, on whichever pane the click landed in
 (which the same tap focuses, so the row acts on what the chrome says it does).
-`qml/CtxMenu.qml` is the desktop's verbatim copy — see [`../AGENTS.md`](../AGENTS.md),
-and retune all eight or none.
+The menu comes from `qmlcommon/CtxMenu.qml`; viewer is the first app migrated
+from the old per-app copies. See [`../AGENTS.md`](../AGENTS.md).
 
 - **The copy is `pylib/clipfile.py`, never `QClipboard`** (`Clip` in `main.py`).
   A Wayland selection dies with the process that offered it, so a copy made in
