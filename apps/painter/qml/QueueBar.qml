@@ -91,10 +91,34 @@ Rectangle {
         TextButton {
             anchors.verticalCenter: parent.verticalCenter
             visible: App.busy
-            label: "[ cancel ]"
+            label: "[ stop & save ]"
             tone: Theme.crit
             winActive: root.winActive
-            onClicked: App.cancel()
+            onClicked: App.stopAndSave()
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.RightButton
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: function(mouse) {
+                    var p = mapToItem(root, mouse.x, mouse.y)
+                    root.ctxMenu.open(p.x, p.y, [
+                        { label: "cancel all without saving", trigger: () => App.cancel() }
+                    ])
+                }
+            }
+        }
+        TextButton {
+            label: "[ unload ]"
+            enabled: App.backendRunning
+            winActive: root.winActive
+            onClicked: App.unloadModels()
+        }
+        TextButton {
+            label: "[ refresh models ]"
+            enabled: App.backendRunning
+            winActive: root.winActive
+            onClicked: App.rescan()
         }
     }
 }

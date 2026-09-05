@@ -142,6 +142,17 @@ in
 {
   home.packages = [ painter ];
 
+  # Painter's graceful-stop sampler is a Comfy custom node, kept in this repo
+  # and linked into the mutable checkout at activation.  The unit is never
+  # restarted here: an active generation must finish under the code that began
+  # it; the next backend start imports the new node.
+  home.activation.painterPartialStopNode = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    if [ -d ${comfyDir}/custom_nodes ]; then
+      $DRY_RUN_CMD ln -sfn ${../../apps/painter/comfy_nodes/painter_partial_stop.py} \
+        ${comfyDir}/custom_nodes/painter_partial_stop.py
+    fi
+  '';
+
   # The inference backend. ai-warden starts it for painter's first renewable
   # client lease and stops it after the last window closes plus a short grace.
   systemd.user.services.comfy-painter = lib.mkIf (host != "air") {

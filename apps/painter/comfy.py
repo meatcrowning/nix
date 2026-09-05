@@ -252,6 +252,22 @@ class ComfyClient(QtCore.QObject):
     def interrupt(self):
         self._post("/interrupt", {})
 
+    def stop_and_save(self, callback=None):
+        """End the active painter sampler at its last completed step and save it."""
+        def done(reply):
+            try:
+                ok = reply.error() == QtNetwork.QNetworkReply.NetworkError.NoError
+                doc = json.loads(bytes(reply.readAll()).decode("utf-8")) if ok else {}
+                if callback:
+                    callback(bool(doc.get("stopping")), "" if ok else reply.errorString())
+            except (ValueError, TypeError):
+                if callback:
+                    callback(False, "bad reply")
+            finally:
+                reply.deleteLater()
+
+        self._post("/painter/stop", {}, done)
+
     def cancel(self, job: Job):
         if job.prompt_id and self._active is job:
             self.interrupt()

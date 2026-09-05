@@ -702,10 +702,10 @@ Item {
         { id: "gen",  label: "gen",  tb: true, state: 0,
           tip: App.busy ? "Queue another generation" : "Generate",
           menuText: App.busy ? "Queue Another Generation" : "Generate",
-          menu: "file", icon: "media-playback-start",
+          menu: "file", icon: App.busy ? "list-add" : "media-playback-start",
           bar: true, shortcut: "Ctrl+Return" },
         { id: "stop", label: "x",    tb: true, state: App.busy ? 0 : 2,
-          tip: "Cancel all", menu: "file", icon: "process-stop",
+          tip: "Stop and save", menu: "file", icon: "process-stop",
           bar: true, shortcut: "Ctrl+." },
         "-",
         { id: "open", tip: "Open in Viewer", menu: "file",
@@ -896,7 +896,7 @@ Item {
     // Plasma session `menuBar` does (qmlcommon/DeskMenuBar.qml). Same ids.
     function tbAction(id) {
         if (id === "gen") root.submit()
-        else if (id === "stop") App.cancel()
+        else if (id === "stop") App.stopAndSave()
         else if (id === "p") root.view = 0
         else if (id === "g") root.view = 1
         else if (id === "pv") root.showPreview = !root.showPreview
@@ -963,6 +963,11 @@ Item {
     Connections {
         target: Titlebar
         function onClicked(id) { root.tbAction(id) }
+        function onRclicked(id, x, y) {
+            if (id === "stop") root.ctxMenu.open(x, y, [
+                { label: "cancel all without saving", trigger: () => App.cancel() }
+            ])
+        }
     }
 
     Connections {

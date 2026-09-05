@@ -87,7 +87,7 @@
       "sigmas": ["14", 0],
       "latent_image": ["41", 0]
     },
-    "class_type": "SamplerCustom",
+    "class_type": "PainterSamplerCustom",
     "_meta": { "title": "Sampler", "painter_role": "sampler" }
   },
   "8": {

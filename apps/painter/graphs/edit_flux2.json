@@ -125,7 +125,7 @@
       "sigmas": ["32", 0],
       "latent_image": ["24", 0]
     },
-    "class_type": "SamplerCustomAdvanced",
+    "class_type": "PainterSamplerCustomAdvanced",
     "_meta": { "title": "Sampler", "painter_role": "sampler" }
   },
   "40": {
