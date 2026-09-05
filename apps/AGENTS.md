@@ -321,6 +321,12 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
       app. Harness `pylib/tools/chan-userscript-test.py`, whose real job is the
       seam: the baked CSS, the courier's response and what surfer serves must
       be the same bytes for the same palette.
+    - **`pylib/twittertheme.py` + `pylib/tools/twitter-userscript.py` — Twitter/X
+      follows the same live palette in Vivaldi.** It uses the shared loopback
+      courier and Tampermonkey runtime, so an already-open `x.com` or
+      `twitter.com` tab re-adopts its sheet when the ETag changes; the generator
+      only needs rerunning when its source changes. `twitter-theme` writes the
+      installer at `~/.local/share/chan-theme/desktop-twitter.user.js`.
     - **`pylib/scrollcss.py` + `pylib/userscript.py` — the desktop's scrollbar
       in a browser that is not ours.** Chromium paints its own bar in Aura and
       never asks Qt or GTK, so a page is the one surface `qmlcommon/VScroll.qml`
