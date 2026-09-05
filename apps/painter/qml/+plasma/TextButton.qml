@@ -23,15 +23,20 @@ Item {
     property bool lit: false
     property bool winActive: true
     property bool flipY: false
+    // The compact capsule a panel header uses instead of the words. A KDE
+    // button keeps its frame here — only the label is replaced by the icon,
+    // so it still reads as a button in this session.
+    property bool pillIcon: false
     signal clicked()
 
-    implicitWidth: btn.implicitWidth
-    implicitHeight: btn.implicitHeight
+    implicitWidth: root.pillIcon ? pill.implicitWidth : btn.implicitWidth
+    implicitHeight: root.pillIcon ? pill.implicitHeight : btn.implicitHeight
     width: implicitWidth
     height: implicitHeight
 
     Button {
         id: btn
+        visible: !root.pillIcon
         anchors.fill: parent
         text: String(root.label).replace(/^\s*\[\s*/, "").replace(/\s*\]\s*$/, "")
         enabled: root.enabled
@@ -46,6 +51,30 @@ Item {
             yScale: root.flipY ? -1 : 1
             origin.x: btn.width / 2
             origin.y: Math.round(btn.height / 2)
+        }
+    }
+
+    Button {
+        id: pill
+        visible: root.pillIcon
+        anchors.fill: parent
+        enabled: root.enabled
+        checkable: root.lit
+        checked: root.lit
+        onClicked: root.clicked()
+        contentItem: Item {
+            implicitWidth: 14
+            implicitHeight: 8
+            Rectangle {
+                anchors.centerIn: parent
+                width: 12
+                height: 6
+                radius: 3
+                color: pill.checked ? pill.palette.highlight : "transparent"
+                border.width: 1
+                border.color: pill.enabled ? pill.palette.buttonText
+                                           : pill.palette.mid
+            }
         }
     }
 }
