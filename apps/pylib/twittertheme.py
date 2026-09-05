@@ -58,11 +58,11 @@ div:has(> div > [data-testid="tweetTextarea_0"]),
 [data-testid="sidebarColumn"] > div,
 [data-testid="sidebarColumn"] > div > div,
 aside[role="complementary"] {{ background-color:var(--desk-bg)!important; }}
-/* The premium/news cards set rgb(0,0,0) directly on an inner sidebar div.
-   That is deliberately narrower than a global inline-style override: video
-   and image canvases are content, not desktop surfaces. */
-[data-testid="sidebarColumn"] [style*="background-color"],
-[data-testid="sidebarColumn"] [style*="background:"] {{ background-color:var(--desk-bg)!important; }}
+/* X paints premium/news/trend cards through generated classes at arbitrary
+   nesting depths.  The sidebar has no media canvas, so colour its complete
+   structural subtree rather than trying to chase those unstable classes. */
+[data-testid="sidebarColumn"],
+[data-testid="sidebarColumn"] * {{ background-color:var(--desk-bg)!important; }}
 [data-testid="SearchBox_Search_Input"],
 [data-testid="SearchBox_Search_Input"] * {{ background-color:var(--desk-alt)!important; }}
 [role="dialog"] > div, [data-testid="sheetDialog"], [data-testid="Dropdown"], [role="menu"] {{
