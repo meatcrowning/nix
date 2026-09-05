@@ -29,11 +29,19 @@ let
   # seal name -> the Oxygen icon it wears, as `<category>/<name>` under
   # oxygen's `base/<size>/`. One entry per seal; the assertion below is what
   # stops a new app from quietly missing out.
+  #
+  # Prefer Oxygen's OWN vocabulary — a `categories/`, `devices/` or `status/`
+  # icon — over another program's logo. `apps/krita` and `apps/juk` are Krita's
+  # and JuK's brands, and painter and player are neither. An `apps/` entry here
+  # is only for a name that is generic in spirit (`system-file-manager`,
+  # `internet-web-browser`) or where Oxygen ships no honest generic at all —
+  # which is the case for a chat window, a Soulseek client, a decision board
+  # and a markdown reader, so those four keep a borrowed logo on purpose.
   sealIcons = {
     filer = "apps/system-file-manager";
     viewer = "apps/gwenview";
-    player = "apps/juk";
-    painter = "apps/krita";
+    player = "categories/applications-multimedia";
+    painter = "categories/applications-graphics";
     surfer = "apps/internet-web-browser";
     reader = "apps/okular";
     bespoke-editor = "apps/accessories-text-editor";
