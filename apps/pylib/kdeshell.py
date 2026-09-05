@@ -82,6 +82,12 @@ from PySide6.QtCore import Qt, QUrl, QMetaObject, Q_ARG
 from PySide6.QtGui import QAction, QIcon
 
 from kdetheme import is_plasma, read_ini
+from kdeshell_icons import (
+    apply_icon_theme,
+    icon_search_paths,
+    icon_theme_name,
+    select_plasma_files,
+)
 
 
 def qt_version() -> str:
@@ -320,93 +326,6 @@ def apply_widget_style(app) -> None:
     style = QStyleFactory.create(want)
     if style is not None:
         app.setStyle(style)
-
-
-def icon_theme_name() -> str:
-    """The KDE icon theme, from `kdeglobals` — `[Icons] Theme`, and failing that
-    whatever the look-and-feel package implies.
-
-    A KDE program's toolbar and menus are drawn with icons from the desktop's
-    own set; a `QIcon.fromTheme()` that resolves to nothing gives text-only rows
-    that read as a toolkit demo rather than an application. Qt normally learns
-    the name from the KDE platform theme, but that plugin is not always in an
-    app's environment (and never in an offscreen harness), so we name it
-    ourselves rather than rely on it.
-    """
-    ini = read_ini()
-    name = (ini.get("Icons", {}) or {}).get("Theme", "").strip()
-    if name:
-        return name
-    lnf = (ini.get("KDE", {}) or {}).get("LookAndFeelPackage", "").lower()
-    return "oxygen" if "oxygen" in lnf else "breeze"
-
-
-def icon_search_paths() -> list:
-    """Every `…/icons` directory the XDG data dirs name.
-
-    Qt fills this in from the platform theme, and on a headless/offscreen run
-    there is none — measured: `QIcon.themeSearchPaths()` comes back as just
-    `[':/icons']`, so every `fromTheme()` returns a null icon and a toolbar
-    renders text-only. That is also the shape of the failure if an app's
-    wrapper is ever missing the KDE QPA plugin, so it is worth not depending on
-    it: the paths are derivable from the environment we are already given.
-    """
-    dirs = []
-    home_data = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
-    dirs.append(home_data)
-    dirs += (os.environ.get("XDG_DATA_DIRS")
-             or "/usr/local/share:/usr/share").split(":")
-    out = []
-    for d in dirs:
-        d = (d or "").strip()
-        if not d:
-            continue
-        p = os.path.join(d, "icons")
-        if os.path.isdir(p) and p not in out:
-            out.append(p)
-    return out
-
-
-def apply_icon_theme() -> None:
-    """Pin the icon theme if nothing else has. Never overrides a name the
-    platform theme already set — that one is authoritative."""
-    have = list(QIcon.themeSearchPaths())
-    for p in icon_search_paths():
-        if p not in have:
-            have.append(p)
-    QIcon.setThemeSearchPaths(have)
-    if not QIcon.themeName():
-        QIcon.setThemeName(icon_theme_name())
-    if not QIcon.fallbackThemeName():
-        QIcon.setFallbackThemeName("breeze")
-
-
-def select_plasma_files(engine, extra=()) -> None:
-    """Turn on the `+plasma` file selector for an engine.
-
-    Qt resolves `dir/+plasma/Foo.qml` in place of `dir/Foo.qml` whenever the
-    selector is active, so an app ships a second implementation of a component
-    beside the first and every call site picks the right one with no branch.
-    That is what lets painter keep one `Root.qml` while its controls are ours in
-    one session and the system style's in the other.
-
-    `extra` names selectors to try BEFORE "plasma" — chatter passes `("oxygen",)`
-    when the widget style really is Oxygen, so `qml/+oxygen/Foo.qml` wins where a
-    component is drawn in Oxygen's own vocabulary and `qml/+plasma/Foo.qml`
-    remains the generic KStyle face for everything that is not. Qt tries the
-    selectors in list order and takes the first directory that exists, so a
-    component with no `+oxygen` twin falls through to `+plasma` and then to the
-    unselected file, with nothing to declare at the call site.
-    """
-    from PySide6.QtQml import QQmlFileSelector
-    # PARENTED TO THE ENGINE, deliberately: the constructor's first argument is
-    # the engine it selects for and the SECOND is the QObject parent. Leaving
-    # that out gives the selector no owner, Python collects it moments later,
-    # and every component then loads its unselected file — silently, with no
-    # error and no warning. Measured: `QQmlFileSelector.get(engine)` came back
-    # None immediately after constructing one.
-    sel = QQmlFileSelector(engine, engine)
-    sel.setExtraSelectors([*extra, "plasma"])
 
 
 class KdeShell:
