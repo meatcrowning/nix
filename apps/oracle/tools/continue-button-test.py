@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""`continue` is a state of the SEND BUTTON, in both faces.
+"""`continue` is a state of the SEND BUTTON, in both faces, and the context
+line belongs above the conversation only under Plasma.
 
 It belongs on the button beside the prompt box, not under the bubble [his,
 2026-08-23], so this drives the real window offscreen (`--selftest ORACLE_FAKE`,
@@ -33,6 +34,7 @@ def run(face):
     """One offscreen selftest run in `face`, as its printed compose lines."""
     env = dict(os.environ)
     env["ORACLE_FAKE"] = "1"
+    env["ORACLE_LAYOUT"] = "1"
     env["QT_QPA_PLATFORM"] = "offscreen"
     env.pop("WAYLAND_DISPLAY", None)
     env.pop("DISPLAY", None)
@@ -55,6 +57,9 @@ for face, cont, send in (("hypr", "continue", "send"),
     got_face = re.search(r"compose face: (\S+)", txt)
     idle = re.search(r"compose: canContinue=(\w+) label='([^']*)'", txt)
     typed = re.search(r"compose typed: canSend=(\w+) label='([^']*)'", txt)
+    layout = re.search(
+        r"layout: face=(\S+) stats=([\d.]+)\.\.([\d.]+) "
+        r"reply=([\d.]+)\.\.([\d.]+) prompt=([\d.]+)\.\.([\d.]+)", txt)
     check("%s: the face under test is the right one" % face,
           got_face is not None and got_face.group(1) == face,
           got_face.group(1) if got_face else txt[-300:])
@@ -66,6 +71,17 @@ for face, cont, send in (("hypr", "continue", "send"),
           typed.group(0) if typed else txt[-300:])
     check("%s: and the window still loads clean" % face,
           "0 QML warning(s)" in txt, txt[-200:])
+    if layout:
+        _, stats_top, stats_bottom, reply_top, reply_bottom, prompt_top, _ = layout.groups()
+        stats_top, stats_bottom = float(stats_top), float(stats_bottom)
+        reply_top, reply_bottom, prompt_top = (float(reply_top), float(reply_bottom),
+                                               float(prompt_top))
+        placed = (stats_bottom <= reply_top if face == "plasma"
+                  else reply_bottom <= stats_top < prompt_top)
+    else:
+        placed = False
+    check("%s: the context line is on the correct side of the conversation" % face,
+          placed, layout.group(0) if layout else txt[-300:])
 
 print("FAILED: " + ", ".join(fails) if fails else "OK")
 sys.exit(1 if fails else 0)
