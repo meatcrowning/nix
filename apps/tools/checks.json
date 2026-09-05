@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "checks": [
+    {
+      "name": "painter-prefs",
+      "command": ["{python}", "apps/painter/tools/prefs-test.py"],
+      "kind": "pure",
+      "hosts": ["top", "book"],
+      "timeout": 15
+    },
+    {
+      "name": "player-spotify-selection",
+      "command": ["{python}", "apps/player/tools/spotify-missing-test.py"],
+      "kind": "pure",
+      "hosts": ["top", "book"],
+      "timeout": 15
+    },
+    {
+      "name": "pylib-vivaldi-theme",
+      "command": ["{python}", "apps/pylib/tools/vivaldi-theme-test.py"],
+      "kind": "pure",
+      "hosts": ["top", "book"],
+      "timeout": 15
+    }
+  ]
+}
