@@ -8,4 +8,5 @@ Spin {
     from: -3
     to: 9007199254740992
     step: 1
+    textHorizontalAlignment: TextInput.AlignRight
 }

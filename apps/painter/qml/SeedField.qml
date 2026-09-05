@@ -63,14 +63,14 @@ Field {
             spacing: 4
             TextButton {
                 width: Math.floor((buttons.width - buttons.spacing * 2) / 3)
-                label: "[ 🎲 randomize each time ]"
+                label: "[ 🎲 ]"
                 lit: root.gen.seed < 0
                 anchors.verticalCenter: parent.verticalCenter
                 onClicked: field.randomSeed()
             }
             TextButton {
                 width: Math.floor((buttons.width - buttons.spacing * 2) / 3)
-                label: "[ 🎲 new fixed random ]"
+                label: "[ Random Fixed ]"
                 anchors.verticalCenter: parent.verticalCenter
                 onClicked: field.newFixedSeed()
             }
@@ -78,9 +78,7 @@ Field {
                 id: lastButton
                 objectName: "seedLast"
                 width: buttons.width - x
-                label: field.lastAvailable
-                       ? "[ ♻ " + App.lastSeed + " ]"
-                       : "[ ♻ use last queued seed ]"
+                label: "[ Reuse last ]"
                 enabled: field.lastAvailable
                 anchors.verticalCenter: parent.verticalCenter
                 onClicked: field.useLastSeed()
