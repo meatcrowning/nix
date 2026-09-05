@@ -94,6 +94,8 @@ check("baked CSS == the sheet surfer serves for the same palette",
       baked == chantheme.css(kpal.__getitem__, kdetheme.kde_chrome()))
 check("plasma + oxygen: the baked sheet carries the KStyle relief",
       "background-attachment:fixed" in baked and "box-shadow:inset" in baked)
+check("the live 4chan sheet has no window-inactive colour override",
+      ":window-inactive" not in baked and "visibilitychange" not in baked)
 check("the provenance line names the style it came from", "oxygen" in prov)
 
 for want in ("@run-at       document-start", "@match        *://boards.4chan.org/*",
