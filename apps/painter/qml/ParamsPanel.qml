@@ -7,11 +7,11 @@ Panel {
     // that id (Field.qml, Toggle.qml), so without it nothing in the sampling
     // section could be pinned — silently, since the lookup is guarded.
     id: panel
-    title: "sampling"
+    title: "Sampling"
     badge: App.samplers.length + " samplers"
 
     Field {
-        label: "steps"
+        label: "Steps"
         Spin {
             value: root.gen.steps; from: 1; to: 300; step: 1
             onEdited: function (v) { root.set("steps", v) }
@@ -22,7 +22,7 @@ Panel {
     // which takes no CFG, and its "batch" is the frame count — set as a duration
     // in the video panel. Both would be controls that change nothing here.
     Field {
-        label: "cfg"
+        label: "CFG"
         visible: !App.isVideo
         Spin {
             value: root.gen.cfg; from: 0; to: 30; step: 0.1; decimals: 2
@@ -31,7 +31,7 @@ Panel {
     }
 
     Field {
-        label: "denoise"
+        label: "Denoise"
         Spin {
             value: root.gen.denoise; from: 0; to: 1; step: 0.01; decimals: 2
             onEdited: function (v) { root.set("denoise", v) }
@@ -39,7 +39,7 @@ Panel {
     }
 
     Field {
-        label: "sampler"
+        label: "Sampler"
         Picker {
             width: 200
             options: App.samplers
@@ -49,7 +49,7 @@ Panel {
     }
 
     Field {
-        label: "scheduler"
+        label: "Scheduler"
         Picker {
             width: 200
             options: App.schedulers
@@ -61,7 +61,7 @@ Panel {
     SeedField {}
 
     Field {
-        label: App.isVideo ? "count" : "batch"
+        label: App.isVideo ? "Count" : "Batch"
         hint: App.isVideo
               ? "How many separate video jobs to queue."
               : "Images per submitted job (one sampler run); count queues separate jobs."
@@ -74,7 +74,7 @@ Panel {
                 onEdited: function (v) { root.set("batch_size", v) }
             }
             PixelText {
-                text: "count"
+                text: "Count"
                 visible: !App.isVideo
                 color: Theme.textDim
                 anchors.verticalCenter: parent.verticalCenter

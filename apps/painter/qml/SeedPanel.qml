@@ -8,7 +8,7 @@ import QtQuick
 // that panel the edit preset actually reads, and nothing more.
 Panel {
     id: panel
-    title: "seed"
+    title: "Seed"
     badge: root.gen.seed < 0 ? "random" : "fixed"
 
     SeedField {}

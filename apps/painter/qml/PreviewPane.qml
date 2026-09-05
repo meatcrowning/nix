@@ -347,7 +347,7 @@ Item {
                         if (pane.source === "" || pane.showLive || pane.sourceIsVideo) return
                         var pt = mapToItem(null, m.x, m.y)
                         pane.menuRequested(pt.x, pt.y, [
-                            { label: "copy image",
+                            { label: "Copy Image",
                               trigger: () => App.copyImage(pane.source) }
                         ])
                         return
@@ -376,7 +376,7 @@ Item {
             // would be a lie that never resolves. A first step can genuinely
             // take half a minute on a video model, so the hint waits for the
             // clock rather than firing immediately.
-            text: pane.selLive && !App.busy ? "queued"
+            text: pane.selLive && !App.busy ? "Queued"
                 : !App.busy ? "nothing generated yet"
                 : App.elapsed > 45
                   ? "no preview frames - if the backend has been up a while, restart it from settings so --preview-method takes effect"

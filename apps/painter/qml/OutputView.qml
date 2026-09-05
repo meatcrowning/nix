@@ -191,12 +191,12 @@ Item {
                     if (m.button !== Qt.RightButton) return
                     var pt = mapToItem(null, m.x, m.y)
                     view.menuRequested(pt.x, pt.y, [
-                        { label: "open in viewer",
+                        { label: "Open in Viewer",
                           trigger: () => App.openExternally(view.source) },
-                        { label: "copy image", enabled: !view.isVideo,
+                        { label: "Copy Image", enabled: !view.isVideo,
                           trigger: () => App.copyImage(view.source) },
-                        { label: "fit", trigger: () => view.zoomFit() },
-                        { label: "actual size", trigger: () => view.zoomActual() }
+                        { label: "Fit", trigger: () => view.zoomFit() },
+                        { label: "Actual Size", trigger: () => view.zoomActual() }
                     ])
                 }
             }
@@ -230,7 +230,7 @@ Item {
     PixelText {
         anchors.centerIn: parent
         visible: view.source === ""
-        text: "nothing selected"
+        text: "Nothing Selected"
         color: Theme.dim
     }
 }

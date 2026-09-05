@@ -8,7 +8,7 @@ import QtQuick
 // can change something — a state, not a missing control (docs/DESIGN.md §10).
 Field {
     id: field
-    label: "seed"
+    label: "Seed"
     hint: "-1 is random for every queued batch. new fixed rolls one concrete "
           + "seed now; last restores the previous queued seed."
 

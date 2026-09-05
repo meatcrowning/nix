@@ -67,7 +67,7 @@ Rectangle {
         }
         PixelText {
             visible: App.queue > 0
-            text: "queued " + App.queue
+            text: "Queued " + App.queue
             color: Theme.info
         }
     }
@@ -91,7 +91,7 @@ Rectangle {
         TextButton {
             anchors.verticalCenter: parent.verticalCenter
             visible: App.busy
-            label: "[ stop & save ]"
+            label: "[ Stop & Save ]"
             tone: Theme.crit
             winActive: root.winActive
             onClicked: App.stopAndSave()
@@ -103,19 +103,19 @@ Rectangle {
                 onClicked: function(mouse) {
                     var p = mapToItem(root, mouse.x, mouse.y)
                     root.ctxMenu.open(p.x, p.y, [
-                        { label: "cancel all without saving", trigger: () => App.cancel() }
+                        { label: "Cancel All Without Saving", trigger: () => App.cancel() }
                     ])
                 }
             }
         }
         TextButton {
-            label: "[ unload ]"
+            label: "[ Unload ]"
             enabled: App.backendRunning
             winActive: root.winActive
             onClicked: App.unloadModels()
         }
         TextButton {
-            label: "[ refresh models ]"
+            label: "[ Refresh Models ]"
             enabled: App.backendRunning
             winActive: root.winActive
             onClicked: App.rescan()

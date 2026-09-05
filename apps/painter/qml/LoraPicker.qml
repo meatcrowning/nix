@@ -34,12 +34,12 @@ Rectangle {
             width: parent.width
             PixelText {
                 anchors.verticalCenter: parent.verticalCenter
-                text: "compatible with this model"
+                text: "Compatible with This Model"
                 color: Theme.textDim
             }
             TextButton {
                 anchors.verticalCenter: parent.verticalCenter
-                label: picker.showAll ? "[ hide others ]" : "[ show all ]"
+                label: picker.showAll ? "[ Hide Others ]" : "[ Show All ]"
                 tone: Theme.dim
                 lit: picker.showAll
                 winActive: root.winActive
@@ -79,7 +79,7 @@ Rectangle {
                     TextButton {
                         anchors.verticalCenter: parent.verticalCenter
                         visible: !compatible
-                        label: "[force]"
+                        label: "[Force]"
                         tone: Theme.warn
                         winActive: root.winActive
                         onClicked: App.forceLora(name)

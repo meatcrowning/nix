@@ -53,10 +53,10 @@ Item {
                 box.forceActiveFocus()
                 var hasSel = box.selectionEnd > box.selectionStart
                 var items = [
-                    { label: "cut", enabled: hasSel, trigger: () => box.cut() },
-                    { label: "copy", enabled: hasSel, trigger: () => box.copy() },
-                    { label: "paste", trigger: () => { box.paste(); seed.commit() } },
-                    { label: "select all", trigger: () => box.selectAll() }
+                    { label: "Cut", enabled: hasSel, trigger: () => box.cut() },
+                    { label: "Copy", enabled: hasSel, trigger: () => box.copy() },
+                    { label: "Paste", trigger: () => { box.paste(); seed.commit() } },
+                    { label: "Select All", trigger: () => box.selectAll() }
                 ]
                 var p = mapToItem(null, m.x, m.y)
                 root.ctxMenu.open(p.x, p.y, items)

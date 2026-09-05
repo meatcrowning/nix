@@ -5,7 +5,7 @@ import QtQuick
 // was rejected.  Chain order matters, so rows can be moved.
 Panel {
     id: panel
-    title: "lora"
+    title: "LoRA"
     badge: Loras.count > 0 ? (Loras.count + " active") : ""
     property bool picking: false
 
@@ -26,21 +26,21 @@ Panel {
 
         PixelText {
             visible: Loras.count === 0
-            text: "none"
+            text: "None"
             color: Theme.dim
         }
 
         Row {
             spacing: 6
             TextButton {
-                label: panel.picking ? "[ close ]" : "[ add lora ]"
+                label: panel.picking ? "[ Close ]" : "[ Add LoRA ]"
                 lit: panel.picking
                 winActive: root.winActive
                 onClicked: panel.picking = !panel.picking
             }
             TextButton {
                 visible: Loras.count > 0
-                label: "[ clear ]"
+                label: "[ Clear ]"
                 tone: Theme.dim
                 winActive: root.winActive
                 onClicked: Loras.clear()

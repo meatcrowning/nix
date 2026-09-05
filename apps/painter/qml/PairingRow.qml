@@ -20,7 +20,7 @@ Column {
         }
         PixelText {
             anchors.verticalCenter: parent.verticalCenter
-            text: App.encoderName === "" ? "bundled encoder and VAE" : "auto-paired"
+            text: App.encoderName === "" ? "Bundled Encoder and VAE" : "Auto-Paired"
             color: Theme.textDim
         }
         TextButton {
@@ -35,7 +35,7 @@ Column {
 
     Field {
         visible: rowBox.expanded && App.encoderName !== ""
-        label: "encoder"
+            label: "Encoder"
         hint: "Picked by matching this model's own dimensions against each encoder's hidden size."
         Picker {
             width: 250
@@ -47,7 +47,7 @@ Column {
 
     Field {
         visible: rowBox.expanded && App.vaeName !== ""
-        label: "vae"
+            label: "VAE"
         hint: "Some VAEs are structurally identical, so this falls back to a hash and then to your choice."
         Picker {
             width: 250

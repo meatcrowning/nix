@@ -74,7 +74,7 @@ Item {
                 PixelText {
                     id: title
                     anchors.left: parent.left
-                    text: "settings"
+                    text: "Settings"
                     color: root.fgAccent
                 }
                 TextButton {
@@ -95,17 +95,17 @@ Item {
             }
 
             PixelText {
-                text: "backend: " + App.status
+                text: "Backend: " + App.status
                 color: Theme.textDim
                 width: parent.width
                 elide: Text.ElideRight
             }
             PixelText {
-                text: "unit: " + App.unitState
+                text: "Unit: " + App.unitState
                 color: App.backendRunning ? Theme.ok : Theme.dim
             }
             PixelText {
-                text: "logs: journalctl --user -u comfy-painter -f"
+                text: "Logs: journalctl --user -u comfy-painter -f"
                 color: Theme.dim
                 width: parent.width
                 elide: Text.ElideRight
@@ -147,21 +147,21 @@ Item {
             Row {
                 spacing: 6
                 TextButton {
-                    label: "[ start ]"
+                    label: "[ Start ]"
                     tone: Theme.ok
                     enabled: !App.backendRunning
                     winActive: root.winActive
                     onClicked: App.startBackend()
                 }
                 TextButton {
-                    label: "[ stop ]"
+                    label: "[ Stop ]"
                     tone: Theme.crit
                     enabled: App.backendRunning
                     winActive: root.winActive
                     onClicked: App.stopBackend()
                 }
                 TextButton {
-                    label: "[ unload models ]"
+                    label: "[ Unload Models ]"
                     tone: Theme.warn
                     // /free at a backend that is not there is a silent no-op.
                     enabled: App.ready
@@ -175,23 +175,23 @@ Item {
             Row {
                 spacing: 6
                 TextButton {
-                    label: "[ rescan models ]"
+                    label: "[ Rescan Models ]"
                     winActive: root.winActive
                     onClicked: App.rescan()
                 }
                 PixelText {
                     anchors.verticalCenter: parent.verticalCenter
-                    text: Models.count + " known"
+                    text: Models.count + " Known"
                     color: Theme.textDim
                 }
             }
 
             PixelText {
-                text: "models: /home/lam/models"
+                text: "Models: /home/lam/models"
                 color: Theme.dim
             }
             PixelText {
-                text: "overrides: ~/.local/state/painter/overrides.json"
+                text: "Overrides: ~/.local/state/painter/overrides.json"
                 color: Theme.dim
                 width: parent.width
                 elide: Text.ElideRight

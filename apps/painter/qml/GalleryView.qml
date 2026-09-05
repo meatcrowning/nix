@@ -155,13 +155,13 @@ Item {
     function menuFor(index, path, isVideo) {
         var p = Gallery.paramsAt(index)
         if (!p) {
-            return [{ label: "no parameters stored in this file", enabled: false },
+            return [{ label: "No Parameters Stored in This File", enabled: false },
                     { separator: true }].concat(view.commonItems(index, path, isVideo, p))
         }
         return [
-            { label: "inject all", trigger: () => { root.injectAll(p); root.view = 0 } },
-            { label: "inject prompt", trigger: () => { root.injectPrompt(p); root.view = 0 } },
-            { label: "inject params", trigger: () => { root.injectParams(p); root.view = 0 } },
+            { label: "Inject All", trigger: () => { root.injectAll(p); root.view = 0 } },
+            { label: "Inject Prompt", trigger: () => { root.injectPrompt(p); root.view = 0 } },
+            { label: "Inject Parameters", trigger: () => { root.injectParams(p); root.view = 0 } },
             { separator: true }
         ].concat(view.commonItems(index, path, isVideo, p))
     }
@@ -170,7 +170,7 @@ Item {
     //: thing to do to a job that has not finished. `cancel` is the titlebar's
     //: `x` and stops the whole batch, which is what its label has to say.
     function liveMenu() {
-        return [{ label: "cancel generation", trigger: () => App.cancel() }]
+        return [{ label: "Cancel Generation", trigger: () => App.cancel() }]
     }
 
     // The items every output gets, parameters or not. The last two are offered
@@ -180,18 +180,18 @@ Item {
     // with nothing to act on is not offered greyed, it is not offered
     // (docs/DESIGN.md §10).
     function commonItems(index, path, isVideo, params) {
-        var items = [{ label: "open in viewer", trigger: () => App.openExternally(path) }]
+        var items = [{ label: "Open in Viewer", trigger: () => App.openExternally(path) }]
         if (params && params.positive) {
-            items.push({ label: "copy prompt",
+            items.push({ label: "Copy Prompt",
                          trigger: () => App.copyPrompt(path) })
         }
         var seed = params ? Number(params.seed) : -1
         if (Number.isFinite(seed) && seed >= 0) {
-            items.push({ label: "copy seed",
+            items.push({ label: "Copy Seed",
                          trigger: () => App.copySeed(path) })
         }
         if (isVideo) {
-            items.push({ label: "copy muted copy",
+            items.push({ label: "Copy Muted Copy",
                          trigger: () => App.copyMuted(path) })
         }
         return items
@@ -515,7 +515,7 @@ Item {
                     // A ROW EXISTS FROM THE PRESS, not from the first sample:
                     // a prompt queued behind another job says so rather than
                     // looking like one that is producing nothing.
-                    text: App.busy ? "waiting for the first frame" : "queued"
+                    text: App.busy ? "Waiting for the First Frame" : "Queued"
                     color: Theme.dim
                 }
 
@@ -658,7 +658,7 @@ Item {
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.WordWrap
         visible: Gallery.count === 0
-        text: "nothing yet - Ctrl+Enter or the gen button"
+        text: "Nothing Yet - Ctrl+Enter or the Gen Button"
         color: Theme.dim
     }
 
@@ -669,7 +669,7 @@ Item {
         elide: Text.ElideRight
         // Dragging one out is the only affordance here with no visible handle,
         // so it is the part the line keeps when there is no room for the rest.
-        text: view.width > 400 ? "drag one out, double-click to open, right-click for more"
+        text: view.width > 400 ? "Drag One Out, Double-Click to Open, Right-Click for More"
             : view.width > 250 ? "drag out, double-click opens"
                                : "drag out"
         color: Theme.dim

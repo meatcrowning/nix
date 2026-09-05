@@ -66,11 +66,11 @@ Rectangle {
         if (k === "" || typeof root === "undefined" || !root || !root.ctxMenu) return
         var on = panel.pins.indexOf(k) >= 0
         root.ctxMenu.open(sceneX, sceneY, [
-            { label: on ? "unpin " + k + " from the header"
-                        : "pin " + k + " to the header",
+            { label: on ? "Unpin " + k + " From the Header"
+                        : "Pin " + k + " to the Header",
               trigger: () => panel.togglePin(item) },
             { separator: true },
-            { label: panel.collapsed ? "expand this panel" : "collapse this panel",
+            { label: panel.collapsed ? "Expand This Panel" : "Collapse This Panel",
               trigger: () => { panel.collapsed = !panel.collapsed } }
         ])
     }
@@ -238,7 +238,7 @@ Rectangle {
                     if (!panel.reorderable) return
                     var pt = mapToItem(null, m.x, m.y)
                     root.ctxMenu.open(pt.x, pt.y, [
-                        { label: "reset panel order",
+                        { label: "Reset Panel Order",
                           trigger: () => root.resetOrder() }
                     ])
                     return

@@ -748,7 +748,7 @@ Item {
           tip: "Gallery" },
         { id: "pv",   label: "pv",   tb: true, state: root.showPreview ? 1 : 0,
           tip: "Preview viewport", menu: "view", icon: "document-preview",
-          bar: true, barText: "preview", checkable: true, shortcut: "F8" },
+          bar: true, barText: "Preview", checkable: true, shortcut: "F8" },
         { id: "params", tip: "Parameters", menu: "view",
           icon: "view-split-left-right", checkable: true,
           state: root.showParams ? 1 : 0, shortcut: "F7" },
@@ -757,9 +757,9 @@ Item {
         // what the results pane IS.
         { id: "browse", tip: "Browse", menu: "view", icon: "view-list-icons",
           checkable: true, group: "mode", state: root.inView ? 0 : 1,
-          bar: true, barText: "browse" },
+          bar: true, barText: "Browse" },
         { id: "viewone", tip: "View", menu: "view", icon: "view-preview",
-          checkable: true, group: "mode", bar: true, barText: "view",
+          checkable: true, group: "mode", bar: true, barText: "View",
           state: root.inView ? 1 : (root.selOne === "" && Gallery.count === 0 ? 2 : 0) },
         "-",
         // Zoom is the View mode's, and a clip has none (OutputView.qml).
@@ -778,7 +778,7 @@ Item {
         // it is a switch for a thing that cannot happen, which is worse than no
         // switch at all; `hidden` is read by `actions` below.
         { id: "compare", tip: "Compare", menu: "view", icon: "view-split-left-right",
-          bar: true, barText: "compare", checkable: true,
+          bar: true, barText: "Compare", checkable: true,
           hidden: !root.canCompare,
           state: root.showCompare ? 1 : 0,
           menuText: "Compare before/after" },
@@ -828,15 +828,15 @@ Item {
         { id: "next", tip: "Next Output", menu: "go", icon: "go-next",
           state: root.canStep ? 0 : 2 },
         // ------------------------------------------------------------ tools
-        { id: "rescan", tip: "Rescan Models", menu: "tools",
-          icon: "view-refresh", shortcut: "Ctrl+R", bar: true, barText: "refresh models" },
-        "-",
         { id: "backendstart", tip: "Start Backend", menu: "tools",
           icon: "system-run", state: App.backendRunning ? 2 : 0 },
         { id: "backendstop", tip: "Stop Backend", menu: "tools",
           icon: "process-stop", state: App.backendRunning ? 0 : 2 },
+        "-",
+        { id: "rescan", tip: "Rescan Models", menu: "tools",
+          icon: "view-refresh", shortcut: "Ctrl+R", bar: true },
         { id: "unload", tip: "Unload Models", menu: "tools",
-          icon: "edit-clear-history", bar: true, barText: "unload", state: App.backendRunning ? 0 : 2 },
+          icon: "edit-clear-history", bar: true, state: App.backendRunning ? 0 : 2 },
         // --------------------------------------------------------- settings
         { id: "set",  label: "st",   tb: true, state: root.showSettings ? 1 : 0,
           tip: "Settings", bottom: true, menu: "settings",
@@ -965,7 +965,7 @@ Item {
         function onClicked(id) { root.tbAction(id) }
         function onRclicked(id, x, y) {
             if (id === "stop") root.ctxMenu.open(x, y, [
-                { label: "cancel all without saving", trigger: () => App.cancel() }
+                { label: "Cancel All Without Saving", trigger: () => App.cancel() }
             ])
         }
     }

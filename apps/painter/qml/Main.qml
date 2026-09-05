@@ -13,7 +13,7 @@ Window {
     height: 900
     minimumWidth: 720
     minimumHeight: 560
-    title: "painter"
+    title: "Painter"
     color: Theme.bg
 
     Root {

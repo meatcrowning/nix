@@ -75,11 +75,11 @@ Item {
         if (k === "" || typeof root === "undefined" || !root || !root.ctxMenu) return
         var on = panel.pins.indexOf(k) >= 0
         root.ctxMenu.open(sceneX, sceneY, [
-            { label: on ? "unpin " + k + " from the header"
-                        : "pin " + k + " to the header",
+            { label: on ? "Unpin " + k + " From the Header"
+                        : "Pin " + k + " to the Header",
               trigger: () => panel.togglePin(item) },
             { separator: true },
-            { label: panel.collapsed ? "expand this panel" : "collapse this panel",
+            { label: panel.collapsed ? "Expand This Panel" : "Collapse This Panel",
               trigger: () => { panel.collapsed = !panel.collapsed } }
         ])
     }
@@ -235,7 +235,7 @@ Item {
             acceptedButtons: Qt.RightButton
             enabled: panel.reorderable
             onTapped: root.ctxMenu.open(point.scenePosition.x, point.scenePosition.y, [
-                { label: "reset panel order", trigger: () => root.resetOrder() }
+                { label: "Reset Panel Order", trigger: () => root.resetOrder() }
             ])
         }
     }
