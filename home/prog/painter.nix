@@ -1,4 +1,4 @@
-{ pkgs, lib, host, ... }:
+{ pkgs, lib, hostProfile, ... }:
 
 # painter — text-to-image front end for a headless ComfyUI (source at
 # ~/nix/apps/painter), fifth sibling of surfer/filer/viewer/player. Packaging mirrors
@@ -70,7 +70,7 @@ let
   modelsYaml = "/home/lam/models/extra_model_paths.yaml";
 
   painter =
-    if host == "air" then
+    if hostProfile.isBook then
       # book has no backend of its own — no NVIDIA, no 246G of weights — so it
       # borrows top's, over the ssh forward. The launcher probes top, starts
       # comfy-painter there if it is not already up, waits for it to answer and
@@ -155,7 +155,7 @@ in
 
   # The inference backend. ai-warden starts it for painter's first renewable
   # client lease and stops it after the last window closes plus a short grace.
-  systemd.user.services.comfy-painter = lib.mkIf (host != "air") {
+  systemd.user.services.comfy-painter = lib.mkIf hostProfile.isTop {
     Unit = {
       Description = "ComfyUI headless inference backend (painter)";
       After = [ "graphical-session.target" ];
