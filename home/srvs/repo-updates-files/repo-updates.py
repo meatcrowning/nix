@@ -285,18 +285,27 @@ def survey(fetch=True):
     if rc != 0:
         return {"ok": False, "why": "no origin/%s" % BRANCH}
 
-    _, counts, _ = git("rev-list", "--left-right", "--count",
-                       f"HEAD...origin/{BRANCH}")
-    try:
-        ahead, behind = (int(x) for x in counts.split())
-    except ValueError:
-        ahead = behind = 0
+    # `rev-list HEAD...origin` counts topology, not changes. Our delivery
+    # worktree cherry-picks commits onto origin/main, leaving this live dirty
+    # checkout with different commit IDs for identical patches; rev-list then
+    # claimed all of them were both ahead and behind forever. `git cherry`
+    # removes patch-equivalent commits on each side. Compare the two trees for
+    # paths too, or those same equivalent commits inflate the rebuild cost.
+    _, waiting, _ = git("cherry", "HEAD", f"origin/{BRANCH}")
+    waiting_shas = [line[2:].split()[0] for line in waiting.splitlines()
+                    if line.startswith("+ ")]
+    _, local, _ = git("cherry", f"origin/{BRANCH}", "HEAD")
+    local_shas = [line[2:].split()[0] for line in local.splitlines()
+                  if line.startswith("+ ")]
+    ahead, behind = len(local_shas), len(waiting_shas)
 
-    _, names, _ = git("diff", "--name-only", f"HEAD...origin/{BRANCH}")
+    _, names, _ = git("diff", "--name-only", "HEAD", f"origin/{BRANCH}")
     files = [f for f in names.split("\n") if f]
-    _, subjects, _ = git("log", "--format=%s", "--reverse",
-                         f"HEAD..origin/{BRANCH}")
-    subjects = [s for s in subjects.split("\n") if s]
+    subjects = []
+    for commit in reversed(waiting_shas):
+        _, subject, _ = git("show", "-s", "--format=%s", commit)
+        if subject:
+            subjects.append(subject)
 
     moved = set()
     if "flake.lock" in files:
@@ -304,7 +313,11 @@ def survey(fetch=True):
         moved = {k for k in after if before.get(k) != after[k]}
 
     out = {"ok": True, "sha": sha, "ahead": ahead, "behind": behind,
-           "files": files, "subjects": subjects}
+           "files": files, "subjects": subjects,
+           # README-only pushes change nothing installed on either machine.
+           # Keep them visible to `nix-pull check`, but do not interrupt the
+           # desktop with an apply/rebuild offer for prose.
+           "notifiable": bool(files) and not all(f == "README.md" for f in files)}
     out.update(classify(files, moved, host()))
     return out
 
@@ -812,7 +825,7 @@ def check_and_offer(pending):
     if not s["ok"]:
         log(s["why"])
         return pending
-    if s["behind"] == 0:
+    if s["behind"] == 0 or not s["notifiable"]:
         return pending
 
     st = load_state()
