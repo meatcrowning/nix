@@ -121,6 +121,20 @@ def library_is_remote(root=None):
     return fstype in REMOTE_FSTYPES
 
 
+def library_mounted(root=None):
+    """Is the library root really there — mounted, and with something in it?
+
+    `is_dir()` alone is not enough: an unmounted mountpoint can linger as an
+    empty directory, and anything that PRUNES on a missing file would then
+    delete the whole library (ratings and all). One scandir, first entry only.
+    """
+    try:
+        with os.scandir(str(root or LIBRARY_ROOT)) as it:
+            return next(it, None) is not None
+    except OSError:
+        return False
+
+
 _REMOTE_LIBRARY = None
 
 
@@ -1589,6 +1603,38 @@ class Library(QObject):
         # above can never return them. See ids_for_paths.
         rows.update({i: self._transient[i] for i in ids if i in self._transient})
         return [rows[i] for i in ids if i in rows]
+
+    def prune_missing(self, paths):
+        """Forget tracks whose files are gone: the row DISAPPEARS instead of
+        sitting greyed for ever. Returns how many rows went.
+
+        Deleting copies of a track outside the player (a dedupe pass over the
+        library) used to leave the rows behind until the next full scan pruned
+        them, so the album still listed the extra copies, greyed out.
+
+        The greying itself stays — it is what an UNPLUGGED drive looks like, and
+        that case must never prune: with the drive gone every path in the DB
+        stats missing and this would erase the library. Hence the two gates: a
+        network library never prunes (its DB is authoritative, and the stat is
+        skipped there anyway), and a local one prunes only while the root is
+        mounted and non-empty. Then it re-stats, because the caller's stat and
+        the mount check are not one atomic act.
+        """
+        if library_is_remote_cached():
+            return 0
+        paths = [p for p in dict.fromkeys(paths) if p]
+        if not paths or not library_mounted():
+            return 0
+        paths = [p for p in paths if not os.path.exists(p)]
+        if not paths:
+            return 0
+        self._con.executemany("DELETE FROM tracks WHERE path=?",
+                              [(p,) for p in paths])
+        self._con.commit()
+        rebuild_albums(self._con)   # an album that lost its last track goes too
+        # Queued, not emitted: `changed` drives the very refresh we are inside.
+        QTimer.singleShot(0, self.changed.emit)
+        return len(paths)
 
     # ---- opening a file by path (argv / the OPEN verb) ----
 
@@ -3333,7 +3379,7 @@ class Bridge(QObject):
     def openAlbum(self, album_id, merge=False):
         self._current_album = album_id
         rows = self._library.album_tracks(album_id)
-        out = [track_row(r, check_exists=True) for r in rows]
+        out = self._track_rows(rows)
         if merge:
             self.albumTracksModel.merge(out)
         else:
@@ -3589,7 +3635,7 @@ class Bridge(QObject):
     def openSmart(self, name, merge=False):
         self._current_smart = name
         rows = self._library.smart_tracks(name)
-        out = [track_row(r, check_exists=True) for r in rows]
+        out = self._track_rows(rows)
         if merge:
             self.playlistModel.merge(out)
         else:
@@ -3607,7 +3653,7 @@ class Bridge(QObject):
     @Slot(str)
     def search(self, text):
         rows = self._library.search(text)
-        self.searchModel.set_rows([track_row(r, check_exists=True) for r in rows])
+        self.searchModel.set_rows(self._track_rows(rows))
 
     # ---- play actions (ids resolved from whichever model the view used) ----
 
@@ -3663,6 +3709,23 @@ class Bridge(QObject):
         if not exe or not os.path.isdir(d):
             return
         QProcess.startDetached(exe, [d])
+
+    # ---- listing rows ----
+
+    def _track_rows(self, rows):
+        """Library rows -> model rows for a listing that stats its files.
+
+        A file that is gone is dropped AND pruned from the DB, so a track
+        deleted outside the player leaves the album rather than lingering as a
+        greyed row. `prune_missing` refuses when the drive is unplugged or the
+        library is remote; then nothing is dropped and the rows stay greyed,
+        which is what `available` is for."""
+        out = [track_row(r, check_exists=True) for r in rows]
+        gone = [r["path"] for r, o in zip(rows, out)
+                if not o["available"] and int(r["id"]) > 0]
+        if gone and self._library.prune_missing(gone):
+            out = [o for o in out if o["available"]]
+        return out
 
     # ---- refresh plumbing ----
 
