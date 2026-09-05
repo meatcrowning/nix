@@ -121,6 +121,10 @@ twitter_sheet = twittertheme.css(PAL.__getitem__)
 check("the Twitter/X sheet carries the base palette", "--desk-bg:#102030" in twitter_sheet)
 check("the Twitter/X sheet targets semantic X hooks, not generated classes",
       '[data-testid="tweet"]' in twitter_sheet and "css-" not in twitter_sheet)
+check("the Twitter/X sheet keeps post copy at the primary ink and themes composer/sidebar wrappers",
+      '[data-testid="tweetText"] *, [data-testid="UserName"]' in twitter_sheet
+      and 'div:has(> [data-testid="tweetTextarea_0"])' in twitter_sheet
+      and '[data-testid="sidebarColumn"] > div' in twitter_sheet)
 twitter_text, _ = twitter_gen.build("plasma", TMP / "twitter.user.js")
 check("the Twitter/X script covers both current and legacy domains",
       "*://x.com/*" in twitter_text and "*://twitter.com/*" in twitter_text)
