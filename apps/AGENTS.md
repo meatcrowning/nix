@@ -716,17 +716,12 @@ characters anywhere**. goetia's inbox is a separate decision; see
 
 ### `CtxMenu.qml` — a menu row acts on a box that still has the keyboard
 
-Not in `qmlcommon/`: filer, player, reader, editor, board, painter and viewer
-each hold a **verbatim copy**, and surfer holds the ancestor as
-`ContextMenu.qml`. Retune all eight or none. `SelectButton.qml` — the dropdown
-face every enum pick wears (docs/DESIGN.md §7.2) — is under the same rule:
-player and filer each hold a verbatim copy.
-
-The reason given here for that used to be *"it needs `PixelText`, which a shared
-component cannot reach"*, and **that half is no longer true**:
-`qmlcommon/PixelText.qml` exists since `DeskMenuBar` needed the same type
-(below). Folding these eight copies into one is now a possible job, not an
-impossible one — it is simply not done, and doing it is a change of its own.
+`qmlcommon/CtxMenu.qml` is the canonical copy; viewer is the first consumer.
+Filer, player, reader, editor, board and painter still hold copies while they
+move over one harnessed app at a time, and surfer holds the ancestor as
+`ContextMenu.qml`. Keep those copies byte-equivalent until they are removed.
+`SelectButton.qml` — the dropdown face every enum pick wears
+(docs/DESIGN.md §7.2) — remains a verbatim copy in player and filer.
 
 **Opening the menu takes the active focus** — that is how Escape and the
 outside-click scrim reach its sink — so it remembers the item it took the focus
