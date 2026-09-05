@@ -1,4 +1,4 @@
-{ pkgs, lib, host, ... }:
+{ pkgs, lib, hostProfile, ... }:
 
 # player — the standalone Qt/QML music player (source at ~/nix/apps/player), fourth
 # sibling of surfer/filer/viewer. Packaging mirrors viewer.nix, including the
@@ -42,7 +42,7 @@ let
   '';
 
   player =
-    if host == "air" then
+    if hostProfile.isBook then
       # air plays top's library over SMB, so launching is more than exec'ing
       # python: probe top, mount, pull the metadata database + art cache, run,
       # push back. That lives in the repo as live source (player/tools/

@@ -1,4 +1,4 @@
-{ pkgs, lib, host, ... }:
+{ pkgs, lib, hostProfile, ... }:
 
 # viewer — the standalone Qt/QML image viewer split out of filer (source at
 # ~/nix/apps/viewer). Packaging mirrors filer.nix exactly, including the air split:
@@ -17,7 +17,7 @@ let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
 
   viewer =
-    if host == "air" then
+    if hostProfile.isBook then
       pkgs.writeShellScriptBin "viewer" ''
         exec /usr/bin/python3 /home/lam/nix/apps/viewer/main.py "$@"
       ''

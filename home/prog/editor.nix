@@ -1,4 +1,4 @@
-{ pkgs, lib, host, ... }:
+{ pkgs, lib, hostProfile, ... }:
 
 # editor — the desktop's text editor, with Kate's core editing (source at
 # ~/nix/apps/editor). Packaging mirrors reader.nix exactly, including the air
@@ -33,7 +33,7 @@ let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
 
   editor =
-    if host == "air" then
+    if hostProfile.isBook then
       pkgs.writeShellScriptBin "editor" ''
         exec /usr/bin/python3 /home/lam/nix/apps/editor/main.py "$@"
       ''

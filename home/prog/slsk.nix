@@ -1,4 +1,4 @@
-{ pkgs, lib, host, ... }:
+{ pkgs, lib, hostProfile, ... }:
 
 # slsk — the desktop's Soulseek client for the local slskd daemon (source at
 # ~/nix/apps/slsk). It replaces the slskd web UI for search + downloads.
@@ -17,7 +17,7 @@ let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
 
   slsk =
-    if host == "air" then
+    if hostProfile.isBook then
       pkgs.writeShellScriptBin "slsk" ''
         exec /usr/bin/python3 /home/lam/nix/apps/slsk/main.py "$@"
       ''

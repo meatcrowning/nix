@@ -1,4 +1,4 @@
-{ pkgs, lib, host, ... }:
+{ pkgs, lib, hostProfile, ... }:
 
 # reader — the desktop's document reader: markdown, and PDFs (source at
 # ~/nix/apps/reader).
@@ -25,7 +25,7 @@ let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
 
   reader =
-    if host == "air" then
+    if hostProfile.isBook then
       pkgs.writeShellScriptBin "reader" ''
         # `mimetype` for the same reason as the `top` wrapper below; book needs
         # it more, its graphical session PATH holding no nix profile at all.

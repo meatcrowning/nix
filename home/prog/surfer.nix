@@ -1,4 +1,4 @@
-{ pkgs, lib, host, ... }:
+{ pkgs, lib, hostProfile, ... }:
 
 # surfer — the standalone Qt/QML browser (source at ~/nix/apps/surfer; QtWebEngine,
 # i.e. open Chromium, with the browser chrome in the hyprvtb titlebar).
@@ -223,7 +223,7 @@ let
   '';
 
   surfer =
-    if host == "air" then
+    if hostProfile.isBook then
       # air additionally brackets the run with the profile handoff (see
       # ~/nix/apps/surfer/tools/sync.py): merge top's cookies + userscripts in
       # before the window opens, merge ours back out after it closes.
@@ -322,7 +322,7 @@ in
     # same wrapQtAppsHook arguments). air has no nix Qt to borrow — it runs
     # Fedora's system PySide6 — so there the helper is just the passthrough,
     # which keeps ONE documented recipe working on both machines.
-    ++ lib.optional (host == "air")
+    ++ lib.optional hostProfile.isBook
       (pkgs.writeShellScriptBin "surfer-qtenv" ''exec ${qtenvBody} "$@"'');
 
   # Desktop entry so surfer shows up in the runner and is eligible for http(s).
