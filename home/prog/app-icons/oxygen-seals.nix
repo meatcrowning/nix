@@ -40,7 +40,7 @@ let
   sealIcons = {
     filer = "apps/system-file-manager";
     viewer = "apps/gwenview";
-    player = "categories/applications-multimedia";
+    player = "mimetypes/audio-x-generic";
     painter = "categories/applications-graphics";
     surfer = "apps/internet-web-browser";
     reader = "apps/okular";
