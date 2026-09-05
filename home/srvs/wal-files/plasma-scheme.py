@@ -8,12 +8,12 @@ from the palette, which is what made a wallpaper change repaint the windows —
 and that had to stop (8956ecb), because kdeglobals under Plasma is his whole
 global theme (widget style, fonts, icon set), not a private channel.
 
-So this takes the other route: keep the SHAPE of the scheme he picked — the
-template, `OxygenDarkFlat.colors`, with its unfocused palette baked in and the
-inactive effect off (7e659ba) — and move only its HUE onto the wallpaper's
-accent. Structure, contrast and every foreground/background relationship
-Oxygen defines survive untouched; the family of blues becomes a family of
-whatever colour the wallpaper is.
+So this takes the other route: keep the SHAPE of the scheme he picked — either
+the light or dark Oxygen template, each with its unfocused palette baked in and
+the inactive effect off — and move only its HUE onto the wallpaper's accent.
+Structure, contrast and every foreground/background relationship Oxygen defines
+survive untouched; the family of blues becomes a family of whatever colour the
+wallpaper is.
 
 The maths, per tinted value: RGB -> HLS, hue replaced by the accent's hue,
 lightness kept exactly, saturation scaled by `accent_saturation / 0.30`
@@ -27,12 +27,12 @@ NOT tinted: `ForegroundNormal` (near-white body text), the three semantic
 roles (`ForegroundNegative`/`Neutral`/`Positive` — a red error stays red on a
 green wallpaper), and everything outside `[Colors:*]`/`[WM]`.
 
-TWO SCHEMES ARE TEMPLATED (2026-08-28): OxygenDarkFlat, and AeroThemePlasma's
-`Aero` — read out of the system profile, so it exists only where the aeroshell
-module put it. The same maths serves both; Aero is a LIGHT scheme whose greys
-have no saturation to move, so what actually follows the wallpaper there is the
-titlebar, the selection and the focus decoration, which is the Win7 behaviour
-anyway. See CANDIDATES for why Aero needs its name forced.
+THREE SCHEMES ARE TEMPLATED: OxygenDarkFlat, OxygenLightFlat, and
+AeroThemePlasma's `Aero` — read out of the system profile, so it exists only
+where the aeroshell module put it. The same maths serves each; light schemes'
+greys have no saturation to move, so the titlebar, selection and focus
+decoration provide the wallpaper colour. See CANDIDATES for why Aero needs its
+name forced.
 
 Applying is gated on the live scheme actually BEING one of those: every
 candidate is minted, but the push into kdeglobals only happens for the one
@@ -96,6 +96,7 @@ SAT_REFERENCE = 0.30
 # absent and the candidate is skipped.
 CANDIDATES = [
     (os.path.join(HOME, ".config", "scripts", "plasma-scheme-template.colors"), None),
+    (os.path.join(HOME, ".config", "scripts", "plasma-light-scheme-template.colors"), None),
     ("/run/current-system/sw/share/color-schemes/Aero.colors", "Aero"),
     # book installs AeroThemePlasma from source into Fedora's own prefix, so the
     # same scheme lives here instead. Both paths are listed unconditionally —
