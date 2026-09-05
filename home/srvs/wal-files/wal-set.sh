@@ -117,14 +117,6 @@ fi
 eval "$(cat "$THEMES/$KEY.env")"
 echo "wal-set: source = ${IW}x${IH}, mode = $MODE, accent = #$ACCENT"
 
-# Wine and Ableton read their colours only at process startup. Mint their next
-# startup theme now when Live is installed; unlike the Qt apps below, there is
-# deliberately no attempt to repaint an already-running Windows process.
-if command -v ableton-theme >/dev/null 2>&1 \
-   && [ -d "$HOME/.wine/drive_c/ProgramData/Ableton/Live 11 Suite" ]; then
-    ableton-theme || echo "wal-set: Ableton theme update failed" >&2
-fi
-
 # Publish the quantised cluster list (dominant first, comma-separated bare hex)
 # for the Settings swatch row (SetSwatches.qml) — the display the user picks
 # palette colours from. In place, same inode rule as $STATE.mode above. An env
@@ -426,6 +418,15 @@ elif command -v kwriteconfig6 >/dev/null 2>&1; then
             dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.notifyChange int32 "$change" int32 0 >/dev/null 2>&1 || true
         done
     fi
+fi
+
+# Wine and Ableton read their colours only at process startup. Mint their next
+# startup theme after kdeglobals, because Ableton uses the active KDE scheme's
+# normal white foreground. There is deliberately no attempt to repaint an
+# already-running Windows process.
+if command -v ableton-theme >/dev/null 2>&1 \
+   && [ -d "$HOME/.wine/drive_c/ProgramData/Ableton/Live 11 Suite" ]; then
+    ableton-theme || echo "wal-set: Ableton theme update failed" >&2
 fi
 
 # ---- 6b. Cursor: outline -> accent, core -> bg -------------------------------
