@@ -1,4 +1,4 @@
-{ pkgs, lib, host, ... }:
+{ pkgs, lib, hostProfile, ... }:
 
 # updater — the desktop's GUI for this flake's package updates (source at
 # ~/nix/apps/updater). It checks for updates by shelling out to the read-only
@@ -25,7 +25,7 @@ let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
 
   updater =
-    if host == "air" then
+    if hostProfile.isBook then
       pkgs.writeShellScriptBin "updater" ''
         exec /usr/bin/python3 /home/lam/nix/apps/updater/main.py "$@"
       ''

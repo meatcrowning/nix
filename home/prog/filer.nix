@@ -1,4 +1,4 @@
-{ pkgs, lib, host, ... }:
+{ pkgs, lib, hostProfile, ... }:
 
 # filer — the standalone Qt/QML file browser split out of the Quickshell panel
 # (source at ~/nix/apps/filer, in this repo so it travels to every machine on pull).
@@ -26,7 +26,7 @@ let
   # skip nixpkgs' Qt/PySide6 entirely and exec the system python3 with the
   # dnf-installed python3-pyside6 instead. `top` is untouched.
   filer =
-    if host == "air" then
+    if hostProfile.isBook then
       pkgs.writeShellScriptBin "filer" ''
         # Same `mimetype` prefix as the `top` wrapper below, and book is the
         # host that actually needs it: `home.packages` puts it in
