@@ -1904,22 +1904,34 @@ class Painter(QObject):
         self._log.append(time.strftime("%H:%M:%S") + "  " + line)
         self.logChanged.emit()
 
-    def _on_object_info(self, oi):
-        if not oi:
-            self._set_status("ComfyUI reachable but /object_info failed")
-            return
+    def _apply_object_info(self, oi):
         self._object_info = oi
         self._samplers = G.enum_values(oi, "KSamplerSelect", "sampler_name") or []
         self._schedulers = G.enum_values(oi, "BasicScheduler", "scheduler") or []
         self._curves = G.enum_values(oi, "ModelSamplingSD3Advanced", "curve") or []
         self._windows = G.enum_values(oi, "ModelSamplingSD3Advanced", "outside_window") or []
         self.optionsChanged.emit()
+        self.statusChanged.emit()
+
+    def _on_object_info(self, oi):
+        if not oi:
+            self._set_status("ComfyUI reachable but /object_info failed")
+            return
+        self._apply_object_info(oi)
         # Only if the startup scan found nothing (an empty or unreadable model
         # root at launch): the list is normally already up by now, and rebuilding
         # it would throw away the selection.
         if self.models.rowCount() == 0:
             self.rescan()
-        self.statusChanged.emit()
+
+    def _refresh_object_info(self, oi):
+        """The same document, re-read because the model folders changed.
+
+        Never rescans: it is called FROM a rescan, and the empty-list branch
+        above would then loop on a model root with nothing in it.
+        """
+        if oi:
+            self._apply_object_info(oi)
 
     # -- models ------------------------------------------------------------
 
@@ -1989,6 +2001,15 @@ class Painter(QObject):
             else:
                 self.setMode(want_mode)
         self._set_status(f"{len(rows)} models")
+        # AND RE-READ THE BACKEND'S OWN FILE LISTS. `/object_info` is fetched
+        # once, when the connection comes up, and painter validates every graph
+        # against it before submitting — so a model downloaded while painter was
+        # running is rejected by painter's own preflight ("unet_name=... is not
+        # one of [...]") even though ComfyUI, which re-reads the directory per
+        # prompt, would have taken it. A rescan is exactly the moment the model
+        # folders are known to have changed, so it refreshes both sides.
+        if self._object_info is not None:
+            self.client.fetch_object_info(self._refresh_object_info)
 
     def _retry_scan(self):
         self._scan_tries += 1
