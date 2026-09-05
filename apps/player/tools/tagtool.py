@@ -594,8 +594,14 @@ def art_from_caa(artist, album, paths):
     data = _json_get(f"https://coverartarchive.org/release/{mbid}")
     for img in ((data or {}).get("images") or []):
         if img.get("front") and img.get("image"):
+            # CAA's raw `image` can be an archival full-size scan (a 20000px
+            # scan is ~470MB for one release here). The player only ever
+            # displays <=1024px and mutagen's FLAC block is capped at 16MB,
+            # so use the normalized ~1200px large thumbnail, never the scan.
+            url = ((img.get("thumbnails") or {}).get("large")
+                   or img.get("image"))
             try:
-                return _http(img["image"], timeout=60), None
+                return _http(url, timeout=60), None
             except Exception as e:                           # noqa: BLE001
                 return None, "cover art archive fetch failed: " + str(e)
     return None, "cover art archive has no front image for that release"

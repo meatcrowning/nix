@@ -59,7 +59,12 @@ def caa_front(mbid):
         return None
     for img in data.get("images", []):
         if img.get("front"):
-            return img.get("image")
+            # CAA's raw `image` can be a multi-hundred-MB archival scan (a
+            # 20000px release here wrote a 470MB cover.jpg). The player only
+            # ever displays <=1024px and mutagen's FLAC block caps at 16MB, so
+            # use the normalized ~1200px large thumbnail, never the scan.
+            return ((img.get("thumbnails") or {}).get("large")
+                    or img.get("image"))
     return None
 
 
