@@ -1,17 +1,11 @@
 #!/usr/bin/env python3
-"""Build a borderless JPEG collage from paths selected in Konsole.
-
-Konsole passes the selected terminal text and the session's working directory.
-The text may be one path per line or shell-quoted paths; all resolution stays
-inside that directory unless a selected path is absolute.
-"""
+"""Build a borderless JPEG collage from image paths supplied by Dolphin."""
 
 import argparse
 import json
 import math
 import os
 from pathlib import Path
-import shlex
 import shutil
 import statistics
 import subprocess
@@ -21,24 +15,6 @@ import tempfile
 
 TARGET_ASPECT = 16 / 10
 MAX_CELL_HEIGHT = 1600
-
-
-def selected_paths(text, cwd):
-    """Resolve selection text into distinct regular files, preserving order."""
-    lines = [line.strip() for line in text.replace("\r", "").splitlines() if line.strip()]
-    # `ls -1` makes the common path unambiguous, including filenames with spaces.
-    raw = lines if lines and all((Path(line) if Path(line).is_absolute() else cwd / line).is_file()
-                                 for line in lines) else shlex.split(text)
-    paths, seen = [], set()
-    for item in raw:
-        path = Path(item).expanduser()
-        if not path.is_absolute():
-            path = cwd / path
-        path = path.resolve()
-        if path.is_file() and path not in seen:
-            paths.append(path)
-            seen.add(path)
-    return paths
 
 
 def dimensions(path):
@@ -117,10 +93,9 @@ def command(paths, sizes, output):
              "-q:v", "2", os.fspath(output)])
 
 
-def make_collage(text, cwd):
+def make_collage(paths, cwd):
     if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
         raise RuntimeError("ffmpeg is not available")
-    paths = selected_paths(text, cwd)
     sizes, images = [], []
     for path in paths:
         size = dimensions(path)
@@ -146,11 +121,11 @@ def make_collage(text, cwd):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cwd", required=True, type=Path)
-    parser.add_argument("selection")
+    parser.add_argument("paths", nargs="+")
     args = parser.parse_args()
     try:
-        output = make_collage(args.selection, args.cwd.resolve())
+        paths = [Path(path).expanduser().resolve() for path in args.paths]
+        output = make_collage(paths, paths[0].parent)
     except (OSError, RuntimeError, ValueError) as exc:
         print("konsole-collage: %s" % exc, file=sys.stderr)
         return 1

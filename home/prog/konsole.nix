@@ -25,11 +25,6 @@
 # session's pty; a new window still gets the file.
 {
   home.packages = [
-    (pkgs.writeShellScriptBin "konsole-collage" ''
-      export PATH=${lib.makeBinPath [ pkgs.ffmpeg ]}:$PATH
-      exec ${pkgs.python3}/bin/python3 \
-        /home/lam/nix/apps/pylib/tools/konsole-collage.py "$@"
-    '')
     (pkgs.writeShellScriptBin "konsole-theme" ''
       exec ${pkgs.python3}/bin/python3 \
         /home/lam/nix/apps/pylib/tools/konsole-theme.py "$@"
