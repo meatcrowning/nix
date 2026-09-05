@@ -441,8 +441,21 @@ fi
 #     teardown can't kill it — which is why it no longer has to run *before*
 #     step 7). cursor-recolor.sh flocks itself, so overlapping fires serialise
 #     and still converge on the last accent.
-setsid "$SCRIPTS/cursor-recolor.sh" "$ACCENT" "$BG" "${XCURSOR_SIZE:-22}" \
-    >>"$CACHE/wallpaper-picker.log" 2>&1 </dev/null &
+# A plain background child remains in the wallpaper watcher's systemd cgroup,
+# so systemd kills it as soon as that oneshot exits.  Its own transient user
+# unit gives the recolour its promised independent lifetime; the fallback keeps
+# manual/non-systemd invocations working too.
+if command -v systemd-run >/dev/null 2>&1; then
+    systemd-run --user --quiet --no-block --collect \
+        --unit="wal-cursor-${ACCENT}${BG}" \
+        "$SCRIPTS/cursor-recolor.sh" "$ACCENT" "$BG" "${XCURSOR_SIZE:-22}" \
+        >>"$CACHE/wallpaper-picker.log" 2>&1 \
+        || setsid "$SCRIPTS/cursor-recolor.sh" "$ACCENT" "$BG" "${XCURSOR_SIZE:-22}" \
+            >>"$CACHE/wallpaper-picker.log" 2>&1 </dev/null &
+else
+    setsid "$SCRIPTS/cursor-recolor.sh" "$ACCENT" "$BG" "${XCURSOR_SIZE:-22}" \
+        >>"$CACHE/wallpaper-picker.log" 2>&1 </dev/null &
+fi
 
 # ---- 6c. RGB hardware: DRAM sticks + motherboard headers on the accent -------
 # rgb-set.py pushes ACCENT to every controller via the system openrgb.service

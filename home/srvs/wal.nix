@@ -60,6 +60,10 @@ in
       source = ./wal-files/plasma-wallpaper-watch.sh;
       executable = true;
     };
+    "scripts/plasma-scheme-watch.sh" = {
+      source = ./wal-files/plasma-scheme-watch.sh;
+      executable = true;
+    };
     "scripts/plasma-scheme.py" = {
       source = ./wal-files/plasma-scheme.py;
       executable = true;
@@ -214,6 +218,36 @@ in
       "%h/.config/plasma-org.kde.plasma.desktop-appletsrc"
       "%h/.config/plasma-io.gitgud.wackyideas.desktop-appletsrc"
     ];
+    Install.WantedBy = [ "default.target" ];
+  };
+
+  # Choosing Oxygen Light Flat or Oxygen Dark Flat in System Settings → Colors
+  # changes only kdeglobals' scheme name. Re-mint that selected mutable scheme
+  # from the current wallpaper accent, then let its own KConfig notification
+  # settle through the script's scheme+accent dedupe.
+  systemd.user.services.plasma-scheme-watch = {
+    Unit = {
+      Description = "Re-mint the selected Plasma scheme from the current wallpaper";
+      After = [ "graphical-session.target" ];
+    };
+    Service = {
+      Type = "oneshot";
+      ExecStart = "%h/.config/scripts/plasma-scheme-watch.sh";
+    };
+  };
+
+  systemd.user.paths.plasma-scheme-watch = {
+    Unit.Description = "Watch KDE's colour-scheme selection";
+    Path = {
+      PathChanged = [
+        "%h/.config/kdeglobals"
+        "%h/.config/kdedefaults/kdeglobals"
+      ];
+      PathModified = [
+        "%h/.config/kdeglobals"
+        "%h/.config/kdedefaults/kdeglobals"
+      ];
+    };
     Install.WantedBy = [ "default.target" ];
   };
 }
