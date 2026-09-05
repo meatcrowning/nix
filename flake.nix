@@ -161,6 +161,16 @@
       };
     });
 
+    # Konsole's selection menu is compiled from sessionui.rc; this patch adds
+    # the collage action and hands its selection to the live-source helper.
+    konsole-collage-overlay = (final: prev: {
+      kdePackages = prev.kdePackages // {
+        konsole = prev.kdePackages.konsole.overrideAttrs (old: {
+          patches = (old.patches or []) ++ [ ./home/prog/konsole-collage.patch ];
+        });
+      };
+    });
+
     # (The easyeffects per-channel IPC backport that used to live here is gone:
     # easyeffects 8.2.8 ships wwmm/easyeffects 76a3f9a5 itself, so the patch
     # applied in reverse and failed the build on the 2026-08-18 nixpkgs roll.)
@@ -187,7 +197,7 @@
       });
     });
 
-    overlays = [ vcv-rack-overlay breeze-square-overlay ollama-cuda-overlay kwin-rollup-overlay ];
+    overlays = [ vcv-rack-overlay breeze-square-overlay ollama-cuda-overlay kwin-rollup-overlay konsole-collage-overlay ];
 
     mkPkgs = system: overlays: import nixpkgs {
       inherit system overlays;
@@ -202,7 +212,7 @@
     # by leaving the overlay out of its pkgs entirely — corners just stay
     # round there until this gets added back.
 
-    pkgsAir = mkPkgs "aarch64-linux" [ vcv-rack-overlay ];
+    pkgsAir = mkPkgs "aarch64-linux" [ vcv-rack-overlay konsole-collage-overlay ];
 
   in
   {
