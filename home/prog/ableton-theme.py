@@ -84,7 +84,12 @@ def apply_wine(p: dict[str, str]) -> None:
         "WindowText": "text",
     }
     reg = ["Windows Registry Editor Version 5.00", "", "[HKEY_CURRENT_USER\\Control Panel\\Colors]"]
-    reg.extend(f'"{key}"="{rgb(p[token])}"' for key, token in groups.items())
+    for key, token in groups.items():
+        # USER32's native menu surface is the same semantic window background
+        # as the Qt/Oxygen file menus around it, not the panel's bgAlt.
+        value = kde_color("Colors:Window", "BackgroundNormal") \
+            if key in ("Menu", "MenuBar") else p[token]
+        reg.append(f'"{key}"="{rgb(value)}"')
     reg_path = HOME / ".cache/wine-desktop-theme.reg"
     reg_path.parent.mkdir(parents=True, exist_ok=True)
     reg_path.write_text("\r\n".join(reg) + "\r\n", encoding="utf-16")
