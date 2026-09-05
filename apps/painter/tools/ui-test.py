@@ -3527,11 +3527,14 @@ def test_seed(win, ctl):
               and max(x + w for x, _y, w, _h in button_bounds) <= fx + fw + 1,
               button_bounds)
         labels = [b.property("label") for b in seed_buttons]
-        check("the seed buttons use rgthree's three action faces",
-              any("randomize each time" in str(x) for x in labels)
-              and any("new fixed random" in str(x) for x in labels)
-              and any(("use last queued seed" in str(x)) or (str(rolled) in str(x))
-                      for x in labels), labels)
+        check("the seed buttons have the requested concise labels",
+              any(str(x) == "[ 🎲 ]" for x in labels)
+              and any(str(x) == "[ Random Fixed ]" for x in labels)
+              and any(str(x) == "[ Reuse last ]" for x in labels), labels)
+        check("the seed editor is right-aligned",
+              seed_input is not None
+              and seed_input.property("horizontalAlignment") == 2,
+              None if seed_input is None else seed_input.property("horizontalAlignment"))
 
         # Clipboard is the offscreen platform's private clipboard. Exercise the
         # real right-click menu: an output's copied number has to be pasteable

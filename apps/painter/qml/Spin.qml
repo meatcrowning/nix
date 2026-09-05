@@ -10,6 +10,7 @@ Rectangle {
     property real to: 1000000
     property real step: 1
     property int decimals: 0
+    property int textHorizontalAlignment: TextInput.AlignLeft
     property bool editing: input.activeFocus
 
     signal edited(real value)
@@ -57,6 +58,7 @@ Rectangle {
         anchors.leftMargin: 5
         anchors.rightMargin: 5
         verticalAlignment: TextInput.AlignVCenter
+        horizontalAlignment: spin.textHorizontalAlignment
         color: Theme.text
         font: (typeof DeskStyle !== "undefined" && DeskStyle
                        && typeof DeskStyle.editorFontForScale === "function")
