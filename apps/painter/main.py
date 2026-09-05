@@ -2373,10 +2373,18 @@ class Painter(QObject):
         # silently do nothing); the warden raises its own toast when it frees
         # chatter's weights, so there is nothing to announce on this side.
         if not reserved:
+            # Reservation can legitimately wait while chatter finishes a turn
+            # and gives the GPU back.  `busy` cannot begin here — cancel does
+            # not cancel this HTTP request and a second press is not queued yet
+            # — but the status bar must still say what the first press is doing.
+            self._set_status("making room...")
+
             def _go(ok, reason):
                 if not ok:
+                    self._set_status("ready")
                     self.toast.emit(reason, True)
                     return
+                self._set_status("queueing...")
                 self._start_jobs(entry, params, count, True)
 
             self.warden.reserve("comfy",
@@ -2423,9 +2431,11 @@ class Painter(QObject):
             try:
                 built = self.reg.build(entry, p, object_info=self._object_info)
             except G.ValidationError as exc:
+                self._set_status("ready")
                 self.toast.emit(exc.problems[0], True)
                 return
             except G.GraphError as exc:
+                self._set_status("ready")
                 self.toast.emit(str(exc), True)
                 return
             job = self.client.submit(built["prompt"], built["params"])
@@ -2442,6 +2452,7 @@ class Painter(QObject):
         self.gallery.begin_live("", grab=self._live_grab)
         self._live_grab = False
         self._busy = True
+        self._set_status("ready")
         self.busyChanged.emit()
 
     @Slot()

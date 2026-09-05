@@ -211,6 +211,7 @@ Item {
 
                 // (1) the live sampler preview
                 Image {
+                    objectName: "livePreviewImage"
                     anchors.fill: parent
                     visible: pane.showLive
                     // A provider image only reloads when the URL CHANGES, so
@@ -220,6 +221,10 @@ Item {
                     fillMode: Image.PreserveAspectFit
                     cache: false
                     asynchronous: true
+                    // A new tick is a new URL. Keep the last decoded step on
+                    // screen while Qt fetches the replacement from the async
+                    // provider instead of clearing both preview surfaces.
+                    retainWhileLoading: true
                 }
 
                 // (2a) the finished still
