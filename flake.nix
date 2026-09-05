@@ -143,7 +143,11 @@
   {
     nixosConfigurations = {
       top = nixpkgs.lib.nixosSystem {
-        specialArgs = { inherit inputs user; host = "top"; };
+        specialArgs = {
+          inherit inputs user;
+          host = "top";
+          hostProfile = import ./lib/host-profile.nix { host = "top"; };
+        };
         modules = [
           ({ pkgs, ... }: {
             nixpkgs.overlays = overlays;
@@ -157,7 +161,11 @@
           aerothemeplasma-nix.nixosModules.aerothemeplasma-nix
           {
             home-manager = {
-              extraSpecialArgs = { inherit inputs user; host = "top"; };
+              extraSpecialArgs = {
+                inherit inputs user;
+                host = "top";
+                hostProfile = import ./lib/host-profile.nix { host = "top"; };
+              };
               useGlobalPkgs = true;
               useUserPackages = true;
               backupFileExtension = "backup";
@@ -178,7 +186,11 @@
     homeConfigurations = {
       air = home-manager.lib.homeManagerConfiguration {
         pkgs = pkgsAir;
-        extraSpecialArgs = { inherit inputs user; host = "air"; };
+        extraSpecialArgs = {
+          inherit inputs user;
+          host = "air";
+          hostProfile = import ./lib/host-profile.nix { host = "air"; };
+        };
         modules = [
           plasma-manager.homeModules.plasma-manager
           ./lam.nix
