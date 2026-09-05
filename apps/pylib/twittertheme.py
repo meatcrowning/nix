@@ -58,6 +58,13 @@ div:has(> div > [data-testid="tweetTextarea_0"]),
 [data-testid="sidebarColumn"] > div,
 [data-testid="sidebarColumn"] > div > div,
 aside[role="complementary"] {{ background-color:var(--desk-bg)!important; }}
+/* The premium/news cards set rgb(0,0,0) directly on an inner sidebar div.
+   That is deliberately narrower than a global inline-style override: video
+   and image canvases are content, not desktop surfaces. */
+[data-testid="sidebarColumn"] [style*="background-color"],
+[data-testid="sidebarColumn"] [style*="background:"] {{ background-color:var(--desk-bg)!important; }}
+[data-testid="SearchBox_Search_Input"],
+[data-testid="SearchBox_Search_Input"] * {{ background-color:var(--desk-alt)!important; }}
 [role="dialog"] > div, [data-testid="sheetDialog"], [data-testid="Dropdown"], [role="menu"] {{
   background-color:var(--desk-alt)!important; color:var(--desk-text)!important;
   border-color:var(--desk-border)!important; }}
