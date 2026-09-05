@@ -14,7 +14,6 @@ from pathlib import Path
 HOME = Path.home()
 THEME_QML = HOME / ".config/quickshell/Theme.qml"
 PREFIX = HOME / ".wine"
-KDEGLOBALS = HOME / ".config/kdeglobals"
 LIVE = PREFIX / "drive_c/ProgramData/Ableton/Live 11 Suite"
 THEMES = LIVE / "Resources/Themes"
 PREFERENCES = (
@@ -55,20 +54,6 @@ def rgb(value: str) -> str:
     return " ".join(str(int(value[i:i + 2], 16)) for i in (1, 3, 5))
 
 
-def theme_white() -> str:
-    """The normal window foreground KDE minted for the active colour scheme."""
-    group = ""
-    for raw in KDEGLOBALS.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if line.startswith("[") and line.endswith("]"):
-            group = line[1:-1]
-        elif group == "Colors:Window" and line.startswith("ForegroundNormal="):
-            values = [int(value) for value in line.split("=", 1)[1].split(",")]
-            if len(values) == 3 and all(0 <= value <= 255 for value in values):
-                return "#" + "".join(f"{value:02x}" for value in values)
-    raise RuntimeError("no Colors:Window ForegroundNormal in kdeglobals")
-
-
 def apply_wine(p: dict[str, str]) -> None:
     groups = {
         "ActiveBorder": "accent", "ActiveTitle": "accent",
@@ -107,23 +92,18 @@ def apply_ableton(p: dict[str, str]) -> None:
     if theme is None:
         raise RuntimeError(f"no Theme element in {source}")
 
-    # Live's stock Dark theme makes its main surface black and its foreground
-    # the desktop accent. Invert that relationship for this desktop: the old
-    # foreground/accent becomes the surface and KDE's scheme-minted white is
-    # the readable foreground.
-    p = {**p, "surface": p["accent"], "foreground": theme_white()}
     mapping = {
-        "surface": ("MeterBackground", "SurfaceArea", "Desktop", "ScrollbarInnerTrack",
+        "bg": ("MeterBackground", "SurfaceArea", "Desktop", "ScrollbarInnerTrack",
                "SceneContrast", "DisplayBackground", "ControlTextBack",
-               "ControlContrastTransport", "ClipSlotButton", "RetroDisplayBackground",
-               "ControlBackground", "SurfaceBackground", "DetailViewBackground",
+               "ControlContrastTransport", "ClipSlotButton", "RetroDisplayBackground"),
+        "bgAlt": ("ControlBackground", "SurfaceBackground", "DetailViewBackground",
                   "PreferencesTab", "BrowserBar", "ScrollbarOuterTrack"),
         "highlight": ("SurfaceHighlight", "TakeLaneTrackHighlighted",
                       "RetroDisplayBackgroundLine", "InputCurveColor"),
         "border": ("ControlFillHandle", "ControlContrastFrame", "AutomationGrid",
                    "TakeLaneTrackNotHighlighted", "ScrollbarOuterHandle"),
         "dim": ("RangeDisabledOff", "DimmedWaveformColor"),
-        "foreground": ("ControlForeground", "SurfaceAreaForeground", "SelectionFrame",
+        "text": ("ControlForeground", "SurfaceAreaForeground", "SelectionFrame",
                  "ArrangementRulerMarkings", "DetailViewRulerMarkings",
                  "ControlOffForeground", "BrowserSampleWaveform", "LoopColor"),
         "textDim": ("TextDisabled", "ControlDisabled", "RangeDisabled",
