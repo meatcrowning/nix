@@ -19,6 +19,8 @@ def lean(prompt):
 
 
 has("generate an image of a rainy street", "make_image")
+has("gnerate a cute 1:1 1mp pic of hatsune miku", "make_image")
+has("genrate two pics of a sleepy cat", "make_image")
 has("animate this picture into a short clip", "make_video")
 has("show me a photo of an arctic fox", "search_images", "fetch_image")
 has("what albums are in my music library?", "music_library")

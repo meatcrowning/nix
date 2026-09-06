@@ -201,11 +201,17 @@ check("a job call brings its lifecycle companions",
 check("a structured mutation brings its safer companions",
       set(oracle.TOOL_COMPANIONS["move_path"])
       == set(oracle.AGENT_TOOL_GROUPS["write"]))
+check("tag lookup brings the image generator schema",
+      oracle.TOOL_COMPANIONS["booru_tags"] == ["make_image"])
 
 turn([("run_job", {"command": "true", "label": "test"})])
 check("job companions are attached on the next round",
       all(n in names(CHATS[-1]) for n in oracle.EXTRA_TOOL_GROUPS["jobs"]),
       str(names(CHATS[-1])))
+
+turn([("booru_tags", {"query": "hatsune miku"})])
+check("a tag-check round carries make_image next",
+      "make_image" in names(CHATS[-1]), str(names(CHATS[-1])))
 
 turn([("get_tools", {"names": "nonesuch"})])
 result = json.loads([m for m in CHATS[-1]["messages"]
