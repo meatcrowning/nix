@@ -75,11 +75,14 @@ TINT_KEYS = {
     "activeBlend", "inactiveBlend",
 }
 TINT_GROUPS = re.compile(r"^\[(Colors:[A-Za-z]+|WM)\]$")
-BACKGROUND_KEYS = {
-    ("[Colors:Window]", "BackgroundNormal"),
-    ("[WM]", "activeBackground"),
-    ("[WM]", "inactiveBackground"),
+BACKGROUND_GROUPS = {
+    "[Colors:Button]",
+    "[Colors:Complementary]",
+    "[Colors:Tooltip]",
+    "[Colors:View]",
+    "[Colors:Window]",
 }
+BACKGROUND_KEYS = {"BackgroundNormal", "BackgroundAlternate"}
 
 SAT_REFERENCE = 0.30
 
@@ -136,7 +139,11 @@ def mint(template_text, accent_hex, force_name=None, background_hex=None):
             out.append(line)
             continue
         key, _, value = stripped.partition("=")
-        if background_hex and (group, key) in BACKGROUND_KEYS:
+        if (background_hex and group in BACKGROUND_GROUPS
+                and key in BACKGROUND_KEYS):
+            out.append("%s=%s" % (key, ",".join(map(str, hex_to_rgb(background_hex)))))
+        elif (background_hex and group == "[WM]"
+              and key in ("activeBackground", "inactiveBackground")):
             out.append("%s=%s" % (key, ",".join(map(str, hex_to_rgb(background_hex)))))
         elif (TINT_GROUPS.match(group) and key in TINT_KEYS
                 and re.fullmatch(r"\d{1,3},\d{1,3},\d{1,3}", value)):
