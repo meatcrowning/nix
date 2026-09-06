@@ -52,15 +52,17 @@ Item {
     // lower edge by `tailOverlap`: replies point left and user messages point
     // right. They must be ABOVE the native control — behind it their fill is
     // covered by the conversation surface and reads as a detached outline.
-    // Use the control palette rather than Theme.bg: the native button is
-    // lighter than Chatter's view background under Oxygen.
+    // The Oxygen renderer's finished dark button face is Theme.bg here;
+    // palette.button is only its pale base role and does not match what the
+    // style actually paints. The curl must use the finished face tokens or it
+    // reads as a separate light tag under the bubble.
     Shape {
         anchors.fill: parent
         visible: !root.user
         z: 1
         ShapePath {
             strokeWidth: 0
-            fillColor: frame.palette.button
+            fillColor: Theme.bg
             startX: 0; startY: frame.height - root.tailOverlap
             PathLine {
                 x: root.tailWidth
@@ -76,7 +78,7 @@ Item {
         }
         ShapePath {
             strokeWidth: 1
-            strokeColor: root.isError ? Theme.crit : frame.palette.mid
+            strokeColor: root.isError ? Theme.crit : Theme.border
             fillColor: "transparent"
             startX: root.tailWidth; startY: frame.height
             PathCubic {
@@ -94,7 +96,7 @@ Item {
         z: 1
         ShapePath {
             strokeWidth: 0
-            fillColor: frame.palette.button
+            fillColor: Theme.bg
             startX: root.width - root.tailWidth
             startY: frame.height - root.tailOverlap
             PathLine {
@@ -114,7 +116,7 @@ Item {
         }
         ShapePath {
             strokeWidth: 1
-            strokeColor: root.isError ? Theme.crit : frame.palette.mid
+            strokeColor: root.isError ? Theme.crit : Theme.accent
             fillColor: "transparent"
             startX: root.width - root.tailWidth; startY: frame.height
             PathCubic {
