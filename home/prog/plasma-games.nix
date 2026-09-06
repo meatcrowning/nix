@@ -130,7 +130,9 @@ in
       ExecStart = pkgs.writeShellScript "plasma-games-widget-install" ''
         for attempt in $(seq 1 60); do
           if ${pkgs.kdePackages.qttools}/bin/qdbus org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript ${lib.escapeShellArg ''
+            var done = false;
             for (var i = 0; i < panelIds.length; ++i) {
+              if (done) break;
               var panel = panelById(panelIds[i]);
               var widgets = panel.widgets();
               for (var j = 0; j < widgets.length; ++j) {
@@ -143,7 +145,8 @@ in
                 folder.writeConfig("labelMode", 3);
                 folder.writeConfig("labelText", "games");
                 folder.writeConfig("sortMode", 1);
-                return;
+                done = true;
+                break;
               }
             }
           ''} >/dev/null 2>&1; then
