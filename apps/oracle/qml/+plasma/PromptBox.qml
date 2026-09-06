@@ -81,6 +81,7 @@ Item {
         text: root.busy ? "Stop" : (sends ? "Send" : "Continue")
         icon.name: root.busy ? "process-stop"
                    : (sends ? "document-send" : "media-playback-start")
+        icon.color: palette.buttonText
         // §10.2: a button with nothing to act on is disabled, never silently
         // inert. Stopping is always available while a reply is streaming.
         enabled: root.busy || root.armed || root.canContinue

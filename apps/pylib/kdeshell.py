@@ -87,6 +87,7 @@ from kdeshell_icons import (
     icon_search_paths,
     icon_theme_name,
     select_plasma_files,
+    themed_icon,
 )
 
 
@@ -346,6 +347,10 @@ class KdeShell:
 # holds the list rather than a snapshot of it.
 _palette_view_lists = []
 
+# Every live shell, including one without KWin's optional activation watcher.
+# Palette changes still have to replace its already-materialised QIcons.
+_icon_shells = []
+
 # Every live shell that has been told a KWin activation state. A palette change
 # has to re-flatten their window palettes: an explicitly-set widget palette is
 # a snapshot, exactly like a QQuickWidget's, and stops tracking the app's.
@@ -376,6 +381,11 @@ def _redress_palette_views():
             shell._reapply_kwin_group()
         except RuntimeError:          # the window is gone; forget it
             _kwin_shells.remove(shell)
+    for shell in list(_icon_shells):
+        try:
+            shell._refresh_icons()
+        except RuntimeError:          # the window is gone; forget it
+            _icon_shells.remove(shell)
 
 
 def _group_palette(group):
@@ -639,6 +649,7 @@ def _build_shell_class():
             # crop above [his, 2026-08-23: "it might fail to render properly"].
             self._views = [self.view]
             _palette_view_lists.append(self._views)
+            _icon_shells.append(self)
 
             # THE WINDOW FOLLOWS ITS OWN TITLEBAR, not wl_keyboard focus.
             # `kwinactive.py` for the measurement and for why the app cannot
@@ -1557,7 +1568,8 @@ def _build_shell_class():
             act = self._actions.get("__quit")
             if act is None:
                 from PySide6.QtWidgets import QApplication
-                act = QAction(QIcon.fromTheme("application-exit"), "&Quit", self.window)
+                act = QAction(themed_icon("application-exit"), "&Quit", self.window)
+                act.setProperty("_iconName", "application-exit")
                 act.setShortcut(QKeySequence.Quit)
                 act.setShortcutContext(Qt.ApplicationShortcut)
                 act.triggered.connect(QApplication.closeAllWindows)
@@ -1606,7 +1618,8 @@ def _build_shell_class():
                     box.raise_()
                     box.activateWindow()
 
-                act = QAction(QIcon.fromTheme("help-about"), f"&About {name}", self.window)
+                act = QAction(themed_icon("help-about"), f"&About {name}", self.window)
+                act.setProperty("_iconName", "help-about")
                 act.triggered.connect(about)
                 self._actions["__about"] = act
             return act
@@ -1661,7 +1674,7 @@ def _build_shell_class():
                 act.setToolTip(tip)
             icon = str(e.get("icon") or "")
             if icon and act.property("_iconName") != icon:
-                act.setIcon(QIcon.fromTheme(icon))
+                act.setIcon(themed_icon(icon))
                 act.setProperty("_iconName", icon)
 
             # THE SHORTCUT IS THIS FACE'S ALONE. The app's QML `Shortcut`s stand
@@ -1698,6 +1711,17 @@ def _build_shell_class():
                     self._groups[gname] = grp
                 grp.addAction(act)
             return act
+
+        def _refresh_icons(self):
+            """Rebuild action glyphs after the live KDE palette changes."""
+            for act in self._actions.values():
+                name = act.property("_iconName")
+                if name:
+                    act.setIcon(themed_icon(str(name)))
+            if self._search is not None:
+                for act in self._search.actions():
+                    if act.property("_iconName"):
+                        act.setIcon(themed_icon(str(act.property("_iconName"))))
 
         def _refresh(self):
             """A state flip: update the actions in place. Rebuilding the
@@ -1956,7 +1980,8 @@ def _build_shell_class():
             field.setPlaceholderText(placeholder)
             field.setClearButtonEnabled(True)
             field.setMaximumWidth(width)
-            field.addAction(QIcon.fromTheme("edit-find"), QLineEdit.LeadingPosition)
+            find_action = field.addAction(themed_icon("edit-find"), QLineEdit.LeadingPosition)
+            find_action.setProperty("_iconName", "edit-find")
             field.textChanged.connect(on_text)
             self._search = field
             self._search_action = self._append_widget(tb, field)

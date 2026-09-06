@@ -15,6 +15,7 @@ Button {
 
     text: root.label
     icon.name: "edit-delete-remove"
+    icon.color: palette.buttonText
     // A chip is not a command button: it is the file, with a way to take it
     // back. Flat is the KStyle's word for that.
     flat: true
