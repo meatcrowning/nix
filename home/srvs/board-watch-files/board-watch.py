@@ -1,156 +1,29 @@
 #!/usr/bin/env python3
-"""board-watch — spawn ONE headless agent when he newly answers a board decision.
+"""board-watch — spawn one headless agent when he newly answers a board decision.
 
-`~/nix/docs/board.<hostname>.md` — one board per machine — is where he answers
-the questions agents park for him
-(`apps/board/AGENTS.md`). Until this existed, an answer sat there until he next
-opened a terminal and told somebody about it. This closes that loop: the answer
-itself is the trigger.
+`~/nix/docs/board.<hostname>.md` is the per-host board. A newly answered
+decision is the trigger: the watcher moves it out of NEEDS YOU and spawns one
+agent to work it. The same loop also drains the inbox queue and orchestrates
+typed requests.
 
-Deployed to ~/.config/scripts by home/srvs/board-watch.nix, which also carries
-the systemd units and the reasoning for the mechanism. Read that file first.
+The implementation is split on purpose:
+`home/srvs/board-watch.nix` wires the units, `apps/board/boardmove.py` moves
+items in and out of NEEDS YOU, `apps/board/boardwork.py` owns the
+orchestrator/workers/cap, and `apps/board/boardagents.py` owns inboxes.
 
-WHAT IT WILL AND WILL NOT DO — his two decisions, and they are settled:
+What matters here:
 
-  * The agent WORKS, and since 2026-07-29 it MAY REBUILD AND RELOAD — at its
-    own judgement, any hour, under `~/nix/AGENTS.md` -> "When it is okay to
-    rebuild or hot-reload" and nothing looser. It used to be the reverse (never,
-    work left undone with a note) and he lifted it himself: *"it should be any
-    time but should still adhere to the rule that's written down SOMEWHERE"*.
-    Two consequences worth stating: the rule lives in `AGENTS.md` and NOT in
-    this prompt — a fifth paraphrase is how it came to be true nowhere — and
-    what an agent runs or deliberately leaves pending still has to be SAID on
-    the board, because he is at the machine while it happens.
-  * It fires only while he is AT the machine. Away, asleep or locked, the answer
-    is QUEUED, not dropped — see gate() and the "no state update" trick below.
+  * rebuild/reload is allowed at the agent's judgement under `~/nix/AGENTS.md`;
+  * the watcher only fires while he is at the machine; away or locked is queued;
+  * answers are host-stamped, typed inbox messages stay machine-local;
+  * workers run in transient units; detached spawning is the no-user-manager
+    fallback and does not survive this oneshot on the normal deployed path;
+  * the orchestrator is waited on, workers are not;
+  * one timer interval is the worst-case latency for reclaiming a dead run or
+    an unread note.
 
-AND IT TAKES THE ITEM OFF HIM. Answering used to leave the decision sitting in
-NEEDS YOU for the whole run, so the board went on asking him for something he
-had already given. Now the decision is lifted OUT of NEEDS YOU — raw lines
-stashed, nothing written in its place — as the agent is spawned, and one of
-three things brings it back: the agent lands it (`boardctl land`, which the
-prompt below tells it to use), the agent fails and `give_back()` puts the
-decision back byte-for-byte with a bullet saying so, or this process is killed
-outright and the NEXT tick's reconcile() sees a dead owner pid and does the
-same. A decision cannot be away from the board with nothing working on it for
-longer than one timer interval. All of that mechanism is
-`apps/board/boardmove.py`; read its docstring. (It wrote an `## IN FLIGHT` row
-as well until 2026-07-30; the section is gone, the stash is not.)
-
-Consequence worth knowing: an item that has been moved out of NEEDS YOU is no
-longer fingerprinted, so **taking an item off NEEDS YOU by hand suppresses the
-auto-spawn for it**. That is correct — work is already underway — but it means
-whoever moves it owns doing the work.
-
-AND HE CAN TALK TO IT WHILE IT RUNS. The board app draws a box against every
-running agent, because he asked to be able to send "commands / new ideas /
-fixes" to one mid-flight. An agent's stdin is closed, so a message is a FILE:
-the prompt below tells every agent to run `boardctl.py inbox take` between
-steps, `BOARD_AGENT_ID` names its inbox, and anything nobody reads is swept into
-a queue that a run of this script works on its own (`work_the_queue`). The
-mechanism, and the argument that nothing he types can be lost, are in
-`apps/board/boardagents.py`'s docstring.
-
-AND IT ORCHESTRATES. The board app now opens with ONE box — free text, enter,
-into that same inbox — because he asked for a control surface: *"a single box
-that i could type things into, press enter, and have them sent to an inbox. then
-an agent figures out what agents to assign to what"*. So `work_the_queue` no
-longer spawns an agent that does the job; it spawns an ORCHESTRATOR that splits
-the input up and either `dispatch`es workers or `ask`s him a question in NEEDS
-YOU. `apps/board/boardwork.py` owns the verbs, the concurrency cap and the
-prompt; read its docstring before changing any of it. Three consequences here:
-
-  * **This run is waited on; the workers it starts are not.** A worker runs as
-    its OWN transient systemd unit, so four 45-minute runs cannot hold this
-    script's flock — a decision he answers five minutes later still fires on
-    time. It has to be a unit and not merely a detached child: this is a
-    `oneshot`, and a detached child stays in the oneshot's cgroup, so every
-    worker was being killed seconds after it started while the board reported
-    the work as dispatched and in hand (`boardwork._spawn_worker`, 2026-07-29).
-    The orchestrator IS waited on, at a much shorter timeout, because its
-    failure has to put his own sentence back on the board and there is nobody
-    else left to do it.
-  * **A dispatch is a start, not a result.** `reap()` closes out every worker
-    whose process has gone, and one that never recorded anything gets a bullet
-    saying so. He must never be told something landed when it did not.
-  * **A tick also PROMOTES work dispatched above the cap.** Same shape and same
-    guarantee as `reconcile()` and `sweep()`: worst case one timer interval.
-  * **Every spawn passes `--session-id`.** It is how his board says what an
-    agent is actually doing rather than only that it is alive — see
-    `apps/board/boardphase.py`. Losing that flag degrades every card silently.
-
-THE THREE HAZARDS, and how each is defended:
-
-  1. THE FEEDBACK LOOP. An agent that works a decision edits board.md itself
-     (moving the item to LANDED), which fires the watcher again, forever. The
-     defence is SEMANTIC, not authorship-based — do not try to work out who
-     wrote the file, because the honest answer is often "a git merge". Instead
-     fingerprint only the ANSWER-BEARING state of each decision (which options
-     are ticked, plus his free text) and fire only when a decision that was
-     already known becomes newly answered. An item moving to LANDED, a reworded
-     paragraph, a new question, a decision taken off the list: no new answer, no fire.
-  2. THE SYNC ALSO WRITES. nix-docs-sync pulls the other machine's copy every
-     five minutes with no human in the loop. Same filter handles the rewordings
-     and the moved rows — but an ANSWER that arrives that way is a special case,
-     and it is the reason for hazard 4.
-  4. TWO WATCHERS, ONE FILE. This unit runs on `top` and on `book` (it was
-     `top`-only until 2026-07-29, which was simply wrong — an answer typed on
-     book did nothing until he was next at the desktop). Both machines see the
-     same `[x]`, so firing on content alone would put two agents on one job, on
-     two checkouts of the same two repos, both committing and both pushing. The
-     defence is HOST AFFINITY, and it is by construction rather than by
-     agreement: the board app stamps the machine he answered on, `fingerprint()`
-     carries the stamp and `owns()` fires only for this host. Nothing is
-     claimed, nothing is negotiated, and neither machine ever has to know
-     whether the other is switched on. See HOST/DEFAULT_HOST/owns() below.
-  3. CONCURRENCY. Two rapid edits must not put two agents on one shared git
-     index. flock() below, plus systemd's own refusal to run a oneshot twice.
-     (Per machine — hazard 4 is the cross-machine half, and no lock can be.)
-
-FIRST RUN records the whole board and fires nothing: three of his decisions are
-already answered, and waking up to three agents is not the feature. Two things
-that cost a live hot loop on 2026-07-28 and are now rules:
-
-  * **"First" is an explicit marker in the state file, never an inference from
-    the board being empty.** An empty NEEDS YOU is the resting state now.
-  * **A first run still DRAINS THE QUEUE.** Seeding is about not acting on
-    answers that predate this script; a sentence he typed into the box is not
-    one of those, and the queue's trigger is level-triggered, so a run that
-    leaves it full is a run that gets started again immediately.
-
-AND IT WILL NOT SPIN. `spin_guard()` backs the whole tick off to one run a
-minute once several in a row have ended with the queue no emptier than they
-found it, whatever the cause; `board-watch.nix` sets a systemd start limit above
-that as the net for a runaway that never reaches this code at all.
-
-TESTING. Every side effect is overridable by environment, so the trigger, the
-filter, the queue and the dedupe can be exercised without spawning anything:
-
-    BOARD_WATCH_BOARD       store to read (default: this host's own board,
-                            `boardparse.board_path()`)
-    BOARD_WATCH_STATE       state dir    (default ~/.local/state/board-watch)
-    BOARD_WATCH_LOG         log file     (default ~/.cache/board-watch.log)
-    BOARD_WATCH_SPAWN       command run INSTEAD of `claude`; the prompt arrives
-                            on stdin and $BOARD_WATCH_KEY names the decision
-    BOARD_WATCH_GATE        force the at-the-machine gate: `open` or `closed`
-    BOARD_WATCH_REPO        the checkout the agent works in (default ~/nix)
-    BOARD_ORCH_TIMEOUT      seconds an orchestrator run may take (default 900)
-    BOARD_ORCH_MODEL        `--model` for the orchestrator (default
-    BOARD_ORCH_EFFORT       claude-fable-5 / high); the WORKER_ and DECISION_
-                            pair are his spirit choice and are CLAMPED to
-                            `boardwork.SPIRIT_CEILING` — they can lower a
-                            spirit, never raise one. See `boardwork.ROLES`.
-    BOARD_WORK_SPAWN        command run INSTEAD of `claude` for a WORKER
-    BOARD_MAX_WORKERS       the concurrency cap, overriding the file
-    BOARD_MAX_SUMMONERS     how many orchestrators one tick may run at once,
-                            overriding the file (default 1)
-    BOARD_WATCH_SPIN_LIMIT  undrained runs in a row before the backoff (8)
-    BOARD_WATCH_SPIN_WINDOW seconds the streak has to have started within (60)
-    BOARD_WATCH_SPIN_BACKOFF  seconds a backed-off run sleeps for (60)
-    BOARD_WATCH_HOST        pretend to be this machine (default: the hostname)
-    BOARD_WATCH_DEFAULT_HOST  who works an UNSTAMPED answer (default `top`)
-
-`tools/board-watch-test.py` drives all of them against a throwaway copy.
+The rest of the module comments below keep the exact gate, failure and retry
+rules close to the code.
 """
 import fcntl
 import json
@@ -171,40 +44,21 @@ STATE = os.environ.get("BOARD_WATCH_STATE",
 LOG = os.environ.get("BOARD_WATCH_LOG", os.path.join(HOME, ".cache", "board-watch.log"))
 
 # ------------------------------------------------------------ HOST AFFINITY
-#: WHICH MACHINE THIS IS. This unit runs on `top` AND on `book`. Since
-#: 2026-07-30 each watches its OWN board — `docs/board.top.md` /
-#: `docs/board.book.md`, resolved by `boardparse.board_path()` below — so the
-#: `[x]` this one reads was typed on this machine by construction and no answer
-#: can be seen twice.
+#: Which host this is. Since 2026-07-30 each machine watches its own board, so
+#: the host stamp is belt-and-braces for restored copies rather than the
+#: de-duplicator.
 #:
-#: The stamp below is therefore belt-and-braces now, not the de-duplicator it
-#: was when there was one shared file. It is kept: it costs nothing, and it is
-#: what makes a board restored from the other host's synced copy harmless.
-#:
-#: **The host an answer was typed on works it.** The board app stamps it
-#: (`boardparse.set_answer_host`, an HTML comment the parser owns), the
-#: fingerprint below carries it, and `owns()` is the whole filter. Race-free by
-#: construction: nothing is claimed, nothing is negotiated, and no decision
-#: depends on what the other machine is doing or whether it is even switched on.
+#: The board app stamps the answer host, the fingerprint carries it, and
+#: `owns()` is the filter.
 HOST = os.environ.get("BOARD_WATCH_HOST") or os.uname().nodename
 
-#: ...and who works an answer with NO stamp. Only a hand edit in a text editor
-#: produces one now (the app always stamps), plus every answer that predates the
-#: stamp. `top` is the desktop that is always on, so it is the default owner;
-#: book is shut for days at a time and an unstamped answer would sit unworked.
-#: A stated default, not a race: both machines apply the same rule to the same
-#: bytes and exactly one of them says yes.
+#: Unstamped answers default to top: hand edits and pre-stamp answers only.
 DEFAULT_HOST = os.environ.get("BOARD_WATCH_DEFAULT_HOST", "top")
 
-# The kill switch, and it is deliberately a FILE rather than a nix option or a
-# systemd `disable`: he can stop this at 2am with `touch` and no rebuild, and
-# home-manager cannot quietly re-enable it on the next switch the way it would
-# re-enable a unit he disabled by hand.
+# The kill switch is a file so he can stop it with `touch` and no rebuild.
 OFF = os.path.join(STATE, "off")
 
-# Hard wall on one agent. systemd's TimeoutStartSec sits above it as the outer
-# guard; this one is inside the script so the failure is OURS to record on the
-# board rather than a silent SIGKILL from the service manager.
+# Hard wall on one agent; the script records the failure instead of systemd.
 AGENT_TIMEOUT_S = int(os.environ.get("BOARD_WATCH_TIMEOUT", "2700"))   # 45 min
 
 sys.path[:0] = [os.path.join(REPO, "apps", "board"), os.path.join(REPO, "apps", "pylib")]
@@ -214,12 +68,9 @@ import boardparse as bp                                          # noqa: E402
 import boardundo as bu                                           # noqa: E402
 import boardwork as bw                                           # noqa: E402
 
-#: THIS HOST'S STORE, and it has to be resolved after the imports because the
-#: rule lives in `boardparse` — one board per host (`docs/board.<hostname>.md`),
-#: stated once there and restated nowhere. `ensure_board()` seeds an empty one
-#: on a machine that has never had a board (book's first tick) and hands back
-#: the pre-split `board.md` on a checkout where the migration has not landed
-#: yet, so this can never end up watching a file he cannot see.
+#: This host's board path comes from `boardparse`; `ensure_board()` seeds a new
+#: host and keeps old checkouts watching the pre-split file until migration
+#: lands.
 BOARD = os.environ.get("BOARD_WATCH_BOARD") or bp.ensure_board()
 
 
@@ -250,57 +101,20 @@ def log(msg):
 
 # ---------------------------------------------------------------- the fingerprint
 def fingerprint(item):
-    """What "he has answered this" MEANS, reduced to one comparable string.
-
-    Only two things count: which options are ticked, and his free text. Not the
-    title, not the prose, not the option labels, not the `if unanswered` line —
-    an agent rewording any of those is not an answer, and including them would
-    make every editorial pass look like one.
-
-    Option INDEX rather than label for the same reason: a typo fix in an option
-    he already chose must not read as him changing his mind.
-    """
+    """The answer signature: checked options, free text, and host stamp."""
     ticked = ",".join(str(o["index"]) for o in item["options"] if o["checked"])
     return ("idx:" + ticked + "|ans:" + " ".join(item["answer"].split())
             + "|on:" + (item.get("answerHost") or ""))
 
 
 def owns(item):
-    """Is this answer THIS machine's to work? See HOST above.
-
-    The stamp is part of the fingerprint on purpose, so it is also the HAND-OFF:
-    re-answering an item on the other machine restamps it, which reads as a new
-    answer there and as an already-recorded one here. That is the whole takeover
-    story today — deliberate, one gesture, and it cannot double-fire, because
-    only one host is ever named. There is no automatic takeover: a claim would
-    have to live in a file that syncs every five minutes, and a five-minute
-    window in which both machines believe they own an item is exactly the
-    duplicate this exists to prevent.
-    """
+    """Whether this host owns the stamped answer."""
     h = (item.get("answerHost") or "").strip()
     return h == HOST if h else HOST == DEFAULT_HOST
 
 
 def working_keys():
-    """The decision keys a process on this machine is working RIGHT NOW.
-
-    THE LAST GUARD AGAINST FIRING TWICE, and deliberately the one that depends
-    on nothing this system wrote down. Every agent this file spawns carries
-    `BOARD_WATCH_KEY=<key>` in its environment (`spawn()`), so a live process
-    with that variable set IS the decision being worked — no stash to be stale,
-    no registration to have been dropped, no fingerprint to have been rewritten
-    by a sync.
-
-    It exists because on 2026-07-30 every one of those bookkeeping routes was
-    intact and the decision still fired twice: a rebuild killed the tick, the
-    agent lived on, and the stash was the only thing anyone asked. `adopt()`
-    and `retire_finished()` fix that path; this one is what catches the next
-    path nobody has thought of, and the cost is one pass over `/proc`.
-
-    Own processes only — `/proc/<pid>/environ` is mode 0400 and unreadable for
-    anyone else's, which is exactly the right scope: another user's agent is
-    not working his board.
-    """
+    """Decision keys currently held by live processes on this machine."""
     keys = set()
     try:
         pids = [n for n in os.listdir("/proc") if n.isdigit()]
@@ -320,12 +134,7 @@ def working_keys():
 
 
 def item_span(lines, item):
-    """The decision's raw lines, `### n. title` to just before the next heading.
-
-    boardparse hands back indices into the raw line list rather than a span, and
-    the agent needs the whole item as he wrote it — the prose, the options, the
-    `if unanswered` sentence — not a reconstruction.
-    """
+    """The decision's raw lines, from its heading to the next one."""
     start = item["titleLine"]
     end = len(lines)
     for i in range(start + 1, len(lines)):
@@ -336,11 +145,7 @@ def item_span(lines, item):
 
 
 # ------------------------------------------------------------------- the gate
-# "Only while I'm at the machine." Three independent facts, none of them
-# guessed: logind says the graphical session is the foreground one, the
-# compositor answers and has a lit display, and the panel says it is not locked.
-# The last two are Hyprland's to answer; in a Plasma session `_logind_gate`
-# stands in for them.
+# "Only while I'm at the machine": foreground session, lit display, unlocked.
 def _run(cmd, env=None, timeout=10):
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
@@ -372,22 +177,7 @@ def _graphical_session_active():
 
 
 def _logind_gate():
-    """Presence for a session that is NOT Hyprland — the compositor-agnostic half.
-
-    Both machines can log into Plasma as well as Hyprland, and every other fact
-    the gate reads is asked of `hyprctl`. Until 2026-08-19 a Plasma session
-    therefore read as ABSENCE: on book the watcher sat on a typed order logging
-    `no Hyprland instance is answering` and backing off, once a minute, while he
-    was sitting in front of it. A live foreground graphical session with no
-    compositor socket is a different desktop, not an empty chair.
-
-    What is left to read is logind's own LockedHint. The Hyprland path
-    deliberately does not trust it (nothing in that session sets it — see
-    `_panel_says_locked`); under Plasma kscreenlocker does, and it is the only
-    lock signal there is. Verified on book: KDE session c1 reports
-    LockedHint=no unlocked. Unreadable is not locked, for the same reason
-    `_panel_says_locked` returning None is not.
-    """
+    """Plasma fallback: logind provides the foreground-session and lock check."""
     sid = _logind_session()
     if not sid:
         return False, "logind reports no graphical session"
@@ -401,15 +191,7 @@ def _logind_gate():
 
 
 def hypr_env():
-    """The env `hyprctl` needs, DISCOVERED rather than inherited.
-
-    The systemd user manager's HYPRLAND_INSTANCE_SIGNATURE is imported once by
-    hyprland.lua at compositor start and is then whatever the last thing to run
-    `systemctl --user import-environment` said — measured on top 2026-07-28, it
-    pointed at a dead nested sandbox instance while the real session ran under a
-    different signature entirely. So find the instance whose socket actually
-    answers, newest first, and ignore what we were handed.
-    """
+    """Find the live Hyprland environment instead of trusting inheritance."""
     xdg = os.environ.get("XDG_RUNTIME_DIR", "/run/user/%d" % os.getuid())
     root = os.path.join(xdg, "hypr")
     try:
@@ -441,20 +223,7 @@ def _display_lit(env):
 
 
 def _panel_says_locked(env):
-    """`qs ipc call lock status` -> "locked" / "unlocked" / None if it cannot ask.
-
-    The lock is the panel's own (Lock.qml, ext-session-lock via Quickshell), not
-    hyprlock: `qs ipc call lock activate` is what Super+L and hypridle both run.
-    Nothing on this desktop sets logind's LockedHint — checked, neither hypridle
-    nor quickshell contains the string — so logind cannot answer this and asking
-    it would be a confident lie.
-
-    None (the panel is not running, or is running a build without `lock status`)
-    is NOT treated as locked. Blanking on it would mean a panel that failed to
-    reload silently switches the whole feature off; the display test above still
-    catches the away case within 30s of the auto-lock, since hypridle blanks at
-    5m30 and the panel locks at 5m00.
-    """
+    """Ask Quickshell whether the panel says locked; None means no answer."""
     xdg = env.get("XDG_RUNTIME_DIR", "/run/user/%d" % os.getuid())
     for disp in sorted(n for n in os.listdir(xdg) if re.fullmatch(r"wayland-\d+", n)):
         e = dict(env, WAYLAND_DISPLAY=disp)
@@ -491,20 +260,7 @@ def gate():
 
 # ------------------------------------------------------------------ the state
 def load_state():
-    """The record. `seeded` is EXPLICIT, and that is the whole point of it.
-
-    It used to be inferred — `first_run = not state["answers"]` — which is the
-    same thing only for as long as NEEDS YOU is never empty. An empty NEEDS YOU
-    is now the RESTING state (`apps/board/AGENTS.md`), and on 2026-07-28 it
-    became the actual one: everything moved off the list or into LANDED, saved
-    as `{}`, and from then on every single run decided it was the first. 3,151 of
-    them logged `first run: recorded 0 decisions, fired nothing` in a few
-    minutes, each returning before the queue was drained and each re-arming the
-    level-triggered `board-inbox.path` the instant it exited. Two of his
-    sentences sat in the queue through all of it.
-
-    Emptiness is not evidence of anything. Only the marker is.
-    """
+    """Load persisted state; `seeded` stays an explicit marker."""
     try:
         with open(os.path.join(STATE, "state.json")) as f:
             d = json.load(f)
@@ -515,9 +271,7 @@ def load_state():
     d.setdefault("queued", [])
     d.setdefault("runs", [])
     d.setdefault("spin", {})
-    # UPGRADE, for a state file written before the marker existed: the file's
-    # EXISTENCE is the evidence, because only a completed run writes one. So it
-    # has been seeded, whatever `answers` happens to hold today.
+    # Pre-marker files are already seeded because only a completed run writes one.
     d.setdefault("seeded", True)
     return d
 
@@ -535,23 +289,7 @@ def save_state(d):
 
 
 # -------------------------------------------------- telling him it went wrong
-#: Every bullet this file writes is `FAILED:` — the tag `boardparse.TODO_TAGS`
-#: keeps for "it was attempted and nothing landed". That is the whole reason the
-#: tag set is not just his three: these four templates exist so a failure cannot
-#: read as information, and the tag now says so in the first word.
-#: The first line of each template fits `boardparse.SUMMARY_MAX_WORDS` — about
-#: a dozen words after the tag — with the story on indented continuation lines,
-#: because these go through the same `add_todo_bullet` checks as everything
-#: else and a refused failure note is the one failure this file must not have.
-#: `{how}` and the interpolated titles stay OFF the first line for that reason:
-#: their length is not this file's to choose.
-#:
-#: **`oneline(code=True)` brings its OWN backticks — the template must not add
-#: a second pair.** A doubled span (``x``) is not a span at all: the empty pair
-#: at each end is what `boardparse._CODE` matches, and everything between them
-#: reverts to countable prose. That is what refused the dead-worker note below
-#: on 2026-07-31 (35 words against a cap of 12), so Halphas died leaving nothing
-#: on his board at all — the exact failure this file exists to prevent.
+#: Failed bullets stay short enough for `boardparse` and use one code span only.
 FAIL_TEMPLATE = (
     "- FAILED: **board-watch did not finish decision {num}** - nothing was "
     "committed.\n"
@@ -559,20 +297,7 @@ FAIL_TEMPLATE = (
     "above. Log: `~/.cache/board-watch.log`\n")
 
 
-#: A worker's process is gone and it never used `note`, `land` or `ask`. It did
-#: not finish, and the one thing this system must never do is let that read as
-#: done — so it lands in WAITING ON YOU TO DO in words, quoting the task, since
-#: by the time this runs the worker's card has already left his board.
-#:
-#: **What he typed goes in a code span, and through `bp.oneline`.** It is DATA,
-#: not prose: the separation checks (`boardparse.check_one_ask`) read `**`, a
-#: tag and a phrase counting other work as structure, and a newline in it used
-#: to make the template's second line an untagged bullet — either way the note
-#: saying a worker died would be refused, which is the one failure this file
-#: exists to prevent. Same for `{title}` and `{text}` below.
-#:
-#: ...and the span is the FORMATTER'S, never the template's — see FAIL_TEMPLATE
-#: above for what the doubled pair cost.
+#: A worker that recorded nothing must come back as a failure, not a result.
 WORKER_FAIL = (
     "- FAILED: **a spirit stopped without finishing** - it was working on "
     "{task}.\n"
@@ -581,13 +306,7 @@ WORKER_FAIL = (
     "again to have another go. {where}\n")
 
 
-#: The same death, with the cause: the 45-minute cap (RuntimeMaxSec) cut the
-#: worker off mid-work. Not a failure of the work, and — unlike a decision
-#: agent — not something that resumes on its own, so the tag stays FAILED and
-#: the wording says what actually happened rather than leaving him to guess
-#: why a spirit that was working fine stopped. `boardwork.reap()` stamps the
-#: record (`capped`) from the unit's journal, which is the one record of the
-#: cap that survives `--collect`.
+#: A worker capped at 45 minutes is still a failure, just with the cause named.
 WORKER_CAP_FAIL = (
     "- FAILED: **the {cap}-minute cap cut the spirit off mid-work**\n"
     "    It was working on {task} when the cap SIGTERMed it; nothing landed, "
@@ -595,20 +314,7 @@ WORKER_CAP_FAIL = (
     "have another go. {where}\n")
 
 
-#: Where to READ what it did, on that same continuation line — one path, not a
-#: paragraph. `claude -p` writes its stdout ONCE, at exit, so the `.log` of a
-#: worker that was killed is a POINTER rather than a record: since 2026-07-30
-#: `boardwork` writes it a header at spawn and a post-mortem at reap, and puts
-#: the transcript path on the failed record as `rec["transcript"]`
-#: (commit f3d5b4d). Naming that path here saves the hop through the log, which
-#: is the hop he has to take at exactly the moment he wants an answer fastest.
-#: Older records — and any path where the spawn never recorded a session —
-#: carry no such key, so the log-only wording stays as the fallback rather than
-#: printing an empty span.
-#: The path goes through `bp.oneline(code=True)` for the same reason `{task}`
-#: does: it is DATA. A glob (`transcript_hint` returns one when the file is not
-#: there yet) must not read as `**` structure, and the span keeps the
-#: separation checks off it.
+#: Point at the log or transcript path on the failed record.
 WHERE_LOG = "Log: `~/.cache/board-work/{aid}.log`"
 WHERE_TRANSCRIPT = "Transcript: {transcript} (log: `~/.cache/board-work/{aid}.log`)"
 
@@ -627,27 +333,7 @@ def worker_fail_bullet(rec):
 
 
 def note_on_board(bullet, agent_id=None):
-    """Add one bullet to WAITING ON YOU TO DO.
-
-    He must be able to see that something was attempted and failed WITHOUT
-    reading a log, so a failure that only reached the log is a failure that did
-    not happen. `boardmove.note` is the shared implementation — the same
-    targeted line insert, advisory lock, digest re-check and atomic replace
-    `boardctl` and the app use, so three writers cannot interleave into a
-    half-written store.
-
-    `agent_id` names the agent the bullet is a RESULT for, so the summon note
-    that announced it goes with it (`boardparse.drop_summon`). It has to be
-    passed explicitly here: this process is the watcher, not the worker that
-    died, so `BOARD_AGENT_ID` would name the wrong one or nobody.
-
-    ...and for exactly that reason the gutter's `by=` is **this program**, not
-    that agent. The bullet says the spirit recorded nothing; an attribution
-    naming it would be the same sentence claiming it did. `boardmove.note`
-    resolves the author from the environment, which here names nobody, so this
-    is the fallback and it is an honest one — the watcher genuinely is what put
-    the line on the board.
-    """
+    """Add one failure bullet to WAITING ON YOU TO DO."""
     try:
         return bm.note(bullet, path=BOARD, agent_id=agent_id, by="board-watch")
     except (bm.BoardError, OSError) as e:
@@ -761,61 +447,7 @@ DENY = bw.DENY
 
 def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision",
           retry=True, on_start=None, detach=False, model=None, effort=None):
-    """Run the agent, and WAIT for it. Returns (exit code, how it ended, seconds).
-
-    **`detach=True` starts it in its OWN transient unit and returns at once**,
-    with `rc = None` — the caller then has nothing to report and must not
-    pretend otherwise. That is how a DECISION runs (see `tick`): waiting for one
-    held this unit for the whole run, and a sentence he typed in the meantime
-    sat in the queue until it returned. [his, 2026-08-01, of an order queued
-    behind a five-minute decision run: *"why is there currently a pending order
-    for solomon yet he is sitting there doing nothing"*.] The close-out is not
-    lost, it MOVES: `boardmove.retire_finished()` drops the stash of an agent
-    that reported and exited, and `reconcile()` hands the decision back if it
-    exited without reporting — both already run at the top of every tick, for
-    exactly this shape (an agent whose tick was killed under it).
-
-    What detaching gives up, and it is stated rather than papered over: the
-    immediate `rc`, the `agent said:` line in this log (its stdout goes to
-    `~/.cache/board-work/<key>.log`, which is also where the card's drawer
-    looks), and the one-shot retry on a transient API error below. A decision
-    that dies that way is handed back with his answer intact and he sees the
-    FAILED bullet, which is the same outcome the retry was avoiding one round
-    of. Orchestrator runs are still WAITED on: they are short by design and the
-    tick has nothing else to do while one plans.
-
-    A run that dies on a TRANSIENT platform error — the CLI printing an API
-    5xx / overload line and exiting nonzero (`boardwork.TRANSIENT_RE`, the same
-    pattern `reap()` requeues a worker on) — is retried ONCE, immediately. The
-    2026-07-29 Anthropic outage is why: an orchestrator that dies at launch
-    costs him his own sentence back as a FAILED bullet asking him to type it
-    again, when the system still holds it verbatim. The retry passes no
-    `--session-id` (the first run consumed it; the card's observed line
-    degrades for the retry, which is the honest trade), and `retry=False` on
-    the recursive call is what makes a second transient death final.
-
-    `BOARD_AGENT_ID` is what makes his mid-flight notes reachable: it is the
-    inbox `boardctl.py inbox take` reads with no argument, and the same id the
-    board app addresses the box on this agent's row to.
-
-    `session` is the `--session-id` uuid, and it is what lets his board say what
-    this agent is actually doing rather than only that it is alive: the
-    transcript at `~/.claude/projects/*/<uuid>.jsonl` is written live and
-    `apps/board/boardphase.py` tails it. Chosen here, never guessed at.
-
-    Contrast `boardwork._spawn_worker`, which does NOT wait: a worker is
-    detached so a tick cannot be held open by it. The two runs this function
-    starts — a decision and an orchestrator — are waited on deliberately,
-    because a failure has to be reported onto the board in his own words and
-    there is nobody else left to do it.
-
-    `on_start(pid)` is called with the agent's own pid as soon as it exists,
-    and it is why this uses `Popen` rather than `subprocess.run`. WAITING FOR
-    IT IS NOT OWNING IT: this process is a oneshot systemd stops on every
-    `home-manager switch`, the agent is not, and something has to be able to
-    say which of the two the item's liveness follows (`boardmove.adopt`).
-    Called for the retry too, which is a different process.
-    """
+    """Run the agent and wait for it. Detached workers are the exception."""
     stub = os.environ.get("BOARD_WATCH_SPAWN")
     env = dict(os.environ, BOARD_WATCH_KEY=agent_id, BOARD_AGENT_ID=agent_id)
     # SAY SO, LOUDLY, rather than failing as a bare ENOENT. The CLI reaches this

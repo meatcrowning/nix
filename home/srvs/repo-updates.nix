@@ -1,42 +1,18 @@
 { pkgs, lib, config, ... }:
 
-# "The other machine pushed" — as a toast with buttons on it.
+# "The other machine pushed" — as a toast with buttons.
 #
-# Everything else that crosses the two machines syncs itself: docs/ every 5
-# minutes (nix-docs.nix), the whole of ~/.claude on the same cadence
-# (claude-state.nix). ~/nix does not, and cannot sensibly: pulling the flake is
-# only half of landing it, the other half is a switch that swaps the machine you
-# are sitting at. So the pull stays a decision — and this makes the decision
-# reachable instead of remembered.
+# `~/nix` is the bit that does not sync itself: pulling the flake is only half
+# of landing it, the other half is a switch on the machine you are sitting at.
+# This daemon keeps that decision reachable and delegates the logic to
+# `repo-updates-files/repo-updates.py`.
 #
-# The daemon (repo-updates-files/repo-updates.py, and the reasoning is in its
-# docstring) checks origin/main at session start, on resume from suspend, on a
-# once-a-minute `git ls-remote` peek (one round trip, no objects — the full
-# fetch only runs when that sha is new) and on a slow poll as the backstop,
-# then offers a persistent toast carrying what the change will
-# COST: a compositor pin bump means a from-source Hyprland build on book and no
-# live plugin hot-swap either way, while an apps/-only change means no rebuild
-# at all. Click "Pull & apply" and it pulls, rebuilds through the host's own
-# wrapper (which owns preflight and the shared rebuild lock) and reloads what
-# can be reloaded — under ONE toast, raised the moment the button is clicked and
-# morphed in place until the result, naming each step and drawing a progress bar
-# for it (the `value` hint, docs/DESIGN.md §8.1); click "Dismiss" and it stays
-# quiet until something NEWER lands.
+# It watches `origin/main`, classifies the cost of applying it, and keeps one
+# persistent toast up while the user decides. The host branch stays inside the
+# script (`sudo rebuild-top` vs `rebuild-air`); everything else is shared.
 #
-# BOTH MACHINES, one file: the host branch is inside the script (`sudo
-# rebuild-top` vs `rebuild-air`), because everything else about it — the fetch,
-# the classifier, the toast, the resume detection — is identical on top and
-# book.
-#
-# WHY IT IS A DAEMON and not a timer + a path unit like its board-* siblings:
-# it has to be holding a `notify-send -w` when he clicks the button. That call
-# blocks until the toast closes and prints which action was invoked, and there
-# is nothing else in the freedesktop protocol that tells a one-shot which button
-# a person pressed minutes later.
-#
-# `nix-pull` is the same code with no toast: the by-hand entry point, and what
-# the toast falls back to naming when notification actions are switched off in
-# the panel.
+# It has to be a daemon because `notify-send -w` must stay alive for the button
+# press that closes the toast. `nix-pull` is the no-toast entry point.
 
 {
   xdg.configFile."scripts/repo-updates.py" = {
@@ -44,11 +20,8 @@
     executable = true;
   };
 
-  # The toast's own seal — Gaap, who carries a change from one machine to the
-  # other (home/prog/app-icons/repo-updates.svg). The daemon sends it with
-  # `-i repo-updates`; installed into hicolor so the name resolves, and declared
-  # a SEAL so the panel paints its currentColor strokes in the focus colour
-  # instead of the file's baked fallback (home/prog/app-icons/seals.nix).
+  # Toast icon for the change-notification, installed into hicolor and declared
+  # as a seal so the panel paints it in the focus colour.
   home.file.".local/share/icons/hicolor/scalable/apps/repo-updates.svg".source =
     ../prog/app-icons/repo-updates.svg;
   my.appSeals = [ "repo-updates" ];
@@ -76,14 +49,8 @@
       Type = "simple";
       Restart = "on-failure";
       RestartSec = 10;
-      # Pinned PATH, same shape and same reason as board-notify.service: the
-      # ambient systemd-user PATH reaches none of this. `git` and `nix` do the
-      # survey, `notify-send` raises the toast, and the profile tail is where
-      # the rebuild wrappers live — `rebuild-air` on book (a writeShellScriptBin
-      # in the home profile), `sudo`/`rebuild-top` on top. The nix daemon
-      # profile is named explicitly for `nix build --dry-run` — that is where
-      # book's `nix` lives, outside every other entry here. NOT `%h`: systemd
-      # expands specifiers in ExecStart but not in Environment=.
+      # Pinned PATH for the survey, toast and rebuild wrappers; `%h` is not
+      # expanded in Environment=.
       Environment = [
         "PATH=${lib.makeBinPath [ pkgs.coreutils pkgs.git pkgs.libnotify ]}:${config.home.homeDirectory}/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/run/current-system/sw/bin:/etc/profiles/per-user/lam/bin:/run/wrappers/bin:/usr/bin:/bin"
       ];

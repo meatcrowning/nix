@@ -1,46 +1,19 @@
 { pkgs, lib, hostProfile, config, ... }:
 
-# A desktop notification when a spirit's completion lands on this host's
-# board (`docs/board.<hostname>.md`).
+# Toast when a worker completion lands on this host's board.
 #
-# board-watch (home/srvs/board-watch.nix) closes the loop on the OTHER half of
-# the store — a newly ANSWERED decision. This one closes the loop on a worker's
-# RESULT: a WAITING ON YOU TO DO bullet tagged COMPLETION (the "done, no errors.
-# pushed." record a finishing worker writes — tag being renamed to ENACTED by a
-# parallel change, see board-notify.py) fires a toast, unless goetia is already
-# the focused window, in which case he is looking at the store and the toast
-# would be noise.
+# board-watch covers answered decisions; this covers completed work. The focus
+# signal must come from Hyprland's event socket, so this is a persistent daemon
+# rather than a path unit. Its behaviour lives in
+# `board-notify-files/board-notify.py`.
 #
-# NOT A PATH UNIT, and the whole reason this is its own unit with its own
-# process: focus. Whether goetia has focus must come from Hyprland's EVENT
-# SOCKET, not from `hyprctl activewindow` — that reports CFocusState::window(),
-# which rawSurfaceFocus never clears (memory hyprctl-activewindow-lies), so a
-# one-shot snapshot would wrongly suppress half the time. The socket only
-# pushes on CHANGE and sends no snapshot on connect (measured on top
-# 2026-08-01), so the subscription has to be held open by a long-lived process.
-# That process IS this service: a simple (persistent) daemon that keeps the
-# current focus in memory from the event socket and polls the board for new
-# completions. All the behaviour — the tag, the once-per-completion dedupe, the
-# focus gate, the seed-first-run, the kill switch — is in
-# board-notify-files/board-notify.py; read its docstring before changing
-# anything here.
-#
-# BOTH MACHINES, HOST-NEUTRAL. `home/` is shared verbatim to book, the daemon
-# discovers the live Hyprland instance itself (never an inherited
-# HYPRLAND_INSTANCE_SIGNATURE — see hypr-env.nix), and `notify-send` comes from
-# a nix `libnotify` here. If no compositor answers there is no focus signal, and
-# the safe default (fire, don't wrongly suppress) applies — that is deliberate
-# and is described in the script. Notifications are harmless when he is locked
-# or away, so there is no board-watch at-the-machine gate.
-#
-# It starts at login via default.target (home-manager systemd.user.startServices
-# enables it); if the compositor is not up yet, the daemon just re-discovers
-# until it is. `Restart=on-failure` keeps it alive across a transient crash.
-# Kill switch: `touch ~/.local/state/board-notify/off`, no rebuild.
+# One code path on both machines: the daemon discovers the live Hyprland
+# instance itself, `notify-send` comes from `libnotify`, and the safe default is
+# to fire if focus cannot be read. It starts at login, restarts on failure, and
+# can be disabled with `touch ~/.local/state/board-notify/off`.
 
-# Must run under the board's python: board-notify.py imports the board module set
-# (boardparse -> glyphs -> PySide6). Bare pkgs.python3 crash-looped it (Type=simple
-# + Restart=on-failure => hundreds of restarts). Same host split as board.nix.
+# Use the board Python: the script imports the board module set, so bare
+# pkgs.python3 crash-loops it.
 let boardPython = hostProfile.boardPython pkgs;
 in
 {
@@ -55,18 +28,8 @@ in
       Type = "simple";
       Restart = "on-failure";
       RestartSec = 3;
-      # Pinned PATH for the same reason every other unit here pins it: the
-      # ambient systemd-user PATH reaches none of what this needs. `hyprctl`
-      # answers the discovery probe (it resolves the live instance, see
-      # board-notify.py's discover_event_socket) and comes from a home profile;
-      # `notify-send` comes from libnotify below. The profile tail names both
-      # machines' layouts because this deploys to book as well:
-      #   ~/.nix-profile/bin              standalone home-manager (book)
-      #   /etc/profiles/per-user/lam/bin  home-manager as a NixOS module (top)
-      #   /run/current-system/sw/bin      NixOS system packages (top)
-      #   /usr/bin:/bin                   Fedora (book)
-      # NOT `%h`: systemd expands specifiers in ExecStart but NOT in
-      # Environment=, so the real home directory is interpolated here.
+      # Pinned PATH for the discovery probe and the toast; `%h` is not expanded
+      # in Environment=.
       Environment = [
         "PATH=${lib.makeBinPath [ pkgs.coreutils pkgs.util-linux pkgs.libnotify ]}:${hostProfile.profilePathTail config.home.homeDirectory}"
       ];
