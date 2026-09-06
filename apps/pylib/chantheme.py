@@ -87,7 +87,8 @@ def css(pal, chrome=None):
     """
     p = pal
     bg = p("bg")
-    reply = p("bgAlt")           # OneeChan mainColor (reply/dialog bg)
+    bg_alt = p("bgAlt")
+    reply = bg_alt                # OneeChan mainColor (reply/dialog bg)
     header_bg = p("bgAlt")       # headerBGColor
     border = p("border")         # brderColor + inputbColor
     inp = p("highlight")         # inputColor (field bg)
@@ -150,7 +151,10 @@ def css(pal, chrome=None):
         ".postInfo span.postNum.desktop>a,.postInfo span.postNum.desktop>a:hover{"
         "color:%s%s;opacity:1%s}" % (text, i, i),
         # --- backgrounds ---
-        "body{background:%s%s}" % (bg, i),
+        # Konsole's displayed canvas is the desktop alternate surface. Keep
+        # this long reading canvas on that same solid colour rather than the
+        # lighter window-frame surface behind it.
+        "body{background:%s%s}" % (bg_alt if light else bg, i),
         # `.inline` and the catalog cells (`Show Background` mode) are
         # reply-type insets OneeChan also paints from `mainColor`, but they
         # were never mapped here — so on a dark palette they kept OneeChan's
