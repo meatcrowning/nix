@@ -15,9 +15,6 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QGuiApplication, QImage, QPalette, QRegion
 from PySide6.QtWidgets import QApplication, QWidget
 
-TITLEBAR_HEIGHT = 34
-
-
 def render_surface(width: int, height: int, palette: QPalette) -> QImage:
     """Render an actual Oxygen styled top-level widget, never mapping it."""
     proxy = QWidget()
@@ -54,7 +51,6 @@ def main() -> int:
         for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
             palette.setColor(group, role, colour)
     image = render_surface(width, height, palette)
-    titlebar = render_surface(width, min(TITLEBAR_HEIGHT, height), palette)
 
     state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
     state.mkdir(parents=True, exist_ok=True)
@@ -62,12 +58,13 @@ def main() -> int:
     temporary = target.with_suffix(".new.png")
     if not image.save(str(temporary), "PNG"):
         return 1
+    # Do not replace identical pixels.  The service below uses this file's
+    # timestamp as its update token; retaining it coalesces a burst of KConfig
+    # writes into one Plasma restart instead of repeatedly restarting the shell.
+    if target.exists() and temporary.read_bytes() == target.read_bytes():
+        temporary.unlink()
+        return 0
     temporary.replace(target)
-    title_target = state / "plasma-panel-titlebar.png"
-    title_temporary = title_target.with_suffix(".new.png")
-    if not titlebar.save(str(title_temporary), "PNG"):
-        return 1
-    title_temporary.replace(title_target)
     return 0
 
 

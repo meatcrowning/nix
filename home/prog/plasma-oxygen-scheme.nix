@@ -56,6 +56,17 @@ let
     export QT_STYLE_OVERRIDE=oxygen
     exec ${panel-surface-python}/bin/python ${./plasma-panel-gradient-files/render-surface.py}
   '';
+  panel-surface-refresh = pkgs.writeShellScript "plasma-panel-surface-refresh" ''
+    target="$HOME/.local/state/plasma-panel-surface.png"
+    before="$(stat -c '%y:%s' "$target" 2>/dev/null || true)"
+    ${panel-surface-renderer}/bin/plasma-panel-surface-renderer
+    after="$(stat -c '%y:%s' "$target" 2>/dev/null || true)"
+    # A palette write changes several KConfig files.  Restart only for a new
+    # image, never for the duplicate events or Plasma's own config saves.
+    if [ "$before" != "$after" ]; then
+      ${pkgs.systemd}/bin/systemctl --user try-restart plasma-plasmashell.service
+    fi
+  '';
   # Plasma's FrameSvg tiles its five-pixel centre.  That works for a texture,
   # but cannot represent one gradient shared by a horizontal and vertical
   # panel.  Overlay the stock shell view with a real screen-space surface;
@@ -109,17 +120,24 @@ in
     ${panel-surface-renderer}/bin/plasma-panel-surface-renderer || true
   '';
   systemd.user.services.plasma-panel-surface = {
-    Unit.Description = "render the shared Plasma panel surface";
+    Unit.Description = "render and apply the shared Plasma panel surface";
     Service = {
       Type = "oneshot";
-      ExecStart = "${panel-surface-renderer}/bin/plasma-panel-surface-renderer";
+      # Scheme minting writes several files in a burst.  Let that settle into
+      # one render/restart, avoiding Plasma's start-limit during a wallpaper
+      # switch.
+      ExecStartPre = "${pkgs.coreutils}/bin/sleep 1";
+      ExecStart = panel-surface-refresh;
     };
   };
   systemd.user.paths.plasma-panel-surface = {
     Unit.Description = "refresh the shared Plasma panel surface after theme changes";
     Path.PathChanged = [
-      "%h/.config/kdeglobals"
-      "%h/.config/plasmarc"
+      # plasma-scheme.py rewrites these when a wallpaper changes.  Unlike
+      # kdeglobals, Plasma itself does not rewrite them on shell startup, so
+      # this cannot feed a shell restart back into another refresh.
+      "%h/.local/share/color-schemes/OxygenDarkFlat.colors"
+      "%h/.local/share/color-schemes/OxygenLightFlat.colors"
     ];
     Install.WantedBy = [ "default.target" ];
   };
