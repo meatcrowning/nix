@@ -64,6 +64,16 @@ if [ "$WALLPAPER_ONLY" = 1 ]; then
     exit 0
 fi
 
+# A completed pick is the durable shared choice.  Keep that tiny bit of state
+# beside the writable wallpaper set: wal-repo-sync.sh validates it and commits
+# the basename with any newly imported image, so the next Plasma login on both
+# hosts starts from the picture the user actually selected.  Previews stop
+# above and never alter the durable choice.
+WALL_DIR="$(realpath "$HOME/Pictures/wall" 2>/dev/null || true)"
+if [ -n "$WALL_DIR" ] && [ "$(dirname "$WALL")" = "$WALL_DIR" ]; then
+    printf '%s\n' "${WALL##*/}" > "$WALL_DIR/.current-wallpaper"
+fi
+
 # ---- 3. load the palette (already extracted by wal-prepare.sh above) ---------
 eval "$(cat "$THEMES/$KEY.env")"
 echo "wal-set: source = ${IW}x${IH}, mode = $MODE, accent = #$ACCENT"
