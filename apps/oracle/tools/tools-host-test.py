@@ -52,6 +52,7 @@ print(json.dumps({
     "sessions": o.Ollama._sessions_argv(),
     "ui_sessions": o.Sessions._store_argv(),
     "host_arg_default": o.HOST_ARG["description"],
+    "host_context": o.HOST_CONTEXT_NOTE,
     "write_takes_host": [t["function"]["name"] for t in o.FILE_TOOLS
                          if "host" in t["function"]["parameters"]["properties"]],
 }))
@@ -111,6 +112,11 @@ check("...and the OTHER one over ssh",
       is_ssh(here["fs_" + other]), " ".join(here["fs_" + other][:4]))
 check("the host argument says which is the default, by name",
       here["local"] in here["host_arg_default"], here["host_arg_default"])
+check("every turn names the machine and the laptop/workstation roles",
+      here["local"] in here["host_context"]
+      and "book" in here["host_context"] and "top" in here["host_context"]
+      and ("remote laptop" in here["host_context"]),
+      here["host_context"])
 check("every file tool takes it, writes included",
       set(here["write_takes_host"]) >= {"read_file", "list_dir", "write_file",
                                         "edit_file", "move_path", "delete_path",

@@ -1453,14 +1453,11 @@ HOST_ARG = {"type": "string", "enum": ["top", "book"],
 #: one runs THROUGH tools/sandbox-fs.py against a root it cannot escape (see FS
 #: below and apps/oracle/AGENTS.md) — but since 2026-08-22 BOTH roots are `/`
 #: by default, so the containment is a mechanism kept for the env overrides,
-#: not a jail the model is in. The READ-ONLY tools (list_dir/read_file/
-#: find_files/search_text/show_tree) reach EITHER machine — they take an
-#: optional `host` ("top"/"book") so the model can read book's files from a top
-#: window and top's from a book window, not just whichever machine its own
-#: compute happens to run on. The MUTATING tools (write/edit/move/delete/
-#: make_dir) always land on `top` and take no `host`. Every path is
-#: root-relative, and reads are paginated so the model asks for more rather
-#: than assuming a short read is the whole file.
+#: not a jail the model is in. Every tool takes an optional `host`
+#: ("top"/"book"), defaults to the machine carrying the Chatter window, and
+#: reaches the other machine over the tailnet. Every path is root-relative,
+#: and reads are paginated so the model asks for more rather than assuming a
+#: short read is the whole file.
 FILE_TOOLS = [
     {"type": "function", "function": {
         "name": "list_dir",
@@ -1648,8 +1645,7 @@ FILE_TOOLS.append({"type": "function", "function": {
         "hash": {"type": "boolean",
                  "description": ("Also compute the file's sha256. Off by "
                                  "default: it reads every byte.")},
-        "host": {"type": "string", "enum": ["top", "book"],
-                 "description": "Which machine the file is on. Default 'top'."}},
+        "host": dict(HOST_ARG)},
         "required": ["path"]}}})
 
 FILE_OP = {"list_dir": "list", "read_file": "read", "write_file": "write",
@@ -1674,9 +1670,8 @@ HOUSE_FILES = ("AGENTS.md", "CLAUDE.md")
 #: touches most. The pointer costs a line; reading it is the model's own call,
 #: with its own read_file, only when it is actually working in that tree.
 
-#: The READ-ONLY tool names — these five (and only these) accept a `host`
-#: argument, since only they resolve against the whole-filesystem READ_ROOT
-#: rather than the single sandbox on top (see `Ollama._fs_argv`).
+#: The read-only subset, used for result handling. Every file tool accepts a
+#: `host`; these are distinguished because they resolve through READ_ROOT.
 FILE_READ_TOOL_NAMES = {"list_dir", "read_file", "find_files", "search_text",
                         "show_tree", "file_metadata"}
 
@@ -3192,6 +3187,28 @@ if TOOLS_HOST not in ("top", "book"):
     TOOLS_HOST = LOCAL_HOST
 #: True only when the work has to leave this machine — i.e. book reaching top.
 TOOLS_REMOTE = TOOLS_HOST != LOCAL_HOST
+
+#: Host identity belongs in every turn, not behind describe_self. A model on
+#: book otherwise sees identical tools and an Ollama endpoint tunnelled from
+#: top, then reasonably assumes it is on the workstation and edits the wrong
+#: machine. "book" is the hostname; "air" is the flake/profile name and the
+#: laptop's role, so say both once and state where unqualified tools act.
+if LOCAL_HOST == "book":
+    HOST_CONTEXT_NOTE = (
+        "You are running inside chatter on book (the air profile), the remote "
+        "laptop the user is using you through right now. Treat book as your "
+        "local machine: unqualified file, shell, job, media and device tools "
+        "act on book. top is the workstation and remains reachable by tools "
+        "that take a host argument. Do not infer that Ollama running on top "
+        "means your window or the user's current desktop is on top."
+    )
+else:
+    HOST_CONTEXT_NOTE = (
+        "You are running inside chatter on top, the workstation. Unqualified "
+        "file, shell, job, media and device tools act on top. book (the air "
+        "profile) is the remote laptop and remains reachable by tools that "
+        "take a host argument."
+    )
 
 #: oracle's own config dir (shared with tavily.key). Two optional, no-rebuild
 #: files drive the model selector — drop them in and relaunch, same as the key:
@@ -6070,7 +6087,7 @@ class Ollama(QObject):
         lead = self._base_prompt()
         if lead:
             blocks.append(lead)
-        blocks += [PERSISTENCE_NOTE, GROUNDING_NOTE, CAPABILITY_NOTE,
+        blocks += [HOST_CONTEXT_NOTE, PERSISTENCE_NOTE, GROUNDING_NOTE, CAPABILITY_NOTE,
                    RECALL_GUIDANCE, SAVE_GUIDANCE, MARKER_NOTE]
         tools = tools_note()
         if tools:
@@ -6222,6 +6239,8 @@ class Ollama(QObject):
             "provider": {"backend": "ollama", "endpoint": OLLAMA},
             "app": "chatter (the oracle ollama chat window)",
             "host": socket.gethostname(),
+            "host_role": ("remote laptop (air profile)" if ON_BOOK
+                          else "workstation"),
             # WHERE THE TOOLS ACT. A model that assumed "top" wrote a file on
             # the wrong machine; it is a fact about this window, so it is
             # reported rather than left to be inferred.
@@ -9272,19 +9291,16 @@ class Ollama(QObject):
                                                           "url": url})}
         self._tool_done(remaining, calls)
 
-    # ---- the file tools (jailed, on top) ----
+    # ---- the file tools (host-selectable; default to the window's host) ----
 
     @staticmethod
     def _fs_argv(target_host=None):
         """The command that runs one file op through tools/sandbox-fs.py.
 
-        Mutating ops, and read ops with no explicit `target_host`, always land
-        on `top` — unchanged from before, since the sandbox only ever lives
-        there: local when this window IS top, over the ssh master
-        tools/ollama-tunnel.sh already holds open (OLLAMA_SSH*) when it is
-        book. A read-only op may instead ask for the OTHER machine via
-        `target_host` ("top"/"book", his ask, 2026-08-11): if that is the
-        machine this window already runs on it is once again a local call
+        Every file op defaults to TOOLS_HOST (normally the machine carrying
+        this window), and every schema may select the other machine with
+        `target_host` ("top"/"book"). If that is the machine this window
+        already runs on it is a local call
         (SANDBOX_ROOT/READ_ROOT are the same paths on both — user `lam`,
         identical layout); otherwise it is a fresh ssh call to that host over
         the tailnet (both directions work — MagicDNS `top`/`book`; see
@@ -10861,7 +10877,9 @@ class Ollama(QObject):
     def _fs_heading(name, args):
         a = args if isinstance(args, dict) else {}
         host = str(a.get("host") or "").strip().lower()
-        suffix = " (book)" if name in FILE_READ_TOOL_NAMES and host == "book" else ""
+        suffix = (" (" + host + ")"
+                  if name in FILE_TOOL_NAMES and host and host != TOOLS_HOST
+                  else "")
         if name in ("find_files", "search_text"):
             verb = "finding" if name == "find_files" else "searching"
             return verb + " " + str(a.get("pattern") or "") + suffix
