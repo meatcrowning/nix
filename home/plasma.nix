@@ -114,7 +114,10 @@ in
               dateFormat = "longDate";
               displayTimezoneFormat = "FullText";
               fontFamily = "Oxygen-Sans";
-              fontSize = 9;
+              # The deliberately compact clock text from the live panel. Keep
+              # this in the shared layout so a panel migration/rebuild does
+              # not restore the earlier 9-point setting on either host.
+              fontSize = 6;
               fontStyleName = "Sans-Book";
               fontWeight = 400;
               use24hFormat = 0;
