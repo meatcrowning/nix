@@ -1,6 +1,22 @@
 { pkgs, lib, host, ... }:
 
-{
+let
+  # NixOS gives Top's Plasma applications these paths system-wide. Air's Fedora
+  # session does not, so an unwrapped Konsole silently falls back to Qt's flat
+  # style even though the Oxygen package is present in the profile.
+  konsoleOxygen = pkgs.symlinkJoin {
+    name = "konsole-oxygen";
+    paths = [ pkgs.kdePackages.konsole ];
+    nativeBuildInputs = [ pkgs.makeWrapper ];
+    postBuild = ''
+      wrapProgram "$out/bin/konsole" \
+        --prefix QT_PLUGIN_PATH : ${pkgs.kdePackages.oxygen}/lib/qt-6/plugins \
+        --prefix XDG_DATA_DIRS : ${pkgs.kdePackages.oxygen}/share:${pkgs.kdePackages.plasma-integration}/share \
+        --set QT_QPA_PLATFORMTHEME kde \
+        --set QT_STYLE_OVERRIDE oxygen
+    '';
+  };
+in {
   home.packages = with pkgs; [
     qt6.qtdeclarative
     # kdePackages.polkit-kde-agent-1's actual binary lives at
@@ -23,7 +39,7 @@
     # The Dynamic scheme renders the KStyle-painted window field beneath the
     # terminal text. Keep Konsole managed on both hosts so that scheme and its
     # deliberate chrome defaults do not depend on Fedora's system package.
-    konsole
+    konsoleOxygen
     qttools
     elisa
     # These are the actual applications named by Plasma's default-handler
