@@ -1,0 +1,16 @@
+{
+    "KPackageStructure": "KWin/Script",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "lam"
+            }
+        ],
+        "Description": "replace plasma's untouched three-column tile layout with a 3 by 2 grid",
+        "Icon": "view-grid",
+        "Id": "six-tile-grid",
+        "License": "GPL",
+        "Name": "3 by 2 tile grid"
+    },
+    "X-Plasma-API": "javascript"
+}
