@@ -1020,9 +1020,10 @@ there, and each was worth measuring:
   job is actually submitted (cancel cannot cancel an in-flight warden HTTP
   request), but the status bar says `making room...` while `/reserve` is
   pending and `queueing...` while the accepted graph is being submitted.
-- **The model list does not need the backend.** The registry scan runs on the
-  first tick and retries while it comes up empty, because the sshfs mount may
-  still be landing.
+- **The model list does not need the backend.** The registry scan runs in its
+  own one-thread pool on the first tick and retries while it comes up empty,
+  because the sshfs mount may still be landing. Never move its remote walk and
+  stats back onto the GUI thread; even a cached scan can block on SSHFS.
 
 ## `tools/smoke.py` — the app without the window, and chatter's generator
 
