@@ -130,6 +130,61 @@ def tones(pal: dict) -> dict:
 
 
 
+# Konsole transparency reaches the desktop rather than its parent widget, so
+# the terminal must reproduce Oxygen's actual three-stop window field itself:
+# titlebar-light -> window -> darker foot over 300px, then flat.  This mirrors
+# liboxygen's Helper::verticalGradient (including its -23px titlebar shift).
+OXYGEN_SPAN = 300
+OXYGEN_SHIFT = -23
+WALLPAPER_W = 4096
+WALLPAPER_H = 2048
+
+
+def _png(width: int, height: int, rows) -> bytes:
+    """Minimal 8-bit RGB PNG with one solid colour per scanline."""
+    import struct, zlib
+    raw = bytearray()
+    for row in rows:
+        raw.append(0)
+        raw += bytes(row) * width
+    def chunk(tag, data):
+        return (struct.pack(">I", len(data)) + tag + data
+                + struct.pack(">I", zlib.crc32(tag + data) & 0xffffffff))
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+            + chunk(b"IEND", b""))
+
+
+def oxygen_stops(source=None):
+    """(top, middle, bottom) from Oxygen's active KDE colour scheme."""
+    plasma = kdetheme.is_plasma() if source is None else (source == "plasma")
+    if not plasma or kdetheme.kde_widget_style() not in kdetheme.GRADIENT_STYLES:
+        return None
+    ini = kdetheme.read_ini()
+    wm = ini.get("WM") or {}
+    window = ini.get("Colors:Window") or {}
+    view = ini.get("Colors:View") or {}
+    top = kdetheme._rgb(wm.get("activeBlend"), None)
+    middle = kdetheme._rgb(window.get("BackgroundNormal"), None)
+    bottom = kdetheme._rgb(view.get("BackgroundNormal"), None)
+    return (top, middle, bottom) if top and middle and bottom else None
+
+
+def write_oxygen_background(top, middle, bottom) -> Path:
+    def at(y):
+        pos = min(1.0, max(0.0, (y - OXYGEN_SHIFT) / OXYGEN_SPAN))
+        if pos <= 0.5:
+            return _mix(top, middle, pos * 2)
+        return _mix(middle, bottom, (pos - 0.5) * 2)
+    rows = [at(y) if y < OXYGEN_SPAN + OXYGEN_SHIFT else bottom
+            for y in range(WALLPAPER_H)]
+    path = KONSOLE_DIR / ("%s-oxygen-window.png" % SCHEME_NAME.lower())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(_png(WALLPAPER_W, WALLPAPER_H, rows))
+    return path
+
+
 def build(pal: dict, source=None) -> str:
     """The `.colorscheme` file, for every konsole started from now on."""
     t = tones(pal)
@@ -147,15 +202,17 @@ def build(pal: dict, source=None) -> str:
         out.append("[%s]\nColor=%s\n" % (sect, _kc(t[key])))
     for n in range(8):
         slot(n, t[str(n)], t["%dFaint" % n], t["%dIntense" % n])
-    # In Plasma Konsole's own window is translucent.  Leaving the TerminalDisplay
-    # transparent exposes the REAL KStyle-painted parent behind it — the same
-    # continuous field that joins Oxygen's titlebar, toolbar and window body.
-    # A copied wallpaper can only guess that field and drifts at the border.
-    plasma = kdetheme.is_plasma() if source is None else (source == "plasma")
-    opacity = 0 if plasma else OPACITY
+    stops = oxygen_stops(source)
+    wallpaper = ""
+    if stops:
+        try:
+            wallpaper = str(write_oxygen_background(*stops))
+        except Exception as exc:
+            print("konsole-theme: Oxygen background skipped (%s)" % exc, file=sys.stderr)
     out.append("[General]\nBlur=false\nColorRandomization=false\n"
-               "Description=%s\nOpacity=%s\nWallpaper=\n"
-               % (SCHEME_NAME, "%g" % opacity))
+               "Description=%s\nOpacity=%s\nWallpaper=%s\n"
+               "FillStyle=NoScaling\nAnchor=0,0\nWallpaperOpacity=1\n"
+               % (SCHEME_NAME, "%g" % OPACITY, wallpaper))
     return "".join(out)
 
 
