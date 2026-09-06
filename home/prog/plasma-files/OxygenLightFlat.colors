@@ -41,9 +41,22 @@ Enable=false
 IntensityAmount=0
 IntensityEffect=0
 
+# SURFACE TINT. Every Background* below is held at HLS saturation 0.15 rather
+# than Oxygen's near-neutral greys (Window was 214,210,208 — chroma 6/255, i.e.
+# effectively no colour). plasma-scheme.py replaces the HUE with the wallpaper
+# accent's and keeps lightness, so the saturation set here is the only thing
+# deciding how strongly the light theme carries the wallpaper's colour.
+#
+# It lives in the template, not in the minted ~/.local/share/color-schemes copy,
+# because that copy is REGENERATED from this file on every mint — a tint applied
+# by hand there is silently lost the next time the wallpaper or accent changes
+# (which is how it was lost on 2026-09-05). Raise or lower the 0.15 here.
+#
+# Lightness is untouched for every value, so all the relationships the comments
+# above defend — View sitting below Window, Button above it — survive exactly.
 [Colors:Button]
-BackgroundAlternate=224,223,222
-BackgroundNormal=223,220,217
+BackgroundAlternate=228,223,218
+BackgroundNormal=225,220,215
 DecorationFocus=58,167,221
 DecorationHover=110,214,255
 ForegroundActive=146,76,157
@@ -68,8 +81,8 @@ ForegroundVisited=100,74,155
 # surface as a titlebar, which is what he asked for. Keep the two in step: if
 # this group and [WM] drift apart, the panel stops matching the titlebars.
 [Colors:Complementary]
-BackgroundAlternate=218,217,216
-BackgroundNormal=214,210,208
+BackgroundAlternate=223,217,211
+BackgroundNormal=218,209,204
 DecorationFocus=58,167,221
 DecorationHover=110,214,255
 ForegroundActive=146,76,157
@@ -96,7 +109,7 @@ ForegroundVisited=69,40,134
 
 [Colors:Tooltip]
 BackgroundAlternate=196,224,255
-BackgroundNormal=24,21,19
+BackgroundNormal=25,21,18
 DecorationFocus=58,167,221
 DecorationHover=110,214,255
 ForegroundActive=255,128,224
@@ -109,8 +122,8 @@ ForegroundPositive=0,110,40
 ForegroundVisited=150,111,232
 
 [Colors:View]
-BackgroundAlternate=196,192,190
-BackgroundNormal=203,199,197
+BackgroundAlternate=202,190,184
+BackgroundNormal=208,197,192
 DecorationFocus=58,167,221
 DecorationHover=110,214,255
 ForegroundActive=146,76,157
@@ -123,8 +136,8 @@ ForegroundPositive=0,110,40
 ForegroundVisited=100,74,155
 
 [Colors:Window]
-BackgroundAlternate=218,217,216
-BackgroundNormal=214,210,208
+BackgroundAlternate=223,217,211
+BackgroundNormal=218,209,204
 DecorationFocus=58,167,221
 DecorationHover=110,214,255
 ForegroundActive=146,76,157
