@@ -27,12 +27,18 @@ NOT tinted: `ForegroundNormal` (near-white body text), the three semantic
 roles (`ForegroundNegative`/`Neutral`/`Positive` — a red error stays red on a
 green wallpaper), and everything outside `[Colors:*]`/`[WM]`.
 
-THREE SCHEMES ARE TEMPLATED: OxygenDarkFlat, OxygenLightFlat, and
+FOUR SCHEMES ARE TEMPLATED: OxygenDarkFlat, OxygenDarkNeutral,
+OxygenLightFlat, and
 AeroThemePlasma's `Aero` — read out of the system profile, so it exists only
 where the aeroshell module put it. The same maths serves each; light schemes'
 greys have no saturation to move, so the titlebar, selection and focus
 decoration provide the wallpaper colour. See CANDIDATES for why Aero needs its
 name forced.
+
+OxygenDarkNeutral is the separately selectable dark live scheme for neutral
+surfaces: it applies the wallpaper accent to focus, links, and decorations,
+but takes every ordinary background role directly from the wallpaper's darkest
+palette colour rather than tinting it from the accent.
 
 Applying is gated on the live scheme actually BEING one of those: every
 candidate is minted, but the push into kdeglobals only happens for the one
@@ -86,7 +92,8 @@ BACKGROUND_KEYS = {"BackgroundNormal", "BackgroundAlternate"}
 
 SAT_REFERENCE = 0.30
 
-# The schemes this script knows how to re-mint, as (template path, forced name).
+# The schemes this script knows how to re-mint, as (template path, forced name,
+# wallpaper backgrounds).
 # One is applied per run: whichever one kdeglobals currently NAMES. Anything
 # else he picks in System Settings is left alone, exactly as before — the list
 # only widens which schemes are ours to follow, never which are ours to
@@ -103,13 +110,16 @@ SAT_REFERENCE = 0.30
 # with the flake pin, and on a host without AeroThemePlasma the path is simply
 # absent and the candidate is skipped.
 CANDIDATES = [
-    (os.path.join(HOME, ".config", "scripts", "plasma-scheme-template.colors"), None),
-    (os.path.join(HOME, ".config", "scripts", "plasma-light-scheme-template.colors"), None),
-    ("/run/current-system/sw/share/color-schemes/Aero.colors", "Aero"),
+    (os.path.join(HOME, ".config", "scripts", "plasma-scheme-template.colors"), None, False),
+    # A second live scheme built from the same dark template. Its surfaces use
+    # the wallpaper's dark palette colour, not its accent hue.
+    (os.path.join(HOME, ".config", "scripts", "plasma-scheme-template.colors"), "OxygenDarkNeutral", True),
+    (os.path.join(HOME, ".config", "scripts", "plasma-light-scheme-template.colors"), None, False),
+    ("/run/current-system/sw/share/color-schemes/Aero.colors", "Aero", False),
     # book installs AeroThemePlasma from source into Fedora's own prefix, so the
     # same scheme lives here instead. Both paths are listed unconditionally —
     # a missing candidate is skipped, and no host has both.
-    ("/usr/share/color-schemes/Aero.colors", "Aero"),
+    ("/usr/share/color-schemes/Aero.colors", "Aero", False),
 ]
 
 
@@ -126,7 +136,8 @@ def tint(rgb, hue, sat_scale):
     return tuple(int(round(c * 255)) for c in (r, g, b))
 
 
-def mint(template_text, accent_hex, force_name=None, background_hex=None):
+def mint(template_text, accent_hex, force_name=None, background_hex=None,
+         wallpaper_backgrounds=False):
     ar, ag, ab = hex_to_rgb(accent_hex)
     hue, _, accent_s = colorsys.rgb_to_hls(ar / 255.0, ag / 255.0, ab / 255.0)
     sat_scale = min(1.0, accent_s / SAT_REFERENCE)
@@ -151,6 +162,8 @@ def mint(template_text, accent_hex, force_name=None, background_hex=None):
             out.append("%s=%d,%d,%d" % ((key,) + tint(rgb, hue, sat_scale)))
         elif force_name and group == "[General]" and key == "ColorScheme":
             out.append("ColorScheme=%s" % force_name)
+        elif force_name == "OxygenDarkNeutral" and group == "[General]" and key == "Name":
+            out.append("Name=Oxygen Dark Neutral")
         else:
             out.append(line)
     return "\n".join(out) + "\n"
@@ -286,7 +299,7 @@ def live_scheme():
     if not m:
         return ""
     live_hash = m.group(1)
-    for path, forced in CANDIDATES:
+    for path, forced, _ in CANDIDATES:
         try:
             with open(path) as fh:
                 cand = forced or scheme_name(fh.read())
@@ -318,15 +331,17 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--background", default=None,
                     help="optional bare hex override for Colors:Window BackgroundNormal")
+    ap.add_argument("--wallpaper-background", default=None,
+                    help="dark wallpaper palette colour for wallpaper-background schemes")
     ap.add_argument("--no-apply", action="store_true")
     args = ap.parse_args()
 
-    candidates = ([(args.template, args.name)] if args.template
+    candidates = ([(args.template, args.name, bool(args.wallpaper_background))] if args.template
                   else list(CANDIDATES))
     live = live_scheme()
     applied = False
 
-    for path, forced in candidates:
+    for path, forced, wallpaper_backgrounds in candidates:
         try:
             with open(path) as fh:
                 template = fh.read()
@@ -344,8 +359,10 @@ def main():
 
         out_path = args.out or os.path.join(
             HOME, ".local", "share", "color-schemes", "%s.colors" % name)
+        background = (args.wallpaper_background if wallpaper_backgrounds
+                      else args.background)
         minted = mint(template, args.accent, force_name=forced,
-                      background_hex=args.background)
+                      background_hex=background)
 
         try:
             with open(out_path) as fh:

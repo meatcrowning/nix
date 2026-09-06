@@ -137,6 +137,7 @@ in
       # kdeglobals, Plasma itself does not rewrite them on shell startup, so
       # this cannot feed a shell restart back into another refresh.
       "%h/.local/share/color-schemes/OxygenDarkFlat.colors"
+      "%h/.local/share/color-schemes/OxygenDarkNeutral.colors"
       "%h/.local/share/color-schemes/OxygenLightFlat.colors"
     ];
     Install.WantedBy = [ "default.target" ];

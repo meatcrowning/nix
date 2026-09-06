@@ -19,7 +19,7 @@ esac
 
 scheme="$(kreadconfig6 --file kdeglobals --group General --key ColorScheme 2>/dev/null || true)"
 case "$scheme" in
-    OxygenDarkFlat|OxygenLightFlat) ;;
+    OxygenDarkFlat|OxygenDarkNeutral|OxygenLightFlat) ;;
     *) exit 0 ;;
 esac
 
@@ -54,12 +54,16 @@ done
 # generated BG through when it is available; every other dark/light scheme
 # keeps the template's normal derivation.
 bg=""
-if [ "$scheme" = OxygenDarkFlat ] && [ -f "$WAL_CACHE/current" ]; then
+if { [ "$scheme" = OxygenDarkFlat ] || [ "$scheme" = OxygenDarkNeutral ]; } \
+        && [ -f "$WAL_CACHE/current" ]; then
     wall="$(cat "$WAL_CACHE/current")"
     key="$(printf '%s' "$wall" | md5sum | cut -d' ' -f1)"
     bg="$(sed -n 's/^BG=\([0-9a-fA-F]\{6\}\)$/\1/p' "$WAL_CACHE/themes/$key.env" 2>/dev/null | head -n1)"
 fi
-if [ "$bg" = 464540 ]; then
+if [ "$scheme" = OxygenDarkNeutral ] && [ -n "$bg" ]; then
+    exec "$HOME/.config/scripts/plasma-scheme.py" --accent "$accent" \
+        --wallpaper-background "$bg"
+elif [ "$bg" = 464540 ]; then
     exec "$HOME/.config/scripts/plasma-scheme.py" --accent "$accent" --background "$bg"
 else
     exec "$HOME/.config/scripts/plasma-scheme.py" --accent "$accent"
