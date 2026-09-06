@@ -4,14 +4,25 @@
 #
 # System Settings → Colors writes only the chosen scheme name.  Our two Oxygen
 # schemes are mutable files, so selecting one must also re-mint it from the
-# current Theme.qml accent; otherwise Plasma loads the last on-disk palette and
-# the windows split from the wallpaper-derived desktop palette.
+# current wallpaper palette; otherwise Plasma loads the last on-disk palette
+# and the windows split from the wallpaper-derived desktop palette.
 set -u
 
-THEME="$HOME/.config/quickshell/Theme.qml"
 WAL_CACHE="$HOME/.cache/wal"
+THEME="$HOME/.config/quickshell/Theme.qml"
 
-accent="$(sed -n 's/^    readonly property color accent:    "#\([0-9a-fA-F]\{6\}\)".*/\1/p' "$THEME" | head -n1)"
+# wal-set publishes `current` before it writes the live Plasma roles.  Reading
+# Theme.qml here races its deliberately-last hot reload: the kdeglobals write
+# wakes this unit while Theme.qml still has the previous wallpaper's accent,
+# and this unit would then put that old palette straight back into Oxygen.
+# The palette cache is the transaction's source of truth.  Theme.qml remains a
+# fallback for a manual scheme selection before wal has ever populated a cache.
+wall="$(cat "$WAL_CACHE/current" 2>/dev/null || true)"
+key="$(printf '%s' "$wall" | md5sum | cut -d' ' -f1)"
+accent="$(sed -n 's/^ACCENT=\([0-9a-fA-F]\{6\}\)$/\1/p' "$WAL_CACHE/themes/$key.env" 2>/dev/null | head -n1)"
+if ! printf '%s' "$accent" | grep -qE '^[0-9a-fA-F]{6}$'; then
+    accent="$(sed -n 's/^    readonly property color accent:    "#\([0-9a-fA-F]\{6\}\)".*/\1/p' "$THEME" | head -n1)"
+fi
 case "$accent" in
     [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]) ;;
     *) exit 0 ;;
@@ -56,9 +67,7 @@ done
 bg=""
 surface=""
 if { [ "$scheme" = OxygenDarkFlat ] || [ "$scheme" = OxygenDarkNeutral ]; } \
-        && [ -f "$WAL_CACHE/current" ]; then
-    wall="$(cat "$WAL_CACHE/current")"
-    key="$(printf '%s' "$wall" | md5sum | cut -d' ' -f1)"
+        && [ -n "$wall" ]; then
     bg="$(sed -n 's/^BG=\([0-9a-fA-F]\{6\}\)$/\1/p' "$WAL_CACHE/themes/$key.env" 2>/dev/null | head -n1)"
     surface="$(sed -n 's/^BGALT=\([0-9a-fA-F]\{6\}\)$/\1/p' "$WAL_CACHE/themes/$key.env" 2>/dev/null | head -n1)"
 fi
