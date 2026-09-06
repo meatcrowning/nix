@@ -136,9 +136,10 @@ check("it polls the scrollbar route, not the 4chan one",
       "/scrollbar.css" in text and "/chan.css" not in text)
 check("it carries the current accent as a click-through page wash",
       "mix-blend-mode:color!important" in text and
+      "mix-blend-mode:screen!important" in text and
       "pointer-events:none!important" in text)
 check("the page wash takes its colour from the live accent token",
-      "background-color:#ff0088!important" in scrollcss.page_tint_css(PAL.__getitem__))
+      scrollcss.page_tint_css(PAL.__getitem__).count("background-color:#ff0088!important") == 2)
 check("it has no gate — the scrollbar rides everywhere", "var GATE = null" in text)
 v1 = re.search(r"@version\s+(\S+)", text).group(1)
 v2 = re.search(r"@version\s+(\S+)", gen.build("plasma", "flat", TMP / "o.js")[0]).group(1)

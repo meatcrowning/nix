@@ -279,11 +279,17 @@ def page_tint_css(pal) -> str:
     the current desktop accent over the complete page.  It deliberately belongs
     to the Tampermonkey page sheet, never Vivaldi's own ``custom.css``.
     """
+    # ``color`` keeps a light page's value ladder while replacing its hue.  It
+    # cannot change a black pixel, though, so a second low-alpha ``screen``
+    # layer gives the same live accent a visible presence on dark pages.
     return (
         "html::before{content:\"\"!important;position:fixed!important;inset:0!important;"
         "z-index:2147483646!important;pointer-events:none!important;"
         "background-color:%s!important;mix-blend-mode:color!important;opacity:.18!important}"
-        % pal("accent")
+        "html::after{content:\"\"!important;position:fixed!important;inset:0!important;"
+        "z-index:2147483645!important;pointer-events:none!important;"
+        "background-color:%s!important;mix-blend-mode:screen!important;opacity:.10!important}"
+        % (pal("accent"), pal("accent"))
     )
 
 
