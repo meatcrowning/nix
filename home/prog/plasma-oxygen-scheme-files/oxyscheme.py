@@ -60,7 +60,18 @@ ALPHA_SPREAD  = 0.05
 #
 # Only alpha ramps are affected. Button/frame/lineedit bodies are COLOUR ramps
 # and render identically under all three.
-ALPHA_MODE = os.environ.get('OXYSCHEME_ALPHA_MODE', 'centre')
+ALPHA_MODE = os.environ.get('OXYSCHEME_ALPHA_MODE', 'titlebar')
+# `titlebar` mode: a white overlay at the top fading to nothing, i.e. the same
+# shape Oxygen's window/titlebar gradient has (light at the top edge, the plain
+# surface colour at the foot). Symmetric `centre` shading put the surface colour
+# in the MIDDLE, so the panel never reached the titlebar's light top and read as
+# dimmer than every window.
+TOP_ALPHA = float(os.environ.get('OXYSCHEME_TOP_ALPHA', '0.25'))
+# Oxygen's edge highlights are white at full alpha, authored against a near-black
+# panel. On a light surface six of them stacked in `north-bottom` render as a
+# hard near-white line (measured L=248 against a 212 panel) -- the "weird line at
+# the bottom". They are shading, so they are never recoloured; they are damped.
+GLOW_SCALE = float(os.environ.get('OXYSCHEME_GLOW_SCALE', '0.35'))
 CENTRE_AMPLITUDE = float(os.environ.get('OXYSCHEME_AMPLITUDE', '0.12'))
 # Oxygen shades with black. Plasma's accent lands on the Selection group, so
 # ColorScheme-Highlight IS the accent colour -- pointing the dark end of every
@@ -155,6 +166,33 @@ class Doc:
         self.defs.append(el)
         return gid
 
+
+_TF = re.compile(r'(matrix|translate|scale|rotate)\s*\(([^)]*)\)')
+
+def _nums(t):
+    return [float(x) for x in re.split(r'[,\s]+', t.strip()) if x not in ('',)]
+
+def axis_signs(el, parents):
+    """Sign of the cumulative x/y scale above and on `el`.
+
+    Oxygen draws several framesvg slices through a Y-flip -- `north-center` is
+    matrix(1,0,0,-1,...) -- so an objectBoundingBox gradient authored top-to-
+    bottom comes out upside down on exactly those slices and the panel ends up
+    lighter at the FOOT than at the edge. Walk the transform chain and flip."""
+    a, d = 1.0, 1.0            # 2x2 diagonal is all we need for scale sign
+    node = el
+    while node is not None:
+        t = node.get('transform')
+        if t:
+            for kind, body in _TF.findall(t):
+                v = _nums(body)
+                if kind == 'matrix' and len(v) >= 4:
+                    a *= v[0]; d *= v[3]
+                elif kind == 'scale':
+                    a *= v[0]; d *= (v[1] if len(v) > 1 else v[0])
+        node = parents.get(node)
+    return (1 if a >= 0 else -1), (1 if d >= 0 else -1)
+
 # ---------- role inference ----------
 def role_family(filename):
     n = os.path.basename(filename)
@@ -222,7 +260,7 @@ def gloss_gradient(doc, src_gid, stops):
     gid = doc.uid(src_gid); new.set('id', gid)
     return doc.publish(gid, new)
 
-def respin_alpha(doc, src_gid, stops, mode, axis='v'):
+def respin_alpha(doc, src_gid, stops, mode, axis='v', invert=False):
     """Rebuild an alpha-ramp gradient under `flip` or `centre`."""
     src = doc.idx.get(src_gid)
     offs   = [float(o) for o, _, _ in stops]
@@ -244,6 +282,22 @@ def respin_alpha(doc, src_gid, stops, mode, axis='v'):
         lo, hi = min(offs), max(offs)
         pairs = [(lo + hi - o, c, a) for o, c, a in zip(offs, cols, alphas)]
         pairs.sort(key=lambda t: t[0])
+    if mode == 'titlebar':
+        new = ET.Element(S+'linearGradient')
+        new.set('gradientUnits', 'objectBoundingBox')
+        new.set('x1','0'); new.set('y1','0')
+        new.set('x2', '1' if axis == 'h' else '0')
+        new.set('y2', '0' if axis == 'h' else '1')
+        ramp = ((0.0, TOP_ALPHA), (1.0, 0.0))
+        if invert: ramp = ((0.0, 0.0), (1.0, TOP_ALPHA))
+        for off, a in ramp:
+            st = ET.SubElement(new, S+'stop')
+            st.set('offset', f"{off:.4f}")
+            st.set('style', f"stop-color:#ffffff;stop-opacity:{a:.4f}")
+        gid = doc.uid(src_gid); new.set('id', gid)
+        new.set('data-oxysch', 'body')
+        return doc.publish(gid, new)
+
     if mode == 'centre':
         # Emit a LINEAR objectBoundingBox gradient regardless of what the source
         # was. Oxygen's panel ramps are radialGradients with r=2.5 in user space;
@@ -375,7 +429,7 @@ def convert(src, dst, report=None):
     doc = Doc(root)
     family = role_family(src)
     stats = dict(based_alpha=0, based_colour=0, recoloured=0, untouched_art=0,
-                 skipped_chromatic=0, no_body=0, edge_shaded=0,
+                 skipped_chromatic=0, no_body=0, edge_shaded=0, glow_damped=0,
                  raster_glow=0, raster_kept=0, raster_undecodable=0)
     parents = {c: p for p in root.iter() for c in p}
 
@@ -474,10 +528,12 @@ def convert(src, dst, report=None):
                 bd.pop('fill-opacity', None); set_style(base, bd)
                 base.set('class', role)
                 p = parents[body]; p.insert(list(p).index(body), base)
-                if ALPHA_MODE in ('flip', 'centre'):
+                if ALPHA_MODE in ('flip', 'centre', 'titlebar'):
                     eid_l = (el.get('id') or '').lower()
                     ax = 'h' if ('east' in eid_l or 'west' in eid_l) else 'v'
-                    gid = respin_alpha(doc, fill[5:-1], stops, ALPHA_MODE, ax)
+                    sx, sy = axis_signs(body, parents)
+                    inv = (sx < 0) if ax == 'h' else (sy < 0)
+                    gid = respin_alpha(doc, fill[5:-1], stops, ALPHA_MODE, ax, inv)
                     od = style_dict(body); od['fill'] = f'url(#{gid})'
                     set_style(body, od)
                 else:
@@ -512,6 +568,8 @@ def convert(src, dst, report=None):
     for prefix, gid in centre_ramp.items():
         obb = obb_clone(doc, gid)
         if obb is None: continue
+        centre_el = doc.idx.get(f"{prefix}-center")
+        c_sx, c_sy = axis_signs(centre_el, parents) if centre_el is not None else (1, 1)
         for side in ('left', 'right', 'top', 'bottom'):
             el = doc.idx.get(f"{prefix}-{side}")
             if el is None: continue
@@ -524,12 +582,51 @@ def convert(src, dst, report=None):
                 continue            # already carries its own art
             over = copy.deepcopy(body)
             over.attrib.pop('id', None); over.attrib.pop('class', None)
-            od = style_dict(over); od['fill'] = f'url(#{obb})'
+            e_sx, e_sy = axis_signs(body, parents)
+            use = obb
+            if (e_sy < 0) != (c_sy < 0):
+                # this edge slice is mirrored relative to the centre it copies
+                use = obb_clone(doc, gid)
+                g2 = doc.idx.get(use)
+                sts = g2.findall(S+'stop')
+                offs = [st.get('offset') for st in sts]
+                for st, o in zip(sts, reversed(offs)): st.set('offset', o)
+            od = style_dict(over); od['fill'] = f'url(#{use})'
             od.pop('fill-opacity', None); set_style(over, od)
             p = parents.get(body)
             if p is not None:
                 p.insert(list(p).index(body) + 1, over)
                 stats['edge_shaded'] += 1
+
+    # Damp Oxygen's white edge highlights. They are alpha ramps of pure white at
+    # full opacity -- correct over a near-black panel, a glaring line over a
+    # light one. Scaling their alpha keeps the outline and loses the blowout.
+    if GLOW_SCALE < 1.0:
+        for gid, g in list(doc.idx.items()):
+            if g.tag not in (S+'linearGradient', S+'radialGradient'): continue
+            if g.get('data-oxysch') == 'body':
+                continue   # a body ramp we just built -- not one of Oxygen's glows
+            stops = g.findall(S+'stop')
+            if not stops: continue
+            cols, alphas = [], []
+            for st in stops:
+                sd = style_dict(st)
+                c = sd.get('stop-color') or st.get('stop-color') or '#000000'
+                try: a = float(sd.get('stop-opacity', st.get('stop-opacity') or 1))
+                except ValueError: a = 1.0
+                cols.append(parse_hex(c)); alphas.append(a)
+            if any(c is None for c in cols): continue
+            if not all(achromatic(c) for c in cols): continue
+            if not all(luminance(c) > 0.5 for c in cols): continue   # light only
+            if max(alphas) - min(alphas) <= ALPHA_SPREAD: continue   # a ramp only
+            for st, a in zip(stops, alphas):
+                sd = style_dict(st)
+                sd['stop-opacity'] = f"{a*GLOW_SCALE:.4f}"
+                if 'stop-color' not in sd:
+                    sd['stop-color'] = st.get('stop-color') or '#ffffff'
+                st.attrib.pop('stop-opacity', None)
+                set_style(st, sd)
+                stats['glow_damped'] += 1
 
     convert_rasters(doc, root, parents, family, stats)
 
