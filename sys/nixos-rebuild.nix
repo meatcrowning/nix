@@ -3,7 +3,8 @@
 # Passwordless system rebuild for lam, but hard-scoped to THIS flake and host.
 # `nixos-rebuild` runs arbitrary code as root, so bare NOPASSWD would be
 # equivalent to `NOPASSWD:ALL`. The wrapper closes that path by hardcoding
-# `switch --flake /home/lam/nix#top` and accepting only an optional `--upgrade`
+# `switch` against this repository's committed HEAD and accepting only an
+# optional `--upgrade`
 # (same wrapper+NOPASSWD shape as sys/disks.nix).
 #
 # Because the bare rule is gone, `sudo nixos-rebuild switch ...` now prompts.
@@ -25,6 +26,24 @@ let
       exit 2
     else
       upgrade=0
+    fi
+
+    REPO=/home/lam/nix
+    if [ "$upgrade" = 0 ]; then
+      # Every agent shares REPO's working tree. Building that path lets one
+      # agent's half-written module enter another agent's switch. A rev-pinned
+      # local git flake reads only the focused commits already made by their
+      # owners, while retaining the speed and privacy of a local source.
+      REV=$(${pkgs.git}/bin/git -c safe.directory="$REPO" -C "$REPO" rev-parse HEAD)
+      FLAKE="git+file://$REPO?rev=$REV"
+      if ! ${pkgs.git}/bin/git -c safe.directory="$REPO" -C "$REPO" diff --quiet HEAD -- \
+          || [ -n "$(${pkgs.git}/bin/git -c safe.directory="$REPO" -C "$REPO" ls-files --others --exclude-standard)" ]; then
+        echo "rebuild-top: committed HEAD ''${REV:0:8}; shared working-tree changes are excluded" >&2
+      fi
+    else
+      # `--upgrade` must update flake.lock in the checkout, so it remains the
+      # one explicit working-tree mode and should only be run without other WIP.
+      FLAKE="$REPO"
     fi
 
     # `/tmp/claude-1000` is Claude Code's scratch root; we only borrow a
@@ -56,7 +75,7 @@ let
         uhome=$(${pkgs.getent}/bin/getent passwd "$SUDO_USER" | cut -d: -f6)
         uid=$(id -u "$SUDO_USER")
         if ! runuser -u "$SUDO_USER" -- env HOME="$uhome" XDG_RUNTIME_DIR="/run/user/$uid" \
-             /home/lam/nix/tools/preflight.sh; then
+             PREFLIGHT_FLAKE="$FLAKE" /home/lam/nix/tools/preflight.sh; then
           echo "rebuild-top: preflight FAILED — fix the above, or skip once with REBUILD_NO_PREFLIGHT=1" >&2
           exit 1
         fi
@@ -78,7 +97,7 @@ let
     trap cleanup EXIT INT TERM
 
     if [ "''${REBUILD_IGNORE_GPU:-0}" != 1 ] && [ -x "$GATE" ] && "$GATE" loaded; then
-      heavy=$(${pkgs.nixos-rebuild}/bin/nixos-rebuild dry-build --flake /home/lam/nix#top 2>&1 \
+      heavy=$(${pkgs.nixos-rebuild}/bin/nixos-rebuild dry-build --flake "$FLAKE#top" 2>&1 \
         | ${pkgs.gnugrep}/bin/grep -oE '/nix/store/[^ ]*\.drv' \
         | ${pkgs.gnugrep}/bin/grep -Ei 'cuda|cudnn|torch|llama|ollama|hyprland|qtwebengine|chromium|llvm|linux-[0-9]|mesa|blender|rustc|gcc-[0-9]' \
         | head -5 || true)
@@ -112,9 +131,9 @@ let
     # way.
     scope="${pkgs.systemd}/bin/systemd-run --scope --quiet --slice=nix-build.slice --collect ''${throttle:-}"
     if [ "$upgrade" = 1 ]; then
-      $scope ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --upgrade --flake /home/lam/nix#top
+      $scope ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --upgrade --flake "$FLAKE#top"
     else
-      $scope ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake /home/lam/nix#top
+      $scope ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake "$FLAKE#top"
     fi
     rc=$?
     cleanup; resume_needed=0
