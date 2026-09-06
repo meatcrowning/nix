@@ -256,8 +256,11 @@ def _chrome_css(ch, i):
         # surrounding chrome: light at its top, settling into the base rather
         # than becoming a single flat field down a long thread.
         "html body{background-color:%s%s;background-image:url(http://127.0.0.1:8791/oxygen-window.png)%s;"
-        "background-size:100%% 100%%;background-repeat:no-repeat%s;"
-        "background-attachment:fixed%s}"
+        # Keep the copied KStyle canvas in viewport coordinates.  `100%` is
+        # the document height here, which turns a long thread into a
+        # nearly-flat stretch; the desktop surface is a window-sized paint.
+        "background-size:100vw 100vh;background-position:0 0;"
+        "background-repeat:no-repeat%s;background-attachment:fixed%s}"
         % (ch["windowBottom"], i, i, i, i),
         # Dialogs, catalog cells, previews and menus as the style's slabs:
         # the panel gradient, a 1px light bevel along the top, a soft foot

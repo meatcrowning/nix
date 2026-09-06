@@ -22,14 +22,21 @@ def css(pal):
     return f"""/* desktop Twitter/X — generated; do not hand-edit */
 :root {{ color-scheme: dark; --desk-bg:{bg}; --desk-alt:{alt}; --desk-border:{border};
   --desk-accent:{accent}; --desk-dim:{dim}; --desk-text:{text}; --desk-muted:{text_dim};
-  --desk-highlight:{highlight}; --desk-ok:{ok}; --desk-warn:{warn}; --desk-crit:{crit}; --desk-info:{info}; }}
+  --desk-highlight:{highlight}; --desk-ok:{ok}; --desk-warn:{warn}; --desk-crit:{crit}; --desk-info:{info};
+  --desk-window-surface:url(http://127.0.0.1:8791/oxygen-window.png); }}
 html, body, #react-root, [data-testid="primaryColumn"], [data-testid="sidebarColumn"],
 [role="main"], [role="banner"], [role="navigation"], [data-testid="BottomBar"] {{
-  background-color:var(--desk-bg)!important; color:var(--desk-text)!important; }}
+  background-color:var(--desk-bg)!important; background-image:var(--desk-window-surface)!important;
+  background-size:100vw 100vh!important; background-position:0 0!important;
+  background-repeat:no-repeat!important; background-attachment:fixed!important;
+  color:var(--desk-text)!important; }}
 [data-testid="primaryColumn"], [data-testid="sidebarColumn"], [role="main"],
 [data-testid="sidebarColumn"] > div {{ border-color:var(--desk-border)!important; }}
 [data-testid="tweet"], [data-testid="cellInnerDiv"], [data-testid="trend"],
-[data-testid="conversation"] {{ background-color:var(--desk-bg)!important; border-color:var(--desk-border)!important; }}
+[data-testid="conversation"] {{ background-color:var(--desk-bg)!important;
+  background-image:var(--desk-window-surface)!important; background-size:100vw 100vh!important;
+  background-position:0 0!important; background-repeat:no-repeat!important;
+  background-attachment:fixed!important; border-color:var(--desk-border)!important; }}
 [data-testid="tweet"]:hover, [data-testid="cellInnerDiv"]:hover,
 [role="link"]:hover, [role="menuitem"]:hover, [data-testid="UserCell"]:hover {{
   background-color:var(--desk-highlight)!important; }}
@@ -62,7 +69,10 @@ aside[role="complementary"] {{ background-color:var(--desk-bg)!important; }}
    nesting depths.  The sidebar has no media canvas, so colour its complete
    structural subtree rather than trying to chase those unstable classes. */
 [data-testid="sidebarColumn"],
-[data-testid="sidebarColumn"] * {{ background-color:var(--desk-bg)!important; }}
+[data-testid="sidebarColumn"] * {{ background-color:var(--desk-bg)!important;
+  background-image:var(--desk-window-surface)!important; background-size:100vw 100vh!important;
+  background-position:0 0!important; background-repeat:no-repeat!important;
+  background-attachment:fixed!important; }}
 [data-testid="SearchBox_Search_Input"],
 [data-testid="SearchBox_Search_Input"] * {{ background-color:var(--desk-bg)!important; }}
 /* The tab-strip's add-tab control is a separate header button, outside the
