@@ -18,6 +18,9 @@ from PySide6.QtWidgets import QApplication, QWidget
 
 def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv[:1])
+    if app.style().objectName().lower() != "oxygen":
+        print(f"refusing non-Oxygen style: {app.style().objectName()}", file=sys.stderr)
+        return 1
     screen = QGuiApplication.primaryScreen()
     if screen is None:
         return 1
