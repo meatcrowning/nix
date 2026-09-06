@@ -241,6 +241,16 @@ def push_to_kdeglobals(minted, name, digest):
             subprocess.run([ds, "--session", "--type=signal", "/KGlobalSettings",
                             "org.kde.KGlobalSettings.notifyChange",
                             "int32:" + change, "int32:0"], check=False)
+    # Oxygen's KWin decoration caches its titlebar palette independently of
+    # KGlobalSettings. Plasma and Qt have already repainted from the signals
+    # above, but without this supported KWin reconfigure a newly selected
+    # dynamic scheme can leave its titlebars on the previously selected file.
+    # It is deliberately after every role write: KWin reads the final complete
+    # palette, never the short-lived mixture while this loop is still writing.
+    busctl = shutil.which("busctl")
+    if busctl:
+        subprocess.run([busctl, "--user", "call", "org.kde.KWin", "/KWin",
+                        "org.kde.KWin", "reconfigure"], check=False)
     print("plasma-scheme: pushed %d keys into kdeglobals%s"
           % (len(writes) + 1, "" if ds else " (no dbus-send: no live repaint)"))
 
