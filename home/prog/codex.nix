@@ -1,4 +1,4 @@
-{ ... }:
+{ config, ... }:
 
 # `utilities-terminal` is Oxygen's own terminal icon. Keeping the desktop entry
 # on that icon-theme name lets the launcher follow the active Oxygen palette on
@@ -10,7 +10,7 @@
     Name=codex
     GenericName=codex
     Comment=start codex in the nix checkout
-    Exec=konsole --workdir /home/lam/nix -e codex
+    Exec=${config.home.profileDirectory}/bin/konsole --workdir /home/lam/nix -e codex
     Icon=utilities-terminal
     Terminal=false
     Categories=Development;Utility;
