@@ -1123,6 +1123,25 @@ listener. The daemon is the `ollama` service; if it is down, the model list is
 empty and the reply area draws the error rather than nothing (docs/DESIGN.md
 §10).
 
+**That port is an Ollama-compatible ROUTER now, still inside the same unit and
+the same cgroup.** `apps/oracle/tools/qwen38-ollama-shim.py` supervises Ollama
+on private port 11436 and relays ordinary requests byte-for-byte. Only
+`hf.co/sdkyuan/qwen3.8-27B-qat-q2_0-gguf:latest` is translated to the pinned
+Q2_0-capable llama.cpp worker on 11437, started lazily with the publisher's
+Qwen3.8 flags. The translation covers streamed and non-streamed chat, thinking,
+tool calls/results, token accounting, `/api/show`, `/api/ps` and the existing
+`keep_alive: 0` unload. **Switching engines unloads the old model first**, so
+the shim does not silently defeat `OLLAMA_MAX_LOADED_MODELS=1`.
+
+Keep the router at 11434 and both children in `ollama.service`: that is why the
+model picker, stats, subagents, manage-model tools, start/stop/unload controls,
+book tunnel, ai-warden and heavy rebuild gate all work without a second UI or a
+second lifecycle contract. The custom llama.cpp revision, CUDA sm_120-only
+build, QAT blob digest and three ports live in `sys/ai/ollama.nix`; changing the
+shim therefore needs a system rebuild even though the rest of `apps/oracle` is
+live source. Harness: `tools/qwen38-ollama-shim-test.py`, entirely on ephemeral
+stub ports and never a real daemon or GPU.
+
 **On book, ollama is top's.** `sys/ai/ollama.nix` pins it to `127.0.0.1` on
 top same as painter's ComfyUI, so `home/prog/oracle.nix`'s `air` branch execs
 `apps/oracle/tools/ollama-tunnel.sh -- python3 main.py` as oracle's launcher —
