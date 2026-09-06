@@ -406,8 +406,8 @@ in
   # package upgrade can restore its stock visible toolbar before that state is
   # read.  The user-local entry wins over the packaged one on both hosts and
   # makes the purposeful Top layout unambiguous for every launcher/runner
-  # invocation. Dynamic.colorscheme exposes the already-painted Oxygen parent
-  # window field beneath the terminal text, continuous with the titlebar.
+  # invocation. Dynamic.colorscheme renders the opaque Oxygen parent window
+  # field beneath the terminal text, continuous with the titlebar.
   xdg.dataFile."applications/org.kde.konsole.desktop".text = ''
     [Desktop Entry]
     Type=Application
