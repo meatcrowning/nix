@@ -6,6 +6,19 @@ Vendored source of the standalone image viewer (its own self-contained flake —
 **live** source at `/home/lam/nix/apps/viewer/main.py`, so edits need no
 rebuild. See [`../AGENTS.md`](../AGENTS.md) for the shared rules.
 
+## Retained resource fixture
+
+`tools/resource-fixture.py` launches the real Viewer window with generated PPM
+images under scratch HOME/XDG roots. It requires Qt's offscreen platform,
+removes inherited display/compositor sockets, uses a private runtime directory
+for the handoff socket, and opens no audio or user media. It reports
+`READY normal`, then accepts newline-delimited `stress`, `clear`, and `quit`
+commands on stdin: normal/clear retain one pane, while stress grows the same PID to
+`MAX_PANES`. Run it through Viewer's packaged interpreter/environment on `top`,
+or `/usr/bin/python3` on `book`. The shared fd protocol lives in
+`../pylib/resourcefixture.py`; it is a retained-state seam, not input
+automation.
+
 - **Split out of filer's old built-in overlay.** filer's `openFile` now shells
   out to `viewer <path>`, and viewer scans that file's directory for the sibling
   images, so ‹/› flip through the folder.
