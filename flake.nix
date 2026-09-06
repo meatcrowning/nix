@@ -116,13 +116,15 @@
 
     kwin-rollup-overlay = import ./overlays/kwin-rollup.nix;
 
+    konsole-style-background-overlay = import ./overlays/konsole-style-background.nix;
+
     # (The easyeffects per-channel IPC backport that used to live here is gone:
     # easyeffects 8.2.8 ships wwmm/easyeffects 76a3f9a5 itself, so the patch
     # applied in reverse and failed the build on the 2026-08-18 nixpkgs roll.)
 
     ollama-cuda-overlay = import ./overlays/ollama-cuda.nix;
 
-    overlays = [ vcv-rack-overlay breeze-square-overlay ollama-cuda-overlay kwin-rollup-overlay ];
+    overlays = [ vcv-rack-overlay breeze-square-overlay ollama-cuda-overlay kwin-rollup-overlay konsole-style-background-overlay ];
 
     mkPkgs = system: overlays: import nixpkgs {
       inherit system overlays;
