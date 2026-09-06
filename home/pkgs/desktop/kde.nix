@@ -20,7 +20,7 @@
     kdialog
     kate
     kdenlive
-    # The Dynamic scheme paints an opaque Oxygen window gradient beneath the
+    # The Dynamic scheme inherits the KStyle-painted window field beneath the
     # terminal text. Keep Konsole managed on both hosts so that scheme and its
     # deliberate chrome defaults do not depend on Fedora's system package.
     konsole
