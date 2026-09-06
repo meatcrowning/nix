@@ -40,6 +40,7 @@ future caller that is not gmxhr.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import subprocess
@@ -85,6 +86,25 @@ def _page_css(source, page_url):
     if host == "x.com" or host.endswith(".x.com") or host == "twitter.com" or host.endswith(".twitter.com"):
         return _twitter_css(source)
     return chansource.build_css(source)
+
+
+def _inline_oxygen_surface(css):
+    """Make the KStyle raster usable from an HTTPS userscript sheet.
+
+    The sheet itself arrives through ``GM_xmlhttpRequest`` because a normal
+    HTTPS page may not fetch loopback HTTP.  CSS image subresources *do not*
+    inherit that privileged request path, so leaving the loopback PNG URL in
+    the adopted sheet silently falls back to the flat colour.  Inline only
+    the sheets Vivaldi's userscripts consume; the source-side 4chan route
+    remains byte-identical for surfer's own in-process use.
+    """
+    image = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "plasma-panel-surface.png"
+    try:
+        payload = base64.b64encode(image.read_bytes()).decode("ascii")
+    except OSError:
+        return css
+    return css.replace("url(http://127.0.0.1:8791/oxygen-window.png)",
+                       "url(data:image/png;base64,%s)" % payload)
 
 
 # --------------------------------------------------------------------------- #
@@ -252,6 +272,11 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 build, ctype = route
                 css, _prov = build(self.source)
+            # The page userscripts need a self-contained image: see
+            # `_inline_oxygen_surface`.  `/chan.css` deliberately remains the
+            # exact source sheet used by surfer.
+            if path == "/web.css" or path == "/twitter.css":
+                css = _inline_oxygen_surface(css)
         except SystemExit as e:
             self._send(503, str(e).encode("utf-8"), head=head)
             return
