@@ -150,7 +150,7 @@ def css(pal, chrome=None):
         ".postInfo span.postNum.desktop>a,.postInfo span.postNum.desktop>a:hover{"
         "color:%s%s;opacity:1%s}" % (text, i, i),
         # --- backgrounds ---
-        "body{background:%s%s}" % (bg, i),
+        "html body{background:%s%s}" % (bg, i),
         # `.inline` and the catalog cells (`Show Background` mode) are
         # reply-type insets OneeChan also paints from `mainColor`, but they
         # were never mapped here — so on a dark palette they kept OneeChan's
@@ -255,7 +255,7 @@ def _chrome_css(ch, i):
         # The browser page carries the same fixed window gradient as Vivaldi's
         # surrounding chrome: light at its top, settling into the base rather
         # than becoming a single flat field down a long thread.
-        "body{background-color:%s%s;background-image:linear-gradient("
+        "html body{background-color:%s%s;background-image:linear-gradient("
         "to bottom,%s,%s 320px)%s;background-repeat:no-repeat%s;"
         "background-attachment:fixed%s}"
         % (ch["windowBottom"], i, ch["windowTop"], ch["windowBottom"], i, i, i),
