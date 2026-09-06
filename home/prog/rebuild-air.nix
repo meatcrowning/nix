@@ -14,6 +14,14 @@
 lib.mkIf (host == "air") {
   home.packages = [
     (pkgs.writeShellScriptBin "rebuild-air" ''
+      REPO=/home/lam/nix
+      REV=$(${pkgs.git}/bin/git -C "$REPO" rev-parse HEAD)
+      FLAKE="git+file://$REPO?rev=$REV"
+      if ! ${pkgs.git}/bin/git -C "$REPO" diff --quiet HEAD -- \
+          || [ -n "$(${pkgs.git}/bin/git -C "$REPO" ls-files --others --exclude-standard)" ]; then
+        echo "rebuild-air: committed HEAD ''${REV:0:8}; shared working-tree changes are excluded" >&2
+      fi
+
       LOCKDIR=/tmp/claude-1000/-home-lam-nix
       LOCK=$LOCKDIR/rebuild.lock
       if [ ! -d "$LOCKDIR" ]; then
@@ -32,14 +40,14 @@ lib.mkIf (host == "air") {
       fi
 
       if [ "''${REBUILD_NO_PREFLIGHT:-0}" != 1 ]; then
-        if ! /home/lam/nix/tools/preflight.sh; then
+        if ! PREFLIGHT_FLAKE="$FLAKE" /home/lam/nix/tools/preflight.sh; then
           echo "rebuild-air: preflight FAILED — fix the above, or skip once with REBUILD_NO_PREFLIGHT=1" >&2
           exit 1
         fi
       fi
 
       # exec keeps fd 9 (and therefore the lock) held for the whole switch.
-      exec home-manager switch --flake /home/lam/nix#air "$@"
+      exec home-manager switch --flake "$FLAKE#air" "$@"
     '')
   ];
 }

@@ -20,6 +20,7 @@
 # Exit nonzero on any failure; safe to run repeatedly.
 set -u
 REPO="${PREFLIGHT_REPO:-$HOME/nix}"
+FLAKE="${PREFLIGHT_FLAKE:-$REPO}"
 fail=0
 
 untracked=$(git -C "$REPO" ls-files --others --exclude-standard -- sys home \
@@ -68,7 +69,7 @@ for f in $(git -C "$REPO" diff --name-only HEAD); do
 done
 
 echo "eval: nixosConfigurations.top ..."
-if ! nix eval --raw "$REPO#nixosConfigurations.top.config.system.build.toplevel.drvPath" >/dev/null; then
+if ! nix eval --raw "$FLAKE#nixosConfigurations.top.config.system.build.toplevel.drvPath" >/dev/null; then
   echo "FAIL: system eval failed"
   fail=1
 fi

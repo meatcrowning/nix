@@ -3,7 +3,7 @@
 This is a live, single-user desktop: there is no CI, test suite, or staging
 box. A bad `sudo rebuild-top` costs the user's session. Be a critical peer,
 measure screen-facing behavior with IPC/logs/traces, and finish changes:
-edit → verify → rebuild → commit → push to `main`.
+edit → verify → focused commit → rebuild → push to `main`.
 
 This file is the public root contract. `CLAUDE.md` is its symlink; edit this
 file. The closest nested `AGENTS.md` wins for a file, and an explicit user
@@ -25,7 +25,11 @@ rebuild-air                              # home-manager switch --flake /home/lam
 
 Both wrappers run preflight and take `/tmp/claude-1000/-home-lam-nix/rebuild.lock`
 with `flock -w 600`; `REBUILD_NO_PREFLIGHT=1` skips the wrapper's duplicate
-preflight. `rbsys`, `rbhome`, and `update` are aliases from
+preflight. Normal rebuilds use the repository's committed `HEAD`, not its
+shared dirty working tree, so another agent's unfinished files cannot enter the
+switch. Commit only your explicit paths first; `--upgrade` is the deliberate
+exception because it must update `flake.lock`, and requires a clean ownership
+check. `rbsys`, `rbhome`, and `update` are aliases from
 `home/prog/zsh.nix`; home-manager is a NixOS module on `top`. The wrapper
 hard-codes its flake and host, so bare `sudo nixos-rebuild ...` is not covered.
 For other root commands use the askpass path and state the reason:
@@ -76,8 +80,10 @@ qmllint -I <import paths> qml/Main.qml
 
 Rebuilding and reloading is standing behavior, at agent judgment, at any hour;
 definition of done is applied, not merely pushed. Always run
-`./tools/preflight.sh`, then the host command (`sudo rebuild-top` on `top`,
-`home-manager switch --flake ~/nix#air` on `book`) with nothing staged across it.
+`./tools/preflight.sh`, commit only the owned paths, then run the host command
+(`sudo rebuild-top` on `top`, `rebuild-air` on `book`) with nothing staged
+across it. The wrappers build that committed revision and exclude all remaining
+working-tree WIP.
 Report a rebuild/reload in one line.
 
 Cheap Quickshell reloads and `hyprctl reload` are safe. Build `hyprvtb` and
