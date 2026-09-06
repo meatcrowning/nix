@@ -138,7 +138,7 @@ in
     Type=Application
     Name=player
     GenericName=Music Player
-    Comment=Standalone music player for the top desktop
+    Comment=Music player for the shared library
     Exec=${player}/bin/player %F
     Icon=player
     Terminal=false

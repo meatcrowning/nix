@@ -863,6 +863,14 @@ book) before re-probing. Only a share still dead after that is fatal. Apply the
 same rule to any precondition added here: **if the launcher can restore it,
 restoring it is the behaviour — a `die_ui` is for what it cannot fix.**
 
+**The scanner never holds a SQLite write transaction across a file read.** On
+`air`, one tag read crosses SMB; batching 200 `execute()` calls while parsing
+the next file held SQLite's sole writer slot for minutes and made ratings,
+favourites, play counts and lyrics fail with `database is locked`. Parse a
+batch completely first, then land it with one local `executemany()` + commit.
+`tools/scanner-lock-test.py` puts slow fake files behind that boundary and
+requires a foreground write with a 50 ms timeout to succeed during the scan.
+
 Metadata is reconciled by `tools/dbsync.py` (`pull`/`push`/`sync`/`status`),
 keyed on `tracks.path` and never on `id`, stdlib-only so it runs under Fedora's
 python, and its own remote agent — it pipes ITSELF to `python3 -` over ssh. It

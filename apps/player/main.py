@@ -832,13 +832,13 @@ class Scanner(QThread):
 
         now = time.time()
         bad = 0
-        for i, p in enumerate(todo):
-            t = read_tags(p)
-            if t is None:
-                bad += 1
-                continue
-            mtime, size = seen[p]
-            con.execute("""
+        pending = []
+
+        def flush_pending():
+            """Land parsed rows without holding SQLite across file I/O."""
+            if not pending:
+                return
+            con.executemany("""
                 INSERT INTO tracks (path, mtime, size, title, artist, album, album_artist,
                                     track, disc, date, year, orig_year, genre, duration,
                                     codec, samplerate, bitdepth, rating, favorite,
@@ -857,12 +857,23 @@ class Scanner(QThread):
                     has_art=:has_art,
                     rg_track_gain=:rg_track_gain, rg_track_peak=:rg_track_peak,
                     rg_album_gain=:rg_album_gain, rg_album_peak=:rg_album_peak
-            """, {**t, "path": p, "mtime": mtime, "size": size, "added_at": now})
-            if (i + 1) % 200 == 0:
-                con.commit()
+            """, pending)
+            con.commit()
+            pending.clear()
+
+        for i, p in enumerate(todo):
+            t = read_tags(p)
+            if t is None:
+                bad += 1
+                continue
+            mtime, size = seen[p]
+            pending.append({**t, "path": p, "mtime": mtime, "size": size,
+                            "added_at": now})
+            if len(pending) == 200:
+                flush_pending()
                 self.progress.emit(i + 1, len(todo))
                 self.batch.emit()
-        con.commit()
+        flush_pending()
 
         # Prune vanished files — safe here: the root IS mounted and was walked.
         # (An empty walk of a mounted-but-hosed root still can't run: seen would
