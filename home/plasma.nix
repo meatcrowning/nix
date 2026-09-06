@@ -365,8 +365,8 @@ in
       kdeglobals."KFileDialog Settings"."Sort by" = "Name";
       kdeglobals."KFileDialog Settings"."Sort directories first" = true;
       # Plasma visuals are shared. The live icon theme is intentionally not
-      # pinned: wal-set.sh selects an accent-qualified oxygen-live theme so
-      # open applications see a wallpaper recolour without a stale Qt cache.
+      # pinned: wal-set.sh selects an accent-qualified oxygen-live theme, then
+      # refreshes PlasmaShell's applet pixmaps after a real theme transition.
       kdeglobals.KDE.widgetStyle = "oxygen";
       kwalletrc.Wallet."First Use" = false;
       # The exact titlebar top uses: close / minimize / maximize at left, keep
