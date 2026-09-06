@@ -85,11 +85,12 @@ PANEL_GLOW_SCALE = float(os.environ.get('OXYSCHEME_PANEL_GLOW', '0.0'))
 # this replaced.  Use the titlebar's stop so a vertical panel joins it exactly.
 PANEL_TOP_ALPHA = float(os.environ.get('OXYSCHEME_PANEL_TOP', '0.43'))
 PANEL_BOTTOM_ALPHA = float(os.environ.get('OXYSCHEME_PANEL_BOTTOM', '0.0'))
-# Plasma's five-pixel frame caps need their corresponding screen-space samples,
-# rather than restarting the field in each slice.  The 34px north panel is the
-# first 3.2% of this 1080px desktop; a vertical side panel spans all of it.
+# Plasma's five-pixel frame caps need their corresponding samples rather than
+# restarting the field in each slice.  The top bar deliberately keeps a full
+# titlebar-strength ramp; its light stop is shared with the top of a vertical
+# side panel, which then carries that same tint down to the window base.
 PANEL_CAP_FRAC = 5.0 / 1080.0
-PANEL_NORTH_FRAC = 34.0 / 1080.0
+PANEL_EDGE_FRAC = 0.02
 CENTRE_AMPLITUDE = float(os.environ.get('OXYSCHEME_AMPLITUDE', '0.12'))
 # Oxygen shades with black. Plasma's accent lands on the Selection group, so
 # ColorScheme-Highlight IS the accent colour -- pointing the dark end of every
@@ -279,10 +280,10 @@ def panel_band(location, slice_name):
     """Return this framesvg slice's interval in the shared screen field."""
     if location == 'north':
         if slice_name == 'top':
-            return (0.0, PANEL_CAP_FRAC)
+            return (0.0, PANEL_EDGE_FRAC)
         if slice_name == 'bottom':
-            return (PANEL_NORTH_FRAC - PANEL_CAP_FRAC, PANEL_NORTH_FRAC)
-        return (PANEL_CAP_FRAC, PANEL_NORTH_FRAC - PANEL_CAP_FRAC)
+            return (1.0 - PANEL_EDGE_FRAC, 1.0)
+        return (PANEL_EDGE_FRAC, 1.0 - PANEL_EDGE_FRAC)
     if location in ('east', 'west'):
         if slice_name == 'top':
             return (0.0, PANEL_CAP_FRAC)
@@ -290,7 +291,7 @@ def panel_band(location, slice_name):
             return (1.0 - PANEL_CAP_FRAC, 1.0)
         return (PANEL_CAP_FRAC, 1.0 - PANEL_CAP_FRAC)
     if location == 'south':
-        return (1.0 - PANEL_NORTH_FRAC, 1.0)
+        return (1.0 - PANEL_EDGE_FRAC, 1.0)
     return None
 
 # ---------- role inference ----------
