@@ -81,11 +81,10 @@ Column {
         function onModelChanged() { sw.refresh() }
     }
 
-    // A FLOW, NOT A ROW. Four buttons drawn by the KDE style are wider than a
-    // 300px column, so a Row simply ran `video` off the edge and out of the
-    // panel — the column is a fixed width and the button set is fixed too, so
-    // the only thing left to give is a second line.
-    Flow {
+    // These are a fixed set of four mutually comparable presets, so they share
+    // the whole row rather than leaving a ragged tail after their label widths.
+    // At a narrower panel they shrink together; at a wider one each grows.
+    Row {
         id: flow
         width: sw.width
         spacing: 4
@@ -95,6 +94,7 @@ Column {
 
             TextButton {
                 required property var modelData
+                width: Math.max(1, Math.floor((flow.width - flow.spacing * 3) / 4))
                 label: "[ " + modelData.label + " ]"
                 tone: Theme.textDim
                 lit: App.mode === modelData.id
