@@ -6,8 +6,7 @@
 {
   home.packages = [
     (pkgs.writeShellScriptBin "codex-theme-reload" ''
-      exec ${pkgs.python3}/bin/python3 \\
-        /home/lam/nix/apps/pylib/tools/codex-theme-reload.py "$@"
+      exec ${pkgs.python3}/bin/python3 /home/lam/nix/apps/pylib/tools/codex-theme-reload.py "$@"
     '')
   ];
 
