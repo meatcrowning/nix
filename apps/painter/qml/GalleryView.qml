@@ -253,9 +253,11 @@ Item {
         // so a HiDPI screen still has pixels to draw with.
         readonly property int thumbPx:
             Math.min(560, Math.max(120, Math.ceil(cellWidth * 2 / 60) * 60))
-        // Keep a screenful of delegates alive either side of the viewport: the
-        // churn at the edges is what a scroll actually costs.
-        cacheBuffer: Math.max(600, cellHeight * 3)
+        // One adjacent row is enough to keep scrolling continuous. The former
+        // 600px/three-row buffer realised dozens of image delegates at startup;
+        // their asynchronous JPEG work continued after QML completed and made
+        // the newly shown window unusable while memory approached 1 GiB.
+        cacheBuffer: cellHeight
         // NO ROW-SIZED WHEEL STEP. This was `wheelLines: 1, wheelStep: cellHeight`,
         // i.e. one notch = exactly one row — which reads as the grid SNAPPING
         // an output to the top on every notch instead of scrolling. The default
