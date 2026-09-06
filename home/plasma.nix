@@ -414,7 +414,7 @@ in
     Name=Konsole
     GenericName=Terminal
     Comment=Terminal emulator
-    Exec=${pkgs.kdePackages.konsole}/bin/konsole --hide-menubar --hide-toolbars
+    Exec=${config.home.profileDirectory}/bin/konsole --hide-menubar --hide-toolbars
     Icon=utilities-terminal
     Categories=Qt;KDE;System;TerminalEmulator;
     Terminal=false
