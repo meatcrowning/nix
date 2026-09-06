@@ -76,23 +76,13 @@ import time
 from glyphs import px
 
 # ------------------------------------------------------------------ the store
-# PER HOST, since 2026-07-30. `docs/` syncs both ways every five minutes, so one
-# shared `board.md` meant an overnight agent on `top` and his own typing on
-# `book` resolving against each other — *"i dont want that overwriting ... to
-# overwrite anything i do on air"*. So `top` owns `docs/board.top.md`, `book`
-# owns `docs/board.book.md`, BOTH files stay committed and stay synced AS FILES
-# (each machine keeps a history and a backup of the other's board), and every
-# reader and writer on a host touches only its own. Nothing merges the two, ever.
-#
-# The token is `os.uname().nodename` — the OS hostname, `top` / `book` — and
-# deliberately NOT the flake attribute (`top` / `air`), which exists only inside
-# nix eval: every runtime writer has the hostname and nothing else, so there is
-# no hostname->attribute table anywhere on this path. `BOARD_FILE` overrides the
-# whole thing, for a harness or a one-off. Paths absolute like everything else in
-# this tree (`apps/AGENTS.md`): `$HOME` is /home/lam on both machines.
-#
-# `home/srvs/board-watch*` and `board-reminder*` import `board_path()` and
-# `ensure_board()` from here rather than restating the rule; keep both names.
+# The store is per host: `top` uses `docs/board.top.md` and `book` uses
+# `docs/board.book.md`. The synced files remain separate and are never merged,
+# so a writer on one machine cannot overwrite the other machine's board.
+# `os.uname().nodename` supplies the runtime host token (not the flake attribute);
+# `BOARD_FILE` replaces the whole path for a harness or deliberate one-off.
+# `board-watch*` and `board-reminder*` import `board_path()`/`ensure_board()` so
+# this rule has one implementation.
 BOARD_DIR = os.path.expanduser("~/nix/docs")
 
 #: The single pre-split store. Nothing here creates or deletes it: the migration
@@ -690,41 +680,12 @@ def parse(src):
 
 
 # ------------------------------------------------- what a bullet IS, for drawing
-#
-# `TODO_TAGS` (below) is the WRITE-side rule: a bullet says what it is in its
-# first word. These two are the READ-side use of the same word — the view groups
-# the bullets by it instead of drawing one flat list, which is his: *"the
-# information, completion, partial etc of a message should be used to organize
-# them on the board. under the needs you section there should be sub sections
-# for each of these headers"*.
-#
-# It is computed HERE, once per load, for the same reason the glyph map is: a
-# view that regrouped per delegate would do it on every scroll. Nothing about
-# the STORE changes — no sub-headings are ever written into `board.md`, the raw
-# lines and every index into them are untouched, and a group holds the very same
-# bullet dicts the flat `todo` list does, so removing one and putting it back is
-# the same edit it always was.
-#
-# THE ORDER, and why it is this one. It is by WHAT THE BULLET ASKS OF HIM, and
-# it is fixed by tag — not by age, not by count, not by when it arrived, so a
-# bullet never moves between two readings and no group is ranked against a
-# clock (the no-pressure requirement, `AGENTS.md`).
-#
-#   QUESTION     nothing moves until he says a word. It is the only group that
-#                is waiting on him, so it is first.
-#   FAILED       something was attempted and nothing landed. Second because the
-#                one thing this system must never do is let a failure sink to
-#                the bottom of a list of good news.
-#   PARTIAL      some of it landed and some did not; there is a remainder.
-#   ENACTED      done, and on his machine. A record.
-#   INFORMATION  a fact; nothing is asked of him at all.
-#   SUMMONED     who is working on what right now. Last: it is not a report at
-#                all but the state of the triangle, and every line in it is
-#                retired by its own spirit's result without him touching it.
-#
-# An untagged bullet — the store is full of ones written before the tag rule —
-# comes FIRST, under no heading at all, so nothing claims it as something it is
-# not. Reading is untouched by the tag rule and it is untouched by this too.
+# `TODO_TAGS` is the write-side vocabulary; `todo_groups()` computes its
+# display groups once per load without changing the store, raw lines or indexes.
+# Groups are fixed by tag, never arrival time, so the no-pressure ordering is:
+# QUESTION, FAILED, PARTIAL, ENACTED, INFORMATION, then SUMMONED. Failed work
+# stays above good news, questions stay first, and summons are status rather
+# than results. Legacy untagged bullets remain ungrouped and still parse.
 TODO_ORDER = ("QUESTION", "FAILED", "PARTIAL", "ENACTED", "INFORMATION",
               "SUMMONED")
 
@@ -1596,47 +1557,12 @@ def check_no_question(bullet):
 
 
 # ------------------------------------------------ ONE BOARD ITEM PER ASK
-# His rule, 2026-07-29: *"messages should be SEPARATED"* — when an agent reports
-# on several things, each one is its own bullet. Never several asks folded into
-# one message.
-#
-# It is not a style preference, it is how the board CLEARS. Replying to a bullet
-# clears that bullet (bc1454d), so an ask folded into another agent's paragraph
-# is cleared by a reply that was never about it, and survives nowhere he can
-# see. That happened: worker Purson (`w88cd31`) was handed four asks and wrote
-# ONE bullet — *"PARTIAL: **times on everything under needs you** - landed, plus
-# two more items you sent while I was in there"* — whose headline named the
-# first. He replied to it; asks 2-4 went with it.
-#
-# The write path already SUPPORTS separation: `boardmove.note` prefixes `- ` per
-# line, so several unindented lines in one call are several bullets, each with
-# its own `<!-- placed: -->` stamp, each clearable on its own. What was missing
-# was anything that stopped a writer bundling instead. These four checks are
-# that, and they are STRUCTURAL — a machine cannot read intent, but every one of
-# these shapes is a second ask wearing a disguise:
-#
-#   1. a second TAG further along a bullet's line. `boardctl.py note 'A: x'
-#      'B: y'` used to join its argv with a space and land one bullet saying
-#      both; now argv that looks like that is split into bullets instead
-#      (`boardctl.cmd_note`) and anything that still gets through is refused.
-#   2. a TAG on an INDENTED line — an ask hidden in the elaboration, which is
-#      the one place the tag check deliberately does not look.
-#   3. more than one `**headline**` on one line. The shape is
-#      `TAG: **what you were asked** - what you did`; a second bold span in it
-#      is a second thing you were asked.
-#   4. a sub-bullet list under a bullet, or a phrase that COUNTS other work
-#      ("plus two more items", "the other three"). His shape for the detail is
-#      *"a sentence or two, not a paragraph"* about THAT ask; a list or a tally
-#      is the rest of the run hiding under the first item's headline.
-#
-# What it deliberately does NOT do is guess at prose. Two asks written as two
-# plain sentences pass, and the prompts (`boardwork.RULES`/`WORKER_PROMPT` rule
-# 9) carry the rest. Mechanism where mechanism reaches; a rule where it does not.
-#
-# **His own words are DATA, not prose to be read**: the mechanical failure
-# templates interpolate what he typed, and a note that says a worker died must
-# never be refused because of how he phrased the thing it died on. So they pass
-# it through `oneline()` and the checks skip anything inside a `` ` `` span.
+# Each independent ask must be its own bullet: replies and removals clear one
+# item, while `boardmove.note` already stamps each unindented input line
+# separately. Structural checks reject a second tag on the same line, a tagged
+# indented continuation, multiple bold headlines, sub-bullets, and phrases that
+# count additional work. Plain prose is not guessed at. Interpolated user text
+# is data, so it is normalised by `oneline()` and checks skip code spans.
 #: The two summon words are NOT looked for here, colon or no colon. A bare
 #: `SUMMONED` mid-line is as likely to be the ordinary English word, and a
 #: `SUMMONED:` mid-line is the shape every summon note was written in before
@@ -1789,35 +1715,13 @@ def add_todo_bullet(lines, doc, bullet, when=None, by=None, order=None):
 
 
 # -------------------------------- a summon note dies when its result arrives
-# His rule, 2026-07-29: *"once an agent give the board a completed, partial, etc
-# message - its related summon information message should be removed since the
-# user would already know that part."*
-#
-# The orchestrator's note is a START, never a result (`boardwork.RULES`), so it
-# writes one `SUMMONED` line per task it handed out — *"SUMMONED Marbas
-# (`wd690a4`) to add commit times"*, and did the same behind an `INFORMATION:`
-# tag before 2026-07-30, which the store still holds. That line is worth reading for as long as
-# nothing has come back, and the moment the worker posts its own
-# `ENACTED:`/`PARTIAL:`/`FAILED:` it is worse than noise: two bullets about
-# one piece of work, the upper one announcing what the lower one has finished.
-#
-# It happens HERE rather than in `boardctl`, because the store has more than one
-# writer of a result — `boardctl note` for a worker that finished, board-watch's
-# `WORKER_FAIL` for one that died mid-sentence — and a rule implemented in one
-# caller is a rule that is true in one caller.
-#
-# CONSERVATIVE BY CONSTRUCTION. A wrong deletion loses something he cannot get
-# back; an undeleted summon note is a line he has already read. So:
-#
-#   * only a bullet tagged `SUMMONED`/`COMMANDED` — or, in the shape written
-#     before 2026-07-30, an `INFORMATION` one that SAYS `summoned <Name>` or
-#     `commanded <Name>` — is a candidate. A `QUESTION:`, a decision, an
-#     ordinary `INFORMATION:` fact and the result itself are never touched.
-#   * the ID matches first and the NAME only second, and a name match is
-#     accepted only for a summon note that carries no id at all — a name can be
-#     moved off a live agent (`boardagents.pick_name`), an id never is.
-#   * ambiguity is a REFUSAL to act: two candidates for one worker, or none,
-#     and every summon note stays exactly where it is.
+# A `SUMMONED`/`COMMANDED` start is retired when the same worker posts an
+# `ENACTED`/`PARTIAL`/`FAILED` result. Legacy `INFORMATION: ... summoned` and
+# lowercase forms remain candidates because old stores still contain them.
+# This runs in the shared note write path, so worker completion and board-watch
+# failure use the same rule. Deletion is conservative: match id first, allow a
+# name only for an id-less note, and refuse on ambiguity or no unique candidate;
+# questions, ordinary information and result bullets are never touched.
 RESULT_TAGS = ("ENACTED", "PARTIAL", "FAILED")
 
 #: `SUMMONED Marbas` — or `COMMANDED Marbas`, which is the same announcement
@@ -1922,23 +1826,11 @@ def drop_summon(lines, doc, agent_id="", name=""):
 
 
 # --------------------------------------- state for a board that is NOT this host's
-# Every writer here keeps its bookkeeping under one root — `$XDG_STATE_HOME/board`,
-# `boardmove.state_dir()` — and every one of them resolves that root without ever
-# asking WHICH BOARD it is about. That is right for the store this host actually
-# shows and wrong for anything else, and "anything else" is not hypothetical: an
-# agent writing a one-off probe against a `/tmp` board inherits his real state dir
-# and writes into it. Measured on `top` 2026-08-02: 830 stale `edit-*.lock` files
-# from 830 throwaway board paths, and one fixture stash left in `inflight/` that
-# drew a phantom spirit card on his board — a decision agent with no process
-# behind it, which nothing would ever reap because a stash with a null pid cannot
-# be observed to die.
-#
-# So state ABOUT a board that is not this host's own goes somewhere it can never
-# be mistaken for his: a per-board directory under the runtime dir, gone at the
-# next boot.
-#
-# `XDG_STATE_HOME` being set means the caller has ALREADY isolated itself — which
-# is what both harnesses do — so it is honoured verbatim and none of this fires.
+# State for a non-live board must not enter this host's `$XDG_STATE_HOME/board`:
+# probes and fixtures otherwise leave locks or phantom agent records behind.
+# Unless the caller already set `XDG_STATE_HOME` (the harness contract), route
+# such state to a per-board directory under the runtime dir, which disappears at
+# reboot. The live board keeps the normal state root.
 
 def is_live_board(path):
     """Whether `path` IS the store this host shows (`board_path()`). Pure."""

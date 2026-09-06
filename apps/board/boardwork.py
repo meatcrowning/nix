@@ -2178,52 +2178,15 @@ def context_flags(role, read_only=False):
 
 
 # ------------------------------------------------ what model does which job
-#: Per-ROLE model and reasoning effort, the one table for both spawners
-#: (`_spawn_worker` below and `board-watch.py`'s `spawn`, which imports it from
-#: here for the same reason it imports ALLOW/DENY: a knob set in one spawner and
-#: not the other is invisible until it matters).
+#: Per-role model and reasoning effort, shared by both spawners. The UI-selected
+#: pair is resolved by `role_flags()` for the orchestrator and by
+#: `spirit_model()` for workers/decisions; cards use the same resolver so their
+#: tier cannot disagree with the launched process. See `guide/cost.md`.
 #:
-#: `""` means SAY NOTHING — pass no flag and inherit whatever
-#: `~/.claude/settings.json` is set to. That used to be the default for the two
-#: roles that DO the work, on the reading that nobody had asked for them to
-#: change and that pinning a model would silently outrank the setting he edits
-#: by hand. **He asked, on 2026-07-29**: *"the other agents should all be opus 5
-#: medium thinking"* — so both are pinned now, and the argument above is kept
-#: only to say what changed and why it is no longer the reason.
-#:
-#: The ORCHESTRATOR is the exception he asked for. Its session is short and it
-#: writes no code — read what he typed, work out how many jobs it is, run
-#: `boardctl dispatch`/`ask`, write one note — so the cost of a bigger model and
-#: more thinking is bounded by a run that is capped at fifteen minutes anyway,
-#: while the mistakes it can make (splitting one job into three conflicting
-#: workers, dispatching what should have been a question) each cost a worker, a
-#: commit and something he has to notice and undo. Judgement is the entire job;
-#: buy it.
-#:
-#: Flags verified against the installed CLI (`claude --help`, 2026-07-29):
-#: `--model <model>` takes an alias or a full name, `--effort <level>` takes
-#: low|medium|high|xhigh|max.
-#: The orchestrator's model AND effort are HIS, chosen as one pick in the
-#: dropdown beside the box and read out of `orch_model()` at spawn — the pair
-#: written below is dead for this role (`role_flags` overwrites both from the
-#: file) and is kept only so the table has a row and a fallback shape. He asked
-#: to choose *"the reasoning effort of the summoner agents"* on top of the model,
-#: so the effort is no longer pinned; `DEFAULT_ORCH` (`high`) is what a summoner
-#: runs at until he picks otherwise, which is the value it was pinned to before.
-#: Unlike a spirit the summoner has NO ceiling — its judgement is the whole of
-#: its job and he asked to be able to buy as much of it as he likes.
-#:
-#: A SPIRIT's pair is his too — the fourth dropdown, read out of
-#: `spirit_model()` at spawn (which `role_flags` overwrites the pair below
-#: with), so like the orchestrator's the value here is a dead fallback shape. It
-#: is `SPIRIT_DEFAULT` — [his, 2026-08-02] the spirit default is deepseek v4
-#: — named through the constant so it cannot drift from what `spirit_model()`
-#: returns when he has never chosen.
-#:
-#: The two SPIRIT roles. Both are drawn on his board as spirits and both are
-#: bound by the same ceiling, so the dropdown writes one store and this names who
-#: reads it — a decision agent that could be re-pointed while a worker could not
-#: would be the same control disagreeing with itself.
+#: The orchestrator has no spirit ceiling. Spirit roles share one allowlist and
+#: are clamped after explicit arguments and environment overrides, so a stale
+#: file or inherited setting cannot raise them above the configured ceiling.
+#: Empty values inherit the CLI setting; the table below supplies the defaults.
 SPIRIT_ROLES = ("worker", "decision")
 
 ROLES = {
@@ -2337,26 +2300,12 @@ def sandbox_dir(agent_id):
 
 
 # ------------------------------------------------- a log that survives a kill
-# **A worker's `.log` is empty for the whole run, and empty forever if it is
-# killed.** `claude -p` with no tty writes its result ONCE, at exit, so there is
-# nothing to line-buffer and nothing to flush: a worker that is SIGKILLed, OOMed,
-# reaped at `RuntimeMaxSec` or cut off mid-sentence leaves a zero-byte file, and
-# the one case where the log matters most is the one case it is guaranteed to
-# say nothing. [his, 2026-07-30, of the bullet that reported Foras killed
-# mid-verification with an empty log:] *"i doubt you have no idea what happened
-# to foras as this message implies"*.
-#
-# The full history DOES exist — the agent's own transcript, written live, the
-# same file `boardphase` tails for the observed line — and we know its exact
-# path because the spawn CHOOSES the session uuid. So the log stops being the
-# record and becomes the POINTER: a header at spawn (so it is never zero bytes
-# and always names the transcript) and a post-mortem footer when the worker is
-# reaped without having reported.
-#
-# Header and footer are both `- ` prefixed and dated so nothing mistakes them
-# for the agent's own voice — the card drawer prefers the transcript anyway and
-# falls back to this file (`main.py`), and `_died_transiently` reads the tail,
-# which neither of these lines can match.
+# `claude -p` writes its result only at exit, so a killed, OOMed or timed-out
+# worker can leave a zero-byte log. The live transcript is the authoritative
+# history; the spawned session id gives `boardphase` its path. This file is a
+# pointer: write a header at spawn and a dated footer on reap, both `- `-prefixed
+# so the card drawer and transient-death check cannot mistake them for worker
+# output. See `guide/orchestrator.md` for the reporting contract.
 def _log_line(aid, text):
     """Append one board-written line to a worker's log. Never raises."""
     try:
@@ -3307,31 +3256,19 @@ def cards(agents=None, pend=None):
     urgent. There is no urgency in this app.
     """
     rows = _drawable(ba.agents() if agents is None else agents)
-    # HIS OWN SESSIONS ARE NOT BOARD WORK — [his, 2026-07-31] *"agents started
-    # by the user can be hidden from the triangle"*. The anonymous `session`
-    # rows that `boardagents.agents()` walks out of /proc — bare interactive
-    # Claude Code sessions with no name and no `--where`, e.g. "s831183 an
-    # interactive Claude Code session" — are HIS terminals, not summoned
-    # spirits, so they are dropped here at the one surface that draws the
-    # triangle. Deliberately NOT in `_drawable()`: `groups()` (which is what
-    # `boardctl.py agents` lists) keeps showing them, because that is an
-    # agent-facing collision check where a live session of his still matters.
-    # Board-dispatched workers (named rows) and Solomon are unaffected —
-    # neither is ever a `session`.
+    # Interactive `session` rows are the user's own terminals, not summoned
+    # spirits, so the window omits them. Keep them in `groups()` for the
+    # agent-facing collision check; named workers and Solomon are unaffected.
     rows = [a for a in rows if a.get("kind") != "session"]
-    # A SUBSPIRIT IS NOT A TOP-LEVEL CARD. It is a transient deepseek run a
-    # spirit (or Solomon) delegated a chunk to; the board draws it INSET under
-    # its parent's row, not as one more card in the flat list. `main.py`/`qml`
-    # (Murmur) reads it off the `boardagents.agents()` walk by `kind`/`parent`
-    # and interleaves it — so it is dropped here, exactly like a `session`.
+    # Subspirits are transient delegated runs drawn inset under their parent;
+    # `main.py`/QML interleaves them by `kind`/`parent`, so they are not cards.
     rows = [a for a in rows if a.get("kind") != "subspirit"]
     pend = pending() if pend is None else pend
     out = sorted(rows, key=lambda a: (float(a.get("born") or 0.0), a["id"]))
     orch = [a for a in out if _is_orchestrator(a)]
     rest = [a for a in out if not _is_orchestrator(a)]
-    # Two overlapping orchestrators are both Solomon and both pinned, in birth
-    # order — one role, briefly doing two things, and saying so beats hiding
-    # the second one (`boardagents.ORCHESTRATOR_NAME`).
+    # Overlapping orchestrators remain pinned in birth order; hiding one would
+    # make the live work invisible (`boardagents.ORCHESTRATOR_NAME`).
     return (orch or [_idle_orchestrator_row()]) + rest \
         + [_queued_row(t) for t in pend]
 
@@ -3401,21 +3338,10 @@ def seed_watch_state(key):
         return False
     if key in d["answers"]:
         return False                 # already known (answered or not)
-    # An empty `answers` is the RESTING state (NEEDS YOU empty), not "first run
-    # pending" — `answers` only ever holds the DECISIONS CURRENTLY in NEEDS YOU,
-    # so it is empty whenever the list is empty, which is now the resting state.
-    # Bailing on it meant a question asked on a resting board was NEVER seeded,
-    # so its first sighting was an unknown key and, if the answer landed in the
-    # same window, board-watch's "answered before its first sighting" path fired
-    # a decision agent on it (see board-watch.py tick() hazard 2 / commit 1016f38).
-    # The explicit `seeded` flag owns the "board-watch has never run" distinction,
-    # not a non-empty `answers`; a watcher with no state file at all fails the
-    # `open` above and is recorded by its own first run.
-    # `fingerprint()` of an unanswered item carries the `|on:` host suffix since
-    # host-affinity landed; the old literal here ("idx:|ans:") never matched it,
-    # so even a question that DID get seeded still looked fingerprint-changed on
-    # its first real sighting. Keep this string in lockstep with board-watch's
-    # `fingerprint()` (apps/srvs/board-watch.py) — it is the same canonical shape.
+    # An empty `answers` is the valid resting state, so `seeded` (not a
+    # non-empty answer map) distinguishes "watcher has never run". Seed the
+    # same unanswered fingerprint that board-watch computes, including its host
+    # suffix; keep this literal in lockstep with `fingerprint()`.
     d["answers"][key] = "idx:|ans:|on:"
     tmp = path + ".tmp"
     try:
