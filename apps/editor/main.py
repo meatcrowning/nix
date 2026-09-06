@@ -872,6 +872,31 @@ def main():
     if not engine.rootObjects():
         sys.exit(1)
 
+    fixture = None
+    if os.environ.get("EDITOR_RESOURCE_FIXTURE") == "1":
+        # A retained, offscreen-only resource seam.  The runner supplies only
+        # generated scratch files; transitions call the app's own QML API and
+        # never synthesize input or reach a live service.
+        from resourcefixture import ResourceFixture
+        root = engine.rootObjects()[0]
+        paths = [p for p in os.environ.get("EDITOR_RESOURCE_PATHS", "").split(os.pathsep)
+                 if p]
+
+        def normal():
+            while int(root.property("tabCount") or 0) > 1:
+                root.closeTab(1)
+
+        def stress():
+            for path in paths:
+                root.openPath(path, 0)
+
+        def clear():
+            while int(root.property("tabCount") or 0) > 1:
+                root.closeTab(1)
+
+        fixture = ResourceFixture(app, {"normal": normal, "stress": stress,
+                                        "clear": clear}, parent=app)
+
     from winstate import WinState
     win_state = WinState(engine.rootObjects()[0], "editor")  # keep ref: geometry
 
