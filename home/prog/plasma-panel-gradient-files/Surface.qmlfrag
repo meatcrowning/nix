@@ -1,8 +1,8 @@
     Image {
-        // This is a crop of ONE screen-sized, real Oxygen window background.
-        // It is rendered by Oxygen itself, not approximated with QML stops:
-        // the top and left panels therefore take their pixels from the same
-        // field and the side carries the exact tint found lower in a window.
+        // The horizontal panel is a titlebar-sized Oxygen surface; the vertical
+        // panel is a crop of one screen-sized Oxygen application body.  These
+        // are deliberately different references: window decoration above,
+        // application surface down the side.
         //
         // Keep this at the default z.  Plasma creates the containment (the
         // applets) after this root component, so it remains behind every icon
@@ -11,9 +11,13 @@
         visible: opaqueItem.visible
         opacity: panelOpacity
         anchors.fill: floatingTranslucentItem
-        source: "file:///home/lam/.local/state/plasma-panel-surface.png"
-        sourceClipRect: Qt.rect(Math.round(panel.x), Math.round(panel.y),
-                                Math.round(width), Math.round(height))
+        source: root.verticalPanel
+            ? "file:///home/lam/.local/state/plasma-panel-surface.png"
+            : "file:///home/lam/.local/state/plasma-panel-titlebar.png"
+        sourceClipRect: root.verticalPanel
+            ? Qt.rect(Math.round(panel.x), Math.round(panel.y),
+                      Math.round(width), Math.round(height))
+            : Qt.rect(Math.round(panel.x), 0, Math.round(width), Math.round(height))
         fillMode: Image.Pad
         cache: false
     }
