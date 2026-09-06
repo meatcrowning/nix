@@ -15,6 +15,21 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QGuiApplication, QImage, QPalette, QRegion
 from PySide6.QtWidgets import QApplication, QWidget
 
+TITLEBAR_HEIGHT = 34
+
+
+def render_surface(width: int, height: int, palette: QPalette) -> QImage:
+    """Render an actual Oxygen styled top-level widget, never mapping it."""
+    proxy = QWidget()
+    proxy.setAttribute(Qt.WA_StyledBackground, True)
+    proxy.setPalette(palette)
+    proxy.resize(width, height)
+    image = QImage(width, height, QImage.Format_ARGB32_Premultiplied)
+    image.fill(0)
+    proxy.render(image, QPoint(), QRegion(0, 0, width, height),
+                 QWidget.DrawWindowBackground)
+    return image
+
 
 def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv[:1])
@@ -38,14 +53,8 @@ def main() -> int:
         colour = app.palette().color(QPalette.Active, role)
         for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
             palette.setColor(group, role, colour)
-    proxy = QWidget()
-    proxy.setAttribute(Qt.WA_StyledBackground, True)
-    proxy.setPalette(palette)
-    proxy.resize(width, height)
-    image = QImage(width, height, QImage.Format_ARGB32_Premultiplied)
-    image.fill(0)
-    proxy.render(image, QPoint(), QRegion(0, 0, width, height),
-                 QWidget.DrawWindowBackground)
+    image = render_surface(width, height, palette)
+    titlebar = render_surface(width, min(TITLEBAR_HEIGHT, height), palette)
 
     state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
     state.mkdir(parents=True, exist_ok=True)
@@ -54,6 +63,11 @@ def main() -> int:
     if not image.save(str(temporary), "PNG"):
         return 1
     temporary.replace(target)
+    title_target = state / "plasma-panel-titlebar.png"
+    title_temporary = title_target.with_suffix(".new.png")
+    if not titlebar.save(str(title_temporary), "PNG"):
+        return 1
+    title_temporary.replace(title_target)
     return 0
 
 
