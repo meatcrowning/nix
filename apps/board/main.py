@@ -97,6 +97,7 @@ from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 from deskstyle import DeskStyle  # noqa: E402  (the desktop-wide font setting)
 from kdetheme import theme_source, is_plasma  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
 import kdeshell  # noqa: E402  (the Plasma session's real QtWidgets window)
+from oxygenstyle import is_oxygen  # noqa: E402  (select real Oxygen content controls)
 from glyphs import px  # noqa: E402  (§2.3 — map at INGEST, like boardparse does)
 
 import boardparse  # noqa: E402  (beside this file)
@@ -2227,7 +2228,11 @@ def main():
                            state_key="plasma") if plasma else None
     engine = shell.engine() if plasma else QQmlApplicationEngine()
     if plasma:
-        kdeshell.select_plasma_files(engine)
+        # The board's ordinary QML is the pixel-era Hyprland face.  Oxygen gets
+        # its own content controls as well as the QMainWindow chrome: fields,
+        # section headers, labels and scrolling all resolve to real QStyle
+        # materials instead of a dark terminal page inside an Oxygen window.
+        kdeshell.select_plasma_files(engine, extra=("oxygen",) if is_oxygen() else ())
     ctx = engine.rootContext()
 
     settings = Settings()

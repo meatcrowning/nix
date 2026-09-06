@@ -13,7 +13,9 @@ boardphase.py, boardhermes.py, boardusage.py, boardundo.py, and qml/. `Main.qml`
 is the Hyprland `Window`; `Root.qml` is the same page as an `Item` for the
 Plasma `kdeshell` QMainWindow. Keep them visually and behaviorally equivalent:
 the Plasma shell owns its native Oxygen menu/toolbar/status chrome, while
-hyprvtb owns the Hyprland chrome. The hermes
+hyprvtb owns the Hyprland chrome. `qml/+oxygen/` holds the body variants that
+use the active Oxygen style; keep their API identical to the pixel-face sibling
+and never branch a call site. The hermes
 runtime reads its card/drawer from hermes's session store when no transcript file
 exists; see guide/cards.md. home/prog/board.nix runs the live source at
 /home/lam/nix/apps/board/main.py, including the air system-python split, so
