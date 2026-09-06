@@ -14,7 +14,13 @@
   # supervisor waits for Codex's own task_complete event before restarting the
   # TUI, so a running agent is never interrupted.
   systemd.user.services.codex-theme-reload = {
-    Unit.Description = "queue Codex refresh after a desktop theme change";
+    Unit = {
+      Description = "queue Codex refresh after a desktop theme change";
+      # KConfig and the wallpaper writer update both watched files in a burst.
+      # Every invocation merely replaces one queue generation, so limiting
+      # those harmless coalescing writes can only lose the requested refresh.
+      StartLimitIntervalSec = 0;
+    };
     Service = {
       Type = "oneshot";
       Environment = [ "PATH=${config.home.profileDirectory}/bin:/run/current-system/sw/bin:/usr/bin:/bin" ];
