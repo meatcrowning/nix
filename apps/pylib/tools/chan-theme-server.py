@@ -179,7 +179,10 @@ class Handler(BaseHTTPRequestHandler):
         "/chan.css": (lambda src: chansource.build_css(src), CSS),
         "/": (lambda src: chansource.build_css(src), CSS),
         "/css": (lambda src: chansource.build_css(src), CSS),
-        "/scrollbar.css": (lambda src: scrollcss.build(src), CSS),
+        # The existing all-pages userscript is also the live colour-wash seat.
+        # It pulls this route every 30 seconds, so a palette change reaches an
+        # open page without reinstalling a userscript.
+        "/scrollbar.css": (lambda src: scrollcss.build(src, page=True), CSS),
         "/twitter.css": (lambda src: _twitter_css(src), CSS),
         "/chan.user.js": (lambda src: chan_script.build(src), JS),
         "/scrollbar.user.js": (lambda src: scrollbar_script.build(src), JS),

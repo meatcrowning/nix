@@ -44,15 +44,18 @@ MATCHES = ("*://*/*", "file:///*")
 
 
 def build(source=None, style=None, path=OUT, port=None):
-    css, prov = scrollcss.build(source, style)
+    # This is the all-pages route: in addition to the scrollbar, it carries
+    # the click-through live palette wash.  Vivaldi's own custom.css calls the
+    # same builder without ``page`` so browser chrome is never covered.
+    css, prov = scrollcss.build(source, style, page=True)
     port = port or chansource.PORT
     version = userscript.source_version(
         (HERE.parent / "scrollcss.py", HERE.parent / "userscript.py",
          HERE / "scrollbar-userscript.py"), major=2)
     return userscript.build(
         name="desktop scrollbar",
-        description=("Draws every page's scrollbar as this desktop's (%s), "
-                     "polling the loopback courier." % prov),
+        description=("Draws every page's scrollbar and live desktop colour wash "
+                     "(%s), polling the loopback courier." % prov),
         matches=MATCHES, css=css, version=version,
         url="http://127.0.0.1:%d/scrollbar.css" % port,
         update_url="http://127.0.0.1:%d/scrollbar.meta.js" % port,
