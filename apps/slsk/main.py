@@ -30,7 +30,7 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Slot, Signal, Property, QUrl
+from PySide6.QtCore import QObject, Slot, Signal, Property, QUrl, QTimer
 from PySide6.QtGui import QGuiApplication, QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 
@@ -184,6 +184,36 @@ def main():
     engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
     if not engine.rootObjects():
         sys.exit(1)
+
+    if os.environ.get("SLSK_RESOURCE_FIXTURE") == "1":
+        from resourcefixture import ResourceFixture
+
+        root = engine.rootObjects()[0]
+
+        def populate(query):
+            # The fake slskd sizes both search responses and transfers from the
+            # query.  Going through SlskApi keeps the retained state honest:
+            # worker threads, JSON ingestion, glyph mapping and QML delegates
+            # are all the same objects as in the real application.
+            api.startSearch(query)
+            QTimer.singleShot(100, api.refreshTransfers)
+
+        def clear():
+            root.setProperty("results", [])
+            root.setProperty("transfers", [])
+            root.setProperty("searchStatus", "")
+            api._last_query = ""
+            api._last_results = []
+
+        fixture = ResourceFixture(
+            app,
+            {
+                "normal": lambda: populate("fixture-normal"),
+                "stress": lambda: populate("fixture-stress"),
+                "clear": clear,
+            },
+            settle_ms=1500,
+        )
 
     from winstate import WinState
     win_state = WinState(engine.rootObjects()[0], "slsk")  # keep ref: geometry
