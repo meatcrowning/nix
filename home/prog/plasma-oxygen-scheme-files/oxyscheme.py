@@ -222,34 +222,47 @@ def gloss_gradient(doc, src_gid, stops):
     gid = doc.uid(src_gid); new.set('id', gid)
     return doc.publish(gid, new)
 
-def respin_alpha(doc, src_gid, stops, mode):
+def respin_alpha(doc, src_gid, stops, mode, axis='v'):
     """Rebuild an alpha-ramp gradient under `flip` or `centre`."""
     src = doc.idx.get(src_gid)
-    new = ET.Element(src.tag if src is not None else S+'linearGradient')
-    if src is not None:
-        for k, v in src.attrib.items():
-            if k not in ('id', X+'href', 'href'): new.set(k, v)
-        href = src.get(X+'href') or src.get('href')
-        if href and not any(a in src.attrib for a in ('x1','x2','y1','y2','cx','cy','r')):
-            par = doc.idx.get(href[1:])
-            if par is not None:
-                for k, v in par.attrib.items():
-                    if k not in ('id', X+'href', 'href') and k not in new.attrib:
-                        new.set(k, v)
     offs   = [float(o) for o, _, _ in stops]
     alphas = [a for _, _, a in stops]
     cols   = [c for _, c, _ in stops]
+    new = None
     if mode == 'flip':
+        new = ET.Element(src.tag if src is not None else S+'linearGradient')
+        if src is not None:
+            for k, v in src.attrib.items():
+                if k not in ('id', X+'href', 'href'): new.set(k, v)
+            href = src.get(X+'href') or src.get('href')
+            if href and not any(a in src.attrib for a in ('x1','x2','y1','y2','cx','cy','r')):
+                par = doc.idx.get(href[1:])
+                if par is not None:
+                    for k, v in par.attrib.items():
+                        if k not in ('id', X+'href', 'href') and k not in new.attrib:
+                            new.set(k, v)
         lo, hi = min(offs), max(offs)
         pairs = [(lo + hi - o, c, a) for o, c, a in zip(offs, cols, alphas)]
         pairs.sort(key=lambda t: t[0])
-    else:  # centre
+    if mode == 'centre':
+        # Emit a LINEAR objectBoundingBox gradient regardless of what the source
+        # was. Oxygen's panel ramps are radialGradients with r=2.5 in user space;
+        # Plasma stretches that 5px centre slice across the whole panel, which
+        # blows the radial into a soft blob instead of an even gradient. A
+        # titlebar's gradient is linear and even, so this makes it one.
+        new = ET.Element(S+'linearGradient')
+        new.set('gradientUnits', 'objectBoundingBox')
+        new.set('x1', '0'); new.set('y1', '0')
+        new.set('x2', '1' if axis == 'h' else '0')
+        new.set('y2', '0' if axis == 'h' else '1')
         m = sum(alphas)/len(alphas)
         dev = max(abs(a - m) for a in alphas) or 1.0
         pairs = []
+        lo, hi = min(offs), max(offs)
+        span = (hi - lo) or 1.0
         for o, a in zip(offs, alphas):
             amt = abs(a - m)/dev * CENTRE_AMPLITUDE
-            pairs.append((o, '#000000' if a > m else '#ffffff', amt))
+            pairs.append(((o - lo)/span, '#000000' if a > m else '#ffffff', amt))
     for o, c, a in pairs:
         st = ET.SubElement(new, S+'stop')
         st.set('offset', f"{o:.4f}")
@@ -462,7 +475,9 @@ def convert(src, dst, report=None):
                 base.set('class', role)
                 p = parents[body]; p.insert(list(p).index(body), base)
                 if ALPHA_MODE in ('flip', 'centre'):
-                    gid = respin_alpha(doc, fill[5:-1], stops, ALPHA_MODE)
+                    eid_l = (el.get('id') or '').lower()
+                    ax = 'h' if ('east' in eid_l or 'west' in eid_l) else 'v'
+                    gid = respin_alpha(doc, fill[5:-1], stops, ALPHA_MODE, ax)
                     od = style_dict(body); od['fill'] = f'url(#{gid})'
                     set_style(body, od)
                 else:
