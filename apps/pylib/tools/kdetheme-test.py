@@ -183,10 +183,16 @@ check("the app's own regex finds all twelve", set(found) == set(K.KEYS), str(sor
 check("and they are the derived colours",
       found["bg"] == "#1f2627" and found["accent"] == K._hex(K.kde_palette()["accent"]))
 
+seen = []
+K.watch_palette(lambda: seen.append(True))
+write_scheme(LIGHT)
+check("Plasma clients are notified without waiting for the generated-file watch",
+      (K._bridge._sync() is None) and seen == [True])
+
 mtime = src.stat().st_mtime_ns
 check("an unchanged scheme is not rewritten", K.write_generated(K.kde_palette()) is False)
 check("...and the file was left alone", src.stat().st_mtime_ns == mtime)
-write_scheme(LIGHT)
+write_scheme(DARK)
 check("a changed scheme is rewritten", K.write_generated(K.kde_palette()) is True)
 check("no .tmp left behind", not list(src.parent.glob("*.tmp")))
 
