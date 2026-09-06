@@ -64,12 +64,11 @@ PlasmoidItem {
     readonly property int desktopGutter: Kirigami.Units.smallSpacing + 2
     readonly property int appGutter: 1
 
-    // The whole point: never hidden, whatever is or is not focused.
-    Plasmoid.status: PlasmaCore.Types.ActiveStatus
-    // When Plasma is drawing a real DBus menu, leave only the one-pixel
-    // handoff after Kickoff. Keeping the full fallback representation alive
-    // there reserves its last desktop width and leaves a large blank gap.
-    preferredRepresentation: appExportsMenu ? compactRepresentation : fullRepresentation
+    // Stay visible whenever we supply the fallback. When Plasma has a native
+    // DBus menu, hide this whole applet instead of leaving its panel margin
+    // ahead of the stock menu.
+    Plasmoid.status: appExportsMenu
+        ? PlasmaCore.Types.HiddenStatus : PlasmaCore.Types.ActiveStatus
 
     // ---- what the bar is currently describing --------------------------
 
@@ -402,11 +401,6 @@ PlasmoidItem {
         }
         // macOS slides from menu to menu once one is open; so do we.
         onHoveredChanged: if (hovered && popup.visible && !isOpen) openMine()
-    }
-
-    compactRepresentation: Item {
-        implicitWidth: root.appGutter
-        implicitHeight: 1
     }
 
     fullRepresentation: Item {
