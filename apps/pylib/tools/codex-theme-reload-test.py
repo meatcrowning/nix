@@ -2,6 +2,7 @@
 """Hermetic smoke test for codex-theme-reload.py; touches no real Codex state."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -28,7 +29,10 @@ def main() -> int:
         sessions = root / "codex" / "sessions" / "today"
         sessions.mkdir(parents=True)
         log = sessions / "rollout.jsonl"
-        log.write_text(json.dumps({"type": "session_meta", "payload": {"id": SESSION, "cwd": str(root)}}) + "\n")
+        log.write_text(json.dumps({"type": "session_meta", "payload": {
+            "id": SESSION, "cwd": str(root),
+            "timestamp": (datetime.now(timezone.utc) + timedelta(seconds=5)).isoformat().replace("+00:00", "Z"),
+        }}) + "\n")
         fake = root / "fake-codex.py"
         fake.write_text("""#!/usr/bin/env python3
 import os, pathlib, signal, sys, time

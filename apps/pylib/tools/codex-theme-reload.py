@@ -10,6 +10,7 @@ the restart never falls back to whichever conversation happened to be newest.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import os
 from pathlib import Path
@@ -47,7 +48,7 @@ def jsonl_paths() -> Iterable[Path]:
     return SESSIONS.rglob("*.jsonl")
 
 
-def session_id(path: Path, cwd: Path) -> str | None:
+def session_id(path: Path, cwd: Path) -> tuple[str, int] | None:
     """Return this supervisor's newly opened session, never another window's."""
     try:
         with path.open(encoding="utf-8") as source:
@@ -57,8 +58,14 @@ def session_id(path: Path, cwd: Path) -> str | None:
     payload = first.get("payload", {})
     if first.get("type") != "session_meta" or payload.get("cwd") != str(cwd):
         return None
-    ident = payload.get("id")
-    return ident if isinstance(ident, str) else None
+    ident, created = payload.get("id"), payload.get("timestamp")
+    if not isinstance(ident, str) or not isinstance(created, str):
+        return None
+    try:
+        created_ns = int(datetime.fromisoformat(created.replace("Z", "+00:00")).timestamp() * 1_000_000_000)
+    except ValueError:
+        return None
+    return ident, created_ns
 
 
 def find_session(cwd: Path, not_before_ns: int) -> tuple[str, Path] | None:
@@ -70,9 +77,13 @@ def find_session(cwd: Path, not_before_ns: int) -> tuple[str, Path] | None:
             continue
         if stamp < not_before_ns:
             continue
-        ident = session_id(path, cwd)
-        if ident:
-            candidates.append((stamp, ident, path))
+        found = session_id(path, cwd)
+        # A Codex log is updated on every turn.  Its mtime therefore cannot
+        # associate a window with a session; the immutable session timestamp
+        # can.  This prevents another terminal in the same checkout from ever
+        # being resumed in this window.
+        if found and found[1] >= not_before_ns:
+            candidates.append((stamp, found[0], path))
     if not candidates:
         return None
     _stamp, ident, path = max(candidates)
@@ -145,6 +156,12 @@ def supervise(command: list[str]) -> int:
                     break
             time.sleep(0.35)
         else:
+            if resume is not None and child.returncode:
+                # A resume error must not make Konsole disappear.  Leave the
+                # durable conversation on disk, surface a new live Codex TUI,
+                # and never retry the uncertain id automatically.
+                resume = None
+                continue
             return child.returncode or 0
 
 
