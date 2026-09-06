@@ -81,6 +81,10 @@ check("OneeChan's alternating options rows use the desktop surface",
       "#oneechan-options #main-section>.option:nth-of-type(even){background:#203040!important}" in flat)
 check("OneeChan's anchor actions do not retain its black button fill",
       "#oneechan-options .options-button,#oneechan-options .options-button:hover,.qr-link,.qr-link:hover,.pages.cataloglink,.pages.cataloglink:hover,.pages strong>a,.pages strong>a:hover{background:#203040!important}" in flat)
+LIGHT_PAL = dict(PAL, bg="#e0cec6", bgAlt="#d8c1b8")
+light = chantheme.css(LIGHT_PAL.__getitem__, None)
+check("a light 4chan canvas follows Konsole's alternate desktop surface",
+      "body{background:#d8c1b8!important}" in light)
 
 # The panel-palette parser reads exactly the literal shape every app's Palette
 # does (and the shape kdetheme itself generates).
