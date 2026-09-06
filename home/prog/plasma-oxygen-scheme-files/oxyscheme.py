@@ -44,26 +44,30 @@ CHROMA_RASTER = 0.10
 LUM_SPREAD    = 0.02   # above this a gradient is a colour ramp, not an alpha ramp
 ALPHA_SPREAD  = 0.05
 # What to do with an alpha ramp (72% of Oxygen's gradients). See convert().
-#   flip      (default) the same ramp, reversed along its axis
+#   centre    (default) recentre on the ramp's own mean and cap the swing at
+#             CENTRE_AMPLITUDE, so the mid-tone IS the scheme colour and the
+#             shading moves gently both ways around it. At 0.12 this matches how
+#             Oxygen draws a TITLEBAR -- a smooth symmetric gradient over the
+#             surface colour -- which is the look he asked the panel to have.
+#   flip      the same ramp, reversed along its axis. Keeps Oxygen's full
+#             contrast, which on the panel reads as a heavy dark smear.
 #   faithful  keep it exactly -- but Oxygen's ramps run TOWARD opaque black, and
 #             an opaque end stays opaque whatever the scheme is, so the panel
 #             keeps a black band and panel text becomes unreadable on a light
 #             scheme. That is what `flip` exists to fix: Oxygen shades away from
 #             the edge it darkens, so reversing it puts the scheme colour where
 #             the text sits and the dark end on the panel's outer border.
-#   centre    recentre on the ramp's own mean and cap the swing, so the mid-tone
-#             IS the scheme colour and shading moves both ways around it
 #
 # Only alpha ramps are affected. Button/frame/lineedit bodies are COLOUR ramps
 # and render identically under all three.
-ALPHA_MODE = os.environ.get('OXYSCHEME_ALPHA_MODE', 'flip')
-CENTRE_AMPLITUDE = float(os.environ.get('OXYSCHEME_AMPLITUDE', '0.35'))
+ALPHA_MODE = os.environ.get('OXYSCHEME_ALPHA_MODE', 'centre')
+CENTRE_AMPLITUDE = float(os.environ.get('OXYSCHEME_AMPLITUDE', '0.12'))
 # Oxygen shades with black. Plasma's accent lands on the Selection group, so
 # ColorScheme-Highlight IS the accent colour -- pointing the dark end of every
 # ramp at it makes the panel's shading tint with the theme instead of going grey.
 # The light end stays white: it is a specular highlight, not a colour.
 ACCENT_ROLE = os.environ.get('OXYSCHEME_ACCENT_ROLE', 'ColorScheme-Highlight')
-ACCENT_RAMPS = os.environ.get('OXYSCHEME_ACCENT_RAMPS', '1') not in ('0', 'no', '')
+ACCENT_RAMPS = os.environ.get('OXYSCHEME_ACCENT_RAMPS', '0') not in ('0', 'no', '')
 # Oxygen's ramp starts at alpha 0, so the accent only reaches full strength at
 # the very edge and the panel reads as a pale wash rather than the theme blue.
 # The floor lifts the whole accent side so the colour is actually present.
