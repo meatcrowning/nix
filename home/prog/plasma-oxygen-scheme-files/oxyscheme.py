@@ -86,11 +86,11 @@ PANEL_GLOW_SCALE = float(os.environ.get('OXYSCHEME_PANEL_GLOW', '0.0'))
 PANEL_TOP_ALPHA = float(os.environ.get('OXYSCHEME_PANEL_TOP', '0.43'))
 PANEL_BOTTOM_ALPHA = float(os.environ.get('OXYSCHEME_PANEL_BOTTOM', '0.0'))
 # Plasma's five-pixel frame caps need their corresponding samples rather than
-# restarting the field in each slice.  The top bar deliberately keeps a full
-# titlebar-strength ramp; its light stop is shared with the top of a vertical
-# side panel, which then carries that same tint down to the window base.
+# restarting the field in each slice.  The shared field has a titlebar-strength
+# fade in its first 34px and then reaches the empty-window base: the top panel
+# shows that fade whole, and a side panel carries its exact continuation.
 PANEL_CAP_FRAC = 5.0 / 1080.0
-PANEL_EDGE_FRAC = 0.02
+PANEL_TITLEBAR_FRAC = 34.0 / 1080.0
 CENTRE_AMPLITUDE = float(os.environ.get('OXYSCHEME_AMPLITUDE', '0.12'))
 # Oxygen shades with black. Plasma's accent lands on the Selection group, so
 # ColorScheme-Highlight IS the accent colour -- pointing the dark end of every
@@ -280,10 +280,10 @@ def panel_band(location, slice_name):
     """Return this framesvg slice's interval in the shared screen field."""
     if location == 'north':
         if slice_name == 'top':
-            return (0.0, PANEL_EDGE_FRAC)
+            return (0.0, PANEL_CAP_FRAC)
         if slice_name == 'bottom':
-            return (1.0 - PANEL_EDGE_FRAC, 1.0)
-        return (PANEL_EDGE_FRAC, 1.0 - PANEL_EDGE_FRAC)
+            return (PANEL_TITLEBAR_FRAC - PANEL_CAP_FRAC, PANEL_TITLEBAR_FRAC)
+        return (PANEL_CAP_FRAC, PANEL_TITLEBAR_FRAC - PANEL_CAP_FRAC)
     if location in ('east', 'west'):
         if slice_name == 'top':
             return (0.0, PANEL_CAP_FRAC)
@@ -291,7 +291,7 @@ def panel_band(location, slice_name):
             return (1.0 - PANEL_CAP_FRAC, 1.0)
         return (PANEL_CAP_FRAC, 1.0 - PANEL_CAP_FRAC)
     if location == 'south':
-        return (1.0 - PANEL_EDGE_FRAC, 1.0)
+        return (1.0 - PANEL_CAP_FRAC, 1.0)
     return None
 
 # ---------- role inference ----------
@@ -390,18 +390,25 @@ def respin_alpha(doc, src_gid, stops, mode, axis='v', invert=False, panel=False,
         new.set('x1','0'); new.set('y1','0')
         new.set('x2', '1' if axis == 'h' else '0')
         new.set('y2', '0' if axis == 'h' else '1')
-        hi, lo = ((PANEL_TOP_ALPHA, PANEL_BOTTOM_ALPHA) if panel
-                  else (TOP_ALPHA, 0.0))
-        if panel_location == 'south':
-            # Likewise, the bottom bar samples the field after it has faded.
-            hi = lo
         field_band = panel_band(panel_location, band) if panel else None
-        if field_band is not None:
+        if panel and field_band is not None:
+            # Sample the same titlebar-to-window-base curve in every framesvg
+            # slice.  A side centre is nearly screen-height, so it needs the
+            # extra stop where the titlebar fade reaches the flat window body.
             f0, f1 = field_band
-            span = hi - lo
-            hi, lo = hi - span * f0, hi - span * f1
-        ramp = ((0.0, hi), (1.0, lo))
-        if invert: ramp = ((0.0, lo), (1.0, hi))
+            span = PANEL_TOP_ALPHA - PANEL_BOTTOM_ALPHA
+            def field_alpha(f):
+                return PANEL_BOTTOM_ALPHA + span * max(0.0, 1.0 - f / PANEL_TITLEBAR_FRAC)
+            points = [0.0, 1.0]
+            if f0 < PANEL_TITLEBAR_FRAC < f1:
+                points.append((PANEL_TITLEBAR_FRAC - f0) / (f1 - f0))
+            ramp = [(p, field_alpha(f0 + (f1 - f0) * (1.0 - p if invert else p)))
+                    for p in sorted(points)]
+        else:
+            hi, lo = ((PANEL_TOP_ALPHA, PANEL_BOTTOM_ALPHA) if panel
+                      else (TOP_ALPHA, 0.0))
+            ramp = ((0.0, hi), (1.0, lo))
+            if invert: ramp = ((0.0, lo), (1.0, hi))
         for off, a in ramp:
             st = ET.SubElement(new, S+'stop')
             st.set('offset', f"{off:.4f}")
