@@ -112,9 +112,8 @@ if m:
     check("and that ink is readable on the slab it sits on",
           vivaldichrome.hexcolor.contrast(m.group(1), CHROME["buttonTop"]) >= 4.5)
 check("Vivaldi's outer client frame uses the structural border",
-      "#browser{color:%s!important;background:%s!important;"
-      "background-image:none!important;border-color:%s!important}"
-      % (PAL["text"], PAL["bg"], PAL["border"]) in oxy)
+      "#browser{color:%s!important;" % PAL["text"] in oxy
+      and "border-color:%s!important}" % PAL["border"] in oxy)
 
 # --- the whole sheet ---------------------------------------------------------
 css = vivaldichrome.css(PAL.__getitem__, CHROME, extra="::-webkit-scrollbar{width:9px}")

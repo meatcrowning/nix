@@ -190,7 +190,7 @@ def relief_css(pal, chrome=None) -> str:
     return "".join([
         # The window's own surfaces: title/tab strip, address bar, status bar.
         "#header,.tabbar-wrapper,#tabs-tabbar-container{%s;box-shadow:inset 0 1px 0 %s!important}"
-        % (slab(head_top, head_bottom), bevel),
+        % (window_slab(), bevel),
         ".toolbar-mainbar{%s;border-bottom:1px solid %s!important}" % (window_slab(), border),
         "#footer,.toolbar-statusbar{%s;border-top:1px solid %s!important}" % (window_slab(), border),
         "#panels-container{%s;border-right:1px solid %s!important}" % (window_slab(), border),
@@ -232,9 +232,8 @@ def relief_css(pal, chrome=None) -> str:
         # #webpage-stack) with the theme's background image.  That is the
         # otherwise-light seam between hyprvtb and the page view.  Keep the
         # frame, but make both it and the surface use our structural colours.
-        "#browser{color:%s!important;background:%s!important;"
-        "background-image:none!important;border-color:%s!important}"
-        % (fg, bg, border),
+        "#browser{color:%s!important;%s;border-color:%s!important}"
+        % (fg, window_slab(), border),
     ])
 
 
