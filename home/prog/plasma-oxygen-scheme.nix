@@ -46,6 +46,31 @@
 # This installs a SEPARATE style and changes nothing on its own -- it is inert
 # until picked in System Settings -> Colours & Themes -> Plasma Style.
 let
+  # Plasma's FrameSvg tiles its five-pixel centre.  That works for a texture,
+  # but cannot represent one gradient shared by a horizontal and vertical
+  # panel.  Overlay the stock shell view with a real screen-space surface;
+  # retain the invisible FrameSvg beneath it because PanelView reads its mask
+  # and margins in C++.
+  panel-gradient-view = pkgs.runCommand "plasma-panel-gradient-view"
+    { nativeBuildInputs = [ pkgs.perl ]; }
+    ''
+      mkdir -p $out
+      cp -r ${pkgs.kdePackages.plasma-desktop}/share/plasma/shells/org.kde.plasma.desktop/. $out/
+      chmod -R u+w $out
+      panel_qml=$out/contents/views/Panel.qml
+      perl -0pi -e 's/(id: opaqueItem.*?opacity:) root\.panelOpacity/$1 0/s' $panel_qml
+      awk -v fragment=${./plasma-panel-gradient-files/Surface.qmlfrag} '
+        /^    Keys.onEscapePressed: \{$/ {
+          while ((getline line < fragment) > 0) print line
+          close(fragment)
+          print
+          next
+        }
+        { print }
+      ' $panel_qml > $panel_qml.tmp
+      mv $panel_qml.tmp $panel_qml
+    '';
+
   oxygen-scheme = pkgs.runCommand "plasma-theme-oxygen-scheme"
     {
       nativeBuildInputs = [ pkgs.python3 ];
@@ -61,4 +86,8 @@ in
   # ONE directory symlink, not per-file: KPackage rejects per-file symlinks
   # inside a package directory as path traversal.
   home.file.".local/share/plasma/desktoptheme/oxygen-scheme".source = oxygen-scheme;
+  home.file.".local/share/plasma/shells/org.kde.plasma.desktop" = {
+    source = panel-gradient-view;
+    force = true;
+  };
 }
