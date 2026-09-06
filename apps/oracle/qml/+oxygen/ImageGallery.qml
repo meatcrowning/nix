@@ -57,44 +57,51 @@ Column {
         spacing: 2
         visible: gal.oks.length === 1
 
-        QQC.Frame {
-            id: soloFrame
-            anchors.horizontalCenter: parent.horizontalCenter
-            readonly property real inset: leftPadding + rightPadding
-            readonly property real vinset: topPadding + bottomPadding
-            width: solo.width + inset
-            height: solo.height + vinset
+        // A Column controls a direct child's x coordinate.  The full-width
+        // wrapper preserves the frame's centering anchor for narrow charts.
+        Item {
+            width: parent.width
+            height: soloFrame.height
 
-            contentItem: Item {
-                Image {
-                    id: solo
-                    readonly property var e: gal.oks.length === 1 ? gal.oks[0] : null
-                    readonly property real natW:
-                        (e && e.w > 0) ? e.w : (gal.width - soloFrame.inset)
-                    readonly property real natH:
-                        (e && e.h > 0) ? e.h : (gal.width - soloFrame.inset)
-                    // Capped by the column AND by the height ceiling, never
-                    // upscaled past native.
-                    sourceSize.width: Math.max(1, Math.round(
-                        Math.min(gal.width - soloFrame.inset, natW,
-                                 gal.maxH * natW / Math.max(1, natH))))
-                    fillMode: Image.PreserveAspectFit
-                    asynchronous: true
-                    source: e ? "file://" + e.path : ""
+            QQC.Frame {
+                id: soloFrame
+                anchors.horizontalCenter: parent.horizontalCenter
+                readonly property real inset: leftPadding + rightPadding
+                readonly property real vinset: topPadding + bottomPadding
+                width: solo.width + inset
+                height: solo.height + vinset
+
+                contentItem: Item {
+                    Image {
+                        id: solo
+                        readonly property var e: gal.oks.length === 1 ? gal.oks[0] : null
+                        readonly property real natW:
+                            (e && e.w > 0) ? e.w : (gal.width - soloFrame.inset)
+                        readonly property real natH:
+                            (e && e.h > 0) ? e.h : (gal.width - soloFrame.inset)
+                        // Capped by the column AND by the height ceiling, never
+                        // upscaled past native.
+                        sourceSize.width: Math.max(1, Math.round(
+                            Math.min(gal.width - soloFrame.inset, natW,
+                                     gal.maxH * natW / Math.max(1, natH))))
+                        fillMode: Image.PreserveAspectFit
+                        asynchronous: true
+                        source: e ? "file://" + e.path : ""
+                    }
                 }
-            }
 
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                acceptedButtons: Qt.LeftButton | Qt.RightButton
-                onClicked: function (m) {
-                    if (m.button === Qt.RightButton) {
-                        var p = mapToItem(null, m.x, m.y);
-                        gal.contextRequested(solo.e ? (solo.e.path || "") : "",
-                                             p.x, p.y);
-                    } else {
-                        gal.enlarge(0);
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onClicked: function (m) {
+                        if (m.button === Qt.RightButton) {
+                            var p = mapToItem(null, m.x, m.y);
+                            gal.contextRequested(solo.e ? (solo.e.path || "") : "",
+                                                 p.x, p.y);
+                        } else {
+                            gal.enlarge(0);
+                        }
                     }
                 }
             }
