@@ -142,12 +142,24 @@ def tones(pal: dict) -> dict:
 # window's own fill.
 #
 # So the gradient is drawn into an image and handed to Konsole as its wallpaper.
-# It reproduces Oxygen's ramp: lighter at the top edge, the plain surface colour
-# at the foot (the measured 222 -> 184 luma run recorded in
-# home/prog/plasma-files/OxygenLightFlat.colors).
-GRADIENT_TOP = float(os.environ.get("KONSOLE_GRADIENT_TOP", "1.09"))
-GRADIENT_BOTTOM = float(os.environ.get("KONSOLE_GRADIENT_BOTTOM", "0.94"))
-GRADIENT_H = 1024
+# Its stops come from the active scheme's [WM] group: activeBlend is the exact
+# Oxygen titlebar stop and activeBackground is the window surface it decays
+# into.  Deriving a top by lightening `bg` made the terminal nearly white
+# (253,253,254 for the current scheme) while Oxygen's titlebar is
+# (223,229,237), so the terminal could not meet its own titlebar.
+#
+# Konsole's default FillStyle is Tile.  That restarts a tiled image at every
+# repaint rectangle, which is harmless for a photo but makes a vertical ramp
+# visibly restart whenever output changes.  NoScaling + a top-left anchor
+# samples this image in terminal coordinates instead: the 280px Oxygen fade is
+# fixed, and partial repaints sample the same pixels as a whole repaint.
+GRADIENT_FADE = int(os.environ.get("KONSOLE_GRADIENT_FADE", "280"))
+GRADIENT_H = 2048
+GRADIENT_W = 4096
+# The terminal starts below its native titlebar.  Start it at that same point
+# in Oxygen's window ramp, rather than restarting from the titlebar's lightest
+# pixel inside the client area.
+GRADIENT_OFFSET = int(os.environ.get("KONSOLE_GRADIENT_OFFSET", "34"))
 
 
 def _png(width: int, height: int, rows) -> bytes:
@@ -156,8 +168,7 @@ def _png(width: int, height: int, rows) -> bytes:
     raw = bytearray()
     for row in rows:
         raw.append(0)                       # filter: none
-        for (r, g, b) in row:
-            raw += bytes((r, g, b))
+        raw += bytes(row) * width
     def chunk(tag, data):
         return (struct.pack(">I", len(data)) + tag + data
                 + struct.pack(">I", zlib.crc32(tag + data) & 0xffffffff))
@@ -167,23 +178,28 @@ def _png(width: int, height: int, rows) -> bytes:
             + chunk(b"IEND", b""))
 
 
-def write_gradient(bg) -> "pathlib.Path":
-    import colorsys
-    r, g, b = [c / 255 for c in bg]
-    h, l, sat = colorsys.rgb_to_hls(r, g, b)
-    def at(k):
-        rr, gg, bb = colorsys.hls_to_rgb(h, min(1.0, max(0.0, l * k)), sat)
-        return tuple(round(c * 255) for c in (rr, gg, bb))
-    top, bot = at(GRADIENT_TOP), at(GRADIENT_BOTTOM)
+def gradient_stops(bg, source=None):
+    """The real Oxygen window stops, or None when this is not that surface."""
+    plasma = kdetheme.is_plasma() if source is None else (source == "plasma")
+    if not plasma or kdetheme.kde_widget_style() not in kdetheme.GRADIENT_STYLES:
+        return None
+    wm = kdetheme.read_ini().get("WM") or {}
+    top = kdetheme._rgb(wm.get("activeBlend"), None)
+    base = kdetheme._rgb(wm.get("activeBackground"), None)
+    return (top, base) if top and base else None
+
+
+def write_gradient(top, base) -> "pathlib.Path":
     rows = []
     for y in range(GRADIENT_H):
-        f = y / (GRADIENT_H - 1)
-        rows.append([tuple(round(top[i] + (bot[i] - top[i]) * f) for i in range(3))])
+        f = min(1.0, (y + GRADIENT_OFFSET) / max(1, GRADIENT_FADE))
+        rows.append(tuple(round(top[i] + (base[i] - top[i]) * f) for i in range(3)))
     path = KONSOLE_DIR / ("%s-gradient.png" % SCHEME_NAME.lower())
-    path.write_bytes(_png(1, GRADIENT_H, rows))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(_png(GRADIENT_W, GRADIENT_H, rows))
     return path
 
-def build(pal: dict) -> str:
+def build(pal: dict, source=None, write_wallpaper=True) -> str:
     """The `.colorscheme` file, for every konsole started from now on."""
     t = tones(pal)
 
@@ -206,13 +222,16 @@ def build(pal: dict) -> str:
     # Blur follows transparency: unblurred text over a busy wallpaper is the
     # thing that makes a translucent terminal unreadable.
     wallpaper = ""
-    if GRADIENT:
+    stops = gradient_stops(t["bg"], source)
+    if GRADIENT and stops:
         try:
-            wallpaper = str(write_gradient(t["bg"]))
+            path = KONSOLE_DIR / ("%s-gradient.png" % SCHEME_NAME.lower())
+            wallpaper = str(write_gradient(*stops) if write_wallpaper else path)
         except Exception as exc:                      # never break the scheme
             print("konsole-theme: gradient skipped (%s)" % exc, file=sys.stderr)
     out.append("[General]\nBlur=%s\nColorRandomization=false\n"
                "Description=%s\nOpacity=%s\nWallpaper=%s\n"
+               "FillStyle=NoScaling\nAnchor=0,0\n"
                "WallpaperOpacity=1\nWallpaperFlipType=NoFlip\n"
                % ("true" if OPACITY < 1.0 else "false", SCHEME_NAME,
                   ("%g" % OPACITY), wallpaper))
@@ -456,10 +475,12 @@ def main() -> int:
                     help="print the scheme and exit, writing nothing")
     ap.add_argument("--no-default", action="store_true",
                     help="write the scheme but leave the default profile alone")
+    ap.add_argument("--no-repaint", action="store_true",
+                    help="write the scheme without touching open terminals")
     a = ap.parse_args()
 
     pal, prov = palette(a.source)
-    scheme = build(pal)
+    scheme = build(pal, a.source, write_wallpaper=not a.dump)
     if a.dump:
         sys.stderr.write("konsole-theme: from %s\n" % prov)
         sys.stdout.write(scheme)
@@ -482,9 +503,10 @@ def main() -> int:
                          % (dest.name, prov, prof.name))
     else:
         sys.stderr.write("konsole-theme: %s from %s\n" % (dest.name, prov))
-    q = _qdbus()
-    reprofile(q)                                # font, scrollback — not colours
-    live = repaint(pal)                         # colours, on what is already open
+    if not a.no_repaint:
+        q = _qdbus()
+        reprofile(q)                            # font, scrollback — not colours
+    live = 0 if a.no_repaint else repaint(pal)   # colours, on what is already open
     if live:
         sys.stderr.write("konsole-theme: repainted %d live terminal%s\n"
                          % (live, "" if live == 1 else "s"))
