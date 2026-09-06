@@ -1,41 +1,17 @@
 #!/usr/bin/env bash
-# Report drift between the nix SOURCE of a seed-once file and its LIVE copy.
+# Compare the nix source and live copies of the runtime-mutable dotfiles.
+# `seed-reconcile.sh` runs on every switch: source structure wins, while
+# wallpaper/cursor-owned values are carried from the live file. Therefore source
+# drift is expected before a switch; post-switch drift is the fault to investigate.
 #
-# Some dotfiles in this repo cannot be plain /nix/store symlinks, because
-# runtime scripts rewrite them in place: wal-set.sh owns the palette lines and
-# cursor-recolor.sh the cursor theme. They were therefore installed only if
-# ABSENT, which meant a rebuild never updated them — an edit to the nix source
-# silently did nothing on the running system.
+#   seed-drift.sh              human-readable post-switch report
+#   seed-drift.sh --quiet      no output; exit 1 on drift
+#   seed-drift.sh --pre-switch ask the reconciler what the next switch will do
 #
-# Since 2026-08-05 `tools/seed-reconcile.sh` runs from home.activation on every
-# switch and closes that: the nix source wins on structure, the live file keeps
-# the named runtime-owned values. So "source ahead of live" is now the NORMAL
-# state between an edit and the next switch, and the question worth asking has
-# two halves:
-#
-#   BEFORE a switch — what will the switch do?     --pre-switch  (preflight's mode)
-#   AFTER  a switch — did the reconciler miss one?  default report
-#
-# Those are different questions and only the second is a fault. Until
-# 2026-08-07 there was one answer to both and it was a hard FAIL, which
-# deadlocked the repo: every commit that touched hyprland.lua made preflight
-# fail, preflight gates `sudo rebuild-top`, and the switch was the only thing
-# that could clear the drift. Nothing that changed a seed-once file could land —
-# including `nix-pull apply`, whose whole job is to land other machines'
-# commits unattended.
-#
-# This script diffs each pair with the runtime-owned VALUES masked out, so what
-# survives is real drift: a line one side has and the other doesn't.
-#
-#   tools/seed-drift.sh              # human-readable report (the post-switch tripwire)
-#   tools/seed-drift.sh --quiet      # no output, exit 1 if drift  (for scripting)
-#   tools/seed-drift.sh --pre-switch # what the NEXT switch will do (preflight)
-#
-# Exit: 0 = in sync / nothing for the switch to do
-#       1 = drift  (report mode: the reconciler missed it — investigate;
-#                   --pre-switch: the switch resolves it — benign)
-#       2 = a file is missing, or the reconciler CANNOT run (a real fault in
-#           both modes)
+# Exit 0: in sync (or nothing to do); 1: drift (pre-switch is benign); 2:
+# missing file or reconciler failure. Runtime-owned values are masked before the
+# comparison, and --pre-switch invokes the reconciler itself so the two stay in
+# lockstep.
 
 set -uo pipefail
 

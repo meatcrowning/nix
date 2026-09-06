@@ -1,41 +1,16 @@
 #!/usr/bin/env bash
-# boot-verify.sh — how much of "will this rebuild actually boot?" can be
-# answered WITHOUT rebooting `top`.
+# boot-verify.sh — opt-in boot checks without rebooting `top`.
 #
-# OPT-IN. Nothing calls this automatically; preflight.sh does not run it and
-# `sudo rebuild-top` does not either, because the VM half costs minutes.
+#   boot-verify.sh              static toplevel/initrd/kernel/NVIDIA/ESP checks
+#   boot-verify.sh --vm         also boot a scratch-disk QEMU VM to multi-user
+#   boot-verify.sh --vm --keep  retain the VM disk and console log
 #
-#   ./tools/boot-verify.sh              # static checks only (~1 min, mostly cached)
-#   ./tools/boot-verify.sh --vm         # + boot the configuration in headless QEMU
-#   ./tools/boot-verify.sh --vm --keep  # leave the VM disk image behind for inspection
-#
-# WHAT THE STATIC HALF PROVES
-#   The new toplevel exists and is internally complete: a bootspec, a kernel, an
-#   initrd and an init that all really exist; every module the initrd is told to
-#   have is actually in its module closure (or built in); the root filesystem's
-#   driver is among them; the NVIDIA modules were built against THIS kernel; the
-#   ESP has room for the new kernel+initrd. Those are the realistic ways a
-#   rebuild here stops booting — a kernel bump that leaves an out-of-tree module
-#   behind, a lost initrd module for the nvme root, or an ESP too full to take
-#   the new entry.
-#
-# WHAT IT CANNOT PROVE
-#   Nothing here executes the real initrd against the real disks, so it cannot
-#   catch a broken UUID, a firmware/NVRAM problem, or a driver that loads but
-#   hangs on this hardware.
-#
-# WHAT --vm PROVES, AND DOES NOT
-#   It boots THIS configuration's userland in QEMU on a scratch disk and waits
-#   for multi-user.target. That is a real, honest test of systemd unit ordering,
-#   activation scripts, /etc generation and anything that can deadlock or fail
-#   the boot in userland. It is NOT a test of this machine's boot path: the VM
-#   variant substitutes a virtio root disk and its own initrd for the real nvme
-#   root, has no NVIDIA GPU, and never touches the ESP or the bootloader. A
-#   green --vm run plus green static checks is a strong signal; it is not a
-#   guarantee, and the last three known-good generations pinned in the boot menu
-#   (sys/boot-known-good.nix) are the actual safety net.
-#
-# Runs entirely headless: no window, no display, no bootloader write, no reboot.
+# Static checks cannot exercise real disks, firmware/NVRAM, or hardware driver
+# hangs. `--vm` checks userland systemd ordering, activation, /etc generation and
+# deadlocks, but substitutes virtio storage/initrd, has no NVIDIA GPU, and never
+# touches the ESP/bootloader. Both modes are headless and never reboot; this is
+# opt-in because the VM takes minutes. The last three known-good generations are
+# the boot fallback.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

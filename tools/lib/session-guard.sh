@@ -1,86 +1,24 @@
 #!/usr/bin/env bash
-# session-guard.sh — the thing a harness sources so it cannot reach his session.
-#
-# WHY THIS EXISTS
-#
-# On 2026-07-30 he reported test windows appearing on his real monitor and his
-# pointer being moved out from under him while agents ran tests. AGENTS.md ->
-# "Testing without interfering with the user" already forbade both; what was
-# missing was a MECHANISM, so every harness re-implemented the guard by hand and
-# each one got a different subset of it right.
-#
-# The failure mode this is aimed at is the SILENT DEGRADE: a harness means to
-# drive a nested compositor or an offscreen client, that target fails to come
-# up, `WAYLAND_DISPLAY`/`HYPRLAND_INSTANCE_SIGNATURE` still name HIS session
-# (they are inherited, and nothing clears them), and the test drives his desktop
-# instead — successfully, quietly, with a green exit code. Every function here
-# turns that into a loud abort.
-#
-# Sourced, not run:
-#
+# session-guard.sh — source this in every harness that touches a compositor.
+# It prevents silent fall-through to the user's live session when a nested or
+# off-screen target failed to start. Source it, do not execute it:
 #   . "$(dirname "$0")/lib/session-guard.sh"
 #
-# WHAT IT OFFERS
+# API:
+#   sg_live_sig / sg_live_wl       resolve the live session from runtime state.
+#   sg_require_live_session        require hyprctl to target that session.
+#   sg_require_nested              require WAYLAND_DISPLAY/signature to target
+#                                  a non-live nested compositor.
+#   sg_require_nested_sig SIG      same check for `hyprctl -i SIG` callers.
+#   sg_require_offscreen           require Qt offscreen or a non-live Wayland.
+#   sg_seat_snapshot/assert        record and warn on focus/pointer changes;
+#                                  assertion is warn-only and never self-repairs.
+#   sg_pointer_pin CMD...          the sole permitted pointer restore wrapper.
 #
-#   sg_live_sig                 HIS session's HYPRLAND_INSTANCE_SIGNATURE,
-#                               RESOLVED (alive pid + live socket) rather than
-#                               believed from the environment. Empty if there is
-#                               no live Hyprland (a TTY, ssh) — not a fault.
-#   sg_require_live_session     for a harness that deliberately uses the live
-#                               compositor (tools/sandbox.sh): die unless
-#                               `hyprctl` is reachable AND is talking to his
-#                               session. A poisoned signature aiming us at some
-#                               dead or nested instance is a bug, not a target.
-#   sg_require_nested           the inverse, and the important one: die unless
-#                               $HYPRLAND_INSTANCE_SIGNATURE / $WAYLAND_DISPLAY
-#                               name something that is NOT his session. Call it
-#                               after starting a nested compositor and before
-#                               the first thing that would touch it. If the
-#                               nested compositor did not come up, this is what
-#                               stops the test from running against his desktop.
-#   sg_require_offscreen        die unless QT_QPA_PLATFORM=offscreen is exported
-#                               (or a nested target is in force). For harnesses
-#                               that mean to render headless.
-#   sg_require_nested_sig SIG   the same check for a harness that aims hyprctl
-#                               with `-i SIG` instead of by environment: die
-#                               unless SIG is set and is NOT his session's.
-#   sg_seat_snapshot            record what he is focused on and where his
-#                               pointer is.
-#   sg_seat_assert              compare against that snapshot and warn on any
-#                               change. Deliberately warn-only and deliberately
-#                               NOT self-repairing: focusing something "back" is
-#                               itself a focus grab. The repair is to stop
-#                               moving them.
-#   sg_pointer_pin CMD...       the ONE sanctioned pointer warp: run CMD and put
-#                               his pointer back if the COMPOSITOR moved it as a
-#                               side effect. See below.
-#
-# Every function here except sg_pointer_pin is read-only against his session,
-# and sg_pointer_pin only ever writes back the position it read.
-#
-# NOTE ON THE POINTER — and this note was WRONG until 2026-07-30, which is how
-# the bug below survived an audit. `cursor:no_warps = true` in hyprland.lua does
-# NOT mean "nothing moves the cursor but an explicit warp". Read in the pinned
-# Hyprland 0.56 source, two paths warp his pointer with no reference to that
-# setting at all:
-#
-#   * `CMonitor::onDisconnect` (src/output/Monitor.cpp) — "Cleanup everything.
-#     Move windows back, snap cursor, shit." — unconditionally
-#     `warpTo(BACKUPMON->m_position + BACKUPMON->m_transformedSize / 2)`. On a
-#     one-monitor desktop that is **the exact centre of his screen**, every time
-#     any output goes away. `tools/sandbox.sh stop` removes a headless output,
-#     so every harness teardown did this to him. THIS was "the mouse still gets
-#     stolen / randomly moved to the center of the screen".
-#   * `Actions::focusMonitor` -> `tryMoveFocusToMonitor`
-#     (src/config/shared/actions/ConfigActions.cpp) — warps to the target
-#     workspace's focus candidate `middle()`, or to `monitor->middle()` if that
-#     workspace is empty. `no_warps` gates only the extra
-#     `simulateMouseMovement()` underneath, never the warp itself. That is
-#     `hl.dsp.focus({ monitor = ... })`, which `sandbox.sh exec` used as its
-#     focus-restore net.
-#
-# So a pointer that moved does NOT imply somebody called a cursor dispatcher.
-# It can equally mean somebody removed an output.
+# All functions except `sg_pointer_pin` are read-only against the live session;
+# the wrapper restores only the position it read immediately before the command.
+# `cursor:no_warps` does not prevent Hyprland from warping on output removal or
+# focus dispatch, so output teardown and focus calls must use that wrapper.
 
 # Guard against being sourced twice (a harness may source a sibling that
 # sources this).

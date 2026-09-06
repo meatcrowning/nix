@@ -1,47 +1,16 @@
 #!/bin/sh
-# git-commit.sh — COMMIT THROUGH THIS, never bare `git commit` (AGENTS.md,
-# "The index is SHARED"). It is the enforcement half of that rule's second
-# clause — "git diff what you are about to commit and confirm every hunk is
-# yours" — which until now was prose an agent could skip.
+# git-commit.sh — the guarded pathspec commit entry point. The working-tree
+# copy of a pathspec is what `git commit -- path` takes, so mixed edits in one
+# file can be swept into a commit; the shared index must never be swept blindly.
 #
-# Why it exists: a pathspec commit `git commit -m msg -- f.txt` takes the WHOLE
-# working-tree copy of f.txt, so if another spirit is mid-edit on that same
-# file, its half-finished WIP is swept silently into your commit. That really
-# happened: commit 9c1f477 was meant to carry one agent's cards() session-filter
-# hunk, but boardwork.py also held another agent's decision-unit WIP in the
-# working tree, and the pathspec commit took the whole file. Verified
-# empirically: staging only your hunks then `git commit -- f.txt` still commits
-# the working tree (both sets of hunks); only an index commit respects your
-# selection, and only after the index holds nothing but your own hunks.
+#   git-commit.sh -m "subject" -- path/one path/two
+#   git-commit.sh -m "subject" --hunks -- path/one
 #
-#   tools/git-commit.sh -m "subject" -- path/one path/two   # hardened pathspec commit
-#   tools/git-commit.sh -m "subject" --hunks -- path/one    # commit only your hunks
-#
-# Default mode:
-#   - Refuses a bare / -a commit (which would sweep the shared index).
-#   - Always prints the exact diff that will land — the whole working-tree copy
-#     of each path, which is precisely what a pathspec commit sweeps in.
-#   - REFUSES (exit 1) any path whose uncommitted diff vs HEAD is large enough
-#     to plausibly carry more than your one change — that is the smell of
-#     another spirit's WIP riding along. Escape hatches, in order of safety:
-#         --hunks            commit only the hunks you pick, leave theirs behind
-#         drop the path      leave that file alone, commit the rest
-#         --yes-file <path>  you reviewed the printed diff and accept sweeping
-#                            that whole file's working-tree copy
-#   This is deliberately a hard gate, not a warn: a false positive costs you one
-#   --yes-file (or a --hunks pass), while a missed mixed file costs a commit you
-#   cannot cleanly take back. Preflight stays warn-not-fail (a false failure
-#   there blocks a rebuild); this script only fronts a commit, which is exactly
-#   where the danger lands.
-#
-# --hunks mode:
-#   Interactively `git add -p` the given paths, keeping only the hunks you say
-#   are yours, then commit the index. The other spirit's WIP stays behind,
-#   unstaged in the working tree, exactly as you found it. An index commit is
-#   the "bare commit" AGENTS.md warns about, but it is safe ONLY because this
-#   mode first asserts the index holds nothing but your own staged hunks; if the
-#   shared index already holds another spirit's staged content it aborts
-#   rather than sweep it.
+# Default mode refuses bare/-a commits, prints the exact diff, and exits 1 when
+# a path exceeds the mixed-work heuristic. Use `--hunks` to interactively stage
+# only your hunks, or `--yes-file PATH` after reviewing the whole-file diff.
+# `--hunks` first rejects pre-existing staged content and commits only selected
+# hunks; default mode uses explicit pathspecs. These are hard safety gates.
 set -u
 usage() { sed -n '1,2p' "$0" >&2; echo "usage: $0 -m MSG [--hunks] [--yes-file PATH]... -- PATH..." >&2; }
 

@@ -1,37 +1,15 @@
 #!/usr/bin/env bash
-# Bring a seed-once file's LIVE copy up to its nix SOURCE, carrying across the
-# handful of values runtime scripts own.
+# Reconcile a runtime-mutable live copy from its nix source while carrying the
+# values owned by wallpaper/cursor scripts. Home activation runs this for
+# `hyprland-lua` and `theme-qml` on every switch; `seed-drift.sh` must mask the
+# same values.
 #
-# Two dotfiles here cannot be plain /nix/store symlinks, because runtime
-# scripts rewrite them in place: wal-set.sh splices the wallpaper palette into
-# both, and cursor-recolor.sh renames the cursor theme in hyprland.lua. They
-# were therefore installed only if ABSENT — which meant a rebuild never updated
-# them, so `git pull && rebuild` silently did not apply anything either file
-# had changed. That is the whole of "seed drift": not a fussy check, but a pull
-# that did not reach the running system.
+#   seed-reconcile.sh <kind> <src> <live>
+#   seed-reconcile.sh --dry-run <kind> <src> <live>
 #
-# This script closes it. The nix source is authoritative for STRUCTURE; the
-# live file is authoritative for the named runtime-owned VALUES, and those are
-# carried forward onto the source before it is written back. Run from
-# home.activation on every switch (home/prog/hyprland.nix, quickshell.nix), so
-# the live copy can no longer fall behind.
-#
-#   seed-reconcile.sh <kind> <nix-source> <live-path>     # seed or reconcile
-#   seed-reconcile.sh --dry-run <kind> <src> <live>       # report, write nothing
-#
-# <kind> is `hyprland-lua` or `theme-qml` — it selects which values are
-# runtime-owned. tools/seed-drift.sh is the tripwire that says this script is
-# not doing its job; the two must agree on that list.
-#
-# Exit: 0 = in sync, seeded, or reconciled.
-#       1 = (--dry-run only) would seed or would reconcile — the normal state
-#           between an edit and the next switch, and NOT a fault.
-#       2 = cannot do it: a missing source, or a carry that would have written
-#           the template value over a runtime-owned one. Activation runs this
-#           with `|| true`, so 2 is a SILENT no-op there — it is the code
-#           tools/seed-drift.sh --pre-switch fails preflight on. The two must
-#           stay distinct: conflating them is what deadlocked the rebuild until
-#           2026-08-07.
+# Exit 0: in sync, seeded, or reconciled. Exit 1: dry-run would seed/reconcile.
+# Exit 2: missing source or unsafe carry; activation's `|| true` makes that a
+# silent no-op, while preflight reports it as a real failure.
 
 set -uo pipefail
 
@@ -57,22 +35,10 @@ TMP="$(mktemp)" || exit 2
 trap 'rm -f "$TMP" "$TMP.blk" "$TMP.out"' EXIT
 cp "$SRC" "$TMP" || exit 2
 
-# carry <ere-prefix> <ere-value>
-# Read the value the live file currently holds for the line matching
-# ^<prefix><value>, and write it into the same line of the working copy. The
-# prefix must anchor tightly enough to name exactly one line: a loose one (say,
-# any rgba) would drag across the WRONG line — hyprland.lua's active_border and
-# inactive_border sit two lines apart and are both runtime-owned now, so each
-# needs its own line-start-anchored prefix rather than a shared rgba match.
-#
-# Two constraints on the patterns, both paid for (title_rotated reverted to the
-# seed's `false` on every switch until 2026-08-08, and the sed never said why):
-#   * neither may contain a literal `%` — it is the sed delimiter here. The old
-#     `|` delimiter was terminated by the alternation in `(true|false)`, so
-#     both boolean carries errored to stderr and silently carried nothing.
-#   * <ere-value> must contain no capture groups — carry's own parens are the
-#     only ones, or \3 stops being "the rest of the line". Alternate with a
-#     bare `true|false`; carry's wrap gives it its scope.
+# carry <ere-prefix> <ere-value>: copy one tightly anchored runtime value from
+# LIVE into TMP. Prefixes must distinguish adjacent fields (not a generic rgba
+# match). Patterns may not contain `%` (the sed delimiter) or capture groups
+# (carry reserves its own groups; use bare `true|false`).
 carry() {
     local pre="$1" val="$2" v esc
     v=$(sed -nE "s%^(${pre})(${val})(.*)\$%\2%p" "$LIVE" | head -1)

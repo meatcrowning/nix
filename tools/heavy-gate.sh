@@ -1,63 +1,21 @@
 #!/usr/bin/env bash
-# Keep a heavy rebuild from meeting a loaded GPU backend — by ASKING him first.
-#
-# The 2026-08-09 freeze was a rebuild compiling ollama's CUDA kernels while a
-# ComfyUI video run held the other half of 30 GiB. Capping the build cgroup
-# (sys/nix-build-limits.nix) makes that survivable; this makes the two never
-# meet, which is better: a throttled build and a throttled render are both bad
-# outcomes, and they are avoidable by simply not overlapping.
-#
-# TWO backends, because either can hold the machine's memory:
-#
-#   * ComfyUI (`comfy-painter.service`, a USER unit) — its queue says whether a
-#     job is in flight, so a render can be waited out precisely.
-#   * ollama (`ollama.service`, a SYSTEM unit) — `/api/ps` says which models are
-#     RESIDENT. It has no queue endpoint, so a generation in flight is not
-#     visible here; a warm 23 GB model is, and that is what matters for RAM.
-#
-# THE ANSWER IS HIS, NOT OURS (2026-08-09). This used to suspend comfy on its
-# own judgement. Now a loaded backend in front of a heavy build raises a
-# CRITICAL toast with two buttons and does what he picks:
-#
-#   Stop & rebuild  -> stop whichever backend is loaded, build, put them back
-#   Rebuild anyway  -> leave them up; the caller builds throttled instead
-#
-# and no answer inside the timeout means "anyway" — an unattended machine must
-# not sit on a held rebuild lock waiting for a click that is not coming.
-#
-# The rules that survived from the silent version, each for a reason:
-#
-#   1. A render in flight is NEVER interrupted. Even on "Stop & rebuild" we
-#      wait for it — however long — and only then stop comfy.
-#   2. Weights merely sitting in VRAM are not a reason to wait: they are freed
-#      (`/free`), which costs him a reload later and nothing else.
-#   3. Suspending stops AND runtime-masks, so nothing can restart the backend
-#      halfway through the build. Masking is the half that matters: painter
-#      fires `startBackend` on its own launch (main.py:790).
-#   4. He is told, by name, at every step — a backend that vanished with no
-#      explanation is exactly the "silent change" docs/DESIGN.md §10 forbids.
-#   5. Resume restores only what we suspended, and only if we suspended it — a
-#      backend that was already down before the rebuild stays down.
-#
-# Usage:  heavy-gate.sh status | loaded | ask [timeout] | wait [timeout]
-#                       | suspend | resume | demo [timeout]
-#
-# Runs as root (from rebuild-top) or as lam by hand; the user-side half is
-# re-entered with runuser when root. Idempotent: every verb is safe to repeat,
-# and `resume` with nothing suspended does nothing at all.
+# Ask before a heavy rebuild overlaps a loaded ComfyUI or ollama backend.
+# ComfyUI's queue identifies in-flight renders; ollama's cgroup memory identifies
+# resident/loading weights. Usage:
+#   heavy-gate.sh status | loaded | ask [timeout] | wait [timeout]
+#                  | suspend | resume | demo [timeout]
+# Runs as root from rebuild-top or as lam by hand. `Stop & rebuild` waits for a
+# render, frees/stops and runtime-masks loaded backends, then restores only what
+# it suspended. `Rebuild anyway`, timeout, or no notification server leaves them
+# running so the caller uses throttled limits. Every verb is idempotent.
 set -uo pipefail
 
 COMFY_URL=${HEAVY_GATE_COMFY_URL:-${COMFY_GATE_URL:-http://127.0.0.1:8188}}
 OLLAMA_URL=${HEAVY_GATE_OLLAMA_URL:-http://127.0.0.1:11434}
 COMFY_UNIT=comfy-painter.service
 OLLAMA_UNIT=ollama.service
-# ollama is a SYSTEM unit, so its cgroup is fixed under system.slice (unlike
-# comfy's user unit, which heavy-gate reads via systemctl). This is the same
-# path the ai-warden reads (ai-warden.py ollama_cgroup()) and the reason is
-# identical: `/api/ps` reports {"models":[]} for the whole duration a model
-# LOADS, which is precisely the window a rebuild collides with, while
-# memory.current is correct throughout (measured 2026-08-22: it said "nothing
-# resident" while llama-server held 14.4 GiB).
+# ollama is a system unit; read memory.current because /api/ps is empty while a
+# model loads. More than 1 GiB means resident/loading weights, not an idle daemon.
 OLLAMA_CGROUP=${OLLAMA_CGROUP:-/sys/fs/cgroup/system.slice/ollama.service/memory.current}
 # tmpfs: a reboot mid-rebuild leaves nothing to undo.
 STATE_DIR=/run/heavy-gate
@@ -114,16 +72,9 @@ comfy_state() {
   if [ "$q" -gt 0 ]; then echo rendering; else echo idle; fi
 }
 
-# `warm` is the whole point for ollama: a model that finished answering an hour
-# ago still holds its weights until keep_alive expires, and THAT is the memory a
-# build would have to fit around. Reads the unit's cgroup, NOT `/api/ps` — the
-# endpoint is blind for the whole duration a model loads (measured 2026-08-22:
-# `{"models":[]}` while llama-server held 14.4 GiB RSS), which is exactly the
-# window a rebuild collides with; memory.current is correct throughout and is
-# the same source the ai-warden trusts. A warm model holds gigabytes, an idle
-# daemon sits near zero, so > 1 GiB is the "resident or loading" bar.
-# Prints: "<1|0> <bytes>" — the count is a proxy for the cgroup bar, kept so the
-# callers' "N model(s)" wording survives.
+# `warm` is cgroup memory above 1 GiB: keep-alive weights still count after a
+# request, and `/api/ps` is blind during loading. Prints `<1|0> <bytes>` for the
+# existing model-count wording.
 OLLAMA_WARM_BYTES=$((1024 * 1024 * 1024))
 ollama_resident() {
   local b=0
@@ -191,18 +142,9 @@ notify() {
   as_user notify-send -a "rebuild" -u normal -- "$1" "$2" >/dev/null 2>&1 || true
 }
 
-# The question. Prints ONE word on stdout, which is the caller's whole contract:
-#
-#   clear    nothing is loaded — there was nothing to ask
-#   stop     he pressed "Stop & rebuild"
-#   keep     he pressed "Rebuild anyway"
-#   timeout  he was not there; treat as "anyway"
-#   noask    no notification server answered; treat as "anyway"
-#
-# The toast is urgency 2 so it never auto-expires and ignores do-not-disturb,
-# and NotificationCard draws a critical toast's buttons whatever the
-# `notifActions` setting says — a critical question he cannot answer would be
-# worse than not asking.
+# `ask` prints one contract word: clear, stop, keep, timeout, or noask. The
+# critical, non-expiring toast has buttons regardless of `notifActions`; timeout
+# and noask mean keep/continue rather than holding an unattended rebuild lock.
 ask() {
   local timeout=${1:-$ASK_TIMEOUT_DEFAULT}
   local c o n b g body sum
@@ -312,10 +254,8 @@ Stop $(join_by " and " "${what[@]}") and build, or build alongside it?"
 # waiting / suspending / resuming
 # ---------------------------------------------------------------------------
 
-# Waits while a comfy render is in flight. The timeout is a backstop against a
-# hung queue, not a deadline for his work: it defaults to an hour and the caller
-# decides what a timeout means (rebuild-top declines to suspend and builds under
-# the cgroup caps instead, which is the throttled path).
+# Wait for an in-flight render. Timeout is a hung-queue backstop, not a deadline
+# for the render; the caller chooses the throttled fallback.
 do_wait() {
   local timeout=${1:-3600} waited=0 said=0
   while [ "$(comfy_state)" = rendering ]; do
@@ -333,15 +273,9 @@ do_wait() {
   return 0
 }
 
-# `systemctl --user mask --runtime` DOES NOT WORK for a home-manager user unit,
-# and fails silently: it writes its /dev/null symlink into
-# $XDG_RUNTIME_DIR/systemd/user, which in the USER manager's search path ranks
-# BELOW $XDG_CONFIG_HOME/systemd/user — where home-manager puts
-# comfy-painter.service. Measured 2026-08-09: symlink present, exit 0,
-# `is-enabled` still `enabled-runtime`, and the unit started perfectly happily.
-# `user.control` is the directory that outranks everything, so the mask goes
-# there by hand. (The SYSTEM manager has no such problem: /run/systemd/system
-# outranks /etc, so `mask --runtime` is the right tool for ollama.)
+# A user-unit runtime mask under XDG_RUNTIME_DIR loses to home-manager's unit;
+# place ComfyUI's mask in user.control. The system-unit runtime mask works for
+# ollama.
 CTL="/run/user/$UID_/systemd/user.control"
 comfy_mask_on() {
   as_user mkdir -p "$CTL" \
