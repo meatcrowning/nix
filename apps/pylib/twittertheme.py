@@ -42,7 +42,7 @@ html, body, #react-root {{
   background-image:none!important; border-color:var(--desk-border)!important; }}
 [data-testid="tweet"]:hover, [data-testid="cellInnerDiv"]:hover,
 [role="link"]:hover, [role="menuitem"]:hover, [data-testid="UserCell"]:hover {{
-  background-color:var(--desk-highlight)!important; }}
+  background-color:transparent!important; }}
 [data-testid="tweetText"], [data-testid="tweetText"] *, [data-testid="UserName"],
 [data-testid="UserName"] *, [role="heading"], [data-testid="app-bar-back"] {{ color:var(--desk-text)!important; }}
 [data-testid="tweetText"] a, [data-testid="UserName"] a, a[role="link"] {{ color:var(--desk-accent)!important; }}
@@ -88,6 +88,14 @@ aside[role="complementary"] {{ background-color:transparent!important; backgroun
 [data-testid="tweetButton"] *, [data-testid="tweetButtonInline"] *, [data-testid="DM_Button"] * {{ color:var(--desk-bg)!important; }}
 [aria-selected="true"] {{ color:var(--desk-accent)!important; border-color:var(--desk-accent)!important; }}
 [data-testid="emptyState"] {{ background-color:var(--desk-bg)!important; color:var(--desk-muted)!important; }}
+/* X's remaining component classes are deliberately unstable, but their
+   wrappers all live inside these two semantic columns.  Make those wrappers
+   transparent so this is one connected desktop canvas; exclude real media so
+   a video/photo keeps its own pixels.  The same pass removes X's hairline
+   separators and card outlines without suppressing icons or thumbnails. */
+[data-testid="primaryColumn"] :not(img):not(svg):not(video):not(canvas):not(path),
+[data-testid="sidebarColumn"] :not(img):not(svg):not(video):not(canvas):not(path) {{
+  background-color:transparent!important; border-color:transparent!important; }}
 ::-webkit-scrollbar-track {{ background:var(--desk-bg)!important; }}
 ::-webkit-scrollbar-thumb {{ background:var(--desk-border)!important; border-color:var(--desk-bg)!important; }}
 ::-webkit-scrollbar-thumb:hover {{ background:var(--desk-accent)!important; }}
