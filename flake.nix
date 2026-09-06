@@ -139,7 +139,11 @@
     # by leaving the overlay out of its pkgs entirely — corners just stay
     # round there until this gets added back.
 
-    pkgsAir = mkPkgs "aarch64-linux" [ vcv-rack-overlay ];
+    # Air skips Breeze's local patch because it has no aarch64 cache, but it
+    # does need the small Konsole patch: Dynamic.colorscheme's
+    # `Wallpaper=StyleBackground` is otherwise inert and the terminal hides
+    # the live Oxygen window gradient instead of carrying it under the text.
+    pkgsAir = mkPkgs "aarch64-linux" [ vcv-rack-overlay konsole-style-background-overlay ];
 
   in
   {
