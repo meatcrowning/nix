@@ -157,6 +157,13 @@ exactly what it always was.
   calls `setPromptChoice`, which persists, and a run without that override
   rewrote his own base prompt.
 
+  `tools/resource-fixture.py --state blank|fake|clear --seconds N` holds the
+  real Hyprland-face window for resource sampling. It hard-forces offscreen,
+  scratches every writable Oracle store, points the server at a closed local
+  port, and removes display/proxy environment. `clear` loads the fake transcript
+  and then clears it through the normal session-load seam, so retained memory
+  can be compared with a populated fixture without touching a live service.
+
   Three things that make a render show STATE, not just the resting window:
 
   - **`ORACLE_POKE=edit-prompt,new-session`** names the rows instead of firing

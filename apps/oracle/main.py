@@ -11960,6 +11960,20 @@ def run_selftest(app, shell, win, plasma, warnings, fleet_pane=None):
     """
     rc = [0]
 
+    def fixture_target():
+        """The content item whose transcript the retained fixture controls."""
+        from PySide6.QtCore import QObject
+        return shell.root if plasma else win.findChild(QObject, "content")
+
+    def clear_fixture():
+        """Clear through the same session-load seam as an ordinary switch."""
+        from PySide6.QtCore import Q_ARG, QMetaObject
+        QMetaObject.invokeMethod(fixture_target(), "loadTurns",
+                                 Q_ARG("QVariant", "resource-empty"),
+                                 Q_ARG("QVariant", "Resource fixture"),
+                                 Q_ARG("QVariant", "[]"))
+        app.processEvents()
+
     def finish():
         # ORACLE_FAKE: a demo conversation in the log, so a render has bubbles
         # in it at all. It goes in through `loadTurns` — the function a session
@@ -12022,7 +12036,7 @@ def run_selftest(app, shell, win, plasma, warnings, fleet_pane=None):
             # Under Hyprland the QML root is the WINDOW; `loadTurns` lives on
             # the `Root` item inside it, and invoking it on the Window is a
             # silent no-op (the demo log simply never appears).
-            target = shell.root if plasma else win.findChild(QObject, "content")
+            target = fixture_target()
             QMetaObject.invokeMethod(target, "loadTurns",
                                      Q_ARG("QVariant", "demo"),
                                      Q_ARG("QVariant", "Demo conversation"),
@@ -12075,6 +12089,13 @@ def run_selftest(app, shell, win, plasma, warnings, fleet_pane=None):
                         Q_ARG("QVariant", _i))))
                 print("times stamped: %s" % json.dumps(_stamped))
                 print("times newday: %s" % json.dumps(_newday))
+        # ORACLE_RESOURCE_STATE=clear starts populated, then clears the real
+        # transcript through loadTurns. Together with blank (no ORACLE_FAKE)
+        # and fake, this gives the resource runner deterministic retained-state
+        # fixtures without adding a second application construction path.
+        if os.environ.get("ORACLE_RESOURCE_STATE") == "clear":
+            clear_fixture()
+
         # ORACLE_SEND: drive real prompts through the window, against whatever
         # OLLAMA_HOST points at (tools/round-split-test.py points it at a stub
         # on 127.0.0.1 — never his daemon), then print the log as JSON. It is
@@ -12467,7 +12488,31 @@ def run_selftest(app, shell, win, plasma, warnings, fleet_pane=None):
         if warnings:
             rc[0] = 1
         print(f"selftest: root loaded, {len(warnings)} QML warning(s)")
-        app.quit()
+        retain = os.environ.get("ORACLE_RESOURCE_RETAIN")
+        if retain:
+            try:
+                seconds = float(retain)
+            except ValueError:
+                print("selftest: ORACLE_RESOURCE_RETAIN must be seconds",
+                      file=sys.stderr)
+                rc[0] = 2
+                app.quit()
+                return
+            if not 0 < seconds <= 3600:
+                print("selftest: ORACLE_RESOURCE_RETAIN must be in (0, 3600]",
+                      file=sys.stderr)
+                rc[0] = 2
+                app.quit()
+                return
+            state = os.environ.get("ORACLE_RESOURCE_STATE", "blank")
+            from PySide6.QtCore import Q_RETURN_ARG, QMetaObject
+            rows = json.loads(QMetaObject.invokeMethod(
+                fixture_target(), "rowsJson", Q_RETURN_ARG("QVariant")) or "[]")
+            print(f"resource fixture: ready state={state} rows={len(rows)} "
+                  f"pid={os.getpid()}", flush=True)
+            QTimer.singleShot(round(seconds * 1000), app.quit)
+        else:
+            app.quit()
 
     QTimer.singleShot(1200, finish)
     app.exec()
