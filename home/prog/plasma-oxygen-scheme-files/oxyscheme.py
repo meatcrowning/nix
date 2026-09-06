@@ -543,7 +543,8 @@ def convert(src, dst, report=None):
     stats = dict(based_alpha=0, based_colour=0, recoloured=0, untouched_art=0,
                  skipped_chromatic=0, no_body=0, edge_shaded=0, glow_damped=0,
                  raster_glow=0, raster_kept=0, raster_undecodable=0,
-                 panel_shadows_removed=0, panel_inner_edge_flattened=0)
+                 panel_shadows_removed=0, panel_inner_edge_flattened=0,
+                 panel_surface_opaque=0)
     parents = {c: p for p in root.iter() for c in p}
 
     def ancestry(el):
@@ -804,6 +805,25 @@ def convert(src, dst, report=None):
     convert_rasters(doc, root, parents, family, stats)
 
     if is_panel_file:
+        # Plasma's stock panel surface is deliberately 70% transparent so the
+        # dark Oxygen bar can float above a wallpaper.  This theme instead uses
+        # the panel as a continuation of an empty window: the Background role
+        # must therefore be opaque, with only the white titlebar tint varying.
+        for el in root.iter():
+            fill, _, _ = get_fill(el)
+            surface = (fill == 'currentColor' and
+                       'ColorScheme-Background' in (el.get('class') or ''))
+            if fill and fill.startswith('url(#'):
+                gradient = doc.idx.get(fill[5:-1])
+                surface = surface or (gradient is not None and
+                                      gradient.get('data-oxysch') == 'body')
+            if surface:
+                sd = style_dict(el)
+                if sd.get('opacity') != '1':
+                    sd['opacity'] = '1'
+                    set_style(el, sd)
+                    stats['panel_surface_opaque'] += 1
+
         # Panel shadows are a separate nine-slice frame (`shadow-*`), not part
         # of the panel body's shading.  Remove the whole frame so a panel reads
         # as one continuous window surface, with no floating halo or drop.
