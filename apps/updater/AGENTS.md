@@ -140,3 +140,9 @@ receives the intended command as trailing argv. Set both together, keep every
 path under scratch XDG roots, and make the runner simulate output and exit
 status; no resource test may resolve `nix`, `nix-upgradable.sh`, or either real
 rebuild wrapper.
+
+`tools/resource-fixture.py` is that retained fixture. It creates synthetic
+normal and stress `flake.lock` files, routes every job through the stateful
+`tools/fake-command-runner.py`, and exposes `normal`, `stress`, `clear`, and
+`quit` over the shared stdin/READY protocol. It must remain offscreen with no
+inherited display socket; the fixture may replace only its scratch flake lock.
