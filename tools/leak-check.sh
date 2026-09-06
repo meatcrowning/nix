@@ -1,42 +1,14 @@
 #!/bin/sh
-# leak-check.sh — did a test leak into the user's live session?
+# leak-check.sh — warn about test residue in the live session. It is run by
+# preflight and checks six states: stale manager environment; dead compositor
+# locks; a second live Hyprland; a live HEADLESS-* sandbox or stale state file;
+# tagged/probe windows on visible monitors; and focus/pointer left on test or
+# headless objects. It also notes the exact monitor-centre signature of an
+# unpinned output-removal warp.
 #
-# The enforcement half of AGENTS.md -> "Testing without interfering with the
-# user". That rule is otherwise kept by discipline alone, and on 2026-07-30 it
-# was not kept: workers took his keyboard and pointer focus while he was using
-# the machine. This script cannot stop a test from grabbing focus, but it does
-# catch the *residue* every leaked test leaves behind, at the one moment every
-# agent here is already required to pass through: preflight.
-#
-# Six states, all of them things a harness is supposed to have cleaned up:
-#   1. The systemd user manager pointing at a compositor that is not his
-#      (hypr-session-env.sh --check — reused, never reimplemented; the full
-#      story of why that store goes wrong is in AGENTS.md under
-#      home/srvs/hypr-env.nix).
-#   2. $XDG_RUNTIME_DIR/hypr/<sig>/ lock directories whose PID is dead.
-#   3. A second, live Hyprland that is not the session one — a nested test
-#      compositor still running, still able to hold a seat and a clipboard.
-#   4. A sandbox monitor left standing (/tmp/vtb-sandbox), i.e. `sandbox.sh
-#      start` without its `stop`.
-#   5. A TEST WINDOW ON HIS REAL MONITOR — a sandbox-tagged (or probe-titled)
-#      client that is not on a HEADLESS-* output. Added 2026-07-30, because 1-4
-#      caught only residue and he was reporting the live symptom: "test windows
-#      keep popping up".
-#   6. HIS SEAT LEFT SOMEWHERE HE DID NOT PUT IT — keyboard focus on a test
-#      window or on an off-screen monitor, or the pointer parked inside a
-#      HEADLESS-* output. Same report: "they keep moving my mouse around". A
-#      cursor on a monitor with no cable in it is not a state a real session
-#      reaches by itself. Since 2026-07-30 it also NOTES a pointer sitting on
-#      the exact centre of a real monitor — where Hyprland snaps it when an
-#      output is removed, which is what "the mouse randomly moves to the centre
-#      of the screen" turned out to be. tools/sandbox.sh now undoes that snap
-#      (sg_pointer_pin); the note catches a harness that does not.
-#
-# WARNS ONLY, AND MUST STAY THAT WAY. Every one of these states is one a real
-# login can legitimately be in — he starts nested compositors himself, and a
-# TTY has no session at all. Blocking his rebuild on a false positive is worse
-# than the bug this exists to catch, so preflight ignores the exit status.
-# Exit 1 means "found something" for any other caller that wants it.
+# This must remain warn-only: all states can be legitimate during a real login,
+# TTY, or user-run nested compositor. Exit 1 reports findings to other callers;
+# preflight ignores it. Repair hints are emitted with each finding.
 set -u
 
 found=0
@@ -76,10 +48,8 @@ for d in "$HYPR_ROOT"/*/; do
   fi
 done
 
-# 4. Sandbox left standing. The monitor is the part that matters — a HEADLESS-*
-#    output in his live compositor is a test that never tore down — so it is
-#    reported separately from the directory, which may just be litter (or a
-#    sandbox another agent is using right now).
+# 4. A live HEADLESS-* output is an un-torn-down sandbox; report it separately
+#    from the directory, which may be harmless litter or another active run.
 SBOX="${VTB_SANDBOX_DIR:-/tmp/vtb-sandbox}"
 if hyprctl version >/dev/null 2>&1; then
   heads=$(hyprctl monitors -j 2>/dev/null | sed -n 's/.*"name": "\(HEADLESS-[0-9]*\)".*/\1/p')
@@ -88,21 +58,15 @@ if hyprctl version >/dev/null 2>&1; then
     "      A 'sandbox.sh start' with no 'stop'. Windows may still be on it." \
     "      repair:  $HOME/nix/tools/sandbox.sh stop"
 fi
-# The STATE FILE, not the directory. `stop` removes state+classes and leaves the
-# (now empty) directory behind, so testing for the directory made a cleanly
-# stopped sandbox warn on every preflight from then until a reboot cleared /tmp —
-# a permanent false positive that teaches agents to skim past this whole script.
-# `start` writes the state file and `stop` removes it, so it is the honest
-# marker of "a sandbox is up"; the monitor half is caught separately above.
+# Check the state file, not the directory: `stop` removes state and classes but
+# intentionally leaves the empty directory. The monitor is checked above.
 if [ -f "$SBOX/state" ] && [ -z "${heads:-}" ]; then
   warn "WARN: sandbox state left behind at $SBOX/state (no headless monitor, so" \
        "      the monitor half was torn down).  repair:  $HOME/nix/tools/sandbox.sh stop"
 fi
 
-# 5 + 6. The live symptoms, not the residue: a test window he can SEE, and his
-#        seat left where a harness put it. One python call over three hyprctl
-#        reads (~30ms total) — this runs inside preflight, so it stays cheap and
-#        it stays read-only.
+# 5 + 6. One read-only Python probe checks visible test windows and seat residue
+#        (focus, headless pointer, and centre-snap note) cheaply in preflight.
 if hyprctl version >/dev/null 2>&1; then
   seat=$(python3 - <<'PY' 2>/dev/null
 import json, subprocess

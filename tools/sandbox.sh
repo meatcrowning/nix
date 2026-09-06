@@ -1,105 +1,27 @@
 #!/usr/bin/env bash
-# A monitor the user cannot see, for agents to test on.
+# A headless Hyprland output for GUI tests. It is a real compositor output but
+# has no cable, so windows and `grim -o` pixels are invisible to the user.
+# This deliberately uses the live compositor for fidelity; a not-yet-switched
+# plugin needs the nested harness instead, since a plugin crash still affects
+# the live session.
 #
-# WHY THIS EXISTS
+#   sandbox.sh start | exec CMD... | shot [FILE] | clients | hyprctl ARGS...
+#   sandbox.sh status | stop
 #
-# Testing a desktop change used to mean opening a window on the live session:
-# it steals focus, shoves the user's stack around, and drags whatever they were
-# doing into the experiment. This gives that work somewhere else to happen.
-#
-# Hyprland can add a virtual output at runtime (`hyprctl output create
-# headless`). It is a real monitor in every way the compositor cares about — it
-# has workspaces, it renders every frame, and windows on it are decorated,
-# animated and screenshottable — except that no cable leads anywhere. Windows
-# launched onto it are invisible to the user, and `grim -o` reads its pixels
-# back.
-#
-# The alternative (a nested Hyprland, as home/prog/hyprvtb/tools/nested-smoke.sh
-# runs) is more isolated but appears as a WINDOW in the live session, so it is
-# just as disruptive. Three headless-parent designs were tried and abandoned
-# before this one: nixpkgs' cage is wlroots 0.17 and offers xdg_wm_base v5,
-# which Hyprland's client side (v6) refuses; sway creates the headless output
-# but has the same v5 ceiling; labwc has the right xdg-shell but on this NVIDIA
-# box either advertises no usable DRM device (endless "Failed to allocate a GBM
-# buffer: bo null") or hands the nested compositor no output at all. This
-# approach needs no extra package and no nesting at all.
-#
-# THE TRADE-OFF, STATED PLAINLY: windows here are in the user's real session,
-# decorated by the LIVE hyprvtb instance. Good for fidelity — you are testing
-# the plugin that is actually running — but a plugin crash still takes the
-# session down, and these are real clients of the real compositor. To test a
-# plugin build that has NOT been switched to yet, use the nested harness.
-#
-# USAGE
-#
-#   tools/sandbox.sh start            create the virtual monitor
-#   tools/sandbox.sh exec CMD...      launch a GUI program onto it (off-screen)
-#   tools/sandbox.sh shot [FILE]      screenshot it (default /tmp/vtb-sandbox/shot.png)
-#   tools/sandbox.sh clients          what is on it, with geometry
-#   tools/sandbox.sh hyprctl ARGS...  plain hyprctl, for convenience
-#   tools/sandbox.sh status           monitor + workspace + window count
-#   tools/sandbox.sh stop             close its windows and remove the monitor
-#
-# NOTES
-#
-#  * A window launched here CANNOT TAKE THE KEYBOARD, and that is a compositor
-#    rule rather than anything this script does after the fact:
-#    `sandbox-never-takes-the-seat` in hyprland.lua is `no_focus` matched on the
-#    `sandbox` tag below. `silent` only ever stopped the VIEW from switching —
-#    the window still took focus at map time and held it for the two seconds
-#    until the restore in `exec` noticed, once per launch, dozens of times in a
-#    harness run (measured on the event socket, top 2026-07-30). The restore is
-#    still there, as a net, and now warns if it ever fires.
-#    The intended cost: nothing here can be typed into. A harness that must send
-#    input to its subject wants a nested compositor with its own seat.
-#  * WHAT YOU HAND `exec` MUST `exec` ALL THE WAY DOWN, or the rules above do
-#    not apply and the window opens in front of him. Hyprland keys the
-#    `[workspace N silent; tag +sandbox]` rule on the PID it forked; if anything
-#    in the chain forks instead of exec-ing — a wrapper script that runs its
-#    payload as a child, a shell that cannot tail-call because of a redirection
-#    written into the exec string — the client is a grandchild, the rule matches
-#    nothing, and with no `sandbox` tag it has no `no_focus` either, so it takes
-#    his keyboard too. Put any redirection INSIDE a launcher script, after an
-#    explicit `exec` (home/prog/hyprvtb/tools/nested-smoke.sh does exactly this).
-#    The placement check below turns a miss into an abort rather than a surprise,
-#    but it is a net, not a substitute.
-#  * A window launched here is also DEAF — `exec` prepends
-#    `env PIPEWIRE_REMOTE=/dev/null PULSE_SERVER=/dev/null` so a test program
-#    cannot play over whatever he is listening to. `SANDBOX_AUDIO=1` opts out.
-#  * Every window launched here is TAGGED `sandbox` (an exec rule, so the
-#    compositor applies it at map time — `hyprctl clients -j` shows
-#    "tags": ["sandbox*"]). The monitor is what the panel filters on, since a
-#    second REAL monitor's windows must keep appearing in the taskbar and
-#    "which output" is the honest question there. The tag answers the other
-#    one — "whose window is this" — which survives the window being moved, and
-#    is what `stop` uses so a window dragged off the sandbox workspace is still
-#    torn down instead of being left on the user's desktop.
-#  * `exec` VERIFIES the placement afterwards and treats a miss as fatal. The
-#    exec rule below places the window; until 2026-07-30 nothing checked that it
-#    had, so a client the rule did not reach (a second toplevel, a splash, a
-#    rule the compositor refused) simply opened in front of him and the harness
-#    carried on. Now any sandbox-tagged window that is not on the sandbox
-#    workspace is closed and the run aborts. It does not retry.
-#  * Everything here goes through `lib/session-guard.sh`, which is also what
-#    stops this script driving a compositor that is NOT his session — a stale
-#    `HYPRLAND_INSTANCE_SIGNATURE` from somebody's nested test is an abort, not
-#    a target.
-#  * HIS POINTER IS PUT BACK, because the COMPOSITOR moves it and this script
-#    cannot ask it not to. Removing an output makes Hyprland snap the cursor to
-#    the centre of the surviving monitor, and `hl.dsp.focus({monitor=...})`
-#    warps it to the focused window's middle; neither obeys `cursor:no_warps`.
-#    Both call sites go through `sg_pointer_pin`, which restores the position it
-#    read a moment earlier and nothing else. Nothing here may move his pointer
-#    any other way.
-#  * `stop` closes the sandbox's windows BEFORE removing the output — Hyprland
-#    migrates the windows of a removed monitor onto a real one, which is
-#    exactly what this exists to prevent. It then prunes the classes it
-#    launched from the plugin's per-class geometry memory, so a test window's
-#    size never becomes where the real app opens next time.
-#  * Dispatchers go through `hl.dsp.*` Lua objects. NOT `hyprctl dispatch
-#    <name>` (this config is Lua, so the argument is evaluated as Lua and a
-#    bare dispatcher name is a nil global) and NOT `hyprctl keyword` (it
-#    refuses outright: "keyword can't work with non-legacy parsers").
+# Safety contracts:
+# * `exec` must receive a command that `exec`s all the way down. The compositor
+#   applies `[workspace N silent; tag +sandbox]` and `no_focus` by PID; a forked
+#   wrapper can miss the rule and steal focus. Placement is checked afterwards;
+#   a miss closes the client and aborts, without retrying. The sandbox cannot
+#   accept keyboard input; use a nested compositor when the subject needs a seat.
+# * Clients are tagged `sandbox`, audio is disabled with
+#   `PIPEWIRE_REMOTE=/dev/null PULSE_SERVER=/dev/null` unless `SANDBOX_AUDIO=1`,
+#   and `stop` closes them before removing the output. The tag also catches
+#   windows moved away from the sandbox and geometry state is pruned.
+# * `session-guard.sh` rejects a stale/non-live compositor target. Pointer
+#   changes caused by output removal or focus dispatch go only through
+#   `sg_pointer_pin`, which restores the position it just read.
+# * Use `hl.dsp.*` Lua dispatchers, not bare `hyprctl dispatch` or `keyword`.
 
 set -uo pipefail
 
