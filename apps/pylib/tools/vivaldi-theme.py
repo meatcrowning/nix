@@ -54,6 +54,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -158,6 +159,9 @@ def write_ui(source=None, style=None, directory=UI_DIR):
     css, prov = build_css(source, style)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / "custom.css"
+    surface = Path(os.environ.get("XDG_STATE_HOME") or (Path.home() / ".local" / "state")) / "plasma-panel-surface.png"
+    if surface.exists():
+        shutil.copy2(surface, directory / "oxygen-window.png")
     text = HEADER % prov + css + "\n"
     # Unchanged content is not rewritten: the path unit calls this on every
     # palette write, and a quiet rewrite would only churn the file's mtime.

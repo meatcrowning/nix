@@ -218,6 +218,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self, head=False):
         refresh_session_env()
         path = self.path.split("?", 1)[0]
+        if path == "/oxygen-window.png":
+            image = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "plasma-panel-surface.png"
+            try:
+                body = image.read_bytes()
+            except OSError:
+                self._send(404, b"Oxygen window surface is not generated yet\n", head=head)
+                return
+            self._send(200, body, "image/png", [("ETag", '"%s"' % chansource.stamp(body.hex()))], head=head)
+            return
         route = self.ROUTES.get(path)
         if route is None and path not in ("/version", "/web.css"):
             self._send(404, head=head, body=b"chan-theme: /chan.css, /scrollbar.css, /twitter.css, "
