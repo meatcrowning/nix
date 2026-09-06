@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""The styled background follows the real WINDOW's state.
+"""The styled background follows the requested window state.
 
 `kdeshell` draws the KStyle's window background inside the QQuickWidget from an
-image rendered from the real top-level's background only. The URL still carries
-the active group explicitly: Qt's wl_keyboard focus can differ from the state
-KWin uses to paint the decoration during a "select window" screenshot.
+unshown, equal-sized top-level widget. The URL still carries the active group
+explicitly: Qt's wl_keyboard focus can differ from the state KWin uses to paint
+the decoration during a "select window" screenshot.
 
 So: the URL carries `a`/`i`, the window is dressed in that group's colours, and
 losing focus re-requests the image. Palettes are SET here rather than read from
@@ -51,7 +51,7 @@ prov_cls, bg_cls = kdeshell._build_background_classes()
 win = QMainWindow()
 win.setAttribute(Qt.WA_StyledBackground, True)
 win.resize(400, 300)
-prov = prov_cls(win)
+prov = prov_cls()
 
 
 def crop_top(url):
