@@ -1253,6 +1253,7 @@ Item {
     readonly property var actions: {
         const out = [];
         out.push({ id: "new-session", menu: "file", menuText: "New Session",
+                   barText: "New",
                    tip: "start a fresh conversation", icon: "document-new",
                    bar: true, shortcut: "@New" });
         // The saved sessions, as a radio set: one of them IS the conversation
@@ -1287,6 +1288,7 @@ Item {
                    state: (Ollama.busy || win.canSend || win.canContinue) ? 0 : 2 });
         out.push("-");
         out.push({ id: "attach", menu: "chat", menuText: "Attach Files…",
+                   barText: "Attach",
                    tip: "attach files to the next message",
                    icon: "mail-attachment", bar: true, shortcut: "@Open" });
         out.push({ id: "detach", menu: "chat", menuText: "Clear Attachments",

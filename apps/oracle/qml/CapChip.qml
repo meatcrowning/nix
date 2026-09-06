@@ -22,6 +22,9 @@ Rectangle {
         id: capText
         anchors.centerIn: parent
         text: root.label
-        color: Theme.textDim
+        // Full-strength text, not textDim: at chip size on bgAlt the dim grey
+        // was not readable [his, 2026-09-05]. The subordination is the chip's
+        // size and its frame, not a washed-out label.
+        color: Theme.text
     }
 }
