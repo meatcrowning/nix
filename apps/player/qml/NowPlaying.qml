@@ -10,10 +10,10 @@ import "../../qmlcommon"
 // down to a band. The rest is split into two columns: the left carries the
 // playing track's identity (title + rating + artist + album) and under it the
 // queue — no transport controls and no position readout, both of which live in
-// the titlebar now; the right column is the lyrics, which
-// collapses to zero width whenever the track has none. Lyrics are requested per
-// track change and delivered async by the LyricsProvider (embedded → .lrc →
-// LRCLIB).
+// the titlebar now. In the wide, side-art layout, lyrics sit UNDER that queue;
+// in the narrow top-art layout they remain its right column. An absent lyrics
+// result collapses its pane entirely. Lyrics are requested per track change and
+// delivered async by the LyricsProvider (embedded → .lrc → LRCLIB).
 Item {
     id: root
 
@@ -51,10 +51,13 @@ Item {
     readonly property var cur: Player.current
     readonly property bool hasLyrics: lyricsView.hasContent
 
-    // Both splits are user-draggable and persisted: the art row's height
-    // fraction and the lyrics column's width.
+    // The art-row, lyrics-column and lyrics-row splits are separately
+    // user-draggable and persisted. The lyrics row belongs to the side-art
+    // layout; a wide, short window makes a third skinny column much less useful
+    // than a readable queue over a readable lyrics pane.
     property real artFrac: Number(Prefs.get("npArtFrac", 0.45))
     property real lyricsW: Number(Prefs.get("npLyricsWidth", 320))
+    property real lyricsH: Number(Prefs.get("npLyricsHeight", 280))
 
     // Art on TOP, or art in a COLUMN down the left? A top row spans the whole
     // window width, so `PreserveAspectCrop` scales a square cover to that WIDTH
@@ -89,6 +92,8 @@ Item {
     readonly property int queueMinW: 240
     readonly property int artColMin: queueMinW + 180 + 1
     readonly property bool sideArt: width >= height * 0.6 + artColMin
+    readonly property bool lyricsBelowQueue: sideArt && height >= 480
+    readonly property int queueMinH: 300
 
     // IN A PLASMA SESSION THE COVER IS NEVER CROPPED. His call, 2026-08-18 —
     // and it is a straight trade, not a refinement of the reasoning above: the
@@ -235,18 +240,23 @@ Item {
         LyricsView {
             id: lyricsView
             objectName: "lyricsPane"
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-            anchors.right: parent.right
-            // The saved split is a preference, not permission to collapse the
-            // queue. At the current compact Plasma window the cover leaves
-            // just enough content width for a 240px queue and 180px lyrics
-            // pane; without this cap the old 394px preference consumed the
-            // queue and made the two panes read as a vertical layout.
+            x: root.lyricsBelowQueue ? 0 : bottomRow.width - width
+            y: root.lyricsBelowQueue ? bottomRow.height - height : 0
+            // A saved split is a preference, not permission to collapse its
+            // sibling. The wide side-art layout stacks the panes, reserving a
+            // real queue; narrower top-art layouts use two columns and retain
+            // the queue's 240px floor.
             width: root.hasLyrics
-                   ? Math.max(180, Math.min(bottomRow.width * 0.6, root.lyricsW,
-                                            bottomRow.width - root.queueMinW - 1))
+                   ? (root.lyricsBelowQueue ? bottomRow.width
+                      : Math.max(180, Math.min(bottomRow.width * 0.6, root.lyricsW,
+                                               bottomRow.width - root.queueMinW - 1)))
                    : 0
+            height: root.hasLyrics
+                    ? (root.lyricsBelowQueue
+                       ? Math.max(180, Math.min(bottomRow.height * 0.6, root.lyricsH,
+                                                bottomRow.height - root.queueMinH - 1))
+                       : bottomRow.height)
+                    : 0
             visible: root.hasLyrics
             clip: true
             trackId: root.cur.id !== undefined ? root.cur.id : -1
@@ -258,41 +268,52 @@ Item {
 
         Rectangle {
             id: vsep
-            anchors.right: lyricsView.left
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-            width: root.hasLyrics ? 1 : 0
+            x: root.hasLyrics ? (root.lyricsBelowQueue ? 0 : lyricsView.x - 1)
+                              : bottomRow.width
+            y: root.hasLyrics ? (root.lyricsBelowQueue ? lyricsView.y - 1 : 0)
+                              : bottomRow.height
+            width: root.hasLyrics ? (root.lyricsBelowQueue ? parent.width : 1) : 0
+            height: root.hasLyrics ? (root.lyricsBelowQueue ? 1 : parent.height) : 0
             visible: root.hasLyrics
             color: Theme.border
         }
-        Item {   // drag handle over the column split
-            x: vsep.x - 3
-            width: 7
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
+        Item {   // drag handle over the lyrics split
+            x: root.lyricsBelowQueue ? 0 : vsep.x - 3
+            y: root.lyricsBelowQueue ? vsep.y - 3 : 0
+            width: root.lyricsBelowQueue ? parent.width : 7
+            height: root.lyricsBelowQueue ? 7 : parent.height
             z: 10
             visible: root.hasLyrics
             MouseArea {
                 anchors.fill: parent
-                cursorShape: Qt.SplitHCursor
+                cursorShape: root.lyricsBelowQueue ? Qt.SplitVCursor : Qt.SplitHCursor
                 onPositionChanged: function(mouse) {
                     if (!pressed) return;
-                    var gx = mapToItem(bottomRow, mouse.x, 0).x;
-                    root.lyricsW = Math.max(180, Math.min(bottomRow.width * 0.6,
-                                                          bottomRow.width - root.queueMinW - 1,
-                                                          bottomRow.width - gx));
+                    if (root.lyricsBelowQueue) {
+                        var gy = mapToItem(bottomRow, 0, mouse.y).y;
+                        root.lyricsH = Math.max(180, Math.min(bottomRow.height * 0.6,
+                                                              bottomRow.height - root.queueMinH - 1,
+                                                              bottomRow.height - gy));
+                    } else {
+                        var gx = mapToItem(bottomRow, mouse.x, 0).x;
+                        root.lyricsW = Math.max(180, Math.min(bottomRow.width * 0.6,
+                                                              bottomRow.width - root.queueMinW - 1,
+                                                              bottomRow.width - gx));
+                    }
                 }
-                onReleased: Prefs.set("npLyricsWidth", root.lyricsW)
+                onReleased: Prefs.set(root.lyricsBelowQueue ? "npLyricsHeight"
+                                                             : "npLyricsWidth",
+                                      root.lyricsBelowQueue ? root.lyricsH : root.lyricsW)
             }
         }
 
         // ---- left column: track identity + transport, queue underneath ----
         Item {
             id: leftCol
-            anchors.left: parent.left
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-            anchors.right: vsep.left
+            x: 0
+            y: 0
+            width: root.lyricsBelowQueue && root.hasLyrics ? parent.width : vsep.x
+            height: root.lyricsBelowQueue && root.hasLyrics ? vsep.y : parent.height
 
             Column {
                 id: info

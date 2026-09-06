@@ -192,20 +192,28 @@ if [ "$ONLINE" = 1 ]; then
     # more innocent-sounding "db pull failed (continuing)".
     "$PY" "$DBSYNC" --host "$HOST" pull || say "db pull failed (continuing)"
 
-    # Art: thumbs (~21 MB) block launch because the album grid is the first
-    # thing you see, and QML reads each thumb off disk once as the grid renders
-    # — a thumb that lands later stays blank until the next launch, which is why
-    # this one step is still synchronous. The full-size covers (~192 MB) trickle
-    # in behind it, since only the now-playing view wants them.
+    # Art: a FIRST cache fill blocks, because an empty album grid is not an
+    # honest first frame. Once air already has thumbnails, though, refreshing
+    # its ~21 MB cache before every launch delays a fully usable player by
+    # 15 seconds on this Wi-Fi link. Existing art remains valid while rsync
+    # refreshes in the background; a new thumb simply appears on the next
+    # ordinary relaunch, like the full-size covers (~192 MB).
     # Same first-contact rule as dbsync's SSH: a new name (top vs top.local)
     # must not wedge on the host-key prompt, a changed key must still fail.
     # SSH_MUX rides the connection dbsync just opened instead of building a
     # third and fourth of its own.
     RSH="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new ${SSH_MUX[*]}"
     mkdir -p "$ART_LOCAL"
-    rsync -a -e "$RSH" --timeout=20 --include='*-t.jpg' --exclude='*' \
-        "$HOST:.cache/player/art/" "$ART_LOCAL/" 2>/dev/null \
-        || say "thumb sync failed (covers may be blank)"
+    thumb_sync() {
+        rsync -a -e "$RSH" --timeout=20 --include='*-t.jpg' --exclude='*' \
+            "$HOST:.cache/player/art/" "$ART_LOCAL/" 2>/dev/null \
+            || say "thumb sync failed (covers may be blank)"
+    }
+    if find "$ART_LOCAL" -maxdepth 1 -type f -name '*-t.jpg' -print -quit | grep -q .; then
+        thumb_sync &
+    else
+        thumb_sync
+    fi
     ( rsync -a -e "$RSH" --timeout=60 --include='*-f.jpg' --exclude='*' \
         "$HOST:.cache/player/art/" "$ART_LOCAL/" >/dev/null 2>&1 ) &
 fi
