@@ -692,14 +692,14 @@ Exactly the dark-mode courier's shape, on a parallel scheme:
   scheme (`OneeThemeHandler` fed by `OneeTheme.css(url)`) and adopts it as a
   constructed `CSSStyleSheet` via `document.adoptedStyleSheets` (CSP-proof,
   concat-only so it never clobbers cosmetic/page-style sheets).
-- **Two guards.** It runs only on 4chan hosts (`boards.4chan(nel)?.org`), and it
-  **self-gates**: it adopts only once `document.documentElement` carries the
-  `oneechan` class (OneeChan sets `html.oneechan` on init) — so the re-skin
-  rides ONLY when OneeChan is actually active, never on bare 4chan. It polls for
-  the class (~60s cap) since OneeChan marks the page after document-creation.
+- **Document-start, one host guard.** It runs only on 4chan hosts
+  (`boards.4chan(nel)?.org`) and adopts immediately. Waiting for OneeChan's
+  late `html.oneechan` marker exposed its baked fallback for a frame on slow
+  loads; the shared sheet is safe on bare 4chan too, so it is the page's only
+  desktop theme from its first frame.
 - **Live**: `WalPalette.onChanged` → `win.reinjectOnee()` → each view runs
-  `window.__surferOneeThemeRefresh()`, which re-fetches + re-adopts (or strips
-  the sheet if OneeChan went away) — no reload. Same `Connections{target:
+  `window.__surferOneeThemeRefresh()`, which re-fetches + re-adopts — no reload.
+  Same `Connections{target:
   WalPalette}` block that drives `reinjectScrollbar`/`reinjectDark`.
 
 The role→palette map (`OneeTheme._css`, selectors mirroring `ch4SS` verbatim so
@@ -746,8 +746,8 @@ loopback (`--host-resolver-rules`) so the host gate passes: over a baked
 ch4SS-style baseline the palette colours win on body/reply/links/quotelinks
 (proving adopted-after-`<style>` + `!important` beats ch4SS on ties), a
 `WalPalette` change (the watched `Theme.qml` rewritten) live-re-skins the open
-page, and a page WITHOUT `html.oneechan` keeps its baked baseline untouched (the
-self-gate); plus the relief layer — a synthetic `oxygen` scheme
+page, and a page WITHOUT `html.oneechan` is themed from document-start too;
+plus the relief layer — a synthetic `oxygen` scheme
 (`DESK_KDEGLOBALS`) gains the gradients and puts them after the flat rules,
 a `breeze` one and the Hyprland session get none. The harness pins
 `DESK_SESSION=hypr` for its flat body, since it may itself be started from a

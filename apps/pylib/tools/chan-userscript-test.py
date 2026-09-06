@@ -73,6 +73,12 @@ flat = chantheme.css(PAL.__getitem__, None)
 check("the sheet builds with no chrome (the Hyprland face)", len(flat) > 1000)
 check("no chrome means no gradient — DESIGN.md §2 holds on this desktop",
       "linear-gradient(to bottom" not in flat)
+check("post numbers use the timestamp's primary ink",
+      ".postInfo .postNum a{color:#00ff88!important}" in flat)
+check("hovering a field keeps its fill stable",
+      ".captcha-root:hover{background:#123456!important}" in flat)
+check("OneeChan's alternating options rows use the desktop surface",
+      "#main-section>.option:nth-of-type(even){background:#203040!important}" in flat)
 
 # The panel-palette parser reads exactly the literal shape every app's Palette
 # does (and the shape kdetheme itself generates).
@@ -107,8 +113,8 @@ for want in ("@run-at       document-start", "@match        *://boards.4chan.org
              "@grant        GM_xmlhttpRequest", "@connect      127.0.0.1"):
     check("header carries %r" % want.split()[0] + " " + want.split()[-1],
           want in text)
-check("self-gate on html.oneechan survives for 4chan while X is ungated",
-      '"4chan.org": "oneechan"' in text and "classList.contains(PAGE_GATE)" in text
+check("4chan starts its sheet at document-start, before OneeChan, while X stays ungated",
+      "var GATE = null" in text and "if (!PAGE_GATE){ start(); return; }" in text
       and "*://x.com/*" in text)
 check("adopts rather than appends (cascades after ch4SS)",
       "adoptedStyleSheets" in text)

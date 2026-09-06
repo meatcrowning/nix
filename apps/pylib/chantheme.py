@@ -141,6 +141,10 @@ def css(pal, chrome=None):
         "#boardNavDesktop,#boardNavDesktopFoot{color:%s%s}" % (header_text, i),
         ".backlink{color:%s%s}" % (blink, i),
         ".quotelink{color:%s%s}" % (ql, i),
+        # A post's own number is navigation chrome, not a quotelink: it sits
+        # beside the timestamp and should carry the same primary ink.  The
+        # actual >> reference remains a `.quotelink` in the post body.
+        ".postInfo .postNum a{color:%s%s}" % (text, i),
         # --- backgrounds ---
         "body{background:%s%s}" % (bg, i),
         # `.inline` and the catalog cells (`Show Background` mode) are
@@ -161,6 +165,15 @@ def css(pal, chrome=None):
         ":root.header-gradient #header-bar{background:%s%s}" % (header_bg, i),
         "input:not(.jsColor),textarea,.riceCheck,#qr-filename-container,select,"
         ".captcha-root{background:%s%s}" % (inp, i),
+        # OneeChan brightens every field on hover.  Fields are stable surfaces
+        # here: focus gets the border state below, but merely crossing a field
+        # must not repaint its fill.
+        "input:not(.jsColor):hover,textarea:hover,.riceCheck:hover,"
+        "#qr-filename-container:hover,select:hover,.captcha-root:hover{"
+        "background:%s%s}" % (inp, i),
+        # Its options panel darkens every other main row from `mainColor`.
+        # That makes a light desktop palette read as black zebra stripes.
+        "#main-section>.option:nth-of-type(even){background:%s%s}" % (reply, i),
         # --- borders ---
         ".reply,:root.op-background .postContainer.opContainer,.dialog,.entry,"
         ".inline,fieldset,#post-preview,select{border-color:%s%s}" % (border, i),
