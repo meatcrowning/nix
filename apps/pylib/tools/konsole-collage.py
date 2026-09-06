@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a borderless JPEG collage from image paths supplied by Dolphin."""
+"""Build a borderless PNG collage from image paths supplied by Dolphin."""
 
 import argparse
 import json
@@ -56,11 +56,11 @@ def layout(sizes):
 
 
 def output_path(cwd):
-    """Never overwrite a previous collage; pick collage-2.jpg, then -3, …"""
-    candidate = cwd / "collage.jpg"
+    """Never overwrite a previous collage; pick collage-2.png, then -3, …"""
+    candidate = cwd / "collage.png"
     number = 2
     while candidate.exists():
-        candidate = cwd / ("collage-%d.jpg" % number)
+        candidate = cwd / ("collage-%d.png" % number)
         number += 1
     return candidate
 
@@ -75,22 +75,24 @@ def command(paths, sizes, output):
         # bars. `setsar` avoids a non-square-pixel input changing the geometry.
         filters.append(
             "[%d:v]scale=%d:%d:force_original_aspect_ratio=increase,"
-            "crop=%d:%d,setsar=1[%s]" % (index, cell_w, cell_h, cell_w, cell_h, label)
+            "crop=%d:%d,setsar=1,format=rgba[%s]" %
+            (index, cell_w, cell_h, cell_w, cell_h, label)
         )
         labels.append("[%s]" % label)
     missing = cols * rows - len(paths)
     for index in range(missing):
         label = "blank%d" % index
-        filters.append("color=c=black:s=%dx%d:d=1[%s]" % (cell_w, cell_h, label))
+        filters.append("color=c=black@0:s=%dx%d:d=1,format=rgba[%s]" %
+                       (cell_w, cell_h, label))
         labels.append("[%s]" % label)
     layout_text = "|".join("%d_%d" % ((index % cols) * cell_w, (index // cols) * cell_h)
                            for index in range(cols * rows))
-    filters.append("%sxstack=inputs=%d:layout=%s:fill=black[out]" %
+    filters.append("%sxstack=inputs=%d:layout=%s:fill=black@0,format=rgba[out]" %
                    ("".join(labels), cols * rows, layout_text))
     return (["ffmpeg", "-hide_banner", "-nostdin", "-y", "-loglevel", "error"] +
             sum((["-i", os.fspath(path)] for path in paths), []) +
             ["-filter_complex", ";".join(filters), "-map", "[out]", "-frames:v", "1",
-             "-q:v", "2", os.fspath(output)])
+             "-pix_fmt", "rgba", os.fspath(output)])
 
 
 def make_collage(paths, cwd):
@@ -105,7 +107,7 @@ def make_collage(paths, cwd):
     if len(images) < 2:
         raise RuntimeError("select at least two readable images")
     output = output_path(cwd)
-    with tempfile.NamedTemporaryFile(prefix=".%s." % output.stem, suffix=".jpg",
+    with tempfile.NamedTemporaryFile(prefix=".%s." % output.stem, suffix=".png",
                                      dir=cwd, delete=False) as temp:
         temp_path = Path(temp.name)
     try:
