@@ -1,0 +1,10 @@
+    // The same nine-slice shadow Oxygen puts around a window. Its centre is
+    // transparent, so the screen-space surface below stays untouched.
+    KSvg.FrameSvgItem {
+        id: themedPanelShadow
+        visible: opaqueItem.visible
+        opacity: panelOpacity
+        anchors.fill: floatingTranslucentItem
+        imagePath: "widgets/panel-background"
+        prefix: "shadow"
+    }

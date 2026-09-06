@@ -83,10 +83,12 @@ let
       chmod -R u+w $out
       panel_qml=$out/contents/views/Panel.qml
       perl -0pi -e 's/(id: opaqueItem.*?opacity:) root\.panelOpacity/$1 0/s' $panel_qml
-      awk -v fragment=${./plasma-panel-gradient-files/Surface.qmlfrag} '
+      awk -v surface=${./plasma-panel-gradient-files/Surface.qmlfrag} -v shadow=${./plasma-panel-gradient-files/Shadow.qmlfrag} '
         /^    Keys.onEscapePressed: \{$/ {
-          while ((getline line < fragment) > 0) print line
-          close(fragment)
+          while ((getline line < surface) > 0) print line
+          close(surface)
+          while ((getline line < shadow) > 0) print line
+          close(shadow)
           print
           next
         }
