@@ -112,6 +112,16 @@ aside[role="complementary"] {{ background-color:transparent!important; backgroun
   background-color:var(--desk-bg)!important; background-image:var(--desk-window-surface)!important;
   background-size:100vw 100vh!important; background-position:0 0!important;
   background-repeat:no-repeat!important; background-attachment:fixed!important; }}
+/* X's photo viewer does not use tweetDetail: its white reply column is the
+   Timeline scroller beside photoViewer's canvas.  Paint that pane and its
+   immediate host, while leaving the photo/video half alone. */
+[data-testid="photoViewer"] [aria-label^="Timeline:"],
+[data-testid="photoViewer"] div:has(> [aria-label^="Timeline:"]) {{
+  background-color:var(--desk-bg)!important; background-image:var(--desk-window-surface)!important;
+  background-size:100vw 100vh!important; background-position:0 0!important;
+  background-repeat:no-repeat!important; background-attachment:fixed!important; }}
+[data-testid="photoViewer"] [aria-label^="Timeline:"] :not(img):not(svg):not(video):not(canvas):not(path) {{
+  background-color:transparent!important; border-color:transparent!important; }}
 /* Leaving media fullscreen can leave X at its wide-navigation breakpoint.
    Keep the desktop's normal icon rail; clipping the link rather than hiding
    it preserves its label for accessibility and its icon/count for the UI. */
