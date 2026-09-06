@@ -257,12 +257,16 @@ try:
         twitter_served = r.read().decode("utf-8")
     check("the courier serves Twitter/X from the live palette",
           "--desk-bg:#28222a" in twitter_served and '[data-testid="tweet"]' in twitter_served)
+    check("the HTTPS-consumed page sheet embeds its Oxygen raster",
+          "url(data:image/png;base64," in twitter_served
+          and "http://127.0.0.1:8791/oxygen-window.png" not in twitter_served)
     with urllib.request.urlopen(base + "/web.css?u=https%3A%2F%2Fx.com%2Fhome", timeout=5) as r:
         combined_twitter = r.read().decode("utf-8")
     with urllib.request.urlopen(base + "/web.css?u=https%3A%2F%2Fboards.4chan.org%2Fg%2F", timeout=5) as r:
         combined_chan = r.read().decode("utf-8")
     check("the shared installed-script route selects Twitter/X by page host",
-          '[data-testid="tweet"]' in combined_twitter and "#header-bar" not in combined_twitter)
+          '[data-testid="tweet"]' in combined_twitter and "#header-bar" not in combined_twitter
+          and "url(data:image/png;base64," in combined_twitter)
     check("the shared installed-script route retains the OneeChan sheet on 4chan",
           "#header-bar" in combined_chan and '[data-testid="tweet"]' not in combined_chan)
 
