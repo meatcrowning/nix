@@ -76,20 +76,17 @@ GLOW_SCALE = float(os.environ.get('OXYSCHEME_GLOW_SCALE', '0.35'))
 # the ramp, so a white edge highlight that reads as a soft sheen on a mid-tone
 # widget becomes a hard line against it (measured L=252 against a 237 panel).
 PANEL_GLOW_SCALE = float(os.environ.get('OXYSCHEME_PANEL_GLOW', '0.12'))
-# A PANEL is a thin slice of that same ramp, not a compressed copy of it.
-# Measured from the real Oxygen style offscreen (2026-09-05): the window
-# background starts at luma 253 and decays to the surface colour (211) only by
-# y=280, then stays flat. A ~44px panel therefore shows just the top 16% of the
-# decay and stays nearly as light as a titlebar. Ramping the full range across
-# the panel's own height instead is what made it "much dimmer" than every
-# titlebar. These are white-overlay alphas at the panel's two edges.
+# A panel is a SCREEN slice of the same ramp an empty window carries.  A north
+# panel therefore holds the bright top of that field, while east/west stretches
+# the whole field down its height.  Treating every panel as a self-contained
+# ramp made the top and left bars visibly belong to different surfaces.
 PANEL_TOP_ALPHA = float(os.environ.get('OXYSCHEME_PANEL_TOP', '0.96'))
-PANEL_BOTTOM_ALPHA = float(os.environ.get('OXYSCHEME_PANEL_BOTTOM', '0.81'))
-# ...and the ramp is split ACROSS the three bands by their heights, not restarted
-# in each. A framesvg draws top/centre/bottom as separate elements, so giving all
-# three the same 0.96->0.81 range steps by 14 luma at every seam.
-PANEL_BANDS = {'top': (0.00, 0.16), 'center': (0.16, 0.84), 'bottom': (0.84, 1.00),
-               'left': (0.16, 0.84), 'right': (0.16, 0.84)}
+PANEL_BOTTOM_ALPHA = float(os.environ.get('OXYSCHEME_PANEL_BOTTOM', '0.0'))
+# Plasma's top/bottom frame slices are fixed-size caps; the centre owns almost
+# all of a vertical panel's physical height.  Split the one screen-ramp across
+# those caps instead of restarting it at every seam.
+PANEL_BANDS = {'top': (0.00, 0.02), 'center': (0.02, 0.98), 'bottom': (0.98, 1.00),
+               'left': (0.02, 0.98), 'right': (0.02, 0.98)}
 CENTRE_AMPLITUDE = float(os.environ.get('OXYSCHEME_AMPLITUDE', '0.12'))
 # Oxygen shades with black. Plasma's accent lands on the Selection group, so
 # ColorScheme-Highlight IS the accent colour -- pointing the dark end of every
@@ -315,7 +312,7 @@ def gloss_gradient(doc, src_gid, stops):
     return doc.publish(gid, new)
 
 def respin_alpha(doc, src_gid, stops, mode, axis='v', invert=False, panel=False,
-                 band=None):
+                 band=None, panel_location=None):
     """Rebuild an alpha-ramp gradient under `flip` or `centre`."""
     src = doc.idx.get(src_gid)
     offs   = [float(o) for o, _, _ in stops]
@@ -345,6 +342,13 @@ def respin_alpha(doc, src_gid, stops, mode, axis='v', invert=False, panel=False,
         new.set('y2', '0' if axis == 'h' else '1')
         hi, lo = ((PANEL_TOP_ALPHA, PANEL_BOTTOM_ALPHA) if panel
                   else (TOP_ALPHA, 0.0))
+        if panel_location == 'north':
+            # The top bar lies at the top of the shared field: the ramp is
+            # effectively flat across its 34px thickness.
+            lo = hi
+        elif panel_location == 'south':
+            # Likewise, the bottom bar samples the field after it has faded.
+            hi = lo
         if panel and band in PANEL_BANDS:
             f0, f1 = PANEL_BANDS[band]
             span = hi - lo
@@ -491,7 +495,8 @@ def convert(src, dst, report=None):
     family = role_family(src)
     stats = dict(based_alpha=0, based_colour=0, recoloured=0, untouched_art=0,
                  skipped_chromatic=0, no_body=0, edge_shaded=0, glow_damped=0,
-                 raster_glow=0, raster_kept=0, raster_undecodable=0)
+                 raster_glow=0, raster_kept=0, raster_undecodable=0,
+                 panel_shadows_removed=0)
     parents = {c: p for p in root.iter() for c in p}
 
     def ancestry(el):
@@ -582,7 +587,7 @@ def convert(src, dst, report=None):
                     inv = gradient_screen_y_sign(body, parents, ax) < 0
                     band = eid_l.rsplit('-', 1)[-1] if '-' in eid_l else None
                     gid = respin_alpha(doc, fill[5:-1], stops, ALPHA_MODE, ax,
-                                       inv, True, band)
+                                       inv, True, band, eid_l.split('-', 1)[0])
                     base = copy.deepcopy(body); base.attrib.pop('id', None)
                     bd = style_dict(base); bd['fill'] = 'currentColor'
                     bd.pop('fill-opacity', None); set_style(base, bd)
@@ -618,7 +623,8 @@ def convert(src, dst, report=None):
                     is_panel = os.path.basename(src).startswith('panel-background')
                     band = eid_l.rsplit('-', 1)[-1] if '-' in eid_l else None
                     gid = respin_alpha(doc, fill[5:-1], stops, ALPHA_MODE, ax,
-                                       inv, is_panel, band)
+                                       inv, is_panel, band,
+                                       eid_l.split('-', 1)[0] if is_panel else None)
                     od = style_dict(body); od['fill'] = f'url(#{gid})'
                     set_style(body, od)
                 else:
@@ -668,7 +674,7 @@ def convert(src, dst, report=None):
             if is_panel_file and ALPHA_MODE == 'titlebar':
                 # give this edge its OWN band of the panel ramp, or the seam steps
                 use = respin_alpha(doc, gid, doc.stops(gid), ALPHA_MODE, ax,
-                                   inv, True, side)
+                                   inv, True, side, prefix.lower())
             else:
                 use = obb_clone(doc, gid)
                 if use is None: continue
@@ -727,6 +733,17 @@ def convert(src, dst, report=None):
                     stats['glow_damped'] += 1
 
     convert_rasters(doc, root, parents, family, stats)
+
+    if is_panel_file:
+        # Panel shadows are a separate nine-slice frame (`shadow-*`), not part
+        # of the panel body's shading.  Remove the whole frame so a panel reads
+        # as one continuous window surface, with no floating halo or drop.
+        for el in list(root.iter()):
+            if (el.get('id') or '').startswith('shadow-'):
+                parent = parents.get(el)
+                if parent is not None:
+                    parent.remove(el)
+                    stats['panel_shadows_removed'] += 1
 
     st = None
     for e in root.iter(S+'style'):
