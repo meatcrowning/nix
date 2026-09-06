@@ -64,6 +64,7 @@ let
     pname = "plasma-menubar-native-interface";
     version = "1";
     src = ./plasma-menubar-files/native;
+    dontWrapQtApps = true;
     nativeBuildInputs = [
       pkgs.cmake
       pkgs.ninja
