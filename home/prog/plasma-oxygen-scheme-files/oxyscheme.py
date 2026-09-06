@@ -58,6 +58,12 @@ ALPHA_SPREAD  = 0.05
 # and render identically under all three.
 ALPHA_MODE = os.environ.get('OXYSCHEME_ALPHA_MODE', 'flip')
 CENTRE_AMPLITUDE = float(os.environ.get('OXYSCHEME_AMPLITUDE', '0.35'))
+# Oxygen shades with black. Plasma's accent lands on the Selection group, so
+# ColorScheme-Highlight IS the accent colour -- pointing the dark end of every
+# ramp at it makes the panel's shading tint with the theme instead of going grey.
+# The light end stays white: it is a specular highlight, not a colour.
+ACCENT_ROLE = os.environ.get('OXYSCHEME_ACCENT_ROLE', 'ColorScheme-Highlight')
+ACCENT_RAMPS = os.environ.get('OXYSCHEME_ACCENT_RAMPS', '1') not in ('0', 'no', '')
 
 ROLES = [
     ("Text",             "#31363b"), ("Background",       "#eff0f1"),
@@ -134,6 +140,12 @@ class Doc:
         return self.stops(href[1:], seen+(gid,)) if href else []
     def uid(self, b):
         self.n += 1; return f"{b}-oxysch{self.n}"
+    def publish(self, gid, el):
+        """defs added during the run must join the index -- a later pass looks
+        gradients up by id, and idx is built once at construction."""
+        self.idx[gid] = el
+        self.defs.append(el)
+        return gid
 
 # ---------- role inference ----------
 def role_family(filename):
@@ -199,8 +211,8 @@ def gloss_gradient(doc, src_gid, stops):
         st = ET.SubElement(new, S+'stop')
         st.set('offset', off)
         st.set('style', f"stop-color:{col};stop-opacity:{max(0.0,min(1.0,a))*o:.4f}")
-    gid = doc.uid(src_gid); new.set('id', gid); doc.defs.append(new)
-    return gid
+    gid = doc.uid(src_gid); new.set('id', gid)
+    return doc.publish(gid, new)
 
 def respin_alpha(doc, src_gid, stops, mode):
     """Rebuild an alpha-ramp gradient under `flip` or `centre`."""
@@ -233,9 +245,36 @@ def respin_alpha(doc, src_gid, stops, mode):
     for o, c, a in pairs:
         st = ET.SubElement(new, S+'stop')
         st.set('offset', f"{o:.4f}")
-        st.set('style', f"stop-color:{c};stop-opacity:{max(0.0,min(1.0,a)):.4f}")
-    gid = doc.uid(src_gid); new.set('id', gid); doc.defs.append(new)
-    return gid
+        a = max(0.0, min(1.0, a))
+        rgb = parse_hex(c)
+        if ACCENT_RAMPS and rgb is not None and luminance(rgb) < 0.5:
+            # the dark end: let the accent supply the colour via the stylesheet
+            st.set('class', ACCENT_ROLE)
+            st.set('style', f"stop-opacity:{a:.4f}")
+        else:
+            st.set('style', f"stop-color:{c};stop-opacity:{a:.4f}")
+    gid = doc.uid(src_gid); new.set('id', gid)
+    return doc.publish(gid, new)
+
+def obb_clone(doc, gid):
+    """Re-express a gradient in objectBoundingBox units so it can be reused on a
+    sibling slice of a different size and position, keeping its axis."""
+    src = doc.idx.get(gid)
+    if src is None: return None
+    def num(k, d=0.0):
+        try: return float(src.get(k))
+        except (TypeError, ValueError): return d
+    horizontal = abs(num('x2') - num('x1')) > abs(num('y2') - num('y1', 1.0))
+    new = ET.Element(S+'linearGradient')
+    new.set('gradientUnits', 'objectBoundingBox')
+    new.set('x1', '0'); new.set('y1', '0')
+    new.set('x2', '1' if horizontal else '0')
+    new.set('y2', '0' if horizontal else '1')
+    for st in src.findall(S+'stop'):
+        c = ET.SubElement(new, S+'stop')
+        for k, v in st.attrib.items(): c.set(k, v)
+    nid = doc.uid('edge'); new.set('id', nid)
+    return doc.publish(nid, new)
 
 # ---------- raster glows ----------
 def _alpha_profile(px, w, h, n):
@@ -279,8 +318,8 @@ def _glow_gradient(doc, px, w, h, role, n=6):
         st = ET.SubElement(g, S+'stop')
         st.set('offset', f"{i/(len(prof)-1):.4f}")
         st.set('class', role); st.set('style', f"stop-opacity:{a:.4f}")
-    gid = doc.uid('glow'); g.set('id', gid); doc.defs.append(g)
-    return gid
+    gid = doc.uid('glow'); g.set('id', gid)
+    return doc.publish(gid, g)
 
 def convert_rasters(doc, root, parents, family, stats):
     for im in list(root.iter(S+'image')):
@@ -314,7 +353,7 @@ def convert(src, dst, report=None):
     doc = Doc(root)
     family = role_family(src)
     stats = dict(based_alpha=0, based_colour=0, recoloured=0, untouched_art=0,
-                 skipped_chromatic=0, no_body=0,
+                 skipped_chromatic=0, no_body=0, edge_shaded=0,
                  raster_glow=0, raster_kept=0, raster_undecodable=0)
     parents = {c: p for p in root.iter() for c in p}
 
@@ -342,13 +381,27 @@ def convert(src, dst, report=None):
             return max(alphas) >= 0.9 and alphas[-1] >= 0.5
         return parse_hex(fill) is not None and fop >= 0.9
 
+    def _achromatic_paint(el):
+        fill, _, _ = get_fill(el)
+        if not fill or fill == 'none': return False
+        if fill.startswith('url(#'):
+            cols = [parse_hex(c) for _, c, _ in doc.stops(fill[5:-1])]
+            return bool(cols) and all(c is not None and achromatic(c) for c in cols)
+        rgb = parse_hex(fill)
+        return rgb is not None and achromatic(rgb)
+
     def first_body(el):
         cands = [el] if el.tag in PAINTED else \
                 [c for c in el.iter() if c.tag in PAINTED and c is not el]
-        for c in cands:
-            if is_base_paint(c): return c
-        # nothing in here is a body: the whole slice is shading. Leave it be.
-        return None
+        base = [c for c in cands if is_base_paint(c)]
+        # Prefer an ACHROMATIC body. Oxygen parks opaque marker rects (#ffff00,
+        # #008000) as the first child of some slices; taking one as the body got
+        # it rejected as chromatic and left the real black body underneath with
+        # no scheme colour behind it -- which is why the panel's bottom-left
+        # corner stayed pure black.
+        for c in base:
+            if _achromatic_paint(c): return c
+        return base[0] if base else None
 
     # INNERMOST addressable elements: the framesvg slice / glyph level.
     # Not outermost -- Oxygen nests the whole drawing under <g id="base">, and
@@ -360,6 +413,8 @@ def convert(src, dst, report=None):
         if any(addressable(ch.get('id')) for ch in el.iter() if ch is not el):
             continue                      # has an addressable descendant
         seen.add(eid); targets.append(el)
+
+    centre_ramp = {}     # framesvg prefix -> gradient the centre ended up with
 
     for el in targets:
         body = first_body(el)
@@ -401,6 +456,11 @@ def convert(src, dst, report=None):
                     gid = respin_alpha(doc, fill[5:-1], stops, ALPHA_MODE)
                     od = style_dict(body); od['fill'] = f'url(#{gid})'
                     set_style(body, od)
+                else:
+                    gid = fill[5:-1]
+                eid = el.get('id') or ''
+                if eid.endswith('-center'):
+                    centre_ramp[eid[:-len('-center')]] = gid
                 stats['based_alpha'] += 1
             else:
                 stats['untouched_art'] += 1
@@ -419,6 +479,33 @@ def convert(src, dst, report=None):
             base.set('class', role)
             p = parents[body]; p.insert(list(p).index(body), base)
             stats['based_alpha'] += 1
+
+    # A framesvg's edge slices whose body is a flat solid read as a lighter
+    # flat block against the shaded centre -- that is the "blank space" at the
+    # panel's right end. Stock hides it by painting every slice black. Give them
+    # the centre's own ramp, re-expressed in objectBoundingBox units so it lands
+    # correctly on a slice of a different size.
+    for prefix, gid in centre_ramp.items():
+        obb = obb_clone(doc, gid)
+        if obb is None: continue
+        for side in ('left', 'right', 'top', 'bottom'):
+            el = doc.idx.get(f"{prefix}-{side}")
+            if el is None: continue
+            # the body we recoloured, found by its paint -- NOT first_body(),
+            # which no longer recognises it now that its fill is currentColor
+            cands = [el] if el.tag in PAINTED else \
+                    [c for c in el.iter() if c.tag in PAINTED and c is not el]
+            body = next((c for c in cands if get_fill(c)[0] == 'currentColor'), None)
+            if body is None:
+                continue            # already carries its own art
+            over = copy.deepcopy(body)
+            over.attrib.pop('id', None); over.attrib.pop('class', None)
+            od = style_dict(over); od['fill'] = f'url(#{obb})'
+            od.pop('fill-opacity', None); set_style(over, od)
+            p = parents.get(body)
+            if p is not None:
+                p.insert(list(p).index(body) + 1, over)
+                stats['edge_shaded'] += 1
 
     convert_rasters(doc, root, parents, family, stats)
 
