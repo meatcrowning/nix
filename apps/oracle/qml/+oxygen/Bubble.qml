@@ -1,17 +1,13 @@
 import QtQuick
 import QtQuick.Shapes
-import QtQuick.Controls as QQC
 
-// One message's frame under Oxygen. The frame itself is `+plasma/Bubble.qml`'s,
-// unchanged and for its reasons: a real `Button`'s background drawn by the
-// KStyle, with the control `enabled: false` so it takes no hover, press or
-// focus, and the message's own text above it at full colour.
+// One message's frame under Oxygen. Unlike the generic Plasma KStyle Button,
+// this is one continuous Shape: its lower outer corner becomes the speech curl
+// itself [his, 2026-09-05]. A Button plus an attached piece always exposes the
+// rectangular bottom bevel and therefore can never read as one bubble.
 //
-// WHAT THIS FACE ADDS IS THE ERROR STATE. `isError` is declared by both other
-// faces and honoured by neither in a Plasma session — a failed turn drew
-// exactly like a successful one. Oxygen has no "error button" primitive, so
-// this does the one thing that is an annotation rather than an imitation: a 1px
-// rule in the scheme's own negative foreground around the style's frame.
+// `isError` changes that same uninterrupted outline to the scheme's negative
+// foreground. There is no second error frame and no separate tail material.
 //
 // `Theme.crit` IS that colour here, and this is worth stating because it looks
 // like the wallpaper palette and is not: `kdetheme.theme_source()` swaps the
@@ -27,46 +23,41 @@ Item {
     property string face: "oxygen"
     property bool user: false
     property bool isError: false
-    // The native button retains its rectangular frame. This is the small
-    // Oxygen-only speech-bubble curl below it; Root.qml reserves its height.
+    // Root.qml reserves the curl's height below the message contents.
     readonly property real tailHeight: 9
     readonly property real tailWidth: 11
-    // Oxygen paints its button edge a few pixels inside the control's box.
-    // Bring the curl this far back over the face so the two shapes are one.
-    readonly property real tailOverlap: 5
     default property alias content: holder.data
 
-    QQC.Button {
+    Item {
         id: frame
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
         height: Math.max(0, parent.height - root.tailHeight)
-        enabled: false
-        text: ""
-        background.opacity: 1.0
-        contentItem: Item {}
     }
 
-    // Oxygen has no speech-bubble primitive. These outward curls overlap its
-    // lower edge by `tailOverlap`: replies point left and user messages point
-    // right. They must be ABOVE the native control — behind it their fill is
-    // covered by the conversation surface and reads as a detached outline.
-    // The Oxygen renderer's finished dark button face is Theme.bg here;
-    // palette.button is only its pale base role and does not match what the
-    // style actually paints. The curl must use the finished face tokens or it
-    // reads as a separate light tag under the bubble.
+    // ONE silhouette: the lower outer corner itself continues into the curl.
+    // A separate native Button plus a tail cannot do this — Oxygen paints the
+    // button's complete rectangular bevel before QML can add anything, leaving
+    // either its bottom rule or a mismatched patch across the join.
     Shape {
         anchors.fill: parent
         visible: !root.user
-        z: 1
         ShapePath {
-            strokeWidth: 0
-            fillColor: Theme.bg
-            startX: 0; startY: frame.height - root.tailOverlap
-            PathLine {
-                x: root.tailWidth
-                y: frame.height - root.tailOverlap
+            strokeWidth: 1
+            strokeColor: root.isError ? Theme.crit : Theme.border
+            fillGradient: LinearGradient {
+                x1: 0; y1: 0; x2: 0; y2: root.height
+                GradientStop { position: 0; color: Qt.lighter(Theme.bgAlt, 1.16) }
+                GradientStop { position: 1; color: Theme.bgAlt }
+            }
+            startX: 3; startY: 0
+            PathLine { x: root.width - 3; y: 0 }
+            PathQuad { x: root.width; y: 3; controlX: root.width; controlY: 0 }
+            PathLine { x: root.width; y: frame.height - 3 }
+            PathQuad {
+                x: root.width - 3; y: frame.height
+                controlX: root.width; controlY: frame.height
             }
             PathLine { x: root.tailWidth; y: frame.height }
             PathCubic {
@@ -74,76 +65,36 @@ Item {
                 control1X: 8; control1Y: frame.height + root.tailHeight - 2
                 control2X: 3; control2Y: frame.height + root.tailHeight
             }
-            PathLine { x: 0; y: frame.height - root.tailOverlap }
-        }
-        ShapePath {
-            strokeWidth: 1
-            strokeColor: root.isError ? Theme.crit : Theme.border
-            fillColor: "transparent"
-            startX: root.tailWidth; startY: frame.height
-            PathCubic {
-                x: 0; y: frame.height + root.tailHeight
-                control1X: 8; control1Y: frame.height + root.tailHeight - 2
-                control2X: 3; control2Y: frame.height + root.tailHeight
-            }
-            PathLine { x: 0; y: frame.height - root.tailOverlap }
+            PathLine { x: 0; y: 3 }
+            PathQuad { x: 3; y: 0; controlX: 0; controlY: 0 }
         }
     }
 
     Shape {
         anchors.fill: parent
         visible: root.user
-        z: 1
         ShapePath {
-            strokeWidth: 0
-            fillColor: Theme.bg
-            startX: root.width - root.tailWidth
-            startY: frame.height - root.tailOverlap
-            PathLine {
-                x: root.width
-                y: frame.height - root.tailOverlap
+            strokeWidth: 1
+            strokeColor: root.isError ? Theme.crit : Theme.accent
+            fillGradient: LinearGradient {
+                x1: 0; y1: 0; x2: 0; y2: root.height
+                GradientStop { position: 0; color: Qt.lighter(Theme.bgAlt, 1.16) }
+                GradientStop { position: 1; color: Theme.bgAlt }
             }
+            startX: 3; startY: 0
+            PathLine { x: root.width - 3; y: 0 }
+            PathQuad { x: root.width; y: 3; controlX: root.width; controlY: 0 }
             PathLine { x: root.width; y: frame.height + root.tailHeight }
             PathCubic {
                 x: root.width - root.tailWidth; y: frame.height
                 control1X: root.width - 3; control1Y: frame.height + root.tailHeight
                 control2X: root.width - 8; control2Y: frame.height + root.tailHeight - 2
             }
-            PathLine {
-                x: root.width - root.tailWidth
-                y: frame.height - root.tailOverlap
-            }
+            PathLine { x: 3; y: frame.height }
+            PathQuad { x: 0; y: frame.height - 3; controlX: 0; controlY: frame.height }
+            PathLine { x: 0; y: 3 }
+            PathQuad { x: 3; y: 0; controlX: 0; controlY: 0 }
         }
-        ShapePath {
-            strokeWidth: 1
-            strokeColor: root.isError ? Theme.crit : Theme.accent
-            fillColor: "transparent"
-            startX: root.width - root.tailWidth; startY: frame.height
-            PathCubic {
-                x: root.width; y: frame.height + root.tailHeight
-                control1X: root.width - 8
-                control1Y: frame.height + root.tailHeight - 2
-                control2X: root.width - 3
-                control2Y: frame.height + root.tailHeight
-            }
-            PathLine {
-                x: root.width
-                y: frame.height - root.tailOverlap
-            }
-        }
-    }
-
-    // Drawn only when it is true, so a normal bubble is exactly the sibling's.
-    Rectangle {
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        height: frame.height
-        visible: root.isError
-        color: "transparent"
-        border.width: 1
-        border.color: Theme.crit
-        radius: 2
     }
 
     Item {
