@@ -48,6 +48,12 @@
 let
   panel-surface-python = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
   panel-surface-renderer = pkgs.writeShellScriptBin "plasma-panel-surface-renderer" ''
+    # This runs from systemd, outside the Qt wrappers our applications use.
+    # Put Oxygen's style plugin in that process explicitly; otherwise Qt falls
+    # back to the session's generic style and only the palette happens to match.
+    export QT_PLUGIN_PATH=${pkgs.kdePackages.oxygen}/lib/qt-6/plugins:${pkgs.kdePackages.plasma-integration}/lib/qt-6/plugins''${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}
+    export XDG_DATA_DIRS=${pkgs.kdePackages.oxygen}/share:${pkgs.kdePackages.plasma-integration}/share''${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}
+    export QT_STYLE_OVERRIDE=oxygen
     exec ${panel-surface-python}/bin/python ${./plasma-panel-gradient-files/render-surface.py}
   '';
   # Plasma's FrameSvg tiles its five-pixel centre.  That works for a texture,
