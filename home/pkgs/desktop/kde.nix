@@ -20,10 +20,9 @@
     kdialog
     kate
     kdenlive
-    # The repository overlays this package so the Dynamic Konsole scheme's
-    # StyleBackground hook exposes the active KStyle window gradient behind
-    # terminal text.  Air must use this package too: Fedora's Konsole accepts
-    # the scheme file but has no implementation for that hook.
+    # The Dynamic scheme paints an opaque Oxygen window gradient beneath the
+    # terminal text. Keep Konsole managed on both hosts so that scheme and its
+    # deliberate chrome defaults do not depend on Fedora's system package.
     konsole
     qttools
     elisa
