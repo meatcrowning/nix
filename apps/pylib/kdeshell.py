@@ -506,7 +506,11 @@ def _build_background_classes():
         # Every event that can make the rendered image wrong: the geometry
         # moved, the palette or the style changed under it — or the window
         # gained or lost focus, which repaints the chrome in the OTHER colour
-        # group and used to leave this crop in the old one.
+        # group and used to leave this crop in the old one.  `Show` and the
+        # first layout pass matter for an overlay toolbar: it reparents the
+        # QQuickWidget after Root.qml loads, and its first image request can
+        # otherwise carry the pre-polish central-widget geometry while the
+        # native titlebar has already settled on the final window.
         #: …plus the two that only exist on some Qt builds: the view moving to
         #: a screen with another scale changes the DPR in the URL, and nothing
         #: else would notice (`getattr`, because naming an enum a build does
@@ -516,7 +520,8 @@ def _build_background_classes():
                        if e is not None)
 
         def eventFilter(self, obj, ev):
-            if ev.type() in (QEvent.Resize, QEvent.Move, QEvent.PaletteChange,
+            if ev.type() in (QEvent.Resize, QEvent.Move, QEvent.Show,
+                             QEvent.LayoutRequest, QEvent.PaletteChange,
                              QEvent.ApplicationPaletteChange, QEvent.StyleChange,
                              QEvent.ActivationChange, QEvent.WindowActivate,
                              QEvent.WindowDeactivate) + self._EXTRA:
