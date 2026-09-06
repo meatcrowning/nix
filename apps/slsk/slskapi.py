@@ -123,8 +123,14 @@ class SlskApi(QObject):
     transfersUpdated = Signal("QVariantList")      # flattened transfer list
     toast = Signal(str, str)                       # message, kind (ok|warn|crit|info)
 
-    def __init__(self, base=DEFAULT_HOST, key_file=DEFAULT_KEY_FILE, parent=None):
+    def __init__(self, base=None, key_file=None, parent=None):
         super().__init__(parent)
+        base = base or os.environ.get("SLSK_API_URL", DEFAULT_HOST)
+        key_file = key_file or os.environ.get("SLSK_API_KEY_FILE", DEFAULT_KEY_FILE)
+        parsed = urllib.parse.urlsplit(base)
+        if parsed.scheme not in ("http", "https") or parsed.hostname not in (
+                "127.0.0.1", "::1", "localhost"):
+            raise ValueError("slsk API endpoint must be loopback")
         self._base = base.rstrip("/")
         self._key = self._read_key(key_file)
         # connection status (read by QML)

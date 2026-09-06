@@ -75,3 +75,8 @@ watching — it is a read-only GET.
   interpreter (`W="$(readlink -f "$(command -v reader)")"; PY="$(tail -1 "$W" |
   grep -o '/nix/store/[^" ]*/bin/python3')"` + `QT_QPA_PLATFORM=offscreen`), not
   on his screen.
+
+Hermetic harnesses may set `SLSK_API_URL` and `SLSK_API_KEY_FILE` to a fake
+loopback server and scratch key. Non-loopback endpoints are rejected. Never
+point a resource fixture at the live 5030 daemon: even a mistaken transition
+must be incapable of searching, queueing, or cancelling there.
