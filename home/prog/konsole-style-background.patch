@@ -2,42 +2,40 @@ diff --git a/src/terminalDisplay/TerminalPainter.cpp b/src/terminalDisplay/Termi
 index 5d819327..ec602555 100644
 --- a/src/terminalDisplay/TerminalPainter.cpp
 +++ b/src/terminalDisplay/TerminalPainter.cpp
-@@ -30,4 +30,6 @@
+@@ -30,4 +30,7 @@
  #include <QRegion>
  #include <QString>
  #include <QTransform>
-+#include <QApplication>
-+#include <QPalette>
++#include <QDir>
++#include <QFileInfo>
++#include <QImage>
  #include <QtMath>
-@@ -620,5 +622,33 @@ void TerminalPainter::drawBackground(QPainter &painter, const QRect &rect, const QColor &backgroundColor, bool useOpacitySetting)
+@@ -620,5 +623,30 @@ void TerminalPainter::drawBackground(QPainter &painter, const QRect &rect, const QColor &backgroundColor, bool useOpacitySetting)
  void TerminalPainter::drawBackground(QPainter &painter, const QRect &rect, const QColor &backgroundColor, bool useOpacitySetting)
  {
 +    // A generated colour scheme can ask for the owning window's painted
-+    // background rather than a bitmap wallpaper. Konsole's own top-level
-+    // container is flat, so render a real, styled top-level QWidget with the
-+    // same palette and crop it to TerminalDisplay coordinates. This is the
-+    // exact Oxygen path, opaque beneath the text and continuous with chrome.
++    // background rather than its terminal colour. The shared Plasma surface
++    // is rendered by a real Oxygen-styled top-level QWidget whenever the KDE
++    // palette changes; crop that exact render to TerminalDisplay coordinates.
++    // It stays opaque, while the terminal content above it is transparent.
 +    if (m_parentDisplay->wallpaper()->path() == QStringLiteral("StyleBackground")) {
 +        QWidget *window = m_parentDisplay->window();
 +        if (window != nullptr) {
 +            const QPoint origin = m_parentDisplay->mapTo(window, QPoint());
-+            QWidget proxy;
-+            proxy.setAttribute(Qt::WA_StyledBackground, true);
-+            QPalette palette = QApplication::palette();
-+            for (int role = 0; role < QPalette::NColorRoles; ++role) {
-+                const auto colorRole = static_cast<QPalette::ColorRole>(role);
-+                const QColor color = palette.color(QPalette::Active, colorRole);
-+                palette.setColor(QPalette::Inactive, colorRole, color);
-+                palette.setColor(QPalette::Disabled, colorRole, color);
++            static QImage surface;
++            static qint64 surfaceMtime = -1;
++            const QString stateRoot = qEnvironmentVariable(
++                "XDG_STATE_HOME", QDir::homePath() + QStringLiteral("/.local/state"));
++            const QFileInfo info(stateRoot + QStringLiteral("/plasma-panel-surface.png"));
++            const qint64 mtime = info.exists() ? info.lastModified().toMSecsSinceEpoch() : -1;
++            if (mtime != surfaceMtime) {
++                surface.load(info.filePath());
++                surfaceMtime = mtime;
 +            }
-+            proxy.setPalette(palette);
-+            proxy.resize(window->size());
-+            painter.save();
-+            painter.translate(-origin);
-+            painter.setClipRect(rect.translated(origin));
-+            proxy.render(&painter, QPoint(), QRegion(proxy.rect()), QWidget::DrawWindowBackground);
-+            painter.restore();
-+            return;
++            if (!surface.isNull()) {
++                painter.drawImage(rect, surface, rect.translated(origin));
++                return;
++            }
 +        }
 +    }
      if (!m_parentDisplay->wallpaper()->isNull()
