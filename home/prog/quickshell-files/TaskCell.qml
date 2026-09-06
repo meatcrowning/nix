@@ -3,32 +3,17 @@ import QtQuick.Effects
 import Quickshell
 import Quickshell.Widgets
 
-// ONE running-program cell: app icon, focus treatment, click-to-focus /
-// click-to-unroll / click-to-minimize, right-click menu, hover tooltip.
-//
-// Extracted from Taskbar.qml so the same cell can be laid out two ways without
-// the behaviour existing twice: Taskbar.qml stacks these in a Column down the
-// classic bar, and DockHeader.qml flows them across the dock panel's top,
-// wrapping to a second row as they overflow.
+// Shared task cell for the classic taskbar and dock header: icon, state,
+// focus/unroll/minimize actions, context menu, and tooltip.
 Rectangle {
     id: cell
     required property var modelData
 
     readonly property bool focusedWin: modelData.activated
 
-    // ---- what the cell says about its window ------------------------------
-    // Four states, one ramp from the accent down to the same dim the cells have
-    // always used when idle:
-    //
-    //   focused, on screen   full accent
-    //   unfocused, on screen accent, a third of the way to dim
-    //   rolled up            accent, three quarters of the way to dim
-    //   minimized            dim
-    //
-    // Roll-up and minimize outrank focus: a rolled-up window can still hold the
-    // keyboard, and drawing it as if it were on screen is the one thing this is
-    // meant to fix. The state itself comes from WinState (the compositor knows;
-    // the Wayland toplevel list does not).
+    // State colors distinguish focused, ordinary, rolled, and minimized
+    // windows. Roll/minimize outrank focus because WinState gets those states
+    // from the compositor rather than the foreign-toplevel list.
     readonly property string winState: WinState.stateOf(modelData.appId, modelData.title)
     readonly property bool offScreen: winState !== ""
     function _mix(a, b, t) {
@@ -40,26 +25,15 @@ Rectangle {
         : winState === "rolled"    ? _mix(Theme.accent, Theme.dim, 0.75)
         : focusedWin               ? Theme.accent
                                    : _mix(Theme.accent, Theme.dim, 0.35)
-    // DesktopEntries scans lazily/asynchronously on first access, so at panel
-    // startup (windows already open) heuristicLookup can return null before the
-    // scan populates. A plain function-call binding would latch that null
-    // forever (heuristicLookup registers no dependency on the model), leaving
-    // apps whose window-class != icon-name stuck on the generic fallback. Touch
-    // .applications.values so this binding re-runs once the scan finishes and
-    // the real entry appears.
+    // Touch the values model so this binding re-evaluates after the lazy desktop
+    // entry scan completes.
     readonly property var appEntry: {
         DesktopEntries.applications.values;
         if (!modelData.appId)
             return null;
         const byClass = DesktopEntries.heuristicLookup(modelData.appId);
-        // `org.quickshell` is Quickshell's OWN entry, not one of his programs,
-        // and every Quickshell toplevel reports it: the Settings window and each
-        // file-browser window are the same class, because Quickshell has no
-        // per-window app id (and `qs` has no flag for one — checked). So for
-        // that one class the title is the only handle that distinguishes them.
-        // "settings" resolves to settings.desktop; a browser's title is a path
-        // and resolves to nothing, which correctly leaves it on the Quickshell
-        // icon rather than borrowing another program's seal.
+        // Quickshell's shared app id covers settings and file-browser windows;
+        // use the title when it resolves to a more specific desktop entry.
         if (byClass && byClass.id === "org.quickshell" && modelData.title) {
             const byTitle = DesktopEntries.heuristicLookup(modelData.title);
             if (byTitle)
@@ -69,43 +43,24 @@ Rectangle {
     }
     readonly property string iconName: appEntry && appEntry.icon
         ? appEntry.icon : (modelData.appId || "")
-    // Knocked back off-screen: the icon is most of the cell's ink and a border
-    // alone is easy to miss on a busy row.
+    // Reduce icon ink for compositor-managed rolled/minimized states.
     readonly property real iconDim: cell.winState === "minimized" ? 0.45
                                   : cell.winState === "rolled" ? 0.7 : 1
 
-    // A window on an output the user cannot see is not one of HIS windows, and
-    // the taskbar is the one place the sandbox's promise leaked: `tools/
-    // sandbox.sh` keeps an agent's test windows off his screen, but the Wayland
-    // toplevel list this cell is built from carries no monitor, so they turned
-    // up in his bar anyway. WinState joins the monitor back on (see its OUTPUTS
-    // block). Both hosts of this cell are Positioners — Taskbar's Column and
-    // DockHeader's Flow — so an invisible cell takes no slot and leaves no gap.
+    // Exclude windows on virtual outputs; Positioners then leave no slot.
     visible: !WinState.offOutput(modelData.appId, modelData.title)
 
     width: Theme.wsCell
     height: Theme.wsCell
     radius: Theme.windowRounding
-    // The filled background stays the FOCUS marker alone — it is the one thing
-    // you look for to answer "where am I typing", and folding roll/minimize into
-    // it would cost that reading. Those speak through the border colour instead.
+    // The fill remains the focus marker; roll/minimize are communicated by the
+    // border color.
     color: focusedWin && !cell.offScreen ? Theme.bgAlt : "transparent"
     border.width: focusedWin ? Theme.ctrlBorder + 1 : Theme.ctrlBorder
     border.color: cell.stateColor
 
-    // The icon is never drawn straight (AppIcon tints it to the state colour,
-    // exactly for a seal, luminance-scaled for a foreign icon whose light/dark
-    // detail is the drawing): breeze-dark ships no
-    // dark VARIANT for its colourful app/mimetype icons (breeze-dark's
-    // system-file-manager, text-x-generic … are
-    // byte-identical to breeze's), so a raw icon renders in its light-theme
-    // colours and reads as "stuck on light mode" on this dark bar. Tinting every
-    // one to the cell's state colour is docs/DESIGN.md §3.3's own rule — "the
-    // program icons should actually show the states of every window … full accent
-    // colour for unrolled and focused" — the same accent ladder the border and
-    // the fallback letter already ride, and the same move the tray makes with its
-    // own tint. It also subsumes goetia's currentColor sigil, which used to be the
-    // only icon tinted here.
+    // AppIcon applies the state tint to both bespoke seals and foreign icons;
+    // this keeps icon and border state consistent (docs/DESIGN.md §3.3).
     AppIcon {
         anchors.centerIn: parent
         width: Theme.wsCell - 12
