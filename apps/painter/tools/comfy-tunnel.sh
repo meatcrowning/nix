@@ -202,6 +202,7 @@ export AI_WARDEN_URL="http://127.0.0.1:$WPORT"
 # another painter, or to him, and pulling it out from under either is worse than
 # leaving it.
 MOUNTS=()
+MOUNT_PIDS=()
 
 mount_ro() {
     local remote="$1" here="$2"
@@ -221,6 +222,34 @@ unmount_ours() {
     done
 }
 
+# The model registry retries while SSHFS is arriving (main.py), so a mount is
+# not a reason to hold the first Painter frame hostage.  `exec` makes the
+# recorded PID the sshfs process itself, letting cleanup stop an in-flight
+# mount before unmounting the paths this launcher owns.
+mount_ro_async() {
+    local remote="$1" here="$2"
+    findmnt -rn "$here" >/dev/null 2>&1 && return 0
+    mkdir -p "$here" || return 1
+    MOUNTS+=("$here")
+    (
+        exec "$SSHFS" -o ro,follow_symlinks,reconnect,BatchMode=yes \
+             -o ServerAliveInterval=15,ServerAliveCountMax=3 \
+             "$HOST:$remote" "$here" 2>/dev/null
+    ) &
+    MOUNT_PIDS+=("$!")
+}
+
+stop_mounts() {
+    local pid
+    for pid in ${MOUNT_PIDS[@]+"${MOUNT_PIDS[@]}"}; do
+        kill "$pid" 2>/dev/null || true
+    done
+    for pid in ${MOUNT_PIDS[@]+"${MOUNT_PIDS[@]}"}; do
+        wait "$pid" 2>/dev/null || true
+    done
+    MOUNT_PIDS=()
+}
+
 # COMFY_ENSURE_BACKEND: for a NON-interactive consumer that will not start the
 # backend itself the way painter's main.py does — systheme's headless render. It
 # turns comfy-painter on before the app and, ONLY if we were the one who turned
@@ -238,13 +267,12 @@ stop_backend_ours() {
 }
 
 if [ -z "${PAINTER_NO_MODELS_MOUNT:-}" ] && [ ${#APP[@]} -gt 0 ]; then
-    # The path is known before the mount exists, so the app can be told where the
-    # models WILL be and started straight away — sshfs takes about a second, and
-    # that second was spent with no window on screen. main.py's scan retries
-    # while the list is empty, so it picks them up as soon as the mount lands.
+    # The path is known before the mount exists.  Start the mount in parallel;
+    # main.py retries its scan while it arrives instead of making the window
+    # wait through this SSHFS round trip.
     export PAINTER_MODELS="$MODELS_LOCAL"
-    if mount_ro "$MODELS_REMOTE" "$MODELS_LOCAL"; then
-        say "models from $HOST:$MODELS_REMOTE at $MODELS_LOCAL"
+    if mount_ro_async "$MODELS_REMOTE" "$MODELS_LOCAL"; then
+        say "mounting models from $HOST:$MODELS_REMOTE at $MODELS_LOCAL"
     else
         # Not fatal: the backend is what painter cannot work without, and the
         # picker being empty says so plainly. Say why, once, rather than let it
@@ -269,9 +297,9 @@ fi
 # half of the history rather than the ability to generate — so it says so on
 # stderr and does not put a notification in front of him.
 if [ -z "${PAINTER_NO_PEER_OUT:-}" ] && [ ${#APP[@]} -gt 0 ]; then
-    if mount_ro "$OUT_REMOTE" "$OUT_LOCAL"; then
-        export PAINTER_PEER_OUT="$OUT_LOCAL"
-        say "outputs from $HOST:$OUT_REMOTE at $OUT_LOCAL"
+    export PAINTER_PEER_OUT="$OUT_LOCAL"
+    if mount_ro_async "$OUT_REMOTE" "$OUT_LOCAL"; then
+        say "mounting outputs from $HOST:$OUT_REMOTE at $OUT_LOCAL"
     else
         say "could not mount $HOST:$OUT_REMOTE - the history will show book's own outputs only"
     fi
@@ -310,7 +338,7 @@ if [ ${#FWD_SPECS[@]} -eq 0 ]; then
     if [ ${#APP[@]} -gt 0 ]; then
         # Run, do not `exec`: exec replaces this shell and the EXIT trap never
         # fires, so the sshfs mount we just made would outlive the app.
-        trap 'stop_client_keeper; unmount_ours' EXIT
+        trap 'stop_client_keeper; stop_mounts; unmount_ours' EXIT
         start_client_keeper
         "${APP[@]}"
         exit $?
@@ -343,6 +371,7 @@ if [ ${#APP[@]} -gt 0 ]; then
         stop_client_keeper
         stop_backend_ours
         kill "$TUN" 2>/dev/null || true
+        stop_mounts
         unmount_ours
     }
     trap cleanup EXIT
