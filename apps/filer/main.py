@@ -1332,6 +1332,33 @@ def main():
     # it has nothing to be told about and takes no socket name.
     listener = None if spec else _start_select_listener(app, win)  # noqa: F841
 
+    fixture = None
+    if os.environ.get("FILER_RESOURCE_FIXTURE") == "1":
+        from resourcefixture import ResourceFixture
+        from PySide6.QtCore import QMetaObject, Q_ARG
+        normal_dir = os.environ["FILER_RESOURCE_NORMAL_DIR"]
+        stress_dir = os.environ["FILER_RESOURCE_STRESS_DIR"]
+
+        def _go(pane, path):
+            QMetaObject.invokeMethod(pane, "go", Q_ARG(str, path))
+
+        def normal():
+            if bool(win.property("splitOn")):
+                QMetaObject.invokeMethod(win, "toggleSplit")
+            _go(win.property("leftPane"), normal_dir)
+
+        def stress():
+            _go(win.property("leftPane"), stress_dir)
+            if not bool(win.property("splitOn")):
+                QMetaObject.invokeMethod(win, "toggleSplit")
+            right = win.property("rightPane")
+            if right is not None:
+                _go(right, stress_dir)
+
+        fixture = ResourceFixture(app, {"normal": normal, "stress": stress,
+                                        "clear": normal}, settle_ms=600,
+                                  parent=app)
+
     sys.exit(app.exec())
 
 
