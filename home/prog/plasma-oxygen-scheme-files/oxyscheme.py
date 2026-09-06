@@ -76,9 +76,9 @@ GLOW_SCALE = float(os.environ.get('OXYSCHEME_GLOW_SCALE', '0.35'))
 # the ramp, so a white edge highlight that reads as a soft sheen on a mid-tone
 # widget becomes a hard line against it (measured L=252 against a 237 panel).
 PANEL_GLOW_SCALE = float(os.environ.get('OXYSCHEME_PANEL_GLOW', '0.12'))
-# A panel is a SCREEN slice of the same ramp an empty window carries.  A north
-# panel therefore holds the bright top of that field, while east/west stretches
-# the whole field down its height.  Treating every panel as a self-contained
+# A panel carries the same light-to-base ramp as an empty window.  North/south
+# run it through their thickness like a titlebar; east/west stretch it from the
+# top to the bottom of the screen.  Treating every panel as a self-contained
 # ramp made the top and left bars visibly belong to different surfaces.
 # OxygenLightFlat's real titlebar is Background (198,209,224) → Blend
 # (223,229,237): a 0.43 white overlay, not the 0.96 body-background estimate
@@ -345,11 +345,7 @@ def respin_alpha(doc, src_gid, stops, mode, axis='v', invert=False, panel=False,
         new.set('y2', '0' if axis == 'h' else '1')
         hi, lo = ((PANEL_TOP_ALPHA, PANEL_BOTTOM_ALPHA) if panel
                   else (TOP_ALPHA, 0.0))
-        if panel_location == 'north':
-            # The top bar lies at the top of the shared field: the ramp is
-            # effectively flat across its 34px thickness.
-            lo = hi
-        elif panel_location == 'south':
+        if panel_location == 'south':
             # Likewise, the bottom bar samples the field after it has faded.
             hi = lo
         if panel and band in PANEL_BANDS:
