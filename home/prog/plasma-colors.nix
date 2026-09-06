@@ -30,7 +30,7 @@
             $DRY_RUN_CMD ${pkgs.python3}/bin/python ${../srvs/wal-files/plasma-scheme.py} \
               --template ${./plasma-files/OxygenDarkFlat.colors} \
               --name OxygenDarkNeutral --out "$live" --accent 808080 \
-              --wallpaper-background 000000 --no-apply
+              --surface-color 120f06 --no-apply
             continue
             ;;
           OxygenLightFlat) source=${./plasma-files/OxygenLightFlat.colors} ;;
