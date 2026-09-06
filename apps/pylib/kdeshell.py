@@ -440,7 +440,8 @@ def _build_background_classes():
     inside the window and a serial are all in the path, so a resize or a palette
     change produces a new URL and the old one is never served from cache.
     """
-    from PySide6.QtCore import QObject, QPoint, QRect, Property, Signal, QEvent
+    from PySide6.QtCore import (QObject, QPoint, QRect, Property, Signal,
+                               QEvent, QTimer)
     from PySide6.QtGui import QImage, QPalette, QRegion
     from PySide6.QtQuick import QQuickImageProvider
     from PySide6.QtWidgets import QApplication, QWidget
@@ -500,6 +501,9 @@ def _build_background_classes():
             self._view = view
             self._window = window
             self._serial = 0
+            self._refresh_pending = False
+            self._refresh_forced = False
+            self._last_state = None
             view.installEventFilter(self)
             window.installEventFilter(self)
 
@@ -525,10 +529,38 @@ def _build_background_classes():
                              QEvent.ApplicationPaletteChange, QEvent.StyleChange,
                              QEvent.ActivationChange, QEvent.WindowActivate,
                              QEvent.WindowDeactivate) + self._EXTRA:
-                self.refresh()
+                # One desktop scheme update produces a burst of palette,
+                # layout and resize events. Rendering the background directly
+                # from each event can feed another layout pass and monopolise
+                # the GUI thread. Collapse the burst, then repaint only if the
+                # geometry or visual state really changed.
+                self.refresh(force=False)
             return False
 
-        def refresh(self):
+        def _state(self):
+            win = self._window
+            view = self._view
+            off = view.mapTo(win, QPoint(0, 0))
+            style = QApplication.style()
+            return (win.width(), win.height(), off.x(), off.y(),
+                    view.width(), view.height(), view.devicePixelRatioF() or 1.0,
+                    _window_active(win), int(view.palette().cacheKey()),
+                    style.objectName() if style is not None else "")
+
+        def refresh(self, force=True):
+            self._refresh_forced = self._refresh_forced or force
+            if self._refresh_pending:
+                return
+            self._refresh_pending = True
+            QTimer.singleShot(0, self._flush_refresh)
+
+        def _flush_refresh(self):
+            self._refresh_pending = False
+            state = self._state()
+            forced, self._refresh_forced = self._refresh_forced, False
+            if not forced and state == self._last_state:
+                return
+            self._last_state = state
             self._serial += 1
             self.changed.emit()
 
