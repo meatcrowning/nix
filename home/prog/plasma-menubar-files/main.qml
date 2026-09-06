@@ -11,23 +11,34 @@
     This applet supplies the part Plasma has no source for, and nothing else.
     It sits immediately LEFT of the stock appmenu applet:
 
-        [kickoff]  [AppName]  [ File Edit View … ]      <- app exports a menu
-        [kickoff]  [Vivaldi]  [ Window ]                <- it does not
-        [kickoff]  [Desktop]                            <- nothing is focused
+        [kickoff] [AppName] [ File Edit View … ]      app exports a menu
+        [kickoff] [Vivaldi] [ Window ]                it does not
+        [kickoff] [Desktop] [ File Edit Go Window Help ]   nothing focused
 
     so when the real menus exist they are still the stock applet's, drawn by
     the stock DBusMenu importer, and we only add the bold app-name button macOS
-    puts to their left. The Window menu appears only when there are no real
-    menus to disagree with it.
+    puts to their left.
 
-    Labels are Title Case, against docs/DESIGN.md §7.2's lowercase rule: these
-    buttons sit inches from Dolphin's own "File Edit View", drawn by the KDE
-    style in a KDE session (§"In a PLASMA session none of this applies"), and a
-    lowercase "window" beside them would read as a bug, not as a house style.
+    The desktop state follows Finder's own bar — Finder, File, Edit, View, Go,
+    Window, Help — [his, 2026-09-05] *"desktop one should have the same entires
+    and options as the mac os one"*. Two departures, both forced:
 
-    Every entry does something real — no placeholder that silently fails
-    (§10.3). That is why there is no About, no Preferences and no wallpaper
-    item: nothing on this machine can be asked for those generically.
+      - VIEW is absent. Every item in Finder's View menu addresses a Finder
+        window's chrome or a desktop icon arrangement, and the Plasma desktop
+        containment exposes neither on D-Bus — its sort order, icon size and
+        toolbox live in the containment's own config, reachable only from its
+        right-click menu. A View menu here would be items that do nothing.
+      - Items that are macOS services with no counterpart on this machine
+        (AirDrop, iCloud Drive, Recents, Dictation, Services) are dropped
+        rather than shown greyed for ever.
+
+    Every remaining entry does something real — no placeholder that silently
+    fails (docs/DESIGN.md §10.3).
+
+    Labels are Title Case, against §7.2's lowercase rule: these buttons sit
+    inches from Dolphin's own "File Edit View", drawn by the KDE style in a KDE
+    session (§"In a PLASMA session none of this applies"), and a lowercase
+    "window" beside them would read as a bug, not as a house style.
 */
 
 import QtQml
@@ -55,15 +66,14 @@ PlasmoidItem {
     property QtObject shown: null
 
     readonly property bool onDesktop: shown === null
-    readonly property string appLabel: onDesktop ? "Desktop" : shown.appName
     // Non-empty means the stock applet is about to draw this window's real
-    // menus to our right, so we must not draw a Window menu beside them.
+    // menus to our right, so we must not draw menus of our own beside them.
     readonly property bool appExportsMenu: !onDesktop && shown.menuService.length > 0
 
     // Opening one of our menus takes keyboard focus off his window, which
     // makes KWin drop the active task — without this the bar would flip to
-    // "Desktop" the moment you clicked it. Upstream guards the same way on
-    // the containment's own input status; ours has to cover the popup too.
+    // "Desktop" the moment you clicked it. Upstream guards the same way on the
+    // containment's own input status; ours has to cover the popup too.
     readonly property bool panelHasFocus: popup.visible
         || Plasmoid.containment.status === PlasmaCore.Types.AcceptingInputStatus
 
@@ -100,6 +110,7 @@ PlasmoidItem {
             readonly property bool isWindow: model.IsWindow === true
             readonly property string appName: model.AppName || model.display || "Window"
             readonly property string appId: model.AppId || ""
+            readonly property string title: model.display || model.AppName || "Window"
             readonly property string menuService: model.ApplicationMenuServiceName || ""
             readonly property bool minimized: model.IsMinimized === true
             readonly property bool maximized: model.IsMaximized === true
@@ -135,9 +146,25 @@ PlasmoidItem {
         }
     }
 
+    function shellQuote(s) {
+        return "'" + String(s).replace(/'/g, "'\\''") + "'";
+    }
+
+    // xdg-open for real paths, so it obeys whatever this session's default
+    // file manager is (in Plasma that is Dolphin — home/prog/mime-defaults.nix).
+    function openPath(path) {
+        runner.run("xdg-open " + shellQuote(path));
+    }
+
+    // KIO-only addresses (applications:/, remote:/) are not something xdg-open
+    // can hand to a non-KDE handler, so they go straight to Dolphin.
+    function openKio(url) {
+        runner.run("dolphin " + shellQuote(url));
+    }
+
     function shortcut(name) {
-        runner.run('qdbus org.kde.kglobalaccel /component/kwin '
-                   + 'org.kde.kglobalaccel.Component.invokeShortcut "' + name + '"');
+        runner.run("qdbus org.kde.kglobalaccel /component/kwin "
+                   + "org.kde.kglobalaccel.Component.invokeShortcut " + shellQuote(name));
     }
 
     function activeIndex() {
@@ -145,7 +172,7 @@ PlasmoidItem {
     }
 
     // Every window of the shown app, as indices that survive the list moving
-    // under us while we close them one at a time.
+    // under us while we act on them one at a time.
     function siblingIndices() {
         const out = [];
         if (root.onDesktop) {
@@ -165,97 +192,215 @@ PlasmoidItem {
         return out;
     }
 
+    // The window list Finder's Window menu ends with. `sameAppOnly` narrows it
+    // to the app we are naming, which is what macOS shows.
+    function windowEntries(sameAppOnly) {
+        const out = [];
+        const id = root.onDesktop ? "" : root.shown.appId;
+        const name = root.onDesktop ? "" : root.shown.appName;
+        for (let i = 0; i < taskWatcher.count; ++i) {
+            const t = taskWatcher.objectAt(i);
+            if (!t || !t.isWindow) {
+                continue;
+            }
+            if (sameAppOnly && !(id.length > 0 ? t.appId === id : t.appName === name)) {
+                continue;
+            }
+            const idx = tasksModel.makePersistentModelIndex(t.row);
+            out.push({
+                label: t.title,
+                checked: t.isActive,
+                trigger: () => tasksModel.requestActivate(idx),
+            });
+        }
+        return out;
+    }
+
     // ---- the menus ------------------------------------------------------
     // Entry shape is docs/DESIGN.md §7.2's: {label, enabled?, separator?,
-    // checked?, trigger?}. Destructive last, behind a separator.
+    // checked?, trigger?}. Destructive last, behind a separator. Menus are
+    // built at open time, so a menu can never show stale window state.
 
-    function appEntries() {
-        if (root.onDesktop) {
-            return [
-                { label: "Show Desktop", trigger: () => root.shortcut("Show Desktop") },
-                { label: "Overview", trigger: () => root.shortcut("Overview") },
-                { separator: true },
-                { label: "Display Settings…", trigger: () => runner.run("kcmshell6 kcm_kscreen") },
-                { label: "System Settings…", trigger: () => runner.run("systemsettings") },
-            ];
+    function desktopMenus() {
+        const menus = [
+            {
+                title: "Desktop",
+                bold: true,
+                build: () => [
+                    { label: "About This System", trigger: () => runner.run("kinfocenter") },
+                    { separator: true },
+                    { label: "Settings…", trigger: () => runner.run("systemsettings") },
+                    { label: "Display Settings…", trigger: () => runner.run("kcmshell6 kcm_kscreen") },
+                    { separator: true },
+                    { label: "Hide Others", trigger: () => root.shortcut("Show Desktop") },
+                    { label: "Show All", trigger: () => root.shortcut("Overview") },
+                    { separator: true },
+                    {
+                        label: "Empty Trash…",
+                        trigger: () => runner.run(
+                            "kdialog --warningcontinuecancel "
+                            + "'Are you sure you want to permanently erase the items in the Trash?' "
+                            + "--continue-label 'Empty Trash' && ktrash6 --empty"),
+                    },
+                ],
+            },
+            {
+                title: "File",
+                build: () => [
+                    { label: "New Window", trigger: () => root.openPath("~/") },
+                    { label: "Open Trash", trigger: () => root.openKio("trash:/") },
+                    { separator: true },
+                    { label: "Find…", trigger: () => runner.run("krunner") },
+                ],
+            },
+            {
+                title: "Edit",
+                build: () => [
+                    {
+                        label: "Show Clipboard",
+                        trigger: () => runner.run("qdbus org.kde.klipper /klipper "
+                                                  + "org.kde.klipper.klipper.showKlipperPopupMenu"),
+                    },
+                ],
+            },
+            {
+                title: "Go",
+                build: () => [
+                    { label: "Documents", trigger: () => root.openPath("~/Documents") },
+                    { label: "Desktop", trigger: () => root.openPath("~/Desktop") },
+                    { label: "Downloads", trigger: () => root.openPath("~/Downloads") },
+                    { label: "Home", trigger: () => root.openPath("~/") },
+                    { label: "Computer", trigger: () => root.openPath("/") },
+                    { label: "Network", trigger: () => root.openKio("remote:/") },
+                    { label: "Applications", trigger: () => root.openKio("applications:/") },
+                    { separator: true },
+                    {
+                        label: "Go to Folder…",
+                        trigger: () => runner.run(
+                            "d=$(kdialog --getexistingdirectory \"$HOME\") && xdg-open \"$d\""),
+                    },
+                    { label: "Connect to Server…", trigger: () => root.openKio("remote:/") },
+                ],
+            },
+        ];
+
+        const windows = root.windowEntries(false);
+        if (windows.length > 0) {
+            menus.push({ title: "Window", build: () => root.windowEntries(false) });
         }
+        menus.push({
+            title: "Help",
+            build: () => [{ label: "KDE Help", trigger: () => runner.run("khelpcenter") }],
+        });
+        return menus;
+    }
+
+    function appMenus() {
         const name = root.shown.appName;
-        return [
-            {
-                label: "Hide " + name,
-                enabled: root.shown.minimizable,
-                trigger: () => {
-                    for (const i of root.siblingIndices()) {
-                        tasksModel.requestToggleMinimized(i);
-                    }
+        const menus = [{
+            title: name,
+            bold: true,
+            build: () => [
+                {
+                    label: "Hide " + name,
+                    enabled: root.shown.minimizable,
+                    trigger: () => {
+                        for (const i of root.siblingIndices()) {
+                            tasksModel.requestToggleMinimized(i);
+                        }
+                    },
                 },
-            },
-            { separator: true },
-            {
-                label: "Quit " + name,
-                enabled: root.shown.closable,
-                trigger: () => {
-                    for (const i of root.siblingIndices()) {
-                        tasksModel.requestClose(i);
-                    }
+                { separator: true },
+                {
+                    label: "Quit " + name,
+                    enabled: root.shown.closable,
+                    trigger: () => {
+                        for (const i of root.siblingIndices()) {
+                            tasksModel.requestClose(i);
+                        }
+                    },
                 },
+            ],
+        }];
+
+        // The app draws its own File/Edit/… through the stock applet to our
+        // right; a Window menu of ours would land on the wrong side of them.
+        if (root.appExportsMenu) {
+            return menus;
+        }
+
+        menus.push({
+            title: "Window",
+            build: () => {
+                const out = [
+                    {
+                        label: root.shown.minimized ? "Restore" : "Minimize",
+                        enabled: root.shown.minimizable,
+                        trigger: () => tasksModel.requestToggleMinimized(root.activeIndex()),
+                    },
+                    {
+                        label: "Zoom",
+                        enabled: root.shown.maximizable,
+                        trigger: () => tasksModel.requestToggleMaximized(root.activeIndex()),
+                    },
+                    {
+                        label: root.shown.fullScreen ? "Exit Full Screen" : "Enter Full Screen",
+                        enabled: root.shown.fullScreenable,
+                        trigger: () => tasksModel.requestToggleFullScreen(root.activeIndex()),
+                    },
+                    {
+                        label: "Keep Above",
+                        checked: root.shown.keptAbove,
+                        trigger: () => tasksModel.requestToggleKeepAbove(root.activeIndex()),
+                    },
+                ];
+                const windows = root.windowEntries(true);
+                if (windows.length > 1) {
+                    out.push({ separator: true });
+                    for (const w of windows) {
+                        out.push(w);
+                    }
+                }
+                out.push({ separator: true });
+                out.push({
+                    label: "Close Window",
+                    enabled: root.shown.closable,
+                    trigger: () => tasksModel.requestClose(root.activeIndex()),
+                });
+                return out;
             },
-        ];
+        });
+        return menus;
     }
 
-    function windowEntries() {
-        if (root.onDesktop) {
-            return [];
-        }
-        return [
-            {
-                label: root.shown.minimized ? "Restore" : "Minimize",
-                enabled: root.shown.minimizable,
-                trigger: () => tasksModel.requestToggleMinimized(root.activeIndex()),
-            },
-            {
-                label: "Zoom",
-                enabled: root.shown.maximizable,
-                trigger: () => tasksModel.requestToggleMaximized(root.activeIndex()),
-            },
-            {
-                label: root.shown.fullScreen ? "Exit Full Screen" : "Enter Full Screen",
-                enabled: root.shown.fullScreenable,
-                trigger: () => tasksModel.requestToggleFullScreen(root.activeIndex()),
-            },
-            {
-                label: "Keep Above",
-                checked: root.shown.keptAbove,
-                trigger: () => tasksModel.requestToggleKeepAbove(root.activeIndex()),
-            },
-            { separator: true },
-            {
-                label: "Close Window",
-                enabled: root.shown.closable,
-                trigger: () => tasksModel.requestClose(root.activeIndex()),
-            },
-        ];
-    }
+    readonly property var barMenus: onDesktop ? desktopMenus() : appMenus()
 
     // ---- the bar --------------------------------------------------------
 
     component BarButton: PlasmaComponents3.ToolButton {
-        property var entries: []
+        property var menu: null
 
         readonly property bool isOpen: popup.visible && popup.owner === this
 
         Layout.fillWidth: root.vertical
         Layout.fillHeight: !root.vertical
+        text: menu ? menu.title : ""
+        font.bold: menu ? menu.bold === true : false
         down: isOpen
+
+        function openMine() {
+            popup.openFor(this, menu.build());
+        }
+
         onClicked: {
             if (isOpen || popup.justClosed()) {
                 popup.close();
             } else {
-                popup.openFor(this, entries);
+                openMine();
             }
         }
         // macOS slides from menu to menu once one is open; so do we.
-        onHoveredChanged: if (hovered && popup.visible && !isOpen) popup.openFor(this, entries)
+        onHoveredChanged: if (hovered && popup.visible && !isOpen) openMine()
     }
 
     fullRepresentation: GridLayout {
@@ -266,23 +411,19 @@ PlasmoidItem {
         rowSpacing: 0
         columnSpacing: 0
 
-        BarButton {
-            text: root.appLabel
-            font.bold: true
-            entries: root.appEntries()
-        }
-
-        BarButton {
-            text: "Window"
-            visible: !root.onDesktop && !root.appExportsMenu
-            entries: root.windowEntries()
+        Repeater {
+            model: root.barMenus
+            delegate: BarButton { menu: modelData }
         }
     }
 
     // ---- the popup ------------------------------------------------------
     // A PlasmaCore.Dialog rather than a QtQuick Menu: this is a panel applet,
     // and only a real popup window is guaranteed not to be clipped to the
-    // panel it drops out of.
+    // panel it drops out of. Do NOT set `flags` on it — Qt.Popup turns this
+    // into an xdg_popup parented to the panel's layer surface, which is what
+    // made the first version's menus never appear at all (2026-09-05). The
+    // `type` alone is what tells KWin what this window is.
 
     PlasmaCore.Dialog {
         id: popup
@@ -300,7 +441,6 @@ PlasmoidItem {
         onVisibleChanged: if (!visible) closedAt = Date.now()
 
         type: PlasmaCore.Dialog.PopupMenu
-        flags: Qt.Popup | Qt.FramelessWindowHint
         hideOnWindowDeactivate: true
         location: Plasmoid.location
         visible: false
@@ -332,11 +472,14 @@ PlasmoidItem {
                     Layout.fillWidth: true
                     Layout.minimumWidth: Kirigami.Units.gridUnit * 8
                     implicitWidth: isSeparator ? 0 : item.implicitWidth
-                    implicitHeight: isSeparator ? sep.implicitHeight : item.implicitHeight
+                    implicitHeight: isSeparator ? Kirigami.Units.smallSpacing * 3
+                                                : item.implicitHeight
 
-                    PlasmaComponents3.MenuSeparator {
-                        id: sep
+                    Rectangle {
                         visible: row.isSeparator
+                        height: 1
+                        color: Kirigami.Theme.textColor
+                        opacity: 0.2
                         anchors {
                             left: parent.left
                             right: parent.right

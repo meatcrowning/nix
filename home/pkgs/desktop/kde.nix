@@ -13,6 +13,11 @@
   ] ++ (with kdePackages; [
     kdeconnect-kde
     kcolorchooser
+    # The menu bar's Finder-shaped desktop menus need a dialog for the two
+    # entries that ask something before acting: "Empty Trash…" (a confirm it
+    # would otherwise not have, for an irreversible one-click action) and
+    # "Go to Folder…" (a directory picker). home/prog/plasma-menubar.nix.
+    kdialog
     kate
     kdenlive
     qttools
