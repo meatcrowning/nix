@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 APP = Path(__file__).resolve().parent.parent / "main.py"
@@ -109,11 +110,51 @@ def child_env(case):
     # would be a password prompt he did not ask for.
     env.pop("WAYLAND_DISPLAY", None)
     env.pop("DISPLAY", None)
+    # book's system PySide6 must not load Qt plugins exported by a Nix-launched
+    # terminal. Those are a different Qt build and abort before offscreen is
+    # created. top re-execs under the packaged interpreter and keeps its paths.
+    if Path(sys.executable).resolve() == Path("/usr/bin/python3").resolve():
+        for key in ("QT_PLUGIN_PATH", "QML2_IMPORT_PATH", "QML_IMPORT_PATH"):
+            env.pop(key, None)
+        env["QT_QPA_PLATFORMTHEME"] = ""
+        env["QT_STYLE_OVERRIDE"] = ""
     if case == "broken":
         # Make `import PySide6` fail the way a broken Fedora python3-pyside6
         # would, and assert the exit code the wrapper's fallback keys off.
         env["PYTHONPATH"] = NOPYSIDE
     return env
+
+
+def run_sampled_case(case):
+    """Run one synthetic dialog and sample only that short-lived child.
+
+    The accept child still receives the fixed, non-secret test phrase used by
+    the contract suite. Nothing invokes sudo and nothing reaches a display.
+    """
+    started = time.monotonic()
+    proc = subprocess.Popen([sys.executable, __file__, "--case", case],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            env=child_env(case))
+    peak_rss = peak_pss = 0
+    rollup = Path(f"/proc/{proc.pid}/smaps_rollup")
+    while proc.poll() is None:
+        try:
+            values = {}
+            for line in rollup.read_text().splitlines():
+                if line.startswith(("Rss:", "Pss:")):
+                    key, value, _unit = line.split()
+                    values[key.rstrip(":")] = int(value)
+            peak_rss = max(peak_rss, values.get("Rss", 0))
+            peak_pss = max(peak_pss, values.get("Pss", 0))
+        except (OSError, ValueError):
+            pass
+        time.sleep(0.002)
+    stdout, stderr = proc.communicate()
+    return proc, stdout, stderr, {
+        "elapsed_ms": (time.monotonic() - started) * 1000,
+        "peak_rss_kib": peak_rss,
+        "peak_pss_kib": peak_pss,
+    }
 
 
 def main():
@@ -141,17 +182,32 @@ def main():
             fails.append(name)
 
     # --- accept ---
-    p = subprocess.run([sys.executable, __file__, "--case", "accept"],
-                       capture_output=True, env=child_env("accept"))
-    check("accept: exit 0", p.returncode == 0, f"rc={p.returncode} err={p.stderr[-300:]!r}")
+    resource = "--resource" in sys.argv
+    if resource:
+        p, pout, perr, accept_sample = run_sampled_case("accept")
+    else:
+        p = subprocess.run([sys.executable, __file__, "--case", "accept"],
+                           capture_output=True, env=child_env("accept"))
+        pout, perr = p.stdout, p.stderr
+    check("accept: exit 0", p.returncode == 0, f"rc={p.returncode} err={perr[-300:]!r}")
     check("accept: stdout is exactly the password",
-          p.stdout == (SECRET + "\n").encode(), f"stdout={p.stdout!r}")
+          pout == (SECRET + "\n").encode(), f"stdout={pout!r}")
 
     # --- cancel ---
-    p = subprocess.run([sys.executable, __file__, "--case", "cancel"],
-                       capture_output=True, env=child_env("cancel"))
+    if resource:
+        p, pout, perr, cancel_sample = run_sampled_case("cancel")
+    else:
+        p = subprocess.run([sys.executable, __file__, "--case", "cancel"],
+                           capture_output=True, env=child_env("cancel"))
+        pout = p.stdout
     check("cancel: exit 1", p.returncode == 1, f"rc={p.returncode}")
-    check("cancel: stdout empty", p.stdout == b"", f"stdout={p.stdout!r}")
+    check("cancel: stdout empty", pout == b"", f"stdout={pout!r}")
+
+    if resource:
+        for case, sample in (("accept", accept_sample), ("cancel", cancel_sample)):
+            print("RESOURCE %s elapsed_ms=%.1f peak_pss_kib=%d peak_rss_kib=%d" %
+                  (case, sample["elapsed_ms"], sample["peak_pss_kib"],
+                   sample["peak_rss_kib"]))
 
     # --- broken (no PySide6) -> exit 3 so the wrapper falls back ---
     p = subprocess.run([sys.executable, str(APP), "prompt:"],

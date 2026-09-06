@@ -181,6 +181,10 @@ can do is leave the bar undimmed.
 python3 apps/askpass/tools/askpass-selftest.py   # the three contracts, headless
 ```
 
+Add `--resource` to sample peak PSS/RSS and accept/cancel latency around the
+same synthetic offscreen children. It never invokes sudo, and the accept case
+uses only the fixed test phrase already asserted by the contract suite.
+
 It runs the real `main.py` under `QT_QPA_PLATFORM=offscreen`, drives the QML
 from Python and asserts: accept → exit 0 with stdout *exactly* the password;
 cancel → exit 1 with stdout empty; `PySide6` unimportable → exit 3 with stdout
