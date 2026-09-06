@@ -81,6 +81,9 @@ for pair in \
     actual="$(kreadconfig6 --file kdeglobals --group "$1" --key "$2" 2>/dev/null || true)"
     [ -n "$expected" ] && [ "$actual" = "$expected" ] || { in_sync=0; break; }
 done
+ui_accent_rgb="$((16#${ui_accent:0:2})),$((16#${ui_accent:2:2})),$((16#${ui_accent:4:2}))"
+[ "$(kreadconfig6 --file kdeglobals --group General --key AccentColor 2>/dev/null || true)" = "$ui_accent_rgb" ] \
+    || in_sync=0
 [ "$in_sync" = 1 ] && exit 0
 
 # The generator owns the wallpaper-specific dark surface ladder. Carry the
