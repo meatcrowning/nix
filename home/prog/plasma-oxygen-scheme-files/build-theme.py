@@ -46,6 +46,14 @@ def main(src, out):
         for k, v in stats.items():
             totals[k] = totals.get(k, 0) + v
 
+    # IconTasks asks its theme for a state frame.  Oxygen's stock tasks asset
+    # deliberately reduces inactive entries to an almost invisible underline;
+    # use the real Oxygen button frames instead, so every task is a tactile
+    # button and the focused task receives the style's focus treatment.
+    shutil.copyfile(os.path.join(src, "widgets/button.svgz"),
+                    os.path.join(out, "widgets/tasks.svgz"))
+    os.chmod(os.path.join(out, "widgets/tasks.svgz"), 0o644)
+
     # plasmarc carries the theme's blur/compositing hints -- keep it.
     for extra in ("plasmarc",):
         p = os.path.join(src, extra)
