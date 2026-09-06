@@ -270,31 +270,8 @@ def desktop_css(pal, style=DEFAULT_STYLE) -> str:
     return "".join(css)
 
 
-# ---- the page wash -----------------------------------------------------------
-def page_tint_css(pal) -> str:
-    """A live, click-through wash over a foreign page.
-
-    A browser page is not ours to re-layout or re-colour selector by selector.
-    The overlay keeps its images, controls and typography intact while carrying
-    the current desktop accent over the complete page.  It deliberately belongs
-    to the Tampermonkey page sheet, never Vivaldi's own ``custom.css``.
-    """
-    # ``color`` keeps a light page's value ladder while replacing its hue.  It
-    # cannot change a black pixel, though, so a second low-alpha ``screen``
-    # layer gives the same live accent a visible presence on dark pages.
-    return (
-        "html::before{content:\"\"!important;position:fixed!important;inset:0!important;"
-        "z-index:2147483646!important;pointer-events:none!important;"
-        "background-color:%s!important;mix-blend-mode:color!important;opacity:.18!important}"
-        "html::after{content:\"\"!important;position:fixed!important;inset:0!important;"
-        "z-index:2147483645!important;pointer-events:none!important;"
-        "background-color:%s!important;mix-blend-mode:screen!important;opacity:.10!important}"
-        % (pal("accent"), pal("accent"))
-    )
-
-
 # ---- what a caller asks for -------------------------------------------------
-def build(source=None, style=None, page=False):
+def build(source=None, style=None):
     """(css, provenance) for the requested session face.
 
     `source` forces `plasma` | `hypr` instead of reading the live session;
@@ -316,26 +293,18 @@ def build(source=None, style=None, page=False):
                         metrics = oxygenstyle.metrics()
                 except Exception:                      # noqa: BLE001 - kcfg defaults
                     metrics = None
-                css = oxygen_css(pal.__getitem__, metrics, kde_button())
-                if page:
-                    css += page_tint_css(pal.__getitem__)
-                return (css, "Oxygen's own bar (%s, %dpx)"
+                return (oxygen_css(pal.__getitem__, metrics, kde_button()),
+                        "Oxygen's own bar (%s, %dpx)"
                         % (chrome["style"], (metrics or _OXY_FALLBACK)["scrollWidth"]))
             pick = style or scrollbar_style()
-            css = desktop_css(pal.__getitem__, pick)
-            if page:
-                css += page_tint_css(pal.__getitem__)
-            return (css,
+            return (desktop_css(pal.__getitem__, pick),
                     "the desktop's %s bar, KDE colour scheme" % pick)
     pal = chansource.panel_palette()
     if not pal:
         raise SystemExit("no palette: neither a readable kdeglobals nor %s"
                          % chansource.PANEL_THEME)
     pick = style or scrollbar_style()
-    css = desktop_css(pal.__getitem__, pick)
-    if page:
-        css += page_tint_css(pal.__getitem__)
-    return (css,
+    return (desktop_css(pal.__getitem__, pick),
             "the desktop's %s bar, wallpaper palette" % pick)
 
 
