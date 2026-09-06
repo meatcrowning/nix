@@ -2040,15 +2040,19 @@ GET_TOOLS_TOOL = {
         "description": (
             "Attach one or more of the tools listed in 'Other tools' so you can "
             "call them, and get their full argument schemas back. Pass names "
-            "(comma-separated) or a group. Do this the moment a job needs one; "
+            "as a list or comma-separated text, or pass a group. Do this the "
+            "moment a job needs one; "
             "it costs one step and nothing else."),
         "parameters": {
             "type": "object",
             "properties": {
-                "names": {"type": "string",
-                          "description": ("Tool names or groups, comma-separated "
-                                          "— e.g. 'lastfm, music_library' or "
-                                          "'images'.")}},
+                "names": {
+                    "description": ("Tool names or groups — e.g. "
+                                    "['lastfm', 'music_library'] or 'images'."),
+                    "oneOf": [
+                        {"type": "string"},
+                        {"type": "array", "items": {"type": "string"},
+                         "minItems": 1}] }},
             "required": ["names"]}}}
 GET_TOOLS_TOOL_NAMES = {"get_tools"}
 
@@ -2779,6 +2783,8 @@ TOOL_ONCE_NAMES = {
 #: dismissed as a hallucination) before it says it does not know something —
 #: especially personal facts like his name or his preferences.
 RECALL_GUIDANCE = (
+    "Answer from the current conversation whenever it already contains the "
+    "fact; do not call memory or session tools to rediscover visible context. "
     "You are talking with the same person across many separate conversations, "
     "and you can read your earlier ones: call list_sessions to see your past "
     "conversations with him and read_session to read any of them in full. "
@@ -6126,8 +6132,12 @@ class Ollama(QObject):
         everything it attached, so the model can call correctly in the very
         next round rather than guessing argument names — that is the half of
         this that makes one extra step enough."""
-        raw = str(args.get("names", "") or args.get("name", "") or "")
-        parts = [p.strip() for p in re.split(r"[,\s]+", raw) if p.strip()]
+        raw = args.get("names", "") or args.get("name", "") or ""
+        if isinstance(raw, list):
+            parts = [str(p).strip() for p in raw if str(p).strip()]
+        else:
+            parts = [p.strip() for p in re.split(r"[,\s]+", str(raw))
+                     if p.strip()]
         reg = self._main_registry()
         wanted, unknown = [], []
         for p in parts:
