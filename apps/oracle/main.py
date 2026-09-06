@@ -87,6 +87,7 @@ import genshort  # noqa: E402  (his generation shorthand -> make_image/make_vide
 import boorutags  # noqa: E402  (pylib; the Danbooru vocabulary anima was captioned with)
 import fleet  # noqa: E402  (chatter's own; the subagent/jobs pane and its target helper)
 from sessions import Sessions  # noqa: E402  (named transcript/store Qt seam)
+from turnmetrics import TurnMetrics  # noqa: E402  (content-free turn timings)
 
 #: The local ollama daemon. Loopback-pinned like everything else that speaks to
 #: a local backend here — never a new listener (root AGENTS.md → the tailnet).
@@ -4503,6 +4504,7 @@ class Ollama(QObject):
         self._resp_t0 = 0.0      # monotonic start of the reply's content stream
         self._resp_tokens = 0    # content frames seen this reply (≈ tokens)
         self._ctx_used = 0       # tokens the context held at the last turn (prompt+gen)
+        self._metrics = TurnMetrics(SELFTEST)
 
     # ---- model list ----
 
@@ -5243,6 +5245,10 @@ class Ollama(QObject):
         self.refreshModelInfo(model)   # keep the context stat matched to the turn
         self._set_busy(True)
         self.replyStarted.emit()
+        self._metrics.begin(model=model, kind="send", num_ctx=self._num_ctx,
+                            warm=model in self._loaded_ctx,
+                            history_messages=len(hist), input_chars=len(prompt),
+                            attachments=len(items))
 
         # ASK FOR THE MEMORY FIRST. Loading a 24 GiB model beside a ComfyUI
         # render is not a slow turn, it is a frozen desktop — so the warden
@@ -5252,6 +5258,7 @@ class Ollama(QObject):
         def _go(ok, reason):
             if not ok:
                 self._set_busy(False)
+                self._metrics.finish("error", "warden refused")
                 self.replyError.emit(reason)
                 return
             self._post_chat()
@@ -5398,10 +5405,16 @@ class Ollama(QObject):
         self.refreshModelInfo(model)
         self._set_busy(True)
         self.replyStarted.emit()
+        self._metrics.begin(model=model, kind="continue:" + str(mode),
+                            num_ctx=self._num_ctx,
+                            warm=model in self._loaded_ctx,
+                            history_messages=len(hist),
+                            input_chars=len(partial), attachments=0)
 
         def _go(ok, reason):
             if not ok:
                 self._set_busy(False)
+                self._metrics.finish("error", "warden refused")
                 self.replyError.emit(reason)
                 return
             self._post_chat()
@@ -6412,6 +6425,7 @@ class Ollama(QObject):
         # the answer. Offering them again is what produced an EMPTY reply.
         if self._no_tools:
             body = json.dumps(payload).encode("utf-8")
+            self._metrics.request(len(body))
             return self._send_chat(body)
         # ALL tools are offered on EVERY turn (his call — no per-tool toggle):
         # the file tools and web_search alike. A model with no tool support will
@@ -6420,6 +6434,7 @@ class Ollama(QObject):
         # model.
         payload["tools"] = self._offered_tools()
         body = json.dumps(payload).encode("utf-8")
+        self._metrics.request(len(body))
         self._send_chat(body)
 
     def _send_chat(self, body):
@@ -6444,6 +6459,7 @@ class Ollama(QObject):
         # Drops the whole turn: a pending tool fetch checks `busy` and bails, so
         # a search still in flight never re-posts to a cancelled turn.
         self._flush_stream()
+        self._metrics.finish("cancelled")
         self._set_busy(False)
         self._stop_generating()
         if self._reply is not None:
@@ -6521,6 +6537,7 @@ class Ollama(QObject):
             except ValueError:
                 continue
             if obj.get("error"):
+                self._metrics.note_server_error()
                 self.replyError.emit(str(obj["error"]))
                 continue
             msg = obj.get("message") or {}
@@ -6559,11 +6576,14 @@ class Ollama(QObject):
             # Tool calls arrive assembled by ollama (not partial deltas); a turn
             # may carry several. Accumulate them for the round.
             calls = msg.get("tool_calls")
+            if think or piece or calls:
+                self._metrics.first_output()
             if calls:
                 self._tool_calls.extend(calls)
             # The final frame carries ollama's own token accounting — the exact
             # generation rate, which replaces the running estimate.
             if obj.get("done"):
+                self._metrics.server_done(obj)
                 self._done_reason = str(obj.get("done_reason") or "")
                 ec = obj.get("eval_count")
                 ed = obj.get("eval_duration")     # nanoseconds
@@ -6667,6 +6687,7 @@ class Ollama(QObject):
             return                      # cancel() already cleared busy
         if err != QNetworkReply.NetworkError.NoError:
             self._set_busy(False)
+            self._metrics.finish("error", err_str)
             self.replyError.emit(err_str)
             return
         # A tool round: run the calls, feed the results back, and let the model
@@ -6707,6 +6728,7 @@ class Ollama(QObject):
         reason = self._truncation_reason()
         if reason:
             self.replyTruncated.emit(reason)
+        self._metrics.finish("done", reason)
         self.replyDone.emit()
 
     #: How many `![](…)` images one reply may pull in on its own. A model
@@ -6783,6 +6805,7 @@ class Ollama(QObject):
         reason = self._truncation_reason()
         if reason:
             self.replyTruncated.emit(reason)
+        self._metrics.finish("done", reason)
         self.replyDone.emit()
 
     @staticmethod
@@ -6899,6 +6922,7 @@ class Ollama(QObject):
         reason = self._truncation_reason()
         if reason:
             self.replyTruncated.emit(reason)
+        self._metrics.finish("done", reason)
         self.replyDone.emit()
 
     # ---- the web_search tool loop ----
@@ -6979,6 +7003,7 @@ class Ollama(QObject):
         """Dispatch each tool call; when the last result is in, re-post the
         chat with the tool messages appended. Calls run concurrently."""
         remaining = self._new_round(calls)
+        self._metrics.tool_round([self._call_parts(c)[0] for c in calls])
         remaining["cache"] = self._tool_seen
         reg = self._main_registry()
         for i, call in enumerate(calls):
@@ -7828,6 +7853,7 @@ class Ollama(QObject):
         if finish is not None:
             finish([tr for tr in remaining["sink"] if tr is not None])
             return
+        self._metrics.tools_finished()
         for tr in remaining["sink"]:
             if tr is not None:
                 self._messages.append(tr)
