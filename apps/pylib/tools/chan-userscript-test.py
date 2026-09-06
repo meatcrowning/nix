@@ -74,7 +74,7 @@ check("the sheet builds with no chrome (the Hyprland face)", len(flat) > 1000)
 check("no chrome means no gradient — DESIGN.md §2 holds on this desktop",
       "linear-gradient(to bottom" not in flat)
 check("post numbers use the timestamp's primary ink",
-      ".postInfo .postNum a{color:#00ff88!important}" in flat)
+      ".postInfo .postNum,.postInfo .postNum a,.postInfo .postNum a:hover{color:#00ff88!important}" in flat)
 check("hovering a field keeps its fill stable",
       ".captcha-root:hover{background:#123456!important}" in flat)
 check("OneeChan's alternating options rows use the desktop surface",
@@ -105,6 +105,10 @@ check("the 4chan fallback includes the sheet surfer serves plus Twitter/X",
       + "\n" + twittertheme.css(kpal.__getitem__))
 check("plasma + oxygen: the baked sheet carries the KStyle relief",
       "background-attachment:fixed" in baked and "box-shadow:inset" in baked)
+chrome_field = re.findall(r"\.captcha-root\{background:(#[0-9a-f]+)!important;border-radius", baked)
+chrome_hover = re.findall(r"\.captcha-root:hover\{background:(#[0-9a-f]+)!important", baked)
+check("plasma fields keep their sunken fill on hover",
+      bool(chrome_field and chrome_hover) and chrome_hover[-1] == chrome_field[-1])
 check("the live 4chan sheet has no window-inactive colour override",
       ":window-inactive" not in baked and "visibilitychange" not in baked)
 check("the provenance line names the style it came from", "oxygen" in prov)
