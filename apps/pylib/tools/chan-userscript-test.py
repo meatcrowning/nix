@@ -106,7 +106,7 @@ check("the 4chan fallback includes the sheet surfer serves plus Twitter/X",
       baked == chantheme.css(kpal.__getitem__, kdetheme.kde_chrome())
       + "\n" + twittertheme.css(kpal.__getitem__))
 check("plasma + oxygen: the baked sheet carries the KStyle relief",
-      "background-attachment:fixed" in baked and "box-shadow:inset" in baked)
+      "box-shadow:inset" in baked and "background-attachment:fixed" not in baked)
 chrome_field = re.findall(r"\.captcha-root\{background:(#[0-9a-f]+)!important;border-radius", baked)
 chrome_hover = re.findall(r"\.captcha-root:hover\{background:(#[0-9a-f]+)!important", baked)
 check("plasma fields keep their sunken fill on hover",
