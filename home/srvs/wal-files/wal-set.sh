@@ -207,7 +207,11 @@ esac
 if [ "$PLASMA_SESSION" = 1 ]; then
     # Keep the selected theme/shape; only move its colour family to the accent.
     echo "wal-set: Plasma session — KDE theme untouched, re-minting its colour scheme"
-    "$SCRIPTS/plasma-scheme.py" --accent "$ACCENT"
+    if [ "$BG" = "464540" ]; then
+        "$SCRIPTS/plasma-scheme.py" --accent "$ACCENT" --background "$BG"
+    else
+        "$SCRIPTS/plasma-scheme.py" --accent "$ACCENT"
+    fi
 
     # ---- AeroThemePlasma glass ------------------------------------------
     # In the ATP session the titlebar and panel colour is NOT art: smod's frame
