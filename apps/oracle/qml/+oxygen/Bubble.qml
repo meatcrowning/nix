@@ -21,8 +21,8 @@ Item {
     property bool user: false
     property bool isError: false
     // Root.qml reserves the curl's height below the message contents.
-    readonly property real tailHeight: 9
-    readonly property real tailWidth: 11
+    readonly property real tailHeight: 13
+    readonly property real tailWidth: 15
     default property alias content: holder.data
 
     Item {

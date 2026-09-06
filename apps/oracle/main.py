@@ -126,7 +126,7 @@ class OxygenBubblePaint(QQuickPaintedItem):
         bottom = max(top, self.height() - 1.5)
         body = min(bottom, max(top, self._body_height - inset))
         tail = max(0.0, bottom - body)
-        tail_w = min(11.0, right - left)
+        tail_w = min(15.0, right - left)
         r = min(4.0, (right - left) / 2.0, (body - top) / 2.0)
         path = QPainterPath()
         path.moveTo(left + r, top)
@@ -135,7 +135,7 @@ class OxygenBubblePaint(QQuickPaintedItem):
         if self._user:
             path.lineTo(right, body + tail)
             path.cubicTo(right - 3, body + tail,
-                         right - 8, body + tail - 2,
+                         right - tail_w + 5, body,
                          right - tail_w, body)
             path.lineTo(left + r, body)
             path.quadTo(left, body, left, body - r)
@@ -143,7 +143,7 @@ class OxygenBubblePaint(QQuickPaintedItem):
             path.lineTo(right, body - r)
             path.quadTo(right, body, right - r, body)
             path.lineTo(left + tail_w, body)
-            path.cubicTo(left + 8, body + tail - 2,
+            path.cubicTo(left + tail_w - 5, body,
                          left + 3, body + tail,
                          left, body + tail)
         path.lineTo(left, top + r)
@@ -11828,10 +11828,11 @@ def main():
     if plasma_face := (is_plasma() if not face else face in ("plasma", "oxygen")):
         from PySide6.QtGui import QIcon
         icon_file = Path.home() / ".local/share/icons/hicolor/scalable/apps/oracle.svg"
-        # Load the seal itself. QIcon.fromTheme("oracle") resolves to Oxygen's
-        # Konversation alias by design for launchers, but the titlebar icon he
-        # chose is Chatter's Gusion seal.
-        app.setWindowIcon(QIcon(str(icon_file)))
+        # Under Oxygen, `oracle` is deliberately aliased to Konversation's
+        # native artwork (home/prog/app-icons/oxygen-seals.nix). That is also
+        # Chatter's titlebar icon; the hicolor Gusion seal is only its fallback
+        # under icon themes without an Oxygen face.
+        app.setWindowIcon(QIcon.fromTheme("oracle", QIcon(str(icon_file))))
 
     palette = Palette(theme_source(PANEL_THEME))
     style = DeskStyle()
