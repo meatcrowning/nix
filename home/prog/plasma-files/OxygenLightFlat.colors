@@ -152,20 +152,29 @@ ForegroundNormal=34,31,30
 ForegroundPositive=0,110,40
 ForegroundVisited=100,74,155
 
-# THE TITLEBAR IS THE WINDOW'S OWN SURFACE. activeBackground/inactiveBackground
-# and both Blend stops are held equal to [Colors:Window] BackgroundNormal, so the
-# decoration meets the top of the client with no seam — which is the whole point
-# of Oxygen's frame. They are NOT automatically in step: plasma-scheme.py tints
-# the [WM] keys too, but only their HUE, so raising the saturation of the Colors
-# groups and leaving [WM] alone leaves the titlebar greyer and lighter than the
-# window under it (seen on Konsole, 2026-09-05: titlebar 208,211,214 against a
-# window top of 198,209,224). If the surface tint above changes, change these.
+# THE TITLEBAR IS THE TOP OF THE WINDOW'S GRADIENT — not a flat slab, and not a
+# separate colour. Oxygen draws the window from light at the titlebar down to
+# darker at the foot (measured luma 222 -> 184), and the decoration carries the
+# top of that ramp: `*Blend` is the gradient's LIGHT stop and `*Background` its
+# dark stop. So Blend is BackgroundNormal lightened 9% (matching that 222/184
+# ratio) and Background IS BackgroundNormal, which puts the seam where the
+# titlebar meets the client at exactly the client's own colour — the ramp runs
+# continuously across both.
+#
+# Setting all four equal instead flattens it: the titlebar and window top become
+# one solid colour and Oxygen's gradient disappears (done by mistake 2026-09-05).
+#
+# These are NOT automatically in step with the Colors groups: plasma-scheme.py
+# tints the [WM] keys, but only their HUE, so raising the surface saturation and
+# leaving [WM] alone leaves the titlebar greyer than the window under it (which
+# is how it drifted: titlebar 208,211,214 against a window top of 198,209,224).
+# If the surface tint above changes, recompute both stops from it.
 [WM]
 activeBackground=224,207,198
-activeBlend=224,207,198
+activeBlend=237,228,223
 activeForeground=34,31,30
 inactiveBackground=224,207,198
-inactiveBlend=224,207,198
+inactiveBlend=237,228,223
 inactiveForeground=34,31,30
 
 [General]
