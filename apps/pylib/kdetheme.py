@@ -436,10 +436,12 @@ def _shade_l(rgb, d):
 # faintest on the window — and the only thing that reads them (surfer's
 # OneeChan re-skin) is a web page, where nothing else can draw the real one.
 _STOPS = {
-    "window": (0.045, -0.022),
-    "panel":  (0.030, -0.014),
-    "header": (0.060, -0.026),
-    "button": (0.080, -0.038),
+    # The middle stop is the Oxygen window's characteristic shaded band.
+    # It recovers slightly at the foot instead of fading uniformly top-down.
+    "window": (0.045, -0.065, -0.022),
+    "panel":  (0.030, -0.042, -0.014),
+    "header": (0.060, -0.075, -0.026),
+    "button": (0.080, -0.070, -0.038),
 }
 
 
@@ -475,8 +477,9 @@ def kde_chrome(ini=None) -> dict | None:
     }
     out = {}
     for name, base in bases.items():
-        up, down = _STOPS[name]
+        up, mid, down = _STOPS[name]
         out[name + "Top"] = _hex(_shade_l(base, up * k))
+        out[name + "Mid"] = _hex(_shade_l(base, mid * k))
         out[name + "Bottom"] = _hex(_shade_l(base, down * k))
     # The two relief tones: Oxygen's 1px light bevel along the top of every
     # slab and the shadow under its foot. Alpha, not colour, so they sit over
