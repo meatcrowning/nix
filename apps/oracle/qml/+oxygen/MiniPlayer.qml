@@ -126,7 +126,6 @@ Item {
             QQC.ToolButton {
                 id: dismissBtn
                 icon.name: "window-close"
-                icon.color: palette.buttonText
                 display: QQC.AbstractButton.IconOnly
                 QQC.ToolTip.visible: hovered
                 QQC.ToolTip.text: "hide this bar"
