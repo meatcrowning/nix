@@ -1,121 +1,40 @@
 { pkgs, lib, hostProfile, config, ... }:
 
-# Act on his answers to this host's board (`docs/board.<hostname>.md`) without
+# Act on answers to this host's board (`docs/board.<hostname>.md`) without
 # waiting for him to mention them.
 #
-# The board is where agents park the questions only he can settle. Answering one
-# used to do nothing until he next opened a terminal and told a session about
-# it; this watches the file and spawns ONE headless agent for ONE newly-answered
-# decision. All of the behaviour — the semantic filter, the queue, the failure
-# note, the kill switch — is in board-watch-files/board-watch.py; read its
-# docstring before changing anything here.
+# The watcher sees one newly-answered decision, one inbox queue, and one
+# orchestrator entry point. The behaviour itself lives in
+# `board-watch-files/board-watch.py`; read that docstring before changing
+# anything here.
 #
-# It also MOVES the decision out of NEEDS YOU and into IN FLIGHT as it spawns,
-# and hands it back if the agent dies (apps/board/boardmove.py). Two
-# consequences for this file: the timer interval below is also the worst-case
-# latency for reclaiming an item whose agent was killed outright, since that
-# reconcile runs at the top of every tick; and PATH must keep reaching a
-# `python3`, because the agent closes the loop with apps/board/tools/boardctl.py
-# rather than by editing the markdown (it comes from the per-user profile at the
-# end of the list — do not trim that entry).
+# It moves a decision out of NEEDS YOU as it spawns and hands it back if the
+# agent dies (`apps/board/boardmove.py`). That makes the timer the worst-case
+# latency for reclaiming a dead run, and PATH must still reach `python3`
+# because the loop closes through `apps/board/tools/boardctl.py`, not by
+# editing the markdown directly.
 #
-# AND IT CARRIES HIS NOTES. The board app draws a box against every running
-# agent (apps/board/boardagents.py). An agent's stdin is closed, so a message is
-# a file: the spawned agent is told to poll `boardctl.py inbox take`, and
-# anything nobody reads is swept into a queue that a tick of this script works
-# with an agent of its own. Third consequence for this file, after the two
-# below: the timer interval is also the worst case for a note he typed while
-# nothing was running, since the queue is only looked at on a tick.
+# One board per host since 2026-07-30: `docs/board.top.md` on top,
+# `docs/board.book.md` on book. The files still sync as backup/history, but
+# only the named host writes its own board. The host stamp below is
+# belt-and-braces for restored copies, and `~/.local/state/board/` stays
+# machine-local for typed inbox messages, the worker queue, the cap and the
+# kill switch.
 #
-# AND IT IS NOW THE ORCHESTRATOR. The board app grew ONE box at the top of the
-# window — free text, enter, into that same inbox — because he asked for a
-# control surface rather than a per-agent chat: "a single box that i could type
-# things into, press enter, and have them sent to an inbox. then an agent
-# figures out what agents to assign to what". The run this unit starts for that
-# input no longer does the work itself. It PLANS: it splits the input up and
-# either dispatches worker agents (detached, capped, drawn as cards on his
-# board) or asks him a question in NEEDS YOU. apps/board/boardwork.py is the
-# mechanism, the cap and both prompts.
+# On book this is a systemd user unit under standalone home-manager; `switch`
+# starts it there via `systemd.user.startServices`.
 #
-# HOW MANY of those planning runs a tick starts is his, in the top dropdown of
-# the four at the top of the goetia window (boardwork.summoners(); the file
-# ~/.local/state/board/summoners, machine-local like the cap). What he typed is
-# split across up to that many, run together in threads, and the tick is held
-# for the slowest rather than the sum. One is the default and is what this did
-# before the control existed.
-#
-# Two consequences for this file, and they are why it changed:
-#   - a third trigger, `board-inbox.path` below, so typing into that box does
-#     not wait up to five minutes for the timer;
-#   - a tick now also PROMOTES work that was dispatched above the concurrency
-#     cap, so the timer interval is the worst case for a queued task starting
-#     once a slot frees — the same guarantee reconcile() and sweep() already
-#     gave stranded items and unread notes.
-#
-# BOTH MACHINES, and since 2026-07-30 each watches ITS OWN BOARD:
-# `docs/board.top.md` on top, `docs/board.book.md` on book. The two files still
-# sync (so each machine keeps a backup and a history of the other's board) but
-# only the machine a board is named for ever writes it, so one answer cannot be
-# seen by two watchers in the first place and nothing merges his typing with
-# anybody else's. His words, 2026-07-30: "i actually want to change it so
-# neither board on top or air syncs ... commits obviously will stay synced."
-#
-# The AFFINITY below predates that and is now belt-and-braces rather than the
-# load-bearing de-duplicator. It is kept deliberately: it costs nothing, it is
-# what makes a board file restored from the other host's copy harmless, and
-# removing it would churn the parser and the harness for no behaviour. This was
-# `top`-only until 2026-07-29 — `home/` is shared verbatim with `air`/book, so
-# deploying it to both would then have had one answer picked up twice, by two
-# agents, on two checkouts of the same two repos. The cost of that gate was that
-# answering on book did nothing at all until he was next sitting at top, which
-# is not what he asked for. So instead:
-#
-#   * A DECISION is stamped with the machine he answered it on — an HTML comment
-#     the parser owns (`boardparse.set_answer_host`, written by the board app in
-#     the same targeted line edit as the answer). `board-watch.py`'s `owns()`
-#     fires only on its own host's stamp; an unstamped one (a hand edit, or an
-#     answer predating the stamp) belongs to `top`, the machine that is always
-#     on. Re-answering an item on the other machine restamps it and is therefore
-#     the hand-off. There is no automatic takeover, on purpose: a claim would
-#     have to live in a file that syncs every five minutes, and a five-minute
-#     window in which both machines believe they own an item is the very
-#     duplicate this is preventing.
-#   * TYPED INPUT needs no rule at all. The inbox lives under
-#     `~/.local/state/board/`, which nothing syncs, so a sentence exists only on
-#     the machine it was typed on and is worked there. Same for the worker
-#     queue, the cap, the watcher's fingerprints and the kill switch.
-#
-# On book this is a systemd USER unit under standalone home-manager on Fedora —
-# no `sys/` involved, nothing NixOS-specific. `systemd.user.startServices`
-# defaults to true (home-manager 25.05+), so `home-manager switch --flake
-# ~/nix#air` reloads the manager and starts these three units itself.
-#
-# TWO TRIGGERS, and both are needed. Measured on top 2026-07-28 with a scratch
-# path unit rather than reasoned about, because `board` writes via temp file +
-# `os.replace()` and some watch modes miss a rename entirely:
-#   - a `path` unit on the FILE does see the rename. PathChanged fired on three
-#     consecutive atomic replaces and on an ordinary append, and did not fire
-#     for a sibling file in the same directory — so watching board.md beats
-#     watching docs/, which every `git` operation of the sync would rattle.
-#   - it does NOT queue. With the service made to run for 8s, three replaces
-#     during that window produced exactly one further run: systemd re-arms only
-#     on an event that arrives while the unit is inactive. An answer typed while
-#     an agent is running would be lost outright.
-# Hence the timer as well — the same belt-and-braces pairing sort-downloads.nix
-# uses, and here it does double duty: it is also what drains the queue when he
-# unlocks, since nothing on this desktop emits an unlock signal we can watch.
+# Two triggers are deliberate: `board-inbox.path` catches typed input
+# immediately, and the timer drains the queue, promotes over-cap work, and
+# re-arms for unlock polling.
 
 let
-  # THE BOARD THIS HOST WATCHES. One board per host since 2026-07-30, named for
-  # the OS hostname (`top`, `book`) rather than the flake attribute (`top`,
-  # `air`) — every runtime writer of the store derives it from
-  # `os.uname().nodename` and nothing else, so the mapping is done here, once,
-  # where the flake attribute is the only name available.
+  # One board per host; the runtime name comes from the OS hostname, not the
+  # flake attribute.
   boardHost = hostProfile.hostname;
   boardFile = "%h/nix/docs/board.${boardHost}.md";
-  # Must run under the board's python: board-watch.py imports the whole board
-  # module set (boardparse -> glyphs -> PySide6), so bare pkgs.python3 crashed it
-  # on every trigger. Same host split as home/prog/board.nix.
+  # Use the board Python: the script imports the board module set, so bare
+  # pkgs.python3 crashes at import.
   boardPython = hostProfile.boardPython pkgs;
 in
 {
@@ -127,108 +46,18 @@ in
   systemd.user.services.board-watch = {
     Unit = {
       Description = "Work one newly-answered decision from ~/nix/docs/board.${boardHost}.md";
-      # THE OUTER NET, and it is set this high on purpose. The path units
-      # retrigger in bursts (his edit, then the sync's pull of it, then the
-      # agent's own commit, then the timer) and every run is cheap when there is
-      # nothing new, so the default 5-starts-in-10s would wedge the unit for the
-      # rest of the session over normal traffic — which is why this used to be
-      # 0, i.e. off entirely.
-      #
-      # Off entirely turned out to be worse. On 2026-07-28 a bug in the script
-      # made every run return before draining the app's inbox queue, and
-      # `board-inbox.path` below is level-triggered: 3,151 starts in a few
-      # minutes on the machine he was sitting at. The script now backs itself
-      # off (`spin_guard`), and that is the guard that matters because it cannot
-      # wedge anything; this exists for the runaway the script cannot see — a
-      # crash on import, a broken PATH — where nothing in Python ever runs.
-      #
-      # 30 a minute is far above any legitimate burst and far below a loop. If
-      # it ever does trip, the unit goes `failed` and SAYS SO on his own board
-      # (boardagents.watcher_state reads exactly this unit); recovery is
-      # `systemctl --user reset-failed board-watch.service`.
+      # Outer guard for bursty retriggers; the script's own spin guard handles
+      # the queue loop, this catches the crash-before-Python cases.
       StartLimitIntervalSec = 60;
       StartLimitBurst = 30;
     };
     Service = {
       Type = "oneshot";
-      # BELT AND BRACES FOR THE WORKERS, and it is worth stating why it is only
-      # the braces. A oneshot's default KillMode is `control-group`: when the
-      # main process exits, systemd kills everything LEFT IN ITS CGROUP — and a
-      # child detached with `start_new_session` is still in that cgroup, because
-      # that call detaches the process GROUP (a terminal-signal concept) and says
-      # nothing about cgroups. So every worker an orchestrator dispatched was
-      # killed seconds later, while the board honestly reported the work as
-      # dispatched and in hand. Measured on top 2026-07-29: worker `we9f99c`
-      # registered at 22:49:16, the orchestrator exited at 22:49:29, and the
-      # worker's transcript ends three tool calls in.
-      #
-      # The real fix is in `apps/board/boardwork.py`, which now asks the user
-      # manager for one transient unit per worker (`systemd-run --user
-      # --unit=board-worker-<id>`) — its own cgroup, a real lifecycle, the
-      # 45-minute cap actually enforced, and a genuine systemd unit, which is
-      # the shape he asked for the agents section in. That path needs no
-      # rebuild, which is why it is the primary one.
-      #
-      # This line covers the fallback: on a machine with no user manager (or
-      # with `BOARD_WORK_NO_UNIT=1`) `boardwork` still spawns a plain detached
-      # child, and without this that child dies with the tick. Both were
-      # measured to survive; this one only takes effect after a rebuild.
+      # Fallback only: if a worker is spawned detached instead of as its own
+      # unit, keep it alive after the oneshot exits.
       KillMode = "process";
-      # Pinned, because the ambient systemd-user PATH cannot be relied on for
-      # any of these: claude is the agent; git/gh are what it commits and pushes
-      # with (the credential helper is `!gh auth git-credential`); hyprctl and
-      # quickshell answer the at-the-machine gate; coreutils/util-linux supply
-      # date and flock. `bash` and `openssh` are here for the agent's own use,
-      # not the watcher's.
-      #
-      # `openssh` is TOP-ONLY, and that is not a preference. On book, Fedora's
-      # /etc/ssh/ssh_config pulls in /etc/crypto-policies/back-ends/openssh.config,
-      # which names `GSSAPIKexAlgorithms` and the mlkem768* KEXes — options
-      # nixpkgs' unpatched openssh rejects, so it prints "terminating, 2 bad
-      # configuration options" and never dials, for EVERY destination, not just
-      # top (measured on book 2026-07-29 against both `top` and localhost).
-      # Being first on this PATH it shadowed /usr/bin's working Fedora ssh,
-      # so a board agent on book could not reach the tailnet at all. Dropping it
-      # here lets the /usr/bin tail win, which is the same reason `systemd` is
-      # top-only below.
-      #
-      # THE TAIL HAS TO NAME BOTH MACHINES' PROFILE LAYOUTS, since this now
-      # deploys to book as well and `claude`, `python3`, `hyprctl` and `qs` all
-      # come out of a profile rather than out of this list:
-      #   ~/.nix-profile/bin              standalone home-manager (book)
-      #   /etc/profiles/per-user/lam/bin  home-manager as a NixOS module (top)
-      #   /run/current-system/sw/bin      NixOS system packages (top)
-      #   /run/wrappers/bin               NixOS setuid wrappers (top) — and it
-      #                                   MUST come before the two store paths
-      #                                   below. Without it `sudo` resolves to
-      #                                   /run/current-system/sw/bin/sudo, the
-      #                                   plain store binary, which is not
-      #                                   setuid and refuses to run at all
-      #                                   ("must be owned by uid 0 and have the
-      #                                   setuid bit set"). Every worker is told
-      #                                   to end its change with `sudo
-      #                                   rebuild-top` and none of them could;
-      #                                   hit on top 2026-07-30. Absent on book,
-      #                                   where a missing PATH entry costs
-      #                                   nothing.
-      #   /usr/bin:/bin                   Fedora (book) — and where book's
-      #                                   systemctl/loginctl/systemd-run come
-      #                                   from, deliberately: they must match
-      #                                   the user manager that is actually
-      #                                   running, which on Fedora is Fedora's.
-      #                                   Hence `pkgs.systemd` is top-only.
-      #   ~/.local/bin                    the hermes launcher, curl-installed
-      #                                   (home/prog/hermes-agent.nix) — a
-      #                                   deepseek-tuned summoner or spirit
-      #                                   spawns `hermes`, not `claude`, and
-      #                                   the shell PATH fixes there never
-      #                                   reach a systemd unit. Absent, every
-      #                                   hermes dispatch dies at the check in
-      #                                   board-watch.py with "not on this
-      #                                   unit's PATH".
-      # NOT `%h`: systemd expands specifiers in ExecStart but NOT in
-      # Environment= (measured on top with a scratch transient unit — the value
-      # arrived as the literal `%h/x`), so this interpolates the real path.
+      # Pinned PATH for the watcher and its agent. The tail names both profile
+      # layouts, and `%h` is not expanded in Environment=.
       Environment = [
         "PATH=${lib.makeBinPath ([
           pkgs.coreutils
