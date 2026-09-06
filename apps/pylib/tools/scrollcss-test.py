@@ -102,8 +102,6 @@ check("one stepper above and two below, per oxygenrc",
                        ":vertical:end:increment"})
 check("the base button part is block, so Blink materialises native steppers",
       "::-webkit-scrollbar-button{display:block!important" in oxy)
-check("a direction fallback reaches Vivaldi's start stepper",
-      "::-webkit-scrollbar-button:vertical:decrement{" in oxy)
 check("the unused start:increment is hidden, not left default",
       ":vertical:start:increment{display:none" in oxy.replace(
           "::-webkit-scrollbar-button", "").replace(",", "{display:none"))

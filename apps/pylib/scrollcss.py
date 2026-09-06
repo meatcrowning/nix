@@ -203,21 +203,6 @@ def oxygen_css(pal, metrics=None, button=None) -> str:
         css.append(button(sel, direction, ink))
         css.append(button(sel + ":hover", direction, ink_hot))
         css.append(button(sel + ":active", direction, accent))
-    # Vivaldi's current Chromium exposes the two end buttons by their full
-    # `:start`/`:end` state but sometimes omits that state while painting the
-    # start button.  The direction pseudo-class reaches the same native part
-    # without relying on its placement; it is a visual fallback only — the
-    # native part still supplies the click and repeat behaviour.  Reassert the
-    # configured absences afterwards, because the fallback deliberately names
-    # both ends of a direction.
-    for sel, direction in ((":vertical:decrement", "up"),
-                           (":vertical:increment", "down"),
-                           (":horizontal:decrement", "left"),
-                           (":horizontal:increment", "right")):
-        css.append(button(sel, direction, ink))
-    if hidden:
-        css.append("%s{display:none!important}"
-                   % ",".join("::-webkit-scrollbar-button" + s for s in hidden))
     # A stepper's corner piece (webkit draws one where two buttons meet) must
     # not keep the default light square.
     css.append("::-webkit-scrollbar-button:decrement:increment{display:none!important}")
@@ -294,16 +279,6 @@ def desktop_css(pal, style=DEFAULT_STYLE) -> str:
                    % (sel, _triangle(ink_hot, direction)))
         css.append("::-webkit-scrollbar-button%s:active{%sbackground-image:url(%s)!important}"
                    % (sel, sunken, _triangle(accent, direction)))
-    # See Oxygen above: placement-specific styling is not enough for
-    # Vivaldi's missing start stepper, so give every native direction its same
-    # base arrow. The next rule keeps win31's intentionally absent directions
-    # absent.
-    for sel, direction in ((":vertical:decrement", "up"),
-                           (":vertical:increment", "down"),
-                           (":horizontal:decrement", "left"),
-                           (":horizontal:increment", "right")):
-        css.append("::-webkit-scrollbar-button%s{background-image:url(%s)!important}"
-                   % (sel, _triangle(ink, direction)))
     css.append("::-webkit-scrollbar-button:vertical:start:increment,"
                "::-webkit-scrollbar-button:vertical:end:decrement,"
                "::-webkit-scrollbar-button:horizontal:start:increment,"
