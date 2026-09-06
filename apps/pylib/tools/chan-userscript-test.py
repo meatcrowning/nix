@@ -133,6 +133,9 @@ check("a <style> fallback exists for no constructable stylesheets",
 # than breaking the whole page palette.
 twitter_sheet = twittertheme.css(PAL.__getitem__)
 check("the Twitter/X sheet carries the base palette", "--desk-bg:#102030" in twitter_sheet)
+check("the Twitter/X canvas uses the shared fixed Oxygen surface",
+      "--desk-window-surface:url(http://127.0.0.1:8791/oxygen-window.png)" in twitter_sheet
+      and "background-size:100vw 100vh!important" in twitter_sheet)
 check("the Twitter/X sheet targets semantic X hooks, not generated classes",
       '[data-testid="tweet"]' in twitter_sheet and "css-" not in twitter_sheet)
 check("the Twitter/X sheet keeps post copy at the primary ink and themes composer/sidebar wrappers",
