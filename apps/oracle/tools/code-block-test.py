@@ -24,7 +24,7 @@ APP = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(APP))
 sys.path.insert(0, str(APP.parent / "pylib"))
 
-from PySide6.QtCore import QObject                       # noqa: E402
+from PySide6.QtCore import QObject, Qt                   # noqa: E402
 from PySide6.QtGui import QGuiApplication, QTextDocument  # noqa: E402
 
 sys.argv = [sys.argv[0], "--selftest"]
@@ -47,6 +47,9 @@ MD = ("intro line\n\n"
       "```\n\n"
       "between the two\n\n"
       "```sh\nsudo rebuild-top\n```\n\n"
+      "| release | year |\n"
+      "|---|---|\n"
+      "| wake up | 2021 |\n\n"
       "trailing prose with `inline code` in it\n")
 
 
@@ -63,6 +66,7 @@ class FakeQuickDoc(QObject):
 
 
 doc = QTextDocument()
+doc.setTextWidth(300)
 doc.setMarkdown(MD)
 fake = FakeQuickDoc(doc)
 
@@ -80,11 +84,21 @@ def nonbreakable():
 check("Qt marks the code blocks unwrappable to begin with",
       len(nonbreakable()) == 3, repr(nonbreakable()))
 
+tables = doc.rootFrame().childFrames()
+check("the fixture contains one markdown table", len(tables) == 1,
+      str(len(tables)))
+
 md = oracle.MdFormat()
 runs = json.loads(md.styleCode(fake))
 
 check("after the pass nothing is unwrappable", nonbreakable() == [],
       repr(nonbreakable()))
+if len(tables) == 1:
+    check("the markdown table is centred in the reply width",
+          tables[0].format().alignment() == Qt.AlignmentFlag.AlignHCenter
+          and doc.documentLayout().frameBoundingRect(tables[0]).x() > 0,
+          "align=%r x=%.1f" % (tables[0].format().alignment(),
+                                doc.documentLayout().frameBoundingRect(tables[0]).x()))
 check("the two fenced blocks come back as two runs", len(runs) == 2,
       json.dumps(runs))
 

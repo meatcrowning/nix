@@ -3640,7 +3640,7 @@ class Clip(QObject):
 
 
 class MdFormat(QObject):
-    """Make a rendered reply's CODE BLOCKS sit inside the bubble.
+    """Finish the rendered reply layout Qt's markdown reader leaves incomplete.
 
     Qt's markdown reader gives every fenced block `NonBreakableLines`, so a long
     line does not wrap — it lays out past the item's width and paints across
@@ -3648,12 +3648,11 @@ class MdFormat(QObject):
     in QML reaches that flag: it is on the QTextDocument's block formats, which
     is why this lives here rather than in `MarkdownText.qml`.
 
-    So the same document the item is already drawing is walked once and each
-    code block is (a) allowed to wrap and (b) given the background and the
-    margins that make it read as an embedded block rather than as loose
-    monospace. The TEXT is untouched — no re-wrapping of the source, no inserted
-    newlines — so `Clip.copyMarkdown` still hands over exactly what the model
-    wrote.
+    So the same document the item is already drawing is walked once: each code
+    block is allowed to wrap and inset, and each markdown table is horizontally
+    centred inside the bubble. The TEXT is untouched — no re-wrapping of the
+    source, no inserted newlines — so `Clip.copyMarkdown` still hands over
+    exactly what the model wrote.
 
     It is idempotent and reports whether it CHANGED anything, which is what
     keeps a `textChanged` handler from looping on its own edits.
@@ -3676,7 +3675,7 @@ class MdFormat(QObject):
 
     @Slot(QObject, result=str)
     def styleCode(self, quick_doc):
-        """Let every fenced block wrap, and say WHERE the blocks are.
+        """Finish code/table layout, and say WHERE the code blocks are.
 
         Returns a JSON array of `{start, end}` character positions, one entry
         per run of code lines, so the item can draw a panel behind each one —
@@ -3694,6 +3693,14 @@ class MdFormat(QObject):
         doc = quick_doc.textDocument()
         if doc is None:
             return "[]"
+        # A markdown table is a QTextTable inside the document's root frame.
+        # The reader leaves its alignment at 0 (left); setting the frame format
+        # centres the table itself rather than merely its text.
+        for table in doc.rootFrame().childFrames():
+            table_fmt = table.format()
+            if table_fmt.alignment() != Qt.AlignmentFlag.AlignHCenter:
+                table_fmt.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+                table.setFormat(table_fmt)
         runs = []
         block = doc.begin()
         while block.isValid():
