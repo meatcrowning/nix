@@ -44,6 +44,17 @@ import chansource                                               # noqa: E402
 import kdetheme                                                 # noqa: E402
 
 SCHEME_NAME = "Dynamic"
+
+# Terminal background opacity, 0..1. 1 is fully opaque (what this wrote until
+# 2026-09-05). Override per run with KONSOLE_OPACITY=0.95 konsole-theme.
+# Konsole caches opacity for the life of a window, so unlike the colours — which
+# the live repaint below pushes over the pty — a change here only reaches
+# terminals opened afterwards.
+try:
+    OPACITY = float(os.environ.get("KONSOLE_OPACITY", "0.85"))
+except ValueError:
+    OPACITY = 0.85
+OPACITY = min(1.0, max(0.1, OPACITY))
 KONSOLE_DIR = Path(os.environ.get("KONSOLE_THEME_DIR")
                    or (Path.home() / ".local" / "share" / "konsole"))
 KONSOLERC = Path(os.environ.get("KONSOLE_THEME_RC")
@@ -134,8 +145,15 @@ def build(pal: dict) -> str:
         out.append("[%s]\nColor=%s\n" % (sect, _kc(t[key])))
     for n in range(8):
         slot(n, t[str(n)], t["%dFaint" % n], t["%dIntense" % n])
-    out.append("[General]\nBlur=false\nColorRandomization=false\n"
-               "Description=%s\nOpacity=1\nWallpaper=\n" % SCHEME_NAME)
+    # Opacity < 1 makes the terminal translucent against whatever is behind the
+    # WINDOW (wallpaper, other windows) — KWin composites it; it is not Oxygen's
+    # window gradient showing through, which an opaque terminal covers entirely.
+    # Blur follows transparency: unblurred text over a busy wallpaper is the
+    # thing that makes a translucent terminal unreadable.
+    out.append("[General]\nBlur=%s\nColorRandomization=false\n"
+               "Description=%s\nOpacity=%s\nWallpaper=\n"
+               % ("true" if OPACITY < 1.0 else "false", SCHEME_NAME,
+                  ("%g" % OPACITY)))
     return "".join(out)
 
 
