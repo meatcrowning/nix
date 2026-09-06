@@ -167,14 +167,14 @@ in
     Install.WantedBy = [ "default.target" ];
   };
 
-  # Auto-version wallpapers dropped into ~/Pictures/wall: copy them into the
-  # repo's wallpaper set and commit + push (see wal-repo-sync.sh for the paranoid
-  # git handling). PATH is pinned so the service finds git + gh (the credential
-  # helper is `!gh auth git-credential`, so gh must be resolvable) without
-  # depending on the ambient systemd-user PATH.
+  # Reconcile wallpapers dropped into or removed from ~/Pictures/wall with the
+  # repo's wallpaper set and commit + push (see wal-repo-sync.sh for the
+  # paranoid git handling). PATH is pinned so the service finds git + gh (the
+  # credential helper is `!gh auth git-credential`, so gh must be resolvable)
+  # without depending on the ambient systemd-user PATH.
   systemd.user.services.wal-repo-sync = {
     Unit = {
-      Description = "Commit + push wallpapers dropped into ~/Pictures/wall to the nix repo";
+      Description = "Commit + push wallpaper additions and removals to the nix repo";
       After = [ "graphical-session.target" ];
     };
     Service = {
@@ -189,7 +189,7 @@ in
   };
 
   systemd.user.paths.wal-repo-sync = {
-    Unit.Description = "Watch ~/Pictures/wall and sync new wallpapers into the nix repo";
+    Unit.Description = "Watch ~/Pictures/wall and sync wallpaper changes into the nix repo";
     Path.PathModified = "%h/Pictures/wall";
     Install.WantedBy = [ "default.target" ];
   };
