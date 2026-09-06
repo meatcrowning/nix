@@ -17,9 +17,10 @@
 # not imported.
 #
 # This applet authors ONLY what Plasma has no source for, and sits immediately
-# LEFT of the stock one:
+# AFTER the stock one. The stock applet vanishes outside a native app menu, so
+# this one then takes its place after Kickoff:
 #
-#   [kickoff]  [ File Edit View … ]              app exports a menu (stock applet)
+#   [kickoff]  [ File Edit View … ] [ ]          app exports a menu (stock applet)
 #   [kickoff]  [ Window ]                        Vivaldi (ours)
 #   [kickoff]  [ File Edit Go Window Help ]      desktop (ours)
 #
@@ -65,7 +66,7 @@ in
   #
   # The scripting API can only APPEND — there is no reorder in
   # `shell/scripting/containment.h` — so a first-ever install lands it at the
-  # end of the panel and its place left of the appmenu is set once, by hand, in
+# end of the panel and its place after the appmenu is set once, by hand, in
   # AppletOrder. The one obsolete fixed spacer directly before this applet is
   # removed: it is a blank gutter between Kickoff and the first menu label.
   systemd.user.services.plasma-menubar = {
