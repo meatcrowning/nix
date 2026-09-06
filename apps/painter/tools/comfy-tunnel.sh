@@ -348,7 +348,7 @@ fi
 
 # -N: no remote command. ExitOnForwardFailure so a refused bind is loud rather
 # than a tunnel that silently forwards nothing.
-FWD=("$SSH" -o BatchMode=yes -o ExitOnForwardFailure=yes
+FWD=("$SSH" "${SSH_MUX[@]}" -o BatchMode=yes -o ExitOnForwardFailure=yes
      -o ServerAliveInterval=20 -o ServerAliveCountMax=3
      -N)
 for spec in "${FWD_SPECS[@]}"; do
