@@ -103,7 +103,7 @@ VARIANTS = {
 # Per-wallpaper background corrections. These are applied after the generated
 # palette so they affect only the named theme and only dark mode.
 DARK_BG_OVERRIDES = {
-    "preyouandi-1920x1080.png": "464540",
+    "album-art--preyouandi.png": "464540",
 }
 
 # KDE-only accent corrections. The general wallpaper palette still follows the
@@ -112,7 +112,7 @@ DARK_BG_OVERRIDES = {
 # accent than that winner. Emitting the value into the cached palette keeps the
 # initial apply and the Plasma scheme watcher on the same input.
 PLASMA_ACCENT_OVERRIDES = {
-    "blawan-bouq-1920x1080-cloud.png": "e1348c",
+    "album-art--blawan-bouq.png": "e1348c",
 }
 
 
