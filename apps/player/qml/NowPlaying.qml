@@ -70,10 +70,11 @@ Item {
     // width it frees goes to the queue and the lyrics rather than to nothing
     // (§5.2). Same responsive reading as AlbumPanel's `stacked`, and §5.6.
     //
-    // Two constants. The content column's floor is 420 — near the 480 the whole
+    // Two constants. The content column's floor is 421 — near the 480 the whole
     // page gets in the narrowest window player will open (Main.qml's
     // `minimumWidth` on top), so nothing in it is squeezed below a width it
-    // already survives every day, and the cover keeps the rest. That matters at
+    // already survives every day: 240px for the queue, 180px for lyrics, and
+    // the divider between them. The cover keeps the rest. That matters at
     // the size this is actually judged at: maximized here is ~1406x1006, not
     // 1880, because the panel reserves 376px of the 1920 — 420 leaves 98% of
     // the cover, 480 would clip 8% of it. 0.6 is the point where the column is
@@ -85,7 +86,8 @@ Item {
     // The test is WINDOW GEOMETRY only, never `artFrac` — a layout that could
     // flip mid-drag would be the split handle rearranging the page under the
     // cursor.
-    readonly property int artColMin: 420
+    readonly property int queueMinW: 240
+    readonly property int artColMin: queueMinW + 180 + 1
     readonly property bool sideArt: width >= height * 0.6 + artColMin
 
     // IN A PLASMA SESSION THE COVER IS NEVER CROPPED. His call, 2026-08-18 —
@@ -236,8 +238,14 @@ Item {
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             anchors.right: parent.right
+            // The saved split is a preference, not permission to collapse the
+            // queue. At the current compact Plasma window the cover leaves
+            // just enough content width for a 240px queue and 180px lyrics
+            // pane; without this cap the old 394px preference consumed the
+            // queue and made the two panes read as a vertical layout.
             width: root.hasLyrics
-                   ? Math.max(180, Math.min(bottomRow.width * 0.6, root.lyricsW))
+                   ? Math.max(180, Math.min(bottomRow.width * 0.6, root.lyricsW,
+                                            bottomRow.width - root.queueMinW - 1))
                    : 0
             visible: root.hasLyrics
             clip: true
@@ -271,6 +279,7 @@ Item {
                     if (!pressed) return;
                     var gx = mapToItem(bottomRow, mouse.x, 0).x;
                     root.lyricsW = Math.max(180, Math.min(bottomRow.width * 0.6,
+                                                          bottomRow.width - root.queueMinW - 1,
                                                           bottomRow.width - gx));
                 }
                 onReleased: Prefs.set("npLyricsWidth", root.lyricsW)

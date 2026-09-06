@@ -560,6 +560,26 @@ def main():
         # focus (it read 4530 highlight pixels short, once).
         spin(app, 600)
 
+        if view == "now":
+            # A lyrics reply arrives after the page is visible in normal use.
+            # Use one here so this harness checks the actual two-pane geometry,
+            # not merely the no-lyrics branch where the right column is zero.
+            lyr.ready.emit(1, {"source": "fixture", "synced": False,
+                               "lines": [], "text": "words\n" * 20})
+            spin(app, 200)
+            lyrics_pane = content.findChild(QQuickItem, "lyricsPane")
+            queue_list = content.findChild(QQuickItem, "queueList")
+            check("now: lyrics stays beside the queue",
+                  lyrics_pane is not None and queue_list is not None
+                  and lyrics_pane.property("visible")
+                  and lyrics_pane.property("x") >= (queue_list.property("x")
+                                                     + queue_list.property("width")),
+                  (lyrics_pane.property("x"), queue_list.property("x"),
+                   queue_list.property("width")) if lyrics_pane and queue_list else "missing pane")
+            check("now: lyrics cannot squeeze the queue below 240px",
+                  queue_list is not None and queue_list.property("width") >= 240,
+                  queue_list.property("width") if queue_list else "missing queue")
+
         focus(True)
         spin(app, 300)
         on = grab()
