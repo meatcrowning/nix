@@ -98,7 +98,8 @@ pin_env() {
     sed -i -E 's/(hl\.env\("XCURSOR_THEME", ")GoogleDot-[^"]*(")/\1'"$NAME"'\2/' "$LUA"
     sed -i -E 's/(hl\.env\("HYPRCURSOR_THEME", ")GoogleDot-[^"]*(")/\1'"$NAME"'\2/' "$LUA"
 }
-# Point the compositor at the new theme. NOTE: setcursor updates the theme used
+# Point the current desktop at the new theme. Plasma applies its cursor through
+# plasma-apply-cursortheme; Hyprland uses setcursor. NOTE: setcursor updates the theme used
 # for the NEXT cursor-shape request, but it does NOT re-rasterise the cursor
 # buffer already on screen — Hyprland keeps compositing the cached shape until a
 # client re-requests its cursor (i.e. until you hover something that changes the
@@ -109,7 +110,12 @@ pin_env() {
 # only a genuine client shape re-request does. There is no known IPC on this
 # Hyprland build (0.55.4, lua config) that forces it, so we don't fake one; the
 # recolour is fast now and the next hover picks it up.
-apply() { hyprctl setcursor "$NAME" "$SIZE" >/dev/null 2>&1 || true; }
+apply() {
+    case ":${XDG_CURRENT_DESKTOP:-}:" in
+        *:KDE:*) plasma-apply-cursortheme --size "$SIZE" "$NAME" >/dev/null 2>&1 || true ;;
+        *) hyprctl setcursor "$NAME" "$SIZE" >/dev/null 2>&1 || true ;;
+    esac
+}
 
 # Generated theme names are inherited at process launch. Removing an old
 # directory while that process is alive makes its next shape request fall back
