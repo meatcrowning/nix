@@ -103,6 +103,22 @@ aside[role="complementary"] {{ background-color:transparent!important; backgroun
 [data-testid="primaryColumn"] div:has(> [data-testid="tweetTextarea_0"]),
 [data-testid="primaryColumn"] div:has(> div > [data-testid="tweetTextarea_0"]) {{
   border-bottom:1px solid var(--desk-border)!important; }}
+/* The media viewer opens its conversation in a second, independent column
+   rather than the home timeline's primary column.  Give that detail surface
+   the same viewport-anchored canvas, so it joins the page instead of falling
+   back to X's white modal panel. */
+[role="dialog"] [data-testid="primaryColumn"],
+[data-testid="tweetDetail"] {{
+  background-color:var(--desk-bg)!important; background-image:var(--desk-window-surface)!important;
+  background-size:100vw 100vh!important; background-position:0 0!important;
+  background-repeat:no-repeat!important; background-attachment:fixed!important; }}
+/* Leaving media fullscreen can leave X at its wide-navigation breakpoint.
+   Keep the desktop's normal icon rail; clipping the link rather than hiding
+   it preserves its label for accessibility and its icon/count for the UI. */
+header[role="banner"]:has(nav a[aria-label="Home"]) {{
+  width:104px!important; min-width:104px!important; max-width:104px!important; }}
+header[role="banner"]:has(nav a[aria-label="Home"]) nav a {{
+  width:52px!important; max-width:52px!important; overflow:hidden!important; }}
 ::-webkit-scrollbar-track {{ background:var(--desk-bg)!important; }}
 ::-webkit-scrollbar-thumb {{ background:var(--desk-border)!important; border-color:var(--desk-bg)!important; }}
 ::-webkit-scrollbar-thumb:hover {{ background:var(--desk-accent)!important; }}
