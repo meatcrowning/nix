@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls as QQC
 
 // The compose box in a Plasma session: the KStyle's own sunken Frame around a
 // real TextArea, with a real Button beside it — Oxygen's focus frame, its
@@ -35,49 +35,52 @@ Item {
     // space under the text line and the bottom edge"]. Whatever slack the
     // button's height still imposes is now SPLIT — the input is centred on it —
     // so the box reads as padding rather than as a gap.
-    height: Math.min(180, Math.max(area.implicitHeight + frame.topPadding
-                                   + frame.bottomPadding,
+    height: Math.min(180, Math.max(area.implicitHeight + 8,
                                    sendBtn.implicitHeight))
 
-    // The compose frame is Oxygen's raised control surface — the same gradient
-    // its buttons use. The TextArea supplies editing and scrolling only; its
-    // recessed View fill would replace this surface with the hard-coded-looking
-    // pink inset that does not belong on the prompt row.
-    Frame {
+    // Draw the compose surface with the SAME native Button primitive as Send.
+    // It is only a background (disabled, empty, and below the editor), so it
+    // cannot claim a click; full opacity keeps its raised Oxygen gradient.
+    QQC.Button {
         id: frame
         anchors { left: parent.left; right: sendBtn.left; rightMargin: 6
                   verticalCenter: parent.verticalCenter }
-        height: Math.min(root.height, area.implicitHeight + topPadding + bottomPadding)
+        height: Math.min(root.height, area.implicitHeight + 8)
+        enabled: false
+        text: ""
+        background.opacity: 1.0
+        contentItem: Item { }
+    }
 
-        ScrollView {
-            anchors.fill: parent
-            clip: true
+    // The editor is transparent so the Button beneath is the only surface. Its
+    // own ScrollView/TextArea backgrounds are Oxygen's recessed View colour.
+    QQC.ScrollView {
+        anchors { fill: frame; margins: 4 }
+        clip: true
+        background: null
 
-            TextArea {
-                id: area
-                wrapMode: TextArea.Wrap
-                // Frame owns the raised Oxygen surface; do not draw the
-                // TextArea's recessed View background over it.
-                background: null
-                placeholderText: "ask the model…  (Enter to send, Shift+Enter for a newline)"
-                persistentSelection: true
-                focus: true
+        QQC.TextArea {
+            id: area
+            wrapMode: QQC.TextArea.Wrap
+            background: null
+            placeholderText: "ask the model…  (Enter to send, Shift+Enter for a newline)"
+            persistentSelection: true
+            focus: true
 
-                Keys.onPressed: function (e) {
-                    if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter)
-                        && !(e.modifiers & Qt.ShiftModifier)) {
-                        root.submitted();
-                        e.accepted = true;
-                    } else if (e.key === Qt.Key_Escape) {
-                        root.escaped();
-                        e.accepted = true;
-                    }
+            Keys.onPressed: function (e) {
+                if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter)
+                    && !(e.modifiers & Qt.ShiftModifier)) {
+                    root.submitted();
+                    e.accepted = true;
+                } else if (e.key === Qt.Key_Escape) {
+                    root.escaped();
+                    e.accepted = true;
                 }
             }
         }
     }
 
-    Button {
+    QQC.Button {
         id: sendBtn
         objectName: "sendLabel"        // same handle as ../PromptBox.qml's
         anchors { right: parent.right; verticalCenter: parent.verticalCenter }
