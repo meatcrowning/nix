@@ -108,6 +108,9 @@ exactly what it always was.
       pair; it is generic by design.
   `qmlcommon/+plasma/VScroll.qml` is the fifth fix and lives one level up,
   since every app shares it (apps/AGENTS.md → oxygenstyle).
+  `+oxygen/PromptBox.qml` deliberately routes to that same native prompt
+  control: Oxygen is the selector's first choice, so without this entry it can
+  fall through to the hard-coded Hyprland rectangle instead.
 - **`Meter.qml` and the picture frames in a reply keep OUR drawing on purpose.**
   A KStyle `ProgressBar` paints nothing inside the `QQuickWidget` (measured
   2026-08-22: blank in the app and blank in a standalone qqc2-desktop-style
