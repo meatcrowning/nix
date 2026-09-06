@@ -243,6 +243,9 @@ else:
                           ["parameters"]["properties"]["agent"]["enum"]))
     check("the system prompt names the directory to write into",
           str(d) in oracle_main.agents_note(cat2))
+    librarian = cat2 + [{"name": "librarian", "description": "music"}]
+    check("librarian routes Soulseek acquisition out of the main context",
+          "immediately spawn `librarian`" in oracle_main.agents_note(librarian))
 
 print("FAILED: " + ", ".join(fails) if fails else "OK")
 sys.exit(1 if fails else 0)

@@ -2601,6 +2601,23 @@ def agents_note(catalog=None):
         "the next spawn uses the new version. Say so when you do; do not "
         "rewrite an agent he is relying on without telling him."
         % (AGENTS_ROOT, ", ".join(sorted(AGENT_TOOL_GROUPS))))
+    # Music acquisition can make a modest user request expand into searches,
+    # transfer polling, journals and imports. Keep that operational bulk in
+    # the librarian's separate context without requiring him to ask for it on
+    # every Soulseek request. Only state the route when that specialist is
+    # actually installed: a dangling instruction is an affordance that cannot
+    # work.
+    if any(a["name"] == "librarian" for a in cat):
+        lines.append(
+            "Routing rule: when he asks to acquire, download, pull, get, grab "
+            "or fetch music through Soulseek/slskd, immediately spawn "
+            "`librarian` for the complete acquisition. Do this without asking "
+            "him to delegate it; give the agent the artist, release or link "
+            "and any stated constraints. Its searches, transfer state and "
+            "import work stay in its context; reply from its compact report. "
+            "Use the main conversation for questions or discussion ABOUT "
+            "Soulseek that do not ask to acquire music."
+        )
     return "\n".join(lines)
 
 
