@@ -122,6 +122,16 @@ aside[role="complementary"] {{ background-color:transparent!important; backgroun
   background-repeat:no-repeat!important; background-attachment:fixed!important; }}
 [data-testid="photoViewer"] [aria-label^="Timeline:"] :not(img):not(svg):not(video):not(canvas):not(path) {{
   background-color:transparent!important; border-color:transparent!important; }}
+/* Some X builds omit photoViewer's test id entirely, but the right-hand
+   conversation remains a named Timeline.  Keep this fallback unscoped: on a
+   normal page it simply continues the same fixed canvas; in media detail it
+   reaches the otherwise un-themed reply pane. */
+[aria-label^="Timeline:"] {{
+  background-color:var(--desk-bg)!important; background-image:var(--desk-window-surface)!important;
+  background-size:100vw 100vh!important; background-position:0 0!important;
+  background-repeat:no-repeat!important; background-attachment:fixed!important; }}
+[aria-label^="Timeline:"] :not(img):not(svg):not(video):not(canvas):not(path) {{
+  background-color:transparent!important; border-color:transparent!important; }}
 /* Leaving media fullscreen can leave X at its wide-navigation breakpoint.
    Keep the desktop's normal icon rail; clipping the link rather than hiding
    it preserves its label for accessibility and its icon/count for the UI. */
