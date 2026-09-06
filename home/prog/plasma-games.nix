@@ -32,6 +32,43 @@ let
         done < <(find -L "$applications_dir" -type f -name '*.desktop' -print0)
       done
 
+      # Steam records installed games as app manifests rather than desktop
+      # entries. Make launchers for those titles too, but not Steam's runtime
+      # components, and do not duplicate a launcher Steam/the user already
+      # provided with the same rungameid URL.
+      for steamapps_dir in \
+        "$HOME/.local/share/Steam/steamapps" \
+        "$HOME/.steam/steam/steamapps" \
+        "$HOME/.steam/root/steamapps"; do
+        [ -d "$steamapps_dir" ] || continue
+        while IFS= read -r -d $'\0' manifest; do
+          appid=$(basename "$manifest" | sed -n 's/^appmanifest_\([0-9][0-9]*\)\.acf$/\1/p')
+          name=$(sed -n 's/^[[:space:]]*"name"[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$manifest" | head -n 1)
+          [ -n "$appid" ] && [ -n "$name" ] || continue
+          case "$name" in
+            "Steam Linux Runtime"*|"Steamworks Common Redistributables") continue ;;
+          esac
+          already_linked=0
+          for launcher in "$staging_dir"/*.desktop; do
+            [ -e "$launcher" ] || continue
+            if grep -Fqx "Exec=steam steam://rungameid/$appid" "$launcher"; then
+              already_linked=1
+              break
+            fi
+          done
+          [ "$already_linked" = 0 ] || continue
+          cat > "$staging_dir/steam-$appid.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=$name
+Exec=steam steam://rungameid/$appid
+Icon=steam_icon_$appid
+Categories=Game;
+Terminal=false
+EOF
+        done < <(find -L "$steamapps_dir" -maxdepth 1 -type f -name 'appmanifest_*.acf' -print0)
+      done
+
       rm -rf "$games_dir"
       mv "$staging_dir" "$games_dir"
       trap - EXIT
