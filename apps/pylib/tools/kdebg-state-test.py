@@ -97,15 +97,31 @@ check("the URL carries the window's state",
       url.split("#")[0].split(",")[-1] in ("a", "i"), url)
 before = len(seen)
 app.sendEvent(win, QEvent(QEvent.WindowDeactivate))
+app.processEvents()
 check("losing focus re-requests the image", len(seen) > before,
       "%d -> %d" % (before, len(seen)))
 before = len(seen)
 app.sendEvent(view, QEvent(QEvent.Show))
-check("showing the final view geometry re-requests the image", len(seen) > before,
+app.processEvents()
+check("an unchanged show event does not re-render", len(seen) == before,
       "%d -> %d" % (before, len(seen)))
 before = len(seen)
-app.sendEvent(win, QEvent(QEvent.ApplicationPaletteChange))
+changed_pal = QPalette(view.palette())
+changed_pal.setColor(QPalette.Window, QColor(90, 40, 170))
+view.setPalette(changed_pal)
+app.processEvents()
 check("...and so does a scheme change", len(seen) > before)
+
+# A single scheme application can fan out into several equivalent events.
+# They must collapse to one render; this is what keeps that burst from turning
+# into a permanent Qt layout/background feedback loop.
+before = len(seen)
+for _ in range(20):
+    app.sendEvent(view, QEvent(QEvent.LayoutRequest))
+    app.sendEvent(view, QEvent(QEvent.PaletteChange))
+app.processEvents()
+check("an unchanged palette/layout burst does not re-render", len(seen) == before,
+      "%d -> %d" % (before, len(seen)))
 
 # ---- a QQuickWidget's palette follows the desktop's -----------------------
 # The view is handed the palette once, at construction; the app object hearing
