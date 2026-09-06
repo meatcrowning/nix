@@ -7,7 +7,11 @@
         // applets) after this root component, so it remains behind every icon
         // and label while replacing the invisible opaque FrameSvg above.
         id: unifiedPanelSurface
-        visible: opaqueItem.visible
+        // Leave a vertical panel on Plasma's solid `solid/panel-background`.
+        // The screen-space image is deliberately only for the top panel: its
+        // window-background crop would otherwise put the strongest part of
+        // Oxygen's gradient at the top of the left task strip.
+        visible: opaqueItem.visible && !root.verticalPanel
         opacity: panelOpacity
         anchors.fill: floatingTranslucentItem
         source: "file:///home/lam/.local/state/plasma-panel-surface.png"
