@@ -11,17 +11,19 @@
     This applet supplies the part Plasma has no source for, and nothing else.
     It sits immediately LEFT of the stock appmenu applet:
 
-        [kickoff] [AppName] [ File Edit View … ]      app exports a menu
-        [kickoff] [Vivaldi] [ Window ]                it does not
-        [kickoff] [Desktop] [ File Edit Go Window Help ]   nothing focused
+        [kickoff] [ File Edit View … ]                app exports a menu
+        [kickoff] [ Window ]                          it does not
+        [kickoff] [ File Edit Go Window Help ]        nothing focused
 
     so when the real menus exist they are still the stock applet's, drawn by
     the stock DBusMenu importer, and we only add the bold app-name button macOS
     puts to their left.
 
-    The desktop state follows Finder's own bar — Finder, File, Edit, View, Go,
-    Window, Help — [his, 2026-09-05] *"desktop one should have the same entires
-    and options as the mac os one"*. Two departures, both forced:
+    The desktop state folds Finder's actions into File, Edit, Go, Window and
+    Help — [his, 2026-09-05] *"desktop one should have the same entires and
+    options as the mac os one"*. The Desktop title is deliberately absent;
+    it was a window-title-shaped button, not a menu category. Two departures,
+    both forced:
 
       - VIEW is absent. Every item in Finder's View menu addresses a Finder
         window's chrome or a desktop icon arrangement, and the Plasma desktop
@@ -48,7 +50,6 @@ import org.kde.plasma.plasmoid
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.components as PlasmaComponents3
 import org.kde.plasma.plasma5support as P5Support
-import org.kde.kirigami as Kirigami
 import org.kde.taskmanager as TaskManager
 
 PlasmoidItem {
@@ -64,6 +65,9 @@ PlasmoidItem {
 
     // The delegate of the window we are naming, or null for the desktop.
     property QtObject shown: null
+    // A click on the desktop must not resurrect the previously focused app
+    // when our menu closes.  Only an actual task activation clears this.
+    property bool desktopPinned: false
 
     readonly property bool onDesktop: shown === null
     // Non-empty means the stock applet is about to draw this window's real
@@ -80,7 +84,7 @@ PlasmoidItem {
     onPanelHasFocusChanged: if (!panelHasFocus) retrack()
 
     function retrack() {
-        if (root.panelHasFocus) {
+        if (root.panelHasFocus || root.desktopPinned) {
             return;
         }
         for (let i = 0; i < taskWatcher.count; ++i) {
@@ -91,6 +95,7 @@ PlasmoidItem {
             }
         }
         root.shown = null;
+        root.desktopPinned = true;
     }
 
     TaskManager.TasksModel {
@@ -121,7 +126,12 @@ PlasmoidItem {
             readonly property bool maximizable: model.IsMaximizable === true
             readonly property bool fullScreenable: model.IsFullScreenable === true
 
-            onIsActiveChanged: root.retrack()
+            onIsActiveChanged: {
+                if (isActive && isWindow) {
+                    root.desktopPinned = false;
+                }
+                root.retrack();
+            }
         }
 
         onObjectAdded: root.retrack()
@@ -224,17 +234,15 @@ PlasmoidItem {
     function desktopMenus() {
         const menus = [
             {
-                title: "Desktop",
-                bold: true,
+                title: "File",
                 build: () => [
-                    { label: "About This System", trigger: () => runner.run("kinfocenter") },
+                    { label: "New Window", trigger: () => root.openPath("~/") },
+                    { label: "Open Trash", trigger: () => root.openKio("trash:/") },
+                    { separator: true },
+                    { label: "Find…", trigger: () => runner.run("krunner") },
                     { separator: true },
                     { label: "Settings…", trigger: () => runner.run("systemsettings") },
                     { label: "Display Settings…", trigger: () => runner.run("kcmshell6 kcm_kscreen") },
-                    { separator: true },
-                    { label: "Hide Others", trigger: () => root.shortcut("Show Desktop") },
-                    { label: "Show All", trigger: () => root.shortcut("Overview") },
-                    { separator: true },
                     {
                         label: "Empty Trash…",
                         trigger: () => runner.run(
@@ -242,15 +250,6 @@ PlasmoidItem {
                             + "'Are you sure you want to permanently erase the items in the Trash?' "
                             + "--continue-label 'Empty Trash' && ktrash6 --empty"),
                     },
-                ],
-            },
-            {
-                title: "File",
-                build: () => [
-                    { label: "New Window", trigger: () => root.openPath("~/") },
-                    { label: "Open Trash", trigger: () => root.openKio("trash:/") },
-                    { separator: true },
-                    { label: "Find…", trigger: () => runner.run("krunner") },
                 ],
             },
             {
@@ -284,13 +283,30 @@ PlasmoidItem {
             },
         ];
 
-        const windows = root.windowEntries(false);
-        if (windows.length > 0) {
-            menus.push({ title: "Window", build: () => root.windowEntries(false) });
-        }
+        menus.push({
+            title: "Window",
+            build: () => {
+                const out = [
+                    { label: "Hide Others", trigger: () => root.shortcut("Show Desktop") },
+                    { label: "Show All", trigger: () => root.shortcut("Overview") },
+                ];
+                const windows = root.windowEntries(false);
+                if (windows.length > 0) {
+                    out.push({ separator: true });
+                    for (const window of windows) {
+                        out.push(window);
+                    }
+                }
+                return out;
+            },
+        });
         menus.push({
             title: "Help",
-            build: () => [{ label: "KDE Help", trigger: () => runner.run("khelpcenter") }],
+            build: () => [
+                { label: "About This System", trigger: () => runner.run("kinfocenter") },
+                { separator: true },
+                { label: "KDE Help", trigger: () => runner.run("khelpcenter") },
+            ],
         });
         return menus;
     }
@@ -369,7 +385,7 @@ PlasmoidItem {
 
         onClicked: {
             if (isOpen || popup.justClosed()) {
-                popup.close();
+                popup.dismiss();
             } else {
                 openMine();
             }
@@ -393,18 +409,12 @@ PlasmoidItem {
     }
 
     // ---- the popup ------------------------------------------------------
-    // A PlasmaCore.Dialog rather than a QtQuick Menu: this is a panel applet,
-    // and only a real popup window is guaranteed not to be clipped to the
-    // panel it drops out of. Do NOT set `flags` on it — Qt.Popup turns this
-    // into an xdg_popup parented to the panel's layer surface, which is what
-    // made the first version's menus never appear at all (2026-09-05). The
-    // `type` alone is what tells KWin what this window is.
-
-    PlasmaCore.Dialog {
+    // Use Plasma's own Menu and MenuItem delegates: the stock appmenu uses
+    // this exact visual language, so fallbacks cannot look like a second UI.
+    PlasmaComponents3.Menu {
         id: popup
 
         property Item owner: null
-        property var entries: []
         // hideOnWindowDeactivate closes us BEFORE the press that caused it
         // reaches the button, so clicking an open menu's own button would
         // close and instantly reopen it. Anything inside this shadow is that.
@@ -413,82 +423,48 @@ PlasmoidItem {
             return !visible && Date.now() - closedAt < 200;
         }
 
-        onVisibleChanged: if (!visible) closedAt = Date.now()
-
-        type: PlasmaCore.Dialog.PopupMenu
-        hideOnWindowDeactivate: true
-        location: Plasmoid.location
-        visible: false
+        onClosed: {
+            owner = null;
+            closedAt = Date.now();
+        }
 
         function openFor(button, list) {
+            while (count > 0) {
+                const oldItem = itemAt(0);
+                removeItem(oldItem);
+                oldItem.destroy();
+            }
+            for (const entry of list) {
+                const menuItem = entry.separator === true
+                    ? separatorComponent.createObject(popup)
+                    : itemComponent.createObject(popup, { entry: entry });
+                addItem(menuItem);
+            }
             owner = button;
-            entries = list;
-            visualParent = button;
-            visible = true;
+            popup(button, 0, button.height);
         }
 
-        function close() {
-            visible = false;
-            owner = null;
+        function dismiss() {
+            close();
         }
 
-        // Dialog sizes itself from mainItem's implicit dimensions.  A
-        // ColumnLayout with fill-width rows has neither until its parent has a
-        // width, which made this dialog 0x0 and produced Plasma's "trying to
-        // show an empty dialog" warning.  This Column is measured from its
-        // delegates alone, before the dialog maps.
-        mainItem: Item {
-            implicitWidth: Math.max(1, menuColumn.implicitWidth)
-            implicitHeight: Math.max(1, menuColumn.implicitHeight)
-            width: implicitWidth
-            height: implicitHeight
+        Component {
+            id: separatorComponent
+            PlasmaComponents3.MenuSeparator { }
+        }
 
-            Column {
-                id: menuColumn
-                spacing: 0
-
-                Repeater {
-                    model: popup.entries
-
-                    delegate: Item {
-                        id: row
-
-                        readonly property var entry: modelData
-                        readonly property bool isSeparator: entry.separator === true
-
-                        implicitWidth: isSeparator ? 0
-                                                   : Math.max(Kirigami.Units.gridUnit * 8,
-                                                              item.implicitWidth)
-                        width: isSeparator ? menuColumn.width : implicitWidth
-                        height: isSeparator ? Kirigami.Units.smallSpacing * 3
-                                            : item.implicitHeight
-
-                        Rectangle {
-                            visible: row.isSeparator
-                            height: 1
-                            color: Kirigami.Theme.textColor
-                            opacity: 0.2
-                            anchors {
-                                left: parent.left
-                                right: parent.right
-                                verticalCenter: parent.verticalCenter
-                            }
-                        }
-
-                        PlasmaComponents3.ItemDelegate {
-                            id: item
-                            visible: !row.isSeparator
-                            anchors.fill: parent
-                            text: row.entry.label || ""
-                            enabled: row.entry.enabled !== false
-                            icon.name: row.entry.checked === true ? "checkmark" : ""
-                            onClicked: {
-                                popup.close();
-                                if (row.entry.trigger) {
-                                    row.entry.trigger();
-                                }
-                            }
-                        }
+        Component {
+            id: itemComponent
+            PlasmaComponents3.MenuItem {
+                required property var entry
+                text: entry.label || ""
+                enabled: entry.enabled !== false
+                checkable: entry.checked === true
+                checked: entry.checked === true
+                onTriggered: {
+                    popup.dismiss();
+                    if (entry.trigger) {
+                        entry.trigger();
                     }
                 }
             }
