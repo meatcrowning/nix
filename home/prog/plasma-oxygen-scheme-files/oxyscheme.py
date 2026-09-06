@@ -526,7 +526,7 @@ def convert(src, dst, report=None):
     stats = dict(based_alpha=0, based_colour=0, recoloured=0, untouched_art=0,
                  skipped_chromatic=0, no_body=0, edge_shaded=0, glow_damped=0,
                  raster_glow=0, raster_kept=0, raster_undecodable=0,
-                 panel_shadows_removed=0)
+                 panel_shadows_removed=0, panel_inner_edge_flattened=0)
     parents = {c: p for p in root.iter() for c in p}
 
     def ancestry(el):
@@ -725,6 +725,21 @@ def convert(src, dst, report=None):
             if p is not None:
                 p.insert(list(p).index(body) + 1, over)
                 stats['edge_shaded'] += 1
+
+    if is_panel_file:
+        # `west-right` and `east-left` are the screen-facing inner edges of a
+        # vertical panel.  Oxygen puts a separate stack of decorative strokes
+        # in those thin slices.  Once the panel is a window surface rather than
+        # a dark floating bar, that stack becomes a full-height seam.  The
+        # first paint is the slice body and the second is the ramp above; keep
+        # those and discard only the old edge decoration.
+        for edge_id in ('west-right', 'east-left'):
+            edge = doc.idx.get(edge_id)
+            if edge is None:
+                continue
+            for child in list(edge)[2:]:
+                edge.remove(child)
+                stats['panel_inner_edge_flattened'] += 1
 
     # Damp Oxygen's white edge highlights. They are alpha ramps of pure white at
     # full opacity -- right over a near-black panel, a hard line over a light
