@@ -2,9 +2,6 @@
 
 let
   pkgId = "org.kde.lam.playervisualizer";
-  oxygenVisualizer = pkgs.kdePackages.oxygen.overrideAttrs (old: {
-    patches = (old.patches or []) ++ [ ./oxygen-player-visualizer.patch ];
-  });
   cavaConfig = pkgs.writeText "player-visualizer-cava.conf"
     (builtins.readFile ./plasma-player-visualizer-files/cava.conf);
   state = pkgs.writeShellApplication {
@@ -35,10 +32,9 @@ let
     cp ${./plasma-player-visualizer-files/main.qml} $out/contents/ui/main.qml
   '';
 in {
-  # Keep the patched decoration in the user profile too.  `top` also receives
-  # it through sys/dsk/oxygen-player-visualizer.nix, which is the path KWin
-  # itself resolves; this copy keeps the Plasma-capable `book` branch aligned.
-  home.packages = [ oxygenVisualizer ];
+  # KWin resolves the patched decoration from the top system profile.  It must
+  # not also enter the user profile: player already brings in stock Oxygen,
+  # and buildEnv correctly rejects two providers for the same plugin path.
   xdg.dataFile."plasma/plasmoids/${pkgId}".source = package;
   systemd.user.services.plasma-player-visualizer = {
     Unit = { Description = "Cava state for the Plasma player visualizer"; After = [ "graphical-session.target" ]; ConditionEnvironment = "KDE_FULL_SESSION=true"; };
