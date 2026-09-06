@@ -56,9 +56,6 @@ except ValueError:
     OPACITY = 1.0
 OPACITY = min(1.0, max(0.1, OPACITY))
 
-# Draw Oxygen's window gradient behind the text (see write_gradient below).
-# KONSOLE_GRADIENT=0 turns it off and leaves a flat background.
-GRADIENT = os.environ.get("KONSOLE_GRADIENT", "1") not in ("0", "no", "")
 KONSOLE_DIR = Path(os.environ.get("KONSOLE_THEME_DIR")
                    or (Path.home() / ".local" / "share" / "konsole"))
 KONSOLERC = Path(os.environ.get("KONSOLE_THEME_RC")
@@ -133,73 +130,7 @@ def tones(pal: dict) -> dict:
 
 
 
-# ---- the background gradient -------------------------------------------------
-#
-# Konsole paints the terminal itself, so Oxygen's window gradient — the one
-# Dolphin and painter show — is covered completely and can never show through.
-# Transparency does not help: Opacity < 1 makes Qt mark the whole window
-# translucent, and what appears behind the text is then the DESKTOP, not the
-# window's own fill.
-#
-# So the gradient is drawn into an image and handed to Konsole as its wallpaper.
-# Its stops come from the active scheme's [WM] group: activeBlend is the exact
-# Oxygen titlebar stop and activeBackground is the window surface it decays
-# into.  Deriving a top by lightening `bg` made the terminal nearly white
-# (253,253,254 for the current scheme) while Oxygen's titlebar is
-# (223,229,237), so the terminal could not meet its own titlebar.
-#
-# Konsole's default FillStyle is Tile.  That restarts a tiled image at every
-# repaint rectangle, which is harmless for a photo but makes a vertical ramp
-# visibly restart whenever output changes.  NoScaling + a top-left anchor
-# samples this image in terminal coordinates instead: the 280px Oxygen fade is
-# fixed, and partial repaints sample the same pixels as a whole repaint.
-GRADIENT_FADE = int(os.environ.get("KONSOLE_GRADIENT_FADE", "280"))
-GRADIENT_H = 2048
-GRADIENT_W = 4096
-# The terminal starts below its native titlebar.  Start it at that same point
-# in Oxygen's window ramp, rather than restarting from the titlebar's lightest
-# pixel inside the client area.
-GRADIENT_OFFSET = int(os.environ.get("KONSOLE_GRADIENT_OFFSET", "34"))
-
-
-def _png(width: int, height: int, rows) -> bytes:
-    """Minimal 8-bit RGB PNG. Avoids a Pillow dependency for one gradient."""
-    import struct, zlib
-    raw = bytearray()
-    for row in rows:
-        raw.append(0)                       # filter: none
-        raw += bytes(row) * width
-    def chunk(tag, data):
-        return (struct.pack(">I", len(data)) + tag + data
-                + struct.pack(">I", zlib.crc32(tag + data) & 0xffffffff))
-    return (b"\x89PNG\r\n\x1a\n"
-            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
-            + chunk(b"IDAT", zlib.compress(bytes(raw), 9))
-            + chunk(b"IEND", b""))
-
-
-def gradient_stops(bg, source=None):
-    """The real Oxygen window stops, or None when this is not that surface."""
-    plasma = kdetheme.is_plasma() if source is None else (source == "plasma")
-    if not plasma or kdetheme.kde_widget_style() not in kdetheme.GRADIENT_STYLES:
-        return None
-    wm = kdetheme.read_ini().get("WM") or {}
-    top = kdetheme._rgb(wm.get("activeBlend"), None)
-    base = kdetheme._rgb(wm.get("activeBackground"), None)
-    return (top, base) if top and base else None
-
-
-def write_gradient(top, base) -> "pathlib.Path":
-    rows = []
-    for y in range(GRADIENT_H):
-        f = min(1.0, (y + GRADIENT_OFFSET) / max(1, GRADIENT_FADE))
-        rows.append(tuple(round(top[i] + (base[i] - top[i]) * f) for i in range(3)))
-    path = KONSOLE_DIR / ("%s-gradient.png" % SCHEME_NAME.lower())
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(_png(GRADIENT_W, GRADIENT_H, rows))
-    return path
-
-def build(pal: dict, source=None, write_wallpaper=True) -> str:
+def build(pal: dict, source=None) -> str:
     """The `.colorscheme` file, for every konsole started from now on."""
     t = tones(pal)
 
@@ -216,25 +147,15 @@ def build(pal: dict, source=None, write_wallpaper=True) -> str:
         out.append("[%s]\nColor=%s\n" % (sect, _kc(t[key])))
     for n in range(8):
         slot(n, t[str(n)], t["%dFaint" % n], t["%dIntense" % n])
-    # Opacity < 1 makes the terminal translucent against whatever is behind the
-    # WINDOW (wallpaper, other windows) — KWin composites it; it is not Oxygen's
-    # window gradient showing through, which an opaque terminal covers entirely.
-    # Blur follows transparency: unblurred text over a busy wallpaper is the
-    # thing that makes a translucent terminal unreadable.
-    wallpaper = ""
-    stops = gradient_stops(t["bg"], source)
-    if GRADIENT and stops:
-        try:
-            path = KONSOLE_DIR / ("%s-gradient.png" % SCHEME_NAME.lower())
-            wallpaper = str(write_gradient(*stops) if write_wallpaper else path)
-        except Exception as exc:                      # never break the scheme
-            print("konsole-theme: gradient skipped (%s)" % exc, file=sys.stderr)
-    out.append("[General]\nBlur=%s\nColorRandomization=false\n"
-               "Description=%s\nOpacity=%s\nWallpaper=%s\n"
-               "FillStyle=NoScaling\nAnchor=0,0\n"
-               "WallpaperOpacity=1\nWallpaperFlipType=NoFlip\n"
-               % ("true" if OPACITY < 1.0 else "false", SCHEME_NAME,
-                  ("%g" % OPACITY), wallpaper))
+    # In Plasma Konsole's own window is translucent.  Leaving the TerminalDisplay
+    # transparent exposes the REAL KStyle-painted parent behind it — the same
+    # continuous field that joins Oxygen's titlebar, toolbar and window body.
+    # A copied wallpaper can only guess that field and drifts at the border.
+    plasma = kdetheme.is_plasma() if source is None else (source == "plasma")
+    opacity = 0 if plasma else OPACITY
+    out.append("[General]\nBlur=false\nColorRandomization=false\n"
+               "Description=%s\nOpacity=%s\nWallpaper=\n"
+               % (SCHEME_NAME, "%g" % opacity))
     return "".join(out)
 
 
@@ -480,7 +401,7 @@ def main() -> int:
     a = ap.parse_args()
 
     pal, prov = palette(a.source)
-    scheme = build(pal, a.source, write_wallpaper=not a.dump)
+    scheme = build(pal, a.source)
     if a.dump:
         sys.stderr.write("konsole-theme: from %s\n" % prov)
         sys.stdout.write(scheme)
