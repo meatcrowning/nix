@@ -29,6 +29,24 @@ case "$accent" in
 esac
 
 scheme="$(kreadconfig6 --file kdeglobals --group General --key ColorScheme 2>/dev/null || true)"
+[ -n "$scheme" ] || exit 0
+
+# The Plasma panel's continuous Oxygen surface is a rendered image, not a
+# live SVG fill.  A wallpaper change rewrites the selected .colors file and
+# wakes plasma-panel-surface.path, but switching between two already-minted
+# schemes changes only kdeglobals: text follows immediately while that image
+# keeps the previous scheme's background.  Queue one refresh for a genuine
+# scheme-name transition.  The cache also absorbs this script's own KConfig
+# notifications, and the renderer itself avoids a plasmashell restart when the
+# resulting pixels are unchanged.
+panel_scheme_cache="$WAL_CACHE/plasma-panel-scheme"
+if [ "$(cat "$panel_scheme_cache" 2>/dev/null || true)" != "$scheme" ]; then
+    mkdir -p "$WAL_CACHE"
+    printf '%s' "$scheme" > "$panel_scheme_cache"
+    systemctl --user --no-block start plasma-panel-surface.service \
+        >/dev/null 2>&1 || true
+fi
+
 case "$scheme" in
     OxygenDarkFlat|OxygenDarkNeutral|OxygenLightFlat) ;;
     *) exit 0 ;;
