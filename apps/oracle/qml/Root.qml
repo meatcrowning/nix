@@ -2771,20 +2771,44 @@ Item {
 
                                 // The speaker's name, OUTSIDE the bubble and on its
                                 // side — a caption, not a line of the message
-                                // (§9.1: subordinated, one step dim).
-                                PixelText {
-                                    id: whoText
-                                    x: isUser ? turnStack.width - width : 0
-                                    // Just the speaker, ONCE per turn. The caption
-                                    // used to name the round from 2 on ("model ·
-                                    // round 2"); the SPLIT is what he wanted, not a
-                                    // label on it [his, 2026-08-22] — and the later
-                                    // rounds of one turn repeat neither the name nor
-                                    // anything else between their bubbles [his,
-                                    // 2026-08-23].
-                                    visible: isUser || turn.isHead
-                                    text: who
-                                    color: Theme.textDim
+                                // (§9.1: subordinated, one step dim). The running
+                                // reasoning-token count rides BESIDE THE NAME [his,
+                                // 2026-09-05]: it used to sit in the thinking
+                                // heading below, among the tool disclosures, which
+                                // is where the turn's machinery lives — the count is
+                                // about the message, so it belongs on the message's
+                                // own caption line.
+                                Item {
+                                    width: parent.width
+                                    height: whoText.visible ? whoText.height : 0
+                                    PixelText {
+                                        id: whoText
+                                        x: isUser ? parent.width - width : 0
+                                        // Just the speaker, ONCE per turn. The caption
+                                        // used to name the round from 2 on ("model ·
+                                        // round 2"); the SPLIT is what he wanted, not a
+                                        // label on it [his, 2026-08-22] — and the later
+                                        // rounds of one turn repeat neither the name nor
+                                        // anything else between their bubbles [his,
+                                        // 2026-08-23].
+                                        visible: isUser || turn.isHead
+                                        text: who
+                                        color: Theme.textDim
+                                    }
+                                    // Ticks live while the model reasons and PERSISTS
+                                    // once the turn settles — the same number the
+                                    // thinking heading used to carry, one step dim so
+                                    // it stays subordinate to the name it follows.
+                                    PixelText {
+                                        anchors { left: whoText.right; leftMargin: 6
+                                                  baseline: whoText.baseline }
+                                        visible: !isUser && turn.isHead
+                                                 && turn.agg.thinkTokens > 0
+                                        text: win.fmtCount(turn.agg.thinkTokens)
+                                              + (turn.agg.thinkTokens === 1 ? " token"
+                                                                            : " tokens")
+                                        color: Theme.textDim
+                                    }
                                 }
 
                                 // ---- the turn's bookkeeping, ONCE, at the top of it
@@ -2915,22 +2939,6 @@ Item {
                                                 PixelText {
                                                     visible: think.hasBody
                                                     text: think.expanded ? "-" : "+"
-                                                    color: Theme.textDim
-                                                }
-                                                // The reasoning-token count, named and
-                                                // still, to the LEFT of the time [his,
-                                                // 2026-08-22]: "240 tokens", "1.2k
-                                                // tokens". It PERSISTS once counted, so a
-                                                // COLLAPSED block still reports its size
-                                                // after the answer starts — the heading is
-                                                // all he sees when it is folded (§9.1
-                                                // subordinated — one step dim, never
-                                                // accent).
-                                                PixelText {
-                                                    visible: turn.agg.thinkTokens > 0
-                                                    text: win.fmtCount(turn.agg.thinkTokens)
-                                                          + (turn.agg.thinkTokens === 1 ? " token ·"
-                                                                               : " tokens ·")
                                                     color: Theme.textDim
                                                 }
                                                 // The state, and the ellipsis rides it

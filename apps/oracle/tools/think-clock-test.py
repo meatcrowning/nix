@@ -159,7 +159,7 @@ def headings():
                                        or t.startswith("thinking")
                                        or t.startswith("thought")
                                        or t.startswith("loading")
-                                       or t.endswith("tokens ·") or t.endswith("token ·")):
+                                       or t.endswith(" tokens") or t.endswith(" token")):
                 out.append(t)
             walk(ch, d + 1)
 
@@ -195,8 +195,11 @@ spin(100)
 h = headings()
 check("once it settles it reads `thought for …`",
       any(x.startswith("thought for") for x in h), repr(h))
-check("the token count is beside it, on the left",
-      any(x.endswith("token ·") or x.endswith("tokens ·") for x in h), repr(h))
+# The count moved out of the clock heading and onto the speaker caption beside
+# the name [his, 2026-09-05] — still one PixelText in the tree, without the "·"
+# that used to rule it off from the state text.
+check("the token count is drawn, beside the speaker's name",
+      any(x.endswith(" token") or x.endswith(" tokens") for x in h), repr(h))
 check("no state text is left running",
       not any(x.startswith("waiting") or x.startswith("thinking") for x in h),
       repr(h))
