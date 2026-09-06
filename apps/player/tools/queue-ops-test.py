@@ -97,6 +97,8 @@ def mk(queue_ids, index, shuffle=False, orig=None):
     p._mpv = FakeMpv()
     p._mpv.pl = [t["path"] for t in p._queue]
     p._mpv.playlist_pos = max(0, index)
+    p._mpv_fill_token = 0
+    p._mpv_fill_pending = False
     p._prefs = type("Pf", (), {"get": lambda *a: None, "set": lambda *a: None})()
     p._rg_mode, p._rg_preamp, p._rg_fallback = "off", 0.0, 0.0
     return p
@@ -126,6 +128,17 @@ p = mk([], -1)
 p.queueTracks([4, 5])
 check("empty queue becomes a play", ids(p), [4, 5])
 check("...and starts it", p._index, 0)
+
+print("deferred session restore")
+p = mk(list(range(1, 13)), 3)
+p._sync_mpv(3, paused=True, defer_rest=True)
+check("restore opens only the current track before the event loop", p._mpv.pl,
+      ["/t/4.flac"])
+for _ in range(20):
+    app.processEvents()
+check("restore fills the queued tail in later event-loop turns", p._mpv.pl,
+      [f"/t/{i}.flac" for i in range(4, 13)])
+check("restore fill settles", p._mpv_fill_pending, False)
 
 p = mk([2, 1, 3], 0, shuffle=True, orig=[1, 2, 3])
 p.queueTracks([9])
