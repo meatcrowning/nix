@@ -88,6 +88,7 @@ import boorutags  # noqa: E402  (pylib; the Danbooru vocabulary anima was captio
 import fleet  # noqa: E402  (chatter's own; the subagent/jobs pane and its target helper)
 from sessions import Sessions  # noqa: E402  (named transcript/store Qt seam)
 from turnmetrics import TurnMetrics  # noqa: E402  (content-free turn timings)
+from routing import request_tools  # noqa: E402  (first-request schema routing)
 
 #: The local ollama daemon. Loopback-pinned like everything else that speaks to
 #: a local backend here — never a new listener (root AGENTS.md → the tailnet).
@@ -1926,9 +1927,12 @@ def skill_tool(catalog=None):
                 "job, written for exactly this task and better than anything "
                 "you would improvise. Call it BEFORE you start writing "
                 "whenever the job matches one, then follow what it returns to "
-                "the letter, including its output contract (a skill may "
-                "require that your whole reply IS the thing it produces, with "
-                "no preamble and no offer to revise). Call it again with "
+                "the letter. An output contract such as 'reply with the prompt "
+                "and nothing else' governs your FINAL answer only when that is "
+                "what he asked you to deliver. When another tool requires the "
+                "skill as preparation, use its instructions to prepare that "
+                "tool's arguments, call the tool, and finish the larger job. "
+                "Call it again with "
                 "`guide` to read one of the reference guides it lists. "
                 "The installed skills and what each is for are listed in your "
                 "system instructions; `name` below is the same live catalog."),
@@ -1956,8 +1960,10 @@ def skills_note(catalog=None):
         return ""
     lines = ["Skills available to you, loaded with the use_skill tool. Each is "
              "expert instructions for one job; when what he asks matches one, "
-             "call use_skill FIRST and then follow it exactly, including its "
-             "output contract:"]
+             "call use_skill FIRST and follow it. A skill's output-only contract "
+             "is your final-answer contract only when he asked for that output; "
+             "when a tool requires the skill as preparation, continue on to "
+             "that tool:"]
     # The full description is returned by use_skill. This always-on catalog is
     # only the router; cap prose-heavy frontmatter so nineteen skills do not
     # consume thousands of tokens before the model sees the user's request.
@@ -2274,6 +2280,17 @@ EXTRA_TOOL_GROUPS = {
     "memory": ["save_memory", "list_memories", "delete_memory"],
     "models": ["manage_models"],
     "self": ["describe_self"],
+}
+
+#: Once a model enters one lifecycle, keep the controls it will need on the
+#: very next round.  `run_job` without status/log/stop made starting work easier
+#: than checking or correcting it; attaching only the one name it happened to
+#: call preserved that trap for the rest of the turn.
+TOOL_COMPANIONS = {
+    **{name: list(EXTRA_TOOL_GROUPS["jobs"])
+       for name in EXTRA_TOOL_GROUPS["jobs"]},
+    **{name: list(AGENT_TOOL_GROUPS["write"])
+       for name in AGENT_TOOL_GROUPS["write"]},
 }
 
 #: What a subagent gets when its definition names no tools. Everything that
@@ -2812,55 +2829,28 @@ SAVE_GUIDANCE = (
 #: here too (docs/DESIGN.md §10 affordance honesty: never imply an ability that
 #: silently is not there, in either direction, and never overstate a jail).
 CAPABILITY_NOTE = (
-    "What you can actually do in this app, through function tools offered every "
-    "turn: search the public web; READ a web page or JSON URL by link "
-    "(fetch_url); fetch and display images; PLAY A VIDEO inline "
-    "(show_video — a YouTube or other watch page, or a direct video "
-    "file, streamed into the chat with a play button he presses); "
-    "read the current time in any "
-    "timezone; INSTALL AND MANAGE THE MODELS THEMSELVES (manage_models: list, "
-    "show, pull a new one from the ollama library with progress, remove one) — "
-    "use it rather than `ollama` in a shell; "
-    "SEARCH HIS MUSIC LIBRARY and put something on (music_library "
-    "finds tracks and albums with their paths; control_media play_these / "
-    "queue_these plays or queues them); "
-    "SHOW him a picture that is already on the machine (show_image — "
-    "for a chart you plotted or a file you found: it costs you nothing and "
-    "needs no vision); GENERATE one (make_image, his own image backend — "
-    "ALWAYS load the matching prompt skill with use_skill before you write any "
-    "image prompt: anima-prompt for anime (then booru_tags the result), "
-    "krea-prompt for photoreal, flux-klein-edit for edits, video-prompt for "
-    "video. Never skip it, never write an image prompt from memory); LOOK "
-    "AT HIS SCREEN (screenshot); SEE AND CONTROL ANY MEDIA (control_media — "
-    "what is playing, pause, skip, seek, volume, on the machine this window "
-    "runs on); read a "
-    "file's real type, size, duration, codecs and TAGS without opening it "
-    "(file_metadata); read, write, edit, move, delete and search files on the host — "
+    "What you can actually do in this app: the core function tools are attached "
+    "to every request; the compact 'Other tools' index names the rest, and "
+    "get_tools attaches their full schemas. Use the index instead of guessing "
+    "arguments. The families cover: files and a real Python/Bash shell; web, "
+    "Wikipedia, URLs and APIs; current time; past sessions and durable memory; "
+    "music search/playback and Last.fm; images, video, audio and the screen; "
+    "model management; long background jobs; reusable skills; and subagents "
+    "whose bulky work stays out of this context. describe_self reports the "
+    "exact live inventory. For image/video GENERATION, load the matching prompt "
+    "skill before writing the generator arguments: anima-prompt (then validate "
+    "with booru_tags), krea-prompt, flux-klein-edit or video-prompt. Loading a "
+    "skill is preparation when the requested result is the generated media, "
+    "not a reason to stop with prompt text. File tools reach "
     + ("the WHOLE filesystem, not a sandbox, exactly what the user himself can "
        "touch" if WRITE_FREE else
        "reading anywhere, writing only inside your own sandbox directory") +
-    " (files he drags onto the window are staged for you too); read your "
-    "past conversations; save, list and delete your own durable memories; load "
-    "a SKILL (use_skill) — expert instructions for one job, listed for you "
-    "below; SPAWN A SUBAGENT (spawn_agent) to do a bulky job in its own "
-    "context and hand you back only the answer, and write or edit the agent "
-    "definitions those are built from; RUN Python code (run_python); and RUN "
-    "BASH (run_bash) — a real "
-    "shell, so grep, find, sed, cp, mv, git and pipelines of them are how you "
-    "do file work, not something you only describe. Both runners execute on the "
-    "host as the user, with the network up, killed after a few seconds and "
-    "capped in CPU and memory. That reach is real and so is the damage it can "
-    "do: look at a file before you overwrite it, prefer editing to replacing, "
+    ". Files he drops are staged for you. Commands run as the user, with the "
+    "network, short time and resource limits, no confirmation or undo, and no "
+    "root. Look before overwriting, prefer a targeted edit, "
     "never delete or move anything you did not create unless he asked for it in "
-    "this conversation, and say what you changed. Nothing you run is confirmed "
-    "first and nothing is undone. You cannot use root (there is no sudo). "
-    "Describe your abilities in these terms, and call "
-    "describe_self for the exact live tool list — never claim a capability you "
-    "do not have, and never deny one you do. Some of the tools you are offered "
-    "are HIS: he writes them as scripts in a directory and they appear beside "
-    "the app's own (their descriptions say so). You can read and write that "
-    "directory with the file tools, so if a job needs a tool that does not "
-    "exist, you can propose one — or write it.")
+    "this conversation, verify changes, and say what changed. Never claim a "
+    "capability absent from describe_self or deny one it lists.")
 
 #: FINISH THE JOB. A model that treats one tool round as one turn stops after a
 #: look-around and describes what it would do next, which left him pressing
@@ -5219,26 +5209,10 @@ class Ollama(QObject):
         self._squeezed = False       # …and nothing has squeezed it yet
         self._extra_tools = set()    # a fresh turn attaches its own tools
         self._tool_seen = {}         # no result can leak into a later turn
-        # Generation schemas are ~1.9k tokens together. Attach them when the
-        # prompt asks for pixels, not to every factual/file/code conversation.
-        low = prompt.lower()
-        if gen or re.search(r"\b(make|create|generate|draw|render|edit)\b.{0,35}"
-                            r"\b(image|picture|photo|art|illustration)\b", low):
-            self._extra_tools.add("make_image")
-        if (gen and gen["tool"] == "make_video") or re.search(
-                r"\b(make|create|generate|animate|render)\b.{0,35}"
-                r"\b(video|clip|animation)\b", low):
-            self._extra_tools.add("make_video")
-        # Library claims are mutable and a poisoned summary memory once made a
-        # nonexistent label sound like part of his collection. Put the live
-        # catalog schema directly in front of even a small model when the ask is
-        # about what he owns or library stats; do not make it discover the door.
-        if re.search(r"\b(music|audio) library\b|\b(library|collection) stats\b|"
-                     r"\b(what|which).{0,30}\b(albums?|artists?|tracks?|comps?)\b",
-                     low):
-            self._extra_tools.add("music_library")
-        if re.search(r"\blast\.?fm\b|\bscrobbl", low):
-            self._extra_tools.add("lastfm")
+        # Put only an obvious request's family on its FIRST request. Ambiguous
+        # work stays lean and reaches everything through get_tools.
+        self._extra_tools.update(request_tools(
+            prompt, gen["tool"] if gen else ""))
         self._resp_t0 = 0.0
         self._resp_tokens = 0
         self._set_tps(0.0)
@@ -6071,55 +6045,45 @@ class Ollama(QObject):
                 "current with save_memory/delete_memory:\n" + "\n".join(lines))
 
     def _system_prompt(self, research=""):
-        """A minimal system message that pins an unambiguous `now`. The model
-        otherwise dates itself from its training; here it gets the real instant
-        in local time and UTC, and is told to call get_current_time for any
-        other zone rather than guessing a DST offset.
+        """Build one cache-friendly system message with an unambiguous `now`.
 
-        Local time leads: a bare "what time is it" means "here", and UTC can be
-        a calendar day ahead of a negative-offset zone (Alaska at night, say) —
-        leading with UTC's date made the model report that later date as "the
-        current time" and it read as reporting the future. Naming local time
-        first as *the* current time, with UTC only as a cross-reference, is
-        what keeps the model's default answer matching what "now" means to him."""
+        Stable guidance and catalogs lead; memories, request-specific research
+        depth and the exact clock trail.  The clock used to be the first token
+        and changed every second, invalidating the reusable prefix before the
+        server reached thousands of otherwise-identical instruction tokens.
+        Local time still leads inside the clock block so a bare "what time" is
+        answered for here rather than for UTC's sometimes-different date.
+        """
         now = datetime.now(timezone.utc)
         local = now.astimezone()
-        base = ("The current time right now is %s local time (%s), which is "
-                "%s UTC. When asked for the current time or date with no place "
-                "specified, answer with the local time above, not the UTC one. "
-                "For the time or date somewhere else, call get_current_time "
-                "with an IANA timezone rather than converting it yourself."
-                % (local.strftime("%Y-%m-%d %H:%M:%S"),
-                   local.tzname() or local.strftime("%z"),
-                   now.strftime("%Y-%m-%d %H:%M:%S")))
-        memory_block = self._memory_block()
-        if memory_block:
-            base += "\n\n" + memory_block
-        base += "\n\n" + RECALL_GUIDANCE
-        base += "\n\n" + SAVE_GUIDANCE
-        base += "\n\n" + GROUNDING_NOTE
-        base += "\n\n" + CAPABILITY_NOTE
-        base += "\n\n" + PERSISTENCE_NOTE
-        base += "\n\n" + MARKER_NOTE
-        tools = tools_note()
-        if tools:
-            base += "\n\n" + tools
-        skills = skills_note()
-        if skills:
-            base += "\n\n" + skills
-        agents = agents_note()
-        if agents:
-            base += "\n\n" + agents
-        base += "\n\n" + authoring_note()
-        if research:
-            base += "\n\n" + research
-        # His chosen base (a preset or his own custom text) LEADS — the time
-        # line, memory block and recall/save guidance above always run whatever
-        # base is active; only this leading block swaps.
+        blocks = []
         lead = self._base_prompt()
         if lead:
-            base = lead + "\n\n" + base
-        return base
+            blocks.append(lead)
+        blocks += [PERSISTENCE_NOTE, GROUNDING_NOTE, CAPABILITY_NOTE,
+                   RECALL_GUIDANCE, SAVE_GUIDANCE, MARKER_NOTE]
+        tools = tools_note()
+        if tools:
+            blocks.append(tools)
+        skills = skills_note()
+        if skills:
+            blocks.append(skills)
+        agents = agents_note()
+        if agents:
+            blocks.append(agents)
+        blocks.append(authoring_note())
+        memory_block = self._memory_block()
+        if memory_block:
+            blocks.append(memory_block)
+        if research:
+            blocks.append(research)
+        blocks.append(
+            "The current time right now is %s local time (%s), which is %s UTC. "
+            "For another place call get_current_time with its IANA timezone."
+            % (local.strftime("%Y-%m-%d %H:%M:%S"),
+               local.tzname() or local.strftime("%z"),
+               now.strftime("%Y-%m-%d %H:%M:%S")))
+        return "\n\n".join(blocks)
 
     def _run_job_tool(self, name, args, idx, remaining, calls):
         """run_job / job_status / job_log / job_stop, through the one `Jobs`
@@ -7014,6 +6978,9 @@ class Ollama(QObject):
             # on a `get_tools` for a tool it has already used correctly.
             if name in reg and name not in CORE_TOOL_NAMES:
                 self._extra_tools.add(name)
+            for companion in TOOL_COMPANIONS.get(name, ()):
+                if companion in reg:
+                    self._extra_tools.add(companion)
             # Name every call in the transcript, whatever it is — the generic
             # indicator, so a tool with no richer disclosure is never silent.
             self.toolCallStarted.emit(name or "tool")
