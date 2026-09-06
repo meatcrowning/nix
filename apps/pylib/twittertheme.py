@@ -24,19 +24,22 @@ def css(pal):
   --desk-accent:{accent}; --desk-dim:{dim}; --desk-text:{text}; --desk-muted:{text_dim};
   --desk-highlight:{highlight}; --desk-ok:{ok}; --desk-warn:{warn}; --desk-crit:{crit}; --desk-info:{info};
   --desk-window-surface:url(http://127.0.0.1:8791/oxygen-window.png); }}
-html, body, #react-root, [data-testid="primaryColumn"], [data-testid="sidebarColumn"],
-[role="main"], [role="banner"], [role="navigation"], [data-testid="BottomBar"] {{
+/* One fixed canvas, not one mini-gradient per X component.  The structural
+   wrappers below stay transparent so the field runs continuously through the
+   feed, composer, and sidebar. */
+html, body, #react-root {{
   background-color:var(--desk-bg)!important; background-image:var(--desk-window-surface)!important;
   background-size:100vw 100vh!important; background-position:0 0!important;
   background-repeat:no-repeat!important; background-attachment:fixed!important;
   color:var(--desk-text)!important; }}
 [data-testid="primaryColumn"], [data-testid="sidebarColumn"], [role="main"],
+[role="banner"], [role="navigation"], [data-testid="BottomBar"] {{
+  background-color:transparent!important; background-image:none!important; }}
+[data-testid="primaryColumn"], [data-testid="sidebarColumn"], [role="main"],
 [data-testid="sidebarColumn"] > div {{ border-color:var(--desk-border)!important; }}
 [data-testid="tweet"], [data-testid="cellInnerDiv"], [data-testid="trend"],
-[data-testid="conversation"] {{ background-color:var(--desk-bg)!important;
-  background-image:var(--desk-window-surface)!important; background-size:100vw 100vh!important;
-  background-position:0 0!important; background-repeat:no-repeat!important;
-  background-attachment:fixed!important; border-color:var(--desk-border)!important; }}
+[data-testid="conversation"] {{ background-color:transparent!important;
+  background-image:none!important; border-color:var(--desk-border)!important; }}
 [data-testid="tweet"]:hover, [data-testid="cellInnerDiv"]:hover,
 [role="link"]:hover, [role="menuitem"]:hover, [data-testid="UserCell"]:hover {{
   background-color:var(--desk-highlight)!important; }}
@@ -64,15 +67,12 @@ div:has(> [data-testid="tweetTextarea_0"]),
 div:has(> div > [data-testid="tweetTextarea_0"]),
 [data-testid="sidebarColumn"] > div,
 [data-testid="sidebarColumn"] > div > div,
-aside[role="complementary"] {{ background-color:var(--desk-bg)!important; }}
+aside[role="complementary"] {{ background-color:transparent!important; background-image:none!important; }}
 /* X paints premium/news/trend cards through generated classes at arbitrary
    nesting depths.  The sidebar has no media canvas, so colour its complete
    structural subtree rather than trying to chase those unstable classes. */
 [data-testid="sidebarColumn"],
-[data-testid="sidebarColumn"] * {{ background-color:var(--desk-bg)!important;
-  background-image:var(--desk-window-surface)!important; background-size:100vw 100vh!important;
-  background-position:0 0!important; background-repeat:no-repeat!important;
-  background-attachment:fixed!important; }}
+[data-testid="sidebarColumn"] * {{ background-color:transparent!important; }}
 [data-testid="SearchBox_Search_Input"],
 [data-testid="SearchBox_Search_Input"] * {{ background-color:var(--desk-bg)!important; }}
 /* The tab-strip's add-tab control is a separate header button, outside the
