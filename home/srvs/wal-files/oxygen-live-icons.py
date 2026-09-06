@@ -62,6 +62,29 @@ def activate(name):
                         "org.kde.KGlobalSettings.notifyChange", "int32:4", "int32:0"], check=False)
 
 
+def active_theme():
+    """Return KDE's selected icon theme before this render changes it."""
+    if kreadconfig := shutil.which("kreadconfig6"):
+        result = subprocess.run(
+            [kreadconfig, "--file", "kdeglobals", "--group", "Icons", "--key", "Theme"],
+            check=False, capture_output=True, text=True)
+        return result.stdout.strip()
+    return ""
+
+
+def refresh_plasma_shell(previous, current):
+    """Discard Plasma applets' icon pixmaps after an actual theme transition."""
+    if previous == current:
+        return
+    if systemctl := shutil.which("systemctl"):
+        # Qt applications honour KGlobalSettings' icon notification, but Plasma
+        # Folder/Trash applets retain their QML pixmaps.  Restart only a running
+        # Plasma shell after the renderer has completed; this is a no-op under
+        # Hyprland and does not run for a same-theme reapply.
+        subprocess.run([systemctl, "--user", "try-restart", "plasma-plasmashell.service"],
+                       check=False)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--accent", required=True, metavar="RRGGBB")
@@ -79,6 +102,7 @@ def main():
     with lock.open("w") as lock_file:
         fcntl.flock(lock_file, fcntl.LOCK_EX)
         previous = state.read_text().strip().split() if state.exists() else []
+        selected = active_theme()
         # KDE retains pixmaps by theme name.  The name therefore identifies
         # immutable pixels: both the transform version and the accent belong
         # in it, rather than reusing one of two mutable directories.
@@ -92,6 +116,7 @@ def main():
             state.write_text(RENDER_VERSION + " " + accent + "\n")
         if not args.no_activate:
             activate(name)
+            refresh_plasma_shell(selected, name)
     print(name)
 
 
