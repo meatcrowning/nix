@@ -1,30 +1,20 @@
     Image {
         // This is a crop of ONE screen-sized, real Oxygen window background.
         // Both panels therefore take their pixels from the same field: where
-        // they meet, the tint and gradient continue without a seam.
+        // they meet, the tint and gradient continue without a seam. Keep it
+        // fully present instead of tying it to Plasma's adaptive opacity: the
+        // opaque/fullscreen face is the intended panel face at every time.
         //
         // Keep this at the default z.  Plasma creates the containment (the
         // applets) after this root component, so it remains behind every icon
         // and label while replacing the invisible opaque FrameSvg above.
         id: unifiedPanelSurface
-        // The screen-space image is deliberately only for the top panel: its
-        // window-background crop would otherwise put the strongest part of
-        // Oxygen's gradient at the top of the left task strip.
-        visible: opaqueItem.visible && !root.verticalPanel
-        opacity: panelOpacity
+        visible: root.floatingness === 0
+        opacity: 1
         anchors.fill: floatingTranslucentItem
         source: "file:///home/lam/.local/state/plasma-panel-surface.png"
         sourceClipRect: Qt.rect(Math.round(panel.x), Math.round(panel.y),
                                 Math.round(width), Math.round(height))
         fillMode: Image.Pad
         cache: false
-    }
-    Rectangle {
-        // Oxygen's `solid/panel-background` still contains a radial gloss.
-        // A palette role is the only true flat panel face and tracks the
-        // active colour scheme without baking a wallpaper-specific colour.
-        visible: opaqueItem.visible && root.verticalPanel
-        opacity: panelOpacity
-        anchors.fill: floatingTranslucentItem
-        color: Kirigami.Theme.backgroundColor
     }
