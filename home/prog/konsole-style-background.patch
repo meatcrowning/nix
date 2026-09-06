@@ -58,3 +58,24 @@ index 5d819327..ec602555 100644
      if (!m_parentDisplay->wallpaper()->isNull()
          && m_parentDisplay->wallpaper()->draw(painter, rect, useOpacitySetting ? m_parentDisplay->terminalColor()->opacity() : 1.0, backgroundColor)) {
      } else if (qAlpha(m_parentDisplay->terminalColor()->blendColor()) < 0xff && useOpacitySetting) {
+diff --git a/src/terminalDisplay/TerminalScrollBar.cpp b/src/terminalDisplay/TerminalScrollBar.cpp
+--- a/src/terminalDisplay/TerminalScrollBar.cpp
++++ b/src/terminalDisplay/TerminalScrollBar.cpp
+@@ -16,6 +16,8 @@
+ #include "session/SessionController.h"
+ 
+ // KDE
++#include <KColorScheme>
++#include <KSharedConfig>
+ 
+ // Qt
+ #include <QGuiApplication>
+@@ -264,6 +266,8 @@
+     // fall back to generic widget colors.
+     if (appStyle->objectName() == QLatin1String("breeze")) {
+         setPalette(_backgroundMatchingPalette);
++    } else if (appStyle->objectName() == QLatin1String("oxygen")) {
++        setPalette(KColorScheme::createApplicationPalette(KSharedConfig::openConfig()));
+     } else {
+         setPalette(QGuiApplication::palette());
+     }
