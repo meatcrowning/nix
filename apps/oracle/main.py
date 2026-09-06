@@ -1675,6 +1675,13 @@ HOUSE_FILES = ("AGENTS.md", "CLAUDE.md")
 FILE_READ_TOOL_NAMES = {"list_dir", "read_file", "find_files", "search_text",
                         "show_tree", "file_metadata"}
 
+# A dead SMB/exFAT mount can leave even `os.listdir()` in uninterruptible I/O.
+# File tools are asynchronous so the window still paints, but a tool ROUND was
+# waiting only for QProcess.finished: one stuck directory therefore left the
+# model's turn on "thinking" forever.  A timeout completes the logical tool
+# call; the process stays referenced until the kernel eventually releases it.
+FS_TOOL_TIMEOUT_MS = 20_000
+
 #: The SESSION-READ tools (list_sessions / read_session), offered beside the
 #: file and web tools so the model can reach past conversations he has had with
 #: it — not just this one. Read-only from the model's side: no save/delete
@@ -10706,19 +10713,16 @@ class Ollama(QObject):
         argv = self._fs_argv(target_host)
         proc = QProcess(self)
         self._procs.append(proc)
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        settled = False
 
-        def finished(*_):
-            if proc not in self._procs:
+        def settle(result):
+            nonlocal settled
+            if settled:
                 return
-            self._procs.remove(proc)
-            try:
-                out = bytes(proc.readAllStandardOutput())
-                err = bytes(proc.readAllStandardError())
-                rc = proc.exitCode()
-            except RuntimeError:
-                return
-            proc.deleteLater()
-            result = self._fs_result(out, err, rc)
+            settled = True
+            timer.stop()
             # The tree's own guide, named the first time this conversation
             # touches that tree (HOUSE_FILES) — so he never has to point the
             # agent at the rules of the place it is standing in.
@@ -10733,11 +10737,37 @@ class Ollama(QObject):
                                    "error" not in result)
             self._tool_done(remaining, calls)
 
+        def finished(*_):
+            if proc not in self._procs:
+                return
+            self._procs.remove(proc)
+            try:
+                out = bytes(proc.readAllStandardOutput())
+                err = bytes(proc.readAllStandardError())
+                rc = proc.exitCode()
+            except RuntimeError:
+                return
+            proc.deleteLater()
+            timer.deleteLater()
+            settle(self._fs_result(out, err, rc))
+
+        def timed_out():
+            # SIGKILL releases an ordinary slow child.  A D-state process
+            # cannot be killed until its mount answers, so leave it referenced
+            # for `finished()` rather than destroying a live QProcess.  Either
+            # way, the TOOL round must be allowed to complete now.
+            settle({"error": ("file operation timed out after %ds; the "
+                              "filesystem may be unavailable — do not repeat "
+                              "this call") % (FS_TOOL_TIMEOUT_MS // 1000)})
+            proc.kill()
+
         proc.finished.connect(finished)
         proc.errorOccurred.connect(lambda *_: None)  # surfaced through finished
+        timer.timeout.connect(timed_out)
         proc.start(argv[0], argv[1:])
         proc.write(json.dumps(req).encode("utf-8"))
         proc.closeWriteChannel()
+        timer.start(FS_TOOL_TIMEOUT_MS)
 
     # ---- the code runner (jailed, on top) ----
 
