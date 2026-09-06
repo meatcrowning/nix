@@ -45,14 +45,16 @@ Item {
         contentItem: Item {}
     }
 
-    // Oxygen has no speech-bubble primitive. These outward curls sit behind
-    // its native button: replies point left and user messages point right.
+    // Oxygen has no speech-bubble primitive. These outward curls overlap its
+    // lower edge by one pixel: replies point left and user messages point
+    // right. They must be ABOVE the native control — behind it their fill is
+    // covered by the conversation surface and reads as a detached outline.
     // Use the control palette rather than Theme.bg: the native button is
     // lighter than Chatter's view background under Oxygen.
     Shape {
         anchors.fill: parent
         visible: !root.user
-        z: -1
+        z: 1
         ShapePath {
             strokeWidth: 1
             strokeColor: root.isError ? Theme.crit : frame.palette.mid
@@ -71,7 +73,7 @@ Item {
     Shape {
         anchors.fill: parent
         visible: root.user
-        z: -1
+        z: 1
         ShapePath {
             strokeWidth: 1
             strokeColor: root.isError ? Theme.crit : frame.palette.mid
