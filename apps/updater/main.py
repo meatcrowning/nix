@@ -501,6 +501,48 @@ def main():
     if not engine.rootObjects():
         sys.exit(1)
 
+    fixture = None
+    if os.environ.get("UPDATER_RESOURCE_FIXTURE") == "1":
+        from resourcefixture import ResourceFixture
+
+        root = engine.rootObjects()[0]
+        normal_lock = Path(os.environ["UPDATER_RESOURCE_NORMAL_LOCK"])
+        stress_lock = Path(os.environ["UPDATER_RESOURCE_STRESS_LOCK"])
+
+        def load_lock(source):
+            # REPO is a harness-owned scratch tree in fixture mode.  Replacing
+            # its lock exercises the real watcher/model without touching the
+            # checked-out flake that updater normally manages.
+            (REPO / "flake.lock").write_bytes(source.read_bytes())
+            inputs.refresh()
+
+        def reset_view():
+            if runner.busy:
+                runner.stop()
+            root.setProperty("logText", "")
+            root.setProperty("status", "")
+            root.setProperty("pkgsByInput", {})
+            root.setProperty("expanded", {})
+            root.setProperty("previewing", "")
+
+        def normal():
+            reset_view()
+            load_lock(normal_lock)
+            runner.previewInput("nixpkgs")
+
+        def stress():
+            reset_view()
+            load_lock(stress_lock)
+            runner.check(False)
+
+        def clear():
+            reset_view()
+            load_lock(normal_lock)
+
+        fixture = ResourceFixture(
+            app, {"normal": normal, "stress": stress, "clear": clear},
+            settle_ms=750)
+
     sys.exit(app.exec())
 
 
