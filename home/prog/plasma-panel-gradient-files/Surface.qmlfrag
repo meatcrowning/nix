@@ -6,7 +6,6 @@
         visible: opaqueItem.visible
         opacity: panelOpacity
         anchors.fill: floatingTranslucentItem
-        z: 0.1 // above the retained mask FrameSvg; below dynamically-added applets
 
         Rectangle {
             anchors.fill: parent
