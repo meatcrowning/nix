@@ -1,5 +1,3 @@
-{ pkgs, ... }:
-
 # Oxygen, rebuilt so its chrome follows the SELECTED COLOUR SCHEME.
 #
 # Why stock Oxygen does not. Two independent mechanisms, and Oxygen fails both:
@@ -45,7 +43,13 @@
 #
 # This installs a SEPARATE style and changes nothing on its own -- it is inert
 # until picked in System Settings -> Colours & Themes -> Plasma Style.
+{ lib, pkgs, ... }:
+
 let
+  panel-surface-python = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
+  panel-surface-renderer = pkgs.writeShellScriptBin "plasma-panel-surface-renderer" ''
+    exec ${panel-surface-python}/bin/python ${./plasma-panel-gradient-files/render-surface.py}
+  '';
   # Plasma's FrameSvg tiles its five-pixel centre.  That works for a texture,
   # but cannot represent one gradient shared by a horizontal and vertical
   # panel.  Overlay the stock shell view with a real screen-space surface;
@@ -89,5 +93,28 @@ in
   home.file.".local/share/plasma/shells/org.kde.plasma.desktop" = {
     source = panel-gradient-view;
     force = true;
+  };
+
+  home.packages = [ panel-surface-renderer ];
+
+  # The generated image is a cache of the active Qt style, so refresh it on
+  # activation and whenever Plasma's palette/theme settings change.
+  home.activation.renderPlasmaPanelSurface = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    ${panel-surface-renderer}/bin/plasma-panel-surface-renderer || true
+  '';
+  systemd.user.services.plasma-panel-surface = {
+    Unit.Description = "render the shared Plasma panel surface";
+    Service = {
+      Type = "oneshot";
+      ExecStart = "${panel-surface-renderer}/bin/plasma-panel-surface-renderer";
+    };
+  };
+  systemd.user.paths.plasma-panel-surface = {
+    Unit.Description = "refresh the shared Plasma panel surface after theme changes";
+    Path.PathChanged = [
+      "%h/.config/kdeglobals"
+      "%h/.config/plasmarc"
+    ];
+    Install.WantedBy = [ "default.target" ];
   };
 }
