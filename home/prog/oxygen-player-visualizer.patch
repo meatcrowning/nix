@@ -1,0 +1,76 @@
+--- a/kdecoration/oxygendecoration.h
++++ b/kdecoration/oxygendecoration.h
+@@ -114,6 +114,7 @@
+ 
+     //* title text
+     void renderTitleText(QPainter *, const QPalette &) const;
++    void renderPlayerVisualizer(QPainter *, const QPalette &, const QRect &) const;
+ 
+     //* corners
+     void renderCorners(QPainter *, const QRectF &, const QPalette &) const;
+--- a/kdecoration/oxygendecoration.cpp
++++ b/kdecoration/oxygendecoration.cpp
+@@ -23,6 +23,11 @@
+ #include <KSharedConfig>
+ 
+ #include <QPainter>
++#include <QFile>
++#include <QJsonDocument>
++#include <QStandardPaths>
++#include <algorithm>
++#include <cmath>
+ #include <QTextStream>
+ #include <QTimer>
+ 
+@@ -185,6 +190,12 @@ bool Decoration::init()
+ 
+     createButtons();
+     updateShadow();
++    if (window()->windowClass().contains(QStringLiteral("player"), Qt::CaseInsensitive)) {
++        auto *visualizerTimer = new QTimer(this);
++        visualizerTimer->setInterval(34);
++        connect(visualizerTimer, &QTimer::timeout, this, [this]() { update(titleBar()); });
++        visualizerTimer->start();
++    }
+     return true;
+ }
+ 
+@@ -598,7 +609,13 @@
+     painter->setFont(settings()->font());
+ 
+     // caption rect
+-    const auto cR = captionRect();
++    auto cR = captionRect();
++    const bool player = window()->windowClass().contains(QStringLiteral("player"), Qt::CaseInsensitive);
++    QRect visualizer;
++    if (player && cR.first.width() >= 112) {
++        visualizer = QRect(cR.first.right() - 71, cR.first.top(), 72, cR.first.height());
++        cR.first.setRight(visualizer.left() - settings()->smallSpacing());
++    }
+ 
+     // copy caption
+     const QString caption = painter->fontMetrics().elidedText(window()->caption(), Qt::ElideMiddle, cR.first.width());
+@@ -614,6 +625,23 @@
+     const auto color(fontColor(palette));
+     painter->setPen(color);
+     painter->drawText(cR.first, cR.second | Qt::TextSingleLine, caption);
++    if (!visualizer.isNull())
++        renderPlayerVisualizer(painter, palette, visualizer);
++}
++
++void Decoration::renderPlayerVisualizer(QPainter *painter, const QPalette &palette, const QRect &rect) const
++{
++    QFile state(QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation) + QStringLiteral("/player-visualizer.json"));
++    if (!state.open(QIODevice::ReadOnly)) return;
++    const auto levels = QJsonDocument::fromJson(state.readAll()).object().value(QStringLiteral("levels")).toArray();
++    const QColor color = fontColor(palette);
++    for (qsizetype i = 0; i < levels.size(); ++i) {
++        const int left = rect.left() + (rect.width() * i) / levels.size();
++        const int right = rect.left() + (rect.width() * (i + 1)) / levels.size() - 1;
++        const qreal level = std::clamp(levels.at(i).toDouble() / 100.0, 0.0, 1.0);
++        const int height = qMax(1, qRound(rect.height() * std::pow(level, 0.55)));
++        painter->fillRect(QRect(left, rect.bottom() - height + 1, qMax(1, right - left + 1), height), color);
++    }
+ }
+ 
+ } // namespace
