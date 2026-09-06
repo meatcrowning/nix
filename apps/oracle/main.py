@@ -42,15 +42,129 @@ from html.parser import HTMLParser
 
 from PySide6.QtCore import (QObject, Slot, Signal, Property, QUrl, QUrlQuery,
                             QBuffer, QFileSystemWatcher, QProcess,
-                            QProcessEnvironment, Qt, QTimer)
-from PySide6.QtGui import QGuiApplication, QColor, QImage
+                            QProcessEnvironment, Qt, QTimer, QRect)
+from PySide6.QtGui import (QGuiApplication, QColor, QImage, QPainterPath,
+                           QPen)
 from PySide6.QtNetwork import (QNetworkAccessManager, QNetworkRequest,
                                QNetworkReply)
-from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
+from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, qmlRegisterType
 # Imported for its side effect: it registers the QtQuick wrapper types, so the
 # QML root arrives as a QQuickWindow rather than a bare QWindow — which is what
 # the selftest's `grabWindow()` needs.
-from PySide6.QtQuick import QQuickWindow  # noqa: F401
+from PySide6.QtQuick import QQuickWindow, QQuickPaintedItem  # noqa: F401
+
+
+class OxygenBubblePaint(QQuickPaintedItem):
+    """One Oxygen-painted button clipped to a speech-bubble silhouette."""
+
+    changed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._user = False
+        self._error = False
+        self._body_height = 0.0
+        self._outline = QColor("transparent")
+        self.setAntialiasing(True)
+
+    def _get_user(self):
+        return self._user
+
+    def _set_user(self, value):
+        value = bool(value)
+        if value != self._user:
+            self._user = value
+            self.changed.emit()
+            self.update()
+
+    user = Property(bool, _get_user, _set_user, notify=changed)
+
+    def _get_error(self):
+        return self._error
+
+    def _set_error(self, value):
+        value = bool(value)
+        if value != self._error:
+            self._error = value
+            self.changed.emit()
+            self.update()
+
+    error = Property(bool, _get_error, _set_error, notify=changed)
+
+    def _get_body_height(self):
+        return self._body_height
+
+    def _set_body_height(self, value):
+        value = max(0.0, float(value))
+        if value != self._body_height:
+            self._body_height = value
+            self.changed.emit()
+            self.update()
+
+    bodyHeight = Property(float, _get_body_height, _set_body_height,
+                          notify=changed)
+
+    def _get_outline(self):
+        return self._outline
+
+    def _set_outline(self, value):
+        value = QColor(value)
+        if value != self._outline:
+            self._outline = value
+            self.changed.emit()
+            self.update()
+
+    outlineColor = Property(QColor, _get_outline, _set_outline, notify=changed)
+
+    def _path(self):
+        w = max(0.0, self.width())
+        h = max(0.0, self.height())
+        body = min(h, max(0.0, self._body_height))
+        tail = max(0.0, h - body)
+        tail_w = min(11.0, w)
+        r = min(3.0, w / 2.0, body / 2.0)
+        path = QPainterPath()
+        path.moveTo(r, 0)
+        path.lineTo(w - r, 0)
+        path.quadTo(w, 0, w, r)
+        if self._user:
+            path.lineTo(w, body + tail)
+            path.cubicTo(w - 3, body + tail,
+                         w - 8, body + tail - 2,
+                         w - tail_w, body)
+            path.lineTo(r, body)
+            path.quadTo(0, body, 0, body - r)
+        else:
+            path.lineTo(w, body - r)
+            path.quadTo(w, body, w - r, body)
+            path.lineTo(tail_w, body)
+            path.cubicTo(8, body + tail - 2,
+                         3, body + tail,
+                         0, body + tail)
+        path.lineTo(0, r)
+        path.quadTo(0, 0, r, 0)
+        path.closeSubpath()
+        return path
+
+    def paint(self, painter):
+        from PySide6.QtWidgets import QApplication, QStyle, QStyleOptionButton
+
+        path = self._path()
+        painter.save()
+        painter.setClipPath(path)
+        option = QStyleOptionButton()
+        option.rect = QRect(0, 0, max(1, round(self.width())),
+                            max(1, round(self.height())))
+        option.palette = QApplication.palette()
+        option.state = QStyle.State_Enabled | QStyle.State_Active
+        QApplication.style().drawControl(QStyle.CE_PushButton, option, painter)
+        painter.restore()
+        painter.setPen(QPen(self._outline, 1))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPath(path)
+
+
+qmlRegisterType(OxygenBubblePaint, "Chatter", 1, 0, "OxygenBubblePaint")
 
 HERE = Path(__file__).resolve().parent
 QML = HERE / "qml"
