@@ -76,20 +76,20 @@ GLOW_SCALE = float(os.environ.get('OXYSCHEME_GLOW_SCALE', '0.35'))
 # glows have no place on it.  Even its 1–2% residual stack reads as a hard line
 # at the side panel's window-facing edge.
 PANEL_GLOW_SCALE = float(os.environ.get('OXYSCHEME_PANEL_GLOW', '0.0'))
-# A panel carries the same light-to-base ramp as an empty window, through its
-# THIN dimension.  North/south run it vertically like a titlebar; east/west
-# run it horizontally from the screen edge toward the windows.  Sending the
-# side panel's ramp down its long axis made it read as a separate surface.
+# A panel samples one screen-tall light-to-base field: the north panel occupies
+# only its first 34px, while a west/east panel carries that same field down the
+# screen.  Its SVG is rotated, so an east/west panel needs the *local x* axis
+# to make the gradient run down the physical screen.
 # OxygenLightFlat's real titlebar is Background (198,209,224) → Blend
 # (223,229,237): a 0.43 white overlay, not the 0.96 body-background estimate
 # this replaced.  Use the titlebar's stop so a vertical panel joins it exactly.
 PANEL_TOP_ALPHA = float(os.environ.get('OXYSCHEME_PANEL_TOP', '0.43'))
 PANEL_BOTTOM_ALPHA = float(os.environ.get('OXYSCHEME_PANEL_BOTTOM', '0.0'))
-# Plasma's top/bottom frame slices are fixed-size caps; the centre owns almost
-# all of a vertical panel's physical height.  Split the one screen-ramp across
-# those caps instead of restarting it at every seam.
-PANEL_BANDS = {'top': (0.00, 0.02), 'center': (0.02, 0.98), 'bottom': (0.98, 1.00),
-               'left': (0.02, 0.98), 'right': (0.02, 0.98)}
+# Plasma's five-pixel frame caps need their corresponding screen-space samples,
+# rather than restarting the field in each slice.  The 34px north panel is the
+# first 3.2% of this 1080px desktop; a vertical side panel spans all of it.
+PANEL_CAP_FRAC = 5.0 / 1080.0
+PANEL_NORTH_FRAC = 34.0 / 1080.0
 CENTRE_AMPLITUDE = float(os.environ.get('OXYSCHEME_AMPLITUDE', '0.12'))
 # Oxygen shades with black. Plasma's accent lands on the Selection group, so
 # ColorScheme-Highlight IS the accent colour -- pointing the dark end of every
@@ -272,11 +272,26 @@ def gradient_screen_x_sign(el, parents, axis):
     return 1 if component >= 0 else -1
 
 def panel_gradient_invert(el, parents, axis, location):
-    """Put a side panel's light stop at its outside screen edge."""
-    if location in ('east', 'west'):
-        sign = gradient_screen_x_sign(el, parents, axis)
-        return sign > 0 if location == 'east' else sign < 0
+    """Put the field's light stop at the physical top of every panel."""
     return gradient_screen_y_sign(el, parents, axis) < 0
+
+def panel_band(location, slice_name):
+    """Return this framesvg slice's interval in the shared screen field."""
+    if location == 'north':
+        if slice_name == 'top':
+            return (0.0, PANEL_CAP_FRAC)
+        if slice_name == 'bottom':
+            return (PANEL_NORTH_FRAC - PANEL_CAP_FRAC, PANEL_NORTH_FRAC)
+        return (PANEL_CAP_FRAC, PANEL_NORTH_FRAC - PANEL_CAP_FRAC)
+    if location in ('east', 'west'):
+        if slice_name == 'top':
+            return (0.0, PANEL_CAP_FRAC)
+        if slice_name == 'bottom':
+            return (1.0 - PANEL_CAP_FRAC, 1.0)
+        return (PANEL_CAP_FRAC, 1.0 - PANEL_CAP_FRAC)
+    if location == 'south':
+        return (1.0 - PANEL_NORTH_FRAC, 1.0)
+    return None
 
 # ---------- role inference ----------
 def role_family(filename):
@@ -379,8 +394,9 @@ def respin_alpha(doc, src_gid, stops, mode, axis='v', invert=False, panel=False,
         if panel_location == 'south':
             # Likewise, the bottom bar samples the field after it has faded.
             hi = lo
-        if panel and band in PANEL_BANDS:
-            f0, f1 = PANEL_BANDS[band]
+        field_band = panel_band(panel_location, band) if panel else None
+        if field_band is not None:
+            f0, f1 = field_band
             span = hi - lo
             hi, lo = hi - span * f0, hi - span * f1
         ramp = ((0.0, hi), (1.0, lo))
@@ -613,7 +629,7 @@ def convert(src, dst, report=None):
                 # white titlebar ramp instead of preserving Oxygen's dark gloss.
                 if is_panel and ALPHA_MODE == 'titlebar':
                     eid_l = (el.get('id') or '').lower()
-                    ax = 'v'
+                    ax = 'h' if eid_l.startswith(('east-', 'west-')) else 'v'
                     inv = panel_gradient_invert(body, parents, ax,
                                                 eid_l.split('-', 1)[0])
                     band = eid_l.rsplit('-', 1)[-1] if '-' in eid_l else None
@@ -650,7 +666,8 @@ def convert(src, dst, report=None):
                 if ALPHA_MODE in ('flip', 'centre', 'titlebar'):
                     eid_l = (el.get('id') or '').lower()
                     is_panel = os.path.basename(src).startswith('panel-background')
-                    ax = ('v' if is_panel else
+                    ax = (('h' if eid_l.startswith(('east-', 'west-')) else 'v')
+                          if is_panel else
                           ('h' if ('east' in eid_l or 'west' in eid_l) else 'v'))
                     loc = eid_l.split('-', 1)[0] if is_panel else None
                     inv = (panel_gradient_invert(body, parents, ax, loc)
@@ -693,7 +710,8 @@ def convert(src, dst, report=None):
     for prefix, gid in centre_ramp.items():
         centre_el = doc.idx.get(f"{prefix}-center")
         c_sx, c_sy = axis_signs(centre_el, parents) if centre_el is not None else (1, 1)
-        ax = ('v' if is_panel_file else
+        ax = (('h' if prefix.lower() in ('east', 'west') else 'v')
+              if is_panel_file else
               ('h' if ('east' in prefix.lower() or 'west' in prefix.lower()) else 'v'))
         for side in ('left', 'right', 'top', 'bottom'):
             el = doc.idx.get(f"{prefix}-{side}")
