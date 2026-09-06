@@ -28,7 +28,10 @@ let
           grep -qx 'Type=Application' "$desktop_file" || continue
           grep -Eq '^Categories=([^;]*;)*Game(;|$)' "$desktop_file" || continue
           grep -Eq '^(Hidden|NoDisplay)=true$' "$desktop_file" && continue
-          ln -s "$desktop_file" "$staging_dir/$desktop_name"
+          # Folder View's compact popup does not consistently follow launcher
+          # symlinks after its model has been reconfigured. Keep a normal
+          # desktop entry here; the next refresh replaces it from its source.
+          cp --dereference "$desktop_file" "$staging_dir/$desktop_name"
         done < <(find -L "$applications_dir" -type f -name '*.desktop' -print0)
       done
 
