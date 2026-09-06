@@ -679,7 +679,7 @@ Item {
           menu: "file", icon: App.busy ? "list-add" : "media-playback-start",
           bar: true, shortcut: "Ctrl+Return" },
         { id: "stop", label: "x",    tb: true, state: App.busy ? 0 : 2,
-          tip: "Stop and save", menu: "file", icon: "process-stop",
+          tip: "Stop", menu: "file", icon: "process-stop",
           bar: true, shortcut: "Ctrl+." },
         "-",
         { id: "open", tip: "Open in Viewer", menu: "file",
