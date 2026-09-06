@@ -1,24 +1,15 @@
 #!/bin/sh
 # claude-state-premigrate.sh — make ~/.claude safe for claude-memory-sync.sh to
-# treat as a single repo. Runs as ExecStartPre on every tick; idempotent, and a
-# no-op once both steps below have happened.
+# treat as a single repo. It runs as ExecStartPre, is idempotent, and becomes a
+# no-op after the migration steps below have happened.
 #
-# WHY THIS EXISTS
+# ~/.claude/projects used to be its own repo with an allowlist .gitignore. The
+# sync now covers the whole of ~/.claude, so that inner repo must go: otherwise
+# git would record projects/ as a gitlink and none of its contents would sync.
+# `book` cannot be migrated by hand, so the unit has to do it itself.
 #
-# ~/.claude/projects used to be its own git repo (the claude-memories remote,
-# an ALLOWLIST that tracked only */memory/**). The sync now covers the whole of
-# ~/.claude, transcripts included, so that inner repo has to go: git would
-# otherwise record projects/ as a gitlink — a bare commit hash — and not one
-# byte of what is inside it would ever reach the other machine. The failure is
-# silent, which is exactly how the orchestrator briefing went missing in the
-# first place.
-#
-# `book` cannot be migrated by hand (it is a laptop, frequently off and off-LAN),
-# so this has to be something the unit does for itself on first run there.
-#
-# NOTHING IS DELETED. The inner .git is MOVED aside, and the claude-memories
-# remote still holds the full memory history — this repo starts fresh, but no
-# history is destroyed on either side.
+# Nothing is deleted. The inner .git is moved aside, and the old remote remains
+# an archive.
 
 REPO="${CM_SYNC_REPO:-$HOME/.claude}"
 BRANCH="${CM_SYNC_BRANCH:-main}"
@@ -45,11 +36,8 @@ if [ -d "$REPO/projects/.git" ]; then
 fi
 
 # The old repo's seeded .gitignore/.gitattributes outlive its .git, and the
-# .gitignore is the ALLOWLIST — `*`, re-include only `*/memory/**`. A nested
-# .gitignore still applies to its own subtree in the OUTER repo, so leaving it
-# there quietly reproduced the exact bug this change exists to fix: everything
-# else synced and not one transcript did. Caught only because the first run was
-# checked file-by-file; `git add -A` reports nothing about what it skipped.
+# .gitignore was the allowlist. Left in place, it would keep re-creating the
+# original bug: everything else synced, and not one transcript did.
 for stale in .gitignore .gitattributes; do
   [ -f "$REPO/projects/$stale" ] || continue
   dest="$HOME/.cache/claude-memories-projects$stale-$(date +%Y%m%d-%H%M%S)"
@@ -64,24 +52,21 @@ done
 
 # ---- 2. repo + merge driver -------------------------------------------------
 # claude-memory-sync.sh bootstraps the repo itself, but the `ours` merge driver
-# has to exist BEFORE its first `git merge`, and the script has no hook for
-# that. Doing both here keeps the shared script generic.
+# has to exist before its first merge. Doing both here keeps the shared script
+# generic.
 [ -d "$REPO/.git" ] || {
   git -C "$REPO" init -q -b "$BRANCH" || { log "git init failed"; exit 1; }
   log "initialised $REPO"
 }
 
 # `ours` is not a built-in: .gitattributes naming it is inert unless the repo
-# declares a driver for it, and `true` is the whole implementation (exit 0,
-# leaving the target file — our version — in place).
+# declares a driver for it, and `true` is the whole implementation.
 git -C "$REPO" config merge.ours.driver true
 
-# Same deal for `claudemd`, the frontmatter-aware driver for the memory store —
-# and the same failure mode if it is missing: .gitattributes names it, git finds
-# no driver, and silently falls back to the `*.md merge=union` line above, which
-# is the exact behaviour that fused two revisions of one memory into a malformed
-# document. Registered here rather than in the shared sync engine because that
-# script is generic and reused by nix-docs.nix, which has no memory store.
+# Same deal for `claudemd`, the frontmatter-aware driver for the memory store:
+# if it is missing, git falls back to the `*.md merge=union` rule above and can
+# silently duplicate frontmatter. It is registered here because the shared sync
+# engine is generic and reused by nix-docs.nix.
 DRIVER="${CM_SYNC_MERGE_DRIVER:-$HOME/.config/scripts/claude-memory-merge.sh}"
 if [ -x "$DRIVER" ]; then
   git -C "$REPO" config merge.claudemd.driver "$DRIVER %O %A %B %L %P"
