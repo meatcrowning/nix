@@ -35,39 +35,43 @@ Item {
     // space under the text line and the bottom edge"]. Whatever slack the
     // button's height still imposes is now SPLIT — the input is centred on it —
     // so the box reads as padding rather than as a gap.
-    height: Math.min(180, Math.max(area.implicitHeight, sendBtn.implicitHeight))
+    height: Math.min(180, Math.max(area.implicitHeight + frame.topPadding
+                                   + frame.bottomPadding,
+                                   sendBtn.implicitHeight))
 
-    // THE STYLE'S OWN TEXT INPUT, not a Frame around one. Oxygen draws an input
-    // as a recessed hole — a dark View-coloured fill inside a rounded inset
-    // frame — while a `Frame` is a group box's relief: the window colour behind
-    // a flat outline. Wrapping the TextArea in a Frame and blanking the
-    // TextArea's own background therefore drew the one thing this face is for
-    // (a real KDE control) as the one thing it is not [his, 2026-08-22: the
-    // compose row "isnt in style for oxygen"]. A `ScrollView` holding a
-    // `TextArea` with the background the style gives it IS the multi-line input
-    // every KDE program uses.
-    ScrollView {
+    // The compose frame is Oxygen's raised control surface — the same gradient
+    // its buttons use. The TextArea supplies editing and scrolling only; its
+    // recessed View fill would replace this surface with the hard-coded-looking
+    // pink inset that does not belong on the prompt row.
+    Frame {
         id: frame
         anchors { left: parent.left; right: sendBtn.left; rightMargin: 6
                   verticalCenter: parent.verticalCenter }
-        height: Math.min(root.height, area.implicitHeight)
-        clip: true
+        height: Math.min(root.height, area.implicitHeight + topPadding + bottomPadding)
 
-        TextArea {
-            id: area
-            wrapMode: TextArea.Wrap
-            placeholderText: "ask the model…  (Enter to send, Shift+Enter for a newline)"
-            persistentSelection: true
-            focus: true
+        ScrollView {
+            anchors.fill: parent
+            clip: true
 
-            Keys.onPressed: function (e) {
-                if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter)
-                    && !(e.modifiers & Qt.ShiftModifier)) {
-                    root.submitted();
-                    e.accepted = true;
-                } else if (e.key === Qt.Key_Escape) {
-                    root.escaped();
-                    e.accepted = true;
+            TextArea {
+                id: area
+                wrapMode: TextArea.Wrap
+                // Frame owns the raised Oxygen surface; do not draw the
+                // TextArea's recessed View background over it.
+                background: null
+                placeholderText: "ask the model…  (Enter to send, Shift+Enter for a newline)"
+                persistentSelection: true
+                focus: true
+
+                Keys.onPressed: function (e) {
+                    if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter)
+                        && !(e.modifiers & Qt.ShiftModifier)) {
+                        root.submitted();
+                        e.accepted = true;
+                    } else if (e.key === Qt.Key_Escape) {
+                        root.escaped();
+                        e.accepted = true;
+                    }
                 }
             }
         }
