@@ -147,7 +147,9 @@ def op_search(req):
 
 def op_albums(req):
     """Albums, with their track count and total time — the shape of the library
-    at the level people actually pick music."""
+    at the level people actually pick music. An artist match on any contained
+    track includes its whole release: album_artist is not a complete contributor
+    list."""
     where, args = [], []
     q = str(req.get("q") or "").strip()
     if q:
@@ -159,11 +161,20 @@ def op_albums(req):
         where.append("(album_artist LIKE ? OR artist LIKE ?)")
         args += ["%" + artist + "%"] * 2
     n = limit_of(req)
-    sql = ("SELECT album, COALESCE(NULLIF(album_artist,''), artist) AS artist, "
-           "COUNT(*) AS tracks, SUM(COALESCE(duration,0)) AS seconds, "
-           "MAX(year) AS year, MIN(path) AS one_path "
-           "FROM tracks%s GROUP BY album, artist "
-           "ORDER BY artist COLLATE NOCASE, year, album COLLATE NOCASE LIMIT ?"
+    # Select candidate albums first, then aggregate every track in each one.
+    # Filtering the aggregate itself reports only a guest's matching tracks.
+    sql = ("WITH matched AS ("
+           " SELECT DISTINCT album, COALESCE(NULLIF(album_artist,''), artist) AS group_artist"
+           " FROM tracks%s"
+           ") "
+           "SELECT t.album, COALESCE(NULLIF(t.album_artist,''), t.artist) AS artist, "
+           "COUNT(*) AS tracks, SUM(COALESCE(t.duration,0)) AS seconds, "
+           "MAX(t.year) AS year, MIN(t.path) AS one_path "
+           "FROM tracks t JOIN matched m "
+           "ON m.album IS t.album "
+           "AND m.group_artist IS COALESCE(NULLIF(t.album_artist,''), t.artist) "
+           "GROUP BY t.album, COALESCE(NULLIF(t.album_artist,''), t.artist) "
+           "ORDER BY artist COLLATE NOCASE, year, t.album COLLATE NOCASE LIMIT ?"
            % ((" WHERE " + " AND ".join(where)) if where else ""))
     con = db()
     cur = con.execute(sql, args + [n])
