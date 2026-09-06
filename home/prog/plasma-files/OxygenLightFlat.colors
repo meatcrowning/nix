@@ -152,12 +152,20 @@ ForegroundNormal=34,31,30
 ForegroundPositive=0,110,40
 ForegroundVisited=100,74,155
 
+# THE TITLEBAR IS THE WINDOW'S OWN SURFACE. activeBackground/inactiveBackground
+# and both Blend stops are held equal to [Colors:Window] BackgroundNormal, so the
+# decoration meets the top of the client with no seam — which is the whole point
+# of Oxygen's frame. They are NOT automatically in step: plasma-scheme.py tints
+# the [WM] keys too, but only their HUE, so raising the saturation of the Colors
+# groups and leaving [WM] alone leaves the titlebar greyer and lighter than the
+# window under it (seen on Konsole, 2026-09-05: titlebar 208,211,214 against a
+# window top of 198,209,224). If the surface tint above changes, change these.
 [WM]
-activeBackground=214,210,208
-activeBlend=214,210,208
+activeBackground=224,207,198
+activeBlend=224,207,198
 activeForeground=34,31,30
-inactiveBackground=214,210,208
-inactiveBlend=214,210,208
+inactiveBackground=224,207,198
+inactiveBlend=224,207,198
 inactiveForeground=34,31,30
 
 [General]
