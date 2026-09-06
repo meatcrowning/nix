@@ -71,6 +71,10 @@
     Style.StackedWidgetTransitionsEnabled = true;
     ActiveShadow.Enabled = false;
     Windeco.ButtonSize = "ButtonSmall";
-    Windeco.TitleAlignment = "AlignRight";
+
+    # TitleAlignment is NOT declared: he sets it himself (AlignLeft as of
+    # 2026-09-05) and a declared value is re-asserted on EVERY switch, so
+    # pinning it silently reverted his choice every time anything here was
+    # rebuilt. Same reasoning as kwinrc ButtonsOnRight in home/plasma.nix.
   };
 }

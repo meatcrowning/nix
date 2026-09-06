@@ -217,7 +217,10 @@ in
       # character back in both button tables and implements the roll itself
       # (kwin-rollup-overlay in flake.nix). Reorder HERE, not in System
       # Settings: this value is declared, so a switch would undo a drag.
-      kwinrc."org.kde.kdecoration2".ButtonsOnRight = "LFIX";
+      # ButtonsOnRight/ButtonsOnLeft are NOT declared: he arranges the titlebar
+      # buttons himself (ButtonsOnLeft=XIM, ButtonsOnRight=F as of 2026-09-05)
+      # and a declared value is re-asserted on every switch, so pinning it
+      # reverted his layout on each rebuild.
       kwinrc.Desktops.Number = 1;
       kwinrc.Desktops.Rows = 1;
       kwinrc.Tiling.padding = 4;
