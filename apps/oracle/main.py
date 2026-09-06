@@ -79,7 +79,7 @@ sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 from warden import BackendClientLease, Warden  # noqa: E402  (arbiter + daemon lifetime)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
-from kdetheme import theme_source, is_plasma  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+from kdetheme import theme_source, watch_palette, is_plasma  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
 from oxygenstyle import is_oxygen, read_oxygen  # noqa: E402  (pylib; Plasma AND the widget style is Oxygen, and its settings)
 import kdeshell  # noqa: E402  (pylib; the Plasma session's real QtWidgets window)
 import lastfm as lastfmlib  # noqa: E402  (pylib; his Last.fm account, shared with player)
@@ -3330,6 +3330,11 @@ class Palette(QObject):
             self._watcher.addPath(d)   # dir watch catches atomic replaces
         self._rewatch()
         self._load()
+        # In Plasma, `kdetheme` has already observed kdeglobals and rewritten
+        # this source by the time it calls us.  Reload now instead of waiting
+        # for this second QFileSystemWatcher to receive that replacement.
+        self._palette_callback = self._load
+        watch_palette(self._palette_callback)
 
     def _rewatch(self):
         if os.path.exists(self._path) and self._path not in self._watcher.files():

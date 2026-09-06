@@ -572,11 +572,33 @@ class _Bridge:
     def _sync(self, *_):
         self._rewatch()
         colors = kde_palette()
-        if colors:
-            write_generated(colors)
+        if colors and write_generated(colors):
+            # The file watcher remains as a cross-process fallback.  These are
+            # the apps in THIS process, and they need not wait for that second
+            # filesystem event after KDE has already told us the scheme moved.
+            for callback in tuple(_palette_callbacks):
+                try:
+                    callback()
+                except Exception:
+                    pass
 
 
 _bridge = None
+_palette_callbacks = []
+
+
+def watch_palette(callback):
+    """Call ``callback`` as soon as Plasma has derived a new app palette.
+
+    Watching the generated file is still necessary for the Hyprland path, but
+    using it as the only Plasma notification adds a second inotify/event-loop
+    hop after ``kdeglobals`` changes.  Keep these callbacks process-local: the
+    bridge already observes the source KDE writes, so a live app can repaint in
+    that same turn rather than waiting for its watcher to notice our generated
+    replacement.
+    """
+    if is_plasma() and callback not in _palette_callbacks:
+        _palette_callbacks.append(callback)
 
 
 def theme_source(default):

@@ -71,7 +71,7 @@ QML = HERE / "qml"
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
-from kdetheme import theme_source, is_plasma  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+from kdetheme import theme_source, watch_palette, is_plasma  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
 import kdeshell  # noqa: E402  (pylib; the Plasma session's real QtWidgets window)
 from glyphs import Glyphs  # noqa: E402  (pylib; docs/DESIGN.md 2.3 display-site px())
 
@@ -202,6 +202,10 @@ class Palette(QObject):
             self._watcher.addPath(d)  # dir watch catches atomic replaces
         self._rewatch()
         self._load()
+        # Plasma's source watcher can notify us in the same event turn that it
+        # rewrites the generated palette, rather than after this second watch.
+        self._palette_callback = self._load
+        watch_palette(self._palette_callback)
 
     def _rewatch(self):
         if os.path.exists(self._path) and self._path not in self._watcher.files():
