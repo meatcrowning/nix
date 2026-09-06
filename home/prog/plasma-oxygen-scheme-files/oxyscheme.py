@@ -76,10 +76,10 @@ GLOW_SCALE = float(os.environ.get('OXYSCHEME_GLOW_SCALE', '0.35'))
 # the ramp, so a white edge highlight that reads as a soft sheen on a mid-tone
 # widget becomes a hard line against it (measured L=252 against a 237 panel).
 PANEL_GLOW_SCALE = float(os.environ.get('OXYSCHEME_PANEL_GLOW', '0.12'))
-# A panel carries the same light-to-base ramp as an empty window.  North/south
-# run it through their thickness like a titlebar; east/west stretch it from the
-# top to the bottom of the screen.  Treating every panel as a self-contained
-# ramp made the top and left bars visibly belong to different surfaces.
+# A panel carries the same light-to-base ramp as an empty window, through its
+# THIN dimension.  North/south run it vertically like a titlebar; east/west
+# run it horizontally from the screen edge toward the windows.  Sending the
+# side panel's ramp down its long axis made it read as a separate surface.
 # OxygenLightFlat's real titlebar is Background (198,209,224) → Blend
 # (223,229,237): a 0.43 white overlay, not the 0.96 body-background estimate
 # this replaced.  Use the titlebar's stop so a vertical panel joins it exactly.
@@ -246,6 +246,37 @@ def gradient_screen_y_sign(el, parents, axis):
     # north/south use local Y.  We care only about its physical Y component.
     component = m[1] if axis == 'h' else m[3]
     return 1 if component >= 0 else -1
+
+def gradient_screen_x_sign(el, parents, axis):
+    """Sign of an element-local gradient along physical screen X."""
+    m = (1.0, 0.0, 0.0, 1.0)
+    node = el
+    while node is not None:
+        t = node.get('transform')
+        if t:
+            for kind, body in _TF.findall(t):
+                v = _nums(body)
+                if kind == 'matrix' and len(v) >= 4:
+                    q = tuple(v[:4])
+                elif kind == 'scale' and v:
+                    q = (v[0], 0.0, 0.0, v[1] if len(v) > 1 else v[0])
+                elif kind == 'rotate' and v:
+                    r = math.radians(v[0]); q = (math.cos(r), math.sin(r),
+                                                   -math.sin(r), math.cos(r))
+                else:
+                    continue
+                a, b, c, d = q; e, f, g, h = m
+                m = (a*e + c*f, b*e + d*f, a*g + c*h, b*g + d*h)
+        node = parents.get(node)
+    component = m[0] if axis == 'h' else m[2]
+    return 1 if component >= 0 else -1
+
+def panel_gradient_invert(el, parents, axis, location):
+    """Put a side panel's light stop at its outside screen edge."""
+    if location in ('east', 'west'):
+        sign = gradient_screen_x_sign(el, parents, axis)
+        return sign > 0 if location == 'east' else sign < 0
+    return gradient_screen_y_sign(el, parents, axis) < 0
 
 # ---------- role inference ----------
 def role_family(filename):
@@ -582,8 +613,9 @@ def convert(src, dst, report=None):
                 # white titlebar ramp instead of preserving Oxygen's dark gloss.
                 if is_panel and ALPHA_MODE == 'titlebar':
                     eid_l = (el.get('id') or '').lower()
-                    ax = 'h' if ('east' in eid_l or 'west' in eid_l) else 'v'
-                    inv = gradient_screen_y_sign(body, parents, ax) < 0
+                    ax = 'v'
+                    inv = panel_gradient_invert(body, parents, ax,
+                                                eid_l.split('-', 1)[0])
                     band = eid_l.rsplit('-', 1)[-1] if '-' in eid_l else None
                     gid = respin_alpha(doc, fill[5:-1], stops, ALPHA_MODE, ax,
                                        inv, True, band, eid_l.split('-', 1)[0])
@@ -617,13 +649,15 @@ def convert(src, dst, report=None):
                 p = parents[body]; p.insert(list(p).index(body), base)
                 if ALPHA_MODE in ('flip', 'centre', 'titlebar'):
                     eid_l = (el.get('id') or '').lower()
-                    ax = 'h' if ('east' in eid_l or 'west' in eid_l) else 'v'
-                    inv = gradient_screen_y_sign(body, parents, ax) < 0
                     is_panel = os.path.basename(src).startswith('panel-background')
+                    ax = ('v' if is_panel else
+                          ('h' if ('east' in eid_l or 'west' in eid_l) else 'v'))
+                    loc = eid_l.split('-', 1)[0] if is_panel else None
+                    inv = (panel_gradient_invert(body, parents, ax, loc)
+                           if is_panel else gradient_screen_y_sign(body, parents, ax) < 0)
                     band = eid_l.rsplit('-', 1)[-1] if '-' in eid_l else None
                     gid = respin_alpha(doc, fill[5:-1], stops, ALPHA_MODE, ax,
-                                       inv, is_panel, band,
-                                       eid_l.split('-', 1)[0] if is_panel else None)
+                                       inv, is_panel, band, loc)
                     od = style_dict(body); od['fill'] = f'url(#{gid})'
                     set_style(body, od)
                 else:
@@ -659,7 +693,8 @@ def convert(src, dst, report=None):
     for prefix, gid in centre_ramp.items():
         centre_el = doc.idx.get(f"{prefix}-center")
         c_sx, c_sy = axis_signs(centre_el, parents) if centre_el is not None else (1, 1)
-        ax = 'h' if ('east' in prefix.lower() or 'west' in prefix.lower()) else 'v'
+        ax = ('v' if is_panel_file else
+              ('h' if ('east' in prefix.lower() or 'west' in prefix.lower()) else 'v'))
         for side in ('left', 'right', 'top', 'bottom'):
             el = doc.idx.get(f"{prefix}-{side}")
             if el is None: continue
@@ -669,7 +704,8 @@ def convert(src, dst, report=None):
             if body is None:
                 continue            # already carries its own art
             e_sx, e_sy = axis_signs(body, parents)
-            inv = gradient_screen_y_sign(body, parents, ax) < 0
+            inv = (panel_gradient_invert(body, parents, ax, prefix.lower())
+                   if is_panel_file else gradient_screen_y_sign(body, parents, ax) < 0)
             if is_panel_file and ALPHA_MODE == 'titlebar':
                 # give this edge its OWN band of the panel ramp, or the seam steps
                 use = respin_alpha(doc, gid, doc.stops(gid), ALPHA_MODE, ax,
