@@ -25,10 +25,10 @@ import Quickshell.Widgets
 //                                                      has no layer to sample
 //   colorization over a WHITE fallback       #6dbdf2   exact
 //
-// So colorization scales the tint by the SOURCE's own luminance, and the fix
-// lives in the artwork, not here: white in, exact theme colour out. Full-colour
-// theme icons keep their own light/dark detail through the same path, which is
-// what that scaling is FOR.
+// The image themes now provide a live accent-coloured source for external
+// programs too, but Quickshell caches that source by icon name. Whiten it
+// before colourizing so every panel copy is an exact current state colour even
+// while the provider still holds its previous pixmap.
 Item {
     id: root
 
@@ -65,6 +65,7 @@ Item {
         visible: (root.tint || root.seal) && root.source !== ""
         colorization: 1.0
         colorizationColor: root.color
+        brightness: 1.0
         opacity: root.dim
     }
 }

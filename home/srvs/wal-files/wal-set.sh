@@ -196,6 +196,10 @@ fi
 # kdeglobals is the user's desktop theme, so re-mint the selected colour-scheme
 # file instead of overwriting widget style, icons, or fonts.
 KG="$CONFIG/kdeglobals"
+# Oxygen's application art is raster and otherwise remains on its baked
+# palette. The helper alternates its theme name so open KDE/Qt programs flush
+# their icon cache as well as receiving fresh pixels for future windows.
+"$SCRIPTS/oxygen-live-icons.py" --accent "$ACCENT" >/dev/null
 PLASMA_SESSION=0
 case ":$(printf '%s' "${XDG_CURRENT_DESKTOP:-}" | tr '[:lower:]' '[:upper:]'):" in
     *:KDE:*) PLASMA_SESSION=1 ;;
@@ -293,11 +297,9 @@ elif command -v kwriteconfig6 >/dev/null 2>&1; then
     kw --group WM --key inactiveBackground "$(hx "$BG")"
     kw --group WM --key inactiveForeground "$(hx "$TEXTDIM")"
 
-    # Flat widget style (Breeze, not Oxygen's gradients/frames) + a dark icon
-    # set whose light glyphs read on the black background. Static, but pinned
-    # here so they always win over stale Plasma settings.
+    # Flat widget style (Breeze, not Oxygen's gradients/frames). The live
+    # Oxygen icon theme is selected above; do not overwrite it here.
     kw --group KDE   --key widgetStyle "Breeze"
-    kw --group Icons --key Theme        "breeze-dark"
 
     # Same pixel font AND size as kitty (font_size 11 in kitty.conf), everywhere.
     # The font roles (and kitty + the hyprvtb titlebar) now follow the Settings
