@@ -16,8 +16,10 @@
 #   * The branch is advanced with a compare-and-swap on the old HEAD
 #     (`git update-ref HEAD new old`); if HEAD moved underneath us (a concurrent
 #     commit), we bail and let the next drop retry, never clobbering that commit.
-#   * Additive only: files removed from ~/Pictures/wall are NOT removed from the
-#     repo here (deletion stays a deliberate, manual act).
+#   * The image set is reconciled both ways: a supported image removed from
+#     ~/Pictures/wall is removed from the versioned source in the same focused
+#     commit. Home Manager seeds that source on activation, so without this a
+#     deleted image would return at the next rebuild.
 # Paths default to the live locations; the WAL_SYNC_* overrides exist only so the
 # script can be exercised end-to-end against a throwaway repo in a test.
 REPO="${WAL_SYNC_REPO:-$HOME/nix}"
@@ -37,8 +39,8 @@ mkdir -p "$REPO/$REL"
 # into a single sync — the path unit may fire several times in quick succession.
 sleep 3
 
-# Mirror image files wall -> repo (add/update only). Re-copying an unchanged file
-# is a no-op as far as git CONTENT is concerned, but git does track the exec bit —
+# Mirror supported image files wall -> repo. Re-copying an unchanged file is a
+# no-op as far as git CONTENT is concerned, but git does track the exec bit —
 # `cp -p` used to carry 755 modes over from ~/Pictures/wall, flipping every
 # wallpaper to git-modified (mode-only) and keeping the tree permanently dirty.
 # install -m 644 pins the mode so an unchanged file really is a no-op.
@@ -46,6 +48,18 @@ for f in "$WALL"/*; do
   [ -f "$f" ] || continue
   case "$(printf '%s' "${f##*/}" | tr '[:upper:]' '[:lower:]')" in
     *.png | *.jpg | *.jpeg | *.webp | *.bmp | *.gif) install -m 644 "$f" "$REPO/$REL/" ;;
+  esac
+done
+
+# Deletion must reach the versioned source too. Restrict this to supported image
+# files so sidecars or future metadata in the source directory are never removed
+# just because they do not belong in the writable picker directory.
+for f in "$REPO/$REL"/*; do
+  [ -f "$f" ] || continue
+  case "$(printf '%s' "${f##*/}" | tr '[:upper:]' '[:lower:]')" in
+    *.png | *.jpg | *.jpeg | *.webp | *.bmp | *.gif)
+      [ -e "$WALL/${f##*/}" ] || rm -f -- "$f"
+      ;;
   esac
 done
 
@@ -69,18 +83,18 @@ export GIT_INDEX_FILE="$idx"
 git read-tree "$base"
 git add -- "$REL"
 if git diff-index --cached --quiet "$base" -- "$REL"; then
-  echo "no new wallpapers"
+  echo "wallpaper set unchanged"
   rm -f "$idx"
   exit 0
 fi
-# Human-readable list of the added/changed basenames for the commit message.
+# Human-readable list of the added, changed, or removed basenames for the commit message.
 names=$(git diff-index --cached --name-only "$base" -- "$REL" \
   | while IFS= read -r p; do printf '%s ' "${p##*/}"; done)
 tree=$(git write-tree)
 unset GIT_INDEX_FILE
 rm -f "$idx"
 
-newc=$(printf 'wall: auto-add %s\n' "$names" | git commit-tree "$tree" -p "$base") \
+newc=$(printf 'wall: sync %s\n' "$names" | git commit-tree "$tree" -p "$base") \
   || { echo "commit-tree failed"; exit 0; }
 
 if git update-ref HEAD "$newc" "$base"; then
