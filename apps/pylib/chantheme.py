@@ -87,8 +87,7 @@ def css(pal, chrome=None):
     """
     p = pal
     bg = p("bg")
-    bg_alt = p("bgAlt")
-    reply = bg_alt                # OneeChan mainColor (reply/dialog bg)
+    reply = p("bgAlt")           # OneeChan mainColor (reply/dialog bg)
     header_bg = p("bgAlt")       # headerBGColor
     border = p("border")         # brderColor + inputbColor
     inp = p("highlight")         # inputColor (field bg)
@@ -151,10 +150,7 @@ def css(pal, chrome=None):
         ".postInfo span.postNum.desktop>a,.postInfo span.postNum.desktop>a:hover{"
         "color:%s%s;opacity:1%s}" % (text, i, i),
         # --- backgrounds ---
-        # Konsole's displayed canvas is the desktop alternate surface. Keep
-        # this long reading canvas on that same solid colour rather than the
-        # lighter window-frame surface behind it.
-        "body{background:%s%s}" % (bg_alt if light else bg, i),
+        "body{background:%s%s}" % (bg, i),
         # `.inline` and the catalog cells (`Show Background` mode) are
         # reply-type insets OneeChan also paints from `mainColor`, but they
         # were never mapped here — so on a dark palette they kept OneeChan's
@@ -256,10 +252,13 @@ def _chrome_css(ch, i):
     bevel, shade, r = ch["bevel"], ch["shade"], ch["radius"]
     panel = grad("panelTop", "panelBottom")
     return [
-        # The browser page is not an Oxygen window.  Its canvas stays on the
-        # same solid desktop surface as Konsole; only contained controls get
-        # KStyle relief below.  In particular, do not paint a separate
-        # viewport-height window gradient behind a long thread.
+        # The browser page carries the same fixed window gradient as Vivaldi's
+        # surrounding chrome: light at its top, settling into the base rather
+        # than becoming a single flat field down a long thread.
+        "body{background-color:%s%s;background-image:linear-gradient("
+        "to bottom,%s,%s 320px)%s;background-repeat:no-repeat%s;"
+        "background-attachment:fixed%s}"
+        % (ch["windowBottom"], i, ch["windowTop"], ch["windowBottom"], i, i, i),
         # Dialogs, catalog cells, previews and menus as the style's slabs:
         # the panel gradient, a 1px light bevel along the top, a soft foot
         # shadow and Oxygen's small corner radius. POSTS are deliberately not

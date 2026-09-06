@@ -405,8 +405,8 @@ def main():
     try:
         os.environ["DESK_KDEGLOBALS"] = scheme("oxygen")
         ox = onee_css(dark_pal)
-        check("plasma + oxygen: the page canvas stays on the desktop surface",
-              "background-image:linear-gradient(to bottom" not in ox)
+        check("plasma + oxygen: the page follows the window gradient",
+              "background-image:linear-gradient(to bottom" in ox)
         check("plasma + oxygen: posts get the panel gradient and a bevel",
               "box-shadow:inset 0 1px 0 rgba(255,255,255" in ox)
         check("plasma + oxygen: real buttons get the button gradient",
