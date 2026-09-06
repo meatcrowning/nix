@@ -123,8 +123,10 @@ one owner and one implementation; do not fork their algorithms into an app.
   property. DESK_OXYGENRC selects a test rc; use oxygen-test.py and
   oxygen-scrollbar-probe.py. Where a real QWidget/QStyle exists, ask it rather
   than copying metrics.
-- glyphs.py is the ingestion-time mapping for characters absent from the desktop
-  font. Keep it and the panel's Glyphs.qml table in sync. spellcheck.py is the
+- glyphmap.py is the Qt-free ingestion-time mapping for characters absent from
+  the desktop font; glyphs.py re-exports it and adds the QObject adapter for QML
+  display sites. Keep the map and the panel's Glyphs.qml table in sync.
+  spellcheck.py is the
   sole checker: it invokes hunspell -a; SPELL_HUNSPELL and SPELL_DICPATH are
   Nix-only defaults and book resolves from PATH and /usr/share/hunspell. A
   missing dictionary means available=false and no markings. Keep its token

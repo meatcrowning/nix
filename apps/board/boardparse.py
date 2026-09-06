@@ -56,7 +56,7 @@ untouched and simply not drawn. **An unrecognised line is never an error and is
 never rewritten.**
 
 GLYPH MAPPING (docs/DESIGN.md §2.3). Every drawable string goes through
-`pylib/glyphs.px()` HERE, at ingest, once per load — the file is full of the
+`pylib/glyphmap.px()` HERE, at ingest, once per load — the file is full of the
 characters More Perfect DOS VGA lacks (`—`, `…`, `§`), and one of them in a
 `PixelText` under `FixedHeight` packing clips the whole line it is in. The RAW
 line is kept beside the mapped one, because the raw line is what gets written
@@ -73,7 +73,7 @@ import sys
 import tempfile
 import time
 
-from glyphs import px
+from glyphmap import px
 
 # ------------------------------------------------------------------ the store
 # The store is per host: `top` uses `docs/board.top.md` and `book` uses

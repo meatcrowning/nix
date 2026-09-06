@@ -86,8 +86,35 @@ def notify_lines(lines):
     return [l for l in lines if l.startswith("notify (dry-run)")]
 
 
+def test_glyph_import_paths():
+    """The board parser stays Qt-free; the compatibility adapter still works."""
+    py_path = os.pathsep.join((os.path.join(REPO, "apps", "board"),
+                              os.path.join(REPO, "apps", "pylib")))
+    env = dict(os.environ, PYTHONPATH=py_path)
+    pure = subprocess.run(
+        [sys.executable, "-c",
+         "import sys, boardparse; "
+         "assert boardparse.px('one—two…') == 'one-two...'; "
+         "assert not any(n == 'PySide6' or n.startswith('PySide6.') "
+         "for n in sys.modules)"],
+        env=env, cwd=REPO, capture_output=True, text=True)
+    assert pure.returncode == 0, "Qt-free boardparse import failed: %s" % pure.stderr
+
+    adapter = subprocess.run(
+        [sys.executable, "-c",
+         "from glyphmap import px as pure_px; "
+         "from glyphs import Glyphs, PX_MAP, is_mappable, px; "
+         "g = Glyphs(); "
+         "assert px is pure_px; "
+         "assert g.px('one—two…') == pure_px('one—two…'); "
+         "assert PX_MAP['—'] == '-'; assert is_mappable('—')"],
+        env=env, cwd=REPO, capture_output=True, text=True)
+    assert adapter.returncode == 0, "glyphs QObject adapter failed: %s" % adapter.stderr
+
+
 def main():
     verbose = "-v" in sys.argv
+    test_glyph_import_paths()
     tmp = tempfile.mkdtemp(prefix="board-notify-test-")
     try:
         # ---- seed ------------------------------------------------------
