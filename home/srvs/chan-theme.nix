@@ -45,6 +45,32 @@
     Install.WantedBy = [ "default.target" ];
   };
 
+  # The open-tab sheet above is live, but its embedded fallback must track a
+  # generator change too.  Keep the managed Tampermonkey source current
+  # without asking for a manual `chan-theme` run or a browser restart.
+  systemd.user.services.chan-theme-script = {
+    Unit.Description = "Regenerate the desktop 4chan userscript";
+    Service = {
+      Type = "oneshot";
+      ExecStart = "${pkgs.python3}/bin/python3 /home/lam/nix/apps/pylib/tools/chan-userscript.py";
+    };
+  };
+
+  systemd.user.paths.chan-theme-script = {
+    Unit.Description = "Watch the desktop 4chan userscript sources";
+    Path = {
+      PathChanged = [
+        "%h/nix/apps/pylib/chantheme.py"
+        "%h/nix/apps/pylib/chansource.py"
+        "%h/nix/apps/pylib/twittertheme.py"
+        "%h/nix/apps/pylib/userscript.py"
+        "%h/nix/apps/pylib/tools/chan-userscript.py"
+      ];
+      Unit = "chan-theme-script.service";
+    };
+    Install.WantedBy = [ "paths.target" ];
+  };
+
   # Vivaldi's OWN UI (panels, settings, the tab stack) is a Chromium page too:
   # `apps/pylib/vivaldichrome.py` re-themes the whole chrome by defining the
   # ~90 CSS custom properties its theme engine reads, and the scrollbar sheet
