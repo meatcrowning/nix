@@ -14,4 +14,9 @@ labels = oracle.MODEL_LABELS
 assert labels["qwen3.6:35b-a3b"].endswith("qwen3.6:35b-a3b")
 assert labels["hf.co/bartowski/Qwen_Qwen3.5-9B-GGUF:Q5_K_M"].endswith("qwen3.5-9b q5")
 assert oracle.Ollama().modelLabel("unknown:latest") == "unknown:latest"
+available = ["new:latest", "gemma4:e4b", "qwen3.6:35b-a3b"]
+o = oracle.Ollama()
+o._suggested = ["new:latest"]
+assert o._order(available) == ["qwen3.6:35b-a3b", "gemma4:e4b", "new:latest"]
+assert o.suggestedCount == 3
 print("model labels: ok")
