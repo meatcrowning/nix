@@ -75,6 +75,9 @@ for style, width in (("win31", 16), ("beveled", 14), ("flat", 11)):
 
 check("a site's own scrollbar-color cannot take the standard rendering path",
       "scrollbar-color:auto!important" in scrollcss.desktop_css(PAL.__getitem__))
+check("win31 forces Blink to materialise its native stepper parts",
+      "::-webkit-scrollbar-button{display:block!important" in
+      scrollcss.desktop_css(PAL.__getitem__, "win31"))
 
 # --- the Oxygen face ---------------------------------------------------------
 oxy = scrollcss.oxygen_css(PAL.__getitem__, {"scrollWidth": 15, "scrollSubButtons": 1,
@@ -97,6 +100,8 @@ def buttons(css):
 check("one stepper above and two below, per oxygenrc",
       buttons(oxy) == {":vertical:start:decrement", ":vertical:end:decrement",
                        ":vertical:end:increment"})
+check("the base button part is block, so Blink materialises native steppers",
+      "::-webkit-scrollbar-button{display:block!important" in oxy)
 check("the unused start:increment is hidden, not left default",
       ":vertical:start:increment{display:none" in oxy.replace(
           "::-webkit-scrollbar-button", "").replace(",", "{display:none"))
