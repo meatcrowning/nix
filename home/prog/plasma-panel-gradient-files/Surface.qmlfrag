@@ -18,3 +18,18 @@
         fillMode: Image.Pad
         cache: false
     }
+
+    // Oxygen window slabs finish at their inner edge with a one-pixel light
+    // bevel.  Keep it on the panel's content-facing edge: bottom for a top
+    // panel, right for the vertical panel, so the two segments meet cleanly.
+    Rectangle {
+        visible: opaqueItem.visible
+        opacity: panelOpacity * 0.18
+        color: "white"
+        anchors.bottom: root.verticalPanel ? undefined : floatingTranslucentItem.bottom
+        anchors.right: root.verticalPanel ? floatingTranslucentItem.right : undefined
+        anchors.left: root.verticalPanel ? undefined : floatingTranslucentItem.left
+        anchors.top: root.verticalPanel ? floatingTranslucentItem.top : undefined
+        width: root.verticalPanel ? 1 : floatingTranslucentItem.width
+        height: root.verticalPanel ? floatingTranslucentItem.height : 1
+    }

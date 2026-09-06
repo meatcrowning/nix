@@ -55,8 +55,31 @@ let
     cp ${pkgs.writeText "metadata.json" metadata} $out/metadata.json
     cp ${./plasma-menubar-files/main.qml} $out/contents/ui/main.qml
   '';
+
+  # QML cannot create a native menu window. This tiny Applet interface does:
+  # it owns the QMenu, makes it transient to the panel, and maps it immediately
+  # below the selected category. Keeping the menu data/actions in QML leaves
+  # the desktop's actual behavior in the readable fallback source.
+  nativeInterface = pkgs.stdenv.mkDerivation {
+    pname = "plasma-menubar-native-interface";
+    version = "1";
+    src = ./plasma-menubar-files/native;
+    nativeBuildInputs = [
+      pkgs.cmake
+      pkgs.ninja
+      pkgs.kdePackages.extra-cmake-modules
+      pkgs.pkg-config
+    ];
+    buildInputs = [
+      pkgs.qt6.qtbase
+      pkgs.qt6.qtdeclarative
+      pkgs.kdePackages.libplasma
+      pkgs.kdePackages.kcoreaddons
+    ];
+  };
 in
 {
+  home.packages = [ nativeInterface ];
   xdg.dataFile."plasma/plasmoids/${pkgId}".source = package;
 
   # Installing a plasmoid package never instantiates it, and Plasma has no

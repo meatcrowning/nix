@@ -473,8 +473,24 @@ PlasmoidItem {
     }
 
     // ---- the popup ------------------------------------------------------
-    // Use Plasma's own Menu and MenuItem delegates: the stock appmenu uses
-    // this exact visual language, so fallbacks cannot look like a second UI.
+    // The native interface opens a real QMenu, matching the stock appmenu's
+    // separate Oxygen-themed surface and its below-the-panel placement.
+    property var nativeEntries: []
+
+    Connections {
+        target: Plasmoid.nativeInterface
+        function onMenuTriggered(index) {
+            const entry = root.nativeEntries[index];
+            root.nativeEntries = [];
+            if (entry && entry.trigger) {
+                entry.trigger();
+            }
+        }
+        function onMenuClosed() {
+            root.nativeEntries = [];
+        }
+    }
+
     PlasmaComponents3.Menu {
         id: popup
 
@@ -493,6 +509,18 @@ PlasmoidItem {
         }
 
         function openFor(button, list) {
+            if (Plasmoid.nativeInterface
+                    && typeof Plasmoid.nativeInterface.openMenu === "function") {
+                root.nativeEntries = list;
+                const nativeList = list.map(entry => ({
+                    label: entry.label || "",
+                    enabled: entry.enabled !== false,
+                    checked: entry.checked === true,
+                    separator: entry.separator === true,
+                }));
+                Plasmoid.nativeInterface.openMenu(button, nativeList);
+                return;
+            }
             while (count > 0) {
                 const oldItem = itemAt(0);
                 removeItem(oldItem);
