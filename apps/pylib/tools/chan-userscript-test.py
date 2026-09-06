@@ -74,11 +74,13 @@ check("the sheet builds with no chrome (the Hyprland face)", len(flat) > 1000)
 check("no chrome means no gradient — DESIGN.md §2 holds on this desktop",
       "linear-gradient(to bottom" not in flat)
 check("post numbers use the timestamp's primary ink",
-      ".postInfo .postNum,.postInfo .postNum a,.postInfo .postNum a:hover{color:#00ff88!important}" in flat)
+      ".postInfo .postNum,.postInfo .postNum a,.postInfo .postNum a:hover{color:#00ff88!important;opacity:1!important}" in flat)
 check("hovering a field keeps its fill stable",
       ".captcha-root:hover{background:#123456!important}" in flat)
 check("OneeChan's alternating options rows use the desktop surface",
       "#main-section>.option:nth-of-type(even){background:#203040!important}" in flat)
+check("OneeChan's anchor actions do not retain its black button fill",
+      ".options-button,.qr-link,.pages.cataloglink,.pages strong>a,.options-button:hover,.qr-link:hover,.pages.cataloglink:hover,.pages strong>a:hover{background:#203040!important}" in flat)
 
 # The panel-palette parser reads exactly the literal shape every app's Palette
 # does (and the shape kdetheme itself generates).

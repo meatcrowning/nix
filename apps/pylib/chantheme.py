@@ -145,7 +145,7 @@ def css(pal, chrome=None):
         # beside the timestamp and should carry the same primary ink.  The
         # actual >> reference remains a `.quotelink` in the post body.
         ".postInfo .postNum,.postInfo .postNum a,"
-        ".postInfo .postNum a:hover{color:%s%s}" % (text, i),
+        ".postInfo .postNum a:hover{color:%s%s;opacity:1%s}" % (text, i, i),
         # --- backgrounds ---
         "body{background:%s%s}" % (bg, i),
         # `.inline` and the catalog cells (`Show Background` mode) are
@@ -175,6 +175,13 @@ def css(pal, chrome=None):
         # Its options panel darkens every other main row from `mainColor`.
         # That makes a light desktop palette read as black zebra stripes.
         "#main-section>.option:nth-of-type(even){background:%s%s}" % (reply, i),
+        # OneeChan gives its option-panel actions its own mainColor fill.
+        # They are anchor buttons, so the real-button rule below cannot reach
+        # them; keep their resting and hover surfaces on the page instead of
+        # leaving black pills in an otherwise desktop-matched panel.
+        ".options-button,.qr-link,.pages.cataloglink,.pages strong>a,"
+        ".options-button:hover,.qr-link:hover,.pages.cataloglink:hover,"
+        ".pages strong>a:hover{background:%s%s}" % (reply, i),
         # --- borders ---
         ".reply,:root.op-background .postContainer.opContainer,.dialog,.entry,"
         ".inline,fieldset,#post-preview,select{border-color:%s%s}" % (border, i),
@@ -292,10 +299,15 @@ def _chrome_css(ch, i):
         "input:not(.jsColor):hover,textarea:hover,.riceCheck:hover,"
         "#qr-filename-container:hover,select:hover,.captcha-root:hover{"
         "background:%s%s}" % (ch["panelBottom"], i),
-        # Real buttons (the post form's, not 4chan-X's text "buttons") take
-        # the button gradient. AFTER the field rule and equal to it on
-        # specificity, so a submit input lands here and not in the hole.
-        "button,input[type=submit],input[type=button],input[type=reset]{"
+        # Real buttons and OneeChan's anchor actions take the same desktop
+        # button surface.  The latter are what Save/Cancel/Export use; without
+        # including them they retain OneeChan's black mainColor background.
+        # This follows the field rule, so submit inputs do not land in the
+        # sunken field surface.
+        "button,input[type=submit],input[type=button],input[type=reset],"
+        ".options-button,.qr-link,.pages.cataloglink,.pages strong>a,"
+        ".options-button:hover,.qr-link:hover,.pages.cataloglink:hover,"
+        ".pages strong>a:hover{"
         "background:%s%s;border-radius:%dpx%s;"
         "box-shadow:inset 0 1px 0 %s,0 1px 2px %s%s}"
         % (grad("buttonTop", "buttonBottom"), i, r, i, bevel, shade, i),
