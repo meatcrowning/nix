@@ -645,7 +645,7 @@ that swap is worth it; nothing else does it.
   themselves and future / other agents"*]. The note also tells it to SAY when
   it rewrites one he relies on.
 - **`tools:` takes GROUPS** (`read`, `write`, `exec`, `web`, `sessions`,
-  `skills`, `time`), individual tool names, or `all`. A name chatter does not
+  `history`, `skills`, `time`), individual tool names, or `all`. A name chatter does not
   have is **ignored** rather than fatal — a Claude Code definition naming
   `Read, Grep` is still a usable chatter agent — and a list that resolves to
   nothing falls back to the default set, because an agent that can do nothing
@@ -765,6 +765,30 @@ were unanswerable.
 - Harness `tools/timestamp-test.py`, off the `ORACLE_TIMES` probe in the
   selftest's `ORACLE_FAKE` block (whose demo turns now span two days, so
   `ORACLE_SHOT` shows the divider).
+
+### Prompt history
+
+`prompt_history` lets chatter and its ordinary agents search or aggregate the
+prompts HE typed across both Claude/Codex and Chatter. It is a **read-only,
+purpose-built reader**, rather than permission to parse raw transcript files:
+Claude JSONL is filtered with the same structural rules as
+`~/nix/tools/voice-corpus.py` (external human turns only; no sidechains, tool
+results, slash commands, injected prompts or pasted files), and Chatter keeps
+only saved `isUser` rows. It never writes an index or alters either history.
+
+- `op: "search"` takes literal text and returns at most 40 bounded excerpts,
+  with a source and time (and a Chatter session title/id where applicable).
+  `op: "stats"` returns aggregate source counts, date range, prompt-length and
+  shape distribution, and common terms. Both accept `source: all|claude|chatter`
+  plus inclusive `since`/`until` dates.
+- It runs where the canonical stores live: `top`, through the same ssh branch
+  as sessions when Chatter is open on `book`. Thus a query is identical on both
+  hosts. `ORACLE_CLAUDE_PROJECTS` exists for a disposable harness root only.
+- `history` is a subagent tool group and part of the default agent set. An
+  explicit specialist can request it with `tools: history`; an explorer remains
+  filesystem-only by design.
+- The implementation is `tools/prompt-history.py`; its hermetic contract test
+  is `tools/prompt-history-test.py`. Neither reads a real history during test.
 
 ## Memory (chatter's own durable facts)
 

@@ -1706,6 +1706,30 @@ SESSION_TOOLS = [
 ]
 SESSION_TOOL_NAMES = {"list_sessions", "read_session"}
 
+#: A narrow, read-only door onto HIS typed prompt history. The executable
+#: structurally filters Claude JSONL just as tools/voice-corpus.py does and
+#: returns bounded excerpts or aggregate metrics; it cannot write an index,
+#: transcript, memory, or session.
+PROMPT_HISTORY_TOOL = {"type": "function", "function": {
+    "name": "prompt_history",
+    "description": ("Search or summarize HIS typed prompt history across "
+                    "Claude/Codex and Chatter. Read-only and local: search "
+                    "returns bounded matching excerpts; stats returns counts, "
+                    "length/shape distribution, date range, and common terms. "
+                    "Use this before claiming what he has or has not asked "
+                    "about before."),
+    "parameters": {"type": "object", "properties": {
+        "op": {"type": "string", "enum": ["search", "stats"],
+               "description": "search finds literal text; stats aggregates matching prompts."},
+        "query": {"type": "string", "description": "Required for search; literal case-insensitive text."},
+        "source": {"type": "string", "enum": ["all", "claude", "chatter"],
+                   "description": "Which local history to inspect; default all."},
+        "since": {"type": "string", "description": "Optional inclusive YYYY-MM-DD or ISO timestamp."},
+        "until": {"type": "string", "description": "Optional inclusive YYYY-MM-DD or ISO timestamp."},
+        "limit": {"type": "integer", "description": "Search excerpts to return (default 12, maximum 40)."},
+    }, "required": ["op"]}}}
+PROMPT_HISTORY_TOOL_NAMES = {"prompt_history"}
+
 #: oracle's OWN durable memories — distinct from the read-only session tools
 #: above. A session is a past transcript it can READ; a memory is a fact it
 #: deliberately WROTE and keeps across conversations (the board / Claude-memory
@@ -2244,6 +2268,7 @@ AGENT_TOOL_GROUPS = {
     "web": ["web_search", "fetch_url", "wikipedia", "call_api"],
     "music": ["music_library", "lastfm", "control_media"],
     "sessions": ["list_sessions", "read_session"],
+    "history": ["prompt_history"],
     "skills": ["use_skill"],
     "author": ["make_tool", "make_skill", "make_agent"],
     "time": ["get_current_time"],
@@ -2310,6 +2335,7 @@ TOOL_COMPANIONS = {
 #: is never in any set — subagents are one level deep, on purpose.
 AGENT_TOOLS_DEFAULT = (AGENT_TOOL_GROUPS["read"] + AGENT_TOOL_GROUPS["write"]
                        + AGENT_TOOL_GROUPS["exec"] + AGENT_TOOL_GROUPS["web"]
+                       + AGENT_TOOL_GROUPS["history"]
                        + AGENT_TOOL_GROUPS["skills"] + AGENT_TOOL_GROUPS["author"]
                        + AGENT_TOOL_GROUPS["time"])
 
@@ -2444,7 +2470,7 @@ def _tool_registry():
              WIKIPEDIA_TOOL,
              CALL_API_TOOL, EXEC_TOOL, BASH_TOOL, SHOW_IMAGE_TOOL,
              MUSIC_TOOL, LASTFM_TOOL, PLAYER_TOOL] + list(JOB_TOOLS)
-             + list(SESSION_TOOLS) + list(AUTHOR_TOOLS)
+             + list(SESSION_TOOLS) + [PROMPT_HISTORY_TOOL] + list(AUTHOR_TOOLS)
              + [t for t in [skill_tool()] if t]
              + custom_tool_defs())
     return {t["function"]["name"]: t for t in tools
@@ -3103,6 +3129,13 @@ FS_SCRIPT = str(HERE / "tools" / "sandbox-fs.py")
 SESSIONS_ROOT = os.path.expanduser(
     os.environ.get("ORACLE_SESSIONS", "~/.local/share/oracle/sessions"))
 SESSIONS_SCRIPT = str(HERE / "tools" / "sessions-store.py")
+
+#: Claude's state sync keeps this canonical across top and book. Prompt-history
+#: follows the session-store top/ssh branch, so one query means the same thing
+#: whichever machine carries the Chatter window.
+CLAUDE_PROJECTS_ROOT = os.path.expanduser(os.environ.get(
+    "ORACLE_CLAUDE_PROJECTS", "~/.claude/projects"))
+PROMPT_HISTORY_SCRIPT = str(HERE / "tools" / "prompt-history.py")
 
 #: BACKGROUND JOBS — the work that outlives the turn (tools/job-run.py). Same
 #: place and the same host rule as the sandbox: it lives on TOP, where oracle's
@@ -6305,7 +6338,8 @@ class Ollama(QObject):
                 MUSIC_TOOL, LASTFM_TOOL, MODEL_TOOL,
                 FETCH_URL_TOOL, WIKIPEDIA_TOOL,
                 CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
-                + list(SESSION_TOOLS) + list(MEMORY_TOOLS) + list(AUTHOR_TOOLS)
+                + list(SESSION_TOOLS) + [PROMPT_HISTORY_TOOL]
+                + list(MEMORY_TOOLS) + list(AUTHOR_TOOLS)
                 + [GET_TOOLS_TOOL] + list(JOB_TOOLS)
                 + [t for t in [skill_tool(), spawn_agent_tool()] if t])
 
@@ -7096,6 +7130,8 @@ class Ollama(QObject):
             self._run_exec_tool(name, args, i, remaining, calls)
         elif name in SESSION_TOOL_NAMES:
             self._run_session_tool(name, args, i, remaining, calls)
+        elif name in PROMPT_HISTORY_TOOL_NAMES:
+            self._run_prompt_history_tool(args, i, remaining, calls)
         elif name in MEMORY_TOOL_NAMES:
             self._run_memory_tool(name, args, i, remaining, calls)
         elif name in SKILL_TOOL_NAMES:
@@ -11052,6 +11088,67 @@ class Ollama(QObject):
             n = len(result.get("sessions", []))
             return "listed %d session%s" % (n, "" if n == 1 else "s")
         return "read session " + str(result.get("id", args.get("id", "")))
+
+    # ---- prompt history (typed Claude/Codex + Chatter prompts, read-only) ---
+
+    @staticmethod
+    def _prompt_history_argv():
+        """Run the history reader where both canonical stores live: top.
+
+        This is deliberately separate from the broad file tools. A model gets
+        only typed prompts filtered by the reader, never arbitrary transcript
+        rows, agent briefs, tool results, or a writable index.
+        """
+        if ON_BOOK and not STORE_LOCAL:
+            host = os.environ.get("OLLAMA_SSH_HOST", "top")
+            ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+            argv = [ssh, "-o", "BatchMode=yes"]
+            ctl = os.environ.get("OLLAMA_SSH_CTL")
+            if ctl:
+                argv += ["-o", "ControlMaster=auto", "-o", "ControlPersist=30",
+                         "-o", "ControlPath=" + ctl]
+            argv += [host, "python3", shlex.quote(PROMPT_HISTORY_SCRIPT),
+                     shlex.quote(CLAUDE_PROJECTS_ROOT), shlex.quote(SESSIONS_ROOT)]
+            return argv
+        return [sys.executable, PROMPT_HISTORY_SCRIPT, CLAUDE_PROJECTS_ROOT,
+                SESSIONS_ROOT]
+
+    def _run_prompt_history_tool(self, args, idx, remaining, calls):
+        """Ask the bounded history reader for search excerpts or statistics."""
+        a = args if isinstance(args, dict) else {}
+        self.fileToolStarted.emit("reading prompt history")
+        proc = QProcess(self)
+        self._procs.append(proc)
+
+        def finished(*_):
+            if proc not in self._procs:
+                return
+            self._procs.remove(proc)
+            try:
+                out = bytes(proc.readAllStandardOutput())
+                err = bytes(proc.readAllStandardError())
+                rc = proc.exitCode()
+            except RuntimeError:
+                return
+            proc.deleteLater()
+            result = self._fs_result(out, err, rc)
+            if "error" in result:
+                line, ok = "prompt history: " + str(result["error"])[:160], False
+            elif result.get("op") == "search":
+                line, ok = "prompt history · %d matches" % result.get("matched", 0), True
+            else:
+                line, ok = "prompt history · %d prompts" % result.get("prompts", 0), True
+            remaining["sink"][idx] = {"role": "tool", "tool_name": "prompt_history",
+                                       "content": json.dumps(result)}
+            self.fileToolDone.emit(line, ok)
+            self._tool_done(remaining, calls)
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(lambda *_: None)
+        argv = self._prompt_history_argv()
+        proc.start(argv[0], argv[1:])
+        proc.write(json.dumps(a).encode("utf-8"))
+        proc.closeWriteChannel()
 
     # ---- oracle's own durable memories (create / read / update / delete) ----
 
