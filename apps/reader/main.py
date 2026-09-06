@@ -514,6 +514,34 @@ def main():
     if not engine.rootObjects():
         sys.exit(1)
 
+    fixture = None
+    if os.environ.get("READER_RESOURCE_FIXTURE") == "1":
+        from resourcefixture import ResourceFixture
+        from PySide6.QtCore import QMetaObject, Q_ARG
+        win = engine.rootObjects()[0]
+        normal_path = os.environ["READER_RESOURCE_NORMAL_PATH"]
+        stress_path = os.environ["READER_RESOURCE_STRESS_PATH"]
+
+        def _load(path):
+            pane = win.property("pane")
+            QMetaObject.invokeMethod(pane, "load", Q_ARG(str, path),
+                                     Q_ARG(str, "start"))
+
+        def normal():
+            if bool(win.property("splitOn")):
+                QMetaObject.invokeMethod(win, "setSplit",
+                                         Q_ARG(bool, bool(win.property("splitVertical"))))
+            _load(normal_path)
+
+        def stress():
+            _load(stress_path)
+            if not bool(win.property("splitOn")):
+                QMetaObject.invokeMethod(win, "setSplit", Q_ARG(bool, True))
+
+        fixture = ResourceFixture(app, {"normal": normal, "stress": stress,
+                                        "clear": normal}, settle_ms=600,
+                                  parent=app)
+
     from winstate import WinState
     win_state = WinState(engine.rootObjects()[0], "reader")  # keep ref: geometry
 

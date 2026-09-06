@@ -683,6 +683,21 @@ def main():
     listener = Listener("viewer", _can_take, _take, parent=app)  # noqa: F841
     # (not listening = another viewer already owns the socket; nothing to do)
 
+    fixture = None
+    if os.environ.get("VIEWER_RESOURCE_FIXTURE") == "1":
+        from resourcefixture import ResourceFixture
+
+        def normal():
+            while int(win.property("paneCount") or 0) > 1:
+                win.closePane(int(win.property("paneCount")) - 1)
+
+        def stress():
+            while int(win.property("paneCount") or 0) < MAX_PANES:
+                win.addPane()
+
+        fixture = ResourceFixture(app, {"normal": normal, "stress": stress,
+                                        "clear": normal}, parent=app)
+
     sys.exit(app.exec())
 
 
