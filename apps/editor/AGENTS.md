@@ -15,6 +15,14 @@ W=$(readlink -f "$(which editor)"); sed '$d' "$W" > /tmp/edenv.sh
     apps/editor/tools/editor-test.py )
 ```
 
+For retained resource sampling, `tools/resource-fixture.py` launches the real
+window offscreen with scratch HOME/XDG roots and generated Python documents.
+It reports `READY normal`, accepts `stress`, `clear`, and `quit` as newline
+commands on stdin, and never opens or saves a user file. Run it through the
+packaged interpreter/environment on `top`; `/usr/bin/python3` is the `book`
+branch. The narrow fd protocol is shared in `apps/pylib/resourcefixture.py`;
+do not turn it into input automation.
+
 ---
 
 ## The three-way split, and why it is not negotiable
