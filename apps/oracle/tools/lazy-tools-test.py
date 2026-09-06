@@ -181,6 +181,13 @@ check("and the NEXT round carries them",
 check("without dropping the core set",
       all(n in names(CHATS[-1]) for n in core), str(names(CHATS[-1])))
 
+turn([("get_tools", {"names": ["lastfm", "music_library"]})])
+result = json.loads([m for m in CHATS[-1]["messages"]
+                     if m.get("role") == "tool"][-1]["content"])
+check("tool names may be a JSON list",
+      result["attached"] == ["lastfm", "music_library"],
+      str(result["attached"]))
+
 # ---- groups work, and a bad name is said out loud ---------------------------
 turn([("get_tools", {"names": "images"})])
 result = json.loads([m for m in CHATS[-1]["messages"]
