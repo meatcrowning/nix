@@ -42,6 +42,7 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"   # hard, never setdefault
 os.environ.pop("WAYLAND_DISPLAY", None)       # no way back to his session
 os.environ.pop("DISPLAY", None)
 os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Basic")
+os.environ["PAINTER_SYNC_SCAN"] = "1"       # deterministic model assertions
 # WHICH ROOF THIS HARNESS RENDERS, pinned rather than inherited. `is_plasma()`
 # reads XDG_CURRENT_DESKTOP, so a run started from a Plasma session laid out the
 # QML with `plasma: true` — a 0-height QueueBar, since that face's status bar is
