@@ -99,6 +99,9 @@ in
     Path.PathChanged = [
       "%h/.local/share/applications"
       "%h/.nix-profile/share/applications"
+      "%h/.local/share/Steam/steamapps"
+      "%h/.steam/steam/steamapps"
+      "%h/.steam/root/steamapps"
       "/etc/profiles/per-user/%u/share/applications"
       "/run/current-system/sw/share/applications"
     ];
@@ -112,5 +115,45 @@ in
       Unit = "plasma-games-refresh.service";
     };
     Install.WantedBy = [ "timers.target" ];
+  };
+
+  # Plasma Manager does not rewrite the configuration of an applet that
+  # already exists in a panel. Migrate the first Folder View on each left
+  # panel—the upper of the two folder buttons—over D-Bus once Plasma is ready.
+  systemd.user.services.plasma-games-widget-install = {
+    Unit = {
+      Description = "set the existing Plasma games folder widget";
+      After = [ "graphical-session.target" ];
+    };
+    Service = {
+      Type = "oneshot";
+      ExecStart = pkgs.writeShellScript "plasma-games-widget-install" ''
+        for attempt in $(seq 1 60); do
+          if ${pkgs.kdePackages.qttools}/bin/qdbus org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript ${lib.escapeShellArg ''
+            for (var i = 0; i < panelIds.length; ++i) {
+              var panel = panelById(panelIds[i]);
+              var widgets = panel.widgets();
+              for (var j = 0; j < widgets.length; ++j) {
+                if (widgets[j].type !== "org.kde.plasma.folder") continue;
+                var folder = widgets[j];
+                folder.currentConfigGroup = ["General"];
+                folder.writeConfig("useCustomIcon", true);
+                folder.writeConfig("icon", "folder-games");
+                folder.writeConfig("url", "file://${gamesDirectory}");
+                folder.writeConfig("labelMode", 3);
+                folder.writeConfig("labelText", "games");
+                folder.writeConfig("sortMode", 1);
+                return;
+              }
+            }
+          ''} >/dev/null 2>&1; then
+            exit 0
+          fi
+          sleep 1
+        done
+        exit 1
+      '';
+    };
+    Install.WantedBy = [ "graphical-session.target" ];
   };
 }
