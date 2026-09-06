@@ -694,42 +694,14 @@ def says_line(rec, who=""):
     return ""
 
 
-# ------------------------------------------------- SOLOMON'S OWN VOCABULARY
-# The orchestrator's card is the one that speaks in his own voice — [his,
-# 2026-07-29] *"Solomon wields the ring..."*, *"Solomon etches the circle..."*,
-# *"Solomon summons"*, *"Solomon awaits <agent>..."*. His exact wordings, so do
-# not smooth them into the generic `<subj> is <word>` shape the workers use.
-#
-# **The CIRCLE is his, the TRIANGLE is theirs** — [his, 2026-07-29] *"instead of
-# \"solomon etches the triangle...\" it should read \"solomon etches the
-# circle...\""*. In the Lesser Key the magician stands in the circle and the
-# spirit is bound in the triangle, so this line said the wrong shape. The word
-# is not retired: `triangle` now names the AREA THE SPIRITS RESIDE IN — the
-# agents section of the board, below Solomon's own summoner section.
-#
-# **Two of them are the STARTUP pair, and the order is the point.** `starting`
-# (his spawn exists, its transcript is a second away) leads, then `none` (the
-# transcript is there and nothing has been done in it yet) follows. That
-# ordering is what 481b524 flattened: it collapsed the two states onto one
-# sentence, so the brief initial line stopped LEADING and only reappeared past
-# `START_GRACE_S`, i.e. AFTER the getting-ready line. Restored here [his,
-# 2026-07-29] with the initial line first and worded as he wants it.
-#
-# His original complaint that produced 481b524 is unaffected: what he objected
-# to was a *"dont know"* text flashing first, and `starting` no longer reaches
-# the unlinked sentence at all — it has a line of its own that says he is
-# starting. The unlinked branch (no session id EVER recorded) still says it
-# cannot see, because that is a real failure.
-#
-# **They stay §10.6-honest for the same reason the idle row is.** Every word is
-# written HERE, promoted from nothing, as the placeholder for an absence of
-# observation — never derived from an observation, which stays forbidden.
-#
-# The trailing `...` is three ASCII periods, never U+2026: the font has no
-# single-glyph ellipsis and a fallback glyph drops the whole line ~5px and clips
-# it (docs/DESIGN.md §2.3). `AgentRow.qml` ANIMATES those three cells (they cycle
-# `.`, `..`, `...` on the desktop's own slide duration) — presentation, so it is
-# QML's, and the sentence a test asserts on does not change four times a second.
+# ------------------------------------------------- Solomon's vocabulary
+# Solomon's card has fixed phrases (`wields the ring`, `etches the circle`,
+# `summons`, `awaits`) rather than worker-style predicates. `starting` precedes
+# `none`; an unlinked session remains the honest failure branch. These states
+# are placeholders for missing observation, never replacements for it. The
+# triangle names the spirits' section; Solomon's own shape is the circle.
+# Keep the suffix as three ASCII periods: AgentRow animates those cells, while
+# tests assert the stable sentence.
 def orch_doing_line(state, who=""):
     """Solomon's placeholder for the absence of observation, or "" if the state
     is one where something has actually been seen. `state` is

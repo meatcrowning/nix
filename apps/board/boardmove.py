@@ -920,35 +920,12 @@ def reconcile(path=bp.BOARD_PATH, capped=None):
     return moved
 
 
-# ---------------------------------------------------- LANDED IS READ FROM GIT
-# **The section is COMPUTED, every time it is drawn, from the commit log.**
-# Nothing has to remember, nothing has to sweep, nothing has to be deployed for
-# it to be current — which is the whole of his verdict on 2026-07-29, after the
-# third time he found it hours stale: *"it should just read from the commit log
-# of the repo itself. it shouldnt need an agent to do that"*.
-#
-# He was right about the shape of the bug, not just the bug. Twice the fix was
-# to have SOMETHING WRITE the missing rows — `Board._catch_up` first, then
-# `board-watch.py`'s tick — and both were correct code that could not reach him:
-#
-#   * `apps/` is live source with no hot reload, so the board window he had open
-#     went on running the code from before the fix, for as long as he left it
-#     open. Two correct fixes, one process that had never seen either.
-#   * the watcher is a home-manager unit, so on `top` it needed a
-#     `sudo rebuild-top` before the second fix existed at all on that machine.
-#
-# A derived view has neither failure mode, and that is the point: whichever
-# build of this file is running, the answer it gives is read out of git at the
-# moment of the read. There is no stamped state to be stale, so a stale writer
-# cannot make it wrong.
-#
-# WHAT REMAINS OF THE FILE'S ROWS: a CACHE, and an override. `land --what` still
-# writes a row, because the sentence an agent chose is usually better than the
-# raw commit subject and there is nowhere else to keep it. A row whose hash git
-# also knows supplies the What cell and nothing else; a row naming no commit at
-# all (`no change`, a decision settled) is carried through verbatim, git having
-# nothing to say about it. **The file is never the reason a commit does or does
-# not appear.**
+# ---------------------------------------------------- LANDED is read from git
+# LANDED is a derived view of the local `HEAD`/remote commit log, so it needs no
+# writer, catch-up sweep, deployment, or stamped state. `land --what` remains
+# an optional prose cache: a matching commit supplies only its What cell, while
+# rows without a commit (for example `no change`) pass through verbatim. The
+# file must never decide whether a commit appears.
 
 #: The repos LANDED is a record of. Both, because a change lands in one or the
 #: other: `~/nix` is the public repo, `docs/` is the private one living inside

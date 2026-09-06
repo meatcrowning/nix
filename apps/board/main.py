@@ -894,48 +894,14 @@ class Agents(QObject):
             "parentName": a.get("parentName", ""),
         }
 
-    # ---- WHAT IT IS ACTUALLY SAYING: the tail of the worker's own log ----
-    # [his, 2026-07-30] a card opens a drawer showing *"the last couple of
-    # lines"* of that spirit's output. The card's three lines are this app's
-    # account of the agent; this is the agent's own voice, unedited.
-    #
-    # THE LIVE SOURCE IS THE TRANSCRIPT, NOT THE `.log`. [his, 2026-07-30]
-    # *"the drop down log in agent cards should be the last couple lines of
-    # their REAL LIVE OUTPUT... agent card logs should really never read as
-    # 'nothing logged yet' which they do now pretty much all the time"*.
-    #
-    # The `.log` is the file `boardwork` gives the worker its stdout in
-    # (`~/.cache/board-work/<id>.log`, through its own `_log_path` so the
-    # `XDG_CACHE_HOME` a harness sets is honoured — a test must never read his
-    # real cache, which is the reason that helper exists). It is real, and it is
-    # EMPTY FOR THE WHOLE RUN: `claude -p` with no tty writes its result once, at
-    # the end. Measured on top 2026-07-30 while two workers were live — both
-    # their logs were 0 bytes, and of ~200 finished ones every single non-empty
-    # file was written at exit. So the drawer said "nothing logged yet" for
-    # exactly as long as there was anything to watch, which is the complaint.
-    # (Since 2026-07-30 the file is not literally empty: `boardwork` writes a
-    # `- [board ...]` header at spawn and a post-mortem at reap, so a worker
-    # killed mid-run still points at its transcript. Those are board's lines,
-    # not the agent's — the transcript is still the live source.)
-    #
-    # The agent's transcript is appended to as it works, and `boardphase` already
-    # reads it for the observed line and the context tally — so it is the same
-    # file, no new pipe, and each entry becomes one line: what the agent SAID, or
-    # `describe_call` on the tool it reached for, which is the same vocabulary
-    # the card's own observed line uses. The `.log` is the fallback, and it is
-    # the right one after the run: a dead worker has no more transcript but its
-    # final output is on disk.
-    #
-    # Read here rather than in QML because QML cannot read a file at all, and
-    # cleaned here rather than there because §2.3 says to map glyphs at INGEST:
-    # this is somebody else's text, so it goes through `px()` exactly as the
-    # store's prose does. Only the WIDTH-dependent elide is the drawer's, the
-    # font being monospace (§2.7).
-    #
-    # An EMPTY list means "nothing logged", and the drawer says that in words
-    # rather than opening empty (§10). It is never a guess: a missing file, an
-    # unreadable one and one holding nothing but control junk are all the same
-    # honest answer, and none of them is an error worth a colour.
+    # ---- worker output: transcript tail with log fallback -----------------
+    # The drawer shows the worker's last three lines. The live source is the
+    # appended transcript (also used by boardphase); each entry becomes the
+    # worker's text or a `describe_call` line. After exit, or when no transcript
+    # exists, read the tail of boardwork's `.log` under the harness-selected
+    # `XDG_CACHE_HOME`. Strip controls and map glyphs here, before QML elides
+    # to the drawer width. Missing, unreadable, or control-only input yields an
+    # empty list so the view says "nothing logged" rather than opening blank.
     #: How many of its own lines a card shows. His *"couple"*, read as the 2-3
     #: the drawer can carry without becoming the transcript §5.2 rules out.
     OUTPUT_LINES = 3

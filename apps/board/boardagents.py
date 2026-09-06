@@ -182,33 +182,11 @@ def clean_id(s):
 
 
 # ------------------------------------------------------------------- the names
-#: **An agent has a name, and that is what he is shown.** His words:
-#: *"can you give the workers regular human names? you can still keep the coded
-#: names if you'd like but i think itd be interesting to have them referred to
-#: by regular names"*, then: *"i want the names of agents to be taken from the
-#: names of demons in the lesser key of solomon"* — so the pool is the Ars
-#: Goetia's 72, complete and in the traditional order, 1 Bael ... 72
-#: Andromalius (the Lemegeton's list as Wikipedia gives it, fetched
-#: 2026-07-29). It ran 56 for a while — the short Goetia spellings padded out
-#: with Theurgia-Goetia / Ars Paulina names — until he asked for the full
-#: seventy-two.
-#:
-#: THE NAME IS PRESENTATION AND NOTHING IS KEYED ON IT. The id (`w1a2b3c`) is
-#: still the key: the systemd unit, `~/.cache/board-work/<id>.log`, the
-#: observation sidecar, the inbox directory and every record on disk are named
-#: by it, and a message is addressed by it. Renaming any of those would orphan a
-#: worker that is running right now.
-#:
-#: TWO RULES ON WHAT MAY GO IN. **ASCII only**: §2.3, a glyph the font lacks
-#: clips the whole row, so `Bune`, `Ronove`, `Vine`, `Raum`, `Gaap` and never
-#: the diacritical spellings. **Distinct case-insensitively**, because
-#: `boardctl inbox send --to` matches on the name. Length is deliberately NOT
-#: one any more: `AgentRow.nameW` measures per card (minimum 7 cells), so
-#: `Andromalius` at eleven costs its own card a few title cells and the rest
-#: of the list nothing. Where the pre-72 pool already had a spelling it is
-#: KEPT — `Marax` (not Morax), `Haures` (not Flauros), `Glasya` (for
-#: Glasya-Labolas, and what keeps the pool `isalpha`) — so a worker running
-#: under one of those still matches its own name.
+# Names are presentation only; the id remains the key for all worker state and
+# message routing. The pool is the 72-name ASCII Goetia list in order.
+#
+# Preserve established spellings and case-insensitive uniqueness; card widths
+# measure names individually, so names need not be padded or truncated.
 NAMES = ["Bael", "Agares", "Vassago", "Samigina", "Marbas", "Valefor", "Amon",
          "Barbatos", "Paimon", "Buer", "Gusion", "Sitri", "Beleth", "Leraje",
          "Eligos", "Zepar", "Botis", "Bathin", "Sallos", "Purson", "Marax",

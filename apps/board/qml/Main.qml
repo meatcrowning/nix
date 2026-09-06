@@ -873,62 +873,17 @@ Window {
             id: page
             x: win.pad
             y: win.pad
-            // ======================================== the one box he types in
-            // His control surface, in his own words: *"a single box that i
-            // could type things into, press enter, and have them sent to an
-            // inbox. then an agent figures out what agents to assign to what"*.
-            //
-            // It is FIRST, above everything, because it is the only thing on
-            // this page that starts something. Everything below it is a report.
-            //
-            // It writes down exactly one path — `boardagents.send()` with no
-            // agent named, into `inbox/queue/` — which is the same path a note
-            // to a running agent takes and the same one whose conservation the
-            // harness asserts. There is no second write, and there is nothing
-            // typed here that can end up nowhere: if the orchestrator that
-            // picks it up fails, board-watch puts his sentence itself back onto
-            // the board (`QUEUE_FAIL`).
-            //
-            // What it may NOT say is "done": nothing here fires immediately,
-            // and the gate is that he is at the machine. So the footer says
-            // where it went, never what will come of it (§10).
-            // The box, and to its right the one thing about the box that is a
-            // SETTING rather than a sentence: which model reads what he types.
-            // [his, 2026-07-29] *"add a drop down to the right of the top prompt
-            // box that allows the user to select which model they wish the
-            // orchestrator to be."*
-            //
-            // An Item rather than a Row because the box GROWS when he opens it
-            // and the chooser must stay put against the box's TOP rather than
-            // re-centring itself every keystroke. The box takes the remaining
-            // width; the chooser measures itself off its own text.
-            //
-            // ONE Item, and the chooser column is the reference. [his,
-            // 2026-07-29] *"the prompt box should extend so that it is not a
-            // single line but rather multiple lines so that it is the same
-            // height as from the top of the model selector box to the bottom of
-            // the indicators. the indicators should be anchored to the model
-            // selector box not the prompt box as they are now."* So:
-            //
-            //   * `summonerPick` sits at y 0 and the rest of the column — the
-            //     summoner model, the cap, the spirit model, then the meters —
-            //     hangs off it, and nothing in it looks at the box.
-            //   * `askBox.minHeight` is that column's span, so the box is as
-            //     tall as chooser + gap + meters and both edges line up. It is
-            //     read off their real geometry, never a number: a longer model
-            //     label, a second line on a stale meter or a font-size change
-            //     moves box and column together (§2.7).
-            //   * the dependency is ONE-DIRECTIONAL on purpose. Column -> box.
-            //     Anchoring the meters to the box while the box sizes itself
-            //     off the meters is a binding loop, which is the §5.2 trap and
-            //     what the arrangement this replaces would have become.
-            //
-            // The slack it fills was dead space (§5.2): a one-line box left the
-            // whole area beside the meters empty, and what fills it is the
-            // thing he types into — more of his sentence visible at once, and a
-            // click target that is the region rather than the line (§5.3).
-            // He still extends it past the resting height by typing: `minHeight`
-            // is a floor, not a cap.
+            // The first control is the only submit surface; everything below it
+            // reports state. Submit writes exactly once through
+            // `boardagents.send()` to `inbox/queue/` (the same path as a note),
+            // and board-watch returns the text as `QUEUE_FAIL` if dispatch fails.
+            // The footer reports where the text went, never that it is done.
+            // The model chooser is a setting beside the prompt, not prompt text.
+            // Keep the chooser column as the geometry source: `askBox.minHeight`
+            // follows its real span, so longer labels, wrapped meters, and font
+            // changes keep both edges aligned. The dependency is column -> box;
+            // reversing it would create a binding loop. The Item lets the box
+            // grow without moving the chooser; `minHeight` is a floor, not cap.
             Item {
                 id: topSection
                 width: page.width

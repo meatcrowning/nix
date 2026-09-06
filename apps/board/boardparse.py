@@ -1343,37 +1343,15 @@ def add_landed_row(lines, commit, what, date=None, when=""):
     return lines[:b] + [row] + lines[b:]
 
 
-# ------------------------------------------- every WAITING bullet says WHAT IT IS
-# His words: *"messages in the to do section should start with either QUESTION:
-# INFORMATION: COMPLETION: or something like those, maybe others too?, so that
-# the user can easily know what that message is about. any sort of elaboration or
-# background should go after the short description of the message"*.
-#
-# So a bullet is TAG, then a SHORT description, then anything else — and the
-# SHAPE of "anything else" is his too: *"it should show the PARTIAL INFORMATION
-# whatever text, then a single line summarizing, a new line, and THEN the
-# elaboration if needed. it shouldnt really elaborate that much though"*. One
-# line of summary on the bullet's own line; the elaboration, if there has to be
-# one, on INDENTED continuation lines under it, and **a sentence or two, not a
-# paragraph**. `parse()` splits the two into `summary`/`detail` and the view
-# draws them as two blocks with a gap; `text` stays the joined string every
-# other consumer already reads.
-#
-# "SHORT" got a number on 2026-07-29, because prose alone did not hold: he came
-# back with *"still too long"* after the ordering rule above landed. The first
-# line after the tag is AT MOST about a dozen words (`SUMMARY_MAX_WORDS`,
-# enforced by `check_short_summary` at the same choke point); everything past
-# that budget belongs on the indented continuation lines. A code span counts as
-# ONE word — his interpolated words are data, and a note saying a worker died
-# must never be refused for the length of the thing it died on.
-#
-# The TAG is checked HERE, at the one function every writer of that section goes
-# through (`boardmove.note`, `boardmove.stall`, the `why` of `give_back`, and
-# board-watch's four failure templates). One choke point, so a new writer cannot
-# be added that forgets.
-#
-# The set is SHORT and every tag in it has a writer that emits it; there is no
-# tag here nothing can produce. What each one claims:
+# ------------------------------------------- typed WAITING bullets
+# Every bullet is `TAG: short summary` with optional indented detail. `parse()`
+# exposes `summary` and `detail` for the two-block view while preserving the
+# joined `text` for other consumers. `SUMMARY_MAX_WORDS` is enforced by
+# `check_short_summary`; code spans count as one word. All writers pass through
+# this tag check (`note`, `stall`, `give_back`, and board-watch failure
+# templates), so new bullets cannot bypass the format. QUESTION remains
+# parse-compatible but is rejected for new notes; decisions belong in NEEDS YOU.
+# The remaining tags each describe a writer's outcome:
 TODO_TAGS = (
     #: it asks him something and nothing moves until he answers. NOT a decision
     #: — a decision is an item in NEEDS YOU (`boardmove.ask`), with options and
