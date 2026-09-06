@@ -87,37 +87,10 @@ PlasmoidItem {
     // menus to our right, so we must not draw menus of our own beside them.
     readonly property bool appExportsMenu: !onDesktop && shown.menuService.length > 0
 
-    // The DBusMenu applet receives a task's menu model a frame after task
-    // activation.  Do not turn the desktop labels off in that gap: it reads
-    // as the entire bar flashing blank.  The delegates themselves are kept
-    // alive below, so returning to the desktop is an immediate visibility
-    // change rather than a Repeater rebuild.
-    property bool desktopHandoff: false
-    readonly property bool showDesktopMenus: onDesktop || desktopHandoff
-
-    Timer {
-        id: desktopHandoffTimer
-        interval: 120
-        repeat: false
-        onTriggered: root.desktopHandoff = false
-    }
-
-    onOnDesktopChanged: {
-        if (onDesktop) {
-            desktopHandoffTimer.stop();
-            desktopHandoff = false;
-        } else if (appExportsMenu) {
-            desktopHandoff = true;
-            desktopHandoffTimer.restart();
-        }
-    }
-
-    onAppExportsMenuChanged: {
-        if (!onDesktop && appExportsMenu) {
-            desktopHandoff = true;
-            desktopHandoffTimer.restart();
-        }
-    }
+    // Keep the desktop delegates alive.  Returning from a DBus menu then only
+    // changes their visibility, instead of destroying and recreating a
+    // Repeater between frames.
+    readonly property bool showDesktopMenus: onDesktop
 
     // Opening one of our menus takes keyboard focus off his window, which
     // makes KWin drop the active task — without this the bar would flip to
@@ -409,7 +382,7 @@ PlasmoidItem {
         }];
     }
 
-    // Build the desktop delegates once.  Visibility, not destruction and
+    // Build the desktop delegates once. Visibility, not destruction and
     // recreation, handles the desktop/native handoff above.
     readonly property var desktopBarMenus: desktopMenus()
     readonly property var appBarMenus: onDesktop ? [] : appMenus()
