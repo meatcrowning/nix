@@ -50,6 +50,7 @@ print(json.dumps({
     "jobs": o.Jobs._argv("list"),
     "memory": o.Ollama._memories_argv(),
     "sessions": o.Ollama._sessions_argv(),
+    "ui_sessions": o.Sessions._store_argv(),
     "host_arg_default": o.HOST_ARG["description"],
     "write_takes_host": [t["function"]["name"] for t in o.FILE_TOOLS
                          if "host" in t["function"]["parameters"]["properties"]],
@@ -123,9 +124,12 @@ if here["local"] == "book":
           " ".join(here["memory"][:3]))
     check("...and the session history with it", is_ssh(here["sessions"]),
           " ".join(here["sessions"][:3]))
+    check("the session picker uses that same store", is_ssh(here["ui_sessions"]),
+          " ".join(here["ui_sessions"][:3]))
 else:
     check("on top every store is local anyway",
-          local(here["memory"]) and local(here["sessions"]))
+          local(here["memory"]) and local(here["sessions"])
+          and local(here["ui_sessions"]))
 
 # ---- the escape hatch, both ways ----------------------------------------
 forced = probe(ORACLE_TOOLS_HOST=other)

@@ -86,6 +86,7 @@ import lastfm as lastfmlib  # noqa: E402  (pylib; his Last.fm account, shared wi
 import genshort  # noqa: E402  (his generation shorthand -> make_image/make_video args)
 import boorutags  # noqa: E402  (pylib; the Danbooru vocabulary anima was captioned with)
 import fleet  # noqa: E402  (chatter's own; the subagent/jobs pane and its target helper)
+from sessions import Sessions  # noqa: E402  (named transcript/store Qt seam)
 
 #: The local ollama daemon. Loopback-pinned like everything else that speaks to
 #: a local backend here — never a new listener (root AGENTS.md → the tailnet).
@@ -11593,129 +11594,6 @@ class Backend(QObject):
         proc.finished.connect(finished)
         proc.errorOccurred.connect(lambda *_: None)   # reported through finished
         proc.start(argv[0], argv[1:])
-
-
-class Sessions(QObject):
-    """Named conversation sessions and their transcripts.
-
-    Each session is one JSON transcript file in the canonical store
-    (`SESSIONS_ROOT`), reached through `tools/sessions-store.py` — the same
-    QProcess idiom the file tools use, so a save never blocks the UI and
-    list/load results arrive on signals. oracle GENERATES the session id (a
-    stable `sess-<ms>-<rand>` token, in QML), so the store only ever validates
-    and writes; there is no id to mint and thus no round-trip before the first
-    save. The list is `[{"id","title","updated","turns"}]`, newest first, for the
-    session picker; `loaded` hands a whole transcript back as JSON for QML to
-    rebuild the log from."""
-
-    listChanged = Signal()
-    loaded = Signal(str, str, str)     # id, title, turns as a JSON string
-    saved = Signal(str, str)           # id, title — after a persist landed
-    error = Signal(str)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._list = []
-        self._procs = []               # live QProcesses, so none is GC'd mid-run
-
-    @Property("QVariantList", notify=listChanged)
-    def sessions(self):
-        return self._list
-
-    @staticmethod
-    def _store_argv():
-        """The command that runs one store op through tools/sessions-store.py
-        against the canonical store on top. On `top` it is local; on `book` it
-        goes over the same ssh master tools/ollama-tunnel.sh holds open
-        (OLLAMA_SSH*), so the sessions/transcripts live in one canonical place
-        keyed to top and both machines share them. The op JSON is written to
-        stdin."""
-        if ON_BOOK and not STORE_LOCAL:
-            host = os.environ.get("OLLAMA_SSH_HOST", "top")
-            ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
-            argv = [ssh, "-o", "BatchMode=yes"]
-            ctl = os.environ.get("OLLAMA_SSH_CTL")
-            if ctl:
-                argv += ["-o", "ControlMaster=auto", "-o", "ControlPersist=30",
-                         "-o", "ControlPath=" + ctl]
-            argv += [host, "python3", shlex.quote(SESSIONS_SCRIPT),
-                     shlex.quote(SESSIONS_ROOT)]
-            return argv
-        return [sys.executable, SESSIONS_SCRIPT, SESSIONS_ROOT]
-
-    def _run(self, req, on_done):
-        proc = QProcess(self)
-        self._procs.append(proc)
-
-        def finished(*_):
-            if proc not in self._procs:
-                return
-            self._procs.remove(proc)
-            try:
-                out = bytes(proc.readAllStandardOutput())
-                err = bytes(proc.readAllStandardError())
-            except RuntimeError:
-                return
-            proc.deleteLater()
-            try:
-                obj = json.loads(out.decode("utf-8", "replace") or "{}")
-            except ValueError:
-                tail = err.decode("utf-8", "replace").strip().splitlines()
-                obj = {"error": "session store failed: "
-                       + (tail[-1] if tail else "no output")}
-            on_done(obj if isinstance(obj, dict) else {"error": "bad store reply"})
-
-        proc.finished.connect(finished)
-        proc.errorOccurred.connect(lambda *_: None)   # surfaced through finished
-        argv = self._store_argv()
-        proc.start(argv[0], argv[1:])
-        proc.write(json.dumps(req).encode("utf-8"))
-        proc.closeWriteChannel()
-
-    @Slot()
-    def refresh(self):
-        def done(obj):
-            if "error" in obj:
-                self.error.emit(obj["error"])
-                return
-            self._list = obj.get("sessions", [])
-            self.listChanged.emit()
-        self._run({"op": "list"}, done)
-
-    @Slot(str)
-    def open(self, sid):
-        def done(obj):
-            if "error" in obj:
-                self.error.emit(obj["error"])
-                return
-            self.loaded.emit(obj.get("id", ""), obj.get("title", ""),
-                             json.dumps(obj.get("turns", [])))
-        self._run({"op": "load", "id": sid}, done)
-
-    @Slot(str, str, str)
-    def save(self, sid, title, turns_json):
-        try:
-            turns = json.loads(turns_json or "[]")
-        except ValueError:
-            turns = []
-        if not sid or not turns:
-            return                      # nothing to persist yet
-        def done(obj):
-            if "error" in obj:
-                self.error.emit(obj["error"])
-                return
-            self.saved.emit(obj.get("id", sid), obj.get("title", title))
-            self.refresh()
-        self._run({"op": "save", "id": sid, "title": title, "turns": turns}, done)
-
-    @Slot(str)
-    def remove(self, sid):
-        def done(obj):
-            if "error" in obj:
-                self.error.emit(obj["error"])
-                return
-            self.refresh()
-        self._run({"op": "delete", "id": sid}, done)
 
 
 #: Now that `Ollama` exists, the collision set is what IT offers — never a
