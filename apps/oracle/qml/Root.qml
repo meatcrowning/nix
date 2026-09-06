@@ -1266,9 +1266,8 @@ Item {
                    state: (Ollama.busy || win.canSend || win.canContinue) ? 0 : 2 });
         out.push("-");
         out.push({ id: "new-session", menu: "file", menuText: "New Session",
-                   barText: "New",
                    tip: "start a fresh conversation", icon: "document-new",
-                   bar: true, shortcut: "@New" });
+                   bar: true, barIconOnly: true, shortcut: "@New" });
         // The saved sessions, as a radio set: one of them IS the conversation
         // on screen, and two independent checkmarks could claim otherwise. The
         // toolbar's combo carries the whole list; the menu carries the recent
@@ -1287,9 +1286,9 @@ Item {
                    state: win.sessionId !== "" ? 0 : 2 });
 
         out.push({ id: "attach", menu: "chat", menuText: "Attach Files…",
-                   barText: "Attach",
                    tip: "attach files to the next message",
-                   icon: "mail-attachment", bar: true, shortcut: "@Open" });
+                   icon: "mail-attachment", bar: true, barIconOnly: true,
+                   shortcut: "@Open" });
         out.push({ id: "detach", menu: "chat", menuText: "Clear Attachments",
                    state: attachments.count > 0 ? 0 : 2 });
 
