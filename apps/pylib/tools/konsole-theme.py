@@ -147,16 +147,14 @@ def build(pal: dict, source=None) -> str:
         out.append("[%s]\nColor=%s\n" % (sect, _kc(t[key])))
     for n in range(8):
         slot(n, t[str(n)], t["%dFaint" % n], t["%dIntense" % n])
-    # In Plasma Konsole's own window is translucent. Leaving TerminalDisplay
-    # transparent exposes the real KStyle-painted parent behind it: the
-    # continuous field that joins Oxygen's titlebar, toolbar, and window body.
-    # A copied wallpaper cannot reproduce that geometry.
+    # The patched Konsole renders its opaque parent window background through
+    # this sentinel, preserving the continuous KStyle field under the text.
     plasma = kdetheme.is_plasma() if source is None else (source == "plasma")
-    opacity = 0 if plasma else OPACITY
+    wallpaper = "StyleBackground" if plasma else ""
     out.append("[General]\nBlur=false\nColorRandomization=false\n"
                "Description=%s\nOpacity=%s\nWallpaper=%s\n"
                "FillStyle=NoScaling\nAnchor=0,0\nWallpaperOpacity=1\n"
-               % (SCHEME_NAME, "%g" % opacity, ""))
+               % (SCHEME_NAME, "%g" % OPACITY, wallpaper))
     return "".join(out)
 
 

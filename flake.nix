@@ -139,7 +139,10 @@
     # by leaving the overlay out of its pkgs entirely — corners just stay
     # round there until this gets added back.
 
-    pkgsAir = mkPkgs "aarch64-linux" [ vcv-rack-overlay ];
+    # Air skips Breeze's local patch because it has no aarch64 cache, but the
+    # small Konsole renderer patch carries its real window field under terminal
+    # text instead of letting terminal transparency reach the desktop.
+    pkgsAir = mkPkgs "aarch64-linux" [ vcv-rack-overlay konsole-style-background-overlay ];
 
   in
   {
