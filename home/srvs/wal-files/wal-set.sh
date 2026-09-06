@@ -197,9 +197,20 @@ fi
 # file instead of overwriting widget style, icons, or fonts.
 KG="$CONFIG/kdeglobals"
 # Oxygen's application art is raster and otherwise remains on its baked
-# palette. The helper alternates its theme name so open KDE/Qt programs flush
-# their icon cache as well as receiving fresh pixels for future windows.
-"$SCRIPTS/oxygen-live-icons.py" --accent "$ACCENT" >/dev/null
+# palette. Mint it off the critical path: recolouring the full icon set can take
+# tens of seconds, but it must not hold the palette apply (or an app launch)
+# hostage. The helper alternates its theme name and notifies KDE when done.
+if command -v systemd-run >/dev/null 2>&1; then
+    systemd-run --user --quiet --no-block --collect \
+        --unit="wal-oxygen-icons-${ACCENT}" \
+        "$SCRIPTS/oxygen-live-icons.py" --accent "$ACCENT" \
+        >>"$CACHE/wallpaper-picker.log" 2>&1 \
+        || setsid "$SCRIPTS/oxygen-live-icons.py" --accent "$ACCENT" \
+            >>"$CACHE/wallpaper-picker.log" 2>&1 </dev/null &
+else
+    setsid "$SCRIPTS/oxygen-live-icons.py" --accent "$ACCENT" \
+        >>"$CACHE/wallpaper-picker.log" 2>&1 </dev/null &
+fi
 PLASMA_SESSION=0
 case ":$(printf '%s' "${XDG_CURRENT_DESKTOP:-}" | tr '[:lower:]' '[:upper:]'):" in
     *:KDE:*) PLASMA_SESSION=1 ;;
