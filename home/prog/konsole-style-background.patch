@@ -2,37 +2,54 @@ diff --git a/src/terminalDisplay/TerminalPainter.cpp b/src/terminalDisplay/Termi
 index 5d819327..ec602555 100644
 --- a/src/terminalDisplay/TerminalPainter.cpp
 +++ b/src/terminalDisplay/TerminalPainter.cpp
-@@ -30,4 +30,7 @@
+@@ -30,4 +30,10 @@
  #include <QRegion>
  #include <QString>
  #include <QTransform>
-+#include <QDir>
-+#include <QFileInfo>
 +#include <QImage>
++#include <QPalette>
++#include <QWidget>
++#include <KColorScheme>
++#include <KSharedConfig>
  #include <QtMath>
-@@ -620,5 +623,30 @@ void TerminalPainter::drawBackground(QPainter &painter, const QRect &rect, const QColor &backgroundColor, bool useOpacitySetting)
+@@ -620,5 +626,43 @@ void TerminalPainter::drawBackground(QPainter &painter, const QRect &rect, const QColor &backgroundColor, bool useOpacitySetting)
  void TerminalPainter::drawBackground(QPainter &painter, const QRect &rect, const QColor &backgroundColor, bool useOpacitySetting)
  {
 +    // A generated colour scheme can ask for the owning window's painted
-+    // background rather than its terminal colour. The shared Plasma surface
-+    // is rendered by a real Oxygen-styled top-level QWidget whenever the KDE
-+    // palette changes; crop that exact render to TerminalDisplay coordinates.
-+    // It stays opaque, while the terminal content above it is transparent.
++    // background rather than its terminal colour. Render the same window-sized
++    // Oxygen QWidget proxy used by the desktop's Qt apps, then crop it to the
++    // TerminalDisplay coordinates. Loading the palette from kdeglobals is
++    // deliberate: Konsole's terminal palette is not the owning window palette.
 +    if (m_parentDisplay->wallpaper()->path() == QStringLiteral("StyleBackground")) {
 +        QWidget *window = m_parentDisplay->window();
 +        if (window != nullptr) {
 +            const QPoint origin = m_parentDisplay->mapTo(window, QPoint());
 +            static QImage surface;
-+            static qint64 surfaceMtime = -1;
-+            const QString stateRoot = qEnvironmentVariable(
-+                "XDG_STATE_HOME", QDir::homePath() + QStringLiteral("/.local/state"));
-+            const QFileInfo info(stateRoot + QStringLiteral("/plasma-panel-surface.png"));
-+            const qint64 mtime = info.exists() ? info.lastModified().toMSecsSinceEpoch() : -1;
-+            if (mtime != surfaceMtime) {
-+                surface.load(info.filePath());
-+                surfaceMtime = mtime;
++            static QSize surfaceSize;
++            static quint64 paletteKey = 0;
++            static bool surfaceActive = false;
++            QPalette palette = KColorScheme::createApplicationPalette(KSharedConfig::openConfig());
++            const bool active = window->isActiveWindow();
++            const QPalette::ColorGroup group = active ? QPalette::Active : QPalette::Inactive;
++            for (int role = 0; role < QPalette::NColorRoles; ++role) {
++                const QColor color = palette.color(group, static_cast<QPalette::ColorRole>(role));
++                for (const QPalette::ColorGroup target : {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
++                    palette.setColor(target, static_cast<QPalette::ColorRole>(role), color);
++                }
 +            }
-+            if (!surface.isNull()) {
++            if (surfaceSize != window->size() || paletteKey != palette.cacheKey() || surfaceActive != active) {
++                QWidget proxy;
++                proxy.setAttribute(Qt::WA_StyledBackground, true);
++                proxy.setPalette(palette);
++                proxy.resize(window->size());
++                surface = QImage(window->size(), QImage::Format_ARGB32_Premultiplied);
++                surface.fill(Qt::transparent);
++                proxy.render(&surface, QPoint(), QRegion(window->rect()), QWidget::DrawWindowBackground);
++                surfaceSize = window->size();
++                paletteKey = palette.cacheKey();
++                surfaceActive = active;
++            }
++            if (!surface.isNull() && surface.rect().contains(rect.translated(origin))) {
 +                painter.drawImage(rect, surface, rect.translated(origin));
 +                return;
 +            }
