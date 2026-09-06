@@ -11660,6 +11660,13 @@ def main():
     # everything a person reads says chatter, About included.
     app.setApplicationDisplayName("chatter")
     app.setDesktopFileName("oracle")
+    # A real KDE window does not infer its icon from the desktop id reliably;
+    # without an explicit application icon Oxygen shows image-missing in the
+    # titlebar. The installed hicolor entry is Chatter's Gusion seal.
+    if plasma_face := (is_plasma() if not face else face in ("plasma", "oxygen")):
+        from PySide6.QtGui import QIcon
+        icon_file = Path.home() / ".local/share/icons/hicolor/scalable/apps/oracle.svg"
+        app.setWindowIcon(QIcon.fromTheme("oracle", QIcon(str(icon_file))))
 
     palette = Palette(theme_source(PANEL_THEME))
     style = DeskStyle()
@@ -11669,7 +11676,6 @@ def main():
     # platform default while every other app follows Settings > font. Use the
     # primary output's scale at launch, matching the QML components' per-screen
     # `labelFontForScale(Screen.devicePixelRatio)` path.
-    plasma_face = is_plasma() if not face else face in ("plasma", "oxygen")
     if plasma_face:
         screen = app.primaryScreen()
         scale = screen.devicePixelRatio() if screen is not None else 1.0
