@@ -488,6 +488,52 @@ class _TagIndexJob(QRunnable):
         self.sig.done.emit()
 
 
+class _RegistryScanJob(QRunnable):
+    """Read model metadata without stopping Qt's GUI thread.
+
+    On book the root is SSHFS. Even a cached scan still has to walk and stat
+    every remote file, so doing it from a zero timer made the freshly shown
+    window stop accepting input until the network filesystem answered.
+    """
+
+    class _Sig(QObject):
+        done = Signal(object, object, str)
+
+    def __init__(self):
+        super().__init__()
+        self.setAutoDelete(False)
+        self.sig = _RegistryScanJob._Sig()
+
+    def run(self):
+        try:
+            reg = R.Registry()
+            rows = []
+            for entry in reg.base_models():
+                pairing = reg.pair(entry)
+                fam = pairing["family"]
+                if fam and pairing["encoder"]:
+                    desc = f"{pairing['encoder'].name}  +  {pairing['vae'].name}"
+                elif fam:
+                    desc = "encoder and VAE bundled in the checkpoint"
+                else:
+                    desc = "unrecognised - pick a family"
+                rows.append({
+                    "entry": entry, "name": entry.name,
+                    "family": entry.family or "unknown",
+                    "label": (fam or {}).get("label", entry.family or "unknown"),
+                    "pairing": desc, "quant": entry.quant or "",
+                    "size": _human(entry.size),
+                    "problem": "; ".join(pairing["problems"]),
+                    "known": bool(fam) and not pairing["problems"],
+                    "path": entry.path, "overridden": entry.overridden,
+                })
+            rows.sort(key=lambda row: (not row["known"], row["label"].lower(),
+                                       row["name"].lower()))
+            self.sig.done.emit(reg, rows, "")
+        except Exception as exc:  # noqa: BLE001 - a dead mount is recoverable
+            self.sig.done.emit(None, None, str(exc))
+
+
 class Tags(QObject):
     """The `Tags` context property — the prompt boxes' tag completer.
 
@@ -682,6 +728,11 @@ class Painter(QObject):
                                           # yet (persisted across a relaunch)
 
         self.reg = None
+        self._scan_pool = QThreadPool(self)
+        self._scan_pool.setMaxThreadCount(1)
+        self._scan_job = None
+        self._scan_again = False
+        self._sync_scan = os.environ.get("PAINTER_SYNC_SCAN") == "1"
         # The memory arbiter (home/srvs/ai-warden.nix). A batch asks for room
         # before it is queued, because a ComfyUI load landing on top of a 24 GiB
         # ollama model livelocks the machine rather than failing. Fail-open by
@@ -1239,27 +1290,28 @@ class Painter(QObject):
 
     @Slot()
     def rescan(self):
-        self.reg = R.Registry()
-        rows = []
-        for e in self.reg.base_models():
-            pairing = self.reg.pair(e)
-            fam = pairing["family"]
-            if fam and pairing["encoder"]:
-                desc = f"{pairing['encoder'].name}  +  {pairing['vae'].name}"
-            elif fam:
-                desc = "encoder and VAE bundled in the checkpoint"
-            else:
-                desc = "unrecognised - pick a family"
-            rows.append({
-                "entry": e, "name": e.name, "family": e.family or "unknown",
-                "label": (fam or {}).get("label", e.family or "unknown"),
-                "pairing": desc, "quant": e.quant or "",
-                "size": _human(e.size),
-                "problem": "; ".join(pairing["problems"]),
-                "known": bool(fam) and not pairing["problems"],
-                "path": e.path, "overridden": e.overridden,
-            })
-        rows.sort(key=lambda r: (not r["known"], r["label"].lower(), r["name"].lower()))
+        if self._scan_job is not None:
+            self._scan_again = True
+            return
+        self._scan_job = _RegistryScanJob()
+        self._scan_job.sig.done.connect(self._scan_finished)
+        if self._sync_scan:
+            self._scan_job.run()
+        else:
+            self._scan_pool.start(self._scan_job)
+
+    @Slot(object, object, str)
+    def _scan_finished(self, reg, rows, error):
+        self._scan_job = None
+        if error:
+            self._set_status("model scan failed")
+            self._on_log(f"model scan failed: {error}")
+            if self._scan_again:
+                self._scan_again = False
+                self.rescan()
+            return
+
+        self.reg = reg
         self.models.set_rows(rows)
         want = getattr(self, "_want_model", "")
         if want:
@@ -1312,6 +1364,9 @@ class Painter(QObject):
         # folders are known to have changed, so it refreshes both sides.
         if self._object_info is not None:
             self.client.fetch_object_info(self._refresh_object_info)
+        if self._scan_again:
+            self._scan_again = False
+            self.rescan()
 
     def _retry_scan(self):
         self._scan_tries += 1
