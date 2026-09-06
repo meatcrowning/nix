@@ -8,6 +8,8 @@ screenshots of individual programs and hyprland setup below. all programs are na
 
 <img width="1273" height="934" alt="Screenshot_20260904_215834" src="https://github.com/user-attachments/assets/141fd4e0-ca2c-47e5-805e-6bd6775457a7" />
 
+<img width="708" height="905" alt="Screenshot_20260904_204200" src="https://github.com/user-attachments/assets/6a0cdebe-23a3-4f60-90a1-f9069d4f4fca" />
+
 <img width="1920" height="1080" alt="Screenshot_20260730_223852" src="https://github.com/user-attachments/assets/e7119d2f-d39a-4ae8-bf02-a5cbbb3e79fa" />
 
 <img width="2560" height="1600" alt="Screenshot_20260728_001720" src="https://github.com/user-attachments/assets/1c1b5dce-7156-4d66-b38f-ea85366a657e" />
