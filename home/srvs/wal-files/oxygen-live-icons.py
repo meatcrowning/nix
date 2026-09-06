@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import colorsys
 import fcntl
 import re
 import shutil
@@ -13,6 +14,7 @@ from pathlib import Path
 from PIL import Image
 
 SOURCE = Path("@oxygenIcons@") / "share" / "icons" / "oxygen"
+RENDER_VERSION = "2"  # bump when the pixel transform changes
 
 
 def theme_index(source, destination, name):
@@ -24,14 +26,30 @@ def theme_index(source, destination, name):
 
 
 def recolour(source, destination, accent):
-    colour = tuple(bytes.fromhex(accent))
+    """Replace Oxygen's blue paint, retaining its shading and other inks."""
+    accent_rgb = tuple(channel / 255.0 for channel in bytes.fromhex(accent))
+    accent_hue, accent_saturation, _ = colorsys.rgb_to_hsv(*accent_rgb)
+
+    def replace_blue(pixel):
+        red, green, blue, alpha = pixel
+        if alpha == 0:
+            return pixel
+        hue, saturation, value = colorsys.rgb_to_hsv(red / 255.0, green / 255.0,
+                                                      blue / 255.0)
+        # Oxygen's material colour is a blue band.  Keep black outlines,
+        # white highlights and semantic warning/error colours untouched.
+        if not (0.50 <= hue <= 0.72 and saturation >= 0.18):
+            return pixel
+        red, green, blue = colorsys.hsv_to_rgb(accent_hue, accent_saturation, value)
+        return (round(red * 255), round(green * 255), round(blue * 255), alpha)
+
     for image_path in source.glob("base/**/*.png"):
         target = destination / image_path.relative_to(source)
         target.parent.mkdir(parents=True, exist_ok=True)
         with Image.open(image_path) as image:
-            alpha = image.convert("RGBA").getchannel("A")
-            tinted = Image.new("RGBA", image.size, colour + (0,))
-            tinted.putalpha(alpha)
+            rgba = image.convert("RGBA")
+            tinted = Image.new("RGBA", rgba.size)
+            tinted.putdata([replace_blue(pixel) for pixel in rgba.getdata()])
             tinted.save(target)
 
 
@@ -61,8 +79,8 @@ def main():
     with lock.open("w") as lock_file:
         fcntl.flock(lock_file, fcntl.LOCK_EX)
         previous = state.read_text().strip().split() if state.exists() else []
-        if len(previous) == 2 and previous[0] == accent:
-            slot = previous[1]
+        if len(previous) == 3 and previous[0] == RENDER_VERSION and previous[1] == accent:
+            slot = previous[2]
         else:
             slot = "1" if previous[-1:] == ["0"] else "0"
             destination = root / ("oxygen-live-" + slot)
@@ -70,7 +88,7 @@ def main():
                 shutil.rmtree(destination)
             theme_index(SOURCE, destination, "Oxygen Live " + slot)
             recolour(SOURCE, destination, accent)
-            state.write_text(accent + " " + slot + "\n")
+            state.write_text(RENDER_VERSION + " " + accent + " " + slot + "\n")
         name = "oxygen-live-" + slot
         if not args.no_activate:
             activate(name)

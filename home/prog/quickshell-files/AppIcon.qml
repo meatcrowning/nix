@@ -25,10 +25,9 @@ import Quickshell.Widgets
 //                                                      has no layer to sample
 //   colorization over a WHITE fallback       #6dbdf2   exact
 //
-// The image themes now provide a live accent-coloured source for external
-// programs too, but Quickshell caches that source by icon name. Whiten it
-// before colourizing so every panel copy is an exact current state colour even
-// while the provider still holds its previous pixmap.
+// The image themes now replace Oxygen's blue material colour with the live
+// palette hue. Keep the source luminance here too: it is the glassy highlight
+// and shadow work that makes an Oxygen icon an icon rather than a flat mask.
 Item {
     id: root
 
@@ -65,7 +64,6 @@ Item {
         visible: (root.tint || root.seal) && root.source !== ""
         colorization: 1.0
         colorizationColor: root.color
-        brightness: 1.0
         opacity: root.dim
     }
 }
