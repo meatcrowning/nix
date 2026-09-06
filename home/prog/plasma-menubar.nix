@@ -19,9 +19,9 @@
 # This applet authors ONLY what Plasma has no source for, and sits immediately
 # LEFT of the stock one:
 #
-#   [kickoff]  [AppName]  [ File Edit View … ]   app exports a menu (stock applet)
-#   [kickoff]  [Vivaldi]  [ Window ]             it does not (ours)
-#   [kickoff]  [Desktop]                         nothing focused (ours)
+#   [kickoff]  [ File Edit View … ]              app exports a menu (stock applet)
+#   [kickoff]  [ Window ]                        Vivaldi (ours)
+#   [kickoff]  [ File Edit Go Window Help ]      desktop (ours)
 #
 # Keeping the stock applet is the point — the DBusMenu import, its keyboard
 # handling and its search entry stay upstream's, unforked, and a Plasma bump
@@ -66,7 +66,8 @@ in
   # The scripting API can only APPEND — there is no reorder in
   # `shell/scripting/containment.h` — so a first-ever install lands it at the
   # end of the panel and its place left of the appmenu is set once, by hand, in
-  # AppletOrder. Nothing here ever moves it again.
+  # AppletOrder. The one obsolete fixed spacer directly before this applet is
+  # removed: it is a blank gutter between Kickoff and the first menu label.
   systemd.user.services.plasma-menubar = {
     Unit = {
       Description = "Add the always-visible menu bar to the Plasma panel";
@@ -83,6 +84,8 @@ in
           if qdbus org.kde.plasmashell /PlasmaShell \
               org.kde.PlasmaShell.evaluateScript ${lib.escapeShellArg ''
                 var present = false;
+                var menuPanel = null;
+                var menuIndex = -1;
                 var beside = -1;
                 var top = -1;
                 for (var i = 0; i < panelIds.length; ++i) {
@@ -90,12 +93,20 @@ in
                     if (panel.location === "top" && top < 0) top = panelIds[i];
                     var widgets = panel.widgets();
                     for (var j = 0; j < widgets.length; ++j) {
-                        if (widgets[j].type === "${pkgId}") present = true;
+                        if (widgets[j].type === "${pkgId}") {
+                            present = true;
+                            menuPanel = panel;
+                            menuIndex = j;
+                        }
                         if (widgets[j].type === "org.kde.plasma.appmenu") beside = panelIds[i];
                     }
                 }
                 var target = beside >= 0 ? beside : top;
                 if (!present && target >= 0) panelById(target).addWidget("${pkgId}");
+                if (present && menuIndex > 0) {
+                    var before = menuPanel.widgets()[menuIndex - 1];
+                    if (before.type === "org.kde.plasma.panelspacer") before.remove();
+                }
               ''} >/dev/null 2>&1; then
             exit 0
           fi
