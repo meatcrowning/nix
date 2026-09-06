@@ -19,7 +19,10 @@ THEME="$HOME/.config/quickshell/Theme.qml"
 # fallback for a manual scheme selection before wal has ever populated a cache.
 wall="$(cat "$WAL_CACHE/current" 2>/dev/null || true)"
 key="$(printf '%s' "$wall" | md5sum | cut -d' ' -f1)"
-accent="$(sed -n 's/^ACCENT=\([0-9a-fA-F]\{6\}\)$/\1/p' "$WAL_CACHE/themes/$key.env" 2>/dev/null | head -n1)"
+accent="$(sed -n 's/^PLASMA_ACCENT=\([0-9a-fA-F]\{6\}\)$/\1/p' "$WAL_CACHE/themes/$key.env" 2>/dev/null | head -n1)"
+if ! printf '%s' "$accent" | grep -qE '^[0-9a-fA-F]{6}$'; then
+    accent="$(sed -n 's/^ACCENT=\([0-9a-fA-F]\{6\}\)$/\1/p' "$WAL_CACHE/themes/$key.env" 2>/dev/null | head -n1)"
+fi
 if ! printf '%s' "$accent" | grep -qE '^[0-9a-fA-F]{6}$'; then
     accent="$(sed -n 's/^    readonly property color accent:    "#\([0-9a-fA-F]\{6\}\)".*/\1/p' "$THEME" | head -n1)"
 fi

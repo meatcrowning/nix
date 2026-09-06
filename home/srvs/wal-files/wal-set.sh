@@ -68,6 +68,15 @@ fi
 eval "$(cat "$THEMES/$KEY.env")"
 echo "wal-set: source = ${IW}x${IH}, mode = $MODE, accent = #$ACCENT"
 
+PLASMA_SESSION=0
+case ":$(printf '%s' "${XDG_CURRENT_DESKTOP:-}" | tr '[:lower:]' '[:upper:]'):" in
+    *:KDE:*) PLASMA_SESSION=1 ;;
+esac
+KDE_ACCENT="$ACCENT"
+if [ "$PLASMA_SESSION" = 1 ]; then
+    KDE_ACCENT="${PLASMA_ACCENT:-$ACCENT}"
+fi
+
 # Publish the quantised cluster list (dominant first, comma-separated bare hex)
 # for the Settings swatch row (SetSwatches.qml) — the display the user picks
 # palette colours from. In place, same inode rule as $STATE.mode above. An env
@@ -202,27 +211,23 @@ KG="$CONFIG/kdeglobals"
 # hostage. The helper alternates its theme name and notifies KDE when done.
 if command -v systemd-run >/dev/null 2>&1; then
     systemd-run --user --quiet --no-block --collect \
-        --unit="wal-oxygen-icons-${ACCENT}" \
-        "$SCRIPTS/oxygen-live-icons.py" --accent "$ACCENT" \
+        --unit="wal-oxygen-icons-${KDE_ACCENT}-$$" \
+        "$SCRIPTS/oxygen-live-icons.py" --accent "$KDE_ACCENT" \
         >>"$CACHE/wallpaper-picker.log" 2>&1 \
-        || setsid "$SCRIPTS/oxygen-live-icons.py" --accent "$ACCENT" \
+        || setsid "$SCRIPTS/oxygen-live-icons.py" --accent "$KDE_ACCENT" \
             >>"$CACHE/wallpaper-picker.log" 2>&1 </dev/null &
 else
-    setsid "$SCRIPTS/oxygen-live-icons.py" --accent "$ACCENT" \
+    setsid "$SCRIPTS/oxygen-live-icons.py" --accent "$KDE_ACCENT" \
         >>"$CACHE/wallpaper-picker.log" 2>&1 </dev/null &
 fi
-PLASMA_SESSION=0
-case ":$(printf '%s' "${XDG_CURRENT_DESKTOP:-}" | tr '[:lower:]' '[:upper:]'):" in
-    *:KDE:*) PLASMA_SESSION=1 ;;
-esac
 if [ "$PLASMA_SESSION" = 1 ]; then
     # Keep the selected theme/shape; only move its colour family to the accent.
     echo "wal-set: Plasma session — KDE theme untouched, re-minting its colour scheme"
     if [ "$BG" = "464540" ]; then
-        "$SCRIPTS/plasma-scheme.py" --accent "$ACCENT" --background "$BG" \
+        "$SCRIPTS/plasma-scheme.py" --accent "$KDE_ACCENT" --background "$BG" \
             --surface-color "$BGALT"
     else
-        "$SCRIPTS/plasma-scheme.py" --accent "$ACCENT" \
+        "$SCRIPTS/plasma-scheme.py" --accent "$KDE_ACCENT" \
             --surface-color "$BGALT"
     fi
 
