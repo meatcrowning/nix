@@ -198,8 +198,12 @@ Item {
             }
             // A missing file is ALREADY the inactive grey, so an unfocused
             // window simply makes every row agree with it.
+            // The highlight fill is saturated, so its readable ink is the
+            // panel's light card foreground, not the dark playing-state accent.
+            // Carry it through every selected-row label and control.
+            readonly property color selectedFg: root.fgText
             readonly property color fg: !available ? Theme.inactive
-                                        : (isCurrent ? root.fgAccent : root.fgText)
+                                        : (isCurrent ? selectedFg : root.fgText)
 
             // Text at integer y=1 in the cell-height row — packed like kitty
             // lines, so per-title ascender ink can't read as uneven gaps.
@@ -210,7 +214,7 @@ Item {
                 width: 30
                 y: 1
                 text: track > 0 ? ((disc > 1 ? disc + "-" : "") + track) : ""
-                color: root.fgDim
+                color: row.isCurrent ? row.selectedFg : root.fgDim
             }
             // Title and artist are two texts, not one concatenated string, so
             // the TITLE gets first claim on the width and only the artist is
@@ -271,7 +275,8 @@ Item {
                     clip: true
                     height: parent.height
                     text: glyphs.px(nameCell.artistText)
-                    color: available ? root.fgDim : Theme.inactive
+                    color: !available ? Theme.inactive
+                           : (row.isCurrent ? row.selectedFg : root.fgDim)
                 }
             }
             Row {
@@ -299,7 +304,8 @@ Item {
                     Stars {
                         anchors.verticalCenter: parent.verticalCenter
                         rating: model.rating !== undefined ? model.rating : -1
-                        fgAccent: root.fgAccent
+                        fgAccent: row.isCurrent ? row.selectedFg : root.fgAccent
+                        fgDim: row.isCurrent ? row.selectedFg : Theme.dim
                         onRated: function(fmps) { Library.setRating(trackId, fmps); }
                     }
                     Item {
@@ -309,7 +315,8 @@ Item {
                         PixelText {
                             anchors.centerIn: parent
                             text: "♥"
-                            color: favorite ? Theme.crit : Theme.dim
+                            color: row.isCurrent ? row.selectedFg
+                                  : (favorite ? Theme.crit : Theme.dim)
                         }
                         MouseArea {
                             cursorShape: Qt.PointingHandCursor
@@ -325,7 +332,7 @@ Item {
                     visible: playCount > 0
                     anchors.verticalCenter: parent.verticalCenter
                     text: playCount + "x"
-                    color: Theme.dim
+                    color: row.isCurrent ? row.selectedFg : Theme.dim
                 }
                 PixelText {
                     anchors.verticalCenter: parent.verticalCenter
@@ -333,7 +340,7 @@ Item {
                         var s = Math.max(0, Math.round(duration));
                         return Math.floor(s / 60) + ":" + (s % 60 < 10 ? "0" : "") + (s % 60);
                     }
-                    color: root.fgDim
+                    color: row.isCurrent ? row.selectedFg : root.fgDim
                 }
             }
             MouseArea {
