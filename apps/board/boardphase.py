@@ -106,22 +106,10 @@ WINDOW = 12
 #: it never reaches the screen as a number (see the docstring).
 QUIET_AFTER_S = int(os.environ.get("BOARD_QUIET_AFTER", "180"))
 
-#: A session id is recorded but its transcript file has not appeared yet. For
-#: this long that is STARTING UP, not "cannot see it" — the CLI writes the file
-#: on its first turn, a second or two after the process exists.
-#:
-#: [his, 2026-07-29] *"when solomon first takes a request, his section very
-#: briefly shows 'cannot see what solomon is doing' and then changes to 'Solomon
-#: is getting ready' - it shouldnt show that breif initial 'dont know' text"*.
-#: The two cases were collapsing into `unlinked`: no session id EVER recorded
-#: (an interactive session this system did not spawn — the true unknown) and a
-#: spawn of ours whose transcript is seconds away. Only the first is a thing the
-#: board cannot see; the second it is simply early for.
-#:
-#: It is a GRACE, not a synonym: past it, a spawn whose transcript never
-#: appeared is `unlinked` again and says so, because that is a real failure and
-#: hiding it behind "nothing yet" forever is the §10 lie this app exists not to
-#: tell.
+#: A recorded session whose transcript is not visible is `starting` for this
+#: grace period: the CLI creates the file on its first turn. A session id that
+#: was never recorded remains `unlinked`; after the grace, a spawn whose file
+#: never appeared returns to `unlinked` so a real failure is not hidden forever.
 START_GRACE_S = int(os.environ.get("BOARD_START_GRACE", "120"))
 
 #: The context window an agent is assumed to have, in tokens, when nothing in
@@ -235,14 +223,10 @@ def describe_call(name, inp):
 
     if name == "Bash":
         cmd0 = " ".join(str(inp.get("command") or "").split())
-        # SUMMONED vs COMMANDED, on the OBSERVED line too — [his, 2026-07-29]
-        # *"the `commanded` verb should also be used in solomons agent card,
-        # instead of `hands`"*. It is the same distinction his notes carry
-        # (`boardwork.ORCHESTRATOR_PROMPT`, `boardparse._SUMMONED`): a `dispatch`
-        # starts a NEW agent, an `inbox send` gives one that is already running
-        # more work. Read off the command itself and therefore ahead of the
-        # tool's own `description`, which the agent writes and could word any way
-        # it liked — this is the observed line, so the machine picks the words.
+        # Derive this from the command, not the tool description: `dispatch`
+        # starts a new spirit, while `inbox send` gives more work to one already
+        # running. This keeps the observed line aligned with the store's
+        # `SUMMONED`/`COMMANDED` distinction.
         if "boardctl.py dispatch" in cmd0:
             return "summoning a spirit"
         if "boardctl.py inbox send" in cmd0:
