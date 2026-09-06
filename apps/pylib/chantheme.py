@@ -144,8 +144,11 @@ def css(pal, chrome=None):
         # A post's own number is navigation chrome, not a quotelink: it sits
         # beside the timestamp and should carry the same primary ink.  The
         # actual >> reference remains a `.quotelink` in the post body.
-        ".postInfo .postNum,.postInfo .postNum a,"
-        ".postInfo .postNum a:hover{color:%s%s;opacity:1%s}" % (text, i, i),
+        # OneeChan's selected-theme custom CSS uses
+        # `span.postNum.desktop > a`; retain that shape and add the post-info
+        # parent so this wins even when OneeChan injects its stylesheet later.
+        ".postInfo span.postNum.desktop>a,.postInfo span.postNum.desktop>a:hover{"
+        "color:%s%s;opacity:1%s}" % (text, i, i),
         # --- backgrounds ---
         "body{background:%s%s}" % (bg, i),
         # `.inline` and the catalog cells (`Show Background` mode) are
@@ -174,14 +177,14 @@ def css(pal, chrome=None):
         "background:%s%s}" % (inp, i),
         # Its options panel darkens every other main row from `mainColor`.
         # That makes a light desktop palette read as black zebra stripes.
-        "#main-section>.option:nth-of-type(even){background:%s%s}" % (reply, i),
+        "#oneechan-options #main-section>.option:nth-of-type(even){background:%s%s}" % (reply, i),
         # OneeChan gives its option-panel actions its own mainColor fill.
         # They are anchor buttons, so the real-button rule below cannot reach
         # them; keep their resting and hover surfaces on the page instead of
         # leaving black pills in an otherwise desktop-matched panel.
-        ".options-button,.qr-link,.pages.cataloglink,.pages strong>a,"
-        ".options-button:hover,.qr-link:hover,.pages.cataloglink:hover,"
-        ".pages strong>a:hover{background:%s%s}" % (reply, i),
+        "#oneechan-options .options-button,#oneechan-options .options-button:hover,"
+        ".qr-link,.qr-link:hover,.pages.cataloglink,.pages.cataloglink:hover,"
+        ".pages strong>a,.pages strong>a:hover{background:%s%s}" % (reply, i),
         # --- borders ---
         ".reply,:root.op-background .postContainer.opContainer,.dialog,.entry,"
         ".inline,fieldset,#post-preview,select{border-color:%s%s}" % (border, i),
@@ -305,9 +308,9 @@ def _chrome_css(ch, i):
         # This follows the field rule, so submit inputs do not land in the
         # sunken field surface.
         "button,input[type=submit],input[type=button],input[type=reset],"
-        ".options-button,.qr-link,.pages.cataloglink,.pages strong>a,"
-        ".options-button:hover,.qr-link:hover,.pages.cataloglink:hover,"
-        ".pages strong>a:hover{"
+        "#oneechan-options .options-button,#oneechan-options .options-button:hover,"
+        ".qr-link,.qr-link:hover,.pages.cataloglink,.pages.cataloglink:hover,"
+        ".pages strong>a,.pages strong>a:hover{"
         "background:%s%s;border-radius:%dpx%s;"
         "box-shadow:inset 0 1px 0 %s,0 1px 2px %s%s}"
         % (grad("buttonTop", "buttonBottom"), i, r, i, bevel, shade, i),
