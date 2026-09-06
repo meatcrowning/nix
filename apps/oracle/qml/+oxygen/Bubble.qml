@@ -20,8 +20,12 @@ Item {
     property string face: "oxygen"
     property bool user: false
     property bool isError: false
-    // Root.qml reserves the curl's height below the message contents.
-    readonly property real tailHeight: 13
+    // Root.qml reserves this whole lower corner below the message contents.
+    // Eight pixels extend the BUTTON body below its normal text padding; the
+    // final thirteen form the hook. The body extension is what distinguishes
+    // the drawn lower corner from the old small notch under an unchanged box.
+    readonly property real tailHeight: 21
+    readonly property real curlHeight: 13
     readonly property real tailWidth: 15
     default property alias content: holder.data
 
@@ -30,7 +34,7 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        height: Math.max(0, parent.height - root.tailHeight)
+        height: Math.max(0, parent.height - root.curlHeight)
     }
 
     OxygenBubblePaint {
