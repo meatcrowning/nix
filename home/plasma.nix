@@ -191,7 +191,7 @@ in
               icon = "folder-games";
               url = "file://${config.xdg.dataHome}/plasma-games";
               labelMode = 3;
-              labelText = "Games";
+              labelText = "games";
               sortMode = 1;
             };
           }
