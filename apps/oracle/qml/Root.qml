@@ -41,7 +41,13 @@ Item {
     property string model: ""
     // Read the newly-selected model's context ceiling as soon as it changes, so
     // the stat is right before the first send (send() refreshes it again).
-    onModelChanged: if (model !== "") Ollama.refreshModelInfo(model)
+    onModelChanged: {
+        // A context sample belongs to the model that produced it.  Do not let
+        // switching the selector put the previous model's fill beside a new
+        // window; `loadTurns` restores a saved sample only after this check.
+        Ollama.restoreContextUsed(0);
+        if (model !== "") Ollama.refreshModelInfo(model);
+    }
     property string status: ""
     // The current conversation SESSION: its store id (empty until the first
     // turn is saved — oracle mints a stable one client-side then) and its title
@@ -740,6 +746,14 @@ Item {
             if (title === "") title = "session";
             win.sessionTitle = title;
         }
+        // Ollama gives us one exact context count per completed reply.  Keep it
+        // on the final assistant row (not as a made-up estimate) so reopening
+        // this session can retain the readout until its next server response.
+        var lastAssistant = -1;
+        for (var k = 0; k < chatLog.count; k++)
+            if (!chatLog.get(k).isUser) lastAssistant = k;
+        var sampledCtx = Ollama.contextUsed;
+        var sampledModel = sampledCtx > 0 ? win.model : "";
         var turns = [];
         for (var j = 0; j < chatLog.count; j++) {
             var t = chatLog.get(j);
@@ -753,7 +767,9 @@ Item {
                          agentsBad: t.agentsBad,
                          images: t.images, videos: t.videos,
                          tools: t.tools, toolCount: t.toolCount,
-                         isError: t.isError });
+                         isError: t.isError,
+                         contextUsed: j === lastAssistant ? sampledCtx : 0,
+                         contextModel: j === lastAssistant ? sampledModel : "" });
         }
         Sessions.save(id, title, JSON.stringify(turns));
     }
@@ -771,6 +787,7 @@ Item {
         win.sessionId = "";
         win.sessionTitle = "";
         win.status = "";
+        Ollama.restoreContextUsed(0);
         sessionPicker.open = false;
     }
 
@@ -829,6 +846,7 @@ Item {
         while (chatLog.count > i)
             chatLog.remove(chatLog.count - 1);
         win.activeIndex = -1;
+        win.restoreContextFromTurns();
         win.chatRev++;
         return true;
     }
@@ -1063,6 +1081,22 @@ Item {
     }
 
     // Rebuild the log from a loaded transcript (transient flags reset).
+    function restoreContextFromTurns() {
+        var used = 0;
+        var sampledModel = "";
+        for (var i = chatLog.count - 1; i >= 0; i--) {
+            var row = chatLog.get(i);
+            if (!row.isUser && row.contextUsed > 0) {
+                used = row.contextUsed;
+                sampledModel = row.contextModel || row.who || "";
+                break;
+            }
+        }
+        // A count beside another model's window is a lie.  Older sessions have
+        // no sample and deliberately stay empty until their next reply.
+        Ollama.restoreContextUsed(sampledModel === win.model ? used : 0);
+    }
+
     function loadTurns(id, title, turnsJson) {
         var arr;
         try { arr = JSON.parse(turnsJson); } catch (e) { arr = []; }
@@ -1093,12 +1127,15 @@ Item {
                              genLabel: "", genFrac: 0, genRunning: false, genDone: false,
                              tools: t.tools || "", toolCount: t.toolCount || 0, toolsActive: false,
                              streaming: false, isError: !!t.isError,
-                             step: t.step || 0, ts: t.ts || 0 });
+                             step: t.step || 0, ts: t.ts || 0,
+                             contextUsed: t.contextUsed || 0,
+                             contextModel: t.contextModel || "" });
         }
         win.sessionId = id;
         win.sessionTitle = title;
         win.activeIndex = -1;
         win.status = "";
+        win.restoreContextFromTurns();
         sessionPicker.open = false;
     }
 

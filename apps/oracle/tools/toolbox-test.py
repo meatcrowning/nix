@@ -661,17 +661,25 @@ win = engine.rootObjects()[0]
 content = win.findChild(QObject, "content")
 
 TURNS = [{"isUser": True, "body": "first question"},
-         {"isUser": False, "body": "first answer", "who": "m"},
+         {"isUser": False, "body": "first answer", "who": "",
+          "contextUsed": 700, "contextModel": ""},
          {"isUser": True, "body": "second question"},
-         {"isUser": False, "body": "second answer", "who": "m"}]
+         {"isUser": False, "body": "second answer", "who": "",
+          "contextUsed": 1234, "contextModel": ""}]
 QMetaObject.invokeMethod(content, "loadTurns", Q_ARG("QVariant", "sess-old"),
                          Q_ARG("QVariant", "the old branch"),
                          Q_ARG("QVariant", json.dumps(TURNS)))
 for _ in range(4):
     app.processEvents()
+check("opening a saved conversation restores its context fill",
+      parts["Ollama"].contextUsed == 1234,
+      str(parts["Ollama"].contextUsed))
 QMetaObject.invokeMethod(content, "editFrom", Q_ARG("QVariant", 2))
 for _ in range(4):
     app.processEvents()
+check("editing back to a prior turn restores that turn's context fill",
+      parts["Ollama"].contextUsed == 700,
+      str(parts["Ollama"].contextUsed))
 check("editing an earlier prompt truncates from it",
       content.property("chatRev") is not None
       and content.property("sessionId") == "", "id=%r"
