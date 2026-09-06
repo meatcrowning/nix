@@ -38,7 +38,8 @@ name forced.
 OxygenDarkNeutral is the separately selectable dark live scheme for neutral
 surfaces: it applies the wallpaper accent to focus, links, and decorations,
 but takes every ordinary background role directly from the wallpaper's darkest
-palette colour rather than tinting it from the accent.
+structural colour rather than tinting it from the bright accent. The template's
+lightness steps stay intact, so the entire surface ladder fits the wallpaper.
 
 Applying is gated on the live scheme actually BEING one of those: every
 candidate is minted, but the push into kdeglobals only happens for the one
@@ -91,9 +92,14 @@ BACKGROUND_GROUPS = {
 BACKGROUND_KEYS = {"BackgroundNormal", "BackgroundAlternate"}
 
 SAT_REFERENCE = 0.30
+# A structural palette colour supplies the surface HUE, not a second accent.
+# Oxygen's BackgroundAlternate includes a saturated blue source value; without
+# this cap it would turn into a bright colour on a warm wallpaper instead of a
+# quiet dark surface alongside the rest of the theme.
+SURFACE_SAT_CAP = 0.22
 
 # The schemes this script knows how to re-mint, as (template path, forced name,
-# wallpaper backgrounds).
+# wallpaper surface hues).
 # One is applied per run: whichever one kdeglobals currently NAMES. Anything
 # else he picks in System Settings is left alone, exactly as before — the list
 # only widens which schemes are ours to follow, never which are ours to
@@ -111,8 +117,8 @@ SAT_REFERENCE = 0.30
 # absent and the candidate is skipped.
 CANDIDATES = [
     (os.path.join(HOME, ".config", "scripts", "plasma-scheme-template.colors"), None, False),
-    # A second live scheme built from the same dark template. Its surfaces use
-    # the wallpaper's dark palette colour, not its accent hue.
+    # A second live scheme built from the same dark template. Its whole surface
+    # ladder uses the wallpaper's dark structural hue, not its bright accent.
     (os.path.join(HOME, ".config", "scripts", "plasma-scheme-template.colors"), "OxygenDarkNeutral", True),
     (os.path.join(HOME, ".config", "scripts", "plasma-light-scheme-template.colors"), None, False),
     ("/run/current-system/sw/share/color-schemes/Aero.colors", "Aero", False),
@@ -137,10 +143,15 @@ def tint(rgb, hue, sat_scale):
 
 
 def mint(template_text, accent_hex, force_name=None, background_hex=None,
-         wallpaper_backgrounds=False):
+         surface_hex=None):
     ar, ag, ab = hex_to_rgb(accent_hex)
     hue, _, accent_s = colorsys.rgb_to_hls(ar / 255.0, ag / 255.0, ab / 255.0)
     sat_scale = min(1.0, accent_s / SAT_REFERENCE)
+    if surface_hex:
+        sr, sg, sb = hex_to_rgb(surface_hex)
+        surface_hue, _, surface_s = colorsys.rgb_to_hls(
+            sr / 255.0, sg / 255.0, sb / 255.0)
+        surface_sat_scale = min(SURFACE_SAT_CAP, surface_s / SAT_REFERENCE)
 
     out, group = [], ""
     for line in template_text.splitlines():
@@ -150,7 +161,17 @@ def mint(template_text, accent_hex, force_name=None, background_hex=None,
             out.append(line)
             continue
         key, _, value = stripped.partition("=")
-        if (background_hex and group in BACKGROUND_GROUPS
+        if (surface_hex and group in BACKGROUND_GROUPS
+                and key in BACKGROUND_KEYS
+                and re.fullmatch(r"\d{1,3},\d{1,3},\d{1,3}", value)):
+            rgb = tuple(int(c) for c in value.split(","))
+            out.append("%s=%d,%d,%d" % ((key,) + tint(rgb, surface_hue, surface_sat_scale)))
+        elif (surface_hex and group == "[WM]"
+              and key in ("activeBackground", "inactiveBackground")
+              and re.fullmatch(r"\d{1,3},\d{1,3},\d{1,3}", value)):
+            rgb = tuple(int(c) for c in value.split(","))
+            out.append("%s=%d,%d,%d" % ((key,) + tint(rgb, surface_hue, surface_sat_scale)))
+        elif (background_hex and group in BACKGROUND_GROUPS
                 and key in BACKGROUND_KEYS):
             out.append("%s=%s" % (key, ",".join(map(str, hex_to_rgb(background_hex)))))
         elif (background_hex and group == "[WM]"
@@ -341,17 +362,17 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--background", default=None,
                     help="optional bare hex override for Colors:Window BackgroundNormal")
-    ap.add_argument("--wallpaper-background", default=None,
-                    help="dark wallpaper palette colour for wallpaper-background schemes")
+    ap.add_argument("--surface-color", default=None,
+                    help="dark wallpaper structural colour for surface-ladder schemes")
     ap.add_argument("--no-apply", action="store_true")
     args = ap.parse_args()
 
-    candidates = ([(args.template, args.name, bool(args.wallpaper_background))] if args.template
+    candidates = ([(args.template, args.name, bool(args.surface_color))] if args.template
                   else list(CANDIDATES))
     live = live_scheme()
     applied = False
 
-    for path, forced, wallpaper_backgrounds in candidates:
+    for path, forced, surface_hue in candidates:
         try:
             with open(path) as fh:
                 template = fh.read()
@@ -369,10 +390,9 @@ def main():
 
         out_path = args.out or os.path.join(
             HOME, ".local", "share", "color-schemes", "%s.colors" % name)
-        background = (args.wallpaper_background if wallpaper_backgrounds
-                      else args.background)
+        surface = args.surface_color if surface_hue else None
         minted = mint(template, args.accent, force_name=forced,
-                      background_hex=background)
+                      background_hex=args.background, surface_hex=surface)
 
         try:
             with open(out_path) as fh:

@@ -50,19 +50,21 @@ for pair in \
 done
 [ "$in_sync" = 1 ] && exit 0
 
-# The generator owns the wallpaper-specific dark background. Carry the cached
-# generated BG through when it is available; every other dark/light scheme
-# keeps the template's normal derivation.
+# The generator owns the wallpaper-specific dark surface ladder. Carry the
+# cached structural colour through when it is available; every other dark/light
+# scheme keeps the template's normal derivation.
 bg=""
+surface=""
 if { [ "$scheme" = OxygenDarkFlat ] || [ "$scheme" = OxygenDarkNeutral ]; } \
         && [ -f "$WAL_CACHE/current" ]; then
     wall="$(cat "$WAL_CACHE/current")"
     key="$(printf '%s' "$wall" | md5sum | cut -d' ' -f1)"
     bg="$(sed -n 's/^BG=\([0-9a-fA-F]\{6\}\)$/\1/p' "$WAL_CACHE/themes/$key.env" 2>/dev/null | head -n1)"
+    surface="$(sed -n 's/^BGALT=\([0-9a-fA-F]\{6\}\)$/\1/p' "$WAL_CACHE/themes/$key.env" 2>/dev/null | head -n1)"
 fi
-if [ "$scheme" = OxygenDarkNeutral ] && [ -n "$bg" ]; then
+if [ "$scheme" = OxygenDarkNeutral ] && [ -n "$surface" ]; then
     exec "$HOME/.config/scripts/plasma-scheme.py" --accent "$accent" \
-        --wallpaper-background "$bg"
+        --surface-color "$surface"
 elif [ "$bg" = 464540 ]; then
     exec "$HOME/.config/scripts/plasma-scheme.py" --accent "$accent" --background "$bg"
 else
