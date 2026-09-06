@@ -76,6 +76,7 @@ let
       pkgs.qt6.qtdeclarative
       pkgs.kdePackages.libplasma
       pkgs.kdePackages.kcoreaddons
+      pkgs.kdePackages.kconfig
     ];
   };
 in

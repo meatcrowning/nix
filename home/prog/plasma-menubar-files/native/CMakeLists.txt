@@ -7,7 +7,7 @@ include(KDEInstallDirs)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick Widgets)
 find_package(Plasma REQUIRED)
-find_package(KF6 REQUIRED COMPONENTS CoreAddons)
+find_package(KF6 REQUIRED COMPONENTS Config CoreAddons)
 
 add_library(org.kde.lam.menubar MODULE menubarapplet.cpp)
 target_link_libraries(org.kde.lam.menubar PRIVATE
