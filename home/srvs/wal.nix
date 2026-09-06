@@ -10,8 +10,8 @@ let
     substitute ${./wal-files/wal-extract.py} $out \
       --replace-fail "/usr/bin/env python3" "${pillowPython}/bin/python3"
   '';
-  # Alternating theme names is required: Qt caches icon pixels under a theme
-  # name, so rewriting one theme cannot recolour an already-open program.
+  # Accent-qualified theme names are required: Qt caches icon pixels under a
+  # theme name, so rewriting or reusing one cannot recolour an open program.
   oxygenLiveIcons = pkgs.runCommand "oxygen-live-icons.py" { } ''
     substitute ${./wal-files/oxygen-live-icons.py} $out \
       --replace-fail "/usr/bin/env python3" "${pillowPython}/bin/python3" \
