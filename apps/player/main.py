@@ -1498,6 +1498,10 @@ class Library(QObject):
         self._scanner = None
         self._search_rows = None  # lazy [(haystack, id, genre, year)]
         self._album_meta = None   # lazy {album_id: (genre blob, year)}
+        # Album artist is a release-level credit, not a full contributor list.
+        # Keep track artists separately so collaboration releases surface when
+        # browsing any credited artist.
+        self._album_contributors = None  # lazy {album_id: folded artist blob}
         # Rows for files opened by path that the library has never scanned —
         # negative ids, memory only, never written to the DB. See ids_for_paths.
         self._transient = {}
@@ -1505,6 +1509,7 @@ class Library(QObject):
         self._transient_seq = 0
         self.changed.connect(lambda: setattr(self, "_search_rows", None))
         self.changed.connect(lambda: setattr(self, "_album_meta", None))
+        self.changed.connect(lambda: setattr(self, "_album_contributors", None))
 
     # ---- scanning ----
 
@@ -1763,6 +1768,20 @@ class Library(QObject):
                 out[r["album_id"]] = (gen, yr or r["orig_year"] or r["year"])
             self._album_meta = out
         return self._album_meta
+
+    def album_contributors(self):
+        """{album_id: folded track-artist blob} for artist album browsing."""
+        if self._album_contributors is None:
+            out = {}
+            for r in self._con.execute(
+                    "SELECT album_id, artist FROM tracks WHERE album_id IS NOT NULL"):
+                artist = (r["artist"] or "").casefold()
+                if artist:
+                    old = out.get(r["album_id"], "")
+                    if artist not in old:
+                        out[r["album_id"]] = (old + "\n" + artist) if old else artist
+            self._album_contributors = out
+        return self._album_contributors
 
     @Slot(int, bool)
     def setInstrumental(self, track_id, yes):
@@ -3402,12 +3421,14 @@ class Bridge(QObject):
         rows = self._album_rows
         words, genres, lo, hi = parse_query(self._filter)
         if words or genres or lo is not None or hi is not None:
-            # An album's genre is whatever its tracks carry (Library.album_meta);
+            # An album's genre and contributors are whatever its tracks carry;
             # its year is the album row's own, which is already COALESCEd.
             meta = self._library.album_meta() if genres else {}
+            contributors = self._library.album_contributors() if words else {}
             rows = [r for r in rows
                     if all(w in f'{(r["album"] or "").casefold()}\n'
-                                f'{(r["album_artist"] or "").casefold()}' for w in words)
+                                f'{(r["album_artist"] or "").casefold()}\n'
+                                f'{contributors.get(r["id"], "")}' for w in words)
                     and all(g in meta.get(r["id"], ("", None))[0] for g in genres)
                     and year_in(r["orig_year"] or r["year"], lo, hi)]
         out = [album_row(r) for r in rows]

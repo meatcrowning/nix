@@ -339,6 +339,13 @@ paths run through it: `Library.search` (the results overlay) and
 title/artist/album exactly as before — a filter is opt-in by typing a field
 name.
 
+- **Artist album lookup is track-inclusive everywhere.** A release appears
+  when its `album_artist` **or any contained track artist** matches. Album
+  artist is a release-level credit, not a complete contributor list: searching
+  `blawan` must surface Skrillex's *Thistle*, whose track credit carries
+  Blawan. Keep the grid's derived contributor cache and `tools/library-ipc.py`
+  aligned; neither a retag nor a special-case release list is the fix.
+
     genre:shoegaze          genre:"post rock"       genre:a genre:b   (both)
     year:1997   year:1990-1999   year:2010-   year:>2010   year:<1980
 
