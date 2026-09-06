@@ -2,22 +2,26 @@ diff --git a/src/terminalDisplay/TerminalPainter.cpp b/src/terminalDisplay/Termi
 index 5d819327..ec602555 100644
 --- a/src/terminalDisplay/TerminalPainter.cpp
 +++ b/src/terminalDisplay/TerminalPainter.cpp
-@@ -620,5 +620,22 @@ void TerminalPainter::drawBackground(QPainter &painter, const QRect &rect, const QColor &backgroundColor, bool useOpacitySetting)
+@@ -620,5 +620,26 @@ void TerminalPainter::drawBackground(QPainter &painter, const QRect &rect, const QColor &backgroundColor, bool useOpacitySetting)
  void TerminalPainter::drawBackground(QPainter &painter, const QRect &rect, const QColor &backgroundColor, bool useOpacitySetting)
  {
 +    // A generated colour scheme can ask for the owning window's painted
-+    // background rather than a bitmap wallpaper.  Drawing PE_Widget alone is
-+    // not sufficient: some Plasma top-level widgets intentionally expose a
-+    // transparent primitive.  Render the actual window background (but never
-+    // its children) into TerminalDisplay coordinates instead.
++    // background rather than a bitmap wallpaper. Konsole's own top-level
++    // container is flat, so render a real, styled top-level QWidget with the
++    // same palette and crop it to TerminalDisplay coordinates. This is the
++    // exact Oxygen path, opaque beneath the text and continuous with chrome.
 +    if (m_parentDisplay->wallpaper()->path() == QStringLiteral("StyleBackground")) {
 +        QWidget *window = m_parentDisplay->window();
 +        if (window != nullptr) {
 +            const QPoint origin = m_parentDisplay->mapTo(window, QPoint());
++            QWidget proxy;
++            proxy.setAttribute(Qt::WA_StyledBackground, true);
++            proxy.setPalette(window->palette());
++            proxy.resize(window->size());
 +            painter.save();
 +            painter.translate(-origin);
 +            painter.setClipRect(rect.translated(origin));
-+            window->render(&painter, QPoint(), QRegion(window->rect()), QWidget::DrawWindowBackground);
++            proxy.render(&painter, QPoint(), QRegion(proxy.rect()), QWidget::DrawWindowBackground);
 +            painter.restore();
 +            return;
 +        }
