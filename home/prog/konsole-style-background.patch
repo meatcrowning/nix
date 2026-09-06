@@ -1,0 +1,38 @@
+diff --git a/src/terminalDisplay/TerminalPainter.cpp b/src/terminalDisplay/TerminalPainter.cpp
+index 5d819327..ec602555 100644
+--- a/src/terminalDisplay/TerminalPainter.cpp
++++ b/src/terminalDisplay/TerminalPainter.cpp
+@@ -30,4 +30,6 @@
+ #include <QRegion>
+ #include <QString>
+ #include <QTransform>
++#include <QStyle>
++#include <QStyleOption>
+ #include <QtMath>
+@@ -620,5 +622,26 @@ void TerminalPainter::drawBackground(QPainter &painter, const QRect &rect, const QColor &backgroundColor, bool useOpacitySetting)
+ void TerminalPainter::drawBackground(QPainter &painter, const QRect &rect, const QColor &backgroundColor, bool useOpacitySetting)
+ {
++    // A generated colour scheme can ask for the host window's KStyle surface
++    // rather than a bitmap wallpaper. Paint the owning window's PE_Widget in
++    // its own coordinates, clipped back to this TerminalDisplay. Oxygen then
++    // owns the whole field (titlebar, radial highlight and three-stop body),
++    // so it follows the real window geometry rather than a guessed raster.
++    if (m_parentDisplay->wallpaper()->path() == QStringLiteral("StyleBackground")) {
++        QWidget *window = m_parentDisplay->window();
++        if (window != nullptr) {
++            const QPoint origin = m_parentDisplay->mapTo(window, QPoint());
++            QStyleOption option;
++            window->setAttribute(Qt::WA_StyledBackground, true);
++            option.initFrom(window);
++            option.rect = window->rect();
++            painter.save();
++            painter.translate(-origin);
++            painter.setClipRect(rect.translated(origin));
++            window->style()->drawPrimitive(QStyle::PE_Widget, &option, &painter, window);
++            painter.restore();
++            return;
++        }
++    }
+     if (!m_parentDisplay->wallpaper()->isNull()
+         && m_parentDisplay->wallpaper()->draw(painter, rect, useOpacitySetting ? m_parentDisplay->terminalColor()->opacity() : 1.0, backgroundColor)) {
+     } else if (qAlpha(m_parentDisplay->terminalColor()->blendColor()) < 0xff && useOpacitySetting) {
