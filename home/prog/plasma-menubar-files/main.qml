@@ -50,6 +50,7 @@ import org.kde.plasma.plasmoid
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.components as PlasmaComponents3
 import org.kde.plasma.plasma5support as P5Support
+import org.kde.kirigami as Kirigami
 import org.kde.taskmanager as TaskManager
 
 PlasmoidItem {
@@ -59,7 +60,10 @@ PlasmoidItem {
 
     // The whole point: never hidden, whatever is or is not focused.
     Plasmoid.status: PlasmaCore.Types.ActiveStatus
-    preferredRepresentation: fullRepresentation
+    // When Plasma is drawing a real DBus menu, leave only the small, shared
+    // gutter after Kickoff.  Keeping the full fallback representation alive
+    // there reserves its last desktop width and leaves a large blank gap.
+    preferredRepresentation: appExportsMenu ? compactRepresentation : fullRepresentation
 
     // ---- what the bar is currently describing --------------------------
 
@@ -394,8 +398,18 @@ PlasmoidItem {
         onHoveredChanged: if (hovered && popup.visible && !isOpen) openMine()
     }
 
-    fullRepresentation: GridLayout {
+    compactRepresentation: Item {
+        implicitWidth: Kirigami.Units.smallSpacing
+        implicitHeight: 1
+    }
+
+    fullRepresentation: Item {
+        implicitWidth: bar.implicitWidth + Kirigami.Units.smallSpacing
+        implicitHeight: bar.implicitHeight
+
+        GridLayout {
         id: bar
+        x: Kirigami.Units.smallSpacing
 
         LayoutMirroring.enabled: Application.layoutDirection === Qt.RightToLeft
         flow: root.vertical ? GridLayout.TopToBottom : GridLayout.LeftToRight
@@ -405,6 +419,7 @@ PlasmoidItem {
         Repeater {
             model: root.barMenus
             delegate: BarButton { menu: modelData }
+        }
         }
     }
 
@@ -441,7 +456,7 @@ PlasmoidItem {
                 addItem(menuItem);
             }
             owner = button;
-            popup(button, 0, button.height);
+            popup.popup(button, 0, button.height);
         }
 
         function dismiss() {
