@@ -406,9 +406,8 @@ in
   # package upgrade can restore its stock visible toolbar before that state is
   # read.  The user-local entry wins over the packaged one on both hosts and
   # makes the purposeful Top layout unambiguous for every launcher/runner
-  # invocation.  `konsole` itself stays the patched package above, so
-  # StyleBackground is painted by the live Oxygen KStyle rather than treated
-  # as an ordinary image path.
+  # invocation. Dynamic.colorscheme paints its own opaque Oxygen window field,
+  # so terminal text never becomes transparent to the desktop behind it.
   xdg.dataFile."applications/org.kde.konsole.desktop".text = ''
     [Desktop Entry]
     Type=Application
