@@ -864,11 +864,15 @@ files like it can on top"*].
   card asks `os.path.exists`, not the hostname.
 - `describe_self` reports `tools_act_on`, because a model that assumed `top`
   wrote to the wrong machine.
+- `HOST_CONTEXT_NOTE` is carried in every system prompt. It names `top` and
+  `book`, calls book the remote laptop / air profile, and says where
+  unqualified tools act; the Ollama endpoint being tunnelled from top must
+  never be mistaken for the location of the Chatter window.
 
 Harness: `tools/tools-host-test.py`, which runs a child per configuration and
 reads the argv the app would actually build.
 
-## Code runners (run_python and run_bash, on top)
+## Code runners (run_python and run_bash, on the current host)
 
 `run_python` (`EXEC_TOOL`) and `run_bash` (`BASH_TOOL`) — both offered every
 turn, both dispatched `_run_exec_tool` → `_exec_argv` — let the model actually
@@ -2793,34 +2797,18 @@ both checkouts have it.)
 binary-safe, sandbox-jailed — used only by oracle's own attachment staging,
 never offered to the model.)
 
-**Reads reach BOTH machines, not just the one the window runs on** (his ask,
-2026-08-11 — widened alongside the root). Every read-only tool schema carries
-an optional `host` ("top"/"book", default "top" for backward compat with the
-pre-widening behaviour) that the model sets to pick which machine's filesystem
-it wants; `Ollama._fs_argv(target_host)` resolves it: if `target_host` is the
-same machine the window already runs on, `sandbox-fs.py` runs **locally**;
-otherwise it opens a **fresh ssh call to that host over the tailnet** (both
-directions work — MagicDNS `top`/`book`; the book→top hop reuses
-`tools/ollama-tunnel.sh`'s already-open control master via `OLLAMA_SSH*`, no
-new listener). **Mutating tools take no `host`** — there is only one sandbox
-and it always lives on `top`, so `write_file`/`edit_file`/`move_path`/
-`delete_path`/`make_dir` always resolve `_fs_argv(None)`, i.e. local on `top`,
-over the tunnel's master from `book` — exactly the pre-2026-08-11 behaviour,
-unwidened.
-
-Concretely: on `top`, `main.py` runs `sandbox-fs.py` locally for a `top` read
-or any write, and `ssh book python3 tools/sandbox-fs.py <sandbox> /` for a
-`book` read. On `book`, it's the mirror: local for a `book` read, `ssh top
-python3 tools/sandbox-fs.py <sandbox> /` (over the tunnel's master) for a `top`
-read or any write. The executor is **pure stdlib** so either host's system
+**Every file tool reaches BOTH machines, not just the one the window runs on.**
+Every read and mutation schema carries an optional `host` ("top"/"book") whose
+default is the host carrying the Chatter window. `Ollama._fs_argv(target_host)`
+runs `sandbox-fs.py` locally for that host and opens an ssh call over the
+tailnet for the other; book→top reuses `tools/ollama-tunnel.sh`'s control master.
+The executor is **pure stdlib** so either host's system
 `python3` runs it over ssh with nothing installed, and it `mkdir -p`s the
-sandbox root on first use wherever it runs, so a fresh host needs nothing set
-up by hand. `sandbox-fs.py` speaks one JSON request on stdin → one JSON result
+sandbox root on first use wherever it runs. `sandbox-fs.py` speaks one JSON request on stdin → one JSON result
 on stdout; `main.py` dispatches each call as an async `QProcess` in the
 existing tool loop, concurrent with any web search, and surfaces it as a third
 per-turn disclosure (`fileToolStarted`/`fileToolDone` → the "files · N" block
-in `Main.qml`, §9.1) with a `(book)` suffix in the heading when reading the
-non-default host.
+in `Main.qml`, §9.1) with a host suffix when acting on the non-default host.
 
 **Context is respected** (his rule 5): reads are paginated (default ~300 lines,
 a 40 KB byte ceiling, over-long lines clipped, `next_offset` to page on),
