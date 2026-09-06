@@ -1778,7 +1778,7 @@ Item {
                           right: caret.left; rightMargin: 6
                           verticalCenter: parent.verticalCenter }
                 elide: Text.ElideRight
-                text: win.model !== "" ? win.model
+                text: win.model !== "" ? Ollama.modelLabel(win.model)
                                        : (Ollama.models.length > 0 ? "pick a model"
                                                                    : "no models found")
                 color: win.model !== "" ? Theme.text : Theme.textDim
@@ -2268,7 +2268,7 @@ Item {
                               right: parent.right; rightMargin: 6
                               verticalCenter: parent.verticalCenter }
                     elide: Text.ElideRight
-                    text: modelData
+                    text: Ollama.modelLabel(modelData)
                     color: modelData === win.model ? Theme.accent : Theme.text
                 }
                 MouseArea {
