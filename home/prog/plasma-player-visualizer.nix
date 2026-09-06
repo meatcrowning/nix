@@ -37,12 +37,12 @@ in {
   # and buildEnv correctly rejects two providers for the same plugin path.
   xdg.dataFile."plasma/plasmoids/${pkgId}".source = package;
   systemd.user.services.plasma-player-visualizer = {
-    Unit = { Description = "Cava state for the Plasma player visualizer"; After = [ "graphical-session.target" ]; ConditionEnvironment = "KDE_FULL_SESSION=true"; };
+    Unit = { Description = "Cava state for the Plasma player visualizer"; After = [ "graphical-session.target" ]; };
     Service = { ExecStart = "${state}/bin/plasma-player-visualizer-state"; Restart = "on-failure"; RestartSec = 2; };
     Install.WantedBy = [ "graphical-session.target" ];
   };
   systemd.user.services.plasma-player-visualizer-install = {
-    Unit = { Description = "Place player visualizer beside Plasma media"; After = [ "graphical-session.target" ]; ConditionEnvironment = "KDE_FULL_SESSION=true"; };
+    Unit = { Description = "Place player visualizer beside Plasma media"; After = [ "graphical-session.target" ]; };
     Service = {
       Type = "oneshot";
       Environment = [ "PATH=${lib.makeBinPath [ pkgs.coreutils ]}:${config.home.homeDirectory}/.nix-profile/bin:/run/current-system/sw/bin:/usr/bin:/bin" ];
