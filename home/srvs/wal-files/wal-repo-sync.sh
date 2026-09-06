@@ -3,8 +3,9 @@
 #
 # Fired by the wal-repo-sync.path unit whenever ~/Pictures/wall changes: copy any
 # image files into the repo's versioned set (home/srvs/wal-files/wallpapers) and
-# commit + push them, so a wallpaper dropped in on one machine shows up on the
-# others after a pull. Deployed to ~/.config/scripts by home/srvs/wal.nix.
+# commit + push them, together with the completed wallpaper selection, so a
+# wallpaper dropped or picked on one machine shows up on the others after a
+# pull. Deployed to ~/.config/scripts by home/srvs/wal.nix.
 #
 # SAFETY — this touches a shared repo the user hand-edits and leaves dirty, so it
 # is deliberately paranoid:
@@ -24,7 +25,8 @@
 # script can be exercised end-to-end against a throwaway repo in a test.
 REPO="${WAL_SYNC_REPO:-$HOME/nix}"
 WALL="${WAL_SYNC_WALL:-$HOME/Pictures/wall}"
-REL="home/srvs/wal-files/wallpapers"
+WALL_REL="home/srvs/wal-files/wallpapers"
+SELECTOR_REL="home/srvs/wal-files/current-wallpaper"
 LOG="${WAL_SYNC_LOG:-$HOME/.cache/wal/repo-sync.log}"
 
 mkdir -p "$(dirname "$LOG")"
@@ -33,7 +35,7 @@ echo "=== $(date -Is) wal-repo-sync ==="
 
 [ -d "$WALL" ] || { echo "no $WALL"; exit 0; }
 [ -d "$REPO/.git" ] || { echo "no repo at $REPO"; exit 0; }
-mkdir -p "$REPO/$REL"
+mkdir -p "$REPO/$WALL_REL"
 
 # Coalesce a burst of drops (multi-file copy, an editor's temp-then-rename, etc.)
 # into a single sync — the path unit may fire several times in quick succession.
@@ -47,14 +49,14 @@ sleep 3
 for f in "$WALL"/*; do
   [ -f "$f" ] || continue
   case "$(printf '%s' "${f##*/}" | tr '[:upper:]' '[:lower:]')" in
-    *.png | *.jpg | *.jpeg | *.webp | *.bmp | *.gif) install -m 644 "$f" "$REPO/$REL/" ;;
+    *.png | *.jpg | *.jpeg | *.webp | *.bmp | *.gif) install -m 644 "$f" "$REPO/$WALL_REL/" ;;
   esac
 done
 
 # Deletion must reach the versioned source too. Restrict this to supported image
 # files so sidecars or future metadata in the source directory are never removed
 # just because they do not belong in the writable picker directory.
-for f in "$REPO/$REL"/*; do
+for f in "$REPO/$WALL_REL"/*; do
   [ -f "$f" ] || continue
   case "$(printf '%s' "${f##*/}" | tr '[:upper:]' '[:lower:]')" in
     *.png | *.jpg | *.jpeg | *.webp | *.bmp | *.gif)
@@ -62,6 +64,32 @@ for f in "$REPO/$REL"/*; do
       ;;
   esac
 done
+
+# wal-set.sh writes this only after a full apply, never for a picker preview.
+# Accept a basename that names an image in both the writable set and the repo;
+# anything else is ignored rather than allowing a local state file to escape
+# the versioned wallpaper directory.
+pick_file="$WALL/.current-wallpaper"
+if [ -f "$pick_file" ]; then
+  selected="$(tr -d '\r\n' < "$pick_file")"
+  case "$selected" in
+    ""|*/*|.|..)
+      echo "invalid selected wallpaper ignored"
+      ;;
+    *)
+      case "$(printf '%s' "$selected" | tr '[:upper:]' '[:lower:]')" in
+        *.png | *.jpg | *.jpeg | *.webp | *.bmp | *.gif)
+          if [ -f "$WALL/$selected" ] && [ -f "$REPO/$WALL_REL/$selected" ]; then
+            printf '%s\n' "$selected" > "$REPO/$SELECTOR_REL"
+          else
+            echo "selected wallpaper is not in both sets; retaining selector"
+          fi
+          ;;
+        *) echo "selected wallpaper has unsupported extension; retaining selector" ;;
+      esac
+      ;;
+  esac
+fi
 
 cd "$REPO" || { echo "cd failed"; exit 0; }
 
@@ -75,20 +103,20 @@ base=$(git rev-parse HEAD 2>/dev/null) || { echo "no HEAD"; exit 0; }
 # working tree), so the user's unrelated staged/dirty edits survive as ordinary
 # modifications. NUL-delimited so spaced filenames are safe.
 sync_index() {
-  git diff -z --name-only "$base" HEAD | xargs -0 -r git reset -q --
+  git diff -z --name-only "$base" HEAD -- "$WALL_REL" "$SELECTOR_REL" | xargs -0 -r git reset -q --
 }
 
 idx=$(mktemp)
 export GIT_INDEX_FILE="$idx"
 git read-tree "$base"
-git add -- "$REL"
-if git diff-index --cached --quiet "$base" -- "$REL"; then
+git add -- "$WALL_REL" "$SELECTOR_REL"
+if git diff-index --cached --quiet "$base" -- "$WALL_REL" "$SELECTOR_REL"; then
   echo "wallpaper set unchanged"
   rm -f "$idx"
   exit 0
 fi
 # Human-readable list of the added, changed, or removed basenames for the commit message.
-names=$(git diff-index --cached --name-only "$base" -- "$REL" \
+names=$(git diff-index --cached --name-only "$base" -- "$WALL_REL" "$SELECTOR_REL" \
   | while IFS= read -r p; do printf '%s ' "${p##*/}"; done)
 tree=$(git write-tree)
 unset GIT_INDEX_FILE

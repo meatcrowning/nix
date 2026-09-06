@@ -65,11 +65,12 @@ let
     now="$(${pkgs.coreutils}/bin/date +%s)"
     last="$(${pkgs.coreutils}/bin/cat "$restart_stamp" 2>/dev/null || true)"
     case "$last" in ""|*[!0-9]*) last=0 ;; esac
-    # plasmashell allows three starts per minute.  Scheme browsing can produce
-    # a new panel image on every click, so hold the service open until the
-    # previous restart leaves that window; path events arriving meanwhile are
-    # coalesced and the render below reads only the final selected scheme.
-    wait_for=$((31 - (now - last)))
+    # Plasma permits only three starts in 60 seconds, including its normal
+    # session start.  One automatic restart per 65 seconds leaves that guard
+    # untouched even when the user flips through wallpapers rapidly.  Path
+    # events arriving while we wait are coalesced; the render below reads the
+    # final selected scheme rather than restarting once per click.
+    wait_for=$((65 - (now - last)))
     if [ "$wait_for" -gt 0 ]; then
       ${pkgs.coreutils}/bin/sleep "$wait_for"
     fi
