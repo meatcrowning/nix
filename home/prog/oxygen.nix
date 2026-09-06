@@ -38,7 +38,9 @@
     # so `book` gets the same window.
     Style.StackedWidgetTransitionsEnabled = true;
     ActiveShadow.Enabled = false;
-    Windeco.ButtonSize = "ButtonSmall";
+    # Normal is the purposeful cross-host titlebar metric. It is declared so
+    # a subsequent profile switch cannot bring back the former small controls.
+    Windeco.ButtonSize = "ButtonNormal";
 
     # Titlebar geometry is shared across hosts. Leaving this mutable made
     # top's title text AlignLeft and book's AlignRight even though both selected
