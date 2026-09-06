@@ -4555,6 +4555,12 @@ class Ollama(QObject):
         self._tool_calls = []    # tool calls accumulated in this sub-turn
         self._rounds = 0         # tool rounds taken this turn (MAX_TOOL_ROUNDS cap)
         self._no_tools = False   # the wrap-up round: answer, do not call tools
+        # Qwen's server-side XML tool parser occasionally rejects the model's
+        # otherwise ordinary function markup.  One answer-only retry keeps the
+        # completed tool results in context instead of turning that parser bug
+        # into a dead-end error row.
+        self._tool_parse_retry = False
+        self._server_error = ""
         self._squeezed = False   # this turn wrote its answer UNDER DURESS — see
                                  # `_truncation_reason`
         self._extra_tools = set()  # tools `get_tools` attached THIS turn
@@ -5310,6 +5316,8 @@ class Ollama(QObject):
         self._pending_vision = []    # local images view_image must hand the model
         self._pending_audio = []     # …and the excerpts listen_audio must hand it
         self._no_tools = False       # not a wrap-up round
+        self._tool_parse_retry = False
+        self._server_error = ""
         self._squeezed = False       # …and nothing has squeezed it yet
         self._extra_tools = set()    # a fresh turn attaches its own tools
         self._tool_seen = {}         # no result can leak into a later turn
@@ -6524,6 +6532,7 @@ class Ollama(QObject):
         self._stream_flush.stop()
         self._tool_calls = []
         self._done_reason = ""
+        self._server_error = ""
         reply = self._nam.post(req, body)
         self._reply = reply
         reply.readyRead.connect(lambda: self._on_stream(reply))
@@ -6613,7 +6622,10 @@ class Ollama(QObject):
                 continue
             if obj.get("error"):
                 self._metrics.note_server_error()
-                self.replyError.emit(str(obj["error"]))
+                # The stream ends immediately after an ollama error.  Defer
+                # drawing it until `_on_finished`: qwen's malformed XML tool
+                # call has a useful, tool-free recovery path there.
+                self._server_error = str(obj["error"])
                 continue
             msg = obj.get("message") or {}
             # A "thinking" model streams its reasoning in `thinking` with an
@@ -6747,6 +6759,36 @@ class Ollama(QObject):
             return "context"
         return ""
 
+    @staticmethod
+    def _is_tool_parse_error(error):
+        """Is this Ollama's Qwen function-markup parser, not a tool result?
+
+        Ollama returns this as a normal HTTP 200 NDJSON error frame, so Qt
+        cannot distinguish it from an ordinary server refusal.  Match both
+        stable fragments from its qwen3.5/qwen3-coder parsers and keep the
+        recovery deliberately narrow.
+        """
+        text = str(error or "").lower()
+        return ("tool call parsing failed" in text
+                or ("xml syntax error" in text and "<function>" in text))
+
+    def _retry_without_tools_after_parse_error(self, error):
+        """Ask for the final answer once, retaining all prior tool results."""
+        if self._tool_parse_retry or self._no_tools:
+            return False
+        if not self._is_tool_parse_error(error):
+            return False
+        self._tool_parse_retry = True
+        self._no_tools = True
+        self._messages.append({
+            "role": "user",
+            "content": ("The server could not parse the previous function-call "
+                        "markup. Do not make any tool calls. Give the best final "
+                        "answer using the results already in this conversation."),
+        })
+        self._post_chat()
+        return True
+
     def _on_finished(self, reply):
         if reply is not self._reply:
             reply.deleteLater()
@@ -6764,6 +6806,14 @@ class Ollama(QObject):
             self._set_busy(False)
             self._metrics.finish("error", err_str)
             self.replyError.emit(err_str)
+            return
+        if self._server_error:
+            server_error = self._server_error
+            if self._retry_without_tools_after_parse_error(server_error):
+                return
+            self._set_busy(False)
+            self._metrics.finish("error", server_error)
+            self.replyError.emit(server_error)
             return
         # A tool round: run the calls, feed the results back, and let the model
         # continue. Past the cap, stop looping and take the answer as-is.
@@ -7276,7 +7326,21 @@ class Ollama(QObject):
             self._agent_finish(run, "", error="unreadable reply from ollama")
             return
         if obj.get("error"):
-            self._agent_finish(run, "", error=str(obj["error"]))
+            error = str(obj["error"])
+            if (not run.get("tool_parse_retry")
+                    and self._is_tool_parse_error(error)):
+                run["tool_parse_retry"] = True
+                run["wrap"] = True
+                run["messages"].append({
+                    "role": "user",
+                    "content": ("The server could not parse the previous "
+                                "function-call markup. Do not make any tool "
+                                "calls. Give the best final answer using the "
+                                "results already in this conversation."),
+                })
+                self._agent_post(run)
+                return
+            self._agent_finish(run, "", error=error)
             return
         msg = obj.get("message") or {}
         content = str(msg.get("content") or "")
