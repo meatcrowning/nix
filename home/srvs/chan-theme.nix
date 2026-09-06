@@ -114,4 +114,33 @@
     };
     Install.WantedBy = [ "paths.target" ];
   };
+
+  # An internal Start Page is not inside custom.css at all: Vivaldi reads its
+  # background from the selected theme's Preferences entry.  It owns that file
+  # while running, so writing it then would be lost at shutdown.  Watch its
+  # SingletonLock instead: creation is harmless (the helper deliberately
+  # skips a live profile), and deletion occurs after Vivaldi's final Prefs
+  # flush, when the helper can safely make the next launch current.  This is
+  # the missing automatic hand-off for the Start Page; no manual theme command
+  # is needed after a normal browser close.
+  systemd.user.services.vivaldi-theme-prefs = {
+    Unit.Description = "Refresh Vivaldi's saved desktop theme after exit";
+    Service = {
+      Type = "oneshot";
+      ExecStart = "${pkgs.python3}/bin/python3 /home/lam/nix/apps/pylib/tools/vivaldi-theme.py --prefs";
+      TimeoutStartSec = "1min";
+    };
+  };
+
+  systemd.user.paths.vivaldi-theme-prefs = {
+    Unit.Description = "Apply Vivaldi's Start Page theme when its profile closes";
+    Path = {
+      PathChanged = [
+        "%h/.config/vivaldi/SingletonLock"
+        "%h/.var/app/com.vivaldi.Vivaldi/config/vivaldi/SingletonLock"
+      ];
+      Unit = "vivaldi-theme-prefs.service";
+    };
+    Install.WantedBy = [ "paths.target" ];
+  };
 }
