@@ -72,6 +72,24 @@ TOP_ALPHA = float(os.environ.get('OXYSCHEME_TOP_ALPHA', '0.25'))
 # hard near-white line (measured L=248 against a 212 panel) -- the "weird line at
 # the bottom". They are shading, so they are never recoloured; they are damped.
 GLOW_SCALE = float(os.environ.get('OXYSCHEME_GLOW_SCALE', '0.35'))
+# The panel needs a harder damp than the rest: its surface is the BRIGHT top of
+# the ramp, so a white edge highlight that reads as a soft sheen on a mid-tone
+# widget becomes a hard line against it (measured L=252 against a 237 panel).
+PANEL_GLOW_SCALE = float(os.environ.get('OXYSCHEME_PANEL_GLOW', '0.12'))
+# A PANEL is a thin slice of that same ramp, not a compressed copy of it.
+# Measured from the real Oxygen style offscreen (2026-09-05): the window
+# background starts at luma 253 and decays to the surface colour (211) only by
+# y=280, then stays flat. A ~44px panel therefore shows just the top 16% of the
+# decay and stays nearly as light as a titlebar. Ramping the full range across
+# the panel's own height instead is what made it "much dimmer" than every
+# titlebar. These are white-overlay alphas at the panel's two edges.
+PANEL_TOP_ALPHA = float(os.environ.get('OXYSCHEME_PANEL_TOP', '0.96'))
+PANEL_BOTTOM_ALPHA = float(os.environ.get('OXYSCHEME_PANEL_BOTTOM', '0.81'))
+# ...and the ramp is split ACROSS the three bands by their heights, not restarted
+# in each. A framesvg draws top/centre/bottom as separate elements, so giving all
+# three the same 0.96->0.81 range steps by 14 luma at every seam.
+PANEL_BANDS = {'top': (0.00, 0.16), 'center': (0.16, 0.84), 'bottom': (0.84, 1.00),
+               'left': (0.16, 0.84), 'right': (0.16, 0.84)}
 CENTRE_AMPLITUDE = float(os.environ.get('OXYSCHEME_AMPLITUDE', '0.12'))
 # Oxygen shades with black. Plasma's accent lands on the Selection group, so
 # ColorScheme-Highlight IS the accent colour -- pointing the dark end of every
@@ -193,6 +211,42 @@ def axis_signs(el, parents):
         node = parents.get(node)
     return (1 if a >= 0 else -1), (1 if d >= 0 else -1)
 
+def gradient_screen_y_sign(el, parents, axis):
+    """Which way an element-local gradient runs on the physical screen.
+
+    `east-*` and `west-*` slices are rotated copies of the horizontal art, so
+    their local *x* gradient maps to physical Y through matrix ``b`` rather
+    than ``a``.  A panel is meant to follow the window ramp from the screen's
+    top down, independent of which edge it sits on.  The old scale-only check
+    happened to work for the ordinary SVG, but selected the inverse ramp for
+    the rotated opaque artwork that adaptive transparency uses.
+    """
+    # [a b c d], mapping local (x,y) to screen (a*x+c*y, b*x+d*y).
+    m = (1.0, 0.0, 0.0, 1.0)
+    node = el
+    while node is not None:
+        t = node.get('transform')
+        if t:
+            for kind, body in _TF.findall(t):
+                v = _nums(body)
+                if kind == 'matrix' and len(v) >= 4:
+                    q = tuple(v[:4])
+                elif kind == 'scale' and v:
+                    q = (v[0], 0.0, 0.0, v[1] if len(v) > 1 else v[0])
+                elif kind == 'rotate' and v:
+                    r = math.radians(v[0]); q = (math.cos(r), math.sin(r),
+                                                   -math.sin(r), math.cos(r))
+                else:
+                    continue
+                a, b, c, d = q; e, f, g, h = m
+                # Parent transforms apply after child transforms.
+                m = (a*e + c*f, b*e + d*f, a*g + c*h, b*g + d*h)
+        node = parents.get(node)
+    # The local X axis of east/west slices is the panel's thin direction;
+    # north/south use local Y.  We care only about its physical Y component.
+    component = m[1] if axis == 'h' else m[3]
+    return 1 if component >= 0 else -1
+
 # ---------- role inference ----------
 def role_family(filename):
     n = os.path.basename(filename)
@@ -260,7 +314,8 @@ def gloss_gradient(doc, src_gid, stops):
     gid = doc.uid(src_gid); new.set('id', gid)
     return doc.publish(gid, new)
 
-def respin_alpha(doc, src_gid, stops, mode, axis='v', invert=False):
+def respin_alpha(doc, src_gid, stops, mode, axis='v', invert=False, panel=False,
+                 band=None):
     """Rebuild an alpha-ramp gradient under `flip` or `centre`."""
     src = doc.idx.get(src_gid)
     offs   = [float(o) for o, _, _ in stops]
@@ -288,8 +343,14 @@ def respin_alpha(doc, src_gid, stops, mode, axis='v', invert=False):
         new.set('x1','0'); new.set('y1','0')
         new.set('x2', '1' if axis == 'h' else '0')
         new.set('y2', '0' if axis == 'h' else '1')
-        ramp = ((0.0, TOP_ALPHA), (1.0, 0.0))
-        if invert: ramp = ((0.0, 0.0), (1.0, TOP_ALPHA))
+        hi, lo = ((PANEL_TOP_ALPHA, PANEL_BOTTOM_ALPHA) if panel
+                  else (TOP_ALPHA, 0.0))
+        if panel and band in PANEL_BANDS:
+            f0, f1 = PANEL_BANDS[band]
+            span = hi - lo
+            hi, lo = hi - span * f0, hi - span * f1
+        ramp = ((0.0, hi), (1.0, lo))
+        if invert: ramp = ((0.0, lo), (1.0, hi))
         for off, a in ramp:
             st = ET.SubElement(new, S+'stop')
             st.set('offset', f"{off:.4f}")
@@ -510,6 +571,28 @@ def convert(src, dst, report=None):
             alphas = [a for _, _, a in stops]
             dl, da = max(lums)-min(lums), max(alphas)-min(alphas)
             if dl > LUM_SPREAD:
+                is_panel = os.path.basename(src).startswith('panel-background')
+                # Adaptive transparency swaps a panel to opaque/widgets, whose
+                # body is an opaque colour ramp rather than the alpha ramp used
+                # by the ordinary and solid variants.  Give it the SAME derived
+                # white titlebar ramp instead of preserving Oxygen's dark gloss.
+                if is_panel and ALPHA_MODE == 'titlebar':
+                    eid_l = (el.get('id') or '').lower()
+                    ax = 'h' if ('east' in eid_l or 'west' in eid_l) else 'v'
+                    inv = gradient_screen_y_sign(body, parents, ax) < 0
+                    band = eid_l.rsplit('-', 1)[-1] if '-' in eid_l else None
+                    gid = respin_alpha(doc, fill[5:-1], stops, ALPHA_MODE, ax,
+                                       inv, True, band)
+                    base = copy.deepcopy(body); base.attrib.pop('id', None)
+                    bd = style_dict(base); bd['fill'] = 'currentColor'
+                    bd.pop('fill-opacity', None); set_style(base, bd)
+                    base.set('class', role)
+                    od = style_dict(body); od['fill'] = f'url(#{gid})'; set_style(body, od)
+                    p = parents[body]; p.insert(list(p).index(body), base)
+                    if eid_l.endswith('-center'):
+                        centre_ramp[eid_l[:-len('-center')]] = gid
+                    stats['based_colour'] += 1
+                    continue
                 # opaque colour ramp: split into role base + derived alpha gloss
                 gid = gloss_gradient(doc, fill[5:-1], stops)
                 base = copy.deepcopy(body); base.attrib.pop('id', None)
@@ -531,9 +614,11 @@ def convert(src, dst, report=None):
                 if ALPHA_MODE in ('flip', 'centre', 'titlebar'):
                     eid_l = (el.get('id') or '').lower()
                     ax = 'h' if ('east' in eid_l or 'west' in eid_l) else 'v'
-                    sx, sy = axis_signs(body, parents)
-                    inv = (sx < 0) if ax == 'h' else (sy < 0)
-                    gid = respin_alpha(doc, fill[5:-1], stops, ALPHA_MODE, ax, inv)
+                    inv = gradient_screen_y_sign(body, parents, ax) < 0
+                    is_panel = os.path.basename(src).startswith('panel-background')
+                    band = eid_l.rsplit('-', 1)[-1] if '-' in eid_l else None
+                    gid = respin_alpha(doc, fill[5:-1], stops, ALPHA_MODE, ax,
+                                       inv, is_panel, band)
                     od = style_dict(body); od['fill'] = f'url(#{gid})'
                     set_style(body, od)
                 else:
@@ -565,32 +650,34 @@ def convert(src, dst, report=None):
     # panel's right end. Stock hides it by painting every slice black. Give them
     # the centre's own ramp, re-expressed in objectBoundingBox units so it lands
     # correctly on a slice of a different size.
+    is_panel_file = os.path.basename(src).startswith('panel-background')
     for prefix, gid in centre_ramp.items():
-        obb = obb_clone(doc, gid)
-        if obb is None: continue
         centre_el = doc.idx.get(f"{prefix}-center")
         c_sx, c_sy = axis_signs(centre_el, parents) if centre_el is not None else (1, 1)
+        ax = 'h' if ('east' in prefix.lower() or 'west' in prefix.lower()) else 'v'
         for side in ('left', 'right', 'top', 'bottom'):
             el = doc.idx.get(f"{prefix}-{side}")
             if el is None: continue
-            # the body we recoloured, found by its paint -- NOT first_body(),
-            # which no longer recognises it now that its fill is currentColor
             cands = [el] if el.tag in PAINTED else \
                     [c for c in el.iter() if c.tag in PAINTED and c is not el]
             body = next((c for c in cands if get_fill(c)[0] == 'currentColor'), None)
             if body is None:
                 continue            # already carries its own art
+            e_sx, e_sy = axis_signs(body, parents)
+            inv = gradient_screen_y_sign(body, parents, ax) < 0
+            if is_panel_file and ALPHA_MODE == 'titlebar':
+                # give this edge its OWN band of the panel ramp, or the seam steps
+                use = respin_alpha(doc, gid, doc.stops(gid), ALPHA_MODE, ax,
+                                   inv, True, side)
+            else:
+                use = obb_clone(doc, gid)
+                if use is None: continue
+                if (e_sy < 0) != (c_sy < 0):
+                    g2 = doc.idx.get(use); sts = g2.findall(S+'stop')
+                    offs = [st.get('offset') for st in sts]
+                    for st, o in zip(sts, reversed(offs)): st.set('offset', o)
             over = copy.deepcopy(body)
             over.attrib.pop('id', None); over.attrib.pop('class', None)
-            e_sx, e_sy = axis_signs(body, parents)
-            use = obb
-            if (e_sy < 0) != (c_sy < 0):
-                # this edge slice is mirrored relative to the centre it copies
-                use = obb_clone(doc, gid)
-                g2 = doc.idx.get(use)
-                sts = g2.findall(S+'stop')
-                offs = [st.get('offset') for st in sts]
-                for st, o in zip(sts, reversed(offs)): st.set('offset', o)
             od = style_dict(over); od['fill'] = f'url(#{use})'
             od.pop('fill-opacity', None); set_style(over, od)
             p = parents.get(body)
@@ -599,34 +686,45 @@ def convert(src, dst, report=None):
                 stats['edge_shaded'] += 1
 
     # Damp Oxygen's white edge highlights. They are alpha ramps of pure white at
-    # full opacity -- correct over a near-black panel, a glaring line over a
-    # light one. Scaling their alpha keeps the outline and loses the blowout.
-    if GLOW_SCALE < 1.0:
+    # full opacity -- right over a near-black panel, a hard line over a light
+    # one. Scaling keeps the outline and loses the blowout. The panel needs a
+    # harder damp because its surface IS the bright top of the ramp.
+    gscale = (PANEL_GLOW_SCALE
+              if os.path.basename(src).startswith('panel-background')
+              else GLOW_SCALE)
+    if gscale < 1.0:
         for gid, g in list(doc.idx.items()):
             if g.tag not in (S+'linearGradient', S+'radialGradient'): continue
             if g.get('data-oxysch') == 'body':
-                continue   # a body ramp we just built -- not one of Oxygen's glows
-            stops = g.findall(S+'stop')
-            if not stops: continue
-            cols, alphas = [], []
-            for st in stops:
-                sd = style_dict(st)
-                c = sd.get('stop-color') or st.get('stop-color') or '#000000'
-                try: a = float(sd.get('stop-opacity', st.get('stop-opacity') or 1))
-                except ValueError: a = 1.0
-                cols.append(parse_hex(c)); alphas.append(a)
+                continue                 # a body ramp we built, not a glow
+            own = g.findall(S+'stop')
+            resolved = doc.stops(gid)
+            if not resolved: continue
+            cols = [parse_hex(c) for _, c, _ in resolved]
+            alphas = [a for _, _, a in resolved]
             if any(c is None for c in cols): continue
             if not all(achromatic(c) for c in cols): continue
             if not all(luminance(c) > 0.5 for c in cols): continue   # light only
             if max(alphas) - min(alphas) <= ALPHA_SPREAD: continue   # a ramp only
-            for st, a in zip(stops, alphas):
-                sd = style_dict(st)
-                sd['stop-opacity'] = f"{a*GLOW_SCALE:.4f}"
-                if 'stop-color' not in sd:
-                    sd['stop-color'] = st.get('stop-color') or '#ffffff'
-                st.attrib.pop('stop-opacity', None)
-                set_style(st, sd)
-                stats['glow_damped'] += 1
+            if own:
+                for st, a in zip(own, alphas):
+                    sd = style_dict(st)
+                    sd['stop-color'] = sd.get('stop-color') or st.get('stop-color') or '#ffffff'
+                    sd['stop-opacity'] = f"{a*gscale:.4f}"
+                    st.attrib.pop('stop-opacity', None); st.attrib.pop('stop-color', None)
+                    set_style(st, sd); stats['glow_damped'] += 1
+            else:
+                # No stops of its own: it inherits them through xlink:href. Six
+                # of the glows in `north-bottom` do exactly that, which is how
+                # they escaped damping and left a 1px near-white line at the
+                # panel's foot. Materialise damped stops here rather than edit
+                # the shared parent, which body ramps also point at.
+                g.attrib.pop(X+'href', None); g.attrib.pop('href', None)
+                for (off, col, a) in resolved:
+                    st = ET.SubElement(g, S+'stop')
+                    st.set('offset', off)
+                    st.set('style', f"stop-color:{col};stop-opacity:{a*gscale:.4f}")
+                    stats['glow_damped'] += 1
 
     convert_rasters(doc, root, parents, family, stats)
 
