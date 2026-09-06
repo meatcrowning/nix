@@ -16,6 +16,7 @@ Item {
     property string face: "hypr"     // how a harness proves which one loaded
     property bool user: false
     property bool isError: false
+    readonly property real tailHeight: 0
     default property alias content: holder.data
 
     Rectangle {

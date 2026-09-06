@@ -18,6 +18,7 @@ Item {
     property string face: "plasma"
     property bool user: false
     property bool isError: false
+    readonly property real tailHeight: 0
     default property alias content: holder.data
 
     QQC.Button {

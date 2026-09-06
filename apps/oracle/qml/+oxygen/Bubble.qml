@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Shapes
 import QtQuick.Controls as QQC
 
 // One message's frame under Oxygen. The frame itself is `+plasma/Bubble.qml`'s,
@@ -26,20 +27,72 @@ Item {
     property string face: "oxygen"
     property bool user: false
     property bool isError: false
+    // The native button retains its rectangular frame. This is the small
+    // Oxygen-only speech-bubble curl below it; Root.qml reserves its height.
+    readonly property real tailHeight: 9
+    readonly property real tailWidth: 11
     default property alias content: holder.data
 
     QQC.Button {
         id: frame
-        anchors.fill: parent
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: Math.max(0, parent.height - root.tailHeight)
         enabled: false
         text: ""
         background.opacity: 1.0
         contentItem: Item {}
     }
 
+    // Oxygen has no speech-bubble primitive. These outward curls sit behind
+    // its native button: replies point left and user messages point right.
+    // Use the control palette rather than Theme.bg: the native button is
+    // lighter than Chatter's view background under Oxygen.
+    Shape {
+        anchors.fill: parent
+        visible: !root.user
+        z: -1
+        ShapePath {
+            strokeWidth: 1
+            strokeColor: root.isError ? Theme.crit : frame.palette.mid
+            fillColor: frame.palette.button
+            startX: 0; startY: frame.height - 1
+            PathLine { x: 0; y: frame.height + root.tailHeight }
+            PathCubic {
+                x: root.tailWidth; y: frame.height
+                control1X: 3; control1Y: frame.height + root.tailHeight
+                control2X: 8; control2Y: frame.height + root.tailHeight - 2
+            }
+            PathLine { x: 0; y: frame.height - 1 }
+        }
+    }
+
+    Shape {
+        anchors.fill: parent
+        visible: root.user
+        z: -1
+        ShapePath {
+            strokeWidth: 1
+            strokeColor: root.isError ? Theme.crit : frame.palette.mid
+            fillColor: frame.palette.button
+            startX: root.width; startY: frame.height - 1
+            PathLine { x: root.width; y: frame.height + root.tailHeight }
+            PathCubic {
+                x: root.width - root.tailWidth; y: frame.height
+                control1X: root.width - 3; control1Y: frame.height + root.tailHeight
+                control2X: root.width - 8; control2Y: frame.height + root.tailHeight - 2
+            }
+            PathLine { x: root.width; y: frame.height - 1 }
+        }
+    }
+
     // Drawn only when it is true, so a normal bubble is exactly the sibling's.
     Rectangle {
-        anchors.fill: parent
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: frame.height
         visible: root.isError
         color: "transparent"
         border.width: 1
@@ -47,5 +100,11 @@ Item {
         radius: 2
     }
 
-    Item { id: holder; anchors.fill: parent }
+    Item {
+        id: holder
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: frame.height
+    }
 }
