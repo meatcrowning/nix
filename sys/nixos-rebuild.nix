@@ -1,34 +1,21 @@
 { pkgs, ... }:
 
-# Passwordless system rebuild for lam (so rbsys / rbhome / update never prompt),
-# but hard-scoped to THIS flake and host. `nixos-rebuild` runs arbitrary code as
-# root, so a NOPASSWD rule on the bare `nixos-rebuild` (its old form) was
-# effectively NOPASSWD:ALL — any process running as lam could
-# `sudo nixos-rebuild switch --flake /tmp/evil#top` (or -I / --override-input /
-# --build-host) and get root from a hostile flake, unattended.
+# Passwordless system rebuild for lam, but hard-scoped to THIS flake and host.
+# `nixos-rebuild` runs arbitrary code as root, so bare NOPASSWD would be
+# equivalent to `NOPASSWD:ALL`. The wrapper closes that path by hardcoding
+# `switch --flake /home/lam/nix#top` and accepting only an optional `--upgrade`
+# (same wrapper+NOPASSWD shape as sys/disks.nix).
 #
-# Instead we NOPASSWD only a wrapper that hardcodes `switch --flake
-# /home/lam/nix#top` and accepts no user-supplied flake/args — just an optional
-# literal `--upgrade`. Same wrapper+NOPASSWD approach as drive-label/smartctl in
-# sys/disks.nix. The arbitrary-flake -> root path is closed; rbsys/update still
-# run without a prompt.
-#
-# NB: because the bare `nixos-rebuild` NOPASSWD is gone, `sudo nixos-rebuild
-# switch ...` now prompts. Agents/humans rebuild via `sudo rebuild-top`
-# (passwordless) — or `sudo -A nixos-rebuild ...` for anything the wrapper
-# doesn't cover. `nixos-rebuild build` needs no sudo at all.
+# Because the bare rule is gone, `sudo nixos-rebuild switch ...` now prompts.
+# Rebuild via `sudo rebuild-top`, or `sudo -A nixos-rebuild ...` when you need
+# something the wrapper does not cover. `nixos-rebuild build` still needs no
+# sudo.
 let
-  # The wrapper also owns the two rituals every agent used to have to remember:
-  #   * the SHARED rebuild lock (/tmp/claude-1000/-home-lam-nix/rebuild.lock) —
-  #     several agents rebuild this one checkout concurrently; the canonical
-  #     path predates this wrapper and existing agents flock it by hand, so it
-  #     must not move. Created world-writable because root and user callers
-  #     both need to open it (a user cannot open a root-owned 644 lock).
-  #   * tools/preflight.sh, run as the INVOKING user via runuser — it checks
-  #     the systemd *user* manager and git state, both wrong as root. Skip it
-  #     deliberately with REBUILD_NO_PREFLIGHT=1 (e.g. when preflight itself
-  #     is what you are debugging); it is skipped with a warning, not a
-  #     failure, when SUDO_USER/runuser are unavailable.
+  # The wrapper also owns the shared rebuild lock and the preflight step.
+  # The lock path must stay stable because existing agents already flock it by
+  # hand; it is world-writable so root and user callers can open it. Preflight
+  # runs as the invoking user because it checks the user manager and git state,
+  # not root state. Skip it once with REBUILD_NO_PREFLIGHT=1 when needed.
   # rebuild-air (home/prog/rebuild-air.nix) is the book-side twin.
   rebuildTop = pkgs.writeShellScriptBin "rebuild-top" ''
     if [ "$#" -eq 1 ] && [ "$1" = "--upgrade" ]; then
@@ -40,15 +27,9 @@ let
       upgrade=0
     fi
 
-    # /tmp/claude-1000 is CLAUDE CODE's own scratch root, not ours — we only
-    # borrow a subdirectory of it for the lock. Claude Code refuses to start
-    # when it finds that directory owned by another uid ("/tmp/claude-1000 is
-    # in use by uid 0") and makes him delete it and log in again. `mkdir -p`
-    # here runs as ROOT and used to chmod only the CHILD, leaving the parent
-    # root:root 0755 — so on any boot (which empties /tmp) where a rebuild
-    # happened before the first `claude`, the next `claude` was locked out.
-    # Create the parent as the invoking user, and repair a root-owned one left
-    # by an older wrapper.
+    # `/tmp/claude-1000` is Claude Code's scratch root; we only borrow a
+    # subdirectory for the lock. The parent must stay owned the way Claude Code
+    # expects, and this block repairs a root-owned one left by an older wrapper.
     CLAUDE_TMP=/tmp/claude-1000
     LOCKDIR=$CLAUDE_TMP/-home-lam-nix
     LOCK=$LOCKDIR/rebuild.lock
@@ -84,36 +65,12 @@ let
       fi
     fi
 
-    # A heavy build and a loaded GPU backend never run at the same time —
-    # unless he says they may.
-    #
-    # The freeze on 2026-08-09 was a rebuild that pulled in ollama-cuda — not
-    # in any substituter at that revision, so nvcc started compiling ggml's
-    # kernels locally — while a ComfyUI video run held the other half of the
-    # RAM. sys/nix-build-limits.nix makes that survivable; this makes it not
-    # happen, which is better: rationing two heavy jobs against each other just
-    # makes both of them bad. An agent has no way to know a one-line nix change
-    # means half an hour of nvcc, so the wrapper works it out itself.
-    #
-    # WHOSE CALL IT IS (2026-08-09, his): not the agent's. The wrapper used to
-    # suspend comfy on its own judgement; now a loaded backend in front of a
-    # heavy plan raises a CRITICAL toast — "Stop & rebuild" / "Rebuild anyway" —
-    # and does what he picks. Silence for the ask timeout is "anyway", because
-    # an unattended machine must not sit on the held rebuild lock waiting for a
-    # click; that path is the throttled one, which the cgroup caps make safe.
-    #
-    # BOTH backends count, and "loaded" is not "busy": comfy keeps its weights
-    # resident after a run and ollama keeps a model warm for its whole
-    # keep_alive, so a backend that is answering nothing at all can still be
-    # holding 23 GB. That is the memory the build has to fit around, so warm is
-    # reason enough to ask. (A comfy render actually in flight is still never
-    # interrupted — on "Stop & rebuild" it is waited out first.)
-    #
-    # "Heavy" is name-matched against the dry-run plan, because every switch
-    # builds a handful of tiny units (etc, system-path, unit-*.drv) and gating
-    # on those would mean gating always. The plan costs ~12s of eval, paid only
-    # when a backend is actually loaded. Skip the whole thing with
-    # REBUILD_IGNORE_GPU=1; REBUILD_ASK_TIMEOUT sets how long the toast waits.
+    # Heavy builds and loaded GPU backends do not run together unless he says
+    # they may. The wrapper dry-builds to detect locally compiled heavyweight
+    # outputs, asks through heavy-gate when a backend is loaded, waits out any
+    # render if he chose "stop", and otherwise throttles the switch. Silence is
+    # "anyway"; `REBUILD_IGNORE_GPU=1` skips the gate and `REBUILD_ASK_TIMEOUT`
+    # sets the wait.
     GATE=/home/lam/nix/tools/heavy-gate.sh
     resume_needed=0
     throttle=
@@ -148,16 +105,11 @@ let
       fi
     fi
 
-    # NOT exec'd, unlike every other path here: the trap above has to survive
-    # the switch so comfy comes back whatever happens to it — a failed build, a
-    # Ctrl-C, a killed agent. fd 9 stays open in this shell, so the lock is held
-    # exactly as long as it was before.
-    #
-    # ROOT builds in-process, so without this scope the builders would inherit
-    # whatever cgroup the caller happened to sit in — a kitty or claude scope,
-    # unbounded. The slice is sys/nix-build-limits.nix.
-    # $throttle is empty unless we failed to get comfy out of the way — the
-    # slice's own ceilings are a backstop, not a tax on every build.
+    # Not exec'd: the trap has to survive the switch so the backend is restored
+    # on failure, Ctrl-C or kill. Root builds in-process, so this scope keeps
+    # the builders out of the caller's cgroup; `sys/nix-build-limits.nix` is the
+    # backstop, and `$throttle` is only set when the gate could not clear the
+    # way.
     scope="${pkgs.systemd}/bin/systemd-run --scope --quiet --slice=nix-build.slice --collect ''${throttle:-}"
     if [ "$upgrade" = 1 ]; then
       $scope ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --upgrade --flake /home/lam/nix#top
@@ -170,16 +122,8 @@ let
   '';
 in
 {
-  # Both the /run/current-system symlink and the resolved store path are listed
-  # so the rule matches whether or not sudo canonicalises the invoked command to
-  # its store path (mirrors how the old rule listed both).
-  # `sudo` RESETS THE ENVIRONMENT, so the three switches this wrapper reads have
-  # to be carried across it by name. Without this, `REBUILD_IGNORE_GPU=1 sudo
-  # rebuild-top` — the form AGENTS.md tells every agent to use for a rebuild
-  # driven over ssh from the other machine — silently did nothing, and the gate
-  # asked a question no unattended screen could answer, holding the rebuild lock
-  # for its whole timeout each time [2026-08-25]. Scoped to lam, and every one
-  # of these is read only by rebuild-top itself.
+  # `sudo` resets the environment, so these vars have to be carried across by
+  # name for `REBUILD_IGNORE_GPU=1 sudo rebuild-top` and friends to work.
   security.sudo.extraConfig =
     "Defaults:lam env_keep += \"REBUILD_IGNORE_GPU REBUILD_ASK_TIMEOUT REBUILD_NO_PREFLIGHT\"\n";
 

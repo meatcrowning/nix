@@ -2,66 +2,30 @@
 
 # Cross-machine sync for ~/nix/docs.
 #
-# `meatcrowning/nix` is PUBLIC. The working notes under docs/ — plans, roadmaps,
-# impact analyses, the air/top library-share runbook — are not for publication,
-# but they still need to be on both machines: the whole point of the runbook is
-# that `book` pulls it and finishes a job `top` started.
+# `meatcrowning/nix` is public, but docs/ is not: the working notes there need
+# to be on both machines and stay private, so docs/ is its own git repo against
+# a private remote inside the public checkout. It is deliberately not a
+# submodule — `git pull` would leave the other machine stale. See
+# docs/agents/claude-state-sync.md for the full sync procedure and failure
+# modes.
 #
-# So docs/ is its own git repo against a PRIVATE remote, living inside the
-# public checkout and listed in its .gitignore. Deliberately NOT a submodule:
-# `git pull` does not update submodule contents, so the other machine would
-# read a stale runbook — precisely the friction this exists to remove. On a
-# timer, docs/ is simply always current on both ends.
+# This module reuses claude-memory-sync.sh as the engine and just changes the
+# environment: the repo path, remote, size cap, and the merge-policy seed.
 #
-# The sync logic is claude-memory-sync.sh reused verbatim: it is already
-# parametrized by CM_SYNC_*, already handles unrelated histories, push races
-# and offline ticks, and is already proven across these two machines. Only the
-# environment differs.
-#
-# Both machines get this: `home/` is shared verbatim between `top` and `air`
-# via lam.nix + umport, and Fedora Asahi runs systemd the same as NixOS.
+# Board files are the only special case. Since 2026-07-30 there is one board
+# per host (`docs/board.top.md`, `docs/board.book.md`), each written only by
+# the machine it names and carried by the other as backup/history. The
+# dedicated merge driver keeps an intact merge from aborting the docs sync.
 
 {
-  # NO gitignore in this seed, deliberately. The claude-memory seed installs an
-  # ALLOWLIST .gitignore that ignores everything outside */memory/** — pointing
-  # docs/ at it would silently untrack every file here. The script copies
-  # `$SEED/gitignore` only `[ -f ]`, so omitting it leaves docs/ alone.
+  # No gitignore here: the seed for claude-state uses an allowlist, which would
+  # silently untrack docs/. The size cap is the backstop instead; anything over
+  # 25 MB is a human decision, not a thing to push blindly.
   #
-  # The size cap is the net that gitignore would be elsewhere. The script
-  # refuses to commit when the staged total exceeds CM_SYNC_MAX_MB — with no
-  # gitignore, that refusal is the ONLY thing standing between a stray large
-  # file and a wedged sync. It wedged anyway on 2026-08-03: a 118 MB hermes
-  # session export landed in the tree, the tick committed it, and every push
-  # after failed on GitHub's 100 MB limit — the timer kept committing locally
-  # ("commit is local and safe") while nothing reached the remote. Cap it at
-  # 25 MB: the largest file docs legitimately carries (DESIGN.md, 218 KB) is
-  # two orders of magnitude below it, and anything over it deserves a human
-  # decision, loudly, rather than a silent wedge. (claude-state uses 250 MB —
-  # too big here, since GitHub's hard limit is what actually breaks the push.)
-  #
-  # A gitattributes IS seeded, and it carries exactly one rule. Prose here still
-  # merges NORMALLY, not merge=union like the memory store: union is right for a
-  # pile of independent one-fact files and wrong for prose, where it silently
-  # duplicates paragraphs instead of flagging them. A conflict in a runbook
-  # should stop and ask a human, and it still does — logged loudly, retried next
-  # tick.
-  #
-  # The boards are the exception, because each is a store rather than a
-  # document: board-watch's agents and the board GUI write them unattended — and
-  # an unresolved conflict does not merely flag that file, it aborts the tick and
-  # stops docs/ syncing in either direction until someone notices. See the seeded
-  # gitattributes and board-recent-merge.sh for the policy (real 3-way merge
-  # first, most recent side wins a genuine collision).
-  #
-  # ONE BOARD PER HOST since 2026-07-30: `docs/board.top.md` and
-  # `docs/board.book.md`, each written only by the machine it is named for and
-  # carried by the other purely as a backup and a history. His words: "i
-  # actually want to change it so neither board on top or air syncs ... i dont
-  # want that overwriting ... to overwrite anything i do on air. commits
-  # obviously will stay synced." The FILES still sync — this repo is unchanged
-  # in what it moves; what changed is that nothing on top writes book's board,
-  # so nothing arbitrates between them. The merge rule stays as the net for a
-  # hand edit on the wrong machine.
+  # The gitattributes seed keeps prose on the normal merge path. The board files
+  # are the exception: they are stores, not documents, so the merge driver does
+  # a real 3-way merge first and only falls back to recency on a genuine
+  # collision. That keeps a board sync from aborting the whole docs tick.
   xdg.configFile = {
     "scripts/nix-docs-seed/gitattributes".source = ./nix-docs-files/gitattributes;
 
@@ -111,15 +75,9 @@
     Unit.Description = "Periodically sync ~/nix/docs across machines";
     Timer = {
       OnBootSec = "3min";
-      # MUST accompany OnBootSec in a USER manager. OnBootSec counts from
-      # SYSTEM boot, and the user manager only starts at login — so if login is
-      # more than 3min after boot, the only elapse point is already in the past
-      # when the timer arms and the unit never fires AT ALL. Not theoretical:
-      # on `top` 2026-07-28 the manager started 10min after boot and this timer
-      # plus claude-state-sync sat dead for 14 hours of uptime, so everything
-      # book wrote that evening reached top only after the next reboot — which
-      # read, from the desk, as "the board does not sync". OnStartupSec counts
-      # from the MANAGER's own start, so a late login still arms a future tick.
+      # MUST accompany OnBootSec in a USER manager. OnBootSec counts from system
+      # boot, while the user manager starts at login, so OnStartupSec is what
+      # keeps a late login from missing the first tick entirely.
       OnStartupSec = "3min";
       OnUnitActiveSec = "5min";
       # Catch up after the machine was asleep/off rather than waiting a full

@@ -1,37 +1,15 @@
 #!/bin/sh
-# claude-memory-sync.sh — keep Claude's memory files in sync across machines.
+# claude-memory-sync.sh — generic private-repo sync across two machines.
 #
-# Claude Code writes one markdown file per memory under
-# ~/.claude/projects/<project-slug>/memory/, plus a MEMORY.md index that is
-# loaded into context every session. Those memories are per-machine by default,
-# so anything learned on `top` was invisible on `book` and vice versa. This
-# script makes ~/.claude/projects itself a git repo pointed at a PRIVATE remote
-# and syncs it both ways on a timer.
+# The engine is reused by home/srvs/claude-state.nix for the whole of ~/.claude
+# and by home/srvs/nix-docs.nix for ~/nix/docs. It commits local changes, pulls
+# remote ones, and leaves the caller to decide the repo path, remote, log, and
+# size cap through CM_SYNC_*.
 #
-# The repo is IN PLACE — no copying. Claude writes a memory, the next sync run
-# picks it up. Deployed to ~/.config/scripts by home/srvs/claude-memory.nix and
-# driven by the claude-memory-sync.timer user unit.
-#
-# SAFETY — ~/.claude/projects also holds every session transcript, which is
-# large and full of whatever was on screen at the time. Those must never leave
-# the machine, so .gitignore is an ALLOWLIST: ignore everything, then re-include
-# only */memory/**. Adding a project or a stray file can therefore never widen
-# what gets pushed; only a deliberate .gitignore edit can. Worktree projects
-# (*--claude-worktrees-*) are excluded outright — they die with the worktree.
-#
-# CONFLICTS — .gitattributes marks *.md as `merge=union`, so when both machines
-# edit the same memory git keeps BOTH sides' lines instead of failing. For a
-# memory store, duplicated text is a trivially fixable outcome and a lost memory
-# is not, so union is the right trade. That makes content conflicts impossible;
-# only a delete-on-one-side/edit-on-the-other tree conflict can still stop a
-# merge, and that is left for a human (logged loudly, retried next tick).
-#
-# The CM_SYNC_* overrides exist so the script can be exercised against a
-# throwaway repo in a test — and, since the logic here is generic
-# "keep one private repo in sync across two machines", so a SECOND caller can
-# reuse it wholesale. home/srvs/nix-docs.nix does exactly that for ~/nix/docs
-# and home/srvs/claude-state.nix for the whole of ~/.claude; read the notes on
-# CM_SYNC_SEED and CM_SYNC_LOCK below before adding a fourth.
+# Safety depends on the caller's seed files: a denylist .gitignore for secrets
+# and machine-local runtime state, plus .gitattributes for the merge policy.
+# The default policy keeps markdown content with union and leaves true
+# delete/edit conflicts for a human. Worktree projects are excluded outright.
 REPO="${CM_SYNC_REPO:-$HOME/.claude}"
 REMOTE="${CM_SYNC_REMOTE:-https://github.com/meatcrowning/claude-state.git}"
 BRANCH="${CM_SYNC_BRANCH:-main}"
@@ -47,19 +25,13 @@ LABEL="${CM_SYNC_LABEL:-memory file}"
 HOST="$(hostname -s 2>/dev/null || hostname)"
 
 mkdir -p "$(dirname "$LOG")"
-# Keep the log from growing without bound (it runs every few minutes forever).
+# Keep the log from growing without bound.
 if [ -f "$LOG" ] && [ "$(wc -c <"$LOG")" -gt 262144 ]; then
   tail -c 131072 "$LOG" >"$LOG.tmp" && mv "$LOG.tmp" "$LOG"
 fi
 exec >>"$LOG" 2>&1
 
 # Serialize: the timer and a manual run must not interleave git operations.
-#
-# PER-CALLER, and it must stay that way. This was one hardcoded path shared by
-# every instance, and `flock -n` SKIPS rather than waits — so with two callers
-# on 5-minute timers that happened to align, one of them silently did nothing
-# for that tick, forever, and looked healthy while doing it. Different repos
-# never need to exclude each other; only two runs of the SAME repo do.
 LOCK="${CM_SYNC_LOCK:-$HOME/.cache/$(basename "$LOG" .log).lock}"
 if command -v flock >/dev/null 2>&1; then
   exec 9>"$LOCK"
@@ -68,15 +40,8 @@ fi
 
 log() { echo "$(date -Is) $*"; }
 
-# A missing REPO on a machine that has never synced is the NORMAL first state
-# for a caller whose directory is not created by something else. ~/.claude/
-# projects always exists (Claude Code makes it), but ~/nix/docs does not — it
-# is only ever created by a clone, so bailing here meant the docs timer logged
-# "nothing to sync" forever on `book` and the runbook that exists to be read on
-# the second machine was the one file that never got there. Clone it instead.
-# Only when the PARENT exists: that keeps this from conjuring a tree in a
-# half-configured HOME, and it is the same condition under which a human would
-# have run the clone by hand.
+# A missing REPO is the normal first state for a repo that has never synced.
+# Clone it instead, but only when the parent directory already exists.
 if [ ! -d "$REPO" ]; then
   if [ -d "$(dirname "$REPO")" ] && git clone -q "$REMOTE" "$REPO" 2>/dev/null; then
     log "=== cloned $REMOTE into $REPO ==="
@@ -106,11 +71,9 @@ git remote get-url origin >/dev/null 2>&1 || git remote add origin "$REMOTE"
 # ---- 1. commit whatever this machine changed --------------------------------
 git add -A
 
-# Backstop for a DENYLIST caller (see ~/.claude): an allowlist cannot widen by
-# accident, a denylist can, and `git add -A` is indiscriminate. If a tick ever
-# stages far more than a tick should, that is a new exclusion this repo needs —
-# not something to push and find out about later. Unstage and shout instead.
-# Unset = off, which is right for an allowlist caller.
+# Backstop for a DENYLIST caller (see ~/.claude): `git add -A` is indiscriminate
+# and a denylist can widen by accident. If a tick stages far more than it
+# should, that is a missing exclusion, not something to push and discover later.
 if [ -n "$CM_SYNC_MAX_MB" ]; then
   staged=0
   while IFS= read -r f; do
@@ -148,7 +111,7 @@ fi
 if git fetch -q origin "$BRANCH" 2>/dev/null; then
   if [ -n "$(git rev-parse -q --verify FETCH_HEAD)" ]; then
     # Unrelated histories on a second machine's first run: both sides already
-    # have memories and neither descends from the other. Union-merge them.
+    # have content and neither descends from the other, so merge them.
     if git merge-base --is-ancestor FETCH_HEAD HEAD 2>/dev/null; then
       :   # already up to date with the remote
     elif git merge -q --no-edit --allow-unrelated-histories FETCH_HEAD 2>/dev/null; then
