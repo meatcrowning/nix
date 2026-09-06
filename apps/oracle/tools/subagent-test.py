@@ -246,6 +246,20 @@ else:
     librarian = cat2 + [{"name": "librarian", "description": "music"}]
     check("librarian routes Soulseek acquisition out of the main context",
           "immediately spawn `librarian`" in oracle_main.agents_note(librarian))
+    routed = librarian + [
+        {"name": "media-organizer", "description": "media"},
+        {"name": "triage", "description": "diagnostics"},
+    ]
+    routing_note = oracle_main.agents_note(routed)
+    check("librarian also routes YouTube and broad library work",
+          "from a YouTube link" in routing_note
+          and "broad music-library clean-up" in routing_note)
+    check("media organization routes to its specialist with a review boundary",
+          "immediately spawn `media-organizer`" in routing_note
+          and "destructive move/delete/overwrite decision" in routing_note)
+    check("diagnosis and codebase investigation route to compact specialists",
+          "immediately spawn `triage`" in routing_note
+          and "immediately spawn `explorer`" in routing_note)
 
 print("FAILED: " + ", ".join(fails) if fails else "OK")
 sys.exit(1 if fails else 0)

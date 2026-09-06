@@ -651,12 +651,15 @@ that swap is worth it; nothing else does it.
   code change [his, 2026-08-23: *"make it easier for oracle agents to modify
   themselves and future / other agents"*]. The note also tells it to SAY when
   it rewrites one he relies on.
-- **Soulseek acquisition routes itself.** When the synced `librarian` definition
-  is present, `agents_note()` tells the main agent to spawn it immediately for
-  an ask to acquire music through Soulseek/slskd. The user need not request
-  delegation; the transfer/search/import trace remains in the librarian's
-  isolated context and only its report returns. Questions *about* Soulseek do
-  not take that route.
+- **Bulky work routes itself.** `agents_note()` gives the main agent explicit,
+  conditional routes whenever their synced specialist definitions are present:
+  `librarian` for Soulseek/YouTube acquisition and broad music-library work,
+  `media-organizer` for non-audio media inventories/organization, `triage` for
+  hardware and freeze diagnosis, and `explorer` for broad codebase
+  investigations. The user need not request delegation. The main conversation
+  receives only the report; non-clearly-authorized destructive media changes,
+  small metadata edits, code edits, raw output and context-dependent questions
+  remain there.
 - **`tools:` takes GROUPS** (`read`, `write`, `exec`, `web`, `sessions`,
   `history`, `skills`, `time`), individual tool names, or `all`. A name chatter does not
   have is **ignored** rather than fatal — a Claude Code definition naming
