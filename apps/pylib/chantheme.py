@@ -252,14 +252,10 @@ def _chrome_css(ch, i):
     bevel, shade, r = ch["bevel"], ch["shade"], ch["radius"]
     panel = grad("panelTop", "panelBottom")
     return [
-        # The window gradient. Oxygen paints it on the WINDOW — light at the
-        # top, settling into the base a few hundred px down — so it is
-        # pinned to the viewport (`fixed`) and the page scrolls under it,
-        # rather than running the height of a 300-post thread.
-        "body{background-color:%s%s;background-image:linear-gradient("
-        "to bottom,%s,%s 320px)%s;background-repeat:no-repeat%s;"
-        "background-attachment:fixed%s}"
-        % (ch["windowBottom"], i, ch["windowTop"], ch["windowBottom"], i, i, i),
+        # The browser page is not an Oxygen window.  Its canvas stays on the
+        # same solid desktop surface as Konsole; only contained controls get
+        # KStyle relief below.  In particular, do not paint a separate
+        # viewport-height window gradient behind a long thread.
         # Dialogs, catalog cells, previews and menus as the style's slabs:
         # the panel gradient, a 1px light bevel along the top, a soft foot
         # shadow and Oxygen's small corner radius. POSTS are deliberately not
