@@ -17,9 +17,9 @@ the same behaviour, so the behaviour lives here rather than in each generator:
   — the cascade is what wins here, not specificity — with a `<style>` appended
   last as the fallback where constructable stylesheets are missing.
 
-`gate` is the one difference between the sheets: it may be a class name (all
-matched hosts), or a hostname-suffix -> class map.  The latter lets the
-already-installed 4chan script also cover X without waiting for OneeChan there.
+`gate` is optional: it may be a class name (all matched hosts), or a
+hostname-suffix -> class map.  The 4chan sheet deliberately has no gate: it
+must win from document-start, before OneeChan can paint its baked fallback.
 """
 from __future__ import annotations
 

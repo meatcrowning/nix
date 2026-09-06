@@ -80,7 +80,10 @@ def build(source=None, path=OUT, port=None):
         update_url="http://127.0.0.1:%d/chan.meta.js" % port,
         download_url="http://127.0.0.1:%d/chan.user.js" % port,
         key="__deskChanTheme", style_id="desk-chan-theme",
-        gate={"4chan.org": "oneechan", "4channel.org": "oneechan"},
+        # Apply at document-start.  Waiting for OneeChan's marker exposed its
+        # baked theme first, which was visible as a flash whenever the page or
+        # its scripts arrived slowly.  This sheet is safe on bare 4chan too.
+        gate=None,
         path=path, tool="chan-userscript.py"), prov
 
 

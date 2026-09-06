@@ -1667,9 +1667,9 @@ PAGE_STYLE_RUNTIME_JS = r"""
 # desktop palette with no reload. Same document-creation / synchronous-XHR /
 # adoptedStyleSheets shape as PAGE_STYLE_RUNTIME_JS.
 #
-# SELF-GATE: it adopts only once `document.documentElement` carries the
-# `oneechan` class (OneeChan adds `html.oneechan` when it initialises — so the
-# theme rides ONLY when OneeChan is actually active, never on bare 4chan).
+# Apply at document-creation, before OneeChan itself can paint.  The earlier
+# `html.oneechan` gate left its baked sheet visible first on a slow load.  This
+# override is safe on bare 4chan too, so it is the one theme the host sees.
 # Live: window.__surferOneeThemeRefresh() re-fetches + re-adopts on a palette
 # change, exactly like __surferPageStyleRefresh. Top frame only
 # (RunsOnSubFrames off): OneeChan themes the board page, not its iframes.
@@ -1678,8 +1678,7 @@ ONEE_THEME_RUNTIME_JS = r"""
   if (window.__surferOneeTheme) return;
   window.__surferOneeTheme = true;
 
-  // Only 4chan hosts — OneeChan itself only @matches boards.4chan.org, and the
-  // self-gate below is the real guard, but scope the network chatter anyway.
+  // Only 4chan hosts — keep the courier out of every other page.
   var host = '';
   try { host = location.hostname || ''; } catch(e) {}
   if (!/(^|\.)4chan(nel)?\.org$/.test(host)) return;
@@ -1728,27 +1727,12 @@ ONEE_THEME_RUNTIME_JS = r"""
     } catch(e){}
   }
 
-  function active(){
-    try {
-      return !!(document.documentElement &&
-                document.documentElement.classList.contains('oneechan'));
-    } catch(e){ return false; }
-  }
-
-  // Live refresh (palette change): re-fetch + re-adopt, but only while OneeChan
-  // is actually on. If it went away, strip our sheet.
-  function refresh(){ apply(active() ? fetchCss() : ''); }
+  // Live refresh (palette change): re-fetch + re-adopt on every 4chan page.
+  function refresh(){ apply(fetchCss()); }
   window.__surferOneeThemeRefresh = refresh;
 
-  // documentElement is null at document-creation and OneeChan marks the page
-  // later; poll for html.oneechan, then adopt. ~60s cap so a non-OneeChan page
-  // stops watching.
-  var tries = 0;
-  var iv = setInterval(function(){
-    tries++;
-    if (active()){ apply(fetchCss()); clearInterval(iv); }
-    else if (tries > 600){ clearInterval(iv); }
-  }, 100);
+  // Synchronous courier at document-creation: no OneeChan/default-theme frame.
+  refresh();
 })();
 """
 

@@ -14,10 +14,10 @@ synchronous-XHR / adoptedStyleSheets courier shape as the dark-mode
 with matching selectors + `!important` it beats `ch4SS` on ties — re-skinning
 OneeChan's colours with no reload.
 
-Two guards make it safe: it runs only on 4chan hosts, and it adopts only once
-`document.documentElement` carries the `oneechan` class (OneeChan sets
-`html.oneechan` when it initialises), so it themes ONLY when OneeChan is active,
-never bare 4chan.
+The host guard keeps it on 4chan, and the sheet adopts at document creation —
+before OneeChan can append its own style — so a slow load never flashes the
+other theme. It also styles bare 4chan, making the desktop sheet the host's
+only page theme.
 
 This harness stands up a real offscreen QtWebEngine profile carrying the EXACT
 `Main.qml` concat line (cosmetic + page-style + OneeChan couriers together),
@@ -32,8 +32,8 @@ gate passes, and asserts:
   3. LIVE: a WalPalette change (the watched Theme.qml rewritten) drives
      `__surferOneeThemeRefresh` and re-skins an already-painted page with no
      reload;
-  4. SELF-GATE: a 4chan page WITHOUT html.oneechan is NOT themed — the baked
-     ch4SS baseline survives untouched.
+  4. STARTUP: a 4chan page WITHOUT html.oneechan is still themed, proving the
+     sheet does not wait for OneeChan's late marker.
   5. the KStyle RELIEF layer (Plasma sessions): under a gradient KStyle
      (Oxygen) the sheet gains window/panel/header/button gradients that come
      AFTER the flat rules on the same selectors, so they win on source order;
@@ -470,7 +470,7 @@ def main():
               out.get("bodyBg") == rgb(PAL_B["bg"]))
         check("a palette change live-re-skinned reply background (new bgAlt)",
               out.get("replyBg") == rgb(PAL_B["bgAlt"]))
-        # phase 3: SELF-GATE — a 4chan page WITHOUT html.oneechan is untouched
+        # phase 3: STARTUP — a 4chan page without OneeChan is themed too.
         view.setProperty("url", QUrl(bare))
         QTimer.singleShot(1200, phase3)
 
@@ -478,10 +478,10 @@ def main():
         if not read_title():
             QTimer.singleShot(200, phase3)
             return
-        check("self-gate: a page without html.oneechan keeps ch4SS body bg",
-              out.get("bodyBg") == "rgb(255, 255, 255)")
-        check("self-gate: a page without html.oneechan keeps ch4SS reply bg",
-              out.get("replyBg") == "rgb(238, 238, 238)")
+        check("startup: a page without html.oneechan still takes the palette bg",
+              out.get("bodyBg") == rgb(PAL_B["bg"]))
+        check("startup: a page without html.oneechan still takes the palette reply bg",
+              out.get("replyBg") == rgb(PAL_B["bgAlt"]))
         # phase 4: RENDERED light-palette collapse. Switch to a light palette
         # (light bg, DARK bgAlt/highlight) and load a page whose ch4SS paints
         # every inset near-black, exactly like his live OneeChan theme. Assert
