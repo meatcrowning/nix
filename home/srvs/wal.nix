@@ -10,6 +10,14 @@ let
     substitute ${./wal-files/wal-extract.py} $out \
       --replace-fail "/usr/bin/env python3" "${pillowPython}/bin/python3"
   '';
+  # Alternating theme names is required: Qt caches icon pixels under a theme
+  # name, so rewriting one theme cannot recolour an already-open program.
+  oxygenLiveIcons = pkgs.runCommand "oxygen-live-icons.py" { } ''
+    substitute ${./wal-files/oxygen-live-icons.py} $out \
+      --replace-fail "/usr/bin/env python3" "${pillowPython}/bin/python3" \
+      --replace-fail "@oxygenIcons@" "${pkgs.kdePackages.oxygen-icons}"
+    chmod +x $out
+  '';
   # cursor-recolor.sh needs xcur2png/xcursorgen/magick, which aren't on the bare
   # system PATH it inherits when Quickshell spawns wal-set.sh. Bake their store
   # bin dirs into the script's PATH (@toolPath@ placeholder) so it always resolves.
@@ -50,6 +58,10 @@ in
     };
     "scripts/wal-extract.py" = {
       source = walExtract;
+      executable = true;
+    };
+    "scripts/oxygen-live-icons.py" = {
+      source = oxygenLiveIcons;
       executable = true;
     };
     "scripts/wal-repo-sync.sh" = {
