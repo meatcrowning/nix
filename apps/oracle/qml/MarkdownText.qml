@@ -62,8 +62,8 @@ TextEdit {
     // of the bubble it belongs to [his, 2026-08-22]. That flag lives on the
     // QTextDocument's block formats, which QML cannot reach, so `Md.styleCode`
     // (main.py → MdFormat) walks the document this item is already drawing:
-    // it lets each code block wrap and gives it the inset background and
-    // margins that make it read as embedded. The TEXT is never touched, so
+    // it lets each code block wrap and centres each markdown table in this
+    // bubble. The TEXT is never touched, so
     // Ctrl+C below still hands over the model's own markdown.
     //
     // DEBOUNCED, because a streaming reply rewrites the document on every

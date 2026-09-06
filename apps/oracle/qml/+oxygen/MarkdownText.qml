@@ -12,7 +12,8 @@ import QtQuick
 //     remote fetch.
 //   • Links open on CLICK, never on render.
 //   • `Md.styleCode` still walks the laid-out document to let fenced blocks
-//     wrap — Qt's markdown reader marks every one of them `NonBreakableLines`
+//     wrap and centre markdown tables — Qt's markdown reader marks every one
+//     of them `NonBreakableLines`
 //     and a long line would otherwise paint straight out of the bubble. Still
 //     debounced, because a streaming reply rewrites the document per delta and
 //     each rewrite brings the flag back.
