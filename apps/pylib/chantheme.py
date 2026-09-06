@@ -144,7 +144,8 @@ def css(pal, chrome=None):
         # A post's own number is navigation chrome, not a quotelink: it sits
         # beside the timestamp and should carry the same primary ink.  The
         # actual >> reference remains a `.quotelink` in the post body.
-        ".postInfo .postNum a{color:%s%s}" % (text, i),
+        ".postInfo .postNum,.postInfo .postNum a,"
+        ".postInfo .postNum a:hover{color:%s%s}" % (text, i),
         # --- backgrounds ---
         "body{background:%s%s}" % (bg, i),
         # `.inline` and the catalog cells (`Show Background` mode) are
@@ -284,6 +285,13 @@ def _chrome_css(ch, i):
         ".captcha-root{background:%s%s;border-radius:%dpx%s;"
         "box-shadow:inset 0 1px 2px %s%s}"
         % (ch["panelBottom"], i, r, i, shade, i),
+        # This block is after the flat layer, so it must carry the stable-hover
+        # rule too.  Otherwise Plasma's sunken field colour replaces the flat
+        # resting fill, while the earlier :hover rule wins on specificity and
+        # flips the field back to the page background.
+        "input:not(.jsColor):hover,textarea:hover,.riceCheck:hover,"
+        "#qr-filename-container:hover,select:hover,.captcha-root:hover{"
+        "background:%s%s}" % (ch["panelBottom"], i),
         # Real buttons (the post form's, not 4chan-X's text "buttons") take
         # the button gradient. AFTER the field rule and equal to it on
         # specificity, so a submit input lands here and not in the hole.
