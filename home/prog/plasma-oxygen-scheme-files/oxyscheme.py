@@ -72,10 +72,10 @@ TOP_ALPHA = float(os.environ.get('OXYSCHEME_TOP_ALPHA', '0.25'))
 # hard near-white line (measured L=248 against a 212 panel) -- the "weird line at
 # the bottom". They are shading, so they are never recoloured; they are damped.
 GLOW_SCALE = float(os.environ.get('OXYSCHEME_GLOW_SCALE', '0.35'))
-# The panel needs a harder damp than the rest: its surface is the BRIGHT top of
-# the ramp, so a white edge highlight that reads as a soft sheen on a mid-tone
-# widget becomes a hard line against it (measured L=252 against a 237 panel).
-PANEL_GLOW_SCALE = float(os.environ.get('OXYSCHEME_PANEL_GLOW', '0.12'))
+# A panel is one continuous window surface, so Oxygen's separate white edge
+# glows have no place on it.  Even its 1–2% residual stack reads as a hard line
+# at the side panel's window-facing edge.
+PANEL_GLOW_SCALE = float(os.environ.get('OXYSCHEME_PANEL_GLOW', '0.0'))
 # A panel carries the same light-to-base ramp as an empty window, through its
 # THIN dimension.  North/south run it vertically like a titlebar; east/west
 # run it horizontally from the screen edge toward the windows.  Sending the
