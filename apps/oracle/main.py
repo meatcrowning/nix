@@ -5028,6 +5028,18 @@ class Ollama(QObject):
             self._ctx_used = v
             self.contextUsedChanged.emit()
 
+    @Slot(int)
+    def restoreContextUsed(self, v):
+        """Restore the last server-measured fill of a reopened conversation.
+
+        Ollama only reports prompt/eval tokens on a completed request.  The
+        transcript keeps that exact sample beside its last assistant row so a
+        session switch, branch, or restart does not pretend its visible history
+        is an empty context.  QML verifies the sample's model before calling
+        this; a reply replaces it with fresh server accounting as usual.
+        """
+        self._set_ctx_used(v)
+
     def _set_tps(self, v):
         v = float(v) if v and v > 0 else 0.0
         if abs(v - self._tps) > 1e-6:
