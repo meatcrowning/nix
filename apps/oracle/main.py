@@ -2295,6 +2295,10 @@ TOOL_COMPANIONS = {
        for name in EXTRA_TOOL_GROUPS["jobs"]},
     **{name: list(AGENT_TOOL_GROUPS["write"])
        for name in AGENT_TOOL_GROUPS["write"]},
+    # Looking up Danbooru vocabulary is preparation for an Anima render.  Keep
+    # the generator schema beside it so a model cannot finish its tag checks,
+    # discover make_image is absent, and reason in circles instead of calling.
+    "booru_tags": ["make_image"],
 }
 
 #: What a subagent gets when its definition names no tools. Everything that

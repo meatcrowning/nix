@@ -7,13 +7,19 @@ Ambiguous prompts stay on the ordinary core set and can always use get_tools.
 import re
 
 
+# Keep this deliberately small and intent-shaped.  It is not spellchecking the
+# prompt; it only repairs the common short forms that would otherwise withhold
+# the one schema needed to fulfil an obvious generation request.
+_MAKE = r"(?:make|create|g(?:enerate|nerate|enrate)|draw|render|edit)"
+_IMAGE = r"(?:images?|pictures?|pics?|photos?|art|artwork|illustrations?)"
+
+
 def request_tools(prompt, generated_tool=""):
     text = " ".join(str(prompt or "").lower().split())
     out = set()
 
     if generated_tool == "make_image" or re.search(
-            r"\b(make|create|generate|draw|render|edit)\b.{0,35}"
-            r"\b(image|picture|photo|art|illustration)\b", text):
+            rf"\b{_MAKE}\b.{{0,35}}\b{_IMAGE}\b", text):
         out.add("make_image")
     if generated_tool == "make_video" or re.search(
             r"\b(make|create|generate|animate|render)\b.{0,35}"
