@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(org_kde_lam_menubar LANGUAGES CXX)
+set(CMAKE_AUTOMOC ON)
 
 find_package(ECM REQUIRED NO_MODULE)
 set(CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
