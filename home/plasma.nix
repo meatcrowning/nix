@@ -1,6 +1,16 @@
 { config, pkgs, lib, host, ... }:
 
 let
+  # The active wallpaper is a basename, not a host path: wal-repo-sync.sh
+  # versions the image beside this selector. Both machines seed that directory
+  # at activation, so Plasma can use one durable choice without copying mutable
+  # monitor ids between hosts. Update this selector when the shared wallpaper
+  # choice changes; mutable containment files remain host-local.
+  sharedWallpaperName = lib.removeSuffix "\n"
+    (builtins.readFile ./srvs/wal-files/current-wallpaper);
+  sharedWallpaper =
+    "${config.home.homeDirectory}/Pictures/wall/${sharedWallpaperName}";
+
   # See the comment on `input.mice` below. Hoisted into a `let` so the
   # activation script that pushes the same values at a RUNNING KWin cannot
   # drift from the ones written into kcminputrc.
@@ -26,7 +36,7 @@ in
   programs.plasma = {
     enable = true;
 
-    # book only: the "new Oxygen" KDE global theme (org.kde.oxygen — the
+    # Both hosts: the "new Oxygen" KDE global theme (org.kde.oxygen — the
     # revived Oxygen look-and-feel bundled by kdePackages.oxygen, distinct
     # from the classic pre-Plasma-5 Oxygen). `plasma-apply-lookandfeel` pulls
     # in Oxygen's own colour scheme (OxygenDark), icons, cursor (Oxygen_Black)
@@ -34,24 +44,141 @@ in
     # sets (oxygen-6.7.4/share/plasma/look-and-feel/org.kde.oxygen/contents/defaults).
     # soundTheme is separate — lookAndFeel doesn't touch Sounds.Theme. Applies
     # on next PLASMA login (programs.plasma.startup, overrideConfig=false
-    # means it's a one-shot autostart script, not a live rewrite) — book's
-    # live session right now is Hyprland, which this doesn't touch. Per
+    # means it's a one-shot autostart script, not a live rewrite). Per
     # docs/DESIGN.md §"In a PLASMA session none of this applies": the apps'
     # colours already follow whatever KDE global theme is picked, so this is
     # just picking Oxygen as that theme rather than adding a new mechanism.
-    # The LOOK-AND-FEEL is not set on top: its Plasma session defaults to stock
-    # Breeze (or the separate aerothemeplasma session). The colour scheme is a
-    # separate desktop-wide choice in home/prog/plasma-colors.nix: both hosts
-    # use the brighter, focus-invariant OxygenDarkFlat palette.
+    # The colour scheme is a separate desktop-wide choice in
+    # home/prog/plasma-colors.nix: both hosts use the brighter,
+    # focus-invariant OxygenDarkFlat palette. The wallpaper, Plasma style and
+    # look-and-feel are shared here too; monitor scale remains the host seam.
     # soundTheme is NOT declared [2026-08-29]: plasma-manager re-asserted it on
     # every Plasma login, so a pack picked in System Settings was silently put
     # back to oxygen at the next session start, with nothing saying why. His
     # call — the event sounds are a preference, not something a fresh machine
     # needs guaranteed. lookAndFeel stays, because the colour pipeline reads
     # the picked global theme (home/prog/plasma-colors.nix).
-    workspace = lib.mkIf (host == "air") {
+    workspace = {
       lookAndFeel = "org.kde.oxygen";
+      theme = "oxygen-scheme";
+      wallpaper = sharedWallpaper;
+      wallpaperFillMode = "preserveAspectCrop";
     };
+
+    # The type layout top is using. Plasma's mutable kdeglobals had drifted on
+    # book (Breeze/Oxygen Mono 10), so applications on the two hosts were not
+    # merely scaled differently: they were different faces. Screen scaling is
+    # still host-specific below; the actual type choices are desktop-global.
+    fonts = {
+      general = { family = "Oxygen-Sans"; pointSize = 8; };
+      fixedWidth = { family = "Oxygen Mono"; pointSize = 9; };
+      small = { family = "Oxygen-Sans"; pointSize = 8; };
+      toolbar = { family = "Oxygen-Sans"; pointSize = 8; };
+      menu = { family = "Oxygen-Sans"; pointSize = 8; };
+      windowTitle = { family = "Oxygen-Sans"; pointSize = 8; };
+    };
+
+    # One semantic panel layout, recreated without copying top's containment
+    # ids, activity UUIDs or four-screen map to book. The panels live on the
+    # primary output on either host; only the tray's hardware applets differ.
+    panels = [
+      {
+        location = "top";
+        height = 22;
+        floating = false;
+        opacity = "opaque";
+        widgets = [
+          {
+            name = "org.kde.plasma.panelspacer";
+            config.General = { expanding = false; length = 6; };
+          }
+          {
+            name = "org.kde.plasma.kickoff";
+            config.General = {
+              icon = "launcher-circle";
+              systemFavorites = "suspend,hibernate,reboot,shutdown";
+            };
+          }
+          "org.kde.plasma.appmenu"
+          "org.kde.lam.menubar"
+          "org.kde.plasma.panelspacer"
+          {
+            name = "org.kde.plasma.digitalclock";
+            config.Appearance = {
+              autoFontAndSize = false;
+              dateDisplayFormat = "BesideTime";
+              dateFormat = "longDate";
+              displayTimezoneFormat = "FullText";
+              fontFamily = "Oxygen-Sans";
+              fontSize = 9;
+              fontStyleName = "Sans-Book";
+              fontWeight = 400;
+              use24hFormat = 0;
+            };
+          }
+          "org.kde.plasma.panelspacer"
+          {
+            name = "org.kde.plasma.weather";
+            config.WeatherStation = {
+              placeDisplayName = "Juneau, Juneau International Airport, AK";
+              placeInfo = "Juneau, Juneau International Airport, AK";
+              provider = "noaa";
+            };
+          }
+          "org.kde.plasma.mediacontroller"
+          {
+            name = "org.kde.plasma.systemtray";
+            config.General = {
+              disabledStatusNotifiers = "fooyin,udiskie,.openrgb-wrapped";
+              extraItems = lib.concatStringsSep "," ([
+                "org.kde.kdeconnect"
+                "org.kde.plasma.clipboard"
+                "org.kde.plasma.manage-inputmethod"
+                "org.kde.plasma.notifications"
+                "org.kde.plasma.cameraindicator"
+                "org.kde.plasma.networkmanagement"
+                "org.kde.plasma.keyboardlayout"
+                "org.kde.plasma.keyboardindicator"
+                "org.kde.plasma.printmanager"
+                "org.kde.plasma.volume"
+                "org.kde.kscreen"
+                "org.kde.plasma.brightness"
+                "org.kde.plasma.weather"
+              ] ++ lib.optionals (host == "air") [
+                "org.kde.plasma.devicenotifier"
+                "org.kde.plasma.bluetooth"
+                "org.kde.plasma.battery"
+              ]);
+              iconSpacing = 1;
+              shownItems = "Easy Effects";
+            };
+          }
+          "org.kde.lam.notifgap"
+          "org.kde.lam.playervisualizer"
+        ];
+      }
+      {
+        location = "left";
+        height = 42;
+        floating = false;
+        opacity = "opaque";
+        widgets = [
+          {
+            name = "org.kde.plasma.icontasks";
+            config.General = {
+              forceStripes = true;
+              launchers = "applications:systemsettings.desktop,preferred://filemanager,preferred://browser,applications:painter.desktop,applications:player.desktop,applications:oracle.desktop";
+              maxStripes = 1;
+            };
+          }
+          "org.kde.plasma.panelspacer"
+          "org.kde.plasma.marginsseparator"
+          "org.kde.plasma.folder"
+          "org.kde.plasma.folder"
+          "org.kde.plasma.trash"
+        ];
+      }
+    ];
 
     # The Logitech ERGO M575 trackball, so a PLASMA session on either host
     # feels like the Hyprland one. Hyprland gets sensitivity -0.200 +
@@ -211,16 +338,23 @@ in
       kdeglobals."KFileDialog Settings"."Show Inline Previews" = true;
       kdeglobals."KFileDialog Settings"."Sort by" = "Name";
       kdeglobals."KFileDialog Settings"."Sort directories first" = true;
+      # Plasma visuals are shared. The live icon theme is intentionally not
+      # pinned: wal-set.sh alternates oxygen-live-0/1 so open applications see
+      # a wallpaper recolour without fighting Qt's icon cache.
+      kdeglobals.KDE.widgetStyle = "oxygen";
       kwalletrc.Wallet."First Use" = false;
-      # Titlebar buttons, right-hand group: roll up, keep above, minimize,
-      # close. 'L' is the roll-up ("shade") button — the patched kwin puts that
-      # character back in both button tables and implements the roll itself
-      # (kwin-rollup-overlay in flake.nix). Reorder HERE, not in System
-      # Settings: this value is declared, so a switch would undo a drag.
-      # ButtonsOnRight/ButtonsOnLeft are NOT declared: he arranges the titlebar
-      # buttons himself (ButtonsOnLeft=XIM, ButtonsOnRight=F as of 2026-09-05)
-      # and a declared value is re-asserted on every switch, so pinning it
-      # reverted his layout on each rebuild.
+      # The exact titlebar top uses: close / minimize / maximize at left, keep
+      # above at right, Oxygen decoration, no decoration shadow. These used to
+      # be deliberately mutable, which preserved top while book stayed on its
+      # old `| LFIX` layout. A future layout change belongs here so both hosts
+      # move together.
+      kwinrc."org.kde.kdecoration2" = {
+        ButtonsOnActiveWindowGlow = false;
+        ButtonsOnLeft = "XIM";
+        ButtonsOnRight = "F";
+        ShadowSize = 0;
+        theme = "Oxygen";
+      };
       kwinrc.Desktops.Number = 1;
       kwinrc.Desktops.Rows = 1;
       kwinrc.Tiling.padding = 4;

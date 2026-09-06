@@ -177,6 +177,12 @@ private `docs/agents/` runbooks.
   `hosts/top/` and `sys/` are NixOS-only. `home/` is shared home-manager
   configuration; `lam.nix` imports it. `sys/` and `home/` use recursive
   `umport`; only `.nix` files are imported.
+- Plasma's cross-host visual source is `home/plasma.nix` plus the shared
+  Oxygen/colour modules under `home/prog/`. The selected wallpaper basename is
+  `home/srvs/wal-files/current-wallpaper`, whose image must exist under the
+  adjacent `wallpapers/` directory. Treat mutable KConfig on top as a measured
+  input, not the durable source: capture non-hardware visual changes in those
+  shared declarations so book receives them without copying output ids.
 - `apps/` is inert vendored source outside those imports. Sources run from
   `/home/lam/nix/apps/<name>/main.py`, with packages in `home/prog/<name>.nix`;
   `apps/pylib/` moves with the tree. `apps/board/` is presented as `goetia`,
