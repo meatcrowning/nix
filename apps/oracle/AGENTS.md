@@ -297,14 +297,14 @@ file in and relaunch, same as `tavily.key`, and both live in `~/.config/oracle/`
   model; a selection that is still valid is never overridden. He no longer
   reselects his model every launch.
 - **`suggested.json`** — a JSON array of model name strings that AGENTS write to
-  recommend a model (e.g. after benchmarking tool-calling support). Those that
-  the daemon actually has are ranked **above** the rest of the dropdown, in the
-  file's order; everything else follows alphabetically. `Ollama._order` does the
-  ranking and publishes `suggestedCount` (the size of the leading group) so the
-  dropdown rules a 1px `Theme.border` line off the suggested models from the
-  rest (docs/DESIGN.md §7.2). Malformed or absent → no ranking, plain alpha
-  order. Re-read on every `/api/tags` poll, so a mid-session write lands with no
-  relaunch.
+  recommend a model (e.g. after benchmarking tool-calling support). The locally
+  curated model collection always stays first; present suggestions follow it in
+  the file's order; everything else follows alphabetically. `Ollama._order` does
+  the ranking and publishes `suggestedCount` (the size of the leading group) so
+  the dropdown rules a 1px `Theme.border` line off it from the rest
+  (docs/DESIGN.md §7.2). A malformed or absent file therefore removes only its
+  extra recommendations, never the curated collection. Re-read on every
+  `/api/tags` poll, so a mid-session write lands with no relaunch.
 
 **Streaming no longer hijacks his scroll.** The reply view auto-follows the
 newest text to the bottom only while he is already AT the bottom

@@ -3280,7 +3280,9 @@ SUGGESTED_PATH = CONFIG_DIR / "suggested.json"
 
 # Selector-only names for the locally curated models. Ollama, saved sessions,
 # and last-model retain the exact daemon identifiers; this is solely the short
-# reminder shown beside a model choice.
+# reminder shown beside a model choice.  Their insertion order is also the
+# stable leading group in the selector: an agent adding recommendations must
+# never make the models he already reaches for disappear below a long list.
 MODEL_LABELS = {
     "qwen3.6:35b-a3b": "generalist · agentic — qwen3.6:35b-a3b",
     "gemma4-qat:12b": (
@@ -3294,6 +3296,7 @@ MODEL_LABELS = {
         "generalist · roleplay · agentic · coding · multimodal · OCR · "
         "subagent — qwen3.5-9b q5"),
 }
+CURATED_MODELS = tuple(MODEL_LABELS)
 
 #: The chosen base system prompt, persisted like `last-model`: one small JSON,
 #: `{"choice": <preset id or "custom">, "custom": <the user's own text>}`. The
@@ -4827,12 +4830,18 @@ class Ollama(QObject):
         return out
 
     def _order(self, names):
-        """Agent-suggested models the daemon actually has come first, in the
-        order they were suggested; everything else follows alphabetically. Sets
-        `_suggested_count` as a side effect (the size of that leading group)."""
+        """Curated models stay first, then agent suggestions, then alphabetical.
+
+        All three groups contain only models the daemon actually has.  This
+        makes a replacement or missing ``suggested.json`` harmless: it can add
+        recommendations, but cannot evict the small model collection he uses
+        most.  Sets `_suggested_count` as a side effect (the leading two groups).
+        """
         present = set(names)
-        top = [m for m in self._suggested if m in present]
+        top = [m for m in CURATED_MODELS if m in present]
         seen = set(top)
+        top.extend(m for m in self._suggested if m in present and m not in seen)
+        seen.update(top)
         rest = sorted((n for n in names if n not in seen), key=str.lower)
         self._suggested_count = len(top)
         return top + rest
