@@ -133,6 +133,10 @@ in
             };
           }
           "org.kde.plasma.mediacontroller"
+          # The visualizer is the media controller's compact fallback. Keep it
+          # adjacent to that controller rather than reserving its 72px slot at
+          # the physical right edge after the system tray.
+          "org.kde.lam.playervisualizer"
           {
             name = "org.kde.plasma.systemtray";
             config.General = {
@@ -161,7 +165,6 @@ in
             };
           }
           "org.kde.lam.notifgap"
-          "org.kde.lam.playervisualizer"
         ];
       }
       {
