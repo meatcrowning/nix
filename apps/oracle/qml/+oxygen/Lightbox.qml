@@ -179,6 +179,7 @@ Item {
             id: closeBtn
             anchors.right: parent.right
             icon.name: "window-close"
+            icon.color: palette.buttonText
             display: QQC.AbstractButton.IconOnly
             QQC.ToolTip.visible: hovered
             QQC.ToolTip.text: "close"
@@ -222,6 +223,7 @@ Item {
                   verticalCenter: parent.verticalCenter }
         visible: box.count > 1
         icon.name: "go-previous"
+        icon.color: palette.buttonText
         display: QQC.AbstractButton.IconOnly
         QQC.ToolTip.visible: hovered
         QQC.ToolTip.text: "previous"
@@ -232,6 +234,7 @@ Item {
                   verticalCenter: parent.verticalCenter }
         visible: box.count > 1
         icon.name: "go-next"
+        icon.color: palette.buttonText
         display: QQC.AbstractButton.IconOnly
         QQC.ToolTip.visible: hovered
         QQC.ToolTip.text: "next"

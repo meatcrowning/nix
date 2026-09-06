@@ -47,6 +47,9 @@ Item {
         // restate, not one asking for a wordless button.
         text: root.iconOnly ? "" : (root.plainLabel !== "" ? root.plainLabel : root.label)
         icon.name: root.iconName
+        // Oxygen ships raster action icons.  Colour the silhouette from the
+        // live button role so a wallpaper palette change reaches it too.
+        icon.color: btn.palette.buttonText
         display: root.iconOnly ? Button.IconOnly
                : (root.iconName === "" ? Button.TextOnly : Button.TextBesideIcon)
         enabled: root.enabled

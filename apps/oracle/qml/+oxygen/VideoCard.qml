@@ -168,6 +168,7 @@ Column {
             enabled: false
             opacity: 0.9
             icon.name: "media-playback-start"
+            icon.color: palette.buttonText
             display: QQC.AbstractButton.IconOnly
         }
 

@@ -102,6 +102,7 @@ Rectangle {
                    : bar.volume < 0.34 ? "audio-volume-low"
                    : bar.volume < 0.67 ? "audio-volume-medium"
                                        : "audio-volume-high"
+        icon.color: palette.buttonText
         display: QQC.AbstractButton.IconOnly
         QQC.ToolTip.visible: hovered
         QQC.ToolTip.text: bar.volume <= 0.001 ? "unmute" : "mute"
@@ -142,6 +143,7 @@ Rectangle {
                   verticalCenter: parent.verticalCenter }
         flat: true
         icon.name: bar.full ? "view-restore" : "view-fullscreen"
+        icon.color: palette.buttonText
         display: QQC.AbstractButton.IconOnly
         // The text is the tooltip's, not the button's — a two-word label beside
         // a video is noise, and the icon is the KDE vocabulary for this.

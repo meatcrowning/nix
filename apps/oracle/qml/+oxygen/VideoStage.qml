@@ -143,6 +143,7 @@ Item {
             anchors { right: parent.right; rightMargin: 4
                       verticalCenter: parent.verticalCenter }
             icon.name: "window-close"
+            icon.color: palette.buttonText
             display: QQC.AbstractButton.IconOnly
             QQC.ToolTip.visible: hovered
             QQC.ToolTip.text: "close"

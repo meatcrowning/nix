@@ -196,6 +196,11 @@ paints the cropped Oxygen background. Keep active/inactive window colour groups
 synchronized through kwinactive.py/the KWin helper, and redress every
 QQuickWidget on ApplicationPaletteChange.
 
+Oxygen's stock action icons are coloured raster art, not palette-aware SVGs.
+Use `kdeshell_icons.themed_icon()` for Qt `QAction`s and bind QML controls'
+`icon.color` to `palette.buttonText`; these are the two paths that recolour
+normal, active and disabled controls with every live wallpaper palette change.
+
 The shell owns menu order and standard actions, puts view toggles (including
 Show Menubar/Ctrl+M) in Settings, updates existing QActions in place, and
 rebuilds only when action ids change. Keep persistent widget actions when
