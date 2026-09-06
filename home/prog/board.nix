@@ -38,7 +38,22 @@ let
         dontUnpack = true;
 
         nativeBuildInputs = [ pkgs.qt6.wrapQtAppsHook pkgs.makeWrapper ];
-        buildInputs = [ pyEnv pkgs.qt6.qtdeclarative ];
+        buildInputs = [
+          pyEnv
+          pkgs.qt6.qtdeclarative
+
+          # Goetia's Plasma roof is a real QMainWindow.  The KDE integration,
+          # style and icon plugins must travel with this wrapper or the app
+          # silently falls back to Fusion while the rest of the session is
+          # Oxygen.
+          pkgs.kdePackages.plasma-integration
+          pkgs.kdePackages.oxygen
+          pkgs.kdePackages.breeze
+          pkgs.kdePackages.qqc2-desktop-style
+          pkgs.kdePackages.kirigami
+          pkgs.kdePackages.kiconthemes
+          pkgs.kdePackages.oxygen-icons
+        ];
 
         dontWrapQtApps = true; # we wrap the python launcher ourselves
         installPhase = ''
@@ -46,6 +61,10 @@ let
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/goetia \
             --add-flags /home/lam/nix/apps/board/main.py \
+            --prefix XDG_DATA_DIRS : ${lib.concatStringsSep ":" [
+              "${pkgs.kdePackages.oxygen-icons}/share"
+              "${pkgs.kdePackages.breeze-icons}/share"
+            ]} \
             "''${qtWrapperArgs[@]}"
           runHook postInstall
         '';

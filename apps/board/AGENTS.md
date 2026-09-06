@@ -9,7 +9,11 @@ docs/board.book.md on book; never merge them. The default invocation reads this
 host's store; an explicit board-shaped path is also accepted.
 
 The source is main.py, boardparse.py, boardmove.py, boardagents.py, boardwork.py,
-boardphase.py, boardhermes.py, boardusage.py, boardundo.py, and qml/. The hermes
+boardphase.py, boardhermes.py, boardusage.py, boardundo.py, and qml/. `Main.qml`
+is the Hyprland `Window`; `Root.qml` is the same page as an `Item` for the
+Plasma `kdeshell` QMainWindow. Keep them visually and behaviorally equivalent:
+the Plasma shell owns its native Oxygen menu/toolbar/status chrome, while
+hyprvtb owns the Hyprland chrome. The hermes
 runtime reads its card/drawer from hermes's session store when no transcript file
 exists; see guide/cards.md. home/prog/board.nix runs the live source at
 /home/lam/nix/apps/board/main.py, including the air system-python split, so

@@ -95,7 +95,8 @@ QML = HERE / "qml"
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 from deskstyle import DeskStyle  # noqa: E402  (the desktop-wide font setting)
-from kdetheme import theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+from kdetheme import theme_source, is_plasma  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+import kdeshell  # noqa: E402  (the Plasma session's real QtWidgets window)
 from glyphs import px  # noqa: E402  (§2.3 — map at INGEST, like boardparse does)
 
 import boardparse  # noqa: E402  (beside this file)
@@ -257,6 +258,7 @@ class Titlebar(QObject):
     **Its inner bar carries NO text.** See `_MuteFooterVtbClient`."""
 
     clicked = Signal(str)
+    buttonsChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -272,6 +274,7 @@ class Titlebar(QObject):
                 out.append((str(b["id"]), str(b["label"]), int(b.get("state", 0)),
                             str(b.get("tip", ""))))
         self._client.set_buttons(out)
+        self.buttonsChanged.emit()
 
     @Slot(str)
     def setFooter(self, text):
@@ -2211,13 +2214,20 @@ def _window_icon(fg):
 
 
 def main():
-    app = QGuiApplication(sys.argv)
-    app.setApplicationName("board")
-    app.setDesktopFileName("board")
+    # Under Plasma this is a real QMainWindow so Oxygen paints the window,
+    # menubar, toolbar and status bar itself.  Hyprland stays on the lightweight
+    # QQuickWindow path it has always used.
+    kdeshell.pin_controls_style()
+    app = kdeshell.make_app(sys.argv, "goetia")
 
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
 
-    engine = QQmlApplicationEngine()
+    plasma = is_plasma()
+    shell = kdeshell.shell("goetia", size=(880, 880), min_size=(360, 240),
+                           state_key="plasma") if plasma else None
+    engine = shell.engine() if plasma else QQmlApplicationEngine()
+    if plasma:
+        kdeshell.select_plasma_files(engine)
     ctx = engine.rootContext()
 
     settings = Settings()
@@ -2255,12 +2265,24 @@ def main():
     theme.setParent(app)
     ctx.setContextProperty("Theme", theme)
 
-    engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
-    if not engine.rootObjects():
-        sys.exit(1)
+    if plasma:
+        if not shell.load(QML / "Root.qml"):
+            print("failed to load Root.qml", file=sys.stderr)
+            for error in shell.errors():
+                print("  " + error, file=sys.stderr)
+            sys.exit(1)
+        shell.bind_chrome(titlebar)
+        window = shell.show()
+        root = shell.root
+    else:
+        engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
+        if not engine.rootObjects():
+            sys.exit(1)
+        root = engine.rootObjects()[0]
+        window = root
 
     from winstate import WinState
-    win_state = WinState(engine.rootObjects()[0], "board")  # keep ref: geometry
+    win_state = WinState(window, "board")  # keep ref: geometry
 
     # Pull first, push last. The pull races the window coming up on purpose:
     # `Board` already watches the file and reloads on an atomic replace (§6.1,
@@ -2268,6 +2290,7 @@ def main():
     # second or two later rather than delaying the window until the network
     # answers.
     sync_now(board.path)
+    app.aboutToQuit.connect(root.saveBeforeQuit)
     app.aboutToQuit.connect(lambda: sync_now(board.path))
 
     sys.exit(app.exec())

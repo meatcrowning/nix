@@ -22,8 +22,19 @@ import "../../qmlcommon"
 // That is the requirement he stated in the same breath as the feature ("i feel
 // pressured to act quickly when really i dont need to"), and it is as
 // load-bearing as the parse.
-Window {
+Item {
     id: win
+    anchors.fill: parent
+
+    // The shared page stays transparent over Plasma's real styled window
+    // background; Hyprland gets its ordinary wallpaper-derived base instead.
+    StyledBackground { anchors.fill: parent; z: -2 }
+    Rectangle {
+        anchors.fill: parent
+        z: -3
+        color: Theme.bg
+        visible: !(typeof DeskStyle !== "undefined" && DeskStyle && DeskStyle.plasma)
+    }
 
     // Focus-aware foreground, in lock-step with the titlebar (§3.1.1, filer's
     // idiom). Leaves take the tone they are handed; none reads Window.active.
@@ -153,8 +164,8 @@ Window {
     // he was mid-sentence in a reply would eat the undo he actually meant. The
     // duck-type is the whole test: everything on this board that edits text is a
     // `TextEdit`, and nothing else has a `cursorPosition`.
-    readonly property bool inAnEditor: win.activeFocusItem !== null
-                                       && win.activeFocusItem.cursorPosition !== undefined
+    readonly property bool inAnEditor: win.Window.activeFocusItem !== null
+                                       && win.Window.activeFocusItem.cursorPosition !== undefined
     Shortcut {
         sequences: [StandardKey.Undo]
         enabled: Agents.canUndo && !win.inAnEditor
@@ -253,13 +264,6 @@ Window {
     // free with room for a second window next to it, and gives ~100 monospace
     // columns of text after the gutter. It survives far smaller (§5.6): the
     // layout has no minimum sized for this desktop's monitor.
-    width: 880
-    height: 880
-    minimumWidth: 360
-    minimumHeight: 240
-    visible: true
-    color: Theme.bg
-    title: "goetia"
 
     // ---- state he would notice reverting (§14) ----
     property var collapsed: ({})
@@ -656,9 +660,8 @@ Window {
         Titlebar.setButtons(tbButtons);
         Titlebar.setFooter(footerStr);
     }
-    onClosing: {
+    function saveBeforeQuit() {
         Settings.set("drafts", win.drafts);
-        Qt.quit();
     }
 
     // ---- status: a report, never a permanent label ----
