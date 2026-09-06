@@ -1252,6 +1252,19 @@ Item {
     //   shortcut:  THIS FACE'S key ("@New" takes the platform's standard one)
     readonly property var actions: {
         const out = [];
+        // Send leads the toolbar so its stream control is always under the
+        // same leftmost button, whether it currently sends, continues or stops.
+        var sends = win.canSend || !win.canContinue;
+        out.push({ id: "send", menu: "chat",
+                   menuText: Ollama.busy ? "Stop Generating"
+                             : (sends ? "Send" : "Continue"),
+                   tip: Ollama.busy ? "stop the reply"
+                        : (sends ? "send the prompt" : "carry the last reply on"),
+                   icon: Ollama.busy ? "process-stop"
+                         : (sends ? "document-send" : "media-playback-start"),
+                   bar: true, barIconOnly: true, shortcut: "Ctrl+Return",
+                   state: (Ollama.busy || win.canSend || win.canContinue) ? 0 : 2 });
+        out.push("-");
         out.push({ id: "new-session", menu: "file", menuText: "New Session",
                    barText: "New",
                    tip: "start a fresh conversation", icon: "document-new",
@@ -1273,20 +1286,6 @@ Item {
                    menuText: "Delete Session…", icon: "edit-delete",
                    state: win.sessionId !== "" ? 0 : 2 });
 
-        // Send is Enter in the prompt box in both sessions; this is the same
-        // verb with a name on it, and the one control that reports a stream is
-        // running — it becomes Stop while it is (§10.6).
-        var sends = win.canSend || !win.canContinue;
-        out.push({ id: "send", menu: "chat",
-                   menuText: Ollama.busy ? "Stop Generating"
-                             : (sends ? "Send" : "Continue"),
-                   tip: Ollama.busy ? "stop the reply"
-                        : (sends ? "send the prompt" : "carry the last reply on"),
-                   icon: Ollama.busy ? "process-stop"
-                         : (sends ? "document-send" : "media-playback-start"),
-                   bar: true, shortcut: "Ctrl+Return",
-                   state: (Ollama.busy || win.canSend || win.canContinue) ? 0 : 2 });
-        out.push("-");
         out.push({ id: "attach", menu: "chat", menuText: "Attach Files…",
                    barText: "Attach",
                    tip: "attach files to the next message",

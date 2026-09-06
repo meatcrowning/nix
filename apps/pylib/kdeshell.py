@@ -63,9 +63,10 @@ is re-requested only when geometry, palette, style, or activation changes.
 module reads the app rather than the app reconfiguring itself: the menubar, the
 toolbar and the statusbar are all built from the SAME `tbButtons` array the
 hyprvtb titlebar column is built from, and they call the same `tbAction(id)`
-handler. An app adds two optional keys per entry for this face — `icon:`, a
-freedesktop icon name, and `bar: true` to put the entry on the toolbar — and
-the vtb wire protocol ignores both (`vtbclient.py` reads id/label/state/tip/
+handler. An app adds optional keys per entry for this face — `icon:`, a
+freedesktop icon name, `bar: true` to put the entry on the toolbar, and
+`barIconOnly: true` to hide one toolbar row's text — and the vtb wire protocol
+ignores them (`vtbclient.py` reads id/label/state/tip/
 bottom).
 
 Nothing here runs in the Hyprland session. `is_plasma()` is the single switch,
@@ -1119,20 +1120,22 @@ def _build_shell_class():
                 if self._bar_of(e) != "main":
                     continue
                 act = self._action_for(e)
-                # `barText` puts the NAME beside the icon for ONE button. The
-                # style is a toolbar-wide setting, so the only way to say it per
-                # button is to add a button rather than the action.
+                # `barText` puts the NAME beside the icon for ONE button and
+                # `barIconOnly` hides it. The style is toolbar-wide, so either
+                # exception needs a button rather than the action.
                 label = str(e.get("barText") or "")
-                if label:
+                icon_only = bool(e.get("barIconOnly"))
+                if label or icon_only:
                     from PySide6.QtWidgets import QToolButton
                     btn = self._bar_buttons.get(str(e.get("id", "")))
                     if btn is None:
                         btn = QToolButton(tb)
                         btn.setDefaultAction(act)
-                        btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
                         self._bar_buttons[str(e.get("id", ""))] = btn
-                    btn.setText(_with_mnemonic(label, self._mnemo.get(
-                        str(e.get("id", "")))))
+                    btn.setToolButtonStyle(Qt.ToolButtonIconOnly if icon_only
+                                           else Qt.ToolButtonTextBesideIcon)
+                    btn.setText("" if icon_only else _with_mnemonic(
+                        label, self._mnemo.get(str(e.get("id", "")))))
                     self._append_widget(tb, btn)
                 else:
                     tb.addAction(act)
