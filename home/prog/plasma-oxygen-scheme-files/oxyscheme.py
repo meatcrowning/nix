@@ -831,16 +831,6 @@ def convert(src, dst, report=None):
                     set_style(el, sd)
                     stats['panel_surface_opaque'] += 1
 
-        # Panel shadows are a separate nine-slice frame (`shadow-*`), not part
-        # of the panel body's shading.  Remove the whole frame so a panel reads
-        # as one continuous window surface, with no floating halo or drop.
-        for el in list(root.iter()):
-            if (el.get('id') or '').startswith('shadow-'):
-                parent = parents.get(el)
-                if parent is not None:
-                    parent.remove(el)
-                    stats['panel_shadows_removed'] += 1
-
     st = None
     for e in root.iter(S+'style'):
         if e.get('id') == 'current-color-scheme': st = e; break

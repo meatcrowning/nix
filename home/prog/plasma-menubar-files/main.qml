@@ -64,7 +64,7 @@ PlasmoidItem {
     // The desktop owns its menu bar, so give its first category a little air
     // after Kickoff.  A focused app's menu already has the stock appmenu's
     // inset; the handoff here needs only one physical pixel.
-    readonly property int desktopGutter: Kirigami.Units.smallSpacing + 4
+    readonly property int desktopGutter: Kirigami.Units.smallSpacing + 6
     readonly property int appGutter: 1
 
     // The fallback must stay live to notice desktop focus returning. Plasma
@@ -435,24 +435,28 @@ PlasmoidItem {
         implicitHeight: 1
     }
 
-    fullRepresentation: Item {
-        implicitWidth: bar.implicitWidth + (root.onDesktop
-            ? root.desktopGutter : root.appGutter)
-        implicitHeight: bar.implicitHeight
-
-        GridLayout {
+    // The stock appmenu has GridLayout as its representation root. Keeping
+    // that contract lets Plasma give every label the panel's full line box.
+    fullRepresentation: GridLayout {
         id: bar
-        x: root.onDesktop ? root.desktopGutter : root.appGutter
 
         LayoutMirroring.enabled: Application.layoutDirection === Qt.RightToLeft
+        Layout.minimumWidth: implicitWidth
+        Layout.minimumHeight: implicitHeight
         flow: root.vertical ? GridLayout.TopToBottom : GridLayout.LeftToRight
         rowSpacing: 0
         columnSpacing: 0
 
+        Item {
+            Layout.preferredWidth: root.onDesktop
+                ? root.desktopGutter : root.appGutter
+            Layout.preferredHeight: 0
+            Layout.fillHeight: true
+        }
+
         Repeater {
             model: root.barMenus
             delegate: BarButton { menu: modelData }
-        }
         }
     }
 
