@@ -100,6 +100,10 @@ app.sendEvent(win, QEvent(QEvent.WindowDeactivate))
 check("losing focus re-requests the image", len(seen) > before,
       "%d -> %d" % (before, len(seen)))
 before = len(seen)
+app.sendEvent(view, QEvent(QEvent.Show))
+check("showing the final view geometry re-requests the image", len(seen) > before,
+      "%d -> %d" % (before, len(seen)))
+before = len(seen)
 app.sendEvent(win, QEvent(QEvent.ApplicationPaletteChange))
 check("...and so does a scheme change", len(seen) > before)
 
