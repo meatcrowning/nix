@@ -2,12 +2,7 @@ diff --git a/src/terminalDisplay/TerminalPainter.cpp b/src/terminalDisplay/Termi
 index 5d819327..ec602555 100644
 --- a/src/terminalDisplay/TerminalPainter.cpp
 +++ b/src/terminalDisplay/TerminalPainter.cpp
-@@ -30,4 +30,6 @@
- #include <QRegion>
- #include <QString>
- #include <QTransform>
- #include <QtMath>
-@@ -620,5 +622,26 @@ void TerminalPainter::drawBackground(QPainter &painter, const QRect &rect, const QColor &backgroundColor, bool useOpacitySetting)
+@@ -620,5 +620,22 @@ void TerminalPainter::drawBackground(QPainter &painter, const QRect &rect, const QColor &backgroundColor, bool useOpacitySetting)
  void TerminalPainter::drawBackground(QPainter &painter, const QRect &rect, const QColor &backgroundColor, bool useOpacitySetting)
  {
 +    // A generated colour scheme can ask for the owning window's painted
