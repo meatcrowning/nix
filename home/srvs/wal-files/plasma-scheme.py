@@ -81,6 +81,10 @@ TINT_KEYS = {
     # titlebar keeps a blue top edge under a red wallpaper.
     "activeBlend", "inactiveBlend",
 }
+UI_ACCENT_KEYS = {
+    "DecorationFocus", "DecorationHover",
+    "ForegroundActive", "ForegroundLink", "ForegroundVisited",
+}
 TINT_GROUPS = re.compile(r"^\[(Colors:[A-Za-z]+|WM)\]$")
 BACKGROUND_GROUPS = {
     "[Colors:Button]",
@@ -143,10 +147,16 @@ def tint(rgb, hue, sat_scale):
 
 
 def mint(template_text, accent_hex, force_name=None, background_hex=None,
-         surface_hex=None):
+         surface_hex=None, ui_accent_hex=None):
     ar, ag, ab = hex_to_rgb(accent_hex)
     hue, _, accent_s = colorsys.rgb_to_hls(ar / 255.0, ag / 255.0, ab / 255.0)
     sat_scale = min(1.0, accent_s / SAT_REFERENCE)
+    ui_hue, ui_sat_scale = hue, sat_scale
+    if ui_accent_hex:
+        ur, ug, ub = hex_to_rgb(ui_accent_hex)
+        ui_hue, _, ui_s = colorsys.rgb_to_hls(
+            ur / 255.0, ug / 255.0, ub / 255.0)
+        ui_sat_scale = min(1.0, ui_s / SAT_REFERENCE)
     if surface_hex:
         sr, sg, sb = hex_to_rgb(surface_hex)
         surface_hue, _, surface_s = colorsys.rgb_to_hls(
@@ -180,7 +190,10 @@ def mint(template_text, accent_hex, force_name=None, background_hex=None,
         elif (TINT_GROUPS.match(group) and key in TINT_KEYS
                 and re.fullmatch(r"\d{1,3},\d{1,3},\d{1,3}", value)):
             rgb = tuple(int(c) for c in value.split(","))
-            out.append("%s=%d,%d,%d" % ((key,) + tint(rgb, hue, sat_scale)))
+            use_ui_accent = group == "[Colors:Selection]" or key in UI_ACCENT_KEYS
+            tint_hue = ui_hue if use_ui_accent else hue
+            tint_scale = ui_sat_scale if use_ui_accent else sat_scale
+            out.append("%s=%d,%d,%d" % ((key,) + tint(rgb, tint_hue, tint_scale)))
         elif force_name and group == "[General]" and key == "ColorScheme":
             out.append("ColorScheme=%s" % force_name)
         elif force_name == "OxygenDarkNeutral" and group == "[General]" and key == "Name":
@@ -201,7 +214,7 @@ def scheme_name(text):
 PUSH_GROUPS = re.compile(r"^\[(Colors:[A-Za-z]+|WM|ColorEffects:[A-Za-z]+)\]$")
 
 
-def push_to_kdeglobals(minted, name, digest):
+def push_to_kdeglobals(minted, name, digest, ui_accent_hex):
     """Write the scheme's groups into kdeglobals, then notify running apps."""
     kw = shutil.which("kwriteconfig6")
     if not kw:
@@ -218,6 +231,8 @@ def push_to_kdeglobals(minted, name, digest):
         key, _, value = stripped.partition("=")
         writes.append((group[1:-1], key, value))
     writes.append(("General", "ColorScheme", name))
+    writes.append(("General", "AccentColor", ",".join(
+        map(str, hex_to_rgb(ui_accent_hex)))))
     # `--` before the value, always: ColorAmount=-0.9 is otherwise parsed as
     # options ("Unknown options: 0, ., 9") and the inactive-effect group —
     # the one 7e659ba switched off — silently fails to write.
@@ -364,6 +379,8 @@ def main():
                     help="optional bare hex override for Colors:Window BackgroundNormal")
     ap.add_argument("--surface-color", default=None,
                     help="dark wallpaper structural colour for surface-ladder schemes")
+    ap.add_argument("--ui-accent", default=None,
+                    help="accent roles without changing the scheme's surface hue")
     ap.add_argument("--no-apply", action="store_true")
     args = ap.parse_args()
 
@@ -392,7 +409,8 @@ def main():
             HOME, ".local", "share", "color-schemes", "%s.colors" % name)
         surface = args.surface_color if surface_hue else None
         minted = mint(template, args.accent, force_name=forced,
-                      background_hex=args.background, surface_hex=surface)
+                      background_hex=args.background, surface_hex=surface,
+                      ui_accent_hex=args.ui_accent)
 
         try:
             with open(out_path) as fh:
@@ -411,7 +429,8 @@ def main():
         if args.no_apply or live != name:
             continue
         push_to_kdeglobals(minted, name,
-                           hashlib.sha1(minted.encode()).hexdigest())
+                           hashlib.sha1(minted.encode()).hexdigest(),
+                           args.ui_accent or args.accent)
         applied = True
 
     if not (args.no_apply or applied):

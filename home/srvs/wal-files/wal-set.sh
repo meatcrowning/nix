@@ -224,10 +224,10 @@ if [ "$PLASMA_SESSION" = 1 ]; then
     # Keep the selected theme/shape; only move its colour family to the accent.
     echo "wal-set: Plasma session — KDE theme untouched, re-minting its colour scheme"
     if [ "$BG" = "464540" ]; then
-        "$SCRIPTS/plasma-scheme.py" --accent "$KDE_ACCENT" --background "$BG" \
+        "$SCRIPTS/plasma-scheme.py" --accent "$ACCENT" --ui-accent "$KDE_ACCENT" --background "$BG" \
             --surface-color "$BGALT"
     else
-        "$SCRIPTS/plasma-scheme.py" --accent "$KDE_ACCENT" \
+        "$SCRIPTS/plasma-scheme.py" --accent "$ACCENT" --ui-accent "$KDE_ACCENT" \
             --surface-color "$BGALT"
     fi
 
