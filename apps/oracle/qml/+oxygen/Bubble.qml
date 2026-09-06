@@ -59,15 +59,30 @@ Item {
         visible: !root.user
         z: 1
         ShapePath {
-            strokeWidth: 1
-            strokeColor: root.isError ? Theme.crit : frame.palette.mid
+            strokeWidth: 0
             fillColor: frame.palette.button
             startX: 0; startY: frame.height - root.tailOverlap
-            PathLine { x: 0; y: frame.height + root.tailHeight }
+            PathLine {
+                x: root.tailWidth
+                y: frame.height - root.tailOverlap
+            }
+            PathLine { x: root.tailWidth; y: frame.height }
             PathCubic {
-                x: root.tailWidth; y: frame.height
-                control1X: 3; control1Y: frame.height + root.tailHeight
-                control2X: 8; control2Y: frame.height + root.tailHeight - 2
+                x: 0; y: frame.height + root.tailHeight
+                control1X: 8; control1Y: frame.height + root.tailHeight - 2
+                control2X: 3; control2Y: frame.height + root.tailHeight
+            }
+            PathLine { x: 0; y: frame.height - root.tailOverlap }
+        }
+        ShapePath {
+            strokeWidth: 1
+            strokeColor: root.isError ? Theme.crit : frame.palette.mid
+            fillColor: "transparent"
+            startX: root.tailWidth; startY: frame.height
+            PathCubic {
+                x: 0; y: frame.height + root.tailHeight
+                control1X: 8; control1Y: frame.height + root.tailHeight - 2
+                control2X: 3; control2Y: frame.height + root.tailHeight
             }
             PathLine { x: 0; y: frame.height - root.tailOverlap }
         }
@@ -78,17 +93,41 @@ Item {
         visible: root.user
         z: 1
         ShapePath {
-            strokeWidth: 1
-            strokeColor: root.isError ? Theme.crit : frame.palette.mid
+            strokeWidth: 0
             fillColor: frame.palette.button
-            startX: root.width; startY: frame.height - root.tailOverlap
+            startX: root.width - root.tailWidth
+            startY: frame.height - root.tailOverlap
+            PathLine {
+                x: root.width
+                y: frame.height - root.tailOverlap
+            }
             PathLine { x: root.width; y: frame.height + root.tailHeight }
             PathCubic {
                 x: root.width - root.tailWidth; y: frame.height
                 control1X: root.width - 3; control1Y: frame.height + root.tailHeight
                 control2X: root.width - 8; control2Y: frame.height + root.tailHeight - 2
             }
-            PathLine { x: root.width; y: frame.height - root.tailOverlap }
+            PathLine {
+                x: root.width - root.tailWidth
+                y: frame.height - root.tailOverlap
+            }
+        }
+        ShapePath {
+            strokeWidth: 1
+            strokeColor: root.isError ? Theme.crit : frame.palette.mid
+            fillColor: "transparent"
+            startX: root.width - root.tailWidth; startY: frame.height
+            PathCubic {
+                x: root.width; y: frame.height + root.tailHeight
+                control1X: root.width - 8
+                control1Y: frame.height + root.tailHeight - 2
+                control2X: root.width - 3
+                control2Y: frame.height + root.tailHeight
+            }
+            PathLine {
+                x: root.width
+                y: frame.height - root.tailOverlap
+            }
         }
     }
 
