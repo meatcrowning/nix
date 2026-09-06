@@ -116,6 +116,14 @@ if [ "${1:-}" = "--" ]; then
     APP=("$@")
 fi
 
+# A second painter must not inherit the first one's loopback forwards.  When
+# the first window exits it quite properly tears those down, which otherwise
+# strands the surviving window on two closed ports.  If the normal ports already
+# answer, give this process private loopback ports and tell its Python child
+# exactly where ComfyUI is.  The first window retains the familiar 8188/8200
+# pair; this branch is only the overlap case.
+PRIVATE_PORTS=0
+
 if [ -n "${PAINTER_NO_TUNNEL:-}" ]; then
     say "PAINTER_NO_TUNNEL set - not touching top"
     [ ${#APP[@]} -gt 0 ] && exec "${APP[@]}"
@@ -278,11 +286,21 @@ fi
 # "backend is not ready yet" for ever.
 FWD_SPECS=()
 if comfy_answers; then
-    say "127.0.0.1:$PORT already answers - using it"
+    if [ ${#APP[@]} -gt 0 ]; then
+        PRIVATE_PORTS=1
+        PORT=$((18000 + ($$ % 10000)))
+        WPORT=$((28000 + ($$ % 10000)))
+        export PAINTER_COMFY_URL="http://127.0.0.1:$PORT"
+        export AI_WARDEN_URL="http://127.0.0.1:$WPORT"
+        say "existing painter forward found - using private ports $PORT/$WPORT"
+        FWD_SPECS+=("$PORT:8188" "$WPORT:8199")
+    else
+        say "127.0.0.1:$PORT already answers - using it"
+    fi
 else
     FWD_SPECS+=("$PORT:$PORT")
 fi
-if port_open "$WPORT"; then
+if [ "$PRIVATE_PORTS" -eq 0 ] && port_open "$WPORT"; then
     say "127.0.0.1:$WPORT already bound - using it for the warden"
 else
     FWD_SPECS+=("$WPORT:8199")
@@ -292,7 +310,8 @@ if [ ${#FWD_SPECS[@]} -eq 0 ]; then
     if [ ${#APP[@]} -gt 0 ]; then
         # Run, do not `exec`: exec replaces this shell and the EXIT trap never
         # fires, so the sshfs mount we just made would outlive the app.
-        trap unmount_ours EXIT
+        trap 'stop_client_keeper; unmount_ours' EXIT
+        start_client_keeper
         "${APP[@]}"
         exit $?
     fi
