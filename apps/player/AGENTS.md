@@ -12,6 +12,10 @@ controls it), FMPS rating/playcount/favourite tag writeback (journaled to
 `~/.local/state/player/tagwrites.log`, gated by prefs `tagWrites: off|log|on`,
 ships in `log`), synced lyrics, ReplayGain volume levelling.
 
+For retained resource sampling, `tools/resource-fixture.py` uses a scratch
+library database and a no-audio mpv stub. Its normal/stress/clear protocol is
+offscreen-only and never starts MPRIS, scanning, queue sockets, or playback.
+
 ## Every write to a library file goes through `atomicsave.py`
 
 **There are exactly two paths that modify a file in `aud/`** — `TagWriter`

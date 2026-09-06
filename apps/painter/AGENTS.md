@@ -14,6 +14,11 @@ per-family reason string rather than a silent failure). Chrome is hyprvtb
 titlebar buttons (generate/cancel/view switch + bottom-anchored settings
 drawer).
 
+For retained resource sampling, `tools/resource-fixture.py` fills a scratch
+gallery with synthetic PNGs. Its normal/stress/clear protocol is offscreen-only
+and never acquires the warden, backend, network, clipboard, or notification
+seams.
+
 ## Two roofs: `Main.qml` is the Hyprland one, the KDE shell is the other
 
 `Root.qml` is the app — an `Item`, not a `Window`. `Main.qml` is a twenty-line

@@ -2679,7 +2679,8 @@ class Titlebar(QObject):
 
 def main():
     selftest = "--selftest" in sys.argv
-    if selftest:
+    resource_fixture = os.environ.get("PAINTER_RESOURCE_FIXTURE") == "1"
+    if selftest or resource_fixture:
         # Hard, never setdefault, and with no display left to fall back to: an
         # exported QT_QPA_PLATFORM (his session's, or the wrapper's) used to win
         # here, and the selftest then opened a real painter window on his
@@ -2699,7 +2700,7 @@ def main():
     # otherwise: QStyle is a QtWidgets class, and without it there is no system
     # style to paint with. See kdeshell.make_app.
     app = kdeshell.make_app(sys.argv, "painter")
-    if selftest and app.platformName() != "offscreen":
+    if (selftest or resource_fixture) and app.platformName() != "offscreen":
         raise SystemExit("selftest refuses to run on platform %r, not offscreen"
                          % app.platformName())
 
@@ -2715,7 +2716,7 @@ def main():
     # happened to start it. Selftests never acquire a lease or touch the live
     # unit (root AGENTS.md, testing without interfering with the user).
     backend_lease = None
-    if not selftest:
+    if not selftest and not resource_fixture:
         ctl._set_status("starting ComfyUI...")
         backend_lease = BackendClientLease(ctl.warden, "comfy", app)
         backend_lease.start(lambda ok, _why: None if ok else ctl.startBackend())
@@ -2830,7 +2831,7 @@ def main():
             return 2
         ctl.window = engine.rootObjects()[0]
 
-    if not selftest and ctl.window is not None:
+    if not selftest and not resource_fixture and ctl.window is not None:
         from winstate import WinState
         win_state = WinState(ctl.window, "painter")  # keep ref: persists geometry
 
@@ -2983,6 +2984,20 @@ def main():
         QTimer.singleShot(2500, finish)
         app.exec()
         return rc[0]
+
+    fixture = None
+    if resource_fixture:
+        from resourcefixture import ResourceFixture
+
+        def normal():
+            ctl.gallery.setFilter("fixture-no-match")
+
+        def stress():
+            ctl.gallery.setFilter("")
+            ctl.gallery.load_existing()
+
+        fixture = ResourceFixture(app, {"normal": normal, "stress": stress,
+                                        "clear": normal}, parent=app)
 
     app.exec()
     return 0

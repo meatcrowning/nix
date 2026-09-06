@@ -51,6 +51,10 @@ do not load every guide at once.
 
 ## Verification
 
+`tools/resource-fixture.py` retains normal, stress, and clear states for memory
+sampling. It uses scratch stores and state, disables sync/usage/systemd agent
+discovery, and refuses any display-backed Qt platform.
+
 Run the offscreen harness; the user performs the appearance check. On top, do not
 source the wrapper as a program: remove its final exec line, source the env, and
 invoke its Nix Python.
