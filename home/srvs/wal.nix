@@ -210,6 +210,7 @@ in
     Unit = {
       Description = "Re-theme the desktop from the wallpaper Plasma just set";
       After = [ "graphical-session.target" ];
+      StartLimitIntervalSec = 0;
     };
     Service = {
       Type = "oneshot";
@@ -241,6 +242,7 @@ in
     Unit = {
       Description = "Re-mint the selected Plasma scheme from the current wallpaper";
       After = [ "graphical-session.target" ];
+      StartLimitIntervalSec = 0;
     };
     Service = {
       Type = "oneshot";

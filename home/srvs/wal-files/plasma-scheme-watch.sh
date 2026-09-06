@@ -9,7 +9,7 @@
 set -u
 
 THEME="$HOME/.config/quickshell/Theme.qml"
-CACHE="$HOME/.cache/wal/plasma-scheme-watch"
+WAL_CACHE="$HOME/.cache/wal"
 
 accent="$(sed -n 's/^    readonly property color accent:    "#\([0-9a-fA-F]\{6\}\)".*/\1/p' "$THEME" | head -n1)"
 case "$accent" in
@@ -23,12 +23,44 @@ case "$scheme" in
     *) exit 0 ;;
 esac
 
-# plasma-scheme.py itself notifies kdeglobals, which wakes this path again.
-# The pair makes that second pass a no-op while a genuine KCM choice has a new
-# scheme name and is applied immediately.
-mkdir -p "$(dirname "$CACHE")"
-if [ "$(cat "$CACHE" 2>/dev/null || true)" = "$scheme:$accent" ]; then
-    exit 0
+# Plasma can write its own wallpaper accent into kdeglobals AFTER wal-set has
+# minted this scheme. A scheme+accent cache then lies: the inputs are unchanged
+# while the live roles are not. Compare the roles that establish the whole
+# surface instead, so our own notifications settle immediately but a later
+# Plasma write is repaired.
+MINTED="$HOME/.local/share/color-schemes/$scheme.colors"
+role() {
+    awk -v group="[$1]" -v key="$2" '
+        $0 == group { in_group = 1; next }
+        in_group && /^\[/ { exit }
+        in_group && $0 ~ "^" key "=" { sub("^[^=]*=", ""); print; exit }
+    ' "$MINTED" 2>/dev/null
+}
+in_sync=1
+for pair in \
+    'Colors:Window BackgroundNormal' \
+    'Colors:Window DecorationFocus' \
+    'Colors:View BackgroundNormal' \
+    'Colors:Button BackgroundNormal' \
+    'WM activeBackground'; do
+    set -- $pair
+    expected="$(role "$1" "$2")"
+    actual="$(kreadconfig6 --file kdeglobals --group "$1" --key "$2" 2>/dev/null || true)"
+    [ -n "$expected" ] && [ "$actual" = "$expected" ] || { in_sync=0; break; }
+done
+[ "$in_sync" = 1 ] && exit 0
+
+# The generator owns the wallpaper-specific dark background. Carry the cached
+# generated BG through when it is available; every other dark/light scheme
+# keeps the template's normal derivation.
+bg=""
+if [ "$scheme" = OxygenDarkFlat ] && [ -f "$WAL_CACHE/current" ]; then
+    wall="$(cat "$WAL_CACHE/current")"
+    key="$(printf '%s' "$wall" | md5sum | cut -d' ' -f1)"
+    bg="$(sed -n 's/^BG=\([0-9a-fA-F]\{6\}\)$/\1/p' "$WAL_CACHE/themes/$key.env" 2>/dev/null | head -n1)"
 fi
-printf '%s' "$scheme:$accent" > "$CACHE"
-exec "$HOME/.config/scripts/plasma-scheme.py" --accent "$accent"
+if [ "$bg" = 464540 ]; then
+    exec "$HOME/.config/scripts/plasma-scheme.py" --accent "$accent" --background "$bg"
+else
+    exec "$HOME/.config/scripts/plasma-scheme.py" --accent "$accent"
+fi
