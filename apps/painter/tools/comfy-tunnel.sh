@@ -66,6 +66,48 @@ port_open() {
     exec 3<&- 3>&-
 } 2>/dev/null
 
+# The GUI renews its own warden client lease, but that timer is driven by Qt's
+# event loop.  A stalled painter window used to let the 15-second claim expire
+# even though this launcher, its SSH tunnel, and the backend were all still
+# alive.  The warden then quite reasonably stopped ComfyUI as an orphan as soon
+# as a render finished.  Keep the same client identity alive from this separate
+# shell process; its EXIT cleanup still releases the claim when the app exits.
+warden_client_post() {
+    local path="$1" payload line=""
+    payload="{\"backend\":\"comfy\",\"client\":\"$PAINTER_BACKEND_CLIENT_ID\"}"
+    exec 3<>"/dev/tcp/127.0.0.1/$WPORT" || return 1
+    printf 'POST %s HTTP/1.0\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s' \
+        "$path" "${#payload}" "$payload" >&3 || { exec 3<&- 3>&-; return 1; }
+    # Reading the status line lets the daemon finish handling the request before
+    # this short-lived connection is closed.  A failed heartbeat is harmless:
+    # painter's own client renew and the daemon's expiry backstop remain.
+    read -r -t 2 line <&3 || true
+    exec 3<&- 3>&-
+    [[ "$line" == *" 200 "* ]]
+} 2>/dev/null
+
+KEEPER=""
+start_client_keeper() {
+    # `renew` heals a daemon restart by acquiring an unknown client, so this
+    # first request also covers the small interval before Python enters Qt's
+    # event loop.  The UUID is supplied below and shared with BackendClientLease.
+    warden_client_post /client/renew || true
+    (
+        while sleep 5; do
+            warden_client_post /client/renew || true
+        done
+    ) &
+    KEEPER=$!
+}
+
+stop_client_keeper() {
+    [ -n "$KEEPER" ] || return 0
+    kill "$KEEPER" 2>/dev/null || true
+    wait "$KEEPER" 2>/dev/null || true
+    warden_client_post /client/release || true
+    KEEPER=""
+}
+
 # The app to run, if any: everything after `--`.
 APP=()
 if [ "${1:-}" = "--" ]; then
@@ -123,6 +165,10 @@ say "reaching top as '$HOST'"
 export PAINTER_BACKEND_SSH="$HOST"
 export PAINTER_BACKEND_SSH_BIN="$SSH"
 export PAINTER_BACKEND_SSH_CTL="$SSH_CTL"
+# A book launcher and its child Python process jointly own one warden client
+# claim.  The random suffix prevents two painter windows from renewing or
+# releasing one another's claim.
+export PAINTER_BACKEND_CLIENT_ID="book-painter-$$-${RANDOM}${RANDOM}"
 # Chatter already uses local 8199 for this same remote warden. Painter gets its
 # own local port so either launcher can own or reuse its forward independently.
 export AI_WARDEN_URL="http://127.0.0.1:$WPORT"
@@ -274,7 +320,13 @@ if [ ${#APP[@]} -gt 0 ]; then
     # One trap, set once, covering every exit including the die()s below: a
     # forward left running or a mount left behind is exactly the residue that
     # makes the NEXT launch take a stale path.
-    trap 'stop_backend_ours; kill "$TUN" 2>/dev/null; unmount_ours' EXIT
+    cleanup() {
+        stop_client_keeper
+        stop_backend_ours
+        kill "$TUN" 2>/dev/null || true
+        unmount_ours
+    }
+    trap cleanup EXIT
 fi
 
 # STARTING THE BACKEND IS THE APP'S JOB, NOT THIS SCRIPT'S — when there is an
@@ -315,6 +367,10 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
     sleep 0.1
 done
 say "forwarding 127.0.0.1:$PORT -> $HOST:$PORT; starting painter"
+
+# The shell's heartbeat is deliberately started only after both forwards have
+# bound, so it cannot accidentally talk to an unrelated local HTTP service.
+start_client_keeper
 
 # COMFY_ENSURE_BACKEND: the consumer will not start comfy-painter itself, so do
 # it here and wait for it to actually SERVE before running the app — a headless

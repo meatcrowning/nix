@@ -172,7 +172,10 @@ class BackendClientLease(QObject):
         super().__init__(parent)
         self.warden = warden
         self.backend = backend
-        self.client_id = "%s:%d:%s" % (
+        # On book the launcher has a second, non-Qt heartbeat.  Sharing its id
+        # means a GUI-thread stall cannot make an otherwise live painter look
+        # abandoned to top's warden.  Top keeps the per-process UUID fallback.
+        self.client_id = os.environ.get("PAINTER_BACKEND_CLIENT_ID") or "%s:%d:%s" % (
             socket.gethostname(), os.getpid(), uuid.uuid4().hex)
         self._active = False
         self._timer = QTimer(self)
