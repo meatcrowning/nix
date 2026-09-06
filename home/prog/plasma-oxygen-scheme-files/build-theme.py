@@ -15,6 +15,10 @@ LEAVE_BAKED = {
     "widgets/branding.svgz", "widgets/monitor.svgz", "widgets/picker.svgz",
     "widgets/plot-background.svgz", "widgets/media-delegate.svgz",
     "widgets/dragger.svgz", "widgets/notes.svgz", "widgets/analog_meter.svgz",
+    # IconTasks' normal/focused/minimized/attention frames are state
+    # affordances, not generic panel paint.  Preserve Oxygen's own bevels and
+    # underlines so opened and focused applications remain legible.
+    "widgets/tasks.svgz",
 }
 
 METADATA = {
