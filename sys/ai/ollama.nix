@@ -2,7 +2,46 @@
   pkgs,
   lib,
   ...
-}: {
+}: let
+  # The Qwen3.8 compatibility router is unfinished. Keep its implementation in
+  # the worktree without putting its custom llama.cpp/CUDA build in the system
+  # closure until the protocol and packaging work is resumed.
+  qwen38ShimEnabled = false;
+
+  # A deliberately narrow llama.cpp fork for the one GGUF Ollama 0.32 cannot
+  # parse.  This revision is after upstream's Q2_0 CPU + CUDA merge and carries
+  # Qwen3.8's chat template, reasoning stream and tool-call parser.  Build only
+  # GB205's native sm_120 kernels: this package never runs on book and compiling
+  # every CUDA generation would turn a small compatibility backend into a much
+  # larger rebuild.
+  qwen38Llama = (pkgs.llama-cpp.override {
+    cudaSupport = true;
+    cpuArchDynamicDispatch = false;
+  }).overrideAttrs (old: {
+    version = "qwen38-6703d78";
+    src = pkgs.fetchFromGitHub {
+      owner = "ggml-org";
+      repo = "llama.cpp";
+      rev = "6703d7894c70e8b076ce4608157d056e42e6889c";
+      hash = "sha256-bzDQl51ZJ6sEmw3A8tOahL8Tx/pQkq+5OBnk8rldwno=";
+      leaveDotGit = true;
+      postFetch = ''
+        git -C "$out" rev-parse --short HEAD > "$out/COMMIT"
+        find "$out" -name .git -print0 | xargs -0 rm -rf
+      '';
+    };
+    # package-lock.json is unchanged from nixpkgs' b10408 package.
+    npmDepsHash = "sha256-2Q7XhaLAArmviOLdQsNbYTfdyDE5pW9lR26cRHEVl9k=";
+    cmakeFlags =
+      builtins.filter
+        (flag: !(lib.hasPrefix "-DCMAKE_CUDA_ARCHITECTURES" flag))
+        old.cmakeFlags
+      ++ [ "-DCMAKE_CUDA_ARCHITECTURES:STRING=120" ];
+  });
+
+  qwen38Shim = pkgs.writeText "qwen38-ollama-shim.py"
+    (builtins.readFile ../../apps/oracle/tools/qwen38-ollama-shim.py);
+in {
   # Local LLM serving (RTX 5070). Previously a hand-rolled overlay building
   # ollama from a pinned git src with a manually-recorded vendorHash
   # (flake.nix, commented out) — that broke on a lock update and was never
@@ -63,6 +102,19 @@
       OLLAMA_MAX_LOADED_MODELS = "1";
       OLLAMA_NUM_PARALLEL = "1";
       OLLAMA_KEEP_ALIVE = "2h";
+    } // lib.optionalAttrs qwen38ShimEnabled {
+      # The public endpoint remains Ollama's 11434 contract.  The shim starts
+      # Ollama on 11436 and lazily routes only sdkyuan's QAT Q2_0 tag to the
+      # pinned llama.cpp worker on 11437.  Consequently chatter, book's tunnel,
+      # ai-warden and the server controls all keep one endpoint and one unit.
+      OLLAMA_SHIM_UPSTREAM = "http://127.0.0.1:11436";
+      OLLAMA_SHIM_LLAMA = "http://127.0.0.1:11437";
+      OLLAMA_SHIM_OLLAMA_BIN = "${pkgs.ollama-cuda}/bin/ollama";
+      OLLAMA_SHIM_LLAMA_BIN = "${qwen38Llama}/bin/llama-server";
+      QWEN38_Q2_MODEL = "hf.co/sdkyuan/qwen3.8-27B-qat-q2_0-gguf:latest";
+      QWEN38_Q2_MODEL_PATH = "/home/lam/.ollama/models/blobs/sha256-cadd809e691c5fa2cc33a75020930fc404db84528bff9a06177bf77bedc0a877";
+      QWEN38_Q2_MODEL_SIZE = "8759266208";
+      QWEN38_Q2_CTX = "32768";
     };
   };
 
@@ -90,11 +142,17 @@
   #               a livelock takes the compositor with it and needs the power
   #               button (sys/oomd.nix has the mechanism at length).
   systemd.services.ollama.serviceConfig = {
+    # One service and therefore one cgroup for both engines.  The shim is PID 1
+    # of the unit and supervises the private Ollama daemon plus the lazy
+    # llama-server child.  ai-warden/heavy-gate continue measuring and stopping
+    # this exact cgroup, including while the Q2 model is still loading.
     ProtectHome = lib.mkForce "read-only";
     MemoryAccounting = true;
     MemoryHigh = "24G";
     ManagedOOMMemoryPressure = "kill";
     ManagedOOMMemoryPressureLimit = "60%";
+  } // lib.optionalAttrs qwen38ShimEnabled {
+    ExecStart = lib.mkForce "${pkgs.python3}/bin/python3 ${qwen38Shim}";
   };
 
   # oracle's start/stop buttons (apps/oracle/main.py Backend). On top they run
