@@ -106,6 +106,15 @@ DARK_BG_OVERRIDES = {
     "preyouandi-1920x1080.png": "464540",
 }
 
+# KDE-only accent corrections. The general wallpaper palette still follows the
+# automatic winner; these name the colour Plasma should use for its selection,
+# focus and recoloured Oxygen icon paint when a wallpaper has a clearer UI
+# accent than that winner. Emitting the value into the cached palette keeps the
+# initial apply and the Plasma scheme watcher on the same input.
+PLASMA_ACCENT_OVERRIDES = {
+    "blawan-bouq-1920x1080-cloud.png": "e1348c",
+}
+
 
 def settings():
     """The Settings program's on-disk model, with the shipped defaults for
@@ -607,6 +616,9 @@ def main():
     # Every quantised cluster, dominant first, dropped ones included — wal-set
     # publishes this to $CACHE/current.clusters for the Settings swatch row.
     print("CLUSTERS=%s" % ",".join(all_hexes))
+    plasma_accent = PLASMA_ACCENT_OVERRIDES.get(os.path.basename(path))
+    if plasma_accent is not None:
+        print("PLASMA_ACCENT=%s" % plasma_accent)
     for k, val in out.items():
         print("%s=%s" % (k, val))
     return 0
