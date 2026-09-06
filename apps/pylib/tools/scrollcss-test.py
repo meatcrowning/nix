@@ -102,6 +102,11 @@ check("one stepper above and two below, per oxygenrc",
                        ":vertical:end:increment"})
 check("the base button part is block, so Blink materialises native steppers",
       "::-webkit-scrollbar-button{display:block!important" in oxy)
+check("the steppers are painted with Oxygen's window slab, never transparent",
+      "background-color:%s!important" % PAL["bg"] in oxy
+      and "background-color:transparent!important" not in oxy)
+check("Aura cannot retain its own native scrollbar treatment",
+      "-webkit-appearance:none!important" in oxy)
 check("the unused start:increment is hidden, not left default",
       ":vertical:start:increment{display:none" in oxy.replace(
           "::-webkit-scrollbar-button", "").replace(",", "{display:none"))

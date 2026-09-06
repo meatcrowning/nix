@@ -142,8 +142,11 @@ def oxygen_css(pal, metrics=None, button=None) -> str:
         # Chromium's standard rendering, which ignores every rule below — so
         # put it back on the webkit path first.
         "*{scrollbar-color:auto!important;scrollbar-width:auto!important}",
+        # Aura otherwise keeps parts of its own scrollbar treatment on the
+        # steppers (notably in Vivaldi's internal pages).  Each part must be
+        # ours before the measured Oxygen ladder can line up as one surface.
         "::-webkit-scrollbar{width:%dpx!important;height:%dpx!important;"
-        "background-color:%s!important}" % (width, width, win),
+        "-webkit-appearance:none!important;background-color:%s!important}" % (width, width, win),
         "::-webkit-scrollbar-corner{background-color:%s!important}" % win,
         # The groove is the TRACK, not the two track-pieces: Oxygen's hole runs
         # unbroken under the slider, and a piece each side would round its ends
@@ -168,9 +171,12 @@ def oxygen_css(pal, metrics=None, button=None) -> str:
     def button(sel, direction, colour):
         return ("::-webkit-scrollbar-button%s{display:block!important;"
                 "height:%dpx!important;width:%dpx!important;"
-                "background-color:transparent!important;background-repeat:no-repeat!important;"
+                # A transparent button exposes whichever Vivaldi slab happens
+                # to sit behind it.  Oxygen paints the window colour here, so
+                # its bare chevrons still belong to the continuous bar.
+                "-webkit-appearance:none!important;background-color:%s!important;background-repeat:no-repeat!important;"
                 "background-position:center!important;background-image:url(%s)!important}"
-                % (sel, btn_h, width, _chevron(colour, direction)))
+                % (sel, btn_h, width, win, _chevron(colour, direction)))
 
     shown, hidden = [], []
     for sel, direction, on in (
@@ -194,8 +200,8 @@ def oxygen_css(pal, metrics=None, button=None) -> str:
     if shown:
         css.append("::-webkit-scrollbar-button{display:block!important;"
                    "height:%dpx!important;width:%dpx!important;"
-                   "background-color:transparent!important;background-repeat:no-repeat!important;"
-                   "background-position:center!important}" % (btn_h, width))
+                   "-webkit-appearance:none!important;background-color:%s!important;background-repeat:no-repeat!important;"
+                   "background-position:center!important}" % (btn_h, width, win))
     if hidden:
         css.append("%s{display:none!important}"
                    % ",".join("::-webkit-scrollbar-button" + s for s in hidden))
