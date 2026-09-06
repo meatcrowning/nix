@@ -72,10 +72,10 @@ let
   '';
   # Plasma's FrameSvg tiles its five-pixel centre.  That works for a texture,
   # but cannot represent one gradient shared by a horizontal panel.  Overlay
-  # only that panel with a real screen-space surface; a vertical panel uses
-  # Plasma's solid Oxygen face so it does not acquire a conspicuous top-to-
-  # bottom gradient.  Retain the FrameSvg because PanelView reads its mask and
-  # margins in C++.
+  # only that panel with a real screen-space surface; a vertical panel gets a
+  # true palette-colour fill so it does not acquire Oxygen's conspicuous top-
+  # to-bottom gradient. Retain the FrameSvg because PanelView reads its mask
+  # and margins in C++.
   panel-gradient-view = pkgs.runCommand "plasma-panel-gradient-view"
     { nativeBuildInputs = [ pkgs.perl ]; }
     ''
@@ -83,7 +83,7 @@ let
       cp -r ${pkgs.kdePackages.plasma-desktop}/share/plasma/shells/org.kde.plasma.desktop/. $out/
       chmod -R u+w $out
       panel_qml=$out/contents/views/Panel.qml
-      perl -0pi -e 's/(id: opaqueItem.*?opacity:) root\.panelOpacity/$1 root.verticalPanel ? root.panelOpacity : 0/s' $panel_qml
+      perl -0pi -e 's/(id: opaqueItem.*?opacity:) root\.panelOpacity/$1 0/s' $panel_qml
       awk -v surface=${./plasma-panel-gradient-files/Surface.qmlfrag} -v shadow=${./plasma-panel-gradient-files/Shadow.qmlfrag} '
         /^    Keys.onEscapePressed: \{$/ {
           while ((getline line < surface) > 0) print line
