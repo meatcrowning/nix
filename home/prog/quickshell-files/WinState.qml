@@ -4,63 +4,17 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 
-// Which windows are rolled up, minimized, or on an output the user cannot see —
-// for the taskbar cells and for everything else that reads the toplevel list.
+// Hyprvtb's roll-up/minimize state is absent from the foreign-toplevel protocol,
+// so this singleton joins that list by class/title with `hyprctl clients -j`.
+// Rolled windows are hidden on the active workspace; minimized windows are
+// visible but parked at the monitor's logical right edge. The join is
+// intentionally fail-visible when titles are ambiguous.
 //
-// The Wayland foreign-toplevel list the taskbar is built on (ToplevelManager)
-// carries appId, title and activated — and nothing else. Roll-up and minimize
-// are hyprvtb's, not the protocol's, so their state has to come from the
-// compositor. This polls `hyprctl clients -j` (measured at ~4ms per call) and
-// derives the two from what the plugin actually does to a window:
-//
-//   ROLLED UP   the plugin calls setHidden(true) and leaves the geometry alone,
-//               so the window reads hidden=true where it stands. `hidden` is
-//               also true for a window on a workspace that isn't showing, so a
-//               window only counts as rolled if its workspace is the active one
-//               on some monitor.
-//   MINIMIZED   the plugin parks the window at the monitor's right edge
-//               (x = monitor.x + monitor width, in LOGICAL pixels) and does not
-//               hide it. So: not hidden, and its left edge is at or past that
-//               edge. Verified live — a minimized window on this 2560px/1.67
-//               screen sits at x=1536.
-//
-// Both signatures were measured on a real window rather than reasoned about,
-// and neither is a heuristic about "off-screen-ish" coordinates: they are the
-// exact two things vtbDeco.cpp does (rollUp -> setHidden, minimizeWindow ->
-// move to PMONITOR->m_position.x + PMONITOR->m_size.x).
-//
-// Keyed by class + title, since that is all the toplevel list gives us to join
-// on — this build has no Hyprland window-mapping protocol (see Taskbar.qml).
-// Two windows of the same app with the SAME title are indistinguishable here
-// and will show each other's state; anything else resolves exactly.
-//
-// ---- OUTPUTS THE USER CANNOT SEE ------------------------------------------
-//
-// `tools/sandbox.sh` gives agents a monitor to test on: `hyprctl output create
-// headless` makes a real output in every way the compositor cares about, except
-// that no cable leads anywhere. Its whole promise is that nothing an agent opens
-// reaches the user's screen — and the WAYLAND TOPLEVEL LIST BROKE THAT PROMISE,
-// because it carries no monitor at all. Every test window an agent launched
-// appeared in his taskbar, three feet from his face, which is how this was
-// found. The compositor knows; the protocol does not — the same shape of problem
-// as roll-up and minimize above, so it is answered from the same poll.
-//
-// A monitor is PHYSICAL if the compositor has any hardware identity for it: a
-// non-zero physical size, or a make, model, serial or description. A headless
-// output has none of those — every one of those fields is empty (verified live:
-// DP-5 carries a make, a model and a serial, and 530x300mm, HEADLESS-6
-// carries "" and 0x0). That test, not the name, is the discriminator, because
-// the user may legitimately attach a SECOND REAL MONITOR one day and its windows
-// must still appear. Hyprland's `HEADLESS-n` naming is ORed in as corroboration
-// only: it can add virtual outputs but never subtract one, and no DRM connector
-// is ever named that (they are eDP/DP/HDMI-A/DVI/VGA), so it cannot cost a real
-// monitor its taskbar.
-//
-// The join is fail-VISIBLE, which is the direction that matters: a key counts as
-// off-screen only if EVERY mapped client under it is on a virtual output. Two
-// windows of one app with the same title are indistinguishable here (see above),
-// and hiding one of the user's own windows from his taskbar is far worse than
-// showing one of an agent's for the ~1s it takes the next poll to land.
+// The same client poll identifies virtual outputs for sandbox windows. An
+// output is physical when it has hardware identity (size, make, model, serial,
+// or description); `HEADLESS-*` is corroboration only. A class/title is hidden
+// only when every mapped client is virtual, so a real window is never removed
+// from the taskbar because a matching test window exists elsewhere.
 Singleton {
     id: root
 

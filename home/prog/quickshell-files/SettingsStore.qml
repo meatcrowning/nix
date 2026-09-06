@@ -3,38 +3,10 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// The single source of truth for the settings program. Every control in the
-// Settings window reads and writes SettingsStore.d.<key>; nothing keeps its own
-// copy. Persisted as ~/.config/quickshell/settings.json (Quickshell.shellDir is
-// the running config's directory — the same flat dir the panel lives in, so the
-// main shell can later read the very same file to consume these values).
-//
-// Defaults are declared inline on the JsonAdapter so the on-disk schema is
-// self-describing, and mirrored once in `defaults` so "restore defaults" can
-// reset the live object without re-reading the file. Writes are atomic and
-// debounced (save()), so dragging a slider doesn't hammer the disk.
-//
-// watchChanges IS on — deliberately. This singleton lives in TWO Quickshell
-// instances: the Settings window (the writer) and the panel (`qs -d`, the
-// reader). The panel binds widgets to SettingsStore.d.<key> (via Theme and
-// friends), so when the Settings window writes settings.json the panel's
-// FileView reloads and those bindings update IN PLACE — settings apply live,
-// with no panel reload and therefore no flash. In the writer instance the
-// self-write reloads the same values straight back: nothing calls save() on a
-// programmatic adapter change, so there is no write loop.
-//
-// BOTH instances write, though — not just the Settings window. The panel
-// persists its own live state through here (gammaLevel/brightnessHw from
-// SysInfo, viewMode/dockWidthFrac from a bar drag, procSort, mediaQueueOpen,
-// clockFace…). writeAdapter() serialises the WHOLE adapter, so a panel write of
-// gamma made while the panel's in-memory copy of an unrelated key was stale
-// used to clobber that key back to the stale value — e.g. the Settings window
-// turning "no wallpaper" OFF, then the panel writing gamma a moment later and
-// reverting wallpaperSolid to true, so the desktop stayed solid and the meta+w
-// picker kept showing the colour-theme grid. save() therefore does a
-// read-modify-write: it reloads the freshest file, re-applies only the keys
-// THIS process actually changed (diffed against the last-seen disk snapshot),
-// then writes. See saveTimer/onLoaded below.
+// Shared settings source for the panel and Settings window. The adapter is
+// persisted as settings.json with inline defaults; saves are atomic and
+// debounced. Both processes may write, so save() performs a read-modify-write
+// and reapplies only keys changed by this process.
 Singleton {
     id: root
 
@@ -50,21 +22,8 @@ Singleton {
     // Drop unsaved edits and re-read what's on disk.
     function revert() { file.reload(); }
 
-    // Flip light/dark polarity in ONE place, so the Settings toggle
-    // (SetPgAppearance) and the Meta+D keybind (shell.qml's `theme` IPC) share
-    // it and the logic is never edited twice. Enabling light forces "pure black
-    // background" off: its light analogue is pure WHITE and the two extremes
-    // fight, and a black-titled control is a lie on a white desktop. The write
-    // is what SettingsApply watches (onLightModeChanged) to re-run wal-set.sh,
-    // so both callers re-theme the whole desktop live with no panel reload.
-    //
-    // The dark-mode pure-black choice is REMEMBERED across the round trip:
-    // captured into pureBlackBgDark on the way out to light (single writer, at
-    // the transition, so pre-existing state migrates for free), restored from it
-    // on the way back to dark. Without this, Meta+D into light and back left
-    // pure black off even for someone who had it on. The guards fire only on a
-    // genuine polarity change, so an idempotent call never clobbers the memory
-    // with the forced-off value.
+    // Keep light/dark transitions in one place. Light disables pure black;
+    // pureBlackBgDark remembers the dark-mode choice and restores it on return.
     function setLightMode(v) {
         if (v && !d.lightMode) {
             d.pureBlackBgDark = d.pureBlackBg;   // remember, then force off
@@ -77,14 +36,8 @@ Singleton {
     }
     function toggleLightMode() { setLightMode(!d.lightMode); }
 
-    // Hide/unhide a paper from BOTH surfaces that draw the tiles — the settings
-    // paper grid (SetPaperGrid) and the Meta+W picker (WallpaperPicker). ONE
-    // stored set, wallpaperHidden (source paths, = list-wallpapers.sh field 0 =
-    // the model's own path), so the two renderers can never diverge on what is
-    // hidden. Reassign the array whole: a JsonAdapter var key only fires its
-    // change signal on assignment, not on an in-place push. The reveal path is
-    // wallpaperShowHidden (the Appearance "show hidden papers" toggle), so this
-    // is not a one-way trap (docs/DESIGN.md §10.2).
+    // Store hidden wallpaper paths once for the settings grid and picker.
+    // Reassign arrays so JsonAdapter emits its change signal.
     function hideWallpaper(p) {
         if (!p) return;
         const s = (d.wallpaperHidden || []).slice();
@@ -100,13 +53,7 @@ Singleton {
         return (d.wallpaperHidden || []).indexOf(p) !== -1;
     }
 
-    // Switch the desktop font, remembering the size PER FACE. Same shape as
-    // the pureBlackBgDark round trip above: the outgoing family's size is
-    // captured at the transition (single writer, so pre-existing state
-    // migrates for free), and the incoming family restores its own last size
-    // if it has one — a face tried at 12 comes back at 12 after a detour
-    // through another face at 18. A never-used face keeps the current size,
-    // which is the least surprising seed.
+    // Remember a font size per family and restore it when switching faces.
     function setFontFamily(v) {
         if (v === d.fontFamily) { return; }
         const m = JSON.parse(JSON.stringify(d.fontSizeByFamily || {}));
@@ -116,15 +63,8 @@ Singleton {
         d.fontFamily = v;
         save();
     }
-    // Pull the file in NOW, synchronously (blockLoading), and let the bindings
-    // that depend on it re-evaluate before this call returns.
-    //
-    // For IMPERATIVE code in a Component.onCompleted this is mandatory, not an
-    // optimisation: the tree is built from the shipped defaults, so a handler
-    // that branches on a persisted value — `if (ViewMode.dock) return;` in
-    // shell.qml's reload restore — reads the DEFAULT and takes the wrong branch,
-    // a good 25ms before the real value lands and anything can react to it. A
-    // binding merely flickers; a one-shot handler is simply wrong.
+    // Synchronously load persisted values before imperative Component handlers
+    // branch on them; bindings otherwise begin with shipped defaults.
     function loadNow() { file.reload(); return file.text(); }
     // Reset every key to its shipped default, then persist.
     function restoreDefaults() {
@@ -142,18 +82,8 @@ Singleton {
         file.writeAdapter();
     }
 
-    // Logout commands that CANNOT work, repaired to the shipped default on
-    // load. A persisted setting shadows the default forever, so a machine that
-    // stored one of these back when it *was* the default kept a dead logout
-    // long after the default moved on — book's power menu did nothing at all
-    // until 2026-08-06.
-    //   - `hyprctl dispatch hl.dsp.exit()` is not even valid POSIX sh: PowerMenu
-    //     runs the stored string through `sh -c`, and the bare `()` is a syntax
-    //     error, so the WHOLE line — session-exit.sh included — died before
-    //     anything ran. execDetached surfaces no stderr, so it read as a no-op.
-    //   - `hyprctl dispatch exit` is the classic-string form this Lua-config
-    //     build rejects outright.
-    // Exact matches only: a command the user wrote themselves is theirs.
+    // Known-invalid legacy logout commands are repaired to the shipped default
+    // on load. Match exact strings so user-authored commands are untouched.
     readonly property var deadLogoutCmds: [
         "hyprctl dispatch hl.dsp.exit()",
         "hyprctl dispatch exit",

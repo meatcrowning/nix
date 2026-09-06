@@ -3,37 +3,10 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// The desktop's VIEW MODE and the bar's live width.
-//
-// Two modes:
-//   "classic" — the 48px vertical bar this config has always had, with the
-//               desktop widgets living on the wallpaper as pinned popups.
-//   "dock"    — the bar becomes a wide panel (14-33% of the screen) holding the
-//               widgets themselves in a grid, with the runner + task icons laid
-//               out horizontally across its top.
-//
-// THE SWITCH IS THE DRAG HANDLE. There is no separate toggle to hunt for: you
-// grab the bar's inner edge and pull.
-//
-// OPENING IT HAS ONE DESTINATION. The entry drag is a gesture, not a resize:
-// the bar stays at its 48px until the pull passes `enterFrac` past its own
-// width, then opens in one movement at `dockPx` — the same size every time.
-// Resizing is something you do once you are already in the mode, where the
-// panel does track the pointer, clamped to [minFrac, maxFrac]. Dragging a dock
-// panel below `exitFrac` collapses it back to classic.
-//
-// `exitFrac` (10%) sits well below `minFrac` (14%) on purpose: if the collapse
-// threshold reached into the legal width range, the narrowest dock the user is
-// allowed to choose would already be inside the "about to collapse" zone and
-// the panel could never rest there.
-//
-// Width lives in two properties on purpose:
-//   barWidth  — the COMMITTED width, what the desktop settles at.
-//   liveWidth — what the bar is actually rendering at THIS frame; equals
-//               barWidth except mid-drag, when it follows the pointer.
-// Only barWidth feeds the persisted setting, so a drag doesn't hammer
-// settings.json. The wallpaper follows liveWidth directly (WallpaperLayer.qml)
-// and re-centres every frame, including mid-drag.
+// View mode and panel width. Classic keeps widgets on the wallpaper; dock puts
+// them in a 14–33% grid. The inner edge is the switch: entry snaps to dockPx,
+// resizing tracks the pointer only while docked, and exitFrac collapses to
+// classic. `barWidth` is committed/persisted; `liveWidth` follows a drag.
 Singleton {
     id: root
 
@@ -54,17 +27,8 @@ Singleton {
     readonly property real screenWidth: Quickshell.screens.length
         ? Quickshell.screens[0].width : 1920
 
-    // ---- which axis the bar runs on --------------------------------------
-    // barEdge is left | right | top | bottom. The two horizontal edges turn the
-    // panel into a strip across the screen; everything that used to be a width
-    // is then a HEIGHT, and the classic layout reads left-to-right instead of
-    // top-to-bottom (shell.qml).
-    //
-    // Dock mode and the shortcut notch are vertical-only for now, and this is
-    // where that is decided rather than in each of their files: `dock` is
-    // false on a horizontal edge, so liveWidth is simply Theme.barWidth, the
-    // grip has nothing to drag, and NotchModel reports a notch of zero size —
-    // which is the case every consumer downstream already handles.
+    // Axis is centralized here. Dock/notch are vertical-only; horizontal bars
+    // retain the classic Theme.barWidth and report no notch.
     readonly property bool barHorizontal: {
         const e = SettingsStore.d.barEdge;
         return e === "top" || e === "bottom";
@@ -82,14 +46,7 @@ Singleton {
         return Math.max(minFrac, Math.min(maxFrac, v));
     }
 
-    // NOTE: dock widths used to be quantized to an 8px grid. That existed
-    // ONLY because each distinct width meant a fresh ImageMagick compose and a
-    // hyprpaper set, and a set re-rendered the background layer as a visible
-    // flash — so it was worth snapping nearby widths together to avoid one.
-    // The panel draws the wallpaper itself now (Wall.qml), a width change costs
-    // a property binding, and the grid's only remaining effect would be to jump
-    // the panel up to 4px away from where the drag was released. It is gone; do
-    // not reintroduce it without a reason that isn't the compose cost.
+    // Do not quantize the live drag; only the committed width is persisted.
 
     // The dock's legal width range and the two thresholds, in pixels.
     readonly property int minPx: Math.round(screenWidth * minFrac)
@@ -108,16 +65,8 @@ Singleton {
     property bool dragging: false
     property real dragWidth: 0
 
-    // THE ENTRY GESTURE HAS EXACTLY ONE TARGET WIDTH. Pulling the classic bar
-    // out does not stretch it continuously — the panel stays at 48px until the
-    // pull passes enterPx and then opens, in one movement, at dockPx. Resizing
-    // is a thing you do once you are IN the mode, not part of getting there.
-    // Same in reverse: a dock panel dragged below exitPx shows the classic width
-    // immediately, so you can see the collapse coming before you let go.
-    //
-    // Only the in-dock resize tracks the pointer, clamped to [minPx, maxPx],
-    // and it follows it pixel for pixel — see the note above about the 8px grid
-    // that used to be here.
+    // Entry has one target (dockPx); only an in-dock resize tracks the pointer,
+    // clamped to [minPx, maxPx]. Below exitPx the classic width is previewed.
     readonly property int liveWidth: {
         if (!dragging) return barWidth;
         if (!dock) return dragWidth >= enterPx ? dockPx : Theme.barWidth;
@@ -125,35 +74,12 @@ Singleton {
         return Math.round(Math.max(minPx, Math.min(maxPx, dragWidth)));
     }
 
-    // ---- slow motion, for diagnosing the settle after a release -----------
-    // Multiplies the duration of EVERY animation involved in a view-mode change
-    // — the bar's width settle, the wallpaper's glide, the layout crossfade, the
-    // grip highlight — so a glitch that lasts a couple of frames at 1x can be
-    // recorded and watched. Set at runtime with `qs ipc call view slowmo 10`,
-    // back with `qs ipc call view slowmo 1`.
-    //
-    // Deliberately NOT persisted and NOT in SettingsStore: it is a debug knob,
-    // and it resets to 1 on the next panel reload so it can't be left on by
-    // accident. (SettingsStore.d.animSpeed is a different, user-facing thing.)
+    // Debug slow motion for view-mode animations (`view slowmo N`); not
+    // persisted and reset on reload.
     property real animScale: 1.0
 
-    // ---- ms(): THE one place a duration becomes a number ------------------
-    // Every duration in the panel goes through here, and that is what makes the
-    // two USER-FACING motion settings real. They were in SettingsStore and in
-    // the Settings UI (Appearance > Motion) from the day they shipped and drove
-    // nothing at all, because every Behavior carried its own literal — the debt
-    // docs/DESIGN.md §6.2 describes. Three factors, in this order:
-    //
-    //   reduceMotion  — a hard off switch. Returns 0, which a NumberAnimation
-    //                   treats as "assign immediately": the desktop still
-    //                   changes state, it just stops travelling to get there.
-    //   animSpeed     — the user's own multiplier (Settings > Appearance).
-    //                   1.0 is the canon; <1 is faster, >1 slower.
-    //   animScale     — the debug `slowmo` knob above, NOT persisted.
-    //
-    // Both settings are validated here rather than at the call site: a
-    // settings.json hand-edited to `"animSpeed": 0` or to a string would
-    // otherwise freeze or NaN every animation on the desktop at once.
+    // One duration helper for all panel motion (docs/DESIGN.md §6.2). Applies
+    // reduceMotion, validated user speed, then the non-persistent slowmo scale.
     function ms(base) {
         if (SettingsStore.d.reduceMotion) return 0;
         const s = Number(SettingsStore.d.animSpeed);

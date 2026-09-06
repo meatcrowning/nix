@@ -9,18 +9,10 @@ import Quickshell
 Item {
     id: root
 
-    // Defaults to FALSE, and every host sets it: the popup passes its `open`,
-    // DockTile binds it to the dock's visibility. A `true` default would mean a
-    // grid tile polls once at construction, before that Binding has applied —
-    // measured as a full /proc scan and a drive scan on every reload, for a
-    // widget nobody was looking at.
+    // Hosts bind this to popup/dock visibility; false prevents off-screen
+    // copies from polling before their Binding arrives.
     property bool active: false
-    // Whether the EQ overlay is out over the spectrum. TRANSIENT, not a
-    // SettingsStore key: it is a throwaway view state, and a wallpaper or
-    // theme change reloads the panel from shipped defaults, so the overlay
-    // coming back closed is the honest state — it should not re-open beside
-    // the user on a relog/theme change (see quickshell-files/AGENTS.md on
-    // transient state vs a user-picked setting).
+    // Transient EQ view state; deliberately not persisted across reload/login.
     property bool eqOpen: false
     property int pad: 10
     readonly property real inner: Math.max(180, width - 24)
@@ -30,39 +22,14 @@ Item {
         return (v > 0 ? "+" : "") + v.toFixed(1) + " dB";
     }
 
-    // ---- Non-pixel-font queue text: a fallback that FITS the pixel cell ----
-    // The pixel font (More Perfect DOS VGA) has no CJK glyphs, so Qt falls back
-    // to Noto Sans CJK for a Japanese/Chinese/fullwidth title. Noto's line
-    // metrics (ascent 17, height 21 at 15px) overflow the panel's FixedHeight
-    // 15px line box, so the whole row is pushed down inside its 16px cell and
-    // clipped along the bottom — the "CJK sits low against the Latin rows next
-    // to it" report. Unifont is the one installed family whose metrics FIT the
-    // pixel cell (ascent 13 / descent 2 / height 15, all measured) AND covers
-    // the whole BMP, and it is itself a bitmap font, so such a row keeps the
-    // desktop's pixel look instead of clashing with a smooth sans. Draw these
-    // rows in Unifont and they sit on (nearly) the same baseline as the ASCII
-    // rows, uncropped. A string that mixes Latin with a foreign script takes
-    // Unifont for the whole line — one font, one baseline — rather than
-    // re-introducing the cross-font ascent mismatch.
-    //
-    // The same clip hits EVERY script the pixel font lacks that has no ASCII
-    // form for Glyphs.px() to map to — not just CJK. The regex ranges are the
-    // BMP script blocks More Perfect covers ZERO of (verified against its cmap):
-    // ԰-֏ Armenian, then ؀-᣿ — Arabic/Syriac/Thaana/N'Ko,
-    // Devanagari and every other Indic, Thai/Lao/Tibetan, Myanmar/Georgian,
-    // Hangul Jamo, Ethiopic/Cherokee/Khmer/Mongolian — plus the original CJK
-    // ranges. Hebrew (֐-׿) is deliberately EXCLUDED: More Perfect
-    // draws its alphabet itself, so it stays in the pixel font. Partially
-    // covered Cyrillic/Greek are excluded for the same reason — routing them
-    // would uglify text the pixel font renders fine. An allowlist of the major
-    // scripts, not exhaustive over the whole BMP; widen it deliberately.
+    // Use Unifont for scripts absent from the pixel font so their line metrics
+    // fit the fixed queue row; mixed-script strings use one baseline.
     readonly property var _noPixelRe: /[\u0530-\u058f\u0600-\u18ff\u3000-\u303f\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]/
     function needsUnifont(s) { return s !== null && s !== undefined && _noPixelRe.test(s); }
 
     onActiveChanged: {
         Media.watch(root, active);
-        // An invisible copy must not keep the overlay open (and with it the
-        // EasyEffects socket): close it when we stop being watched.
+        // An inactive copy must release the EQ socket and overlay.
         if (!active) {
             if (root.eqOpen) root.eqOpen = false;
             Media.eqRelease();          // drop the direct-scroll socket too
@@ -97,14 +64,10 @@ Item {
             : kind === "repeat" ? "o"
             : ">"   // play
 
-        // 24, not 26: five of these now share a row with the seekbar, and at the
-        // narrow end of the panel's range every pixel they take comes straight
-        // out of the seekbar's width.
+        // Five buttons share this row with the seekbar.
         width: 24
         height: 24
-        // toggled (repeat/shuffle on) inverts like the titlebar roll button:
-        // accent fill + background-coloured glyph. Hover is the lighter bgAlt tint.
-        // The heart does NOT fill-invert — its own red colour carries the state.
+        // Toggled controls invert; the heart uses its own red state color.
         color: btn.heart
             ? ((mba.containsMouse && active) ? Theme.bgAlt : "transparent")
             : btn.toggled ? Theme.accent : ((mba.containsMouse && active) ? Theme.bgAlt : "transparent")
@@ -121,11 +84,8 @@ Item {
             text: btn.glyph
             color: btn.toggled ? Theme.bg : ((mba.containsMouse && btn.active) ? Theme.accent : Theme.text)
         }
-        // The favourite is a REAL red heart, not a single-colour pixel button:
-        // U+2665 is not in the pixel font's cmap (docs/DESIGN.md §2.3), so it is
-        // drawn with a smooth fallback-font Text and coloured Theme.crit when
-        // favourited — the now-playing window's "heart = red" meaning, and the
-        // "real red heart in an in-window row" the board question asked for.
+        // U+2665 is absent from the pixel font, so the favorite uses a fallback
+        // Text and Theme.crit when active (docs/DESIGN.md §2.3).
         Text {
             anchors.fill: parent
             visible: btn.heart
@@ -146,18 +106,10 @@ Item {
         }
     }
 
-    // ---- in-panel equalizer: the output EQ EasyEffects applies, editable ----
-    // Toggled by clicking the spectrum. Draws the EQ's bands as vertical
-    // faders whose handles sit at their current gain, on the same 30..16000 Hz
-    // axis the spectrum uses. Dragging a fader writes that band's gain to
-    // EasyEffects over its local socket (Media.setBandGain), so the change
-    // lands in real time.
-    //
-    // When EasyEffects cannot take a band write (the stock 8.2.7 build does
-    // not expose the per-channel field — Media.eqWriteLive is probed, not
-    // assumed) the overlay still draws the EQ but disables the edit and says
-    // why. docs/DESIGN.md 10.2: refuse visibly, never silently no-op. Closing
-    // is "click a spot that is not on a fader".
+    // ---- in-panel equalizer ---------------------------------------------
+    // The spectrum click opens frequency/gain faders. Writes are disabled with
+    // an explanation when the EasyEffects socket lacks per-band support
+    // (docs/DESIGN.md §10.2: refuse visibly, never silently no-op).
     component Equalizer: Item {
         id: eq
         readonly property real fmin: 30

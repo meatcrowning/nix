@@ -6,34 +6,10 @@ import Quickshell.Wayland
 Scope {
     id: shell
 
-    // Toast on hot-reload, routed through our own notification server (see
-    // Notifications.qml) with notify-send so it renders like any other toast.
-    // These signals fire on *reloads* only, never the initial startup, so there
-    // is no login spam. reloadFailed is delivered to the still-running old
-    // instance (the new one never came up), so a broken edit announces itself as
-    // a critical toast that — per the server's urgency-2 rule — stays until
-    // clicked, with the parse error as the body.
-    //
-    // wal-set.sh rewrites Theme.qml in place on every wallpaper change, which
-    // also triggers this same reload path. WallpaperPicker touches a marker
-    // file right before running wal-set.sh; onReloadCompleted checks whether
-    // that marker is fresh (an in-memory flag can't survive the reload it's
-    // meant to gate — Quickshell recreates this whole object tree from source
-    // on every reload, so anything set on the old tree is already gone by the
-    // time this fires on the new one). Failures are never gated on it: a
-    // broken edit should always announce itself regardless of what else is
-    // going on.
-    //
-    // The check + conditional notify-send is ONE detached shell command, not
-    // a Process object here awaiting a callback: onReloadCompleted fires on
-    // the OLD tree in its last moments before teardown, so anything short of
-    // an already-detached fire-and-forget process risks getting killed before
-    // it can act on the result. The brief sleep gives Notifications.qml's own
-    // NotificationServer (keepOnReload: false — it's recreated every reload
-    // too) a moment to re-register on D-Bus before the toast is sent. "fresh"
-    // = touched in the last 3s, generous enough to cover file-watcher
-    // detection lag without leaving a crashed wal-set.sh run suppressing
-    // toasts forever (the marker just goes stale and stops mattering).
+    // Announce reload success or failure through the panel's notification
+    // server. Wallpaper writes use a fresh marker to suppress routine success;
+    // failures remain visible. The detached command and short delay let the
+    // recreated notification server reclaim D-Bus before sending.
     Connections {
         target: Quickshell
         function onReloadCompleted() {
@@ -137,25 +113,13 @@ Scope {
         }
     }
 
-    // The "<" button at the bottom of the bar: reveal ALL popups at once as
-    // desktop widgets, restoring whatever was pinned before on toggle-off.
-    //
-    // The reveal/hide is STAGED into a little fan rather than flipping every
-    // pin at once. Reveal order (out): disk+media; then clock+gpu; then
-    // weather+cpu; then calendar+eth — the tiled row fans out leftward from the
-    // disk (disk rightmost, then media, then clock/weather/calendar) while the
-    // stack fans upward above it. Hide runs the same stages in reverse.
-    // Each stage is ~_fanStepMs after the last, so widgets cascade in/out
-    // instead of popping together. Whatever was pinned BEFORE a reveal is kept
-    // pinned on the following hide (_savedPins), so the toggle is lossless.
+    // Reveal all widgets in staged groups, then restore the pre-reveal pin set
+    // when hiding them again.
     property bool allRevealed: false
     property var _savedPins: []
 
-    // every pinnable widget, and the two fan orders. The stack order fixes the
-    // bottom-up stacking (each stackable sits above the ones pinned before it);
-    // the tiled order fixes the row's left fan. Branched per host: top anchors
-    // the stack on the disk (disk→gpu→cpu→eth); air has no disk — cpu is the
-    // corner floor with eth then clock stacked above it, media+weather tiled left.
+    // Pinnable widgets and fan order. Stackables are bottom-up; tiled widgets
+    // use their fixed row order, with host-specific layouts.
     readonly property var _allWidgets: Host.name === "air"
         ? [analogClock, weatherPanel, mediaPanel, cpuPanel, ethPanel]
         : [calendar, analogClock, weatherPanel, diskPanel, mediaPanel, cpuPanel, gpuPanel, ethPanel]
@@ -163,15 +127,8 @@ Scope {
         ? [[cpuPanel], [ethPanel, weatherPanel], [analogClock, mediaPanel]]
         : [[diskPanel, mediaPanel], [analogClock, gpuPanel], [weatherPanel, cpuPanel], [calendar, ethPanel]]
 
-    // The desktop widgets fanned out at login when nothing has been saved yet
-    // (first boot / cleared state). persistKeys, NOT widget refs, and the set is
-    // the Settings program's `defaultWidgets` — the "shown at login" chips on
-    // the Widgets page, which were drawn and read by nothing while this list was
-    // hardcoded. A saved set (Meta+Ctrl+S writes the live pins) still overrides
-    // it. The per-host list below is the FALLBACK for an empty/absent value,
-    // from the generated Host.qml singleton (see quickshell.nix): top keeps the
-    // disk-anchored set; air is the corner stack (cpu/eth/clock) plus
-    // media+weather tiled to its left.
+    // Login defaults are persisted keys from SettingsStore; the host list is
+    // the fallback when no default set has been saved.
     readonly property var _hostWidgets: Host.name === "air"
         ? ["media", "weather", "cpu", "eth", "clock"]
         : ["clock", "weather", "disk", "media", "cpu", "gpu"]
@@ -180,9 +137,7 @@ Scope {
         return (Array.isArray(w) && w.length) ? w : shell._hostWidgets;
     }
 
-    // one stage every _fanStepMs — set to just past a single widget's full
-    // reveal (stacked = ~32ms remap + 260ms rise ≈ 292ms; tiled = 220ms) so a
-    // stage finishes animating before the next one starts.
+    // Allow one widget reveal to finish before starting the next stage.
     readonly property int _fanStepMs: SettingsStore.d.fanStepMs
     property var _fanStages: []
     property int _fanIndex: 0
@@ -235,26 +190,19 @@ Scope {
         }
     }
 
-    // ---- desktop-widget persistence (Meta+Ctrl+S, alongside the window
-    // session save) -------------------------------------------------------
-    // Snapshot exactly which widgets are pinned right now — the user may have
-    // revealed all then unpinned a few, so this reads the live pins, not the
-    // "show all" flag. Restored once at startup below.
+    // Persist the current pin set (Meta+Ctrl+S, alongside the window session).
     function saveWidgets() {
         const keys = _allWidgets.filter(p => p.pinnedOpen).map(p => p.persistKey).join(" ");
         Quickshell.execDetached(["sh", "-c",
             "d=\"$HOME/.local/state/quickshell\"; mkdir -p \"$d\"; printf '%s\\n' \"$1\" > \"$d/widgets\"",
             "_", keys]);
     }
-    // pin order for the instant (reload) path: stackables first, in bottom-up
-    // order, so each reads the already-pinned one below it; tiled widgets after
-    // (their slot is fixed by tileRank, not pin order). air: cpu→eth→clock.
+    // Reload restore order: stackables bottom-up, then tiled widgets by rank.
     readonly property var _pinOrder: Host.name === "air"
         ? [cpuPanel, ethPanel, analogClock, weatherPanel, mediaPanel]
         : [diskPanel, mediaPanel, analogClock, weatherPanel, calendar, gpuPanel, cpuPanel, ethPanel]
 
-    // Login restore: fan the saved (or default) set out. text is the first line
-    // of the saved-widgets file — space-separated persistKeys.
+    // Login restore: the first line contains space-separated persistKeys.
     function applyWidgetState(text) {
         const saved = (text || "").split("\n")[0].trim().split(/\s+/).filter(s => s.length);
         // saved set wins; otherwise the baked-in default (first boot).
@@ -281,22 +229,9 @@ Scope {
     }
 
     // ---- hot-reload continuity ------------------------------------------
-    // Quickshell rebuilds this entire object tree on every reload (a QML edit,
-    // or wal-set.sh rewriting Theme.qml on a wallpaper change), so the desktop
-    // widgets are recreated unpinned and would otherwise blink out and replay
-    // their entry animation. To make a reload a straight swap instead:
-    //
-    //   * the LIVE pin set is mirrored to a file in $XDG_RUNTIME_DIR on every
-    //     change (not the Meta+Ctrl+S file — that one is the deliberate login
-    //     set and must not be overwritten by casual pinning), and
-    //   * it is read back SYNCHRONOUSLY here in Component.onCompleted, i.e.
-    //     while the tree is still being constructed and before any surface has
-    //     mapped, and applied with snapPinned() — no slide, no layer remap.
-    //     (The old async Process read landed after the windows were already up,
-    //     which is exactly what produced the disappear/reappear.)
-    //
-    // $XDG_RUNTIME_DIR is wiped at logout, so the file's absence IS the
-    // login-vs-reload flag — no separate marker needed.
+    // Mirror live pins in XDG_RUNTIME_DIR and restore them synchronously
+    // before surfaces map. The runtime file distinguishes reloads from login;
+    // snapPinned() preserves mapped surfaces and avoids replaying animations.
     readonly property string livePinsPath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/qs-live-pins"
     readonly property string livePins: _allWidgets.filter(w => w.pinnedOpen).map(w => w.persistKey).join(" ")
 
@@ -307,12 +242,9 @@ Scope {
         printErrors: false    // absent on the session's first load; not an error
     }
 
-    // Debounced so the staged fan (one stage every _fanStepMs) writes once at
-    // the end rather than four times. The "v2" prefix keeps the file non-empty
-    // when nothing is pinned, so "exists" stays distinguishable from "absent".
-    //
-    // The PID after it is what makes a reload distinguishable from a fresh
-    // Quickshell start in the same session. On a RELOAD, Quickshell hands the
+    // Debounced so a staged fan writes once at the end. The v2 prefix keeps an
+    // empty pin set distinct from an absent file; the PID identifies a reload
+    // of this process rather than a fresh login.
     // live layer surface from the outgoing window to the incoming one, so a
     // restored widget is already mapped at the layer it had — remapping it
     // would tear that surface down and build a new one, i.e. exactly the
@@ -455,17 +387,8 @@ Scope {
     }
 
     // ---- dock mode retires the desktop widgets --------------------------
-    // The two modes own the same widgets, so only one may display them: in dock
-    // mode they belong to the panel's grid, and leaving them ALSO pinned to the
-    // wallpaper would mean two live instances of each — two copies of every
-    // polling script, and a row of cards stranded behind the panel where a big
-    // chunk of the screen they used to sit on no longer exists.
-    //
-    // The pre-dock pin set is remembered so switching back to classic restores
-    // the desktop exactly as it was left, rather than dumping the user onto the
-    // baked-in default set. snapPinned(false) rather than the staged fan: this
-    // is a mode switch, not a reveal, so the widgets should simply be there when
-    // the crossfade finishes.
+    // Dock and classic own the same widgets. Keep the pre-dock set and restore
+    // it synchronously when returning to classic; do not run the reveal fan.
     property var _preDockPins: []
     Connections {
         target: ViewMode
@@ -493,12 +416,8 @@ Scope {
         function classic(): void { ViewMode.setMode("classic"); ViewMode.applyReserve(); }
         function mode(): string { return SettingsStore.d.viewMode; }
 
-        // Geometry + the last drag's trace, for verifying the edge gesture
-        // without watching it: `qs ipc call view geom` / `... view trace`.
-        // Each trace sample is dragWidth,surfaceWidth,liveWidth for one pointer
-        // event — if the middle column chases the first instead of matching it,
-        // the surface is lagging; if either oscillates around a value the
-        // pointer is holding still at, the tracking maths is wrong.
+        // Geometry and the last drag trace; inspect with `view geom` / `view
+        // trace` rather than watching the gesture.
         function geom(): string {
             return "mode=" + SettingsStore.d.viewMode
                 + " barWidth=" + ViewMode.barWidth
@@ -509,14 +428,8 @@ Scope {
                 + " exitPx=" + Math.round(ViewMode.exitPx)
                 + " dragging=" + ViewMode.dragging
                 + " settling=" + ViewMode.settling
-                // The desktop's motion, as this panel currently resolves it.
-                // slideMs is read from the compositor's published motion.json
-                // (plugin:hyprvtb:slide_duration_ms) and falls back to 260 if
-                // that file is absent — the two are indistinguishable on screen,
-                // so without this line there is no way to tell whether the panel
-                // is tracking the key or merely agreeing with it by default.
-                // `eff` is what a Behavior actually gets, i.e. after
-                // reduceMotion / animSpeed / the slowmo knob.
+                // `slideMs` is the compositor-published duration (260ms fallback);
+                // `eff` includes user motion settings and the debug slowmo knob.
                 + " slideMs=" + ViewMode.slideMs
                 + " eff=" + ViewMode.ms(ViewMode.slideMs)
                 + " samples=" + ViewMode.dragTrace.length;

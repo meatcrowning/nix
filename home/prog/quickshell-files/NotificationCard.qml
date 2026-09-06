@@ -3,86 +3,38 @@ import Quickshell
 import Quickshell.Widgets
 import Quickshell.Io
 
-// A single notification toast. Text-only, coloured by urgency, click anywhere to
-// dismiss, hover to pause its auto-expiry. Styled to match OsdWindow's card:
-// bgAlt fill, hard edges (radius 0), a 2px tinted border and a left urgency
-// strip echoing the bar's accent stripe.
-//
-// A surfer image-download completion toast additionally carries the downloaded
-// file's path in the `x-download-image` hint (Notifications.qml extraHints);
-// such a toast shows a thumbnail on the left and clicking it OPENS the image
-// in the viewer (xdg-open -> the default image handler) before dismissing. The
-// path surfer advertises is ~/Downloads/<name>, but `sort-downloads` files
-// image downloads out of ~/Downloads into ~/Pictures within seconds — so both
-// the thumbnail and the open resolve the file's CURRENT location via
-// scripts/dl-resolve.py rather than trusting the (possibly stale) hinted path.
-//
-// The screenshot and screen-recording completion toasts (Screenshot.qml) use
-// the same hint for the same thumbnail. A recording carries TWO paths: the
-// thumbnail is a poster frame (`x-download-image`, QML Image cannot decode an
-// mp4) while `x-open-path` points the click at the video itself. When
-// `x-open-path` differs from the thumbnail it is a path we control (a capture,
-// never in ~/Downloads), so the click opens it directly without dl-resolve.
-//
-// PROGRESS. A toast carrying the `value` hint (0-100) is reporting on an
-// operation that is still running, and draws a bar under its text — §8.1's
-// bar, the one player's SysthemeToast uses. Senders morph such a toast in place
-// with --replace-id at `-t 0` (§10.4: it stays up until the operation ends and
-// does not re-fire), so the card's own expiry never retires it underneath them.
-// repo-updates' pull-and-rebuild is the first sender: one toast from the click
-// to the last word, a bar per step.
-//
-// ACTIONS. A notification may carry freedesktop actions; they are drawn as a
-// right-aligned row of SetButtons under the text, and invoking one dismisses the
-// toast (Quickshell's invoke() only emits ActionInvoked — it closes nothing).
-// The spec's `default` action is not a button: it means "the notification itself
-// was clicked", so it rides the card's own MouseArea instead. The server
-// advertises action support only when `notifActions` is on, so that setting
-// gates the buttons too — a toast must not draw a control the sender was told
-// would not be there, and an app that respects the capability sends no actions
-// to draw anyway. repo-updates (home/srvs/repo-updates.nix) reads the same
-// setting and falls back to a "run nix-pull" instruction when it is off, so its
-// toast is never a dead end.
+// A notification toast with urgency styling, expiry/dismissal, optional image
+// thumbnail, progress bar, and freedesktop action buttons.
+// Download/recording paths are resolved at use time. Progress senders keep the
+// toast alive with -t 0 and replace it in place (docs/DESIGN.md §8.1, §10.4).
+// `default` remains the card click; explicit actions are rendered only when
+// notifActions permits them.
 Rectangle {
     id: card
 
     // The Quickshell Notification object this toast renders.
     required property var notif
 
-    // Attached-to-the-panel mode (NotificationWindow.attached): the card is
-    // drawn like the shortcut notch (DesktopNotch.qml) — no border on the bar
-    // side, the top and bottom arms overrunning the panel's face by one line
-    // width so the bar's accent strip reads as detouring around the card, and
-    // the stretch under the bar painted in the bar's own background so the
-    // mouth opens INTO the panel instead of sitting against it as a box.
+    // Attached mode joins the card to the panel like the shortcut notch.
     property bool attached: false
-    // Which side the mouth (the bar) is on. false = right, the default edge.
+    // Which side contains the panel mouth; false is the right edge.
     property bool mouthOnLeft: false
-    // The notch's own mouth depth, so the two attachments read as one.
+    // Notch overlap depth used by attached geometry.
     readonly property int mouth: attached ? NotchModel.overlap : 0
-    // Which side a FLOATING card's exit retreats toward — the corner's own
-    // edge, reversing the entry nudge. Attached cards exit into the panel and
-    // take their side from mouthOnLeft instead.
+    // Floating cards exit toward their corner; attached cards exit into panel.
     property bool floatLeft: false
 
-    // Set while the card plays its exit: the notification is already gone from
-    // the tracked model (the lock below is what keeps the object readable), so
-    // nothing here may act on it any more.
+    // The server may untrack a card while its exit runs; closing forbids reuse.
     property bool closing: false
 
     // The exit slide landed; NotificationWindow drops the card from its stack.
     signal departed()
 
-    // Keeps the Notification object alive after the server untracks it, for
-    // exactly as long as the exit animation needs it: the lock dies with the
-    // card, which is when the object is finally dropped.
+    // Keep the notification object alive until the exit animation completes.
     RetainableLock { object: card.notif; locked: true }
 
-    // Leave the way the card arrived, in reverse: attached, roll back INTO the
-    // panel behind the holder's clip (the add transition's from-value, as a
-    // destination); floating, retreat the ±48 nudge and fade. Same slide, same
-    // clock as the window roll (docs/DESIGN.md §6.2) — dismissal and arrival
-    // must read as one mechanism.
+    // Reverse entry: attached cards retreat behind the panel; floating cards
+    // retreat 48px and fade on the shared slide clock.
     function leave() {
         if (card.closing)
             return;

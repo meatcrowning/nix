@@ -4,61 +4,16 @@ import Quickshell
 import Quickshell.Widgets
 import Quickshell.Wayland
 
-// THE ICON BAR, PULLED OUT. This is the shortcut notch (DesktopNotch.qml /
-// NotchModel.qml) pulled away from the panel: the slab moves, and what comes
-// out from behind the panel behind it is the runner.
-//
-// THE MOTION IS THE WHOLE POINT, and it took three attempts to get right. What
-// he asked for is [his] "the bar itself pulls out to reveal the runner - the bar
-// itself appearing unchanged in its normal state", and then, of attempt two,
-// [his] "its still as if a second bar is appearing and exploding out from the
-// original bar. it should appear as if the bar literally moves to the left and
-// reveals a program runner. in addition it should not grow in height".
-//
-// SO NOTHING RESIZES. THIS IS A DRAWER. One rigid card, `openW` wide and the
-// notch's own height, that only ever TRANSLATES:
-//
-//   * CLOSED, its leading edge is the notch and the rest of it is behind the
-//     panel — clipped away at the panel's face by `frame`, which is the whole
-//     illusion. The visible strip is `closedW` = NotchModel.protrusion wide,
-//     the notch's height, with the notch's outline and the seals at the notch's
-//     inset. Pixel for pixel the notch — and the card is simply not drawn
-//     there at all, because the real notch is what is on screen (the surface
-//     itself never unmaps; see `visible` below).
-//   * OPENING, it slides out by `openW - closedW`. The seals ride it because
-//     they are part of it; the names and the runner emerge from behind the
-//     panel because they are further back in the same drawer. Nothing fades,
-//     nothing grows, nothing spawns.
-//
-// Do NOT reintroduce an animated width, height or opacity here. An animated
-// width was attempt two and read as "a second bar exploding out of the first";
-// an animated height was the same mistake on the other axis. The reveal is the
-// clip, and the only animated property in this file is `x`.
-//
-// The columns, left to right: the seals (the desktop's own programs, tagged
-// `Keywords=bespoke;`), each with its NAME beside it, then the runner — search
-// box over every OTHER program on the system. A partition, so neither side
-// repeats the other.
-//
-// IT IS ITS OWN SURFACE, not part of the bar, and that is forced: the notch
-// lives inside the bar's layer surface so their outlines share one coordinate
-// space during a width drag, but the bar's surface width is the constant the
-// exclusive zone derives from, and this drawer is far too wide to add to it. So
-// it is an Overlay surface whose right edge sits on the panel's face, covering
-// the notch for as long as it is out.
-//
-// HOTKEY ONLY. There is no runner button any more (removed from the classic
-// bar's top cluster and from DockHeader): mainMod+Super, which is
-// `qs ipc call launcher toggle` in hyprland.lua.
+// Shortcut notch drawer. It is a rigid Overlay card whose only animated
+// property is x: the closed card is exactly the notch, and the clip reveals
+// names and the runner as it translates. It never animates width, height, or
+// opacity. Desktop entries tagged `Keywords=bespoke;` occupy the seal column;
+// the runner lists every other entry. The drawer is hotkey/IPC-only.
 PanelWindow {
     id: launcher
 
-    // Unlike the bar, this is one persistent surface rather than a per-output
-    // Variant. Letting PanelWindow choose its initial output left it attached
-    // to a removed eDP screen after the external DP output took over: Meta
-    // toggled `open` and the card reached x=0, but there was no qs-launcher
-    // surface mapped anywhere to draw it. Keep the singleton attached to the
-    // current primary output so an output switch remaps it with the panel.
+    // Keep the singleton on the current primary output so output changes remap
+    // it with the panel.
     screen: Quickshell.screens.length ? Quickshell.screens[0] : null
 
     property bool open: false
@@ -67,54 +22,26 @@ PanelWindow {
     property int taps: 0
 
     readonly property bool barLeft: SettingsStore.d.barEdge === "left"
-    // On a top/bottom bar the drawer comes out of the MIDDLE of the bar,
-    // downwards or upwards — the same one-rigid-card slide, on the other axis.
-    // Anchoring the surface to one horizontal edge and NEITHER side is what
-    // centres it: wlr-layer-shell centres a surface on any axis it is not
-    // anchored to.
+    // On a horizontal bar the card is centered on the unanchored axis.
     readonly property bool hz: ViewMode.barHorizontal
     readonly property bool barTop: SettingsStore.d.barEdge === "top"
 
-    // THIS SURFACE IS NEVER UNMAPPED. It is transparent and empty while the
-    // drawer is in, and the card inside it is what appears and disappears.
-    //
-    // Mapping it per open was the last visible glitch: every few opens the
-    // drawer flashed at the TOP-RIGHT for a frame — [his] "it'll appear as if
-    // the bar glitches out an appears above and to the right … after every like
-    // 5 or so times". A layer surface's anchors, margins and size arrive by
-    // CONFIGURE, and a client that commits its first buffer before that
-    // round-trip completes is drawn at the anchored corner with default margins
-    // — which for this window (anchored right, negative margin, full height) is
-    // exactly up and to the right. It is a race, so it misses most of the time,
-    // and `no_anim` removed the fade that used to hide it.
-    //
-    // Staying mapped also takes the remaining map round-trip out of the open.
-    // The cost is one always-composited transparent surface, and the care below:
-    // `out` gates the CARD, the input mask and keyboard focus, so while the
-    // drawer is in, this window draws nothing, takes no input (the notch under
-    // it keeps its own clicks and hover tooltips) and holds no focus.
+    // Keep the surface mapped to avoid configure-race flashes. `out` gates the
+    // card, input mask, and keyboard focus while the transparent surface stays.
     visible: true
     readonly property bool out: open
         || (launcher.hz ? Math.abs(card.y - card.closedY) > 1
                         : Math.abs(card.x - card.closedX) > 1)
     color: "transparent"
 
-    // No input region at all while the drawer is in — anything else would put a
-    // 401x323 dead zone over his desktop, and swallow the notch's own hover.
+    // No input region while closed; the notch beneath retains its hover/clicks.
     mask: launcher.out ? null : blank
     property var blankRegion: Region { id: blank }
 
     // Full height, hard against the panel's FACE — the notch's own mouth.
     //
-    // THE NEGATIVE MARGIN IS LOAD-BEARING, and getting it wrong is what made
-    // this read as "another bar spawns" no matter how the motion was written.
-    // The bar's exclusive zone reserves the bar AND the notch
-    // (`liveWidth + notchPx - windowBorderWidth`, shell.qml), so a surface
-    // anchored to this edge is placed at the NOTCH'S OUTER FACE — a drawer sat
-    // there is beside the notch, never over it, and its closed strip is a
-    // second copy of the notch drawn next to the real one (measured on book:
-    // reserved 359 of 1536, panel face at 1209, surface edge at 1177). Cancel
-    // exactly what the zone added and the closed drawer lands ON the notch.
+    // Cancel the notch portion of the exclusive zone so the closed card lands
+    // on the notch rather than beside it.
     anchors {
         top: launcher.hz ? launcher.barTop : true
         bottom: launcher.hz ? !launcher.barTop : true
@@ -135,40 +62,16 @@ PanelWindow {
 
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "qs-launcher"
-    // ONE FRAME OF Exclusive TO TAKE THE KEYBOARD, then OnDemand to hold it.
-    //
-    // OnDemand alone was the "the runner is open and typing goes to the window
-    // behind it" bug. This drawer opens from a KEYBIND (RunnerShortcut.qml), so
-    // the only thing that happens on open is a None->OnDemand commit — and
-    // Hyprland grants an on-demand layer surface the keyboard on the next
-    // pointer MOTION over it, never on a commit and never on a click. Tap Super
-    // with the pointer over a window and the box was drawn, QML-focused, cursor
-    // blinking, and had no wl_keyboard: `input.forceActiveFocus()` moves focus
-    // inside the scene and cannot ask the compositor for anything. So the open
-    // arms `grab`, which flips this surface to Exclusive — the one mode a commit
-    // can switch to that grabs the keyboard outright. Same fix as the dock's
-    // filter box (shell.qml's `Procs.filterGrab`), which had it first.
-    //
-    // AND THEN STRAIGHT BACK TO OnDemand, the moment the box actually holds
-    // focus. Sticky Exclusive keeps sending us the keyboard after you click into
-    // a window, so the next keystroke would land in the search box instead of
-    // what you just clicked on.
-    //
-    // The OnDemand term is tied to `out`, not `open`, so the layer keeps the
-    // keyboard through the closing pull and gives it back only once the drawer
-    // is home — and holds none of it the rest of the time, which matters now
-    // that the surface is permanent. No `filterLatch` equivalent is needed here:
-    // the bar hands back while the pointer is still over it (the case Hyprland's
-    // refocusLastWindow gets wrong), whereas this drawer is gone by then.
+    // Grab one frame in Exclusive mode so a keybind-opened search receives the
+    // keyboard, then settle to OnDemand. Keep OnDemand through the closing slide
+    // and release it only when the card is home.
     property bool grab: false
     WlrLayershell.keyboardFocus:
         launcher.grab ? WlrKeyboardFocus.Exclusive
       : launcher.out  ? WlrKeyboardFocus.OnDemand
                       : WlrKeyboardFocus.None
 
-    // Drop the grab as soon as the box has the keyboard. The timer is the
-    // backstop: if the grant never arrives, a surface left Exclusive would eat
-    // every keystroke on the desktop, so it is never held longer than this.
+    // The timer bounds Exclusive mode if the keyboard grant never arrives.
     property var grabSettle: Timer {
         interval: 400
         onTriggered: launcher.grab = false
@@ -189,16 +92,8 @@ PanelWindow {
         return false;
     }
 
-    // THE CORPUS IS BUILT ONCE, not on every open and not on every keystroke.
-    // Scanning `DesktopEntries.applications.values`, dropping the seals and the
-    // `NoDisplay` entries, and sorting the ~300 that remain is work that only
-    // changes when the SYSTEM's programs do — so it is a binding on that list,
-    // and pressing Super does none of it. Each row carries its own lowercased
-    // name, because the search would otherwise redo that per program per
-    // keystroke.
-    //
-    // EVERY OTHER PROGRAM: the seals are in the drawer's own column, so listing
-    // them here too would be the same icon twice.
+    // Build the searchable corpus from DesktopEntries changes, not per open or
+    // keystroke. Exclude bespoke seals and NoDisplay entries.
     readonly property var corpus: {
         if (!SettingsStore.d.launcherProviderApps)
             return [];
@@ -217,13 +112,8 @@ PanelWindow {
         return out;
     }
 
-    // What ELSE a program answers to. `Name` alone is not what a person types:
-    // gimp's entry is called "GNU Image Manipulation Program", vlc's generic
-    // name is "Media player", steam's id is `steam.desktop` while its name is
-    // "Steam". So each row carries a second lowercased haystack — generic name,
-    // desktop id, the executable's basename and the entry's own Keywords — built
-    // ONCE with the corpus, never per keystroke. Every field is read
-    // defensively: a DesktopEntry that lacks one gives undefined, not an error.
+    // Search aliases include generic name, desktop id, executable basename, and
+    // Keywords; build them once with the corpus and tolerate missing fields.
     function aliasOf(a) {
         let bits = [];
         if (a.genericName) bits.push(String(a.genericName));
