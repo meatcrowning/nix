@@ -377,24 +377,11 @@ class Gallery(QAbstractListModel):
         if self._live is not None:
             self._all.insert(0, self._live)
         self._refilter()
-        # The first screenful eagerly, the rest on demand (`requestPoster` /
-        # `requestThumb`) — so the top of the grid is never blank while the
-        # delegates that would ask for it are still being built.
-        posters, stills = 0, []
-        for r in self._all:
-            if r["is_video"]:
-                if posters < 24:
-                    self._want_poster(r["path"])
-                    posters += 1
-            elif len(stills) < 24:
-                stills.append(r)
-            if posters >= 24 and len(stills) >= 24:
-                break
-        # REVERSED, because the thumbnail queue is a stack (see `_want_thumb`):
-        # pushed in order, the last one queued would be decoded first and the
-        # top-left tile last.
-        for r in reversed(stills):
-            self._want_thumb(r)
+        # Delegates request only the rows Qt actually realises. Starting 24
+        # still decodes plus 24 video extractions here made a newly shown
+        # window spend about 27 CPU-seconds preparing off-screen history before
+        # it felt usable. The view's cacheBuffer already realises a few rows
+        # beyond the viewport, so those requests are the right warm-up set.
 
     # -- poster frames -----------------------------------------------------
 
@@ -443,9 +430,8 @@ class Gallery(QAbstractListModel):
 
         The gallery shows EVERY output now, and this library is a few hundred
         clips — extracting a frame from all of them at startup would be a few
-        hundred ffmpeg runs for thumbnails nobody has scrolled to yet. The first
-        screenful is queued eagerly (`load_existing`) so the top of the grid is
-        never blank; everything after it asks on the way past."""
+        hundred ffmpeg runs for thumbnails nobody has scrolled to yet. A tile
+        asks only after it has remained realised for 250ms."""
         self._want_poster(str(path))
 
     def _next_poster(self):
