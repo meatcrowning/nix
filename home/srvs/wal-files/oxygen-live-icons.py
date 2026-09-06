@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mint a two-slot, wallpaper-coloured Oxygen icon theme."""
+"""Mint an accent-qualified, wallpaper-coloured Oxygen icon theme."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from pathlib import Path
 from PIL import Image
 
 SOURCE = Path("@oxygenIcons@") / "share" / "icons" / "oxygen"
-RENDER_VERSION = "2"  # bump when the pixel transform changes
+RENDER_VERSION = "3"  # bump when the pixel transform changes
 
 
 def theme_index(source, destination, name):
@@ -79,17 +79,17 @@ def main():
     with lock.open("w") as lock_file:
         fcntl.flock(lock_file, fcntl.LOCK_EX)
         previous = state.read_text().strip().split() if state.exists() else []
-        if len(previous) == 3 and previous[0] == RENDER_VERSION and previous[1] == accent:
-            slot = previous[2]
-        else:
-            slot = "1" if previous[-1:] == ["0"] else "0"
-            destination = root / ("oxygen-live-" + slot)
+        # KDE retains pixmaps by theme name.  The name therefore identifies
+        # immutable pixels: both the transform version and the accent belong
+        # in it, rather than reusing one of two mutable directories.
+        name = "oxygen-live-v" + RENDER_VERSION + "-" + accent
+        if previous != [RENDER_VERSION, accent] or not (root / name).is_dir():
+            destination = root / name
             if destination.exists():
                 shutil.rmtree(destination)
-            theme_index(SOURCE, destination, "Oxygen Live " + slot)
+            theme_index(SOURCE, destination, "Oxygen Live " + accent)
             recolour(SOURCE, destination, accent)
-            state.write_text(RENDER_VERSION + " " + accent + " " + slot + "\n")
-        name = "oxygen-live-" + slot
+            state.write_text(RENDER_VERSION + " " + accent + "\n")
         if not args.no_activate:
             activate(name)
     print(name)
