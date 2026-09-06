@@ -180,7 +180,21 @@ in
           }
           "org.kde.plasma.panelspacer"
           "org.kde.plasma.marginsseparator"
-          "org.kde.plasma.folder"
+          {
+            # This is the upper of the two Folder View buttons at the bottom
+            # of the left panel. `folder-games` is supplied by Oxygen itself,
+            # so its palette/contrast variants continue to come from the
+            # active Oxygen icon theme rather than from a hard-coded asset.
+            name = "org.kde.plasma.folder";
+            config.General = {
+              useCustomIcon = true;
+              icon = "folder-games";
+              url = "file://${config.xdg.dataHome}/plasma-games";
+              labelMode = 3;
+              labelText = "Games";
+              sortMode = 1;
+            };
+          }
           "org.kde.plasma.folder"
           "org.kde.plasma.trash"
         ];
