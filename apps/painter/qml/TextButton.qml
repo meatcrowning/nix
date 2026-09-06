@@ -23,6 +23,10 @@ Item {
     // Item.enabled propagates down, so a disabled button's MouseArea is
     // disabled too and Qt refuses the click for us.
     property bool winActive: true
+    // A compact graphical action for a panel header. It is still TextButton,
+    // so hover, focus and click behaviour remain identical to every other
+    // painter action; only the drawn affordance changes.
+    property bool pillIcon: false
     // A paired up/down affordance is ONE glyph mirrored, never two characters
     // (docs/DESIGN.md §2.4): "^" is not "v" upside down in this font — from the glyf
     // table "v" sits on the baseline while "^" is hard against the ascender, so
@@ -31,7 +35,7 @@ Item {
     property bool flipY: false
     signal clicked()
 
-    implicitWidth: txt.implicitWidth + 8
+    implicitWidth: pillIcon ? 22 : txt.implicitWidth + 8
     implicitHeight: Theme.lineHeight + 5
     width: implicitWidth
     height: implicitHeight
@@ -44,6 +48,7 @@ Item {
 
     PixelText {
         id: txt
+        visible: !root.pillIcon
         anchors.horizontalCenter: parent.horizontalCenter
         // Integer origin, so NativeRendering stays crisp under the flip.
         y: Math.round((root.height - height) / 2)
@@ -58,6 +63,20 @@ Item {
         color: !root.winActive ? Theme.inactive
              : root.lit ? Theme.accent
              : root.tone
+    }
+
+    // This is an ICON, not a second miniature prompt pill: a compact outlined
+    // capsule says "tag view" without spending a header on the words text/tags.
+    Rectangle {
+        visible: root.pillIcon
+        width: 12
+        height: 6
+        radius: 3
+        anchors.centerIn: parent
+        color: root.lit ? Theme.accent : "transparent"
+        border.width: 1
+        border.color: !root.winActive ? Theme.inactive
+                      : root.lit ? Theme.accent : root.tone
     }
 
     MouseArea {
