@@ -72,54 +72,63 @@ Column {
         spacing: 2
         visible: gal.oks.length === 1
 
-        Rectangle {
-            // CENTRED IN THE BUBBLE [his, 2026-08-24]. A portrait picture is
-            // narrower than the column it sits in (the height cap below), and
-            // left-aligned it read as a mistake — a tall picture with a column
-            // of dead space beside it. A landscape one fills the width and the
-            // anchor costs it nothing.
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: solo.width + 2
-            height: solo.height + 2
-            // A PORTRAIT PICTURE IS CAPPED BY ITS HEIGHT, not only by the
-            // column [his, 2026-08-24]. Sized to the column alone, a 2:3 render
-            // is nearly three times the height of a 16:9 one in the same chat
-            // and pushes the reply off the screen. `gal.maxH` is the same
-            // ceiling VideoCard uses for a clip, so a still and a video of the
-            // same shape take the same room; the picture is not cropped — it
-            // is drawn smaller, and one click still opens it full size.
-            color: Theme.bgAlt
-            radius: Theme.rounding
-            border.width: Theme.ctrlBorder
-            border.color: Theme.border
-            Image {
-                id: solo
-                x: 1; y: 1
-                readonly property var e: gal.oks.length === 1 ? gal.oks[0] : null
-                // sourceSize.width caps the decode to the column and, set
-                // alone, scales height by the real aspect — never upscaling
-                // past native.
-                readonly property real natW: (e && e.w > 0) ? e.w : (gal.width - 2)
-                readonly property real natH: (e && e.h > 0) ? e.h : (gal.width - 2)
-                // Width the height cap allows, then the column, then native.
-                sourceSize.width: Math.max(1, Math.round(
-                    Math.min(gal.width - 2, natW,
-                             gal.maxH * natW / Math.max(1, natH))))
-                fillMode: Image.PreserveAspectFit
-                asynchronous: true
-                source: e ? "file://" + e.path : ""
-            }
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                acceptedButtons: Qt.LeftButton | Qt.RightButton
-                onClicked: function (m) {
-                    if (m.button === Qt.RightButton) {
-                        var p = mapToItem(null, m.x, m.y);
-                        gal.contextRequested(solo.e ? (solo.e.path || "") : "",
-                                             p.x, p.y);
-                    } else {
-                        gal.enlarge(0);
+        // A Column owns its direct children's x coordinate.  Put the frame in
+        // a full-width Item first, so the horizontal anchor stays live instead
+        // of the positioner resetting a narrow chart back to the left edge.
+        Item {
+            width: parent.width
+            height: soloFrame.height
+
+            Rectangle {
+                id: soloFrame
+                // CENTRED IN THE BUBBLE [his, 2026-08-24]. A portrait picture is
+                // narrower than the column it sits in (the height cap below), and
+                // left-aligned it read as a mistake — a tall picture with a column
+                // of dead space beside it. A landscape one fills the width and the
+                // anchor costs it nothing.
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: solo.width + 2
+                height: solo.height + 2
+                // A PORTRAIT PICTURE IS CAPPED BY ITS HEIGHT, not only by the
+                // column [his, 2026-08-24]. Sized to the column alone, a 2:3 render
+                // is nearly three times the height of a 16:9 one in the same chat
+                // and pushes the reply off the screen. `gal.maxH` is the same
+                // ceiling VideoCard uses for a clip, so a still and a video of the
+                // same shape take the same room; the picture is not cropped — it
+                // is drawn smaller, and one click still opens it full size.
+                color: Theme.bgAlt
+                radius: Theme.rounding
+                border.width: Theme.ctrlBorder
+                border.color: Theme.border
+                Image {
+                    id: solo
+                    x: 1; y: 1
+                    readonly property var e: gal.oks.length === 1 ? gal.oks[0] : null
+                    // sourceSize.width caps the decode to the column and, set
+                    // alone, scales height by the real aspect — never upscaling
+                    // past native.
+                    readonly property real natW: (e && e.w > 0) ? e.w : (gal.width - 2)
+                    readonly property real natH: (e && e.h > 0) ? e.h : (gal.width - 2)
+                    // Width the height cap allows, then the column, then native.
+                    sourceSize.width: Math.max(1, Math.round(
+                        Math.min(gal.width - 2, natW,
+                                 gal.maxH * natW / Math.max(1, natH))))
+                    fillMode: Image.PreserveAspectFit
+                    asynchronous: true
+                    source: e ? "file://" + e.path : ""
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onClicked: function (m) {
+                        if (m.button === Qt.RightButton) {
+                            var p = mapToItem(null, m.x, m.y);
+                            gal.contextRequested(solo.e ? (solo.e.path || "") : "",
+                                                 p.x, p.y);
+                        } else {
+                            gal.enlarge(0);
+                        }
                     }
                 }
             }
