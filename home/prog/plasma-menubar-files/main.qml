@@ -64,14 +64,18 @@ PlasmoidItem {
     // The desktop owns its menu bar, so give its first category a little air
     // after Kickoff.  A focused app's menu already has the stock appmenu's
     // inset; the handoff here needs only one physical pixel.
-    readonly property int desktopGutter: Kirigami.Units.smallSpacing + 6
+    // The stock delegate supplies its own inner margin. Keep the desktop's
+    // outer nudge to two pixels, so its first label shares the native menu's
+    // left edge instead of acquiring a second whole gutter.
+    readonly property int desktopGutter: 2
     readonly property int appGutter: 1
 
-    // The fallback must stay live to notice desktop focus returning. Plasma
-    // otherwise substitutes this applet's metadata icon and the desktop menus
-    // can never reappear.
+    // Keep one representation alive across focus changes. Replacing the
+    // compact and full trees while TasksModel removes delegates can crash
+    // Plasma's QQmlDelegateModel; an empty full grid after native menus costs
+    // only its invisible trailing applet slot.
     Plasmoid.status: PlasmaCore.Types.ActiveStatus
-    preferredRepresentation: appExportsMenu ? compactRepresentation : fullRepresentation
+    preferredRepresentation: fullRepresentation
 
     // ---- what the bar is currently describing --------------------------
 
@@ -428,11 +432,6 @@ PlasmoidItem {
         }
         // macOS slides from menu to menu once one is open; so do we.
         onHoveredChanged: if (hovered && popup.visible && !isOpen) openMine()
-    }
-
-    compactRepresentation: Item {
-        implicitWidth: root.appGutter
-        implicitHeight: 1
     }
 
     // The stock appmenu has GridLayout as its representation root. Keeping
