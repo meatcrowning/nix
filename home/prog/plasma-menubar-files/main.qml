@@ -58,10 +58,16 @@ PlasmoidItem {
 
     readonly property bool vertical: Plasmoid.formFactor === PlasmaCore.Types.Vertical
 
+    // The desktop owns its menu bar, so give its first category a little air
+    // after Kickoff.  A focused app's menu already has the stock appmenu's
+    // inset; the handoff here needs only one physical pixel.
+    readonly property int desktopGutter: Kirigami.Units.smallSpacing + 2
+    readonly property int appGutter: 1
+
     // The whole point: never hidden, whatever is or is not focused.
     Plasmoid.status: PlasmaCore.Types.ActiveStatus
-    // When Plasma is drawing a real DBus menu, leave only the small, shared
-    // gutter after Kickoff.  Keeping the full fallback representation alive
+    // When Plasma is drawing a real DBus menu, leave only the one-pixel
+    // handoff after Kickoff. Keeping the full fallback representation alive
     // there reserves its last desktop width and leaves a large blank gap.
     preferredRepresentation: appExportsMenu ? compactRepresentation : fullRepresentation
 
@@ -399,17 +405,18 @@ PlasmoidItem {
     }
 
     compactRepresentation: Item {
-        implicitWidth: Kirigami.Units.smallSpacing
+        implicitWidth: root.appGutter
         implicitHeight: 1
     }
 
     fullRepresentation: Item {
-        implicitWidth: bar.implicitWidth + Kirigami.Units.smallSpacing
+        implicitWidth: bar.implicitWidth + (root.onDesktop
+            ? root.desktopGutter : root.appGutter)
         implicitHeight: bar.implicitHeight
 
         GridLayout {
         id: bar
-        x: Kirigami.Units.smallSpacing
+        x: root.onDesktop ? root.desktopGutter : root.appGutter
 
         LayoutMirroring.enabled: Application.layoutDirection === Qt.RightToLeft
         flow: root.vertical ? GridLayout.TopToBottom : GridLayout.LeftToRight
