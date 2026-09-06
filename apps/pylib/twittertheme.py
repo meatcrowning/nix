@@ -96,6 +96,13 @@ aside[role="complementary"] {{ background-color:transparent!important; backgroun
 [data-testid="primaryColumn"] :not(img):not(svg):not(video):not(canvas):not(path),
 [data-testid="sidebarColumn"] :not(img):not(svg):not(video):not(canvas):not(path) {{
   background-color:transparent!important; border-color:transparent!important; }}
+/* The composer is a control group, not a feed card.  Its two quiet rules give
+   the tabs, editor, and “show posts” affordance a readable structure without
+   reintroducing separators between actual posts. */
+[data-testid="primaryColumn"] [role="tablist"],
+[data-testid="primaryColumn"] div:has(> [data-testid="tweetTextarea_0"]),
+[data-testid="primaryColumn"] div:has(> div > [data-testid="tweetTextarea_0"]) {{
+  border-bottom:1px solid var(--desk-border)!important; }}
 ::-webkit-scrollbar-track {{ background:var(--desk-bg)!important; }}
 ::-webkit-scrollbar-thumb {{ background:var(--desk-border)!important; border-color:var(--desk-bg)!important; }}
 ::-webkit-scrollbar-thumb:hover {{ background:var(--desk-accent)!important; }}
