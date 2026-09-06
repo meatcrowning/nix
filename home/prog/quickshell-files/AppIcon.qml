@@ -38,9 +38,10 @@ Item {
     property string source: iconName === ""
         ? "" : Quickshell.iconPath(iconName, "application-x-executable")
     property color color: Theme.accent
-    // Whether a FOREIGN icon is tinted. A seal is tinted either way: drawn raw
-    // it is a white line drawing, which states the theme's colour nowhere.
-    property bool tint: true
+    // Foreign icons carry Oxygen's own highlights and coloured details. A seal
+    // is tinted either way: drawn raw it is a white line drawing, which states
+    // the theme's colour nowhere.
+    property bool tint: false
     property real dim: 1
 
     // Both spellings, because a caller may hand us either half: the icon name

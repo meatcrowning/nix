@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 from PySide6.QtCore import QSize
-from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPainter, QPalette, QPixmap
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPalette, QPixmap
 
 from kdetheme import read_ini
 
@@ -53,20 +53,17 @@ def apply_icon_theme() -> None:
 
 # Oxygen's action artwork is raster and deliberately coloured, so its
 # FollowsColorScheme=true index flag has nothing drawable to apply a scheme to.
-# Rebuild the handful of pixmaps a toolbar actually asks for from their alpha
-# silhouettes instead.  This keeps Oxygen's proportions/detail while giving a
-# normal, active, selected, or disabled action the colour of the matching Qt
-# palette role.  The palette is live: kdeshell refreshes these QIcons on every
+# Replace only Oxygen's blue material band; its highlights, shadows and semantic
+# colours survive. The palette is live: kdeshell refreshes these QIcons on every
 # ApplicationPaletteChange from the wallpaper scheme writer.
 _ICON_SIZES = (16, 22, 32, 48, 64, 128, 256)
 
 
 def themed_icon(name: str, palette: QPalette | None = None) -> QIcon:
-    """Return a palette-coloured version of a freedesktop action icon.
+    """Return a selectively palette-coloured freedesktop action icon.
 
-    Application icons retain their own identity colours; this is for controls
-    whose meaning is already supplied by the button/menu around them.  A null
-    lookup stays null so the caller keeps Qt's ordinary missing-icon behaviour.
+    Only Oxygen's blue is remapped to the applicable palette role. A null lookup
+    stays null so the caller keeps Qt's ordinary missing-icon behaviour.
     """
     source = QIcon.fromTheme(name)
     if source.isNull():
@@ -85,14 +82,19 @@ def themed_icon(name: str, palette: QPalette | None = None) -> QIcon:
             if pixmap.isNull():
                 continue
             image = pixmap.toImage().convertToFormat(QImage.Format_ARGB32)
-            tinted = QImage(image.size(), QImage.Format_ARGB32)
             colour = QColor(palette.color(group, role))
-            tinted.fill(colour)
-            painter = QPainter(tinted)
-            painter.setCompositionMode(QPainter.CompositionMode_DestinationIn)
-            painter.drawImage(0, 0, image)
-            painter.end()
-            out.addPixmap(QPixmap.fromImage(tinted), mode)
+            target_hue, target_sat, _, _ = colour.getHsvF()
+            if target_sat <= 0:
+                target_hue = 0.0
+            for y in range(image.height()):
+                for x in range(image.width()):
+                    pixel = image.pixelColor(x, y)
+                    hue, saturation, value, alpha = pixel.getHsvF()
+                    if alpha <= 0 or not (0.50 <= hue <= 0.72 and saturation >= 0.18):
+                        continue
+                    image.setPixelColor(x, y, QColor.fromHsvF(target_hue, target_sat,
+                                                               value, alpha))
+            out.addPixmap(QPixmap.fromImage(image), mode)
     return out
 
 
