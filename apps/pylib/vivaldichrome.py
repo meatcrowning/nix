@@ -182,8 +182,9 @@ def relief_css(pal, chrome=None) -> str:
 
     def window_slab():
         return ("background:%s!important" % win_top if win_top == win_bottom
-                else "background:linear-gradient(to bottom,%s 0,%s 48%%,%s 100%%)!important"
-                % (win_top, win_mid, win_bottom))
+                else "background-color:%s!important;background-image:url(oxygen-window.png)!important;"
+                "background-size:100%% 100%%!important;background-repeat:no-repeat!important"
+                % win_bottom)
 
     r = "%dpx" % RADIUS
     return "".join([

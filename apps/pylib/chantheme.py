@@ -255,10 +255,10 @@ def _chrome_css(ch, i):
         # The browser page carries the same fixed window gradient as Vivaldi's
         # surrounding chrome: light at its top, settling into the base rather
         # than becoming a single flat field down a long thread.
-        "html body{background-color:%s%s;background-image:linear-gradient("
-        "to bottom,%s 0,%s 48vh,%s 100vh)%s;background-repeat:no-repeat%s;"
+        "html body{background-color:%s%s;background-image:url(http://127.0.0.1:8791/oxygen-window.png)%s;"
+        "background-size:100%% 100%%;background-repeat:no-repeat%s;"
         "background-attachment:fixed%s}"
-        % (ch["windowBottom"], i, ch["windowTop"], ch["windowMid"], ch["windowBottom"], i, i, i),
+        % (ch["windowBottom"], i, i, i, i),
         # Dialogs, catalog cells, previews and menus as the style's slabs:
         # the panel gradient, a 1px light bevel along the top, a soft foot
         # shadow and Oxygen's small corner radius. POSTS are deliberately not
