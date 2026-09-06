@@ -114,7 +114,10 @@ here:
       was the whole of the scroll lag, and the reason toggling the preview pane
       stuttered: it reveals another row and a half at once.
     - **Clips: `~/.cache/painter/posters`**, one ffmpeg frame extracted **on
-      demand** (`Gallery.requestPoster`), only the first 24 queued eagerly.
+      demand** (`Gallery.requestPoster`) after a realised tile dwells for
+      250ms. Nothing is queued by the history scan. Stills follow the same
+      realised-delegate rule immediately; eagerly preparing 24 of each made a
+      new window consume 27 CPU-seconds before it felt usable on `book`.
     - **Nothing on the scroll path may stat a file.** Both cache names are
       built from the mtime+size the scan already read (`Gallery._ck`,
       `cache_stamp`), because half these paths are on an sshfs mount and a stat
