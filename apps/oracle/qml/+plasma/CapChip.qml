@@ -35,6 +35,5 @@ Item {
         id: capText
         anchors.centerIn: parent
         text: root.label
-        opacity: 0.75
     }
 }
