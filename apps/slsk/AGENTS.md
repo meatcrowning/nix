@@ -80,3 +80,9 @@ Hermetic harnesses may set `SLSK_API_URL` and `SLSK_API_KEY_FILE` to a fake
 loopback server and scratch key. Non-loopback endpoints are rejected. Never
 point a resource fixture at the live 5030 daemon: even a mistaken transition
 must be incapable of searching, queueing, or cancelling there.
+
+`tools/resource-fixture.py` is the retained resource harness. It owns a private
+loopback fake slskd, scratch key and scratch XDG/HOME roots, and exposes the
+shared `normal`, `stress`, `clear`, `quit` protocol without contacting the live
+daemon. Its fake routes deliberately exercise the real worker-thread HTTP,
+JSON ingestion, glyph mapping and QML delegate paths.
