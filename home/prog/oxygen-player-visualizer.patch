@@ -10,7 +10,7 @@
      void renderCorners(QPainter *, const QRectF &, const QPalette &) const;
 --- a/kdecoration/oxygendecoration.cpp
 +++ b/kdecoration/oxygendecoration.cpp
-@@ -23,6 +23,11 @@
+@@ -23,6 +23,12 @@
  #include <KSharedConfig>
  
  #include <QPainter>
