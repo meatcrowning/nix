@@ -3475,9 +3475,7 @@ Item {
                                     width: turn.wide ? turn.bubbleMax
                                            : Math.min(turn.bubbleMax,
                                                       turnCol.natural + 2 * turn.pad)
-                                    height: visible
-                                            ? turnCol.height + 2 * turn.pad + tailHeight
-                                            : 0
+                                    height: visible ? turnCol.height + 2 * turn.pad : 0
 
                                     Column {
                                         id: turnCol

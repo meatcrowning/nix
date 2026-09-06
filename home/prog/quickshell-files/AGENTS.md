@@ -643,12 +643,6 @@ the current wallpaper hue, then alternates the theme name to flush KDE's icon
 cache in open programs. It never block-fills an icon: white highlights, black
 outlines, shading and semantic warning/error colours stay as authored.
 
-**Chatter's `oracle` name is the one deliberate exception to seal tinting.**
-Under Oxygen that name resolves to Konversation's native shaded chat orb via
-`app-icons/oxygen-seals.nix`, which is the artwork chosen for both its panel
-task and native titlebar. `AppIcon.preserveDetail` therefore draws it raw;
-flattening it produces a different icon even though the lookup itself is right.
-
 **Verify a change here on the sandbox output** (`tools/sandbox.sh` + `qs -p
 <test shell.qml>`, then read the pixels back): `QT_QPA_PLATFORM=offscreen` has
 no shader path, so MultiEffect renders nothing there and an offscreen grab will

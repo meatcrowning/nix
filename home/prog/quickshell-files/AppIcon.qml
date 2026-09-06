@@ -48,10 +48,6 @@ Item {
     // for the theme lookup, or an already-resolved path/URL whose basename is
     // still the icon name (image://icon/player, …/apps/player.svg).
     readonly property bool seal: AppSeals.has(root.iconName) || AppSeals.has(root.source)
-    // Oxygen gives Chatter Konversation's shaded chat-orb artwork. It is a
-    // deliberate native icon, not the monochrome Gusion fallback, so retain
-    // its highlights instead of flattening it through the seal tint.
-    readonly property bool preserveDetail: root.iconName === "oracle"
 
     IconImage {
         id: img
@@ -60,13 +56,13 @@ Item {
         opacity: root.dim
         // Normally the invisible SOURCE the effect below reads; drawn straight
         // only for a foreign icon nobody asked to tint.
-        visible: root.preserveDetail || (!root.tint && !root.seal)
+        visible: !root.tint && !root.seal
     }
 
     MultiEffect {
         anchors.fill: img
         source: img
-        visible: !root.preserveDetail && (root.tint || root.seal) && root.source !== ""
+        visible: (root.tint || root.seal) && root.source !== ""
         colorization: 1.0
         colorizationColor: root.color
         opacity: root.dim

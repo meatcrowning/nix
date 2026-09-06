@@ -42,177 +42,15 @@ from html.parser import HTMLParser
 
 from PySide6.QtCore import (QObject, Slot, Signal, Property, QUrl, QUrlQuery,
                             QBuffer, QFileSystemWatcher, QProcess,
-                            QProcessEnvironment, Qt, QTimer, QRect)
-from PySide6.QtGui import (QGuiApplication, QColor, QImage, QLinearGradient,
-                           QPainter, QPainterPath, QPen)
+                            QProcessEnvironment, Qt, QTimer)
+from PySide6.QtGui import QGuiApplication, QColor, QImage
 from PySide6.QtNetwork import (QNetworkAccessManager, QNetworkRequest,
                                QNetworkReply)
-from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, qmlRegisterType
+from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 # Imported for its side effect: it registers the QtQuick wrapper types, so the
 # QML root arrives as a QQuickWindow rather than a bare QWindow — which is what
 # the selftest's `grabWindow()` needs.
-from PySide6.QtQuick import QQuickWindow, QQuickPaintedItem  # noqa: F401
-
-
-class OxygenBubblePaint(QQuickPaintedItem):
-    """One Oxygen-painted button clipped to a speech-bubble silhouette."""
-
-    changed = Signal()
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._user = False
-        self._error = False
-        self._body_height = 0.0
-        self._outline = QColor("transparent")
-        self.setAntialiasing(True)
-
-    def _get_user(self):
-        return self._user
-
-    def _set_user(self, value):
-        value = bool(value)
-        if value != self._user:
-            self._user = value
-            self.changed.emit()
-            self.update()
-
-    user = Property(bool, _get_user, _set_user, notify=changed)
-
-    def _get_error(self):
-        return self._error
-
-    def _set_error(self, value):
-        value = bool(value)
-        if value != self._error:
-            self._error = value
-            self.changed.emit()
-            self.update()
-
-    error = Property(bool, _get_error, _set_error, notify=changed)
-
-    def _get_body_height(self):
-        return self._body_height
-
-    def _set_body_height(self, value):
-        value = max(0.0, float(value))
-        if value != self._body_height:
-            self._body_height = value
-            self.changed.emit()
-            self.update()
-
-    bodyHeight = Property(float, _get_body_height, _set_body_height,
-                          notify=changed)
-
-    def _get_outline(self):
-        return self._outline
-
-    def _set_outline(self, value):
-        value = QColor(value)
-        if value != self._outline:
-            self._outline = value
-            self.changed.emit()
-            self.update()
-
-    outlineColor = Property(QColor, _get_outline, _set_outline, notify=changed)
-
-    def _path(self):
-        # Oxygen's slab is inset 3px inside its control rect: two pixels of
-        # soft shadow, then the bevel. Keep the same breathing room around the
-        # speech silhouette instead of putting a flat stroke on the item edge.
-        inset = 3.5
-        left = top = inset
-        right = max(left, self.width() - inset)
-        bottom = max(top, self.height() - 1.5)
-        body = min(bottom, max(top, self._body_height - inset))
-        tail = max(0.0, bottom - body)
-        tail_w = min(15.0, right - left)
-        r = min(4.0, (right - left) / 2.0, (body - top) / 2.0)
-        path = QPainterPath()
-        path.moveTo(left + r, top)
-        path.lineTo(right - r, top)
-        path.quadTo(right, top, right, top + r)
-        if self._user:
-            path.lineTo(right, body + tail)
-            path.cubicTo(right - 3, body + tail,
-                         right - tail_w + 5, body,
-                         right - tail_w, body)
-            path.lineTo(left + r, body)
-            path.quadTo(left, body, left, body - r)
-        else:
-            path.lineTo(right, body - r)
-            path.quadTo(right, body, right - r, body)
-            path.lineTo(left + tail_w, body)
-            path.cubicTo(left + tail_w - 5, body,
-                         left + 3, body + tail,
-                         left, body + tail)
-        path.lineTo(left, top + r)
-        path.quadTo(left, top, left + r, top)
-        path.closeSubpath()
-        return path
-
-    def paint(self, painter):
-        from PySide6.QtWidgets import QApplication, QStyle, QStyleOptionButton
-
-        path = self._path()
-
-        # Measure the active Oxygen renderer itself. Its slab is a soft shadow
-        # followed by a vertical light-to-dark bevel; QPalette roles are not
-        # those final colours because Oxygen derives them through KColorUtils.
-        # Sampling its real output keeps this path tied to oxygenrc and the
-        # current KDE colour scheme without copying Oxygen's colour maths.
-        sample = QImage(64, 64, QImage.Format_ARGB32_Premultiplied)
-        sample.fill(Qt.transparent)
-        sample_painter = QPainter(sample)
-        sample_option = QStyleOptionButton()
-        sample_option.rect = QRect(0, 0, 64, 64)
-        sample_option.palette = QApplication.palette()
-        sample_option.state = QStyle.State_Enabled | QStyle.State_Active
-        QApplication.style().drawControl(
-            QStyle.CE_PushButton, sample_option, sample_painter)
-        sample_painter.end()
-
-        # The two translucent rows before Oxygen's slab are its native shadow.
-        # Reproduce both around the non-rectangular path before laying in the
-        # native material, so the body and curl carry the same depth.
-        for width, color in ((5.0, sample.pixelColor(1, 32)),
-                             (3.0, sample.pixelColor(2, 32))):
-            painter.setPen(QPen(color, width, Qt.SolidLine,
-                                Qt.RoundCap, Qt.RoundJoin))
-            painter.setBrush(Qt.NoBrush)
-            painter.drawPath(path)
-
-        painter.save()
-        painter.setClipPath(path)
-        option = QStyleOptionButton()
-        # Oxygen's own rectangular frame must not survive inside a non-
-        # rectangular bubble. Paint a button four pixels larger on every side:
-        # its frame lands beyond the clip, while its native gradient/material
-        # still fills the speech path. The path below supplies the one border.
-        bleed = 4
-        option.rect = QRect(-bleed, -bleed,
-                            max(1, round(self.width()) + 2 * bleed),
-                            max(1, round(self.height()) + 2 * bleed))
-        option.palette = QApplication.palette()
-        option.state = QStyle.State_Enabled | QStyle.State_Active
-        QApplication.style().drawControl(QStyle.CE_PushButton, option, painter)
-        painter.restore()
-
-        bevel = QLinearGradient(0, path.boundingRect().top(),
-                                0, path.boundingRect().bottom())
-        bevel.setColorAt(0.0, sample.pixelColor(32, 3))
-        bevel.setColorAt(1.0, sample.pixelColor(32, 60))
-        painter.setPen(QPen(bevel, 1.0, Qt.SolidLine,
-                            Qt.RoundCap, Qt.RoundJoin))
-        painter.setBrush(Qt.NoBrush)
-        painter.drawPath(path)
-        if self._error and self._outline.alpha() > 0:
-            painter.setPen(QPen(self._outline, 1.0, Qt.SolidLine,
-                                Qt.RoundCap, Qt.RoundJoin))
-            painter.drawPath(path)
-
-
-qmlRegisterType(OxygenBubblePaint, "Chatter", 1, 0, "OxygenBubblePaint")
+from PySide6.QtQuick import QQuickWindow  # noqa: F401
 
 HERE = Path(__file__).resolve().parent
 QML = HERE / "qml"
@@ -11822,17 +11660,6 @@ def main():
     # everything a person reads says chatter, About included.
     app.setApplicationDisplayName("chatter")
     app.setDesktopFileName("oracle")
-    # A real KDE window does not infer its icon from the desktop id reliably;
-    # without an explicit application icon Oxygen shows image-missing in the
-    # titlebar. The installed hicolor entry is Chatter's Gusion seal.
-    if plasma_face := (is_plasma() if not face else face in ("plasma", "oxygen")):
-        from PySide6.QtGui import QIcon
-        icon_file = Path.home() / ".local/share/icons/hicolor/scalable/apps/oracle.svg"
-        # Under Oxygen, `oracle` is deliberately aliased to Konversation's
-        # native artwork (home/prog/app-icons/oxygen-seals.nix). That is also
-        # Chatter's titlebar icon; the hicolor Gusion seal is only its fallback
-        # under icon themes without an Oxygen face.
-        app.setWindowIcon(QIcon.fromTheme("oracle", QIcon(str(icon_file))))
 
     palette = Palette(theme_source(PANEL_THEME))
     style = DeskStyle()
@@ -11842,6 +11669,7 @@ def main():
     # platform default while every other app follows Settings > font. Use the
     # primary output's scale at launch, matching the QML components' per-screen
     # `labelFontForScale(Screen.devicePixelRatio)` path.
+    plasma_face = is_plasma() if not face else face in ("plasma", "oxygen")
     if plasma_face:
         screen = app.primaryScreen()
         scale = screen.devicePixelRatio() if screen is not None else 1.0
