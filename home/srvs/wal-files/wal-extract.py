@@ -100,6 +100,12 @@ VARIANTS = {
     "fidelity": {"light_cap": 0.55, "accent_v": 0.70, "struct_mul": 1.20, "status_s": 0.65, "light_ink": 0.60, "light_ink_v": 0.48, "main_dominant": True, "main_exact": True, "bg_darkest": True},
 }
 
+# Per-wallpaper background corrections. These are applied after the generated
+# palette so they affect only the named theme and only dark mode.
+DARK_BG_OVERRIDES = {
+    "preyouandi-1920x1080.png": "464540",
+}
+
 
 def settings():
     """The Settings program's on-disk model, with the shipped defaults for
@@ -583,6 +589,10 @@ def main():
 
     out = full_palette(h, s, v, clusters, pure_bg, variant, light,
                        dom_rgb=dom_rgb, dark_rgb=dark_rgb)
+    if not light:
+        bg_override = DARK_BG_OVERRIDES.get(os.path.basename(path))
+        if bg_override is not None:
+            out["BG"] = bg_override
     mode_label = "manual" if manual_hsv is not None else "auto"
 
     # The options this palette was derived under. wal-set.sh evals the file, so
