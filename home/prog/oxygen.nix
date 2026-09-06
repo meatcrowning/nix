@@ -1,4 +1,4 @@
-{ ... }:
+{ host, ... }:
 
 # `oxygenrc` is live input to both hosts' Plasma apps and their QML DeskStyle
 # bridge. Values declared here are reset at each switch; undeclared values stay
@@ -38,9 +38,9 @@
     # so `book` gets the same window.
     Style.StackedWidgetTransitionsEnabled = true;
     ActiveShadow.Enabled = false;
-    # Normal is the purposeful cross-host titlebar metric. It is declared so
-    # a subsequent profile switch cannot bring back the former small controls.
-    Windeco.ButtonSize = "ButtonNormal";
+    # Air alone uses normal titlebar controls.  Keeping this host-scoped makes
+    # each profile durable across refreshes: top retains its small controls.
+    Windeco.ButtonSize = if host == "air" then "ButtonNormal" else "ButtonSmall";
 
     # Titlebar geometry is shared across hosts. Leaving this mutable made
     # top's title text AlignLeft and book's AlignRight even though both selected
