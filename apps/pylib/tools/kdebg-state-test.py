@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
-"""The styled background follows the WINDOW's state, not the proxy's guess.
+"""The styled background follows the real WINDOW's state.
 
 `kdeshell` draws the KStyle's window background inside the QQuickWidget from an
-image a proxy top-level QWidget renders. That proxy is never a window on
-screen, so Qt picks its colour group on its own — and with an inactive colour
-effect on (`[ColorEffects:Inactive] Enable=true`, which his scheme has) the
-chrome the style paints and the crop the QML draws came from two different
-tones the moment the window lost focus. That is the state a "select window"
-screenshot captures, and it is why the titlebar looked disconnected from the
-window in one [his, 2026-08-23].
+image rendered from the real top-level's background only. The URL still carries
+the active group explicitly: Qt's wl_keyboard focus can differ from the state
+KWin uses to paint the decoration during a "select window" screenshot.
 
-So: the URL carries `a`/`i`, the proxy is dressed in that group's colours, and
+So: the URL carries `a`/`i`, the window is dressed in that group's colours, and
 losing focus re-requests the image. Palettes are SET here rather than read from
 his scheme, so the test means the same thing on a machine themed any way at
 all.
@@ -52,7 +48,10 @@ pal.setColor(QPalette.Inactive, QPalette.Window, INACTIVE)
 app.setPalette(pal)
 
 prov_cls, bg_cls = kdeshell._build_background_classes()
-prov = prov_cls()
+win = QMainWindow()
+win.setAttribute(Qt.WA_StyledBackground, True)
+win.resize(400, 300)
+prov = prov_cls(win)
 
 
 def crop_top(url):
@@ -82,8 +81,6 @@ check("a malformed URL is an empty image, not a crash",
       prov.requestImage("nonsense#4", None, None).isNull())
 
 # ---- the URL says which state, and focus changes re-request it ------------
-win = QMainWindow()
-win.resize(400, 300)
 view = QWidget()
 win.setCentralWidget(view)
 win.show()

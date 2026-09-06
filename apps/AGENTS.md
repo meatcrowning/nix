@@ -194,7 +194,8 @@ QQuickWidget, QT_QUICK_CONTROLS_STYLE=org.kde.desktop, and the package's KDE
 style/QPA/theme/icon dependencies. Never make that QQuickWidget transparent,
 never install an event filter on QApplication, and never use static QMessageBox
 helpers; use the modeless DontUseNativeDialog pattern. StyledBackground.qml
-paints the cropped Oxygen background. Keep active/inactive window colour groups
+paints a background-only render cropped from the actual QMainWindow; do not
+substitute a lookalike proxy top-level. Keep active/inactive window colour groups
 synchronized through kwinactive.py/the KWin helper, and redress every
 QQuickWidget on ApplicationPaletteChange.
 

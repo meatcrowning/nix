@@ -17,11 +17,10 @@ import QtQuick
 // `WA_TranslucentBackground`, once with the transparent clearColor alone.
 //
 // So the view is opaque and this draws the background instead: an image the
-// STYLE renders (a proxy top-level QWidget with WA_StyledBackground, rendered
-// into a QImage and cropped to the view's rectangle in the window), served by
-// the `kdebg` image provider. Pixel-exact against a real window's own painted
-// background, so it still lines up seamlessly with the chrome above it, and it
-// is still Oxygen's code drawing Oxygen's gradient.
+// STYLE renders from the actual QMainWindow, background only, cropped to the
+// view's rectangle and served by the `kdebg` image provider. Using the real
+// top-level is what keeps Oxygen's polish, background role and geometry aligned
+// with the decoration above it; it is still Oxygen drawing Oxygen's gradient.
 //
 // Put it at the BACK of the app's root item and let the panes over it stay
 // transparent (`Theme.windowFill`):

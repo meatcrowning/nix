@@ -53,11 +53,11 @@ its own), and **no offscreen harness can catch it** — `QWidget.grab()`
 re-renders through a fresh backing store while the fault is in the live one.
 So the QML paints the background instead, from an image the style renders
 (`_build_background_classes` → the `kdebg` provider, `qmlcommon/StyledBackground.qml`):
-a proxy top-level QWidget with `WA_StyledBackground`, rendered into a QImage
-and cropped to the view's rectangle in the window. Verified pixel-exact against
-a real window's own background, 0 differing samples, and continuous across the
-toolbar seam. 0.76 ms a render, re-requested only when the geometry, the
-palette or the style changes.
+the actual QMainWindow's background-only render, cropped to the view's rectangle.
+Using the real top-level matters because it is the object Oxygen aligns with
+KWin's decoration; an equal-sized proxy can differ after polish or first layout.
+The render is re-requested only when geometry, palette, style, or activation
+changes.
 
 **One source, two roofs** (docs/DESIGN.md §7.6) is unchanged and is why this
 module reads the app rather than the app reconfiguring itself: the menubar, the
@@ -394,12 +394,9 @@ def _group_palette(group):
     Two callers, one reason: something has to render in a chosen colour group
     rather than in the one Qt would pick for it.
 
-    * The background proxy is NEVER A WINDOW ON SCREEN, so Qt decides its group
-      on its own, and it decided differently from the REAL window: with his
-      colour scheme's inactive effect on (`[ColorEffects:Inactive] Enable=true`,
-      Window 43,35,23 active vs 46,34,0 inactive) the chrome the style paints
-      and the crop the QML draws came from two different tones the moment the
-      window lost focus [his, 2026-08-23].
+    * The background-only render must use KWin's chosen group, not Qt's
+      wl_keyboard-based guess. With an inactive colour effect enabled, those
+      can be visibly different during a select-window screenshot.
     * The WINDOW itself wears one of these when KWin tells us what it thinks
       (`kwinactive.py`), which is how the menubar stops following wl_keyboard
       focus and starts following the titlebar.
@@ -447,8 +444,9 @@ def _build_background_classes():
     from PySide6.QtWidgets import QApplication, QWidget
 
     class _BgProvider(QQuickImageProvider):
-        def __init__(self):
+        def __init__(self, window):
             super().__init__(QQuickImageProvider.Image)
+            self._window = window
 
         def requestImage(self, path, size, requested):
             # "winW,winH,offX,offY,viewW,viewH,dpr,a|i#serial" — the last field
@@ -465,21 +463,25 @@ def _build_background_classes():
             vw, vh = max(1, int(vw)), max(1, int(vh))
             dpr = dpr if dpr > 0 else 1.0
 
-            # A top-level widget, never shown: Oxygen paints the window
-            # background only for a real window (isWindow(), WA_StyledBackground,
-            # Qt::Window) — which this is, whether or not it is on screen.
-            proxy = QWidget()
-            proxy.setAttribute(Qt.WA_StyledBackground, True)
-            proxy.setPalette(_group_palette(QPalette.Active if active
-                                            else QPalette.Inactive))
-            proxy.resize(win_w, win_h)
+            # Render the ACTUAL top-level's background, without its children.
+            # A proxy with the same dimensions looked equivalent, but it is not
+            # the object Oxygen aligns with KWin's decoration. In particular,
+            # its polish/background-role and first-layout state can differ from
+            # the shown QMainWindow, leaving the radial highlight brighter in
+            # the titlebar than at the top of Painter. Dolphin has no proxy in
+            # that seam; neither should we.
+            window = self._window
+            if window is None:
+                return QImage()
+            window.setPalette(_group_palette(QPalette.Active if active
+                                             else QPalette.Inactive))
 
             img = QImage(int(win_w * dpr), int(win_h * dpr),
                          QImage.Format_ARGB32_Premultiplied)
             img.setDevicePixelRatio(dpr)
             img.fill(0)
-            proxy.render(img, QPoint(), QRegion(0, 0, win_w, win_h),
-                         QWidget.DrawWindowBackground)
+            window.render(img, QPoint(), QRegion(0, 0, win_w, win_h),
+                          QWidget.DrawWindowBackground)
 
             crop = img.copy(QRect(int(off_x * dpr), int(off_y * dpr),
                                   int(vw * dpr), int(vh * dpr)))
@@ -644,15 +646,11 @@ def _build_shell_class():
             #     *inside* it, and it is absent from screenshots entirely.
             #
             # So we stop asking for transparency. The widget stays opaque, and
-            # the QML paints the real styled background itself, from an image
-            # the STYLE renders (`_StyledBackground` below): a proxy top-level
-            # QWidget with WA_StyledBackground, rendered into a QImage, cropped
-            # to this view's rectangle within the window. Verified pixel-exact
-            # against a real QMainWindow's own painted background — 0 differing
-            # samples across the window. It is still Oxygen's own code drawing
-            # its own gradient, and it still lines up seamlessly with the
-            # menubar and toolbar above it, because it is a crop of the same
-            # window-sized rendering.
+            # the QML paints the real styled background itself, from the actual
+            # QMainWindow's background-only render (`_StyledBackground` below),
+            # cropped to this view's rectangle. It is still Oxygen's own code
+            # drawing Oxygen's gradient, from the same top-level the native
+            # chrome belongs to.
             # AND THE QML HALF WEARS THE SAME PALETTE. Qt Quick Controls inside
             # a QQuickWidget do not inherit QApplication's palette on their own:
             # rendered offscreen against his dark scheme, the window came out
@@ -672,7 +670,7 @@ def _build_shell_class():
             # binds to for its URL. Installed here, before any QML loads, so the
             # app's own `engine()`/`context()` calls see them already there.
             provider_cls, bg_cls = _build_background_classes()
-            self.view.engine().addImageProvider("kdebg", provider_cls())
+            self.view.engine().addImageProvider("kdebg", provider_cls(self.window))
             self.background = bg_cls(self.view, self.window)
             self.view.rootContext().setContextProperty("KdeBackground", self.background)
 
