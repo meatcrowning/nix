@@ -51,10 +51,14 @@ SCHEME_NAME = "Dynamic"
 # the live repaint below pushes over the pty — a change here only reaches
 # terminals opened afterwards.
 try:
-    OPACITY = float(os.environ.get("KONSOLE_OPACITY", "0.85"))
+    OPACITY = float(os.environ.get("KONSOLE_OPACITY", "1"))
 except ValueError:
-    OPACITY = 0.85
+    OPACITY = 1.0
 OPACITY = min(1.0, max(0.1, OPACITY))
+
+# Draw Oxygen's window gradient behind the text (see write_gradient below).
+# KONSOLE_GRADIENT=0 turns it off and leaves a flat background.
+GRADIENT = os.environ.get("KONSOLE_GRADIENT", "1") not in ("0", "no", "")
 KONSOLE_DIR = Path(os.environ.get("KONSOLE_THEME_DIR")
                    or (Path.home() / ".local" / "share" / "konsole"))
 KONSOLERC = Path(os.environ.get("KONSOLE_THEME_RC")
@@ -128,6 +132,57 @@ def tones(pal: dict) -> dict:
     return t
 
 
+
+# ---- the background gradient -------------------------------------------------
+#
+# Konsole paints the terminal itself, so Oxygen's window gradient — the one
+# Dolphin and painter show — is covered completely and can never show through.
+# Transparency does not help: Opacity < 1 makes Qt mark the whole window
+# translucent, and what appears behind the text is then the DESKTOP, not the
+# window's own fill.
+#
+# So the gradient is drawn into an image and handed to Konsole as its wallpaper.
+# It reproduces Oxygen's ramp: lighter at the top edge, the plain surface colour
+# at the foot (the measured 222 -> 184 luma run recorded in
+# home/prog/plasma-files/OxygenLightFlat.colors).
+GRADIENT_TOP = float(os.environ.get("KONSOLE_GRADIENT_TOP", "1.09"))
+GRADIENT_BOTTOM = float(os.environ.get("KONSOLE_GRADIENT_BOTTOM", "0.94"))
+GRADIENT_H = 1024
+
+
+def _png(width: int, height: int, rows) -> bytes:
+    """Minimal 8-bit RGB PNG. Avoids a Pillow dependency for one gradient."""
+    import struct, zlib
+    raw = bytearray()
+    for row in rows:
+        raw.append(0)                       # filter: none
+        for (r, g, b) in row:
+            raw += bytes((r, g, b))
+    def chunk(tag, data):
+        return (struct.pack(">I", len(data)) + tag + data
+                + struct.pack(">I", zlib.crc32(tag + data) & 0xffffffff))
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+            + chunk(b"IEND", b""))
+
+
+def write_gradient(bg) -> "pathlib.Path":
+    import colorsys
+    r, g, b = [c / 255 for c in bg]
+    h, l, sat = colorsys.rgb_to_hls(r, g, b)
+    def at(k):
+        rr, gg, bb = colorsys.hls_to_rgb(h, min(1.0, max(0.0, l * k)), sat)
+        return tuple(round(c * 255) for c in (rr, gg, bb))
+    top, bot = at(GRADIENT_TOP), at(GRADIENT_BOTTOM)
+    rows = []
+    for y in range(GRADIENT_H):
+        f = y / (GRADIENT_H - 1)
+        rows.append([tuple(round(top[i] + (bot[i] - top[i]) * f) for i in range(3))])
+    path = KONSOLE_DIR / ("%s-gradient.png" % SCHEME_NAME.lower())
+    path.write_bytes(_png(1, GRADIENT_H, rows))
+    return path
+
 def build(pal: dict) -> str:
     """The `.colorscheme` file, for every konsole started from now on."""
     t = tones(pal)
@@ -150,10 +205,17 @@ def build(pal: dict) -> str:
     # window gradient showing through, which an opaque terminal covers entirely.
     # Blur follows transparency: unblurred text over a busy wallpaper is the
     # thing that makes a translucent terminal unreadable.
+    wallpaper = ""
+    if GRADIENT:
+        try:
+            wallpaper = str(write_gradient(t["bg"]))
+        except Exception as exc:                      # never break the scheme
+            print("konsole-theme: gradient skipped (%s)" % exc, file=sys.stderr)
     out.append("[General]\nBlur=%s\nColorRandomization=false\n"
-               "Description=%s\nOpacity=%s\nWallpaper=\n"
+               "Description=%s\nOpacity=%s\nWallpaper=%s\n"
+               "WallpaperOpacity=1\nWallpaperFlipType=NoFlip\n"
                % ("true" if OPACITY < 1.0 else "false", SCHEME_NAME,
-                  ("%g" % OPACITY)))
+                  ("%g" % OPACITY), wallpaper))
     return "".join(out)
 
 
