@@ -4478,7 +4478,8 @@ def main():
     # come from the KDE style — and the offscreen-render rule (apps/AGENTS.md)
     # forbids putting a test window on his screen to find out.
     selftest = "--selftest" in sys.argv
-    if selftest:
+    resource_fixture = os.environ.get("PLAYER_RESOURCE_FIXTURE") == "1"
+    if selftest or resource_fixture:
         # Hard, never setdefault, and with no display left to fall back to: an
         # exported QT_QPA_PLATFORM (his session's, or the wrapper's) would
         # otherwise win and the selftest would open a real player window on his
@@ -4501,7 +4502,7 @@ def main():
     # otherwise: QStyle is a QtWidgets class, and without it there is no system
     # style to paint with. See kdeshell.make_app.
     app = kdeshell.make_app(sys.argv, "player")
-    if selftest and app.platformName() != "offscreen":
+    if (selftest or resource_fixture) and app.platformName() != "offscreen":
         raise SystemExit("selftest refuses to run on platform %r, not offscreen"
                          % app.platformName())
     app.setApplicationName("player")
@@ -4699,7 +4700,7 @@ def main():
             sys.exit(1)
         win = engine.rootObjects()[0]
 
-    if not selftest:
+    if not selftest and not resource_fixture:
         from winstate import WinState
         win_state = WinState(win, "player")  # keep ref: geometry
 
@@ -4709,6 +4710,21 @@ def main():
         # scan, no writes.
         bridge.refreshAlbums()
         return _selftest(app, shell, win, plasma, warnings, player, library, bridge)
+
+    fixture = None
+    if resource_fixture:
+        from resourcefixture import ResourceFixture
+
+        def normal():
+            bridge.setAlbumFilter("fixture-no-match")
+
+        def stress():
+            bridge.setAlbumFilter("")
+            bridge.refreshAlbums()
+
+        fixture = ResourceFixture(app, {"normal": normal, "stress": stress,
+                                        "clear": normal}, parent=app)
+        sys.exit(app.exec())
 
     bridge.refreshAlbums()
     # With files on the command line, restore the SESSION (shuffle, loop, the

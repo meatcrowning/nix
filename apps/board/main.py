@@ -2215,6 +2215,19 @@ def _window_icon(fg):
 
 
 def main():
+    resource_fixture = os.environ.get("BOARD_RESOURCE_FIXTURE") == "1"
+    if resource_fixture:
+        if os.environ.get("QT_QPA_PLATFORM") != "offscreen" or \
+                os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY"):
+            raise SystemExit("board resource fixture requires isolated offscreen Qt")
+        # Keep every normally external board seam inert.  The retained window
+        # still uses the real parser, models and QML, but never consults the
+        # live agent runtime, systemd, transcripts, docs sync or network.
+        os.environ["BOARD_NO_SYNC"] = "1"
+        os.environ["BOARD_USAGE_OFFLINE"] = "1"
+        os.environ["BOARD_SYSTEMCTL"] = "/bin/false"
+        boardagents.agents = lambda: []
+        boardwork.cards = lambda: []
     # Under Plasma this is a real QMainWindow so Oxygen paints the window,
     # menubar, toolbar and status bar itself.  Hyprland stays on the lightweight
     # QQuickWindow path it has always used.
@@ -2295,8 +2308,25 @@ def main():
     # second or two later rather than delaying the window until the network
     # answers.
     sync_now(board.path)
-    app.aboutToQuit.connect(root.saveBeforeQuit)
+    if not resource_fixture:
+        app.aboutToQuit.connect(root.saveBeforeQuit)
     app.aboutToQuit.connect(lambda: sync_now(board.path))
+
+    fixture = None
+    if resource_fixture:
+        from resourcefixture import ResourceFixture
+        normal_path = os.environ["BOARD_RESOURCE_NORMAL_PATH"]
+        stress_path = os.environ["BOARD_RESOURCE_STRESS_PATH"]
+
+        def show(path):
+            board._path = path
+            board._load()
+
+        fixture = ResourceFixture(app, {
+            "normal": lambda: show(normal_path),
+            "stress": lambda: show(stress_path),
+            "clear": lambda: show(normal_path),
+        }, parent=app)
 
     sys.exit(app.exec())
 
