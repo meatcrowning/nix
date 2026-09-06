@@ -61,13 +61,27 @@ let
   '';
   panel-surface-refresh = pkgs.writeShellScript "plasma-panel-surface-refresh" ''
     target="$HOME/.local/state/plasma-panel-surface.png"
+    restart_stamp="''${XDG_RUNTIME_DIR:-/run/user/$UID}/plasma-panel-surface.last-restart"
+    now="$(${pkgs.coreutils}/bin/date +%s)"
+    last="$(${pkgs.coreutils}/bin/cat "$restart_stamp" 2>/dev/null || true)"
+    case "$last" in ""|*[!0-9]*) last=0 ;; esac
+    # plasmashell allows three starts per minute.  Scheme browsing can produce
+    # a new panel image on every click, so hold the service open until the
+    # previous restart leaves that window; path events arriving meanwhile are
+    # coalesced and the render below reads only the final selected scheme.
+    wait_for=$((31 - (now - last)))
+    if [ "$wait_for" -gt 0 ]; then
+      ${pkgs.coreutils}/bin/sleep "$wait_for"
+    fi
     before="$(stat -c '%y:%s' "$target" 2>/dev/null || true)"
     ${panel-surface-renderer}/bin/plasma-panel-surface-renderer
     after="$(stat -c '%y:%s' "$target" 2>/dev/null || true)"
     # A palette write changes several KConfig files.  Restart only for a new
     # image, never for the duplicate events or Plasma's own config saves.
     if [ "$before" != "$after" ]; then
-      ${pkgs.systemd}/bin/systemctl --user try-restart plasma-plasmashell.service
+      if ${pkgs.systemd}/bin/systemctl --user try-restart plasma-plasmashell.service; then
+        ${pkgs.coreutils}/bin/date +%s > "$restart_stamp"
+      fi
     fi
   '';
   # Plasma's FrameSvg tiles its five-pixel centre.  That works for a texture,
