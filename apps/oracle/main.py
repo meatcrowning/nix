@@ -43,8 +43,8 @@ from html.parser import HTMLParser
 from PySide6.QtCore import (QObject, Slot, Signal, Property, QUrl, QUrlQuery,
                             QBuffer, QFileSystemWatcher, QProcess,
                             QProcessEnvironment, Qt, QTimer, QRect)
-from PySide6.QtGui import (QGuiApplication, QColor, QImage, QPainterPath,
-                           QPen)
+from PySide6.QtGui import (QGuiApplication, QColor, QImage, QLinearGradient,
+                           QPainter, QPainterPath, QPen)
 from PySide6.QtNetwork import (QNetworkAccessManager, QNetworkRequest,
                                QNetworkReply)
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, qmlRegisterType
@@ -117,15 +117,17 @@ class OxygenBubblePaint(QQuickPaintedItem):
     outlineColor = Property(QColor, _get_outline, _set_outline, notify=changed)
 
     def _path(self):
-        # A 1px QPen is centred on its path. Keep that centre half a pixel
-        # inside the item so no edge is clipped thinner than its neighbours.
-        left = top = 0.5
-        right = max(left, self.width() - 0.5)
-        bottom = max(top, self.height() - 0.5)
-        body = min(bottom, max(top, self._body_height - 0.5))
+        # Oxygen's slab is inset 3px inside its control rect: two pixels of
+        # soft shadow, then the bevel. Keep the same breathing room around the
+        # speech silhouette instead of putting a flat stroke on the item edge.
+        inset = 3.5
+        left = top = inset
+        right = max(left, self.width() - inset)
+        bottom = max(top, self.height() - 1.5)
+        body = min(bottom, max(top, self._body_height - inset))
         tail = max(0.0, bottom - body)
         tail_w = min(11.0, right - left)
-        r = min(3.0, (right - left) / 2.0, (body - top) / 2.0)
+        r = min(4.0, (right - left) / 2.0, (body - top) / 2.0)
         path = QPainterPath()
         path.moveTo(left + r, top)
         path.lineTo(right - r, top)
@@ -153,6 +155,33 @@ class OxygenBubblePaint(QQuickPaintedItem):
         from PySide6.QtWidgets import QApplication, QStyle, QStyleOptionButton
 
         path = self._path()
+
+        # Measure the active Oxygen renderer itself. Its slab is a soft shadow
+        # followed by a vertical light-to-dark bevel; QPalette roles are not
+        # those final colours because Oxygen derives them through KColorUtils.
+        # Sampling its real output keeps this path tied to oxygenrc and the
+        # current KDE colour scheme without copying Oxygen's colour maths.
+        sample = QImage(64, 64, QImage.Format_ARGB32_Premultiplied)
+        sample.fill(Qt.transparent)
+        sample_painter = QPainter(sample)
+        sample_option = QStyleOptionButton()
+        sample_option.rect = QRect(0, 0, 64, 64)
+        sample_option.palette = QApplication.palette()
+        sample_option.state = QStyle.State_Enabled | QStyle.State_Active
+        QApplication.style().drawControl(
+            QStyle.CE_PushButton, sample_option, sample_painter)
+        sample_painter.end()
+
+        # The two translucent rows before Oxygen's slab are its native shadow.
+        # Reproduce both around the non-rectangular path before laying in the
+        # native material, so the body and curl carry the same depth.
+        for width, color in ((5.0, sample.pixelColor(1, 32)),
+                             (3.0, sample.pixelColor(2, 32))):
+            painter.setPen(QPen(color, width, Qt.SolidLine,
+                                Qt.RoundCap, Qt.RoundJoin))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawPath(path)
+
         painter.save()
         painter.setClipPath(path)
         option = QStyleOptionButton()
@@ -168,9 +197,19 @@ class OxygenBubblePaint(QQuickPaintedItem):
         option.state = QStyle.State_Enabled | QStyle.State_Active
         QApplication.style().drawControl(QStyle.CE_PushButton, option, painter)
         painter.restore()
-        painter.setPen(QPen(self._outline, 1))
+
+        bevel = QLinearGradient(0, path.boundingRect().top(),
+                                0, path.boundingRect().bottom())
+        bevel.setColorAt(0.0, sample.pixelColor(32, 3))
+        bevel.setColorAt(1.0, sample.pixelColor(32, 60))
+        painter.setPen(QPen(bevel, 1.0, Qt.SolidLine,
+                            Qt.RoundCap, Qt.RoundJoin))
         painter.setBrush(Qt.NoBrush)
         painter.drawPath(path)
+        if self._error and self._outline.alpha() > 0:
+            painter.setPen(QPen(self._outline, 1.0, Qt.SolidLine,
+                                Qt.RoundCap, Qt.RoundJoin))
+            painter.drawPath(path)
 
 
 qmlRegisterType(OxygenBubblePaint, "Chatter", 1, 0, "OxygenBubblePaint")
@@ -11789,7 +11828,10 @@ def main():
     if plasma_face := (is_plasma() if not face else face in ("plasma", "oxygen")):
         from PySide6.QtGui import QIcon
         icon_file = Path.home() / ".local/share/icons/hicolor/scalable/apps/oracle.svg"
-        app.setWindowIcon(QIcon.fromTheme("oracle", QIcon(str(icon_file))))
+        # Load the seal itself. QIcon.fromTheme("oracle") resolves to Oxygen's
+        # Konversation alias by design for launchers, but the titlebar icon he
+        # chose is Chatter's Gusion seal.
+        app.setWindowIcon(QIcon(str(icon_file)))
 
     palette = Palette(theme_source(PANEL_THEME))
     style = DeskStyle()
