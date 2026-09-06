@@ -157,6 +157,8 @@ check("every non-core tool is named in the index", not missing, str(missing))
 check("no core tool is listed there twice over",
       not any(("- " + n + " ") in note for n in oracle.CORE_TOOL_NAMES))
 check("and it says how to get one", "get_tools" in note)
+check("skill output contracts do not stop a larger tool workflow",
+      "continue on to that tool" in oracle.skills_note())
 check("the index is in the system prompt", note.split("\n")[0]
       in o._system_prompt(""))
 check("one line each, not a schema",
@@ -186,6 +188,17 @@ result = json.loads([m for m in CHATS[-1]["messages"]
 check("a group attaches all of it",
       set(result["attached"]) == set(oracle.EXTRA_TOOL_GROUPS["images"]),
       str(result["attached"]))
+check("a job call brings its lifecycle companions",
+      set(oracle.TOOL_COMPANIONS["run_job"])
+      == {"run_job", "job_status", "job_log", "job_stop"})
+check("a structured mutation brings its safer companions",
+      set(oracle.TOOL_COMPANIONS["move_path"])
+      == set(oracle.AGENT_TOOL_GROUPS["write"]))
+
+turn([("run_job", {"command": "true", "label": "test"})])
+check("job companions are attached on the next round",
+      all(n in names(CHATS[-1]) for n in oracle.EXTRA_TOOL_GROUPS["jobs"]),
+      str(names(CHATS[-1])))
 
 turn([("get_tools", {"names": "nonesuch"})])
 result = json.loads([m for m in CHATS[-1]["messages"]
