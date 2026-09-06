@@ -166,12 +166,12 @@ def relief_css(pal, chrome=None) -> str:
     bg, fg, border = pal("bg"), pal("text"), pal("border")
     view = pal("bgAlt")
     if chrome:
-        win_top, win_bottom = chrome["windowTop"], chrome["windowBottom"]
+        win_top, win_mid, win_bottom = chrome["windowTop"], chrome["windowMid"], chrome["windowBottom"]
         btn_top, btn_bottom = chrome["buttonTop"], chrome["buttonBottom"]
         head_top, head_bottom = chrome["headerTop"], chrome["headerBottom"]
         bevel, shade = chrome["bevel"], chrome["shade"]
     else:
-        win_top = win_bottom = bg
+        win_top = win_mid = win_bottom = bg
         btn_top = btn_bottom = hexcolor.scale_l(bg, 1.08)
         head_top = head_bottom = bg
         bevel, shade = "rgba(255,255,255,0.06)", "rgba(0,0,0,0.22)"
@@ -180,14 +180,19 @@ def relief_css(pal, chrome=None) -> str:
         return ("background:%s!important" % a if a == b
                 else "background:linear-gradient(to bottom,%s,%s)!important" % (a, b))
 
+    def window_slab():
+        return ("background:%s!important" % win_top if win_top == win_bottom
+                else "background:linear-gradient(to bottom,%s 0,%s 48%%,%s 100%%)!important"
+                % (win_top, win_mid, win_bottom))
+
     r = "%dpx" % RADIUS
     return "".join([
         # The window's own surfaces: title/tab strip, address bar, status bar.
         "#header,.tabbar-wrapper,#tabs-tabbar-container{%s;box-shadow:inset 0 1px 0 %s!important}"
         % (slab(head_top, head_bottom), bevel),
-        ".toolbar-mainbar{%s;border-bottom:1px solid %s!important}" % (slab(win_top, win_bottom), border),
-        "#footer,.toolbar-statusbar{%s;border-top:1px solid %s!important}" % (slab(win_top, win_bottom), border),
-        "#panels-container{background:%s!important;border-right:1px solid %s!important}" % (bg, border),
+        ".toolbar-mainbar{%s;border-bottom:1px solid %s!important}" % (window_slab(), border),
+        "#footer,.toolbar-statusbar{%s;border-top:1px solid %s!important}" % (window_slab(), border),
+        "#panels-container{%s;border-right:1px solid %s!important}" % (window_slab(), border),
         # A tab is a slab: raised and lit when active, recessed and quiet when not.
         ".tab{border-radius:%s!important}" % r,
         ".tab.active,.tab-position.active .tab{%s;border:1px solid %s!important;"

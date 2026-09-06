@@ -33,7 +33,7 @@ _spec.loader.exec_module(gen)
 PAL = {"bg": "#102030", "bgAlt": "#203040", "border": "#304050", "accent": "#ff0088",
        "dim": "#8800ff", "text": "#e8f0ff", "textDim": "#445566", "highlight": "#123456",
        "ok": "#abcdef", "warn": "#fedcba", "crit": "#111222", "info": "#334455"}
-CHROME = {"windowTop": "#182838", "windowBottom": "#0c1826", "panelTop": "#1a2a3a",
+CHROME = {"windowTop": "#182838", "windowMid": "#101e2e", "windowBottom": "#0c1826", "panelTop": "#1a2a3a",
           "panelBottom": "#0e1a28", "headerTop": "#1c2c3c", "headerBottom": "#0a1420",
           "buttonTop": "#243444", "buttonBottom": "#16222e",
           "bevel": "rgba(255,255,255,0.10)", "shade": "rgba(0,0,0,0.28)",
