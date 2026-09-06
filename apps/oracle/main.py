@@ -3278,6 +3278,23 @@ VIDEO_VOLUME_PATH = CONFIG_DIR / "video-volume"
 MUTED_TAG = "-muted"
 SUGGESTED_PATH = CONFIG_DIR / "suggested.json"
 
+# Selector-only names for the locally curated models. Ollama, saved sessions,
+# and last-model retain the exact daemon identifiers; this is solely the short
+# reminder shown beside a model choice.
+MODEL_LABELS = {
+    "qwen3.6:35b-a3b": "generalist · agentic — qwen3.6:35b-a3b",
+    "gemma4-qat:12b": (
+        "generalist · roleplay · sex · agentic · coding · multimodal · OCR · "
+        "subagent — gemma4-qat:12b"),
+    "gemma4:e4b": "generalist · roleplay · retarded sex · multimodal · OCR — gemma4:e4b",
+    "hf.co/bartowski/gemma-4-12B-it-GGUF:Q4_K_M": (
+        "generalist · roleplay · sex · agentic · coding · multimodal · OCR · "
+        "subagent — gemma4-12b q4"),
+    "hf.co/bartowski/Qwen_Qwen3.5-9B-GGUF:Q5_K_M": (
+        "generalist · roleplay · agentic · coding · multimodal · OCR · "
+        "subagent — qwen3.5-9b q5"),
+}
+
 #: The chosen base system prompt, persisted like `last-model`: one small JSON,
 #: `{"choice": <preset id or "custom">, "custom": <the user's own text>}`. The
 #: `custom` text is kept even while a preset is active, so switching back to it
@@ -4819,6 +4836,12 @@ class Ollama(QObject):
         rest = sorted((n for n in names if n not in seen), key=str.lower)
         self._suggested_count = len(top)
         return top + rest
+
+    @Slot(str, result=str)
+    def modelLabel(self, name):
+        """The selector label for `name`, without changing its daemon id."""
+        name = str(name or "")
+        return MODEL_LABELS.get(name, name)
 
     # ---- how loud a clip plays, once, for all of them ---------------------
 
@@ -12560,12 +12583,12 @@ def build_kde_chrome(shell, ollama, sessions, backend):
             model_box.clear()
             names = list(ollama.models)
             for i, name in enumerate(names):
-                model_box.addItem(name)
+                model_box.addItem(ollama.modelLabel(name), name)
                 if i + 1 == int(ollama.suggestedCount) and i + 1 < len(names):
                     model_box.insertSeparator(model_box.count())
             cur = str(root.property("model") or "")
             if cur:
-                idx = model_box.findText(cur)
+                idx = model_box.findData(cur)
                 if idx >= 0:
                     model_box.setCurrentIndex(idx)
             model_box.setEnabled(bool(names))
@@ -12575,14 +12598,16 @@ def build_kde_chrome(shell, ollama, sessions, backend):
     def picked_model(text):
         if mirroring or not text:
             return
-        root.setProperty("model", text)
+        idx = model_box.findText(text)
+        if idx >= 0:
+            root.setProperty("model", str(model_box.itemData(idx) or ""))
 
     def model_changed():
         if mirroring:
             return
         cur = str(root.property("model") or "")
-        if cur and model_box.currentText() != cur:
-            idx = model_box.findText(cur)
+        if cur and model_box.currentData() != cur:
+            idx = model_box.findData(cur)
             if idx >= 0:
                 mirroring.append(1)
                 try:
