@@ -10,6 +10,10 @@ let
     (builtins.readFile ./srvs/wal-files/current-wallpaper);
   sharedWallpaper =
     "${config.home.homeDirectory}/Pictures/wall/${sharedWallpaperName}";
+  plasmaManagerLogin = pkgs.writeShellScript "plasma-manager-login" ''
+    export PATH=${lib.makeBinPath [ pkgs.kdePackages.qttools ]}:$PATH
+    exec ${config.xdg.dataHome}/plasma-manager/run_all.sh
+  '';
 
   # See the comment on `input.mice` below. Hoisted into a `let` so the
   # activation script that pushes the same values at a RUNNING KWin cannot
@@ -362,6 +366,19 @@ in
       plasma-localerc.Formats.LANG = "en_US.UTF-8";
     };
   };
+
+  # plasma-manager's generated panel and wallpaper scripts call bare `qdbus`.
+  # Plasma launches this desktop entry as a transient systemd user service on
+  # Fedora, whose PATH does not include the Nix profile; both scripts then fail
+  # and Plasma keeps its stock panel. Replace only the generated launcher with
+  # a wrapper that pins the matching Qt tool for both hosts.
+  xdg.configFile."autostart/plasma-manager-autostart.desktop".text = lib.mkForce ''
+    [Desktop Entry]
+    Type=Application
+    Name=Plasma Manager theme application
+    Exec=${plasmaManagerLogin}
+    X-KDE-autostart-condition=ksmserver
+  '';
 
   # Push the `mice` values at a RUNNING KWin, because writing kcminputrc does
   # not reach one: KWin reads a device's libinput settings when the device is
