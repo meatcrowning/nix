@@ -22,6 +22,15 @@
     kdenlive
     qttools
     elisa
+    # These are the actual applications named by Plasma's default-handler
+    # table in home/prog/mime-defaults.nix. On top Plasma brings many of them
+    # in transitively; declaring them here keeps air's independently managed
+    # profile complete too, rather than relying on whatever Fedora happened to
+    # have installed at the time of the visual migration.
+    dolphin
+    gwenview
+    haruna
+    okular
     qtsvg
     qtstyleplugin-kvantum
     plasmatube
@@ -32,12 +41,6 @@
     qtwebsockets
    # plasma-framework
     ]) ++ lib.optionals (host == "top") [
-    # KDE's own video player, and the Plasma session's default for video/*
-    # (home/prog/mime-defaults.nix, `kdeAssoc`). `top` only for the same reason
-    # mpv is (home/pkgs/media/consume.nix): it is an mpv front end, there is no
-    # cached aarch64 build of that stack, and book has no Plasma session for it
-    # to be the default in — Plasma is a NixOS module (sys/dsk/plasma.nix).
-    haruna
     # breeze-square-overlay patches this locally, so there's no cache hit —
     # it always compiles from source (KDE Frameworks/Qt, genuinely slow).
     # Skipped on air for now to keep first bring-up fast; corners just stay
