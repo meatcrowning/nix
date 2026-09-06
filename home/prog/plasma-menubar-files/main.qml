@@ -9,9 +9,10 @@
     always has menus under it.
 
     This applet supplies the part Plasma has no source for, and nothing else.
-    It sits immediately LEFT of the stock appmenu applet:
+    It sits immediately AFTER the stock appmenu applet, which is absent unless
+    a focused window exports real menus:
 
-        [kickoff] [ File Edit View … ]                app exports a menu
+        [kickoff] [ File Edit View … ] [ ]            app exports a menu
         [kickoff] [ Window ]                          it does not
         [kickoff] [ File Edit Go Window Help ]        nothing focused
 
@@ -45,12 +46,14 @@
 
 import QtQml
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
 import org.kde.plasma.plasmoid
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.components as PlasmaComponents3
 import org.kde.plasma.plasma5support as P5Support
 import org.kde.kirigami as Kirigami
+import org.kde.ksvg as KSvg
 import org.kde.taskmanager as TaskManager
 
 PlasmoidItem {
@@ -61,7 +64,7 @@ PlasmoidItem {
     // The desktop owns its menu bar, so give its first category a little air
     // after Kickoff.  A focused app's menu already has the stock appmenu's
     // inset; the handoff here needs only one physical pixel.
-    readonly property int desktopGutter: Kirigami.Units.smallSpacing + 2
+    readonly property int desktopGutter: Kirigami.Units.smallSpacing + 4
     readonly property int appGutter: 1
 
     // The fallback must stay live to notice desktop focus returning. Plasma
@@ -377,7 +380,11 @@ PlasmoidItem {
 
     // ---- the bar --------------------------------------------------------
 
-    component BarButton: PlasmaComponents3.ToolButton {
+    // Match Plasma's stock app-menu delegate exactly: its menubar frame owns
+    // the text inset, hover treatment and font rather than a generic button.
+    component BarButton: AbstractButton {
+        id: button
+
         property var menu: null
 
         readonly property bool isOpen: popup.visible && popup.owner === this
@@ -386,13 +393,33 @@ PlasmoidItem {
         Layout.fillHeight: !root.vertical
         text: menu ? menu.title : ""
         font.bold: menu ? menu.bold === true : false
+        hoverEnabled: true
         down: isOpen
+
+        topPadding: rest.margins.top
+        leftPadding: rest.margins.left
+        rightPadding: rest.margins.right
+        bottomPadding: rest.margins.bottom
+
+        background: KSvg.FrameSvgItem {
+            id: rest
+            imagePath: "widgets/menubaritem"
+            prefix: button.down ? "pressed" : (button.hovered ? "hover" : "normal")
+        }
+
+        contentItem: PlasmaComponents3.Label {
+            text: button.text
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+            color: button.down || button.hovered
+                ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
+        }
 
         function openMine() {
             popup.openFor(this, menu.build());
         }
 
-        onClicked: {
+        onPressed: {
             if (isOpen || popup.justClosed()) {
                 popup.dismiss();
             } else {
