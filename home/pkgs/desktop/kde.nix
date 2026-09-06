@@ -59,6 +59,7 @@ in {
     oxygen-sounds
     partitionmanager
     qtwebsockets
+    kcolorpicker
    # plasma-framework
     ]) ++ lib.optionals (host == "top") [
     # breeze-square-overlay patches this locally, so there's no cache hit —
