@@ -53,9 +53,21 @@ ForegroundNormal=255,255,255
 ForegroundPositive=0,108,69
 ForegroundVisited=93,76,160
 
+# [Colors:Complementary] IS THE PANEL. Plasma resolves a panel's Plasma-style
+# SVG against this group, not [Colors:Window] — so this group alone decides what
+# the panel looks like. Oxygen ships it as the INVERTED group (near-black
+# background, near-white ink) and plasma-scheme.py preserves that structure, so
+# on the light scheme the panel came out black however the Plasma style was
+# drawn: the oxygen-scheme style's gradients and accent tint were all painting
+# on top of a near-black base and could not be seen. Measured 2026-09-05.
+#
+# It is set to the [Colors:Window] values, which in both templates are exactly
+# the [WM] activeBackground/activeForeground pair — so the panel is the same
+# surface as a titlebar, which is what he asked for. Keep the two in step: if
+# this group and [WM] drift apart, the panel stops matching the titlebars.
 [Colors:Complementary]
-BackgroundAlternate=52,55,77
-BackgroundNormal=14,21,37
+BackgroundAlternate=15,31,53
+BackgroundNormal=25,36,56
 DecorationFocus=0,88,203
 DecorationHover=0,88,203
 ForegroundActive=38,89,193
@@ -65,8 +77,7 @@ ForegroundNegative=174,49,57
 ForegroundNeutral=163,132,75
 ForegroundNormal=255,255,255
 ForegroundPositive=0,108,69
-ForegroundVisited=142,115,233
-
+ForegroundVisited=93,76,160
 [Colors:Selection]
 BackgroundAlternate=0,70,154
 BackgroundNormal=0,70,154
