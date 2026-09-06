@@ -117,32 +117,35 @@ class OxygenBubblePaint(QQuickPaintedItem):
     outlineColor = Property(QColor, _get_outline, _set_outline, notify=changed)
 
     def _path(self):
-        w = max(0.0, self.width())
-        h = max(0.0, self.height())
-        body = min(h, max(0.0, self._body_height))
-        tail = max(0.0, h - body)
-        tail_w = min(11.0, w)
-        r = min(3.0, w / 2.0, body / 2.0)
+        # A 1px QPen is centred on its path. Keep that centre half a pixel
+        # inside the item so no edge is clipped thinner than its neighbours.
+        left = top = 0.5
+        right = max(left, self.width() - 0.5)
+        bottom = max(top, self.height() - 0.5)
+        body = min(bottom, max(top, self._body_height - 0.5))
+        tail = max(0.0, bottom - body)
+        tail_w = min(11.0, right - left)
+        r = min(3.0, (right - left) / 2.0, (body - top) / 2.0)
         path = QPainterPath()
-        path.moveTo(r, 0)
-        path.lineTo(w - r, 0)
-        path.quadTo(w, 0, w, r)
+        path.moveTo(left + r, top)
+        path.lineTo(right - r, top)
+        path.quadTo(right, top, right, top + r)
         if self._user:
-            path.lineTo(w, body + tail)
-            path.cubicTo(w - 3, body + tail,
-                         w - 8, body + tail - 2,
-                         w - tail_w, body)
-            path.lineTo(r, body)
-            path.quadTo(0, body, 0, body - r)
+            path.lineTo(right, body + tail)
+            path.cubicTo(right - 3, body + tail,
+                         right - 8, body + tail - 2,
+                         right - tail_w, body)
+            path.lineTo(left + r, body)
+            path.quadTo(left, body, left, body - r)
         else:
-            path.lineTo(w, body - r)
-            path.quadTo(w, body, w - r, body)
-            path.lineTo(tail_w, body)
-            path.cubicTo(8, body + tail - 2,
-                         3, body + tail,
-                         0, body + tail)
-        path.lineTo(0, r)
-        path.quadTo(0, 0, r, 0)
+            path.lineTo(right, body - r)
+            path.quadTo(right, body, right - r, body)
+            path.lineTo(left + tail_w, body)
+            path.cubicTo(left + 8, body + tail - 2,
+                         left + 3, body + tail,
+                         left, body + tail)
+        path.lineTo(left, top + r)
+        path.quadTo(left, top, left + r, top)
         path.closeSubpath()
         return path
 
@@ -153,8 +156,14 @@ class OxygenBubblePaint(QQuickPaintedItem):
         painter.save()
         painter.setClipPath(path)
         option = QStyleOptionButton()
-        option.rect = QRect(0, 0, max(1, round(self.width())),
-                            max(1, round(self.height())))
+        # Oxygen's own rectangular frame must not survive inside a non-
+        # rectangular bubble. Paint a button four pixels larger on every side:
+        # its frame lands beyond the clip, while its native gradient/material
+        # still fills the speech path. The path below supplies the one border.
+        bleed = 4
+        option.rect = QRect(-bleed, -bleed,
+                            max(1, round(self.width()) + 2 * bleed),
+                            max(1, round(self.height()) + 2 * bleed))
         option.palette = QApplication.palette()
         option.state = QStyle.State_Enabled | QStyle.State_Active
         QApplication.style().drawControl(QStyle.CE_PushButton, option, painter)
