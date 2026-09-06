@@ -341,6 +341,11 @@ in
       dolphinrc.General.ShowZoomSlider = true;
       dolphinrc."KFileDialog Settings"."Places Icons Auto-resize" = false;
       dolphinrc."KFileDialog Settings"."Places Icons Static Size" = 22;
+      # Konsole's clean window is a desktop preference, not an accidental
+      # property of top's KConfig state.  Its root-level MenuBar key cannot be
+      # expressed by plasma-manager's section-only KConfig schema, so the
+      # launcher below is the durable authority for each new window.
+      konsolerc.MainWindow.ToolBarsMovable = "Enabled";
       katerc.General."Days Meta Infos" = 30;
       katerc.General."Save Meta Infos" = true;
       katerc.General."Show Full Path in Title" = false;
@@ -395,6 +400,27 @@ in
     Name=Plasma Manager theme application
     Exec=${plasmaManagerLogin}
     X-KDE-autostart-condition=ksmserver
+  '';
+
+  # KConfig remembers a toolbar only after Konsole has opened once, and a
+  # package upgrade can restore its stock visible toolbar before that state is
+  # read.  The user-local entry wins over the packaged one on both hosts and
+  # makes the purposeful Top layout unambiguous for every launcher/runner
+  # invocation.  `konsole` itself stays the patched package above, so
+  # StyleBackground is painted by the live Oxygen KStyle rather than treated
+  # as an ordinary image path.
+  xdg.dataFile."applications/org.kde.konsole.desktop".text = ''
+    [Desktop Entry]
+    Type=Application
+    Name=Konsole
+    GenericName=Terminal
+    Comment=Terminal emulator
+    Exec=${pkgs.kdePackages.konsole}/bin/konsole --hide-menubar --hide-toolbars
+    Icon=utilities-terminal
+    Categories=Qt;KDE;System;TerminalEmulator;
+    Terminal=false
+    StartupNotify=true
+    DBusActivatable=false
   '';
 
   # Push the `mice` values at a RUNNING KWin, because writing kcminputrc does
