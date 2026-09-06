@@ -3,101 +3,15 @@ import QtQuick
 // line. Nothing here writes a duration of its own (§6.2).
 import "../../qmlcommon"
 
-// One agent's card: WHAT IT SAYS it is doing, WHAT IT IS OBSERVED DOING, what
-// it was asked to do, and the box he types into to reach it.
+// A spirit card shows three things in order: its own claim, observed activity,
+// then its standing brief. `boardphase.says_line()` / `doing_line()` supply the
+// finished sentences; this component must not fill one from the other. When no
+// claim exists, the observed line includes the spirit's name because it leads
+// the card. Cards stay in one oldest-first list rather than moving by phase.
 //
-// THE TWO LINES ARE THE POINT, and they are his call — *"i want both. i want
-// what its saying its doing and what its actually doing"*. The first is a plain
-// SENTENCE led by the agent's own name, because that is how he asked to read it:
-// *"[agent name] is [what the agent says its doing]"*. The bare words `says`
-// and `doing` in a label column beside the two texts are what that replaced.
-//
-// **The second line is the description ALONE** — his call, 2026-07-29:
-// *"actually just take out the [agent] is actually and just display the text
-// after it"*. So UNDER A CLAIM it reads `editing Main.qml`, not *"Marbas is
-// actually editing Main.qml"*. The name is already the subject of the line
-// above it, and a card that said it twice was the repeated metadata
-// docs/DESIGN.md §9.1 rules out.
-//
-// **But when the observed line LEADS the card — no claim above it — it keeps
-// the name on the top line** [his, 2026-08-01]: the card used to drop its name
-// the moment activity was reported and that subjectless line took the lead. So
-// a claimless active card reads *"Marbas is editing Main.qml..."*, name and
-// all (`boardphase.doing_line`'s `lead`). It is drawn once, never twice — the
-// 7-cell name column below only appears when NO sentence names the agent.
-//
-// **The two lines come FIRST, and the title row is the THIRD** — his call
-// again, in as many words: *"the very first line of an agent in the agent
-// section should be the [name] is [what the agent says theyre doing]. the
-// second line should be [name] is actually doing XYZ. the third line should be
-// what the current first line is"*. What a card is FOR is the live pair; the
-// brief it was handed and the `where` it works in never change for the life of
-// the agent, so they sit UNDER the two lines that do.
-//
-//   <name> is ...      the agent's own words (`boardctl.py phase`). Carries the
-//                      OBJECT — "the vtbclient parser" — which watching tool
-//                      calls can never give. Absent until it says something;
-//                      absence is drawn as absence. The right end of this row
-//                      — the card's top row — carries `62k/200k`, how much
-//                      context the agent is standing in against what it holds
-//                      (`boardphase.context_line`, measured out of the
-//                      transcript's own `usage` stamps, absent when nothing
-//                      could be measured).
-//   <the description>  derived from the tool calls in its live transcript
-//                      (`boardphase.py`). Carries the VERB — "editing
-//                      Main.qml" — and cannot be faked, forgotten or left
-//                      stale. No subject, no opener, and NO dots on the end of
-//                      it: the one ticking `...` on a card is on its TOP line,
-//                      and no other line may have one at all.
-//
-// **Both lines are built in `boardphase.py` (`says_line`/`doing_line`), not
-// here**, because the joining is a judgement about the real strings rather than
-// string concatenation: an agent that named no phase is quoted instead of
-// forced after "is", and a STOPPED agent goes into the past tense — with no
-// subject on the line there is nowhere else for the tense to live, so *"last
-// seen editing Main.qml"* is the honest form of the same fact.
-//
-// **Neither is ever shown as the other, and neither is ever filled in from the
-// other.** The second line is the OBSERVED one, so an agent claiming
-// *testing* while it edits says *testing* on one line and *editing
-// Main.qml* on the next. That divergence is information he asked to be able to
-// see: it is not an error, so there is no warning, no badge and nothing from
-// the warn/crit ramp — which on this desktop means a machine fault (§8.1,
-// §9.3), not an agent being optimistic about itself. Two true statements,
-// drawn plainly.
-//
-// There are no phase headings over these cards any more, and no sections at
-// all: one flat list, oldest first (`boardwork.cards()`), so a card does not
-// move when the agent picks up a different tool.
-//
-// The ladder does the rest, and the reorder RETUNED it (§10.6): **the lead
-// tone goes to whichever of the three lines is actually drawn first**, so a
-// card never opens on its quietest text. Ordinarily that is `says`, at
-// `fgText`; `doing` keeps the ordinary secondary tone under it; and the title
-// row — the standing brief, unchanged since the agent was handed it — drops to
-// `Theme.dim` now that it is third.
-//
-// It reads the other way round when it has to: a card with no claim leads with
-// `doing` — which then opens with the agent's name (above) — and a card with
-// neither sentence leads with the title row, which is the case the name column
-// exists for. Position, not trust, picks the tone —
-// the old order had `says` a rung quieter than `doing` for being somebody's
-// account of themselves, and that reading would now make the first line of
-// every card the dimmest thing on it. §10.6's rule is that neither side is
-// filled in from the other; it was never that one outranks the other.
-//
-// WHAT THIS CARD STILL MAY NOT SAY (docs/DESIGN.md §10, and `boardagents.py`'s
-// docstring):
-//
-//   * **It never claims delivery it cannot prove.** A note he sends sits under
-//     the card saying `waiting in its inbox` until the agent actually takes it.
-//   * **A failed agent says so in WORDS**, never in a colour.
-//   * **Nothing counts and nothing ages.** No elapsed time, no "started at", no
-//     step count — including on the quiet line, which says "nothing recently"
-//     and never how long ago.
-//
-// The one mark is §9.1's 2px accent gutter, for the same thing it means on an
-// answered decision: this row is current.
+// The first available line gets the lead tone. Failure and delivery state are
+// written in words, never inferred from colour; cards show no elapsed time,
+// start time or step count. See `guide/cards.md` and `docs/DESIGN.md` §§9–10.
 Item {
     id: row
 

@@ -1,42 +1,12 @@
 import QtQuick
 
-// THE one wheel-to-contentY translator for every app in apps/. Shared, not
-// copied: it used to exist twice (player/qml/ and painter/qml/) while filer
-// only quoted its rationale in a comment and had no copy at all, which is
-// exactly how a convention rots. Reach it with a relative directory import —
-// `import "../../qmlcommon"` from apps/<app>/qml/ — which needs no change to
-// the wrapper in home/prog/<app>.nix. `Theme` resolves inside here because
-// every app installs it as a root CONTEXT PROPERTY (main.py), and context
-// properties are visible in every file-based component whatever directory it
-// lives in.
+// The one wheel-to-contentY translator shared by every app in apps/. It exists
+// because hyprvtb's compositor-side momentum arrives here as a raw wheel stream,
+// and Qt's default Flickable adds its own momentum on top of it.
 //
-// WHY IT EXISTS AT ALL — kinetic momentum is COMPOSITOR-SIDE. hyprvtb
-// synthesizes macOS-style momentum at the seat (plugin:hyprvtb:kinetic in both
-// copies of hyprland.lua; docs/kinetic-scroll.md), so a coast arrives here as
-// an ordinary high-resolution wheel/axis stream. A view honours it iff it moves
-// PROPORTIONALLY to the delta and adds NO momentum of its own. Qt's default
-// Flickable fails both halves. Measured offscreen, PySide6 6.11, 5000px of
-// content, a 240px synthetic coast (30 x 8px pixelDelta, ScrollBegin + updates,
-// no ScrollEnd — the compositor withholds the terminal stop >=300ms):
-//
-//     default Flickable   moved 285px during the stream, then flicked on
-//                         its own to 342px  (+43% over the finger)
-//     interactive:false + WheelScroll   240px, dead stop, +0.0
-//
-// and one classic detent animates 0 -> 72px over ~1s on its own timeline. That
-// second momentum is not "more kinetic", it is a fight between two decay
-// curves, and it is why the house rule is Qt flicking OFF and this overlay ON.
-//
-// The policy that falls out: the SCROLLBAR and the WHEEL only, no
-// click-and-drag flicking. Qt gives you both or neither (a Flickable with
-// `interactive: false` ignores the wheel too), so every scrollable view sets
-// `interactive: false` and overlays one of these.
-//
-// It accepts NO buttons, so presses, double-clicks and hover fall straight
-// through to the rows (and the scrollbar) underneath — it only ever sees the
-// wheel. Unhandled wheels are left unaccepted, so a view that cannot scroll
-// passes the notch out to whatever is behind it (e.g. the album gallery
-// scrolling while the pointer is over an open album section).
+// The rule that falls out: wheel and scrollbar only, no Qt flicking. Every
+// scrollable view sets `interactive: false` and overlays one of these, while
+// presses and hover fall through to whatever is underneath.
 MouseArea {
     id: root
     property Flickable view: null

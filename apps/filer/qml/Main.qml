@@ -39,32 +39,14 @@ Window {
     readonly property bool picking: Picker.active
 
     // ---- split view ----
-    // Two independent browsing panes, side by side or stacked, divided by a
-    // draggable splitter — the point being that you can drag files from one to
-    // the other (the drop half landed first; see AGENTS.md). Each pane is a
-    // whole BrowserPane: its own directory, selection, sort, expanded tree,
-    // context menu and drop target.
+    // Two browsing panes, side by side or stacked, with one chrome driving both.
+    // The point is drag-and-drop between panes; each BrowserPane keeps its own
+    // directory, selection, sort, tree state and drop target.
     //
-    // `focusPane` is which of the two the CHROME acts on. There is one
-    // titlebar for two panes, so everything on it — the address bar, the sort
-    // buttons, the file operations, the dir-size footer — reads `pane`, "the
-    // focused pane", and every pane-agnostic line below kept working
-    // unchanged. Clicking anywhere in a pane points the chrome at it
-    // (BrowserPane's claimFocus/focusClaimed).
-    //
-    // The same shape as surfer's split view (apps/surfer/qml/Main.qml) minus
-    // its hard part: surfer's panes show TABS, so one pane could be handed a
-    // view the other was already showing and the two had to swap. Two filer
-    // panes can happily show the same directory.
-    //
-    // ORIENTATION, kitty's two buttons: `|` splits RIGHT (a vertical divider,
-    // panes side by side — `splitVertical`, the original behaviour) and `_`
-    // splits DOWN (a horizontal divider, panes stacked). One geometry serves
-    // both: a LEADING pane (left/top), the splitter, a TRAILING pane
-    // (right/bottom), measured along whichever axis is active. `splitRatio` is
-    // the same number on either axis, so re-orienting keeps the proportion.
-    // (`_`, not `-`: a bare "-" is the SPACER token in the vtb button-array
-    // protocol — see pylib/vtbclient.py.)
+    // `focusPane` is the pane the chrome acts on. `|` splits right and `_`
+    // splits down, but one geometry serves both axes and `splitRatio` is reused
+    // when the orientation flips. Clicking anywhere in a pane points the chrome
+    // at it.
     property bool splitOn: false
     property bool splitVertical: true   // true = left|right, false = top/bottom
     property int focusPane: 0     // 0 = leading (left/top), 1 = trailing

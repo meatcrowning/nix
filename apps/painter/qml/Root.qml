@@ -653,41 +653,15 @@ Item {
 
     // -------------------------------------------------------------- chrome
 
-    // ONE TABLE OF VERBS, TWO CHROMES THAT READ DIFFERENT COLUMNS OF IT.
+    // `actions` is the shared verb table. Hyprvtb reads id/label/state/tip/
+    // bottom from the rows marked `tb:`; the KDE menubar/toolbar reads the
+    // richer menu fields. Unknown keys are inert, which is what lets one array
+    // serve both.
     //
-    // `actions` is everything painter can be told to do. What each consumer
-    // takes from a row:
-    //
-    //   hyprvtb titlebar   id, label, state, tip, bottom   — and ONLY the rows
-    //                      marked `tb:`, because a titlebar column has six
-    //                      cells, not a menubar's worth. `tbButtons` below is
-    //                      that filter, and it is what `pushButtons()` sends.
-    //   KDE menubar/       menu, menuText, icon, bar, shortcut, checkable,
-    //   toolbar            group  (pylib/kdeshell.py) — every row, since a menu
-    //                      IS the complete set.
-    //
-    // Everything the other side does not read is inert, which is what lets one
-    // array serve both: vtbclient.py ignores unknown keys, and kdeshell never
-    // sees `label`.
-    //
-    // Labels are lowercase ASCII, one or two characters, and the settings cell
-    // is "st" — the same label player and surfer use for the same button
-    // (docs/DESIGN.md §12.1: a function that already has a glyph keeps it in every
-    // app). A menu row instead shows `menuText` or `tip`, in sentence case with
-    // the desktop's own capitalisation, because it is a row of words.
-    //
-    // `state`: 0 normal, 1 lit/checked, 2 disabled. A row whose target does not
-    // exist is DISABLED rather than absent, since a menu whose contents move
-    // around is a menu you cannot learn (docs/DESIGN.md §10.1).
-    //
-    // `shortcut` is the KDE face's alone: the QML `Shortcut`s at the bottom of
-    // this file stand down under Plasma so exactly one thing owns each key.
-    // "@Name" takes the platform's standard sequence rather than a literal.
-    // ...minus the rows that have nothing to act on right now. A row is
-    // normally DISABLED rather than absent (docs/DESIGN.md §10.1 — a menu whose
-    // contents move around is one you cannot learn); `hidden` is the deliberate
-    // exception, for a verb that is meaningless outside one kind of output.
-    // kdeshell trims the separators a filtered-out row leaves behind.
+    // Labels stay short and lowercase for the titlebar (`docs/DESIGN.md`
+    // §12.1), while menu rows can expose the full wording. Disabled rows stay
+    // visible so the action set remains learnable; `hidden` is the deliberate
+    // exception for verbs that only make sense in one output mode (§10.1).
     readonly property var actions:
         root.allActions.filter((a) => a === "-" || a.hidden !== true)
 

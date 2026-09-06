@@ -1,66 +1,18 @@
 """remote — `:top` in the address bar: browse another machine's filesystem.
 
-Type `:top` into filer's path bar and you land in lam's home on `top`. The
-whole feature is one sshfs mount plus a name rewrite, deliberately:
+`:top` resolves to `top`'s home, `:top:/etc` to any remote absolute path, and a
+bare `:NAME` that is not a host resolves to a removable drive. The mount is the
+remote root, not just the home directory, so one mount per host keeps the name
+rewrite unambiguous and lets the ordinary local-path code keep handling tree,
+preview, drag-and-drop and `viewer`.
 
-  * **The mount is the remote's `/`, not its home.** Mounting the home
-    directory would need one mountpoint per (host, root) pair — `:top` and
-    `:top:/etc` would collide on the same directory name — and it would make
-    `pretty()` (the reverse map, below) ambiguous. One mount per host means
-    every path on that machine is addressable, `^` walks out of the home the
-    way it does locally, and the rewrite is a plain prefix swap.
-  * **Everything downstream stays ordinary local-path code.** The tree, the
-    preview grid, drag and drop, copy/move, `viewer` — none of them learn
-    about remotes, because by the time they see a path it is a real path under
-    the mountpoint.
-  * **Mounting happens off the GUI thread.** An ssh handshake to a machine
-    that is asleep takes as long as `ConnectTimeout`; doing that in the
-    address-bar handler would freeze the window. `open()` returns at once and
-    the navigation happens on the `ready` signal.
-  * **It cannot fail silently** (docs/DESIGN.md 10.4): a mount that takes a
-    moment posts a live toast, and a mount that fails replaces it with the
-    reason ssh gave, rather than leaving the path bar sitting on the old
-    directory with no explanation.
+Mounts happen off the GUI thread and never fail silently: a slow connect shows
+a toast, and a failure replaces it with the ssh error. `sshfs` comes from the
+wrapper on `top` and from Fedora's `fuse-sshfs` on `book`, auth is key-only,
+and first-use host keys are accepted automatically.
 
-Address syntax, all of it:
-
-    :top                 lam@top, that machine's /home/lam
-    :top/dl/iso          ... and a subdirectory of it
-    :root@top            another user's home (/root for root, /home/<u> else)
-    :top:/etc/nixos      an absolute path on the remote, home not assumed
-    :SSD                 the removable drive mounted at /run/media/lam/SSD
-    :SSD/flac/x          ... and a subdirectory of it
-
-An address naming THIS machine resolves locally with no mount at all, so
-`:book` on book is simply /home/lam.
-
-A bare `:NAME` that is not a host is looked for among the **drives** —
-`/run/media/<user>/NAME`, where udisks mounts removable media on both machines.
-It is the same address on either one: mounted here, it is that local directory
-and nothing connects; not mounted here, it is the same directory on `DRIVE_HOST`
-(the desktop, `top`, where the external disks actually live) reached through the
-sshfs mount above. So `:SSD` means "the drive called SSD" from wherever it is
-typed, and `pretty()` writes both forms back as `:SSD`.
-
-Precedence, in order, because a drive name could in principle also be a
-hostname: a drive mounted locally wins outright (it needs no network and is what
-`:NAME` most plainly means where it is plugged in); otherwise a live mount to
-`NAME` or a name that RESOLVES is the host it always was; only a name that
-resolves to nothing is looked for on the drive host. Case is folded, so `:ssd`
-finds `SSD`, and the on-disk spelling is what comes back.
-
-Requirements, and they differ per host: `sshfs` comes from the nix wrapper on
-`top` (`home/prog/filer.nix`) and from Fedora's `fuse-sshfs` on `book`, which
-is why it is resolved through `notify.tool()` rather than hardcoded. Auth is
-key-only (`BatchMode=yes`) — a password prompt has no terminal to appear on and
-would hang the mount until the timeout. Unknown host keys are accepted on first
-use (`accept-new`), the same answer a person gives the interactive prompt.
-
-Two things this does NOT try to be: it is not a fast filesystem (thumbnails of
-a remote directory pull the files over the wire), and a symlink on the remote
-pointing at an absolute path — `/nix/store/...`, say — resolves against THIS
-machine's copy of that path, because sshfs hands the link text through
-untranslated. Both are properties of sshfs, not of filer.
+The known limits are sshfs's own: it is not a fast filesystem, and a symlink to
+an absolute path resolves against this machine's copy of that path.
 """
 import os
 import re
@@ -72,21 +24,17 @@ from PySide6.QtCore import QObject, Slot, Signal
 
 from notify import tool, toast
 
-# Where the mounts live. $XDG_RUNTIME_DIR is right for them: they are session
-# state, and a logout that tears the directory down takes the stale mountpoints
-# with it. One directory per host, named `user@host`.
+# Mounts are session state, so `$XDG_RUNTIME_DIR` is the right root. One
+# directory per host, named `user@host`.
 MOUNT_ROOT = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp",
                           "filer-remote")
 
 DEFAULT_USER = os.environ.get("USER") or "lam"
 
-# Where udisks mounts removable media, on NixOS and on Fedora alike — so the
-# same address means the same drive on both machines.
+# Where udisks mounts removable media, on NixOS and on Fedora alike.
 DRIVE_ROOT = "/run/media/" + DEFAULT_USER
 
-# Whose drives a `:NAME` means when no drive of that name is mounted here. The
-# external disks hang off the desktop; from the laptop they are reached over the
-# same sshfs mount `:top` uses.
+# Whose drives a `:NAME` means when no drive of that name is mounted here.
 DRIVE_HOST = "top"
 
 _HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")

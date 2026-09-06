@@ -1,64 +1,14 @@
-"""winstate — remember a top-level window's position and size between sessions.
+"""winstate — remember a top-level window's geometry between sessions.
 
-One helper, wired identically into every app's `main.py` right after the root
-window is created (`win = engine.rootObjects()[0]`):
+It writes frame geometry to `$XDG_STATE_HOME/<app>/window.json` on close and on
+debounced move/resize, then restores it next start. Size restores everywhere;
+position restores on X11 and Hyprland, but not on KWin/Wayland, where the
+protocol cannot provide a reliable client-side position and a KWin rule would
+misplace every toplevel of the app. On X11 we write an `Apply Initially` rule
+into `kwinrulesrc` under `winstate-<app>` and only touch our own group.
 
-    from winstate import WinState
-    winstate = WinState(win, "filer")   # keep the Python ref alive
-
-It writes the window's frame geometry to a per-app state file
-(`$XDG_STATE_HOME/<app>/window.json`, default `~/.local/state/<app>/…`) on
-close and — debounced — whenever the user moves or resizes it, and restores it
-when the app next starts. Maximized / fullscreen survives too.
-
-**What actually persists, per session type — this is deliberate, not a bug:**
-
-- **Size** is client-controlled at surface creation on every windowing system,
-  so it is restored everywhere: Hyprland, KWin/Plasma (Wayland), and X11.
-- **Position** cannot be set by a Wayland client itself — the protocol has no
-  request for it (KWin and Hyprland both). So `setPosition` here is honoured on
-  X11 and is a harmless no-op on Wayland. On the Hyprland session the plugin
-  already remembers each window's geometry across a logout (hyprvtb closes
-  gracefully); on KWin the durable path is a window rule keyed on the app's
-  stable identity (`app_id`, set from the desktop-file name in each `main.py`).
-  Either way the position is *recorded* here, so nothing is lost and a
-  compositor that does honour it gets the right value.
-
-**KWin window rules: X11 only, and NEVER under Wayland.** On an X11 session we
-write a per-app rule into `~/.config/kwinrulesrc` carrying the recorded resting
-position (`positionrule` = *Apply Initially*, keyed on `wmclass` = `app_id`,
-`types` = normal windows only). We only ever touch groups we own — named
-`winstate-<app>` — so a hand-made rule of yours is never disturbed, and the
-read-modify-write is locked and atomic so two apps writing at once cannot
-corrupt the file.
-
-**Under KWin's Wayland session that rule is a trap, and writing one is a bug we
-already shipped.** Two independent halves, both fatal:
-
-- A Wayland client is never told where it is, so `QWindow.x()/y()` read 0 for
-  the whole life of the window. The rule we wrote therefore carried
-  `position=0,0` — and *Apply Initially* faithfully forced every window of the
-  app into the top-left corner at every launch. Recording a position we cannot
-  know and then feeding it back is worse than not remembering at all.
-- A KWin rule matches on `wmclass`, and every toplevel of one app shares its
-  `app_id` — main window, About box, any dialog. `types` cannot separate them
-  here either: KWin gives every xdg-shell toplevel `WindowType::Normal`
-  (`XdgToplevelWindow`; the NET types are an X11 notion), so a dialog is a
-  normal window as far as the rule is concerned. That is why the About box
-  spawned in the corner too.
-
-So on Wayland we write no rule, and on first run we DELETE the `winstate-<app>`
-group we left behind, then ask KWin to reconfigure so the removal takes effect
-without a relog. The cost is stated plainly: on KWin/Wayland a window's
-position is not restored at all, because no client-side mechanism exists to do
-it honestly. Size still is (client-controlled), and the position is still
-recorded, so X11 and Hyprland lose nothing.
-
-Guards, because a restore that lands off-screen or at zero size is worse than
-none: a saved rect with a non-positive width/height is dropped, and a position
-that would put the window (almost) entirely off every connected screen is
-clamped back so a chunk of it stays grabbable. Restoring is skipped entirely
-for a fixed-size window (min == max on both axes) except for its position.
+Saved rects that are too small or mostly off-screen are dropped or clamped so
+the window stays grabbable, and fixed-size windows keep only their position.
 """
 
 import json
