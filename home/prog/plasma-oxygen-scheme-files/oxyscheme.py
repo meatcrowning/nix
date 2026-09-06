@@ -80,7 +80,10 @@ PANEL_GLOW_SCALE = float(os.environ.get('OXYSCHEME_PANEL_GLOW', '0.12'))
 # panel therefore holds the bright top of that field, while east/west stretches
 # the whole field down its height.  Treating every panel as a self-contained
 # ramp made the top and left bars visibly belong to different surfaces.
-PANEL_TOP_ALPHA = float(os.environ.get('OXYSCHEME_PANEL_TOP', '0.96'))
+# OxygenLightFlat's real titlebar is Background (198,209,224) → Blend
+# (223,229,237): a 0.43 white overlay, not the 0.96 body-background estimate
+# this replaced.  Use the titlebar's stop so a vertical panel joins it exactly.
+PANEL_TOP_ALPHA = float(os.environ.get('OXYSCHEME_PANEL_TOP', '0.43'))
 PANEL_BOTTOM_ALPHA = float(os.environ.get('OXYSCHEME_PANEL_BOTTOM', '0.0'))
 # Plasma's top/bottom frame slices are fixed-size caps; the centre owns almost
 # all of a vertical panel's physical height.  Split the one screen-ramp across
