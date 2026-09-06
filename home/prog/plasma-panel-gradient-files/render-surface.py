@@ -12,7 +12,7 @@ import os
 import sys
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QGuiApplication, QImage, QRegion
+from PySide6.QtGui import QGuiApplication, QImage, QPalette, QRegion
 from PySide6.QtWidgets import QApplication, QWidget
 
 
@@ -24,9 +24,20 @@ def main() -> int:
     rect = screen.geometry()
     width, height = max(1, rect.width()), max(1, rect.height())
 
-    # Oxygen only draws this primitive for a real top-level QWidget.
+    # Oxygen only draws this primitive for a real top-level QWidget.  It also
+    # treats an unseen window as inactive unless every colour group is pinned;
+    # copy Active into every group, exactly as kdeshell's pixel-exact provider
+    # does for the application surfaces this must match.
+    palette = QPalette(app.palette())
+    for role in QPalette.ColorRole:
+        if role == QPalette.NColorRoles:
+            continue
+        colour = app.palette().color(QPalette.Active, role)
+        for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
+            palette.setColor(group, role, colour)
     proxy = QWidget()
     proxy.setAttribute(Qt.WA_StyledBackground, True)
+    proxy.setPalette(palette)
     proxy.resize(width, height)
     image = QImage(width, height, QImage.Format_ARGB32_Premultiplied)
     image.fill(0)
