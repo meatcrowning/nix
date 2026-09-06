@@ -133,3 +133,10 @@ visual checks**, harnesses run `QT_QPA_PLATFORM=offscreen`, never a window on
 his screen. A clean offscreen load (no stderr) proves the QML parses and the
 context properties wire; the real actions shell out to `nix`/the rebuild
 wrapper and must **not** be driven against his live flake from a test.
+
+Isolation seams for a future retained fixture are `NIX_UPGRADABLE_REPO` for a
+synthetic flake root and `UPDATER_COMMAND_RUNNER` for a harness executable that
+receives the intended command as trailing argv. Set both together, keep every
+path under scratch XDG roots, and make the runner simulate output and exit
+status; no resource test may resolve `nix`, `nix-upgradable.sh`, or either real
+rebuild wrapper.

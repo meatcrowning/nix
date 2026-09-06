@@ -39,6 +39,7 @@ import json
 import os
 import platform
 import re
+import shlex
 import sys
 import time
 from pathlib import Path
@@ -58,6 +59,12 @@ from deskstyle import DeskStyle  # noqa: E402
 from kdetheme import theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
 
 REPO = Path(os.environ.get("NIX_UPGRADABLE_REPO", str(Path.home() / "nix")))
+COMMAND_RUNNER = shlex.split(os.environ.get("UPDATER_COMMAND_RUNNER", ""))
+
+
+def isolated_step(step):
+    """Route a job through a harness-owned runner when explicitly requested."""
+    return COMMAND_RUNNER + list(step) if COMMAND_RUNNER else list(step)
 
 #: The three inputs frozen on purpose (flake.nix). Bumping one is on his
 #: ask-first list, so they are never part of "update everything" and a
@@ -349,7 +356,7 @@ class Runner(QObject):
         if not self._steps:
             self._done(True)
             return
-        step = self._steps.pop(0)
+        step = isolated_step(self._steps.pop(0))
         self.output.emit("$ " + " ".join(step) + "\n")
         p = QProcess(self)
         p.setWorkingDirectory(str(REPO))
