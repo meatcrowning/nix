@@ -61,13 +61,10 @@ PlasmoidItem {
 
     readonly property bool vertical: Plasmoid.formFactor === PlasmaCore.Types.Vertical
 
-    // The desktop owns its menu bar, so give its first category a little air
-    // after Kickoff.  A focused app's menu already has the stock appmenu's
-    // inset; the handoff here needs only one physical pixel.
-    // The stock delegate supplies its own inner margin. Keep the desktop's
-    // outer nudge to two pixels, so its first label shares the native menu's
-    // left edge instead of acquiring a second whole gutter.
-    readonly property int desktopGutter: 2
+    // The stock delegate supplies its own inner margin. Add no outer desktop
+    // spacer: File and Edit must keep their exact glyph origins on a focus
+    // change between the desktop and a native-menu application.
+    readonly property int desktopGutter: 0
     readonly property int appGutter: 1
 
     // Keep one representation alive across focus changes. Replacing the
