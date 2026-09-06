@@ -186,6 +186,16 @@ def oxygen_css(pal, metrics=None, button=None) -> str:
             shown.append((sel, direction))
         else:
             hidden.append(sel)
+    # Blink only guarantees the native button parts exist when THEIR BASE
+    # pseudo-element is block. A state-specific rule is accepted but Vivaldi
+    # can still leave the overlay scrollbar's button parts out of layout.
+    # Give every candidate its base geometry, then remove directions Oxygen
+    # does not configure. The remaining parts stay native, clickable steppers.
+    if shown:
+        css.append("::-webkit-scrollbar-button{display:block!important;"
+                   "height:%dpx!important;width:%dpx!important;"
+                   "background-color:transparent!important;background-repeat:no-repeat!important;"
+                   "background-position:center!important}" % (btn_h, width))
     if hidden:
         css.append("%s{display:none!important}"
                    % ",".join("::-webkit-scrollbar-button" + s for s in hidden))
@@ -250,7 +260,13 @@ def desktop_css(pal, style=DEFAULT_STYLE) -> str:
     if style != "win31":
         css.append("::-webkit-scrollbar-button{display:none!important}")
         return "".join(css)
-    base = ("display:block!important;width:%dpx!important;height:%dpx!important;"
+    # Force Blink to materialise native button parts from the base pseudo-
+    # element before styling their directions (as above for Oxygen).
+    css.append("::-webkit-scrollbar-button{display:block!important;"
+               "width:%dpx!important;height:%dpx!important;"
+               "background-color:%s!important;background-repeat:no-repeat!important;"
+               "background-position:center!important;%s}" % (width, width, face, raised))
+    base = ("width:%dpx!important;height:%dpx!important;"
             "background-color:%s!important;background-repeat:no-repeat!important;"
             "background-position:center!important;" % (width, width, face))
     for sel, direction in ((":vertical:start:decrement", "up"),
