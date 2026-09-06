@@ -84,10 +84,7 @@ exactly what it always was.
   not), `Chip` (the attachment chip as a flat `Button`),
   `Bubble` (a message as a real KStyle `Button` frame — `enabled: false` so it
   takes no hover, press or focus, with the message's own selectable text drawn
-  above it; **the Oxygen twin uses `OxygenBubblePaint` instead** [his,
-  2026-09-05], a `QQuickPaintedItem` that clips the active QStyle's real button
-  paint to one speech-bubble path and outlines that same path, because an
-  attached shape can never continue a KStyle button's rectangular bevel), and,
+  above it), and,
   from the Oxygen audit of 2026-08-22 [his] *"the scroll bar is
   not properly themed, but im sure there are other things as well"*:
     - **`ViewFrame`** — the conversation's surround. Ours was a 1px rounded
@@ -103,7 +100,7 @@ exactly what it always was.
       shows it, `saved(text)` / `cancelled()` report the choice, and Root.qml
       still decides what saving MEANS (it writes `Ollama`).
     - **`CapChip`** — a capability indicator, as the KStyle's button frame with
-      the label above it, the same non-interactive treatment `+plasma/Bubble` uses.
+      the label above it, the same non-interactive treatment `Bubble` uses.
       **Not `flat`**: a flat KStyle button draws no relief until it is hovered,
       and these never are, so flat left three bare words with nothing boxing
       them.
