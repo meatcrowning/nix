@@ -18,6 +18,10 @@ Usage (see apps/surfer/AGENTS.md — borrow the wrapper's env, never source it):
   --discard: run the lifecycle pass that discards all non-visible tabs.
   --freeze : run the lifecycle pass that freezes all non-visible tabs.
   --tabs N : how many tabs to open (default 6; >1 needs N loopback ports).
+  --one-view: measure the engine/profile floor, one blank view, one lightweight
+              loopback page, then unload only that view to expose engine residue.
+  --full-app: launch real Main.qml with one lightweight loopback tab under the
+              same sealed offscreen/profile isolation and report its idle tree.
 
 PSS across the whole process tree is the ownership estimate that matters for
 the audit. Summed tree RSS remains beside it because that is what a process
@@ -226,7 +230,14 @@ def main():
     ap.add_argument("--tabs", type=int, default=6)
     ap.add_argument("--discard", action="store_true")
     ap.add_argument("--freeze", action="store_true")
+    ap.add_argument("--one-view", action="store_true")
+    ap.add_argument("--full-app", action="store_true")
     args = ap.parse_args()
+
+    if args.full_app:
+        return full_app_main()
+    if args.one_view:
+        return one_view_main()
 
     n = max(2 if args.discard or args.freeze else 1, args.tabs)
     mode = "discard" if args.discard else ("freeze" if args.freeze else "none")
@@ -380,6 +391,132 @@ def main():
     root.deleteLater()
     pump(5000)
     resource_report("fixture cleanup")
+    app.exit(0)
+
+
+def one_view_main():
+    """Measure exactly one WebEngineView and its teardown separately."""
+    body = ("<html><head><title>idle</title></head>"
+            "<body><p>lightweight loopback page</p></body></html>")
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            payload = body.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *args):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    engine = QQmlApplicationEngine()
+    main_pid = os.getpid()
+
+    def report(tag, settle=1500):
+        pump(settle)
+        mem = resource_mb(main_pid)
+        print("  resource %-22s rss=%8.1f MB  pss=%8.1f MB  private=%8.1f MB"
+              % (tag, mem["rss"], mem["pss"], mem["private"]))
+
+    # No QML profile or view yet: Python + Qt + initialized WebEngine runtime.
+    report("engine only")
+    engine.load(QUrl.fromLocalFile(str(HERE / "mem-one-view.qml")))
+    if not engine.rootObjects():
+        raise SystemExit("the one-view fixture would not load")
+    root = engine.rootObjects()[0]
+    report("profile, no view")
+
+    root.setProperty("viewAlive", True)
+    if not wait_for(lambda: root.property("view") is not None):
+        raise SystemExit("the one-view fixture did not instantiate its view")
+    report("one blank view")
+
+    root.setProperty("loaded", False)
+    view = root.property("view")
+    port = srv.server_address[1]
+    view.setProperty("url", QUrl("http://127.0.0.1:%d/" % port))
+    if not wait_for(lambda: bool(root.property("loaded")), ms=60000):
+        print("WARN: loopback page did not report LoadSucceeded; measuring anyway")
+    report("one idle page")
+
+    # Drop the sole view but retain the QML root/profile/engine.  Any remaining
+    # helpers and mappings are global engine/profile residue, not fixture views.
+    del view
+    root.setProperty("viewAlive", False)
+    if not wait_for(lambda: root.property("view") is None):
+        print("WARN: Loader still exposes a view after unload")
+    report("view unloaded", settle=5000)
+
+    root.deleteLater()
+    del root
+    report("fixture cleanup", settle=5000)
+    engine.deleteLater()
+    del engine
+    report("QML engine cleanup", settle=5000)
+    report("cleanup settled", settle=15000)
+    srv.shutdown()
+    app.exit(0)
+
+
+def full_app_main():
+    """Measure Surfer's real QML/Python shell with exactly one loopback tab."""
+    body = b"<html><head><title>idle</title></head><body><p>idle</p></body></html>"
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    env = dict(os.environ)
+    env.update({
+        "QT_QPA_PLATFORM": "offscreen",
+        "SURFER_NO_SINGLETON": "1",
+        "SURFER_NO_SYNC": "1",
+        "SURFER_SOCKET": str(scratch / "surfer.sock"),
+        "XDG_RUNTIME_DIR": str(scratch / "runtime"),
+    })
+    Path(env["XDG_RUNTIME_DIR"]).mkdir(mode=0o700)
+    env.pop("WAYLAND_DISPLAY", None)
+    env.pop("DISPLAY", None)
+    env.pop("DBUS_SESSION_BUS_ADDRESS", None)
+    url = "http://127.0.0.1:%d/" % srv.server_address[1]
+    proc = subprocess.Popen(
+        [sys.executable, str(HERE.parent / "main.py"), url],
+        env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        # Main.qml has no machine-readable ready marker.  Require a surviving
+        # process and allow Chromium's helpers/page to settle before sampling.
+        for _ in range(150):
+            if proc.poll() is not None:
+                raise SystemExit("isolated full Surfer exited before measurement")
+            pump(100)
+        mem = resource_mb(proc.pid)
+        print("  resource %-22s rss=%8.1f MB  pss=%8.1f MB  private=%8.1f MB"
+              % ("full app, one idle tab", mem["rss"], mem["pss"],
+                 mem["private"]))
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+        srv.shutdown()
     app.exit(0)
 
 
