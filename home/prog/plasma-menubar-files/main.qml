@@ -296,40 +296,16 @@ PlasmoidItem {
     }
 
     function appMenus() {
-        const name = root.shown.appName;
-        const menus = [{
-            title: name,
-            bold: true,
-            build: () => [
-                {
-                    label: "Hide " + name,
-                    enabled: root.shown.minimizable,
-                    trigger: () => {
-                        for (const i of root.siblingIndices()) {
-                            tasksModel.requestToggleMinimized(i);
-                        }
-                    },
-                },
-                { separator: true },
-                {
-                    label: "Quit " + name,
-                    enabled: root.shown.closable,
-                    trigger: () => {
-                        for (const i of root.siblingIndices()) {
-                            tasksModel.requestClose(i);
-                        }
-                    },
-                },
-            ],
-        }];
-
-        // The app draws its own File/Edit/… through the stock applet to our
-        // right; a Window menu of ours would land on the wrong side of them.
+        // KDE applications retain only the stock DBusMenu applet to our
+        // right.  The application-name button is deliberately absent: it was
+        // a second, non-native title in the panel rather than a useful menu.
         if (root.appExportsMenu) {
-            return menus;
+            return [];
         }
 
-        menus.push({
+        // Apps without a DBus menu (notably Vivaldi) still need an honest
+        // window menu.  There is no app-name/title button before it.
+        return [{
             title: "Window",
             build: () => {
                 const out = [
@@ -369,8 +345,7 @@ PlasmoidItem {
                 });
                 return out;
             },
-        });
-        return menus;
+        }];
     }
 
     readonly property var barMenus: onDesktop ? desktopMenus() : appMenus()
@@ -457,47 +432,61 @@ PlasmoidItem {
             owner = null;
         }
 
-        mainItem: ColumnLayout {
-            spacing: 0
+        // Dialog sizes itself from mainItem's implicit dimensions.  A
+        // ColumnLayout with fill-width rows has neither until its parent has a
+        // width, which made this dialog 0x0 and produced Plasma's "trying to
+        // show an empty dialog" warning.  This Column is measured from its
+        // delegates alone, before the dialog maps.
+        mainItem: Item {
+            implicitWidth: Math.max(1, menuColumn.implicitWidth)
+            implicitHeight: Math.max(1, menuColumn.implicitHeight)
+            width: implicitWidth
+            height: implicitHeight
 
-            Repeater {
-                model: popup.entries
+            Column {
+                id: menuColumn
+                spacing: 0
 
-                delegate: Item {
-                    id: row
+                Repeater {
+                    model: popup.entries
 
-                    readonly property var entry: modelData
-                    readonly property bool isSeparator: entry.separator === true
+                    delegate: Item {
+                        id: row
 
-                    Layout.fillWidth: true
-                    Layout.minimumWidth: Kirigami.Units.gridUnit * 8
-                    implicitWidth: isSeparator ? 0 : item.implicitWidth
-                    implicitHeight: isSeparator ? Kirigami.Units.smallSpacing * 3
-                                                : item.implicitHeight
+                        readonly property var entry: modelData
+                        readonly property bool isSeparator: entry.separator === true
 
-                    Rectangle {
-                        visible: row.isSeparator
-                        height: 1
-                        color: Kirigami.Theme.textColor
-                        opacity: 0.2
-                        anchors {
-                            left: parent.left
-                            right: parent.right
-                            verticalCenter: parent.verticalCenter
+                        implicitWidth: isSeparator ? 0
+                                                   : Math.max(Kirigami.Units.gridUnit * 8,
+                                                              item.implicitWidth)
+                        width: isSeparator ? menuColumn.width : implicitWidth
+                        height: isSeparator ? Kirigami.Units.smallSpacing * 3
+                                            : item.implicitHeight
+
+                        Rectangle {
+                            visible: row.isSeparator
+                            height: 1
+                            color: Kirigami.Theme.textColor
+                            opacity: 0.2
+                            anchors {
+                                left: parent.left
+                                right: parent.right
+                                verticalCenter: parent.verticalCenter
+                            }
                         }
-                    }
 
-                    PlasmaComponents3.ItemDelegate {
-                        id: item
-                        visible: !row.isSeparator
-                        anchors.fill: parent
-                        text: row.entry.label || ""
-                        enabled: row.entry.enabled !== false
-                        icon.name: row.entry.checked === true ? "checkmark" : ""
-                        onClicked: {
-                            popup.close();
-                            if (row.entry.trigger) {
-                                row.entry.trigger();
+                        PlasmaComponents3.ItemDelegate {
+                            id: item
+                            visible: !row.isSeparator
+                            anchors.fill: parent
+                            text: row.entry.label || ""
+                            enabled: row.entry.enabled !== false
+                            icon.name: row.entry.checked === true ? "checkmark" : ""
+                            onClicked: {
+                                popup.close();
+                                if (row.entry.trigger) {
+                                    row.entry.trigger();
+                                }
                             }
                         }
                     }
