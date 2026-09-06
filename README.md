@@ -2,13 +2,11 @@
 
 monorepo for what is essentially my entire system. point an agent at this and ask it to explain. 
 
-screenshots of individual programs and hyprland setup below. all programs are native-styled in both hyprland and kde plasma. programs not shown; filer, player, reader, viewer, goetia, editor, and askpass:
+screenshots of individual programs and hyprland setup below. all programs are native-styled in both hyprland and kde plasma. not shown; filer, player, reader, viewer, goetia, editor, and askpass:
 
 <img width="1786" height="1353" alt="collage" src="https://github.com/user-attachments/assets/bd9e2457-fdce-43ac-ae21-eb1d24581442" />
 
 <img width="1273" height="934" alt="Screenshot_20260904_215834" src="https://github.com/user-attachments/assets/141fd4e0-ca2c-47e5-805e-6bd6775457a7" />
-
-<img width="708" height="905" alt="Screenshot_20260904_204200" src="https://github.com/user-attachments/assets/6a0cdebe-23a3-4f60-90a1-f9069d4f4fca" />
 
 <img width="1920" height="1080" alt="Screenshot_20260730_223852" src="https://github.com/user-attachments/assets/e7119d2f-d39a-4ae8-bf02-a5cbbb3e79fa" />
 
