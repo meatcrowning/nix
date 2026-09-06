@@ -31,6 +31,9 @@ Item {
     // Oxygen-only speech-bubble curl below it; Root.qml reserves its height.
     readonly property real tailHeight: 9
     readonly property real tailWidth: 11
+    // Oxygen paints its button edge a few pixels inside the control's box.
+    // Bring the curl this far back over the face so the two shapes are one.
+    readonly property real tailOverlap: 5
     default property alias content: holder.data
 
     QQC.Button {
@@ -46,7 +49,7 @@ Item {
     }
 
     // Oxygen has no speech-bubble primitive. These outward curls overlap its
-    // lower edge by one pixel: replies point left and user messages point
+    // lower edge by `tailOverlap`: replies point left and user messages point
     // right. They must be ABOVE the native control — behind it their fill is
     // covered by the conversation surface and reads as a detached outline.
     // Use the control palette rather than Theme.bg: the native button is
@@ -59,14 +62,14 @@ Item {
             strokeWidth: 1
             strokeColor: root.isError ? Theme.crit : frame.palette.mid
             fillColor: frame.palette.button
-            startX: 0; startY: frame.height - 1
+            startX: 0; startY: frame.height - root.tailOverlap
             PathLine { x: 0; y: frame.height + root.tailHeight }
             PathCubic {
                 x: root.tailWidth; y: frame.height
                 control1X: 3; control1Y: frame.height + root.tailHeight
                 control2X: 8; control2Y: frame.height + root.tailHeight - 2
             }
-            PathLine { x: 0; y: frame.height - 1 }
+            PathLine { x: 0; y: frame.height - root.tailOverlap }
         }
     }
 
@@ -78,14 +81,14 @@ Item {
             strokeWidth: 1
             strokeColor: root.isError ? Theme.crit : frame.palette.mid
             fillColor: frame.palette.button
-            startX: root.width; startY: frame.height - 1
+            startX: root.width; startY: frame.height - root.tailOverlap
             PathLine { x: root.width; y: frame.height + root.tailHeight }
             PathCubic {
                 x: root.width - root.tailWidth; y: frame.height
                 control1X: root.width - 3; control1Y: frame.height + root.tailHeight
                 control2X: root.width - 8; control2Y: frame.height + root.tailHeight - 2
             }
-            PathLine { x: root.width; y: frame.height - 1 }
+            PathLine { x: root.width; y: frame.height - root.tailOverlap }
         }
     }
 
