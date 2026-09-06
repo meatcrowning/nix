@@ -125,6 +125,12 @@ here:
   word against the filename AND the prompt — read out of the file once and
   cached on the row. Both lists hold the SAME dicts, so a poster landing
   reaches both; every index QML asks about is a VISIBLE index.
+- **Gallery/history lives in `gallery.py`, not the controller.** It owns output
+  discovery and de-duplication, the live-generation row, filtering, and the
+  bounded thumbnail/poster workers. `main.py` re-exports its public names for
+  existing callers. `tools/gallery-bench.py` measures the synchronous cold
+  scan against synthetic local and peer roots without touching real outputs;
+  the 2026-09-05 baseline was 24 ms for 1,450 rows and 119 ms for 7,000.
 - **The parameter column is a `Repeater` over an ORDER, not a declared stack.**
   `ParamsPane.builtinOrder` is the old declaration order and one saved list
   (`Prefs["sections"]`) reorders it — dragging any panel header moves that
