@@ -1,35 +1,10 @@
 { pkgs, ... }:
 
-# `chan-theme` — regenerate the Tampermonkey userscript that puts this
-# desktop's look on 4chan in Vivaldi.
-#
-# surfer wears the same sheet natively, through its own `surferonee://` courier
-# (live, no regeneration). Vivaldi is somebody else's browser: no Stylus, and
-# the only injection seat is Tampermonkey — where OneeChan already lives — so
-# the CSS goes into a userscript. This is the command that writes it.
-#
-# Writing it is no longer the same as keeping it current: since 2026-08-23 the
-# script POLLS `home/srvs/chan-theme.nix`'s loopback courier
-# (127.0.0.1:8791, `apps/pylib/tools/chan-theme-server.py`) and re-adopts the
-# sheet whenever the palette moves, open tab included. The embedded copy is
-# only the fallback for a page loaded while that unit is down. So re-run this
-# when the SHEET (`apps/pylib/chantheme.py`) or the generator changes — NOT
-# after a colour-scheme or wallpaper change, which now needs nothing.
-#
-# And the installed script then updates ITSELF: it carries
-# `http://127.0.0.1:8791/chan.meta.js` as its `@updateURL` and the courier
-# serves both that and the script. Tampermonkey never updates from a `file://`
-# URL, which is why a hand-installed copy sat at its install-time version for
-# good — the file this writes now carries http update URLs, so installing it
-# from disk is fine. NAVIGATING to the http url loops between Tampermonkey's
-# install page and a load error (its own interception, not the courier — a
-# Vivaldi renderer fetches the same URL fine); install through the dashboard's
-# Utilities > Install from URL instead.
-#
-# Live source at apps/pylib/tools/chan-userscript.py (absolute path, valid on
-# both machines); a rebuild is only needed to change THIS wrapper. Plain
-# python3 — the generator is deliberately Qt-free, which is also why the sheet
-# lives in pylib/chantheme.py rather than inside surfer.
+# Generate Vivaldi's Tampermonkey theme userscript from live, Qt-free source.
+# The installed script polls the loopback courier at 127.0.0.1:8791, so rerun
+# this only when the sheet or generator changes, not after palette/wallpaper
+# changes. Its HTTP update URL is installed through Tampermonkey's
+# Utilities > Install from URL; direct navigation is intercepted incorrectly.
 {
   home.packages = [
     (pkgs.writeShellScriptBin "chan-theme" ''

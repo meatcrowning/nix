@@ -1,45 +1,15 @@
 #!/usr/bin/env bash
-# Run painter ON BOOK against top's ComfyUI, over an ssh tunnel.
-#
-# This is also painter's LAUNCHER on book: home/prog/painter.nix's `air` branch
-# execs `comfy-tunnel.sh -- python3 main.py`, so opening painter from the runner
-# does the whole thing by itself — probe top, forward ComfyUI plus ai-warden and
-# mount top's model and output roots at the same time, run the app as soon as
-# the ports bind, and tear the tunnel and mounts down after. ai-warden starts
-# the backend for the first live painter lease. (The
-# output root is what makes book's history the WHOLE history: top's backend files
-# every result it produces on top, whichever machine asked for it.) It does NOT wait
-# for ComfyUI to finish loading: the window opens now and says what it is waiting
-# for.
-#
-# The backend is loopback-only on purpose (home/prog/painter.nix passes
-# `--listen 127.0.0.1`, and sys/net/tailscale.nix opens only 22 and 445 on
-# tailscale0). ComfyUI has no authentication and executes arbitrary graphs as
-# lam, so the answer to "reach it from the other machine" is a forwarded port
-# behind ssh's key auth, NOT a second listener. Nothing new is exposed: the
-# tunnel rides the ssh hole that dbsync already uses.
-#
-#     ./comfy-tunnel.sh          # start the backend on top, forward 8188, hold
-#     ./comfy-tunnel.sh -- painter   # ...and run painter, tearing down after
-#
-# painter's DEFAULT_URL is http://127.0.0.1:8188, so with the forward up it
-# needs no configuration at all — it just talks to the local end.
-#
-# REACHING TOP IS A PRECONDITION, NOT A NICETY — the same rule, for the same
-# reason, as player's air-launch.sh. Without top there is no backend at all, so
-# a painter window that opens anyway is one that can only fail on the first
-# Generate. Say why in a notification (launched from the runner, stderr goes
-# nowhere a person is looking) and exit. PAINTER_NO_TUNNEL=1 restores a plain
-# launch against whatever is on the local port, for UI work with no top.
-#
-# Host names, in order: `top.local` is mDNS and answers only on the home LAN;
-# `top` is the tailscale MagicDNS name and works from any network. Same
-# candidate list, and same reason, as player/tools/air-launch.sh.
+# Run painter on book against top's loopback ComfyUI through SSH. The `air`
+# launcher invokes this as `comfy-tunnel.sh -- python3 main.py`: it forwards
+# ComfyUI (8188) and ai-warden (top 8199), mounts top's model/output roots
+# read-only, starts the app as soon as ports bind, and cleans up. The backend
+# lease handles warm-up; the window opens immediately. Without `--`, this holds
+# a forward and starts the user unit. `PAINTER_NO_TUNNEL=1` is the local/UI
+# override. ComfyUI has no auth, so SSH is the only remote path; candidates are
+# top, then top.local.
 set -uo pipefail
 
-# The readiness probe writes onto a socket ssh may have closed a moment earlier
-# (see comfy_answers): let that fail with EPIPE, which the probe handles, rather
-# than take the default SIGPIPE and kill the script mid-wait.
+# Let the readiness probe handle EPIPE when a warming SSH socket closes.
 trap '' PIPE
 
 PORT="${COMFY_PORT:-8188}"
@@ -53,13 +23,9 @@ MODELS_REMOTE="${COMFY_MODELS:-/home/lam/models}"
 MODELS_LOCAL="${PAINTER_MODELS_MOUNT:-${XDG_CACHE_HOME:-$HOME/.cache}/painter/models-top}"
 OUT_REMOTE="${COMFY_OUT:-/home/lam/Pictures/painter/out}"
 OUT_LOCAL="${PAINTER_PEER_OUT_MOUNT:-${XDG_CACHE_HOME:-$HOME/.cache}/painter/out-top}"
-# How long to wait for the backend to serve. A warm one is seconds; a cold one
-# is a torch import plus however many GB of weights; and if the nix-shell env
-# has been garbage-collected since the last run it is a few hundred MB of store
-# downloads BEFORE any of that. Hence ten minutes, not one.
+# Cold starts include torch/weights and store downloads; allow ten minutes.
 READY_TIMEOUT="${COMFY_READY_TIMEOUT:-600}"
-# Generous on purpose: a top that is mid-download answers sshd late, and reading
-# "busy" as "asleep" is how this turns into a false "can't reach top".
+# A busy top may answer SSH late; do not mistake that for an asleep host.
 CONNECT_TIMEOUT="${COMFY_CONNECT_TIMEOUT:-15}"
 
 say() { printf 'comfy-tunnel: %s\n' "$*" >&2; }

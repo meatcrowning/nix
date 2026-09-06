@@ -1,52 +1,13 @@
 { pkgs, lib, hostProfile, ... }:
 
-# painter — text-to-image front end for a headless ComfyUI (source at
-# ~/nix/apps/painter), fifth sibling of surfer/filer/viewer/player. Packaging mirrors
-# player.nix, including the air split.
+# Painter is the live-source ComfyUI front end under apps/painter. Its wrapper
+# supplies WebSockets, multimedia, ffmpeg, libnotify, and hunspell on top; book
+# uses Fedora's equivalents. Top pins Qt video decoding away from its broken
+# NVIDIA VAAPI export, as documented in viewer.nix.
 #
-# Two things differ from the other siblings:
-#
-#   * qtwebsockets — the ComfyUI client listens on /ws for progress, node
-#     transitions, errors and live previews, instead of polling /history the way
-#     cte did.
-#   * ffmpeg on PATH — a video family's outputs are clips, and the gallery
-#     shows each one's poster frame (extracted once into ~/.cache/painter/
-#     posters), plus the muted copy the right-click menu makes. Without it a
-#     video tile is blank; on book the wrapper is Fedora's python and ffmpeg
-#     comes from its PATH. Putting that copy on the clipboard needs nothing on
-#     PATH at all any more — `pylib/clipfile.py` is stdlib-only and owns the
-#     selection itself, because wl-copy can offer only one mime type and a file
-#     paste needs two (apps/AGENTS.md → pylib).
-#   * libnotify on PATH — a generation that finishes behind a rolled-up or
-#     unfocused window is announced with a desktop toast carrying its
-#     thumbnail, and painter is launched from a .desktop entry / the runner,
-#     whose PATH need not carry the profile dirs. book takes Fedora's.
-#   * qtmultimedia — the preview viewport plays clips (looped and muted) as well
-#     as showing stills, the same QtMultimedia surface viewer uses, including
-#     its NVDEC pin: Qt's ffmpeg backend probes VAAPI first and top's VAAPI
-#     provider is NVIDIA's shim, which cannot export a surface at all (the whole
-#     measurement is in home/prog/viewer.nix). book keeps Qt's default.
-#   * a systemd --user unit for the backend. ComfyUI is NOT packaged here: it
-#     stays the venv+nix-shell checkout at /home/lam/comfy (a symlink to
-#     Downloads/git/ComfyUI), whose shell.nix already handles the hard parts
-#     (nixpkgs-24.11 pin, torch cu128, patchelfing Triton's ptxas for NixOS).
-#     The unit is started on demand by the app and deliberately NOT stopped on
-#     exit, so 8-16G of weights stay resident between launches. No wantedBy, so
-#     it never starts at boot.
-#
-# Models live at /home/lam/models (~246G, the consolidated root shared with cte
-# via a symlink) and are reached through extra_model_paths.yaml. None of that is
-# in this repo.
-#
-# Runs the LIVE source at ~/nix/apps/painter/main.py — .py/.qml edits need no
-# rebuild, only dep/packaging changes do.
-#
-# The prompt boxes are spellchecked (`pylib/spellcheck.py`), which talks to the
-# `hunspell` BINARY in pipe mode rather than to a Python binding — so the two
-# `SPELL_*` variables below are the whole wiring, and **book's branch gets
-# nothing**: there the checker resolves `hunspell` from `$PATH` and
-# `/usr/share/hunspell`, and marks nothing at all if Fedora has neither. See
-# `home/prog/editor.nix` for the same note at length.
+# ComfyUI and the model store remain external mutable state. The on-demand user
+# service never starts at boot and keeps warm weights between launches. Python
+# and QML edits need only an app relaunch; packaging changes need a rebuild.
 let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
 
@@ -207,24 +168,10 @@ in
       # Model loading is slow; do not let systemd give up on startup.
       TimeoutStartSec = "infinity";
 
-      # No MemoryHigh/MemoryMax here any more. This unit froze `top` on
-      # 2026-08-08 — ComfyUI's dynamic VRAM loading stages weights in SYSTEM
-      # RAM and streams them to the card, so a MiniMaxH3 video run staged
-      # 19995M + 14956M + 2677M against 30G of RAM while kitty, a nix eval and
-      # the panel were already swapping, and the box livelocked (reclaiming
-      # just fast enough that the kernel OOM killer never fired) rather than
-      # crashing outright. The MemoryHigh throttle tried here afterwards
-      # (16G, then 20G) fought the wrong problem: it slowed comfy down
-      # *before* there was any real pressure, stalling legitimate large loads
-      # past painter's startup timeout, without doing anything for the case
-      # that actually froze the box — a nixos-rebuild's memory use landing at
-      # the same time, entirely outside this cgroup, that no per-unit ceiling
-      # here can see.
-      # The real fix is `sys/oomd.nix`: systemd-oomd now watches PSI (memory
-      # pressure, not allocation failure — the kernel killer's blind spot is
-      # exactly the livelock this unit hit) across `user.slice` and kills the
-      # worst offender there before the box stops responding, whoever is
-      # holding the memory and regardless of which cgroup made it scarce.
+      # Do not add MemoryHigh/MemoryMax: ComfyUI legitimately stages large
+      # weights in system RAM, and per-unit throttling cannot see a concurrent
+      # rebuild. sys/oomd.nix instead watches PSI across user.slice and kills
+      # the worst offender before reclaim livelocks the machine.
     };
     # No Install section: never auto-started at boot.
   };

@@ -1,41 +1,9 @@
 { ... }:
 
-# Oxygen's own settings — `~/.config/oxygenrc` — declared, because they are an
-# INPUT TO OUR CODE and not just a look he picked once.
-#
-# In a Plasma session our apps are real KDE windows (`apps/pylib/kdeshell.py`)
-# and the widget style paints them. `kdeglobals` carries the colour scheme, the
-# font and one animation factor, and `apps/pylib/kdetheme.py` already moves all
-# three across. The style has a SECOND store that kdeglobals knows nothing
-# about, and it is the one that says how wide a scrollbar is, how long a hover
-# fade lasts, how big a tree expander's triangle is and whether a tooltip is
-# translucent. Every real QWidget in one of our windows obeys it already; the
-# QML inside the `QQuickWidget` is the half that did not, until
-# `apps/pylib/oxygenstyle.py` started reading it and publishing it through
-# `DeskStyle.style*`.
-#
-# So this file is half configuration and half contract: what is declared here is
-# what those apps draw with. `oxygen-settings6` (in `kdePackages.oxygen`, on
-# PATH) is the GUI that writes the same file — a value it sets that is declared
-# below is reverted at the next switch, which is deliberate and the same rule as
-# `kwinrc ButtonsOnRight` in home/plasma.nix. Everything NOT named here stays
-# his to change from that dialog, and the reader falls back to upstream's own
-# compiled-in default (`kstyle/oxygen.kcfg` in github.com/KDE/oxygen) for any key
-# neither of us has set — so an unset key is a known number, not an unknown one.
-#
-# Both hosts, and on both it is LIVE: `programs.plasma` is enabled
-# unconditionally in home/plasma.nix and `home/` is evaluated by `top` and
-# `book` alike. This comment used to claim book had no Plasma and that the file
-# was therefore inert there — it was wrong, corrected 2026-08-25: book runs a
-# Plasma session wearing Oxygen, which is what chatter's `+oxygen` face is
-# developed against.
-#
-# NOT set here, on purpose — the durations (`GenericAnimationsDuration` 150,
-# `MenuAnimationsDuration` 150, `ProgressBarBusyStepDuration` 50) and the
-# metrics (`ScrollBarWidth` 15, `ViewTriangularExpanderSize` TE_SMALL). Those
-# are the numbers our QML now READS; pinning them here would make this file the
-# source and the style the follower, which is backwards. He moves them in
-# `oxygen-settings6` and the apps follow.
+# `oxygenrc` is live input to both hosts' Plasma apps and their QML DeskStyle
+# bridge. Values declared here are reset at each switch; undeclared values stay
+# user-owned through oxygen-settings6 and fall back to Oxygen defaults. Keep
+# animation durations and metrics undeclared so the apps follow the style.
 {
   programs.plasma.configFile.oxygenrc = {
     # ---- the window drag ----------------------------------------------------
