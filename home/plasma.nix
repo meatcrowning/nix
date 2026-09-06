@@ -137,6 +137,10 @@ in
           # adjacent to that controller rather than reserving its 72px slot at
           # the physical right edge after the system tray.
           "org.kde.lam.playervisualizer"
+          # This controller has a 1px representation, but Plasma still adds
+          # applet margins around it. Keep that invisible margin before the
+          # tray, leaving the tray as the panel's physical endpoint.
+          "org.kde.lam.notifgap"
           {
             name = "org.kde.plasma.systemtray";
             config.General = {
@@ -164,7 +168,6 @@ in
               shownItems = "Easy Effects";
             };
           }
-          "org.kde.lam.notifgap"
         ];
       }
       {
