@@ -72,10 +72,10 @@ let
   '';
   # Plasma's FrameSvg tiles its five-pixel centre.  That works for a texture,
   # but cannot represent one gradient shared by a horizontal panel.  Overlay
-  # only that panel with a real screen-space surface; a vertical panel gets a
-  # true palette-colour fill so it does not acquire Oxygen's conspicuous top-
-  # to-bottom gradient. Retain the FrameSvg because PanelView reads its mask
-  # and margins in C++.
+  # both panels with a real screen-space surface. It stays fully opaque rather
+  # than following Plasma's adaptive panel transition, so the fullscreen
+  # Oxygen gradient is the stable face at all times. Retain the FrameSvg
+  # because PanelView reads its mask and margins in C++.
   panel-gradient-view = pkgs.runCommand "plasma-panel-gradient-view"
     { nativeBuildInputs = [ pkgs.perl ]; }
     ''
