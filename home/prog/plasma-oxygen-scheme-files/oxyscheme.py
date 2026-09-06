@@ -64,6 +64,10 @@ CENTRE_AMPLITUDE = float(os.environ.get('OXYSCHEME_AMPLITUDE', '0.35'))
 # The light end stays white: it is a specular highlight, not a colour.
 ACCENT_ROLE = os.environ.get('OXYSCHEME_ACCENT_ROLE', 'ColorScheme-Highlight')
 ACCENT_RAMPS = os.environ.get('OXYSCHEME_ACCENT_RAMPS', '1') not in ('0', 'no', '')
+# Oxygen's ramp starts at alpha 0, so the accent only reaches full strength at
+# the very edge and the panel reads as a pale wash rather than the theme blue.
+# The floor lifts the whole accent side so the colour is actually present.
+ACCENT_FLOOR = float(os.environ.get('OXYSCHEME_ACCENT_FLOOR', '0.35'))
 
 ROLES = [
     ("Text",             "#31363b"), ("Background",       "#eff0f1"),
@@ -249,6 +253,7 @@ def respin_alpha(doc, src_gid, stops, mode):
         rgb = parse_hex(c)
         if ACCENT_RAMPS and rgb is not None and luminance(rgb) < 0.5:
             # the dark end: let the accent supply the colour via the stylesheet
+            a = ACCENT_FLOOR + (1.0 - ACCENT_FLOOR) * a
             st.set('class', ACCENT_ROLE)
             st.set('style', f"stop-opacity:{a:.4f}")
         else:
