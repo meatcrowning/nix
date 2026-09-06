@@ -1,71 +1,16 @@
 import QtQuick
 import QtQuick.Controls.Basic
 
-// THE scrollbar. `docs/DESIGN.md` §9.2 states it as one idiom for the whole desktop —
-// [his] *"there should be a scrollbar wherever appropriate! please"* — and since
-// 2026-07-28 it is a PIXEL-ERA scrollbar in three selectable variants, because
-// the one it replaced was not:
+// The desktop's scrollbar, shared by every app that needs one (`docs/DESIGN.md`
+// §9.2). `DeskStyle.scrollbarStyle` chooses among the three pixel-era variants;
+// a `typeof` guard keeps offscreen harnesses on the default instead of throwing.
 //
-//   [his] "i actually hate the scrollbar used everywhere. it should be styled
-//          like the font. not like it is now as some sort of modern web-first one"
-//   [his] "i want the option to do this one, the flat pixel block. and beveled
-//          no arrows because they all look tight. put it in the settings to
-//          change, make the default the win 3.1"
+// It shows only when there is something to scroll, never fades, and always
+// reserves `barW` so the layout does not jump when the bar appears. The edges
+// stay geometry-drawn and pixel-snapped so the bevels do not shimmer.
 //
-//     KineticListView { ScrollBar.vertical: VScroll {} }
-//
-// Call sites do not choose. `barStyle` comes off the panel's own settings.json
-// through the `DeskStyle` context property (pylib/deskstyle.py) — the same
-// mechanism that already carries fontFamily/fontSize/reduceMotion/animSpeed to
-// every app, so one control in Settings > Appearance moves all seven at once and
-// there is no second cross-app settings channel to keep in sync. Guarded with a
-// `typeof` exactly like `Motion.qml`'s, so an offscreen harness that never
-// installs DeskStyle still renders (as the default, win31) instead of throwing.
-//
-// SHOWN WHEN THERE IS SOMETHING TO SCROLL, and no fade. [his, 2026-08-22]
-// *"scrollbar should only appear when needed, not all the time"* — so the bar
-// is absent while the content fits and returns the instant it overflows. It
-// never fades either way: full opacity, no `Behavior on opacity` anywhere (the
-// 120 ms fade that used to be here is gone from §6.2.1's non-participants table
-// with it), and the GUTTER is reserved from `barW` whether or not the bar is in
-// it, so a view that starts to overflow does not reflow its content. That
-// reflow was the whole argument for the old always-on rule; reserving the
-// gutter answers it without a bar standing there saying nothing.
-//
-// THE PIXELS ARE THE POINT (§2.2, §4). Every edge is a 1px Rectangle on an
-// integer coordinate and every arrow is drawn as GEOMETRY, never as text: More
-// Perfect DOS VGA has no `↑`/`▲` at all (§2.3), and a PixelText containing a
-// missing glyph loses ~5px of ascent to the fallback font and clips the line it
-// is in. Nothing here is rounded, gradient-filled or antialiased.
-//
-// The thumb is PIXEL-SNAPPED against the fractional offset ScrollBar computes
-// for it (`resizeContent()` puts it at `availableHeight * position`, which is
-// almost never an integer). Without the snap the 1px bevels land on half pixels
-// and shimmer as you drag — the exact mush a pixel font exists to avoid.
-//
-// No new colours: the bevel is a three-tone ladder taken straight out of the
-// wallpaper palette (bg < bgAlt < border < dim), so it recolours with everything
-// else and adds nothing to §3 to keep in sync.
-//
-// UNDER PLASMA the aero look is deliberately dropped for a Breeze-shaped bar
-// (docs/DESIGN.md §9.2 / §3's Plasma rule): a rounded pill thumb over a
-// transparent track, no bevels and no steppers, in the KDE colour scheme's own
-// tones (Theme.* already resolve to kdeglobals here via kdetheme.py). The three
-// aero variants and the `barStyle` setting are ignored in that session — an app
-// still drawing a win31 stepper inside a Breeze window is the one control that
-// reads as "not themed". Detected with `DeskStyle.plasma`, the same switch that
-// moves the palette; guarded with `typeof` so a harness with no DeskStyle keeps
-// the Hyprland look. Its WIDTH, though, is the live style's own number
-// (`DeskStyle.styleScrollWidth`, Oxygen's `ScrollBarWidth`) rather than a
-// literal — see `barW`.
-//
-// AND IN A KDESHELL APP IT IS NOT THIS FILE AT ALL: `+plasma/VScroll.qml` is
-// selected in its place (painter, player, chatter — the apps with a
-// `QApplication`, a live `QStyle` and `QT_QUICK_CONTROLS_STYLE=org.kde.desktop`),
-// and hands the painting to the style itself, so Oxygen's groove, gradient
-// slider and chevron steppers are the real ones rather than an approximation of
-// Breeze's. The pill below is what every OTHER app in a Plasma session gets —
-// none of them has a QStyle to ask, which is why it stays.
+// Kdeshell apps select `+plasma/VScroll.qml` under Plasma so QStyle paints the
+// real bar. Other Plasma apps use this file's style-aware fallback.
 ScrollBar {
     id: vb
 

@@ -1,70 +1,16 @@
 import QtQuick
 import QtQuick.Window
 
-// DeskMenuBar — the app's inner-titlebar buttons, AS A MENUBAR, in a Plasma
-// session.
+// DeskMenuBar renders the app's inner-titlebar button array as a menubar in
+// Plasma (`docs/DESIGN.md` §7.4). Hyprland gets hyprvtb's double-wide titlebar;
+// Plasma gets the same verbs across the top of the window.
 //
-// docs/DESIGN.md §7.4 puts an app's page switches and app-level actions in the
-// inner titlebar: hyprvtb draws a double-wide bar on every window and each app
-// registers a column of two-character cells into it (`tbButtons` ->
-// `Titlebar.setButtons`, apps/pylib/vtbclient.py). That bar is the COMPOSITOR'S,
-// and Plasma 6 is a real alternative session here (`sys/dsk/plasma.nix`) with
-// no hyprvtb in it — so in that session every one of those buttons simply does
-// not exist, and with it half of what each app can do. His call, 2026-08-18:
-// under Plasma they come back as a menubar across the top of the window, where
-// every other KDE program keeps exactly these verbs.
+// One source, two roofs: the same `tbButtons` array drives both chrome paths,
+// and the click handler stays on the window so either surface can call it.
 //
-// It is the same argument `kdetheme.py` already makes for the palette — the
-// session owns the look and the conventions, and an app that ignores it is the
-// one odd window — carried from colour to chrome.
-//
-//     import "../../qmlcommon"
-//
-//     DeskMenuBar {
-//         id: menuBar
-//         anchors { top: parent.top; left: parent.left; right: parent.right }
-//         buttons: win.tbButtons            // the SAME array the titlebar gets
-//         onTriggered: (id) => win.tbAction(id)
-//     }
-//
-// and anchor the window's content to `menuBar.bottom` instead of to the top.
-// In the Hyprland session `plasma` is false, the bar is invisible and its height
-// is 0, so that anchor is a no-op and nothing about the Hyprland look moves.
-//
-// ONE SOURCE, TWO ROOFS. The array is the app's existing `tbButtons` — same
-// ids, same `state`, same tooltips — so the menubar cannot drift out of step
-// with the titlebar, and an app's click handler is called with the same id from
-// either. That is why the click handler must be a FUNCTION on the window
-// (`tbAction(id)`) rather than a body inside `Connections { target: Titlebar }`:
-// two callers, one switch.
-//
-// GROUPING is the one thing the titlebar column has no room for and a menubar
-// needs: an optional `menu: "file"` on any entry names its top-level menu.
-// Entries without one land in `defaultMenu`. Menus appear in first-appearance
-// order, and a "-" spacer in the array becomes a separator inside whichever
-// menu the next entry belongs to. `menu:` is inert everywhere else — the vtb
-// wire protocol carries id/label/state/tip/drag/bottom and ignores the rest
-// (Titlebar.setButtons reads four keys), so annotating the array costs the
-// titlebar nothing.
-//
-// Look: the menu spec of docs/DESIGN.md §7.2, unchanged — `bgAlt` box, 1px
-// `border`, `rounding`, hover fills `highlight` (one step LIGHTER, never
-// inverted), disabled text `inactive`, lowercase labels, `PixelText`, dismissal
-// on select / outside click / Escape. The label of a row is the button's
-// TOOLTIP ("sort by name"), because the two-character cell is a titlebar
-// affordance and a menu is where the full verb belongs; a button with no
-// tooltip falls back to its label.
-//
-// A LIT cell (state 1 — the toggle that is on, the view you are in) keeps its
-// meaning here as a `*` in a reserved gutter plus `accent` text. §12.1 says a
-// lit cell IS the state; a menu row has no fill of its own to say it with
-// (`highlight` is the hover), and the gutter is reserved on every row so the
-// labels do not shift as toggles flip. `*` and not a check glyph because the
-// pixel font's cmap is short and a missing one clips the whole line (§2.3).
-//
-// A DISABLED entry (state 2) is drawn greyed and unclickable rather than
-// dropped — §10's honesty rule: the action exists, it is this state that cannot
-// have it.
+// `menu:` only matters here, where the flat column becomes grouped menus. The
+// visual rules still follow §7.2, and disabled rows stay visible so the action
+// set remains learnable.
 Item {
     id: root
 

@@ -1081,83 +1081,18 @@ GPU_PROBE_JS = r"""
 """
 
 
-# The cosmetic-filtering RUNTIME. One static script, injected by the shared
-# profile at DOCUMENT CREATION into every frame. It replaces a load-finished
-# runJavaScript in Main.qml, which was late by construction: the ads had already
-# painted, nothing re-ran on an SPA route change, and a lazily-inserted ad slot
-# brought no new rules with it.
+# The cosmetic-filter runtime runs as one profile-level script, injected at
+# DocumentCreation into every frame. It is a courier, not a rule bundle: the
+# selectors themselves come back on `surfercos:` URLs, so the static script can
+# stay shared while host/site-specific data stays in Python.
 #
-# It is static because a profile-level script has to be: it is compiled once and
-# shipped to every page, so it cannot bake in one site's selectors. It therefore
-# carries no rules at all — it is a courier. Everything host-specific is pulled
-# out of Python over the `surfercos:` scheme (CosmeticInjector), which is where
-# adblock-rust actually lives:
-#
-#   surfercos://s/<b64 {"u":href}>              text/css   specific hide rules
-#   surfercos://x/<b64 {"u":href}>              js         scriptlets, alone
-#   surfercos://j/<b64 {"u":href}>              js         Cosmetic.specificJs
-#                                                          (the fallback only)
-#   surfercos://g/<b64 {"u":href,"c":[],"i":[]}> js        Cosmetic.genericJs
-#   surfercos://p/<b64 {"u":href}>              json       procedural filters
-#
-# **How the flash actually dies.** Measured on PySide6 6.11 (tools/cosmetic-test.py):
-# at DocumentCreation `document.documentElement` is still NULL, so there is
-# nothing to append a <style> or a <script> to — anything that waits for a parent
-# lands after the parser has built the whole body, and the ad gets a frame. Two
-# things do work with no DOM at all, and this runtime is built on both:
-#
-#   * a SYNCHRONOUS XHR (the request is served in-process by CosmeticInjector —
-#     no network, no disk), and
-#   * `document.adoptedStyleSheets` with a constructed CSSStyleSheet.
-#
-# So the per-site rules — the ones that depend only on the url and therefore
-# CAN be known this early — are fetched and adopted inside the document-creation
-# callback itself. Constructed stylesheets are also exempt from `style-src`, so
-# this is the CSP-proof path as well as the fast one. Everything that genuinely
-# needs a DOM (scriptlets, the generic pass) is deferred and runs as a
-# <script src>, never eval() — the scheme is registered
-# ContentSecurityPolicyIgnored so a strict `script-src` cannot stop it, which
-# `new Function` would not survive.
-#
-# The `j` request is deliberately redundant with `s`: it re-injects the same CSS
-# as an ordinary <style> and carries the scriptlets. That makes it the safety net
-# — if the CSS ever fails to come back, the page still ends up exactly where the
-# old load-finished path left it, only earlier.
-#
-# Nothing here inspects, rewrites or filters a selector, so `:has()` and anything
-# else the engine emits reaches the page verbatim.
-#
-# MAIN world, deliberately: an isolated world gets its own `history` wrapper, so
-# a pushState hook installed there would never see the page's own calls — which
-# is the whole point of hooking it.
-#
-# Three re-run triggers, all throttled onto one flush:
-#   * MutationObserver — harvests only the class/id TOKENS of ADDED nodes (and of
-#     class/id attribute changes), diffed against what has already been asked
-#     for. No selector matching in JS and no full-document re-query per mutation:
-#     a mutation storm that introduces no new token costs one lookup per node and
-#     sends nothing. Plain CSS already covers a late element that matches a rule
-#     we shipped; this exists for the tokens that were not on the page when the
-#     generic set was narrowed to it. Above STORM records/second the observer
-#     DISCONNECTS in favour of a plain poll and comes back after BACK_MS — a
-#     throttle alone still pays the per-record cost, and ad-heavy pages storm.
-#   * pushState/replaceState/popstate/hashchange — an SPA route change means a new
-#     url and therefore a new rule set (all of YouTube after the first click).
-#     Forgets the asked-for tokens and starts the page over, sync path included.
-#   * DOMContentLoaded — one full sweep once the parser is done. The FIRST sweep
-#     is scheduled on requestIdleCallback with a hard timeout, so it cannot be
-#     starved by a busy page.
-#
-# The generic pass is narrowed to the class/id tokens actually on the page and
-# each token is asked about exactly once (`seenC`/`seenI`) — uBO's design, via
-# adblock-rust's hidden_class_id_selectors. `$generichide` is honoured on the
-# engine side, inside Cosmetic.genericJs.
-#
-# Procedural filters (`:has-text`, `:upward`, `:matches-css`, …) come back from
-# the engine JSON-encoded and UNAPPLIED — applying them is the embedder's job,
-# and this runtime is the embedder. Styles are applied BY ATTRIBUTE rather than
-# by element.style, so a page that watches inline styles cannot see or undo
-# them.
+# The point of the early injection is that `document.documentElement` is still
+# null at DocumentCreation, so anything that waits for a parent paints late.
+# The early path uses synchronous in-process XHR plus adoptedStyleSheets for the
+# selector-independent CSS, then defers DOM-dependent scriptlets, SPA re-runs
+# and the mutation/pushState/DOMContentLoaded rechecks. The runtime never
+# rewrites selectors; procedural filters are returned by the engine and applied
+# by the embedder.
 COSMETIC_RUNTIME_JS = r"""
 (function(){
   if (window.__surfer_cosmetic) return;
@@ -2665,59 +2600,16 @@ class Zoom(QObject):
 
 
 class DarkMode(QObject):
-    """Page-appearance overrides, injected as one <style> per page:
+    """Per-page appearance overrides injected once at DocumentCreation.
 
-      * dark mode — a whole-page CSS invert+hue-rotate filter (Dark Reader's
-        *filter* mode) with adjustable brightness/contrast. Media (img/video/
-        canvas/iframe/embed) gets the EXACT inverse filter, so images come out
-        pixel-identical to the original at ANY brightness/contrast — dark mode
-        never tints or dims them. Global on/off + a per-site exception list
-        (hostnames forced OFF — the "whitelist").
-      * font inherit — EVERY page starts from the desktop's font instead of
-        Chromium's: an `@layer` block (beaten by any unlayered page rule, so it
-        behaves as an upgraded user-agent default, not a force) sets the live
-        pick + the desktop font size on `:root`, the monospace elements and the
-        form controls. A page that styles its own text keeps its styles; a page
-        that inherits, inherits the desktop — same family, same apparent size,
-        and the same rasterisation, since the shipped faces carry fontconfig
-        pins Chromium honours. The size is divided by the shared page zoom so
-        inherited text holds the desktop's DEVICE pixel size at any zoom level
-        (a pixel face rasterised at 15 x 0.83 px is not a pixel font any more).
-        Applies in subframes too (fonts travel as the `f` body, the dark
-        filter never does).
-      * system font — force the desktop font family on page text, so ALL of a
-        page reads in the desktop's typeface, not just the runs a site left
-        unstyled. GLOBAL since 2026-08-08, with per-site exceptions (`fontOff`
-        hostnames — the same shape as dark mode's whitelist); icon-font
-        elements are carved out by class so pictograms don't turn to tofu.
-        Family only, so site font-sizes and layout survive — forcing sizes too
-        was tried and retracted, docs/DESIGN.md §16 — plus
-        `font-synthesis:none`, §2.2's "no bold, ever": the shipped faces are
-        Regular-only and Chromium's synthetic bold smears them. It combines
-        with dark mode rather than replacing it. The pick is imposed by a
-        REAL installed face, never a `src:local()` `@font-face` alias:
-        Chromium grayscale-antialiases any `@font-face`-resolved face and
-        ignores the family's fontconfig `antialias=false` pin — the 970147b
-        alias route, dropped 2026-08-09 for pixel-crisp text. The 114%
-        x-height parity the alias bought is back via a font-file TWIN: the
-        default pick also ships an installed " (web)" family whose outlines,
-        advances and vertical metrics are pre-scaled 1.14x
-        (home/pkgs/desktop/font-files/scale-vga.py) — a real face, so the
-        antialias pin reaches it and it rasterises pixel-crisp while site
-        text at the site's own sizes reads at the proportional x-height (see
-        `_adj_fam`).
-
-    All state persists to the "dark" key of prefs.json. Application is NOT
-    per-view at load-finished (that painted light first and flipped once images
-    finished): a profile-level DocumentCreation courier (PAGE_STYLE_RUNTIME_JS)
-    adopts the combined style as a constructed CSSStyleSheet before the first
-    frame, and `css(url)` re-feeds it whenever a toggle or a slider moves —
-    see PageStyleHandler. `js(url)` below remains the in-process/manual apply
-    used by offscreen harnesses, not the live path.
-
-    Known limit (shared with Dark Reader's filter mode): a full-page CSS filter
-    can interfere with `position:fixed` containment on some sites.
-"""
+    Dark mode applies a whole-page invert/hue-rotate filter with an exact
+    inverse on media. Font inherit and system font keep Chromium pages aligned
+    with the desktop font choices, while preserving site layout and
+    per-site exceptions. State lives in the "dark" prefs.json key, the live
+    path runs through PAGE_STYLE_RUNTIME_JS and `css(url)`, and `js(url)` stays
+    the manual/offscreen path. Known limit: full-page CSS filters can upset
+    `position:fixed` on some sites.
+    """
 
     changed = Signal()
 
@@ -4491,56 +4383,13 @@ def _spell_language():
 
 
 def main():
-    # air (Fedora/Asahi) has no working VA-API or Vulkan (the GPU logs show
-    # vaInitialize failing + Vulkan disabled), and Chromium's handling of video
-    # frames corrupts them there — every video "glitches out". Fixed on air ONLY
-    # (detected by the system-python launcher path; top's GPU is fine and keeps
-    # full acceleration). Must be set before QtWebEngine initializes.
-    #
-    # This used to be `--disable-gpu-compositing`, whose comment claimed "page
-    # raster stays GPU-accelerated". It does not: that flag turns off the GPU
-    # compositor for the WHOLE page, so every scroll frame of a heavy site
-    # (github, with its sticky headers and deep layer tree) is composited on the
-    # CPU — which is precisely the "scrolling looks like a much lower framerate"
-    # report, and it got more visible once momentum made scrolls last longer.
-    # The narrow flag disables only the zero-copy GPU-memory-buffer path that
-    # video frames travel through, which is the part Asahi actually breaks, and
-    # leaves page compositing on the GPU where scrolling needs it.
-    #
-    # SURFER_GPU picks the workaround without an edit:
-    #   (unset)    the narrow flag above — current default
-    #   softraster + --disable-gpu-rasterization. Page COMPOSITING stays on the
-    #              GPU (so scrolling keeps its framerate) but every tile,
-    #              glyphs included, is rasterised on the CPU by one code path
-    #              that cannot be lost mid-session. This is the candidate fix
-    #              for "text degrades into bad antialiasing after a while";
-    #              costs some raster throughput on heavy pages.
-    #   safe       the old blunt --disable-gpu-compositing, if video ever
-    #              glitches out again.
-    #
-    # top ALSO needs a video workaround, and it is a different one — the line
-    # above saying "top's GPU is fine" was wrong. On NVIDIA (595.84, RTX 5070)
-    # Chromium's accelerated video decoder hands its frames over as a PLATFORM
-    # GpuMemoryBuffer in multiplanar NV12, and QtWebEngine's shared-image
-    # factories have no backing for that combination:
-    #
-    #   Could not find SharedImageBackingFactory with params: usage:
-    #   Gles2Read|RasterRead|DisplayRead|Scanout, format: (Y_UV, 420, 8unorm,
-    #   ExtSamplerOn), gmb_type: platform, debug_label: MailboxVideoFrameConverter
-    #
-    # That failure LOSES THE GL CONTEXT on the first decoded frame, so the page
-    # stops painting — the video and everything around it — and the log fills
-    # with `Context lost during MakeCurrent` + `non-existent mailbox` at frame
-    # rate. This is the "embedded mp4s on 4chan glitch out and won't play"
-    # report, and it is why webm was hit-or-miss: measured on top 2026-08-05
-    # against a real WebEngineView on the sandbox output, h264/vp9/av1 all lose
-    # the context on frame one while **vp8 is clean** — vp8 is the one codec
-    # this stack has no hardware decoder for, so it never enters the path.
-    # Disabling that one Chromium feature is enough (0 errors vs 234 in the same
-    # run without it) and leaves page compositing and rasterisation on the GPU;
-    # decode falls to software, which this CPU does not notice.
-    # --disable-gpu-memory-buffer-video-frames does NOT fix it (measured), so
-    # the narrow flag air uses is not transferable here.
+    # `ON_AIR` means the Fedora/Asahi path (`sys.executable` under /usr/):
+    # it uses `--disable-gpu-memory-buffer-video-frames`, with optional
+    # `SURFER_GPU=softraster` adding `--disable-gpu-rasterization` and
+    # `SURFER_GPU=safe` falling back to `--disable-gpu-compositing`.
+    # The other host uses `--disable-features=AcceleratedVideoDecodeLinuxGL`
+    # by default, and `SURFER_GPU=hwvideo` restores the accelerated decoder for
+    # re-testing after an NVIDIA or Qt bump.
     _flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
     _mode = os.environ.get("SURFER_GPU", "")
     if ON_AIR:
