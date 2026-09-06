@@ -55,13 +55,9 @@ should stay silent.
 
 ## A reload must look like a state change IN PLACE, not a re-entry
 
-That is the standing bar for anything on this desktop, because a wallpaper or
-theme change rewrites `Theme.qml` and therefore reloads the panel. Quickshell
-rebuilds the *whole* QML tree, so without help every widget comes back empty and
-visibly refills: the disk widget maps at its one-line "reading…" height and
-grows twice as its scripts land (dragging every in-place stackable above it up
-the screen), the forecast collapses until curl returns, cava restarts so the VU
-and spectrum drop to the floor, and the chart ring buffers restart from zero.
+Theme or wallpaper changes rebuild the whole QML tree. The visible result must
+be an in-place state change: widgets keep their pins, data buffers, and layout
+without a refill animation or an empty first frame.
 
 Two mechanisms carry state across, both wired in `shell.qml`:
 
@@ -108,33 +104,11 @@ qs ipc call state carried   # sizes of each carried blob + live buffer lengths
 Poll that repeatedly across a forced reload: all non-zero and `cpuHist` counting
 up monotonically means the swap worked; a reset to 0 means something regressed.
 
-### A reload builds the tree from the shipped DEFAULTS — so it must not animate
+### A reload starts from defaults — so it must not animate
 
-Carrying the state across is only half of it. The other half is that **every
-binding in a fresh tree is first evaluated before `settings.json` has been read
-back**, so for the first moments of a reload the whole desktop believes it is in
-the shipped default configuration: `viewMode` "classic", `dockWidthFrac` 0.15,
-`barWidth` 48. Measured in dock mode at 356px (`console.warn` on
-`ViewMode.barWidth`, book):
-
-```
-Reloading configuration...
-  vm.barWidth -> 48   dock=false        <- shipped defaults
-  wp.w        -> 1                      <- surface has no size yet either
-  wp.w        -> 1488                   <- classic-width wallpaper
-Configuration Loaded
-  vm.barWidth -> 230  dock=true         <- default dockWidthFrac
-  vm.barWidth -> 356  dock=true         <- the real one, ~25ms later
-```
-
-That correction is harmless *as a correction* — it lands inside the load pass,
-before a frame. What was not harmless is that the Behaviors were already armed,
-so it was played as an ANIMATION: the panel grew out of the screen edge over
-200ms, the classic layout crossfaded away behind the dock, and the wallpaper
-slid across the screen over 260ms (seventeen intermediate widths in the trace).
-The user's report was that the larger panel "fails to hot reload in place" —
-correctly, because the desktop was visibly *re-entering* dock mode on every
-theme or wallpaper change rather than simply being in it.
+Bindings in a fresh tree initially see shipped defaults before `settings.json`
+is loaded. The correction happens during the load pass; Behaviors must be
+disabled until persisted geometry has settled.
 
 **So `ViewMode.settling` is true for the first 400ms of every tree, and
 everything that animates a view-mode change gates its `Behavior` on it**: the
@@ -148,13 +122,10 @@ the last of them.
 
 - **Add a `Behavior` on anything that follows a persisted geometry value and you
   must gate it too**, or you have re-added the glitch for that one widget.
-- It cannot be fixed by loading the settings earlier. Both alternatives were
-  tried and measured: `FileView`'s own `blockLoading` initial load and an
-  explicit `reload()` forced from a binding's side effect *both* still leave the
-  first evaluation seeing `viewMode: "classic"`, because bindings run before any
-  `Component.onCompleted` in the tree and a singleton's completion is at the end
-  of the pass. `SettingsStore` does the end-of-pass `reload()` anyway, to bound
-  how late the values can be; the gate is what makes it invisible.
+- Loading settings earlier cannot change QML binding order: bindings run before
+  Component.onCompleted, and singleton completion is at the end of the pass.
+  `SettingsStore` still reloads there to bound lateness; settling makes it
+  invisible.
 - `ViewMode.applyReserve()` is seeded from the settle timer, not from
   `Component.onCompleted`. At completion `dock` is still the default `false`, so
   `_lastReservePx` was seeded 0 — and the next drag release then looked like the
@@ -166,28 +137,18 @@ qs ipc call view geom     # ...dragging=false settling=false
 
 `settling=true` when nothing is happening means the timer never fired.
 
-**A one-shot handler cannot be gated — it must LOAD. `SettingsStore.loadNow()`.**
-Snapping an animation is enough for a binding, which will be re-evaluated when
-the truth arrives. A `Component.onCompleted` runs once and is simply wrong. The
-reload restore in `shell.qml` opens `if (ViewMode.dock) return;` — and read
-`false` on every reload, so in dock mode it re-pinned the saved widget set onto
-the wallpaper and had it torn down again ~25ms later when the real mode landed
-and `onDockChanged` fired. On Hyprland's event socket that is the
-openlayer/closelayer pair per widget this section forbids, on every theme or
-wallpaper change.
+**A one-shot handler must load, not merely gate.**
+`SettingsStore.loadNow()` reads synchronously before handlers branch on a
+persisted value; the reload restore in `shell.qml` therefore sees real dock
+mode and does not repin widgets onto the wallpaper.
 
 ```qml
 function loadNow() { file.reload(); return file.text(); }   // SettingsStore
 ```
 
-**Both calls, in that order, and the `text()` is the one that does the work.**
-`reload()` alone does not deliver — measured three ways (the FileView's own
-`blockLoading` initial load, a `reload()` from a binding's side effect, and a
-bare `reload()` here) and in all three the next line still read
-`viewMode: "classic"`. Reading `text()` forces the blocking read to complete, and
-the adapter's properties — and every binding on them — are updated before the
-call returns: `dockBefore=false dockAfter=true`. Call it first in any
-`Component.onCompleted` that branches on a persisted value.
+**Call both in that order; `text()` forces the blocking read.**
+`reload()` alone does not deliver the adapter values before return. Use this
+pattern first in any `Component.onCompleted` that branches on persisted state.
 
 ### `visible` gates layer-surface mapping — never derive it from geometry
 
