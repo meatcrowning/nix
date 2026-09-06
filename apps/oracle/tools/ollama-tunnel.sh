@@ -1,48 +1,17 @@
 #!/usr/bin/env bash
-# Run oracle ON BOOK against top's ollama daemon, over an ssh tunnel.
+# Run oracle on book against top's loopback Ollama through SSH. The `air`
+# launcher invokes this as `ollama-tunnel.sh -- python3 main.py`, forwarding
+# Ollama (11434) and ai-warden (8199) before starting the app.
 #
-# This is also oracle's LAUNCHER on book: home/prog/oracle.nix's `air` branch
-# execs `ollama-tunnel.sh -- python3 main.py`, so opening oracle from the
-# runner does the whole thing by itself — probe top and forward 11434 before
-# the window ever opens. Modelled directly on painter's
-# apps/painter/tools/comfy-tunnel.sh; read that file's comments for the parts
-# that are identical here (host candidates, the ssh control-master reuse, the
-# EPIPE trap, exec 3<>). This script only carries what differs:
+# Ollama is a top SYSTEM unit; chatter's forwarded warden lease owns its
+# lifecycle, while the app's start/stop buttons use the exported SSH master and
+# the two passwordless `systemctl` commands allowed by sys/ai/ollama.nix.
+# There are no model/output mounts: Ollama resolves its own store. A heavy gate
+# may stop/mask Ollama; that is reported as a normal daemon-down state while
+# the forward remains usable. `ORACLE_NO_TUNNEL=1` is the local/UI override.
 #
-#   * ollama is a SYSTEM unit (sys/ai/ollama.nix), not a `--user` one like
-#     comfy-painter, but it no longer starts at boot. Chatter acquires a
-#     renewable ai-warden lease through the second forward below; the first
-#     client starts Ollama and the last close stops it after a grace. Its
-#     start/stop buttons still run `ssh $HOST sudo -n systemctl {start,stop}
-#     ollama.service`, which is why this script exports OLLAMA_SSH_HOST /
-#     OLLAMA_SSH / OLLAMA_SSH_CTL below (the Backend reuses this master).
-#     top grants lam passwordless sudo for exactly those two commands
-#     (sys/ai/ollama.nix); top askpass cannot prompt over a tty-less ssh.
-#   * it forwards a SECOND port: the ai-warden (8199). The warden is a `top`
-#     user unit and both backends live there, but its client is chatter, which
-#     may be here — and `Warden` fails OPEN, so with nothing on 127.0.0.1:8199
-#     every reserve on book was an instant yes and the memory dance simply did
-#     not happen. Measured 2026-08-24: a `make_video` from book landed on a GPU
-#     still holding gemma4-qat:12b and ComfyUI died with
-#     `torch.OutOfMemoryError … Free (according to CUDA): 9.62 MiB`, with not a
-#     line in the warden's own log because it was never asked. Forwarding it
-#     costs one more `-L` and makes book's chatter arbitrate against the same
-#     daemon top's does.
-#   * no models/output sshfs mounts — oracle has no model files of its own to
-#     read (ollama resolves model names against ITS OWN store) and no
-#     generated-output gallery to peer.
-#   * heavy-gate.sh can SUSPEND ollama.service (stop + runtime-mask) around a
-#     heavy rebuild on top. That is a normal, expected "down" — this script
-#     reports it and forwards the port anyway, exactly like painter's
-#     "comfy-painter is inactive" path, so oracle opens and says the daemon is
-#     unreachable rather than the tunnel refusing to start.
-#
-# oracle's OLLAMA env var defaults to http://127.0.0.1:11434, so with the
-# forward up it needs no configuration at all.
-#
-# REACHING TOP IS A PRECONDITION, NOT A NICETY — same rule as comfy-tunnel.sh
-# and player's air-launch.sh. ORACLE_NO_TUNNEL=1 restores a plain launch
-# against whatever is on the local port, for UI work with no top.
+# The local endpoint is the app default (127.0.0.1:11434). Host candidates are
+# top, then top.local; each port reuses an existing forward before SSH adds it.
 set -uo pipefail
 
 trap '' PIPE
@@ -62,9 +31,8 @@ die() {
     exit 1
 }
 
-# Does an HTTP server on 127.0.0.1:$PORT answer ollama's /api/tags? Same
-# /dev/tcp probe as comfy_answers in comfy-tunnel.sh, and `line=""` is
-# load-bearing for the identical reason documented there.
+# HTTP readiness probe for Ollama. `line=""` is required under `set -u` when a
+# warming forward resets the socket before returning a response.
 ollama_answers() {
     local line=""
     exec 3<>"/dev/tcp/127.0.0.1/$PORT" || return 1
@@ -75,9 +43,8 @@ ollama_answers() {
     [[ "$line" == *" 200 "* ]]
 } 2>/dev/null
 
-# Is anything listening on 127.0.0.1:$1 here? Enough for the warden — it
-# answers HTTP, but a bound port means a forward is already up (or the daemon
-# itself is local, which is the case when this script runs on top).
+# Port-bound check used for the warden forward; it may be a local daemon or an
+# existing tunnel, so readiness is checked separately above.
 port_open() {
     exec 3<>"/dev/tcp/127.0.0.1/$1" || return 1
     exec 3<&- 3>&-
@@ -100,8 +67,8 @@ fi
 if [ -n "${OLLAMA_SSH_HOST:-}" ]; then
     CANDIDATES=("$OLLAMA_SSH_HOST")
 else
-    # `top` FIRST — see comfy-tunnel.sh for the ~5s vs 0.04s measurement that
-    # justifies this order.
+    # top resolves quickly through LAN DNS or tailnet; top.local is the mDNS
+    # fallback.
     CANDIDATES=(top top.local)
 fi
 
@@ -121,20 +88,14 @@ done
 [ -n "$HOST" ] || die "can't reach top (tried: ${CANDIDATES[*]}) - is it awake? Off the home LAN this needs the tailnet up on both machines (tailscale status)."
 say "reaching top as '$HOST'"
 
-# Hand the resolved host, ssh binary and control path to oracle's Backend so its
-# start/stop buttons (apps/oracle/main.py) drive top's ollama.service over the
-# SAME ssh — `ssh $HOST sudo -n systemctl {start,stop} ollama.service`, reusing
-# this master. Chat + UNLOAD are HTTP over the forward; only start/stop need ssh.
+# Let the app's start/stop controls address top's system unit through this same
+# SSH master; chat and unload remain HTTP over the forwarded port.
 export OLLAMA_SSH_HOST="$HOST"
 export OLLAMA_SSH="$SSH"
 export OLLAMA_SSH_CTL="$SSH_CTL"
 
-# Already tunnelled — a second oracle, or a manual forward being held. Use what
-# is up rather than fight over the port, PER PORT: a first oracle may hold the
-# ollama forward while the warden's is missing (or the reverse), and binding
-# one that is taken makes ssh refuse the whole tunnel (ExitOnForwardFailure).
-# THIS TEST MUST COME BEFORE OUR OWN FORWARD STARTS — see comfy-tunnel.sh for
-# why the order matters.
+# Reuse each existing forward independently. This check must precede our SSH
+# launch: binding one occupied port would make ExitOnForwardFailure reject both.
 FWD_PORTS=()
 if ollama_answers; then
     say "127.0.0.1:$PORT already answers - using it"
@@ -170,9 +131,8 @@ if [ ${#APP[@]} -gt 0 ]; then
     trap 'kill "$TUN" 2>/dev/null' EXIT
 fi
 
-# Say (not start) ollama's state on top. The app acquires its lifecycle lease
-# through the forwarded warden after the window exists; its direct systemctl
-# button path is also the fallback if that lease service cannot answer.
+# Report Ollama's state; the app acquires its lease after the window opens, with
+# direct systemctl controls as fallback.
 STATE="$("$SSH" "${SSH_MUX[@]}" -o BatchMode=yes "$HOST" \
          'systemctl is-active ollama.service' 2>/dev/null)"
 say "ollama.service is ${STATE:-unknown} on $HOST"
@@ -182,11 +142,8 @@ if [ ${#APP[@]} -eq 0 ]; then
     exec "${FWD[@]}"
 fi
 
-# WAIT FOR THE FORWARD, NOT FOR OLLAMA — the port must be bound before oracle's
-# first /api/ps poll, but a suspended/masked ollama (heavy-gate.sh) may never
-# answer at all; oracle's own status poll already handles "down" (Backend.
-# pollStatus in main.py), so this loop only guards against the forward itself
-# failing to bind.
+# Wait for the local forward, not Ollama: a heavy-gate suspension may leave the
+# daemon down, which the app reports itself.
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
     port_open "${FWD_PORTS[0]}" && break
     kill -0 "$TUN" 2>/dev/null ||

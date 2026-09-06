@@ -1,39 +1,12 @@
 { lib, ... }:
 
-# The Plasma colour schemes on both hosts: dynamic light and dark Oxygen
-# palettes, each with the UNFOCUSED palette baked in as the only palette.
+# Both hosts select flattened Oxygen palettes: inactive effects are disabled and
+# their desired colors are baked into the templates. Plasma Manager applies the
+# scheme after look-and-feel.
 #
-# OxygenDark distinguishes an unfocused window by a KColorScheme *effect* rather
-# than by a second set of colours — `[ColorEffects:Inactive]` ColorEffect=1
-# (desaturate) at ColorAmount=-0.9, which is `KColorUtils::darken(c, 0.0, 1.9)`:
-# luma untouched, chroma multiplied by 1.9. Hence the brighter, bluer unfocused
-# window. He wants that colour on EVERY window (2026-08-24), and there is no
-# `[ColorEffects:Active]` to answer it with — so both templates turn the
-# inactive effect off. OxygenDarkFlat carries every Background*/Decoration*
-# already put through that chroma x1.9; OxygenLightFlat retains Oxygen's light
-# surfaces. Foreground* stay at their active values: the
-# effect's other half (ContrastEffect=2 at 0.25) faded text toward the
-# background, which is the greying he asked to lose, and `[WM]` is white on both
-# states so the titlebar title reads the same white as the window's body text.
-#
-# The Oxygen look-and-feel itself remains book-only (home/plasma.nix), but the
-# colour result is desktop-wide: top was still selecting raw OxygenDark, so its
-# unfocused windows were brighter than its focused ones after book had already
-# been flattened. Both hosts select this scheme now.
-#
-# plasma-manager applies this with `plasma-apply-colorscheme` from its one-shot
-# login script, ordered after the `plasma-apply-lookandfeel` that would
-# otherwise put OxygenDark back.
-#
-# THE FILE THIS INSTALLS IS A TEMPLATE, NOT THE LIVE SCHEME (2026-08-24). The
-# live `~/.local/share/color-schemes/{OxygenDarkFlat,OxygenLightFlat}.colors`
-# are MINTED from them by `wal-set.sh` -> `plasma-scheme.py`, with the whole blue
-# family hue-rotated onto the wallpaper's accent. They appear in System Settings
-# → Colors: selecting either persists as the user's choice and wallpaper changes
-# repaint that selected version. They cannot be
-# `/nix/store` symlink for the same reason `Theme.qml` and `hyprland.lua`
-# cannot: something at runtime writes it. The seed below is what a machine that
-# has never run wal-set.sh reads — the untinted Oxygen blues.
+# These are templates, not live files. wal-set.sh/plasma-scheme.py mint writable
+# wallpaper-tinted copies under ~/.local/share/color-schemes; activation only
+# seeds a missing copy and must never replace an existing minted one.
 {
   xdg.configFile."scripts/plasma-scheme-template.colors".source =
     ./plasma-files/OxygenDarkFlat.colors;

@@ -1,61 +1,15 @@
 { pkgs, lib, config, ... }:
 
-# Pulls Plasma's notification popups back up against the panel.
+# Plasma's notification applet adds a fixed 36px popup inset after its available
+# screen rect has already accounted for a floating panel. This invisible applet
+# shares Plasma's process-wide QML engine and sets the writable inset to 8px;
+# the resulting 16px panel-to-popup gap was verified in nested Plasma 6.7.4.
+# A renamed upstream module fails harmlessly back to the stock gap.
 #
-# Plasma stacks two independent gaps under a floating panel and never tells you
-# about either. Measured in a headless nested Plasma 6.7.4 (1920x1080, bottom
-# floating panel 46px thick):
-#
-#   panel WINDOW           0,1018 1920x62   -> 46 thickness + 8 + 8 float padding
-#   panel VISIBLE edge     y=1026
-#   notification popup     bottom y=982
-#   KWin's maximize area   bottom y=1034
-#
-# so the popup sat 44px off the panel it spawned from. Both halves are Plasma's:
-#
-#   - `ShellCorona::_availableScreenRect` subtracts `PanelView::totalThickness()`,
-#     i.e. the panel's whole window INCLUDING both floating paddings, so the
-#     applet's usable rect already starts 8px clear of the panel. KWin disagrees
-#     and reserves the thickness only (1034 vs 1018 above) — maximized windows
-#     slide under the float gap, notifications do not.
-#   - the notifications applet then adds `popupEdgeDistance`, a flat
-#     `Kirigami.Units.gridUnit * 2` (36px at a 10pt UI font) in
-#     `applets/notifications/global/Globals.qml`. No setting exposes it, and the
-#     KCM's "popup position" only picks a corner.
-#
-# That applet is compiled into `/usr/lib64/qt6/plugins/plasma/applets/
-# org.kde.plasma.notifications.so` as a qrc QML module with no `plugin` line in
-# its qmldir, so it cannot be shadowed from a QML import path and cannot be
-# edited without rebuilding plasma-workspace.
-#
-# What CAN reach it: `PlasmaQuick::SharedQmlEngine` keeps ONE process-wide
-# QQmlEngine for every applet (`s_engine`, a static weak_ptr), so `Globals` is a
-# single instance shared across the shell — and `popupEdgeDistance` is a plain
-# writable `property int`, not readonly. A widget of our own, living in the same
-# shell, can simply assign it; the assignment kills the gridUnit binding for the
-# life of the process.
-#
-# Verified in that same nested session: popup bottom moved 982 -> 1010, i.e. the
-# 44px gap became 16px (our 8 + the panel's own 8, which now reads as one
-# margin). Nothing else moved; inter-popup spacing is a separate constant.
-#
-# The package alone does nothing: the widget must exist in a panel so Plasma
-# instantiates its QML. `plasma-notif-gap.service` below adds it idempotently
-# once plasmashell owns its bus name. This used to be a hand-run qdbus command,
-# so a fresh panel (including top's KDE panel) silently kept the stock 36px.
-#
-# It draws a 1x1 item and reports PassiveStatus, so it is invisible in a panel.
-# If a future Plasma renames the module the import throws, the retry timer keeps
-# failing quietly and you get the stock 36px back — it cannot break
-# notifications.
-
-#
-# NOTE the whole package directory is deployed as ONE symlink to a store path.
-# Per-file symlinks do not work: KPackage canonicalises every file it opens and
-# rejects anything that resolves outside the package root, so home-manager's
-# usual `/nix/store/...-hm_...metadata.json` link is refused as a "path
-# traversal attempt" and the widget fails to load. With the root itself being
-# the link, the canonical root IS the store directory and the check passes.
+# The service must install the applet into a panel; packaging it is insufficient.
+# Deploy the package directory as one store symlink. KPackage rejects the usual
+# per-file home-manager symlinks because their canonical targets escape the
+# package root.
 
 let
   pkgId = "org.kde.lam.notifgap";

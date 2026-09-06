@@ -1,75 +1,21 @@
 { pkgs, lib, hostProfile, ... }:
 
-# surfer — the standalone Qt/QML browser (source at ~/nix/apps/surfer; QtWebEngine,
-# i.e. open Chromium, with the browser chrome in the hyprvtb titlebar).
-# Packaging mirrors filer.nix exactly, including the air split:
-#
-#   * air: nixpkgs' Qt/Mesa can't create a GPU context on Apple Silicon
-#     (no Honeykrisp GBM/EGL driver — same root cause as filer/hyprvtb, see
-#     docs/agents/air-port-nextsteps.md), so exec the SYSTEM python3 with Fedora's dnf-installed
-#     python3-pyside6 (which ships QtWebEngine and runs on Asahi's Mesa).
-#   * top: a plain wrapper over nixpkgs' python3 + PySide6, wrapped with the
-#     Qt env so QtWebEngine finds its resources.
-#
-# BOTH wrappers send the app's stdio to ~/.cache/surfer.log, truncated once per
-# launch. Launched from a runner or a link click, surfer's stdout/stderr are
-# /dev/null otherwise — which silently discarded every `surfer adblock:` line
-# and the mid-session GPU/raster fallback alongside ~/.cache/surfer-gpu.log.
-# The single-instance probe must run BEFORE the redirect on either host (see
-# the air branch's comment): a link click that hands the URL to the running
-# browser must not truncate that session's log out from under its open fd.
-#
-# Both run the LIVE source at ~/nix/apps/surfer/main.py — day-to-day edits need no
-# rebuild on either machine. (Adding a Python dep like `adblock` below is the
-# exception: it needs one `rbhome` to land in pyEnv. On air the ad blocker
-# looks for `adblock` in the system python — `pip install --user adblock` to
-# get the full engine there; without it, it falls back to domain-only blocking.
-# Note that PyPI only has 0.6.0, so air gets network + plain cosmetic filtering
-# but NOT procedural filtering — the engine code feature-detects, so this is a
-# degradation and not a break. See the `adblock` override below for why.)
+# surfer is the live-source QtWebEngine browser. top uses nixpkgs Python/PySide6;
+# book/air executes Fedora's system Python/PySide6 because nixpkgs Qt/Mesa cannot
+# create an Asahi GPU context. Both wrappers log to ~/.cache/surfer.log, and the
+# singleton probe precedes redirection so a link click cannot truncate the
+# running browser's log. Python source edits are live; dependency changes need
+# a home rebuild. Missing system `adblock` on book degrades to the
+# feature-detected domain-only path.
 #
 let
-  # `adblock` — Brave's adblock-rust engine (the uBlock-Origin-class filter
-  # engine); surfer uses it for full network + cosmetic filtering.
-  #
-  # WHY THIS IS NOT `ps.adblock`. nixpkgs ships python-adblock 0.6.0, which is
-  # upstream's LAST release: ArniDagur/python-adblock has been dead since
-  # 2023-03 and pins the Rust crate at `=0.5.6`. **Procedural cosmetic
-  # filtering — `:has()`, `:has-text()`, `:upward()`, `:remove()`, a large and
-  # growing share of every modern uBO list — landed in adblock-rust 0.9.0**, so
-  # on 0.6.0 the binding has no `procedural_actions` field at all and every one
-  # of those rules is parsed and then silently discarded. There is no newer
-  # release, on PyPI or anywhere: this is the only way to that field.
-  #
-  # jampe/python-adblock rebases the same pyo3 binding onto adblock-rust 0.12.5
-  # and exposes `procedural_actions`, `add_resources` and
-  # `hidden_class_id_selectors`. Pinned to an exact rev by hash and treated as
-  # SOURCE WE OWN, not a dependency we track — upstream is a one-author fork of
-  # a dead project, created 2026-07-20, not published to PyPI, and it will not
-  # be maintained for us. The standing cost is that this flake now carries a
-  # vendored Rust crate whose next adblock-rust bump is ours to do by hand.
-  #
-  # `owner` is meatcrowning/python-adblock, OUR FORK of jampe's tree at the same
-  # rev, and that is the point: the hash already freezes the CONTENT, so nothing
-  # can move under a rebuild, but a hash cannot fetch a repo that has been
-  # deleted. A 0-star one-author upstream can vanish, and then no machine
-  # without the store path already warm — book, or this one after a `nix-collect-
-  # garbage` — can build surfer at all. Forking costs one line and removes that
-  # single point of failure entirely. Re-point at upstream only to pick up a new
-  # rev, and fork that too.
-  #
-  # Staying at the fork's 0.12.5 rather than adblock-rust's latest (0.13.2) is
-  # deliberate: 0.13.0 removed `BlockerResult.matched` in favour of
-  # `should_block()`, which this binding's `lib.rs` and its type stubs both
-  # still use — bumping means editing the fork's Rust, for no filtering we do
-  # not already get.
-  #
-  # **The serialized cache is NOT compatible across this bump.** adblock-rust's
-  # DAT format has offered no cross-version compatibility since 0.10.0, so a
-  # `~/.cache/surfer/filters/engine.dat` written by 0.5.6 is garbage to 0.12.5.
-  # The engine code in apps/surfer/main.py must stamp the cache with the
-  # `adblock.__version__` that wrote it and rebuild on any mismatch — a one-off
-  # manual delete is not enough, since the next bump has the same problem.
+  # top uses the pinned meatcrowning fork (adblock-rust 0.12.5) because PyPI's
+  # final upstream binding is 0.6.0/0.5.6 and lacks procedural actions. The
+  # fork is hash-pinned and is owned source; its next engine bump is a manual
+  # Rust/API migration. Do not casually move to 0.13.x: `BlockerResult.matched`
+  # was removed in 0.13.0. The fork also avoids a build failure if its one-author
+  # upstream disappears. The serialized DAT cache is not cross-version
+  # compatible; main.py stamps the writer version and rebuilds on mismatch.
   adblock = pkgs.python3Packages.adblock.overridePythonAttrs (old: rec {
     version = "0.7.0";
 
@@ -80,8 +26,7 @@ let
       hash = "sha256-aZQWc7XofSKm5aCZuvTGoQa6aAEwSE7Q1khf/aP/LYY=";
     };
 
-    # The fork is already PEP 621 and carries a real version, so nixpkgs'
-    # backport patch and its "0.0.0" substitution are both dead here.
+    # The fork is already PEP 621 and has a real version.
     patches = [ ];
     postPatch = "";
 
@@ -91,10 +36,7 @@ let
       hash = "sha256-IZkGbSWKuwzzVoJZMdwoKqczGbmr1V+8d7KGAOognI0=";
     };
 
-    # Inherited meta still pointed at the abandoned upstream. Licence is
-    # unchanged (the binding is MIT OR Apache-2.0, both LICENSE files present in
-    # the fork; adblock-rust underneath it has been MPL-2.0 all along, at 0.5.6
-    # as much as at 0.12.5) — only the provenance moves.
+    # Keep the inherited licence metadata; only provenance changes to our fork.
     meta = old.meta // {
       homepage = "https://github.com/meatcrowning/python-adblock";
       changelog = "https://github.com/meatcrowning/python-adblock/blob/${src.rev}/CHANGELOG.md";
@@ -104,18 +46,8 @@ let
 
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 adblock ]);
 
-  # Spell-check dictionaries for QtWebEngine, for `top` only. Chromium doesn't
-  # read Hunspell .dic/.aff directly — it wants them compiled to its own .bdic
-  # format, which qwebengine_convert_dict (shipped inside qtwebengine)
-  # produces. The top wrapper points QTWEBENGINE_DICTIONARIES_PATH here; the
-  # profile is switched on imperatively in main.py's _wire_profile.
-  #
-  # The filename IS the language tag Chromium opens — it does no locale
-  # matching — so main.py resolves the tag against whatever .bdic is actually
-  # installed rather than hardcoding one. book gets no derivation here (that
-  # would mean building qtwebengine from source on aarch64) and needs none:
-  # Fedora's qt6-qtwebengine ships /usr/share/qt6/qtwebengine_dictionaries,
-  # named by the Hunspell locale (en_US.bdic), in Qt's default lookup dir.
+  # top needs Hunspell converted to Chromium's .bdic format. book uses Fedora's
+  # QtWebEngine dictionaries and must not build nixpkgs QtWebEngine on Asahi.
   spellDicts = pkgs.runCommand "surfer-spellcheck-dicts" { } ''
     mkdir -p "$out"
     ${pkgs.qt6.qtwebengine}/libexec/qwebengine_convert_dict \
@@ -123,45 +55,12 @@ let
       "$out/en-US.bdic"
   '';
 
-  # Chromium force-enables the FreeType autohinter on any face whose fontconfig
-  # match says antialias=false — the hinting/autohint pins are ignored for the
-  # aliased case (measured offscreen 2026-08-08: with the desktop pins, Botis
-  # 4x6 came back grid-fitted with the exact FT_LOAD_FORCE_AUTOHINT bitmaps at
-  # every size, under every hinting pin and --font-render-hinting value; with
-  # antialias=true the same engine honoured hintnone verbatim). On a face
-  # authored as pixel squares that autohint slices blank rows through every
-  # glyph at any size off its exact grid — [his] "covered with many
-  # horizontally parallel lines". So FOR SURFER ONLY, layer one rule over the
-  # system config: Botis renders antialiased, which disarms the clamp and lets
-  # the hintnone pin through. At the desktop's 15px the AA raster is still
-  # pixel-exact (0 grey pixels — the grid is integral), and off-grid sizes go
-  # soft instead of striped. More Perfect DOS VGA is deliberately NOT included:
-  # its merged outlines survive the forced autohint with zero stripe artifacts
-  # at every probed size, and its mono+hinted render (uniform 8px advances) is
-  # the look the desktop wants. The pins themselves live in
-  # home/pkgs/desktop/font.nix; QtWebEngineProcess children inherit this env.
-  #
-  # The web twin ("More Perfect DOS VGA (web)") renders ANTIALIASED in surfer —
-  # same rule as Botis above, for the same reason, settled by his board
-  # decision 2026-08-10. The twin is the family surfer forces on ALL page text
-  # (_adj_fam in main.py), at each site's OWN font size — and most web sizes
-  # fall off the pixel grid. Off-grid, an aliased pixel face is autohint-sliced
-  # by Chromium into the horizontal stripes he called "weirdly rendered": the
-  # panel and goetia stay clean only because they ever draw ONE on-grid size.
-  # There is no crisp-at-arbitrary-size option at fractional scale, so the
-  # honest choice is striped-but-crisp-on-grid vs uniformly soft — and he
-  # picked soft, matching the panel/goetia look he calls crisp. antialias=true
-  # disarms Chromium's autohint clamp (the striping) and lets the soft raster
-  # through; at an integral grid the AA render is still pixel-exact (0 grey),
-  # so exact-grid sizes keep the crisp pixels and only off-grid ones go soft.
-  #
-  # It is pinned EXPLICITLY (not left to inherit) because the hosts disagree at
-  # rest: font.nix's conf.d pins the twin antialias=false on top, while on book
-  # a stale unmanaged ~/.config/fontconfig/fonts.conf carries a GLOBAL
-  # antialias=true that Fedora loads AFTER conf.d. surfer's fcConf includes
-  # /etc/fonts/fonts.conf and runs this match target="font" LAST, so the twin
-  # renders soft on BOTH hosts regardless. (Until 2026-08-10 this pin was
-  # antialias=false, re-asserting the crisp render; the decision flipped it.)
+  # Chromium's forced autohinter stripes pixel faces when fontconfig says
+  # antialias=false. Pin Botis 4x6 and the web twin antialiased in this wrapper:
+  # on-grid sizes remain pixel-exact, while off-grid sizes become soft instead
+  # of striped. More Perfect DOS VGA (the non-web face) is intentionally left
+  # out because its hinted outlines survive. The explicit last-match pin must
+  # win over different host fontconfig order; QtWebEngineProcess inherits it.
   fcConf = pkgs.writeText "surfer-fontconfig.conf" ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
@@ -178,17 +77,8 @@ let
     </fontconfig>
   '';
 
-  # A wrapper is not a sourceable env file, and this one bites: line 3 is the
-  # single-instance probe, so `source $(which surfer)` hands the RUNNING browser
-  # an empty OPEN — a new home-page tab in the window the user is looking at —
-  # and line 4 then redirects the sourcing shell's stdout into ~/.cache/surfer.log.
-  # An agent did exactly that three times on 2026-07-30, borrowing the Qt env for
-  # an offscreen harness, and he watched three DuckDuckGo tabs appear.
-  #
-  # Two halves of the fix live here: this guard, which makes sourcing an error
-  # instead of an accident, and `surfer-qtenv` below, which is the thing the
-  # sourcer actually wanted. (The third half is in apps/surfer/singleton.py:
-  # a bare no-URL invocation from a caller with no tty is refused outright.)
+  # Refuse sourcing: the wrapper probes the singleton and redirects logs. Use
+  # `surfer-qtenv` for a side-effect-free environment instead.
   sourceGuard = ''
     if [ -z "''${BASH_SOURCE[0]-}" ] || [ "''${BASH_SOURCE[0]}" != "$0" ]; then
       echo "surfer: this wrapper must be EXECUTED, not sourced." >&2
@@ -200,20 +90,12 @@ let
     fi
   '';
 
-  # The documented, side-effect-free way to borrow surfer's Qt environment.
-  # With arguments it execs them inside that environment; with none it prints
-  # the Qt variables as `export` lines for `eval "$(surfer-qtenv)"`. It never
-  # touches the socket, never redirects anything, and never starts a browser.
+  # Side-effect-free Qt helper: exec a command, or print exports for
+  # `eval "$(surfer-qtenv)"` in a subshell.
   qtenvBody = pkgs.writeShellScript "surfer-qtenv-body" ''
-    # `''${!prefix@}` and not `compgen -v`: nixpkgs' bash is built without
-    # progcomp, so compgen is not a builtin here and the loop silently
-    # enumerated nothing (caught 2026-07-30 — the printed env was empty and the
-    # caller inherited its Qt vars from elsewhere without noticing).
+    # `''${!prefix@}` works in nixpkgs' bash without progcomp/compgen.
     if [ "$#" -eq 0 ]; then
-      # PATH is in the list so the printed form matches what the exec form
-      # would give you, surfer's own python included. It is a superset of the
-      # caller's PATH (makeWrapper --prefix), never a replacement — but it is
-      # still store paths, so `eval` it in a subshell, not in a login shell.
+      # Include the wrapper's PATH and interpreter; evaluate in a subshell.
       for v in ''${!QT_@} ''${!QML@} ''${!NIXPKGS_QT@} ''${!QTWEBENGINE@} LOCALE_ARCHIVE PATH; do
         if [ -n "''${!v-}" ]; then printf 'export %s=%q\n' "$v" "''${!v}"; fi
       done
@@ -224,29 +106,12 @@ let
 
   surfer =
     if hostProfile.isBook then
-      # air additionally brackets the run with the profile handoff (see
-      # ~/nix/apps/surfer/tools/sync.py): merge top's cookies + userscripts in
-      # before the window opens, merge ours back out after it closes.
-      #
-      # Only air does this, and that is not an oversight: Fedora runs no
-      # sshd, so top cannot reach book — book is the only machine that can
-      # initiate. It still converges both ways, because book pulls top's
-      # latest at ITS launch and pushes its own at ITS exit.
-      #
-      # Never allowed to get between the user and the browser: the sync is
-      # timeout-bounded and `|| true`, so top being asleep, off the network
-      # or mid-session just logs and launches anyway. Chatter goes to
-      # ~/.cache/surfer-sync.log, not the terminal.
+      # air pulls top's profile before launch and pushes after exit. The sync is
+      # timeout-bounded and fail-open, so an unavailable top never blocks launch.
       pkgs.writeShellScriptBin "surfer" ''
         ${sourceGuard}
-        # Single instance FIRST, before anything else in this wrapper runs.
-        # surfer is the default browser now (home/prog/mime-defaults.nix), so a
-        # link clicked in another app lands here; apps/surfer/singleton.py hands
-        # the URL to the running instance over its socket and exits 0, and only
-        # exits 10 (falling through to a real launch) when nobody is listening.
-        # It has to happen before the sync bracket and before the log
-        # truncation below: those would otherwise refuse twice per click and
-        # truncate the LIVE session's log out from under its open fd.
+        # Probe the singleton before profile sync and log truncation; a link click
+        # must hand off without disturbing the live instance.
         if /usr/bin/python3 /home/lam/nix/apps/surfer/singleton.py "$@"; then exit 0; fi
 
         LOG="$HOME/.cache/surfer-sync.log"
@@ -255,22 +120,11 @@ let
           timeout 90 /usr/bin/python3 /home/lam/nix/apps/surfer/tools/sync.py "$1" \
             >> "$LOG" 2>&1 || echo "  (skipped: rc=$?)" >> "$LOG"
         }
-        # NO `vtbsync pull` here, deliberately. It used to run right there, and
-        # it was paid IN FULL before the window could open: a sleeping `top`
-        # cost 10s+ of dead startup on every cold launch (two ssh calls at
-        # ConnectTimeout each, behind a gate that only checked DNS — which
-        # MagicDNS answers for an offline host in 34ms). Nothing about merging
-        # cookies needs to precede the browser, so main.py's _cookie_sync_live
-        # does it on a background thread once the window is up, injecting
-        # through Chromium's own cookie store so it also needs no restart.
-        # `push` stays here: it runs after the window is gone, blocking nobody.
-        # Same Botis AA carve-out as top's wrapper — see fcConf above. Fedora's
-        # system config lives at /etc/fonts/fonts.conf there too.
+        # Pull happens in main.py after launch; pushing here runs after close and
+        # cannot delay the window.
+        # Fedora's fontconfig is covered by the same explicit Botis/web pin.
         export FONTCONFIG_FILE="''${FONTCONFIG_FILE:-${fcConf}}"
-        # Launched from the runner, so the app's own stdio has nowhere to go and
-        # Qt/Chromium diagnostics were being thrown away. Keep one session's
-        # worth (truncated per launch) — this is how the mid-session GPU/raster
-        # fallback gets caught alongside ~/.cache/surfer-gpu.log.
+        # Preserve Qt/Chromium diagnostics and the GPU fallback log.
         /usr/bin/python3 /home/lam/nix/apps/surfer/main.py "$@" \
           > "$HOME/.cache/surfer.log" 2>&1
         rc=$?
@@ -299,14 +153,8 @@ let
             --run 'exec > "$HOME/.cache/surfer.log" 2>&1' \
             "''${qtWrapperArgs[@]}"
 
-          # Same Qt environment, none of the body. This is what an agent or a
-          # harness reaches for; see apps/surfer/AGENTS.md.
-          # PATH too, not just the Qt vars: a harness borrowing this environment
-          # wants surfer's OWN python (PySide6 + the pinned adblock fork), and
-          # having to dig the interpreter out of the wrapper's last line by hand
-          # is exactly the manoeuvre that ended in three tabs. `surfer-qtenv
-          # python3 tools/find-test.py` is now the whole recipe. air needs no
-          # equivalent: there the interpreter IS /usr/bin/python3.
+          # Harnesses borrow the same Qt variables and pinned interpreter; use
+          # `surfer-qtenv python3 <test>` rather than sourcing the launcher.
           makeWrapper ${qtenvBody} $out/bin/surfer-qtenv \
             --set-default QTWEBENGINE_DICTIONARIES_PATH ${spellDicts} \
             --set-default FONTCONFIG_FILE ${fcConf} \
@@ -318,38 +166,16 @@ let
 in
 {
   home.packages = [ surfer ]
-    # top's `surfer-qtenv` is built inside the derivation above (it needs the
-    # same wrapQtAppsHook arguments). air has no nix Qt to borrow — it runs
-    # Fedora's system PySide6 — so there the helper is just the passthrough,
-    # which keeps ONE documented recipe working on both machines.
+    # air has no nix Qt environment, so its helper is a passthrough.
     ++ lib.optional hostProfile.isBook
       (pkgs.writeShellScriptBin "surfer-qtenv" ''exec ${qtenvBody} "$@"'');
 
-  # Desktop entry so surfer shows up in the runner and is eligible for http(s).
-  # It IS now the default browser — that association, plus Plasma's separate
-  # kdeglobals BrowserApplication key and $BROWSER, is set centrally in
-  # home/prog/mime-defaults.nix. `%U` is load-bearing for that: main.py takes
-  # the first non-flag argv as the start URL.
-  #
-  # `env SURFER_DESKTOP_LAUNCH=1` in Exec is what tells apps/surfer/singleton.py
-  # that a HUMAN asked for this: the runner and Plasma's BrowserApplication are
-  # the one legitimate no-URL launch, and without the marker they look exactly
-  # like the accidental script launch that gate exists to refuse.
-  #
-  # application/xhtml+xml and x-scheme-handler/about are in that file's
-  # surferTypes and were NOT in this MimeType= line, so surfer was the default
-  # for two types it never declared: the association held, but surfer was absent
-  # from the "Open with" list for them (that menu is built from mimeinfo.cache,
-  # which is built from MimeType=). Declared now so all three agree.
-  # App icon: the seal of Raphael, the archangel of Mercury and communication
-  # (Heptameron), redrawn as clean vector SVG in app-icons/. Installed into the
-  # hicolor icon theme so the desktop entry's Icon= AND the titlebar
-  # program-icon slot find it (hyprvtb resolves class -> .desktop -> Icon= ->
-  # icon theme; a currentColor SVG it tints to the title colour) — same pattern
-  # as goetia's seal.
+  # MIME/default-browser associations are centralized in mime-defaults.nix;
+  # `%U` supplies the start URL and SURFER_DESKTOP_LAUNCH=1 marks human no-URL
+  # launches. Declare all browser MIME/scheme types and install the seal icon
+  # used by the titlebar.
   home.file.".local/share/icons/hicolor/scalable/apps/surfer.svg".source = ./app-icons/surfer.svg;
-  # …and declare it a SEAL, so the panel paints its currentColor strokes in
-  # the focus colour instead of the file's baked fallback (app-icons/seals.nix).
+  # Mark it as a seal so the panel can tint its currentColor strokes.
   my.appSeals = [ "surfer" ];
 
   home.file.".local/share/applications/surfer.desktop".text = ''

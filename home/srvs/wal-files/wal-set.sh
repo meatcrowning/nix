@@ -3,45 +3,15 @@
 #
 #   wal-set.sh [--wallpaper-only] [/path/to/wallpaper]
 #
-# With no argument it re-applies the last-used wallpaper (or wall.png on first
-# run). It:
-#   1. delegates to wal-prepare.sh for the mode decision + tiled PNG + colour
-#      palette — all cached, so this is a fast no-op once an image has been
-#      prepared (see wal-prepare-all.sh / wal-prepare.path, which pre-warm
-#      every image under ~/Pictures/wall as soon as it's added)
-#   2. PUBLISHES the wallpaper for the Quickshell panel to draw, by writing two
-#      tiny state files — $CACHE/current (absolute path) and $CACHE/current.mode
-#      (the single word `tile` or `scale`). Nothing else here paints anything.
-#   3. regenerates the Quickshell palette (panel hot-reloads)
-#   4. regenerates the kitty colours (reloaded via SIGUSR1)
-#   5. sets Hyprland's focused-window border (live + persisted)
+# With no argument it reapplies the last wallpaper (or wall.png). wal-prepare.sh
+# supplies cached mode, tiles, and palette; this script publishes `current`,
+# `current.mode`, and `current.blur` for Quickshell, then applies kitty,
+# Hyprland, KDE/Qt, and cursor/RGB colours. Quickshell draws the wallpaper and
+# cross-fades it; hyprpaper and its flash/offset workaround are gone.
 #
-# WHY NO hyprpaper ANY MORE (removed 2026-07-26): Quickshell draws the wallpaper
-# itself now, on a Background-layer window, and this script's whole job on the
-# wallpaper side shrank to "write two state files". Two things forced the move:
-#
-#   * hyprpaper re-renders its background layer surface on every set, and that
-#     re-render reads on screen as a wallpaper FLASH. A large slice of this file
-#     used to exist purely to dodge it — an "already applied" marker keyed to the
-#     hyprpaper PID, a retry loop around an IPC that answers "invalid request"
-#     under a burst, and a rule never to re-set an image that was already up. The
-#     panel can simply CROSS-FADE between two images instead, so the flash (and
-#     all of that machinery) is gone rather than worked around.
-#   * hyprpaper has no notion of an OFFSET: it centres the image on the whole
-#     monitor, so in dock mode (the panel grown to a third of the screen) the
-#     subject of the art sat behind the panel. The workaround was an ImageMagick
-#     compose per (image, monitor size, panel edge, width) — a fresh full-screen
-#     PNG on every dock-width step, each one another hyprpaper set, i.e. another
-#     flash. The panel knows the region it doesn't cover and can just offset the
-#     art into it, per frame, for free. That compose pipeline is gone too.
-#
-# --wallpaper-only stops after step 2 — no Theme.qml write, so no Quickshell
-# reload. Rewriting Theme.qml is exactly what makes Quickshell hot-reload its
-# *entire* config (destroying and recreating every QML object, confirmed by
-# testing — see CLAUDE.md's "Reload lifecycle gotchas"), which would close
-# WallpaperPicker.qml's own window out from under you on every single flip.
-# So the picker previews with --wallpaper-only while flipping (instant, no
-# reload, stays open) and only runs the full apply once, when it closes.
+# `--wallpaper-only` stops after publishing the three state files. Rewriting
+# Theme.qml destroys/recreates the whole Quickshell tree, so the picker uses this
+# two-phase path for instant previews and runs the full apply only on close.
 #
 # Everything is idempotent, so it is safe to run on every Hyprland start.
 set -u
@@ -80,35 +50,16 @@ KEY="$(printf '%s' "$WALL" | md5sum | cut -d' ' -f1)"
 . "$THEMES/$KEY.mode"   # sets MODE, IW, IH
 
 # ---- 2b. publish it for the panel to draw ------------------------------------
-# These two files ARE the wallpaper apply. The panel watches them and does the
-# painting: $CACHE/current (written in step 1) is the absolute path of the image,
-# $CACHE/current.mode is the single word `tile` or `scale` — the decision
-# wal-prepare.sh already made from the image's dimensions, which the panel has no
-# way to re-derive cheaply and must not second-guess (both sides disagreeing on
-# tile-vs-scale is exactly how a wallpaper ends up drawn twice differently).
-#
-# Written UNCONDITIONALLY on every run, including when the value is unchanged: a
-# no-op rewrite costs nothing now that nobody re-renders a layer surface for it,
-# and it means the pair can never be left stale by an early exit somewhere.
-#
-# Written IN PLACE (truncate + write, same inode), never tmp+mv: Quickshell
-# watches a file by inode, so an atomic rename hands it a new inode while it
-# keeps watching the old, now-unlinked one — the same trap documented for
-# Theme.qml in step 7. One tiny write, so the truncated window is not observable
-# in practice. No trailing newline, matching $STATE's own convention.
+# The panel watches `current` (absolute path), `current.mode` (`tile`/`scale`),
+# and `current.blur`. Publish them on every run, in place (same inode); an
+# atomic rename would leave Quickshell watching the old file.
 printf '%s' "$MODE" > "$STATE.mode"
-# $CACHE/current.blur is the pre-blurred backdrop wal-prepare.sh cached for this
-# image (see there for why it is a real Gaussian and not a runtime effect). The
-# panel falls back to blurring the source itself if this is missing or stale, so
-# it is safe to publish the path unconditionally.
+# `current.blur` names wal-prepare.sh's cached backdrop; Quickshell falls back if
+# it is missing or stale.
 printf '%s' "$CACHE/blur-$KEY.png" > "$STATE.blur"
 
 if [ "$WALLPAPER_ONLY" = 1 ]; then
-    # Preview path (the picker, arrow-keying through images): writing $STATE and
-    # $STATE.mode above IS the whole wallpaper apply now, so there is nothing
-    # left to do but get out before the theme/palette work — which is the slow
-    # part AND the part that rewrites Theme.qml and would hot-reload the panel,
-    # closing the picker out from under the user mid-flip.
+    # Preview path: leave before palette work and its Theme.qml hot reload.
     echo "wal-set: wallpaper-only ($MODE), skipping theme apply"
     exit 0
 fi
@@ -123,12 +74,9 @@ echo "wal-set: source = ${IW}x${IH}, mode = $MODE, accent = #$ACCENT"
 # cached before CLUSTERS existed publishes empty; the next re-extract fills it.
 printf '%s' "${CLUSTERS:-}" > "$STATE.clusters"
 
-# NOTE: the Quickshell palette write (Theme.qml) is deliberately the LAST apply
-# step (step 7 below), NOT here. Writing Theme.qml triggers a Quickshell
-# hot-reload that tears down the entire QML tree — including WallpaperPicker.qml
-# and the Process running this very script when the apply came from the picker —
-# which kills this script wherever it's up to. Everything that must survive the
-# reload (kitty, borders, kdeglobals) therefore runs first; Theme.qml goes last.
+# Theme.qml is deliberately last: its reload tears down the QML tree and can kill
+# this picker-launched process. Apply kitty, borders, kdeglobals, cursor, and RGB
+# first.
 
 # ---- 4. kitty colours (reloaded via SIGUSR1) ---------------------------------
 cat > "$CONFIG/kitty/theme.conf" <<KITTYEOF
@@ -185,18 +133,10 @@ pkill -USR1 -x kitty >/dev/null 2>&1
 "$SCRIPTS/ly-theme.sh" "$ACCENT" "$DIM" "$CRIT"
 
 # ---- 5. Hyprland focused-window border + hyprvtb titlebars (live + persisted)
-# `hyprctl keyword` doesn't exist on the lua-config parser ("use eval"), so
-# both the border and the hyprvtb titlebar-plugin colours go through one
-# `hyprctl eval hl.config(...)` call for the live update, and sed against the
-# palette-tagged lines in hyprland.lua for persistence across restarts.
-#
-# shadow_alpha is a USER setting (Settings > Appearance > drop shadow), not a
-# palette colour — it lives in settings.json and the panel applies it live. But
-# this hl.config re-asserts the plugin.hyprvtb block, which reverted shadow_alpha
-# to the plugin default (0.6) on every theme/wallpaper change: the colours
-# survived because they are re-asserted here (and persisted in hyprland.lua) and
-# the shadow was not. So read the user's value and re-assert it in the SAME call,
-# so a theme switch RETAINS the chosen opacity instead of resetting it.
+# Lua config uses `hyprctl eval`, not `keyword`: update border/titlebar colours
+# live in one call and persist them in the palette-tagged Nix source. Re-read
+# user-owned shadow, title orientation, border width, rounding, and dim setting
+# from settings.json so a theme/reload does not reset them.
 SETTINGS="$CONFIG/quickshell/settings.json"
 SHADOW_ALPHA=0.6
 TITLE_ROTATED=false
@@ -205,21 +145,14 @@ ROUNDING=0
 if [ -f "$SETTINGS" ]; then
     v="$(sed -n 's/.*"shadowAlpha"[[:space:]]*:[[:space:]]*\([0-9.]*\).*/\1/p' "$SETTINGS" | head -n1)"
     [ -n "$v" ] && SHADOW_ALPHA="$v"
-    # titleOrientation is the other USER key riding this block (same reasoning
-    # as shadow_alpha above): re-asserted live and persisted in hyprland.lua so
-    # a `hyprctl reload` keeps the sideways title instead of reverting it.
+    # Preserve user-owned title orientation across reloads.
     grep -q '"titleOrientation"[[:space:]]*:[[:space:]]*"horizontal"' "$SETTINGS" && TITLE_ROTATED=true
-    # ...and the GLOBAL frame (Settings > appearance > theme): border width and
-    # corner rounding for every window on the desktop. Same persistence story.
+    # Preserve the global border width and rounding.
     v="$(sed -n 's/.*"windowBorderWidth"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$SETTINGS" | head -n1)"
     [ -n "$v" ] && BORDER_W="$v"
     v="$(sed -n 's/.*"windowRounding"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$SETTINGS" | head -n1)"
     [ -n "$v" ] && ROUNDING="$v"
-    # dimUnfocused also decides the unfocused-window BORDER (the third surface
-    # the dim moves — see apply-window-frame.sh / docs/DESIGN.md §3.1.1). ON: the
-    # static grey. OFF: match the active accent so nothing distinguishes an
-    # unfocused window. Recomputed here because a theme change moves the accent,
-    # and the OFF border must follow it.
+    # When dimming is disabled, the inactive border follows the new accent.
     grep -q '"dimUnfocused"[[:space:]]*:[[:space:]]*false' "$SETTINGS" && DIM_UNFOCUSED=false
 fi
 if [ "${DIM_UNFOCUSED:-true}" = false ]; then IB="${ACCENT}ee"; else IB="595959aa"; fi
@@ -249,56 +182,26 @@ if [ -f "$LUA" ]; then
     sed -i -E 's/(\["col\.bg_alt"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${BGALT}"'ff)\2/' "$LUA"
     sed -i -E 's/(\["col\.crit"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${CRIT}"'ff)\2/' "$LUA"
     sed -i -E 's/(\["col\.warn"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${WARN}"'ff)\2/' "$LUA"
-    # Persist shadow_alpha too — the live hl.config above reverts on the next
-    # `hyprctl reload` (which re-reads this file), so the colours survived and
-    # the shadow did not. Rewriting the seed line here makes it survive a
-    # reload and a restart, exactly as the colour lines do.
+    # Persist user-owned plugin settings so reload/restart agrees with live state.
     sed -i -E 's/(\["shadow_alpha"\][[:space:]]*=[[:space:]]*)[0-9.]+/\1'"${SHADOW_ALPHA}"'/' "$LUA"
     sed -i -E 's/(\["title_rotated"\][[:space:]]*=[[:space:]]*)(true|false)/\1'"${TITLE_ROTATED}"'/' "$LUA"
-    # The global frame. Anchored at line start so the commented-out examples
-    # further down cannot match; `rounding[[:space:]]` cannot reach
-    # rounding_power.
+    # Anchor global frame replacements so examples and rounding_power do not match.
     sed -i -E 's/^([[:space:]]*border_size[[:space:]]*=[[:space:]]*)[0-9]+/\1'"${BORDER_W}"'/' "$LUA"
     sed -i -E 's/^([[:space:]]*rounding[[:space:]]+=[[:space:]]*)[0-9]+/\1'"${ROUNDING}"'/' "$LUA"
 fi
 
 # ---- 6. KDE / Qt apps (kdeglobals colours + pixel font; live-reloaded) --------
-# Qt apps read their palette and fonts from ~/.config/kdeglobals: KDE apps
-# (Dolphin, Kate, dialogs) always do, and every other Qt app does too now that
-# hyprland.lua sets QT_QPA_PLATFORMTHEME=kde. Rewrite the colour groups from the
-# wallpaper palette and pin the same pixel font the panel and kitty use, then
-# poke running apps to reload. kwriteconfig6 edits keys surgically, so groups
-# owned elsewhere (KFileDialog Settings from plasma-manager, ColorEffects, etc.)
-# are left untouched.
-#
-# NOT IN A PLASMA SESSION. There kdeglobals is not this desktop's channel into
-# Qt apps, it IS the desktop: the KDE global theme picked in System Settings,
-# which the vendored apps follow too since 2026-08-18 (apps/pylib/kdetheme.py).
-# Rewriting it from the wallpaper would silently replace his colour scheme,
-# widget style and system font the first time a theme was applied — and
-# wal-set.sh is reachable from a Plasma session (apps/pylib/systheme.py, the
-# player's "create systheme"). One gate covers the fonts too:
-# apply-pixel-font.sh is called from inside this block.
-#
-# That gate went in on 2026-08-18 and took the wallpaper OUT of the window
-# colours in a Plasma session with it — the panel followed the wallpaper (via
-# Plasma's own accentColorFromWallpaper) and the windows did not. The Plasma
-# branch below is the answer: not a kdeglobals rewrite, a re-mint of the colour
-# SCHEME FILE he picked, which plasma-apply-colorscheme then pushes into
-# kdeglobals through KDE's own route — leaving widget style, icons and fonts
-# alone.
+# Outside Plasma, update only the wallpaper-owned kdeglobals colour groups and
+# notify running Qt apps; apply-pixel-font.sh owns the font keys. In Plasma,
+# kdeglobals is the user's desktop theme, so re-mint the selected colour-scheme
+# file instead of overwriting widget style, icons, or fonts.
 KG="$CONFIG/kdeglobals"
 PLASMA_SESSION=0
 case ":$(printf '%s' "${XDG_CURRENT_DESKTOP:-}" | tr '[:lower:]' '[:upper:]'):" in
     *:KDE:*) PLASMA_SESSION=1 ;;
 esac
 if [ "$PLASMA_SESSION" = 1 ]; then
-    # The KDE global theme stays his — but the COLOUR SCHEME follows the
-    # wallpaper, by re-minting the scheme file he already picked with its hue
-    # moved onto the accent and re-applying it under the same name. Oxygen's
-    # shape survives; only its family of blues becomes the wallpaper's colour.
-    # See plasma-scheme.py for the maths and for why it refuses to apply when
-    # the live scheme is not the one it templates.
+    # Keep the selected theme/shape; only move its colour family to the accent.
     echo "wal-set: Plasma session — KDE theme untouched, re-minting its colour scheme"
     "$SCRIPTS/plasma-scheme.py" --accent "$ACCENT"
 
@@ -421,30 +324,25 @@ fi
 # the other desktop apps use. There is no attempt to repaint a running process.
 if command -v ableton-theme >/dev/null 2>&1 \
    && [ -d "$HOME/.wine/drive_c/ProgramData/Ableton/Live 11 Suite" ]; then
-    ableton-theme || echo "wal-set: Ableton theme update failed" >&2
+    # `wine regedit` leaves winedevice.exe alive after its parent returns.
+    # A wallpaper-watch oneshot waits for every process in its cgroup, which
+    # turned a completed palette update into a 90-second timeout.  The theme
+    # is only for Ableton's next launch, so run it in its own transient unit.
+    if command -v systemd-run >/dev/null 2>&1; then
+        systemd-run --user --quiet --no-block --collect \
+            --unit="wal-ableton-${ACCENT}${BG}" ableton-theme \
+            >>"$CACHE/wallpaper-picker.log" 2>&1 \
+            || echo "wal-set: Ableton theme update could not start" >&2
+    else
+        ableton-theme || echo "wal-set: Ableton theme update failed" >&2
+    fi
 fi
 
 # ---- 6b. Cursor: outline -> accent, core -> bg -------------------------------
-# Regenerate ~/.icons/GoogleDot-<accent><bg> from the base theme, recoloured to
-# this wallpaper's accent (outline) and bg (core), and setcursor it live (see
-# cursor-recolor.sh — the core follows bg so the cursor matches the theme in
-# light mode too, not just the dark-mode near-black). Cheap (~9ms)
-# when the accent is unchanged; ~2.9s when it actually has to re-tint — and that
-# re-tint is pure ImageMagick/xcursorgen work the rest of the theme apply does
-# NOT depend on. It used to run inline right here, so a wallpaper switch to a new
-# accent stalled the whole desktop recolor (panel/kitty/borders) ~3s waiting on
-# the cursor. Now it's fired DETACHED (setsid → its own session), so:
-#   * it can't block step 7 (the Quickshell palette write) — the panel, kitty and
-#     borders land in ~0.2s and the cursor catches up a couple seconds later; and
-#   * it survives the step-7 hot-reload that tears this script down mid-run
-#     (setsid puts it outside this script's process group, so the reload's
-#     teardown can't kill it — which is why it no longer has to run *before*
-#     step 7). cursor-recolor.sh flocks itself, so overlapping fires serialise
-#     and still converge on the last accent.
-# A plain background child remains in the wallpaper watcher's systemd cgroup,
-# so systemd kills it as soon as that oneshot exits.  Its own transient user
-# unit gives the recolour its promised independent lifetime; the fallback keeps
-# manual/non-systemd invocations working too.
+# Recolour and apply the cursor detached: ImageMagick work must not delay the
+# palette reload, and the process must survive that reload. cursor-recolor.sh
+# serialises overlapping runs; the transient user unit keeps it alive after a
+# systemd oneshot, with setsid as the manual fallback.
 if command -v systemd-run >/dev/null 2>&1; then
     systemd-run --user --quiet --no-block --collect \
         --unit="wal-cursor-${ACCENT}${BG}" \
@@ -458,24 +356,15 @@ else
 fi
 
 # ---- 6c. RGB hardware: DRAM sticks + motherboard headers on the accent -------
-# rgb-set.py pushes ACCENT to every controller via the system openrgb.service
-# SDK server (a no-op if that's down, and a no-op if `rgbFollowTheme` is off —
-# it reads that key itself, since this script has no json reader on its pinned
-# PATH). Detached for the same reasons as the
-# cursor: the ENE DRAM SMBus writes aren't instant, nothing later depends on
-# them, and setsid keeps it alive through the step-7 Quickshell reload.
+# RGB follows the same detached/reload-safe path; rgb-set.py honours
+# rgbFollowTheme and is harmless when OpenRGB is unavailable.
 setsid "$SCRIPTS/rgb-set.py" "$ACCENT" \
     >>"$CACHE/wallpaper-picker.log" 2>&1 </dev/null &
 
 # ---- 7. Quickshell palette (spliced into Theme.qml; panel hot-reloads) -------
-# MUST BE THE LAST apply step — see the note where step 4 used to be. Writing
-# Theme.qml makes Quickshell hot-reload and tear down the QML tree (and, from
-# the picker, this script's own Process), so nothing may follow it.
-#
-# It also MUST edit Theme.qml in place (truncate + rewrite the SAME inode),
-# never `mv` a temp file over it: Quickshell watches each loaded QML file by
-# inode; an atomic rename gives Theme.qml a new inode while qs keeps watching
-# the old (now-unlinked) one, so the panel never sees the new palette.
+# MUST BE LAST: writing Theme.qml hot-reloads and can tear down this picker-launched
+# process. Keep the same inode (truncate/rewrite; do not replace with `mv`) so
+# Quickshell's file watcher continues to observe the palette.
 THEME="$CONFIG/quickshell/Theme.qml"
 BLOCK="$CACHE/palette.inc"
 cat > "$BLOCK" <<QMLEOF
