@@ -1,9 +1,9 @@
 import QtQuick
 import QtQuick.Controls as QQC
 
-// The compose box in a Plasma session: the KStyle's own sunken Frame around a
-// real TextArea, with a real Button beside it — Oxygen's focus frame, its
-// scrollbar and its button relief, not an imitation of them (apps/AGENTS.md →
+// The compose box in a Plasma session: the KStyle's own raised Button surface
+// below a real TextArea, with a real Button beside it. Oxygen paints both
+// surfaces, so the input and Send share the same relief (apps/AGENTS.md →
 // kdeshell; the window's chrome is real widgets, so the one control the content
 // still owns had better be drawn by the same style).
 //
