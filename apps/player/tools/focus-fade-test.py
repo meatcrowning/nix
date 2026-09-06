@@ -550,9 +550,12 @@ def main():
              ("albums", {"settingsOpen": True}), ("albums", {"searching": True})]
     slots = list(SLOTS) + ["art"]
     for view, extra in views:
-        win.setProperty("view", view)
+        # `view` lives on Root.qml, not the Window wrapper. Assigning it to
+        # `win` merely creates an unused dynamic property and silently tests
+        # whichever page happened to be the default.
+        content.setProperty("view", view)
         for k, v in extra.items():
-            win.setProperty(k, v)
+            content.setProperty(k, v)
         label = view + ("+" + "+".join(extra) if extra else "")
         # Settle the NEW view before the first grab, not between the two: a view
         # whose delegates were still being created would make the focused frame
@@ -580,6 +583,22 @@ def main():
                   queue_list is not None and queue_list.property("width") >= 240,
                   queue_list.property("width") if queue_list else "missing queue")
 
+            # The wide, side-art branch is deliberately a stack: three narrow
+            # columns make both the long queue and line-wrapped lyrics harder
+            # to use. This is the Air shape where the cover sits at left.
+            win.setWidth(1400)
+            win.setHeight(760)
+            spin(app, 200)
+            check("now: wide side-art puts lyrics below the queue",
+                  lyrics_pane is not None and queue_list is not None
+                  and lyrics_pane.property("y") >= (queue_list.property("y")
+                                                     + queue_list.property("height")),
+                  (lyrics_pane.property("y"), queue_list.property("y"),
+                   queue_list.property("height")) if lyrics_pane and queue_list else "missing pane")
+            win.setWidth(480)
+            win.setHeight(826)
+            spin(app, 200)
+
         focus(True)
         spin(app, 300)
         on = grab()
@@ -598,7 +617,7 @@ def main():
         check("%s: the unfocused frame is IDENTICAL — the app draws no inactive state" % label,
               not diff, str(diff) if diff else "")
         for k in extra:
-            win.setProperty(k, False)
+            content.setProperty(k, False)
 
     print()
     print(("FAILED: " + ", ".join(FAILS)) if FAILS else "all checks passed")
