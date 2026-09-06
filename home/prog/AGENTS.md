@@ -1,655 +1,277 @@
-# AGENTS.md — the compositor side of the desktop
+# AGENTS.md — compositor side of the desktop
 
-Hyprland's config (`hypr-files/hyprland.lua`), the `hyprvtb` plugin
-(`hyprvtb/`, C++ — compositor-side window titlebars, session save/restore,
-kinetic scrolling), and the off-screen sandbox agents must test GUI changes on.
+This guide covers Hyprland (`hypr-files/hyprland.lua`), the `hyprvtb` plugin
+(`hyprvtb/`), and the compositor-backed sandbox. The panel has its own guide
+at `quickshell-files/AGENTS.md`; repo-wide rebuild, git, safety, and host rules
+are in `~/nix/AGENTS.md`. Read `hyprvtb/PORTING.md` before changing the plugin
+ABI or either compositor pin.
 
-The Quickshell panel has its own guide: `quickshell-files/AGENTS.md`.
-Repo-wide rules (rebuild, git, boundaries): `~/nix/AGENTS.md`.
-Bumping the compositor pin or the ABI seam: `hyprvtb/PORTING.md` — read that
-one **before** touching the plugin or the pin.
+Anything the plugin draws is governed by `~/nix/docs/DESIGN.md`, including
+titlebar cells, labels, tooltips, shadows, animation, glyphs, and colours. The
+plugin's roll animation is the desktop reference: the
+`plugin:hyprvtb:slide_duration_ms` (260) and
+`plugin:hyprvtb:roll_slide_frac` (0.55) keys are published by `vtbPublishMotion()` to
+`~/.local/state/hyprvtb/motion.json` and `DeskMotion.qml` for the panel and
+apps. Read them through `Cfg::slideDurationMs()` and `Cfg::rollSlideFrac()`;
+they clamp invalid values, and a zero duration can produce a NaN geometry.
 
-**Anything the plugin DRAWS — titlebar cells, labels, tooltips, shadows, the
-roll/open/close animations — is governed by `~/nix/docs/DESIGN.md`**, the desktop's
-design language. The plugin is one of four codebases that put pixels on this
-screen and the user cannot tell them apart, so its glyph vocabulary, its
-timings and its colours are shared with the panel and the apps, not local
-choices. The window roll in/out is the **reference** every other sliding
-animation on the desktop is matched to.
+## Mutable Hyprland source
 
-**That reference is a config key, and this plugin OWNS it** (≥2.90).
-`plugin:hyprvtb:slide_duration_ms` (260) and `plugin:hyprvtb:roll_slide_frac`
-(0.55) are the roll's two beats — and therefore also the panel's popups, the
-titlebar tooltip and the six apps' drawers. They were `static constexpr` until
-2.89, which meant the other codebases hand-copied 260 out of a C++ comment, and
-the panel spent its life at 220 as a result. `vtbPublishMotion()` (main.cpp)
-writes the resolved values to `~/.local/state/hyprvtb/motion.json` (the panel
-reads it with a watching `FileView`) and to a generated
-`~/.local/state/hyprvtb/DeskMotion.qml` (the apps read it with a `Loader` —
-plain Qt QML has no file reader and `XMLHttpRequest` refuses `file://` without
-a blanket permission flag). It runs on every `config.reloaded`, so **retuning
-the whole desktop's motion is one number here plus `hyprctl reload`**, with
-nothing restarted. Read them through `Cfg::slideDurationMs()` /
-`Cfg::rollSlideFrac()`, never cached in a member: those accessors clamp, and a
-0ms duration is a division by zero in the roll's progress step whose NaN lands
-in an animated `CBox` — the degenerate rect `renderRect` aborts on.
-
----
-
-## `hyprland.lua` is mutable — edit the SOURCE, let the switch carry it
-
-It cannot be a `/nix/store` symlink: `wal-set.sh` seds the border and seven
-plugin colours into it and `cursor-recolor.sh` the cursor theme name, all in
-place at runtime. It used to be *seeded once* and then never touched, which
-meant a rebuild could not update it at all — so a fix applied to the nix source
-did nothing until someone also hand-edited the live file, and `git pull &&
-rebuild` silently applied none of it. That was "seed drift", and it bit
-repeatedly: a stale `focus workspace 50` line outlived its removal from source
-and scattered windows across two workspaces; a later episode shipped a dead
-`SettingsStore` binding.
-
-Since 2026-08-05 `home.activation.seedHyprMutableFiles` **reconciles** it on
-every switch (`tools/seed-reconcile.sh`): the nix source is authoritative for
-structure, the live file for the named runtime-owned values, which are carried
-forward. So:
+`hyprland.lua` is runtime-mutable: `wal-set.sh` owns the border and seven
+plugin colours, and `cursor-recolor.sh` owns the cursor theme. Edit only
+`home/prog/hypr-files/hyprland.lua`; activation reconciles it on every switch,
+preserving named runtime values and copying the old live file to
+`~/.cache/seed-reconcile/` when needed.
 
 ```bash
-# …edit home/prog/hypr-files/hyprland.lua ONLY.
-sudo rebuild-top                   # activation rewrites the live copy in place
-hyprctl reload                     # re-runs the live Lua, re-registers hl.bind, no session disturbance
-~/nix/tools/seed-drift.sh          # tripwire — should now be silent. exit 1 = the reconciler missed something
+sudo rebuild-top
+hyprctl reload
+~/nix/tools/seed-drift.sh
 ```
 
-**The live copy is no longer a place to edit.** A live-only change is
-overwritten by the next switch (a copy goes to `~/.cache/seed-reconcile/`, and
-the reconcile says so). Editing it directly is only for a value the reconciler
-carries — i.e. one `wal-set.sh` owns — and even then wal-set.sh is the writer.
+When adding a runtime-owned value, add a matching `carry` in
+`tools/seed-reconcile.sh` and keep `tools/seed-drift.sh`'s `PAIRS` and
+`normalize()` in step. Anchor carries at the key, never a broad value shape
+such as `rgba(...)`, or Nix-owned values can be imported from the live file.
 
-**Adding a runtime-owned value means teaching the reconciler about it**: a new
-`sed -i` in `wal-set.sh`/`cursor-recolor.sh` needs a matching `carry` call in
-`tools/seed-reconcile.sh`, or the switch will stamp the template value back
-over it. Anchor the pattern at the key, never at the value shape — a blanket
-`rgba(...)` would also drag `inactive_border`, which nix owns, across from the
-live file. `tools/seed-drift.sh`'s `PAIRS` and `normalize()` are the tripwire
-for exactly that mistake; keep the two in step. Never trust a written claim
-about current drift state — run the script.
+Drift before a switch is expected. `seed-drift.sh --pre-switch` describes the
+reconciliation; preflight must fail only when the reconciler cannot run (exit
+2), not for ordinary drift. `tools/seed-gate-test.sh` covers this distinction.
 
-**Drift BEFORE a switch is normal and must never block the switch.** Between
-editing the source and switching, the live copy is behind by construction —
-that is the state the reconciler exists to resolve. Until 2026-08-07
-`preflight.sh` hard-failed on it, and since preflight gates `sudo rebuild-top`
-while only the switch clears the drift, every commit touching `hyprland.lua`
-was unlandable: commit 4c1ed09 sat unapplied on `top` for a day, and
-`nix-pull apply` — which rebuilds unattended through the same wrapper — could
-not have landed one at all. Preflight now asks `seed-drift.sh --pre-switch`,
-which reports what the switch will do and fails only when the reconciler
-**cannot run** (exit 2 — activation calls it with `|| true`, so that case would
-silently skip the file, as book's missing `awk` once did). Keep the two exit
-codes distinct; `tools/seed-gate-test.sh` is the regression harness, and
-collapsing them restores the deadlock with no error anywhere.
+## Hyprland integration
 
----
+### Monitor reclaim
 
-## Powering the display off DESTROYS the output
+When the display link drops, Hyprland destroys and re-adds the output. The
+`monitor.added` block in `hyprland.lua` restores windows, but it must:
 
-Not DPMS: the monitor drops its DisplayPort link, so the compositor destroys
-the output and re-adds it when the screen wakes. Measured on `top` 2026-08-01
-in Hyprland's own log — `Connector DP-5 disconnected` / `Disabling output DP-5`
-in the evening, a matching reconnect in the morning. Because this desktop is
-every-window-floating on a single workspace, windows carry absolute coordinates
-across the gap and come back at coordinates that are on no screen: running,
-listed, focusable, invisible. The only way out used to be closing every window
-and reopening it.
+- decide whether a window needs recovery from the monitor rect plus
+  `HOTPLUG_MIN_VISIBLE`; deliberately off-screen/edge placement is valid;
+- use the panel width only to choose a destination, never to decide whether a
+  window is a victim (the panel layer is wider than the reserved rect).
 
-`hyprland.lua`'s `monitor.added` handler puts them back. Two rules in it are
-the whole design, and both are load-bearing:
+Keep the `>>> monitor-reclaim >>>` markers and the block free of live-only
+dependencies. `tools/monitor-reclaim-test.sh` extracts the real block and
+stubs `hl`; it must remain the test instead of using a nested compositor,
+which would move windows onto the user's monitor. `hl.on` accepts misspelled
+events silently; use Hyprland's `CLuaEventHandler::knownEvents()` names such as
+`monitor.added`, `monitor.removed`, `window.*`, `layer.*`, `workspace.*`,
+`config.reloaded`, and `hyprland.start`/`shutdown`.
 
-- **WHETHER to move is judged against the monitor rect**, with a
-  `HOTPLUG_MIN_VISIBLE` floor — a window hanging off an edge is something he
-  does on purpose, and "recovering" it would rearrange his desktop every time
-  the screen wakes. That is a worse bug than the one being fixed, and the first
-  draft had it: subtracting the panel's full layer width moved a window he had
-  deliberately placed.
-- **WHERE to put it may use the panel width**, because `hl.get_monitors()` does
-  not expose the reserved rect and the qs-bar layer (634) is wider than the true
-  reserve (376). Fine for choosing a destination, wrong for choosing a victim.
+### Plugin Lua API
 
-Harness: `tools/monitor-reclaim-test.sh`. It **extracts the real block** from
-`hyprland.lua` between its `>>> monitor-reclaim >>>` markers and runs it against
-a stubbed `hl`, so it tests the source rather than a copy — keep those markers,
-and keep the block free of anything needing a live compositor at load time.
-There is deliberately no nested compositor: reproducing a monitor loss for real
-is the one operation that migrates windows onto a monitor he can see.
-
-Lua event names come from Hyprland's own `CLuaEventHandler::knownEvents()`
-(`monitor.added` / `.removed` / `.focused` / `.layout_changed`, `window.*`,
-`layer.*`, `workspace.*`, `config.reloaded`, `hyprland.start` / `.shutdown`).
-`hl.on` does **not** validate the name — a typo registers silently and never
-fires, so read that list rather than guessing.
-
----
-
-## Plugin actions are Lua functions, never dispatchers
-
-`addDispatcherV2` is useless under the Lua config: `hyprctl dispatch X`
-*evaluates X as a Lua expression* and then wants a dispatcher object back, so a
-plugin dispatcher name resolves to an undefined global and silently does
-nothing. The old `hyprctl dispatch hyprvtbsaveclose` in `session-exit.sh` was a
-no-op for its entire life — logout saved nothing and closed nothing gracefully
-(fixed in v2.54).
-
-Register with `HyprlandAPI::addLuaFunction`; call it as
-`hl.plugin.hyprvtb.<fn>()` from a keybind, and:
+Plugin actions are Lua functions, not dispatchers. Register with
+`HyprlandAPI::addLuaFunction`, call from config as
+`hl.plugin.hyprvtb.<fn>()`, and from scripts as:
 
 ```bash
 hyprctl eval "hl.plugin.hyprvtb.<fn>()"
 ```
 
-from a script. **`hyprctl eval` returns NO values** — a successful chunk prints
-`ok`, and only `error("x")` messages carry text. Any value-returning Lua
-function must therefore publish to a state file instead: the kinetic module
-writes `~/.local/state/hyprvtb/kinetic-{dump.json,stats.txt,get.txt}`
-atomically with a `seq` freshness token. Those paths are `$HOME`-relative, so a
-nested harness instance (`HOME=$RUN/home`) is isolated for free. Follow that
-pattern.
+`hyprctl eval` prints only `ok`; return values must be published atomically to
+state files. Kinetic uses
+`~/.local/state/hyprvtb/kinetic-{dump.json,stats.txt,get.txt}` with a `seq`
+freshness token. Those paths are `$HOME`-relative, so nested harnesses isolate
+them with `HOME=$RUN/home`. `hyprctl keyword` does not work with the modern
+parser; use `eval`. `hl.dsp.*` objects are for `hyprctl dispatch`, not bare
+plugin names.
 
-**`close_pid(<pid>)` is the one an APP calls on itself** — the roll-up + fade
-that the titlebar's `[x]` runs, asked for by the program that is quitting. A Qt
-app that quits on a key tears its surface down where it stands and leaves the
-compositor nothing to animate but a fade of the last frame, so viewer's `q` and
-Escape go through here instead (`pylib/vtbclient.close_animated()`, straight
-down Hyprland's control socket — no `hyprctl` subprocess on the quit path). Two
-properties it must keep:
+`close_pid(<pid>)` is the app-side animated close path
+(`pylib/vtbclient.close_animated()`): address the caller by PID, never the
+active window. Accept the focused window only when it belongs to that PID;
+otherwise require that PID's sole window and call `error()` on ambiguity. Keep
+window searches in their own scope and raise the Lua error after all handles
+are destroyed; `luaL_error` longjmps past C++ destructors.
 
-- **Addressed by PID, never "the active window".** `hyprctl activewindow` lies
-  (see the `hyprctl-activewindow-lies` note), and a close aimed at the wrong
-  window is somebody's unsaved work, not a glitch. It takes the focused window
-  when that window is the caller's, else that pid's only window, and **refuses
-  anything ambiguous** through `error()` — which is how a Lua function returns
-  a boolean to a caller that can only read `ok`. The client falls back to
-  quitting itself, so a refusal costs the animation, never the quit.
-- **Every window handle dies before the `luaL_error`.** It longjmps past
-  destructors, the same trap `luaKineticSet` documents — hold the search in its
-  own scope and error outside it.
-
-**Empty inner column? Dump the app-button server before touching the plugin:**
+For an empty app-button column, dump the server first:
 
 ```bash
-hyprctl eval "hl.plugin.hyprvtb.ipc_dump()"      # -> ~/.local/state/hyprvtb/ipc-dump.json
+hyprctl eval "hl.plugin.hyprvtb.ipc_dump()"
+# ~/.local/state/hyprvtb/ipc-dump.json
 ```
 
-It separates the three causes that all look identical on screen: `"named":
-false` (the socket lost its filesystem name — the listener is alive but
-unreachable, see 2.85 and 2.92), no entry in `regs` for the window's pid (the app never
-connected, or connected under a different pid than `getPID()` reports for its
-window), or a `regs` entry that IS there, which moves the hunt to rendering.
+`named: false` means the listener lost its filesystem name, not that apps
+failed to register. The I/O thread must retake the name after `rename()`
+removes it; never replace that repair with an `unlink()` gap. A missing PID in
+`regs` is an app-registration problem; a present entry moves the investigation
+to rendering. Rendering must consume `CVtbDeco::m_regSnap` advanced by
+`mainThreadTick`, including glyph prewarming; do not read `VtbIpc::get` directly
+from render or hit testing. The global serial means only that some registration
+changed; compare the fresh registration to the snapshot. See
+`docs/hyprvtb-titlebar-flash.md`.
 
-**`"named": false` is now self-correcting, and that is load-bearing.** The name
-only ever changes hands by `rename()` (bind a temp path, rename it into place),
-and the I/O thread re-takes the name within a second if the path stops naming
-its inode — because a nameless listener is invisible: every app already
-connected keeps its inner column while every app launched afterwards gets
-`ENOENT` from `connect()` and can never recover. It read to the user as "the
-inner titlebar buttons of windows are no longer visible" and to an agent as an
-app-startup bug, since the apps genuinely were not registering. **Diagnose it
-from outside the plugin before suspecting `apps/`:** a bare
-`python3 -c "…VtbClient()…"` that cannot connect proves the socket, not the app.
-Do not replace either half with an `unlink()`; both causes (2.92) were an
-unlink with a gap after it.
+## Session exit and snapshots
 
-**The render path never reads the app-button server (≥2.97).** `CVtbDeco` keeps a
-snapshot of its own registration (`m_regSnap`, handed out by `appReg()`); only
-`mainThreadTick` advances it, and it prewarms that snapshot's glyphs before anything
-can draw them. Drawing or hit-testing straight off `VtbIpc::get` reintroduces the
-titlebar text flash — `renderBar` used to stamp `m_lastIpcSerial` too, which hid the
-app's change from the tick, so nothing prewarmed and nothing repainted. The serial is
-GLOBAL (player's `PLAYBAR` bumps it several times a second), so it only means "somebody
-changed something"; what decides is comparing the fresh registration against the
-snapshot. Story: `docs/hyprvtb-titlebar-flash.md`.
+`quickshell-files/PowerMenu.qml` runs
+`quickshell-files/scripts/session-exit.sh` before every `endSession` action.
+That script calls `hl.plugin.hyprvtb.close_all()` through `hyprctl eval`, waits
+up to about four seconds for graceful app closes, and then permits poweroff,
+reboot, or logout. It is close-only: apps save their own state and the plugin's
+`window.close` handler records geometry. Suspend is not an `endSession` item.
 
-Also note `hyprctl keyword` refuses outright here ("keyword can't work with
-non-legacy parsers") — use `hyprctl eval`. And dispatchers are `hl.dsp.*`
-objects passed to `hyprctl dispatch`; a bare dispatcher name is a nil global.
-
----
-
-## Graceful session exit — close-only, never a snapshot
-
-The panel's power menu (`quickshell-files/PowerMenu.qml`) runs
-`quickshell-files/scripts/session-exit.sh` *before*
-the power command for any `endSession` item. That script runs
-`hyprctl eval "hl.plugin.hyprvtb.close_all()"`, which sends a graceful
-`sendClose()` to every decorated non-scratch window — i.e. "clicks the [x]" —
-then waits (bounded ~4 s) for them to actually close before returning and
-letting the power action fire.
-
-**That is its only job.** Each app gets to save its own state, and the plugin's
-`window.close` handler records the window's geometry, which is what makes the
-app reopen where you left it. It deliberately does **not** snapshot a session:
-logging in must not spawn anything. `sleep` is not an `endSession` item —
-windows stay across suspend.
-
-Session *snapshots* (`~/.local/state/hyprvtb/session.tsv`, relaunched by
-`vtbRestoreSession` at the next fresh login) are a separate, deliberate act:
-`hl.plugin.hyprvtb.save_session()` on Meta+Ctrl+S. **Never call it from a
-script** — an unexpected snapshot means the next login spawns a pile of windows,
-and restored windows skip the open-reveal animation by design. To find out what
-a snapshot *would* contain, use `session_probe()` (below): it runs the same
-selection into a scratch file and arms nothing. Neither side of the snapshot
-carries an agent's sandbox windows since 2.93 — also below.
-
----
-
-## `hyprvtb` — where to edit
-
-Hyprland comes from a **pinned** flake input (`hyprland.url =
-github:hyprwm/Hyprland/vX.Y.Z`) and the plugin is built against that exact
-package. Bumping it is a deliberate act with a ritual: `hyprvtb/PORTING.md`.
-
-Two containment rules the nix `checkPhase` enforces:
-
-- Volatile Hyprland internals may be named **only** in `vtbCompat.hpp`;
-  everything else calls `Hl::…`.
-- A weak ref to a decoration must be a `CDecoRef`, never a raw
-  `WP<CVtbDeco>` — a `lock()` over a unique-owned deco aborts the compositor.
-
-There is also a **temporary** third pin, `hyprland-air` (v0.56.2): book runs
-Fedora Asahi's rpm compositor (nix hyprland crashes on Asahi — no GBM), and its
-hyprvtb must be built against that exact version. So `vtbCompat.hpp` is
-dual-version (`#if VTB_HL_056`) and **seam changes must compile against BOTH
-pins.** Delete the bridge when Fedora ships 0.56 — runbook:
-`docs/book-hyprvtb-version-bridge.md`.
-
-`hyprvtb/` is the plugin derivation's `src` (`src = ./.`), so any file added or
-changed there rebuilds the plugin. That is why this guide lives one level up.
-
----
-
-## Reloading the plugin after a source edit
-
-**`rbsys` then `hyprctl reload`. That is the whole procedure. No relog, and
-never `hyprctl plugin load` / `unload`.**
+`hl.plugin.hyprvtb.save_session()` is a deliberate Meta+Ctrl+S action only.
+Never call it from a script: it arms the next-login restore and can spawn a
+pile of windows. Use `session_probe()` to inspect the same selection without
+arming it:
 
 ```bash
-# bump the version string in hyprvtb/main.cpp first — one bump per change
-git add -N <any new file>          # flake eval ignores untracked files
+hyprctl eval "hl.plugin.hyprvtb.session_probe()"
+hyprctl eval "hl.plugin.hyprvtb.session_probe(\"/tmp/fake-session.tsv\")"
+```
+
+Since 2.93, save excludes headless-output and `sandbox`-tagged windows, and
+restore excludes entries on no visible monitor or with degenerate geometry.
+`session_probe()` writes `session-probe.tsv` and
+`session-probe-restore.tsv`, with skip reasons, without touching
+`session.tsv` or processes; its optional path evaluates a fabricated snapshot's
+restore verdicts.
+
+## Plugin source, pins, and reload
+
+Hyprland is pinned and the plugin is built against that exact package. Keep
+volatile Hyprland internals in `vtbCompat.hpp`; other code uses `Hl::…`. A
+weak decoration reference must be `CDecoRef`, never raw `WP<CVtbDeco>`.
+
+`book` uses Fedora Asahi's compositor (`hyprland-air` v0.56.2; Nix Hyprland
+crashes there because of GBM), while `top` uses the main pin. The plugin seam is
+dual-version via `#if VTB_HL_056`; compile seam changes against both pins.
+Remove the bridge only when Fedora ships 0.56, following
+`docs/book-hyprvtb-version-bridge.md`. Because `hyprvtb/` is the derivation's
+`src = ./.`, any file change there rebuilds the plugin.
+
+For every plugin source change, bump the version in `hyprvtb/main.cpp`, then:
+
+```bash
+git add -N <any new file>
+./tools/preflight.sh
 sudo rebuild-top
 hyprctl reload
-hyprctl plugin list                # must show the NEW Version, and exactly ONE hyprvtb
-hyprctl configerrors               # must be empty
+hyprctl plugin list       # one hyprvtb, new Version
+hyprctl configerrors      # empty
 ```
 
-It briefly re-decorates every window; the plugin does session save/restore, so
-this is safe.
+The Lua config loads the resolved `/nix/store/...` path (`readlink -f`), so a
+new derivation changes the literal path and `hyprctl reload` swaps it. Never
+use `hyprctl plugin load` or `unload`: a second path creates an unregistered
+duplicate, unload erases `plugin:hyprvtb:*` keys, and reload cannot restore
+those keys.
 
-**Why it works:** `hyprland.lua` passes `hl.plugin.load` the **resolved**
-`/nix/store/...` path (via `readlink -f`), not the stable symlink. Hyprland
-tracks config-loaded plugins by that literal path *string*, and
-`CPluginSystem::updateConfigPlugins` early-returns unless the string list
-*changes* between reloads. With the symlink the string was constant forever, so
-`hyprctl reload` was a no-op and the stale `.so` stayed mapped — which is what
-made everyone reach for manual `plugin load` and, historically, a relog. With
-the resolved path, each `rbsys` yields a new string and Hyprland does the swap
-itself, in the right order and with the right bookkeeping.
+The swap must detach this plugin's decorations while its code is mapped,
+restore rolled/minimized state, and decorate hidden windows in the new
+instance. `PLUGIN_EXIT` writes `~/.local/state/hyprvtb/handoff.tsv`; the new
+instance reapplies it without animation, accepts it only for the same
+compositor PID, and consumes it. `hyprvtb/tools/hotswap-test.sh [plugin.so]`
+tests this in a nested compositor; the config watcher is asynchronous, so an
+IPC request may be needed to wake an idle nested instance.
 
-### What makes the swap SURVIVABLE (2.65) — do not regress this
+If a swap crashes, `hypr-supervise` quarantines the live build and restarts
+with the real config. `hyprland.lua` loads the last known-good build and leaves
+`crashed-with`/`quarantined` breadcrumbs. This is configured for `top` in
+`sys/dsk/hyprland.nix` and for `book` through ly in `home/prog/ly.nix` and
+`docs/agents/book-supervised-session.md`; after three consecutive crashes it
+falls back to `start-hyprland`.
 
-A hot swap `dlclose()`s the old image while the compositor still holds pointers
-into it, and Hyprland's own cleanup is not enough:
-`HyprlandAPI::removeWindowDecoration` lands in `CWindow::removeWindowDeco`,
-which only queues the removal and calls `updateWindowDecos()` — and that
-early-returns on `!m_isMapped || isHidden()`. Every hidden window (this plugin
-hides rolled-up ones and parks minimized ones off-screen) therefore kept a
-`UP<CVtbDeco>` whose vtable was about to be unmapped, and the session SIGSEGV'd
-at the next window close, inside `~CWindow` under `CWindow::destroyWindow`. That
-is what took the desktop down on 2026-07-25. Three things hold it together now,
-all in `PLUGIN_EXIT`/`PLUGIN_INIT`:
+## Kinetic scrolling
 
-- `Hl::detachOurDecos()` erases this plugin's decorations from every window
-  itself, uncaching them from the positioner, while its code is still mapped.
-- `CVtbDeco::restoreForUnload()` runs first, un-hiding rolled-up windows and
-  un-parking minimized ones — states only this instance knows how to leave,
-  which the incoming one does not inherit.
-- `PLUGIN_INIT` decorates hidden windows too (it used to skip them), so a
-  minimized window is not left with no titlebar at all after the swap.
+`vtbKinetic` emits decaying finger-axis events at the seat via
+`Hl::sendAxis` → `CSeatManager::sendPointerAxis`, downstream of the
+`input.mouse.axis` bus. Do not route through `CInputManager::onMouseWheel`,
+which re-enters the listener and defers a frame. A zero axis value is the wire
+`axis_stop`, so the seam rejects zero/non-finite values mid-flight; withhold
+the terminal stop for at least 300 ms. Disarm every timer in `PLUGIN_EXIT`
+first and close open axis sequences with a zero-delta send plus a frame.
 
-### A swap must also be INVISIBLE, not merely survivable (2.71)
-
-Restoring every window on the way out is required, but it left them restored: a
-rolled-up window snapped open on `hyprctl reload` and stayed open. So
-`PLUGIN_EXIT` now writes the roll/minimize states to
-`~/.local/state/hyprvtb/handoff.tsv` before undoing them, and `PLUGIN_INIT`
-re-applies them (`toggleRollup(false)` — no animation) after it has decorated
-the existing windows. Keyed by window ADDRESS, which is only meaningful because
-a hot swap happens inside one compositor process: the file records that
-process's PID, is discarded on a mismatch, and is consumed (deleted) on the
-first read either way, so nothing leaks into a fresh login. Note the fix cannot
-show on the first reload *from* an older build — the outgoing instance is the
-half that has to write the file.
-
-### A nested compositor HIJACKS the systemd user environment
-
-**Every Hyprland process — including a nested one — repoints the whole systemd
-user manager at itself.** Hyprland runs `systemctl --user import-environment
-DISPLAY WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE XDG_CURRENT_DESKTOP
-QT_QPA_PLATFORMTHEME PATH XDG_DATA_DIRS` at startup (the string is in the
-binary) plus `dbus-update-activation-environment --systemd`, and the mirror
-`unset-environment` at clean exit. One slot per variable, no owner, last writer
-wins. `nested-smoke.sh` / `hotswap-test.sh` / `kinetic-test.sh` all tear down
-with `pkill -9`, so the exit hook never runs and the **dead** nested signature
-stays in the manager for the rest of the login — found on `top` 2026-07-28,
-pointing at an instance dead for an hour while the session ran on `wayland-1`.
-A user unit that shells out to `hyprctl` under it cannot connect **and still
-exits 0.**
-
-All three harnesses now call `~/.config/scripts/hypr-session-env.sh --restore`
-in `cleanup()`. Keep that in any new one, and wrap the ExecStart of any user
-unit that needs the compositor in the same script — `home/srvs/hypr-env.nix`
-has the full story. `tools/preflight.sh` warns when the manager and reality
-disagree.
-
-`tools/sandbox.sh` is NOT implicated: it creates a headless output on the live
-compositor and starts no second Hyprland.
-
-### The nested compositor goes on the SANDBOX, and two things make that real
-
-The three harnesses launch their nested Hyprland through `tools/sandbox.sh
-exec` (2026-07-30), so it maps on a headless output and, by hyprland.lua's
-`sandbox-never-takes-the-seat` (`no_focus` on the `sandbox` tag), cannot take
-his keyboard. Before that they opened it as a plain window on his monitor —
-`nested-smoke.sh` said so in its own step line. Two rules came out of making
-that work, and both are the kind that fail SILENTLY:
-
-- **Whatever `sandbox.sh exec` spawns must `exec` all the way down to the real
-  program.** Hyprland keys an exec rule on **the pid it forked**. Put a
-  redirection straight into the exec string and `/bin/sh` stops exec-ing its
-  last command: it forks, the program is a GRANDCHILD, and `[workspace N
-  silent; tag +sandbox]` matches nothing. The window then maps on the REAL
-  monitor and — carrying no `sandbox` tag — is not covered by the `no_focus`
-  rule either, so it takes his keyboard and Hyprland warps his pointer to it.
-  Measured on `top` 2026-07-30, off `hyprctl clients`/`activewindow`, and it
-  is exactly the "test windows keep popping up and they keep moving my mouse
-  around" he reported. The fix in all three: write a one-line `launch.sh`
-  whose body is `exec env … Hyprland … >log 2>&1` and hand the sandbox THAT.
-  Anything else you add to a launch — a wrapper, a `tee`, a `timeout` — ask
-  first whether it forks.
-- **`hyprctl -i ""` does not fail. It talks to the LIVE compositor.** So an
-  unresolved instance signature does not make a harness error out, it makes
-  every `hl.exec_cmd`, every cursor warp and every plugin call in it happen on
-  HIS desktop. Each harness now resolves its instance EXACTLY — walk
-  `$XDG_RUNTIME_DIR/hypr/*/hyprland.lock`, read the pid each records, and ask
-  `/proc` whether that process carries this run's unique config path — and its
-  `hc()` refuses, loudly and fatally, if the signature is empty or is
-  `$HYPRLAND_INSTANCE_SIGNATURE`. The set-difference against a "before"
-  snapshot this replaced could name the live session (an empty snapshot) or a
-  concurrent agent's instance (`head -1` of two new ones).
-
-Two smaller ones, same session: each harness runs an **off-screen watchdog**
-that kills its compositor the moment that window is seen on a physical output
-(another agent's `sandbox.sh stop` removes the monitor, and Hyprland migrates
-the windows onto a real one), and each stops the sandbox in its **trap** — but
-only if it CREATED it, since `sandbox.sh start` reuses an existing headless
-output and several agents share this desktop.
-
-### Test a swap without gambling the session
+Kinetic is default-off. Runtime trials are:
 
 ```bash
-hyprvtb/tools/hotswap-test.sh [plugin.so]
+hyprctl eval "hl.plugin.hyprvtb.kinetic_set(true)"
+hyprctl eval "hl.plugin.hyprvtb.kinetic_set(false)"
+hyprctl eval "hl.plugin.hyprvtb.kinetic_set(\"friction\", 3.6)"
 ```
 
-Rolls a window up in a nested Hyprland, swaps the plugin under it, and checks
-who owns the titlebar afterwards. It passes on 2.65 and fails on 2.64, so it is
-a real regression test, not a smoke check. Two gotchas it encodes: the swap is
-asynchronous (Hyprland's config watcher usually performs it), and an idle nested
-compositor will not notice until an IPC request turns its event loop.
+Reload clears these overrides. Persistent settings belong in the
+`plugin:hyprvtb:kinetic*` keys in the Nix-source `hyprland.lua`, generated from
+`host.kinetic`: enabled on `book`/`air`, disabled on `top`.
 
-### If a swap does kill the compositor
+`kinetic_test(dy, n, ms)` is dry/trace-only by default. A wet run requires a
+prior `kinetic_set("unsafe_wet", 1)` and a nested compositor because seat
+events target pointer focus; the sandbox monitor cannot isolate them. Use
+`hyprvtb/tools/kinetic-test.sh`, `hotswap-test.sh`, and `nested-smoke.sh`.
+Nested compositors may be frame-starved; `VTBSMOKE_EXPECT_FRAMES=0` is an
+environment accommodation, not a regression.
 
-The session no longer falls off a cliff. `sys/dsk/hyprland.nix` replaces the
-wayland-session's `start-hyprland` — whose answer to an unclean exit is
-`--safe-mode`, i.e. no config at all — with `hypr-supervise`, which records the
-plugin build that was live in `~/.local/state/hyprvtb/crashed-with` and restarts
-with the REAL config. `hyprland.lua` reads that on the way up and loads the last
-**known-good** build instead, leaving the reason in `.../quarantined`. So a bad
-plugin costs one version and a breadcrumb, not the desktop. After 3 crashes in a
-row the supervisor gives up and hands over to `start-hyprland` — at that point
-it is not the plugin's fault.
+Every new scroll surface must use compositor momentum as-is: apply the full
+delta (not sign-only or notch quantisation), add no toolkit fling, and
+distinguish pixel deltas from mouse detents. Do not re-derive physics per
+client. XWayland clients (`kinetic_deny_xwayland = true`) do not participate;
+Chromium, GTK/kitty, and Firefox's own fling is neutralised by the 300 ms stop.
+kitty's `momentum_scroll` is an optional kill switch in
+`kitty-files/kitty.conf`; full-screen TUI protocol events remain line based.
 
-book has the same net since 2026-08-03 — ly (book's display manager) starts
-the session under `hypr-supervise` too, via a per-user session dir + a
-systemd drop-in, sharing the exact `loaded`/`crashed-with`/`known-good`/
-`quarantined` protocol (`home/prog/ly.nix`,
-`docs/agents/book-supervised-session.md`; the swap itself has been sound on
-book since 2026-07-26 — its live `hyprland.lua` carries the resolved-path +
-quarantine block, it used to load the symlink, so reload had never swapped
-there (`docs/book-hyprvtb-version-bridge.md` records the correction)). A bad
-build costs one version and a breadcrumb on either machine now, not a relog.
+## Nested testing and the sandbox
 
-### Never go back to manual `hyprctl plugin load` / `unload`
+Never test on the user's focus, pointer, clipboard, windows, audio, or screen.
+Use the headless sandbox or an offscreen client and the guards in
+`tools/lib/session-guard.sh`; fail closed rather than inheriting the live
+`WAYLAND_DISPLAY` or `HYPRLAND_INSTANCE_SIGNATURE`. The user performs visual
+checks; evidence is IPC, logs, and traces. Do not script plugin actions that
+focus or move the user's window.
 
-It is the source of every "hot reload is unstable" report:
+Every Hyprland process, including nested harnesses, imports its compositor
+environment into the systemd user manager. Harness cleanup must run
+`~/.config/scripts/hypr-session-env.sh --restore`; user units that need
+Hyprland use the same wrapper. `tools/preflight.sh` warns about dead manager
+state. The sandbox starts no second Hyprland.
 
-- `loadPluginInternal` rejects a path that is already loaded, but a *different*
-  string for the same `.so` loads a **second instance**. That instance's
-  `registerPluginValue` calls all fail with `name collision: already
-  registered`, so it owns no config keys.
-- Unloading either instance runs `onPluginUnload`, which erases the
-  `plugin:hyprvtb:col.*` keys from `m_configValues` outright. Now nobody owns
-  them, the next parse of `hyprland.lua` throws `unknown config key`, the Error
-  Overlay trips and titlebars lose their colours. **`hyprctl reload` cannot fix
-  this** — only a plugin *load* re-registers keys, and the Lua config manager has
-  no `m_failedPluginConfigValues` grace list like the legacy one.
-- Unload matches by exact path string and `plugin list -j` does not print paths,
-  so a stale instance can become unreachable (its store path may even be
-  garbage-collected) — at which point a relog really is the only way out.
+The three nested harnesses (`hyprvtb/tools/{nested-smoke,kinetic-test,
+hotswap-test}.sh`) intentionally do not source the shared guard. Their
+`hc()` must positively identify the run by its unique config path in
+`/proc/<pid>/cmdline`, reject an empty signature and the live signature on
+every call, and use `tools/sandbox.sh exec`.
 
----
+The launch chain must `exec` all the way to Hyprland. A shell redirection,
+`tee`, wrapper, or timeout that forks the final process breaks the sandbox's
+PID-based workspace/tag rule and can put a window on the user's monitor. Each
+harness also needs an off-screen watchdog and a trap; stop the sandbox only if
+that run created it. `hyprctl -i ""` is not a refusal—it targets the live
+compositor—so unresolved instance identity is fatal.
 
-## Kinetic momentum scrolling (`vtbKinetic`, ≥2.78)
-
-The plugin SYNTHESIZES input. macOS-style momentum, generated compositor-side:
-the module watches finger-source axis events on the bus and, at the finger-lift
-stop, keeps emitting decaying axis events **at the seat** (`Hl::sendAxis` →
-`CSeatManager::sendPointerAxis`), which is *downstream* of the
-`input.mouse.axis` bus — so synthetic events can never re-enter the plugin's own
-listeners, decos or keybinds. **Do not "fix" that by routing through
-`CInputManager::onMouseWheel`** (it re-enters the bus and defers a frame the
-timer cannot supply). Full spec and provenance: `docs/kinetic-scroll.md` and
-`docs/agents/kinetic-scroll-research/`.
-
-- **A 0-value `sendPointerAxis` IS the protocol `axis_stop`** — never emit a
-  literal 0 mid-flight (the wire cousin of the degenerate-rect abort). The seam
-  wrapper refuses zeros and non-finite values.
-- **The terminal stop is withheld ≥300 ms**, which zeroes every client-side
-  fling estimator (Chromium 200 ms, GTK/kitty 150, Firefox 100). That one rule
-  is why there is no double momentum.
-- **Any timer added to this plugin must be disarmed in `PLUGIN_EXIT` before
-  anything else**, and any OPEN axis sequence closed with a 0-delta send plus a
-  frame — a client left mid-sequence believes scroll is in progress forever.
-- Ships **default off**. Enable and tune live:
-
-  ```bash
-  hyprctl eval "hl.plugin.hyprvtb.kinetic_set(true)"            # instant off: kinetic_set(false)
-  hyprctl eval "hl.plugin.hyprvtb.kinetic_set(\"friction\", 3.6)"  # 2.6..7.0, default 3.6 (mac-anchored)
-  ```
-
-  **`hyprctl reload` CLEARS the runtime override.** `kinetic_set(true)` is a
-  trial mode, not a setting: never rely on it for anything that must survive a
-  reload, a plugin hot-swap or a relogin. Momentum is on for real on air/book
-  only because the `plugin:hyprvtb:kinetic` **config key** is set in both
-  `hyprland.lua` copies (from `host.kinetic`); use the key, not the setter.
-- **Testing:** `kinetic_test(dy, n, ms)` injects through the real estimator,
-  DRY by default (trace-only, safe in the live session). A wet run is refused
-  without a prior `kinetic_set("unsafe_wet", 1)` and must only ever happen in a
-  nested compositor — `sendPointerAxis` targets the seat's pointer focus, so the
-  sandbox monitor cannot isolate it. The battery: `hyprvtb/tools/kinetic-test.sh`
-  (nested, dry+wet numeric acceptance), `hotswap-test.sh` (mid-flight swap),
-  `nested-smoke.sh` (crash-class). Run frame-starved nested (sandbox on book)
-  with `VTBSMOKE_EXPECT_FRAMES=0` — nested compositors never step render-driven
-  animations there; an environment artifact, not a regression.
-
-### Every new scroll surface must honour the kinetic config
-
-**Any scrollable view added anywhere in this desktop — panel, app, script —
-MUST take the compositor's momentum as-is.** Momentum arrives as ordinary
-high-resolution finger-source axis events, so "honouring it" is three
-obligations on the receiving code:
-
-1. **Delta-proportional, never sign-only and never notch-quantised.** A handler
-   that reads only the sign, or rounds to a detent, turns a 60 Hz coast into
-   dozens of full-size steps. This is what put `viewer` on the deny list
-   originally (sign-only zoom, 12 events saturated 1..8) and what keeps `mpv`
-   on it now (`add volume ±2` per wheel event).
-2. **No toolkit-side momentum stacked on top.** One decay curve, generated
-   compositor-side. Do not add a flick/fling/deceleration animation to a view
-   that already receives synthetic axis events.
-3. **Handle the sub-pixel/detent discriminator.** Distinguish a
-   high-resolution pixel delta from a mouse detent and scale each
-   appropriately, or a wheel notch moves one pixel while a coast moves pages.
-
-**The single source of truth for the feel is the `plugin:hyprvtb:kinetic*`
-keys in `hypr-files/hyprland.lua` (the nix source; the switch reconciles the
-live copy), with the per-host
-`kinetic` flag generated into `host.lua` by `hypr-host.nix`.** Tune there, never
-with a per-file literal, and never by re-deriving the physics client-side.
-
-**Known non-participants — do not re-chase these:**
-
-- **XWayland clients** (`kinetic_deny_xwayland = true`): the axis →
-  core-button-4/5 conversion inside Xwayland was never observed, and a leaked
-  tail in a core-button client is a long click train. `feh`, `vlc` and wine/SDL
-  are XWayland on book (verified via `hyprctl clients -j`); Firefox, Chromium,
-  qutebrowser, GTK3/4 and every Qt app here are native Wayland and do get
-  momentum.
-- **Clients that own their own fling** (Chromium 200 ms, GTK/kitty 150,
-  Firefox 100) are neutralised by the ≥300 ms withheld stop, not by config.
-  kitty additionally ships `momentum_scroll 0.96` (Wayland, finger devices):
-  end-gated, so the withhold zeroes it; `momentum_scroll 0` in
-  `kitty-files/kitty.conf` is the documented kill switch if doubling is ever
-  *felt* — it has never been measured.
-- **kitty's TUI passthrough is line-quantised by the terminal protocol.**
-  `pixel_scroll` keeps kitty's own scrollback sub-line, but full-screen TUIs
-  receive discrete line events; that cannot be made smooth from this side.
-- **`top` gets none of this** — `host.kinetic = false` there, no finger source.
-
----
-
-## Testing GUI changes: `tools/sandbox.sh`, never the user's screen
+Common commands:
 
 ```bash
 ~/nix/tools/sandbox.sh start
 ~/nix/tools/sandbox.sh exec <cmd>
-~/nix/tools/sandbox.sh shot [file]     # grim of that monitor
 ~/nix/tools/sandbox.sh clients
 ~/nix/tools/sandbox.sh stop
 ```
 
-It creates a virtual monitor in the live session (`hyprctl output create
-headless`) and launches windows onto it: a real monitor to the compositor —
-workspaces, decorations, animations, every frame rendered — that no cable leads
-to, so nothing appears in front of the user.
+`exec` verifies the window is on the headless output and aborts otherwise.
+It tags windows `sandbox`, restores keyboard focus afterward, and closes
+windows before removing the output (removal otherwise migrates them to a
+physical monitor), then prunes the classes it launched from plugin geometry
+memory. `load_state` refuses a missing `/tmp/vtb-sandbox/state`; `start`
+re-resolves it, while `stop` and `status` may still warn. The sandbox's live
+plugin instance is useful for normal behavior; use the nested harnesses for an
+unswitched plugin build.
 
-**The promise is "nothing of the agent's reaches his screen", and the monitor is
-not the only way onto it.** A headless output hides the window's PIXELS. Anything
-that enumerates windows without asking which output they are on puts them back in
-front of the user — the Wayland foreign-toplevel list carries appId, title and
-activated and no monitor at all, so the panel's taskbar showed every agent's test
-window in the user's bar for the whole life of the sandbox (found 2026-07-27, by
-him). **Before you add anything that walks the window list, ask whether a sandbox
-window would appear in it**, and filter on the output:
+When walking windows, use both meanings: `sandbox` identifies an agent
+window, while a physical output is one with non-zero physical size or make/model/
+serial/description. `HEADLESS-n` corroborates but must never hide a real
+monitor.
+The panel's single physical-output predicate is in
+`quickshell-files/WinState.qml` (`WinState.offOutput(appId, title)`).
 
-- **The panel** joins the monitor back on through `WinState.qml`, whose poll
-  already reads `hyprctl -j monitors; hyprctl -j clients`. It owns the one
-  definition of "physical output" and every consumer asks it
-  (`WinState.offOutput(appId, title)`): the taskbar cells, `Media.playerUp`,
-  `Askpass.active`. See `quickshell-files/AGENTS.md`.
-- **A monitor is physical if the compositor has any hardware identity for it** —
-  non-zero physical size, or a make/model/serial/description. A headless output
-  has none of those. Do NOT key on the name alone: the user may attach a second
-  REAL monitor and its windows must still appear. (`HEADLESS-n` is ORed in as
-  corroboration only — it can add virtual outputs, never subtract a real one.)
-- **Every sandbox window is also TAGGED `sandbox`** (`[workspace N silent; tag
-  +sandbox]` in `exec`), which is the discriminator that survives the window
-  being MOVED. `stop` closes by tag as well as by workspace for that reason.
-  Use the tag for "whose window is this", the monitor for "can he see it".
-- **The session snapshot is filtered on BOTH sides (2.93).** It used to record
-  every decorated window regardless of output, so a snapshot taken while a
-  sandbox was up would have relaunched an agent's test windows on the user's
-  desktop at the next fresh login — the leak surviving a reboot. Now:
-  - **save** skips a window on a headless output *or* carrying the `sandbox`
-    tag (`vtbAgentWindowReason`). The monitor test asks Aquamarine
-    (`Hl::headlessMonitor` → `IOutput::getBackend()->type() ==
-    AQ_BACKEND_HEADLESS`, present on both pins) rather than inferring from
-    hardware identity the way the panel must — the compositor knows which
-    backend made the output. The identity test survives only as the fallback
-    for a monitor with no `m_output` to ask. Two tests because each covers the
-    other's blind spot: a window the sandbox never launched carries no tag, and
-    a sandbox window that got MOVED is on a real monitor.
-  - **restore** drops an entry whose saved geometry lands on no visible monitor
-    (headless outputs excluded) or is degenerate, because an *older* file can
-    still hold sandbox windows. Such an entry was never restorable anyway — the
-    restore path places a window at its exact saved position with no clamp.
-- **`session_probe()` answers "what would a snapshot do?" without arming one.**
-  `save_session()` may never be called from a script, which used to leave its
-  selection untestable. This runs the same selection into
-  `~/.local/state/hyprvtb/session-probe.tsv` and the same restore filter into
-  `session-probe-restore.tsv` (with `# skipped <cls> (reason)` lines), touching
-  neither `session.tsv` nor any process. An optional path argument evaluates a
-  *fabricated* snapshot's restore verdicts, so the drop rules can be exercised
-  against geometry no live window has:
+Session save/restore applies the same isolation: save skips headless or
+`sandbox` windows using Aquamarine's headless backend, and restore drops old
+entries on invisible/degenerate geometry. Keep both checks because either
+tagging or output identity can be missing. `session_probe()` is the safe test
+for both paths.
 
-  ```bash
-  hyprctl eval "hl.plugin.hyprvtb.session_probe()"
-  hyprctl eval "hl.plugin.hyprvtb.session_probe(\"/tmp/fake-session.tsv\")"
-  ```
-
-- `exec` restores keyboard focus to the user's monitor afterwards (a new window
-  takes focus even with `silent`).
-- **`load_state` now refuses to run if the monitor named in `/tmp/vtb-sandbox/
-  state` has gone** (another agent's `stop`, a stray `hyprctl output remove`).
-  Hyprland moves that workspace onto a REAL monitor when the output disappears,
-  so a stale state file turned `exec` into "open a window on the user's screen".
-  `stop`/`status` still run, with a warning; `start` re-resolves.
-- `stop` closes the sandbox's windows BEFORE removing the output — Hyprland
-  migrates a removed monitor's windows onto a real one — then prunes the classes
-  it launched from the plugin's per-class geometry memory.
-- Windows there are decorated by the **live** plugin instance, which is the point
-  (you test what is actually running) — but it is therefore **no protection
-  against a plugin crash.** For an unswitched plugin build use the nested
-  harness `hyprvtb/tools/nested-smoke.sh`, which is properly isolated — and,
-  since 2026-07-30, launched THROUGH this sandbox, so it is off-screen too.
-- Three headless-parent designs were tried and rejected first; `tools/sandbox.sh`'s
-  header records why, so they do not get retried.
-
-### When only PIXELS can answer it: `tools/vtb-titletext-test.sh`
-
-Some of what this plugin does has no observable effect except drawn pixels, and
-`TITLETEXT <0|1>` (2.95, goetia's "my title region carries no text") is the
-worst case: the app-side send is unit-tested, `ipc_dump()` shows the flag was
-stored, and **a stored flag the render path ignores looks identical from both.**
-So that harness puts two real clients on the sandbox monitor — one declaring
-`TITLETEXT 0`, one not — and counts the ink in the title run of each bar. It
-tests the plugin that is actually LOADED, which no source read can do:
-`hyprvtb 2.95 -> 0 px with the verb, 473 px without` is what a pass looks like.
-
-`tools/vtb-flash-test.sh` is the same shape aimed at the titlebar text FLASH: it
-shoots one probe window repeatedly while its footer string changes every 16ms,
-and fails if the footer's ink ever collapses — i.e. if the stacked text is being
-drawn from a texture built inside the render pass. It runs a **self-check mode
-first** (a footer whose length changes, whose ink must swing), because the
-interesting comparison is "the ink did not change", and a probe that never
-reached the bar produces exactly that. On `hyprvtb 2.97`, `top`: 20/20 shots at
-156px in both modes, no blank frame — so the footer/title textures still being
-built in `renderBar` (`prewarmGlyphs` covers button glyphs only) is measured NOT
-to blank here, whatever it does in theory. `docs/hyprvtb-titlebar-flash.md`.
-
-Copy their shape for the next flag of this kind rather than hand-building a probe
-each time (that hunt cost a whole session on 2026-07-29). Two traps it encodes:
-`hyprctl dispatch exec` spawns from the COMPOSITOR's environment, so an on/off
-choice cannot ride in on an env var — two probe files, or you silently test the
-same case twice; and this ImageMagick reports `-metric AE` as a summed
-difference, not a pixel count, hence the absolute ink measure instead of a diff.
-
-Verification is by IPC and logs, never by looking: `hyprctl plugin list`,
-`clients`, `workspaces`, `layers`, `configerrors`, and the Hyprland log. The
-user does all visual and interaction checks.
+For pixel-only flags, use the headless harnesses
+`tools/vtb-titletext-test.sh` and `tools/vtb-flash-test.sh`, not a real-screen
+visual check. They must self-check their probe, use distinct probe files for
+each condition, and measure absolute title ink rather than ImageMagick's
+summed `AE` difference. `hyprctl dispatch exec` uses the compositor's
+environment, so an on/off choice cannot be passed by an agent environment
+variable; use separate probe files. Verification remains `hyprctl plugin list`,
+clients, workspaces, layers, configerrors, and the Hyprland log.
