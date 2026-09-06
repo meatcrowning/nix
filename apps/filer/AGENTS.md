@@ -24,6 +24,19 @@ six apps.
 - Titlebar chrome comes from hyprvtb via `pylib/vtbclient.py`.
 - **The preview grid and the tree list are `KineticGridView` / `KineticListView`** (`../qmlcommon/`), not bare views — the desktop's momentum is compositor-side and Qt's own flick fights it. Any new scrollable surface here must use those too; see [`../AGENTS.md`](../AGENTS.md).
 
+## Retained resource fixture
+
+`tools/resource-fixture.py` launches the real Filer window against scratch
+HOME/XDG roots and directories, after requiring Qt's offscreen platform and
+removing every inherited display/compositor socket. It reports `READY normal`,
+then accepts newline-delimited `stress`, `clear`, and `quit` commands on stdin.
+`normal` is one pane on an empty directory; `stress` retains two panes on a
+generated 2,500-file directory; `clear` returns to the normal state without
+restarting the PID. Run it through Filer's packaged interpreter/environment on
+`top`, or `/usr/bin/python3` on `book`. The shared fd protocol lives in
+`../pylib/resourcefixture.py`; keep this seam state-only, never input automation
+or a path into the user's files.
+
 ## Split view — two panes, one titlebar
 
 `qml/BrowserPane.qml` **is** the file browser — tree, preview grid, selection,

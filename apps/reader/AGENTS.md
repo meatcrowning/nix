@@ -21,6 +21,19 @@ reader ~/nix                    # a directory: opens its README, else its first 
 reader                          # the document you had open last, whichever kind
 ```
 
+## Retained resource fixture
+
+`tools/resource-fixture.py` launches the real Reader window with generated
+Markdown under scratch HOME/XDG roots, after requiring Qt's offscreen platform
+and removing inherited display/compositor sockets. It reports `READY normal`,
+then accepts newline-delimited `stress`, `clear`, and `quit` commands on stdin.
+Normal/clear retain one small document; stress loads a generated 1,800-section
+document and opens the split in the same PID. It never reads a user document or
+rewrites Reader's real reopen state. Run it through Reader's packaged
+interpreter/environment on `top`, or `/usr/bin/python3` on `book`. The shared fd
+protocol lives in `../pylib/resourcefixture.py`; do not widen it into input
+automation.
+
 ## Two DOCUMENT modes, and `doc.kind` is the only place that picks
 
 A PDF is a rendered-page pipeline, not a block pipeline, so it is a **second
