@@ -15,10 +15,6 @@ LEAVE_BAKED = {
     "widgets/branding.svgz", "widgets/monitor.svgz", "widgets/picker.svgz",
     "widgets/plot-background.svgz", "widgets/media-delegate.svgz",
     "widgets/dragger.svgz", "widgets/notes.svgz", "widgets/analog_meter.svgz",
-    # IconTasks' normal/focused/minimized/attention frames are state
-    # affordances, not generic panel paint.  Preserve Oxygen's own bevels and
-    # underlines so opened and focused applications remain legible.
-    "widgets/tasks.svgz",
 }
 
 METADATA = {
@@ -50,7 +46,9 @@ def main(src, out):
     # deliberately reduces inactive entries to an almost invisible underline;
     # use the real Oxygen button frames instead, so every task is a tactile
     # button and the focused task receives the style's focus treatment.
-    shutil.copyfile(os.path.join(src, "widgets/button.svgz"),
+    # Copy the already-converted button so its Oxygen relief follows the live
+    # KDE colour scheme just like the panel and the application surfaces.
+    shutil.copyfile(os.path.join(out, "widgets/button.svgz"),
                     os.path.join(out, "widgets/tasks.svgz"))
     os.chmod(os.path.join(out, "widgets/tasks.svgz"), 0o644)
 
