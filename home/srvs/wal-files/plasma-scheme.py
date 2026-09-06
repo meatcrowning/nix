@@ -75,6 +75,11 @@ TINT_KEYS = {
     "activeBlend", "inactiveBlend",
 }
 TINT_GROUPS = re.compile(r"^\[(Colors:[A-Za-z]+|WM)\]$")
+BACKGROUND_KEYS = {
+    ("[Colors:Window]", "BackgroundNormal"),
+    ("[WM]", "activeBackground"),
+    ("[WM]", "inactiveBackground"),
+}
 
 SAT_REFERENCE = 0.30
 
@@ -118,7 +123,7 @@ def tint(rgb, hue, sat_scale):
     return tuple(int(round(c * 255)) for c in (r, g, b))
 
 
-def mint(template_text, accent_hex, force_name=None):
+def mint(template_text, accent_hex, force_name=None, background_hex=None):
     ar, ag, ab = hex_to_rgb(accent_hex)
     hue, _, accent_s = colorsys.rgb_to_hls(ar / 255.0, ag / 255.0, ab / 255.0)
     sat_scale = min(1.0, accent_s / SAT_REFERENCE)
@@ -131,7 +136,9 @@ def mint(template_text, accent_hex, force_name=None):
             out.append(line)
             continue
         key, _, value = stripped.partition("=")
-        if (TINT_GROUPS.match(group) and key in TINT_KEYS
+        if background_hex and (group, key) in BACKGROUND_KEYS:
+            out.append("%s=%s" % (key, ",".join(map(str, hex_to_rgb(background_hex)))))
+        elif (TINT_GROUPS.match(group) and key in TINT_KEYS
                 and re.fullmatch(r"\d{1,3},\d{1,3},\d{1,3}", value)):
             rgb = tuple(int(c) for c in value.split(","))
             out.append("%s=%d,%d,%d" % ((key,) + tint(rgb, hue, sat_scale)))
@@ -302,6 +309,8 @@ def main():
     ap.add_argument("--name", default=None,
                     help="scheme name to force for --template")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--background", default=None,
+                    help="optional bare hex override for Colors:Window BackgroundNormal")
     ap.add_argument("--no-apply", action="store_true")
     args = ap.parse_args()
 
@@ -328,7 +337,8 @@ def main():
 
         out_path = args.out or os.path.join(
             HOME, ".local", "share", "color-schemes", "%s.colors" % name)
-        minted = mint(template, args.accent, force_name=forced)
+        minted = mint(template, args.accent, force_name=forced,
+                      background_hex=args.background)
 
         try:
             with open(out_path) as fh:
