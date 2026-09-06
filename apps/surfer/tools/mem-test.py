@@ -19,8 +19,9 @@ Usage (see apps/surfer/AGENTS.md — borrow the wrapper's env, never source it):
   --freeze : run the lifecycle pass that freezes all non-visible tabs.
   --tabs N : how many tabs to open (default 6; >1 needs N loopback ports).
 
-The number that matters is tree_rss, the sum of VmRSS across the whole process
-tree — that is the memory the user actually watches in a system monitor.
+PSS across the whole process tree is the ownership estimate that matters for
+the audit. Summed tree RSS remains beside it because that is what a process
+monitor commonly shows, but it double-counts shared pages.
 
 Drives the ENGINE, not a wiring: it sets lifecycleState straight on QML-found
 views, so it isolates the memory lever from the Main.qml change that will
@@ -28,6 +29,7 @@ eventually apply it. The Main.qml wiring itself is asserted by a separate
 drift-guard at the bottom.
 """
 import argparse
+import atexit
 import json
 import os
 import re
@@ -41,6 +43,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+RESOURCE_SAMPLER = HERE.parents[2] / "tools" / "resource-sampler.py"
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"   # hard, never setdefault
 os.environ.pop("WAYLAND_DISPLAY", None)  # with no display Qt aborts loudly; it
@@ -55,16 +58,33 @@ def _borrow_wrapper_env():
     if not wrapper:
         raise SystemExit("no surfer wrapper to borrow PySide6 and the Qt env from")
     text = Path(os.path.realpath(wrapper)).read_text(errors="replace")
-    m = re.search(r'(/nix/store/\S+?/bin/python3)"?\s+\S*main\.py', text)
+    m = re.search(r'((?:/nix/store/\S+?/bin|/usr/bin)/python3)"?\s+\S*main\.py', text)
     if not m:
         raise SystemExit("could not find main.py's interpreter in %s — if the "
                          "wrapper changed shape, update this harness" % wrapper)
     py = m.group(1)
-    body = "\n".join(ln for ln in text.splitlines()
-                     if not ln.startswith("#!")
-                     and "singleton.py" not in ln
-                     and not ln.startswith("exec "))
-    out = subprocess.run(["bash", "-c", body + "\nexec env -0\n"],
+    if py == "/usr/bin/python3":
+        # book's wrapper intentionally uses Fedora's Qt stack directly.  A
+        # Nix-shell environment can inject incompatible Qt libraries, so give
+        # the system interpreter the same sealed environment used by the
+        # offscreen browser harnesses.
+        clean_home = tempfile.mkdtemp(prefix="surfer-mem-home-")
+        env = {
+            "PATH": "/usr/bin:/bin",
+            "HOME": clean_home,
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+            "QT_QPA_PLATFORM": "offscreen",
+            "_SURFER_MEM_HOME": clean_home,
+        }
+        fontconfig = re.search(r'export FONTCONFIG_FILE="\$\{FONTCONFIG_FILE:-([^}]+)\}"', text)
+        if fontconfig:
+            env["FONTCONFIG_FILE"] = fontconfig.group(1)
+        return py, env
+    qtenv = shutil.which("surfer-qtenv")
+    if not qtenv:
+        raise SystemExit("no surfer-qtenv wrapper")
+    # The environment-only wrapper never runs singleton.py or profile sync.
+    out = subprocess.run([qtenv, "env", "-0"],
                          capture_output=True, check=True).stdout
     env = dict(os.environ)
     for entry in out.split(b"\0"):
@@ -88,6 +108,10 @@ if not os.environ.get("_SURFER_MEM_REEXEC"):
 
 # scratch dirs: nothing this writes lands in the user's profile or caches
 scratch = Path(tempfile.mkdtemp(prefix="surfer-mem-"))
+atexit.register(shutil.rmtree, scratch, ignore_errors=True)
+if os.environ.get("_SURFER_MEM_HOME"):
+    atexit.register(shutil.rmtree, os.environ["_SURFER_MEM_HOME"],
+                    ignore_errors=True)
 for var in ("XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"):
     d = scratch / var.lower()
     d.mkdir(parents=True, exist_ok=True)
@@ -139,6 +163,20 @@ def rss_mb(pid):
     return tree_rss_kb(pid) / 1024.0
 
 
+def resource_mb(pid):
+    """Tree totals from the repository's canonical smaps_rollup sampler."""
+    proc = subprocess.run(
+        [sys.executable, str(RESOURCE_SAMPLER), "--pid", str(pid)],
+        capture_output=True, text=True, check=True,
+    )
+    totals = json.loads(proc.stdout)["samples"][0]["totals_memory_kib"]
+    return {
+        "rss": totals["Rss"] / 1024.0,
+        "pss": totals["Pss"] / 1024.0,
+        "private": (totals["Private_Clean"] + totals["Private_Dirty"]) / 1024.0,
+    }
+
+
 def renderer_count(pid):
     """Number of QtWebEngine renderer subprocesses in this process tree."""
     import subprocess as sp
@@ -165,7 +203,8 @@ def renderer_count(pid):
         for c in kids.get(p, []):
             walk(c)
     walk(pid)
-    return sum(1 for p in acc if "--type=renderer" in cmds.get(p, ""))
+    return sum(1 for p in acc
+               if re.search(r"--type(?:=|\s+)renderer(?:\s|$)", cmds.get(p, "")))
 
 
 def pump(ms=120):
@@ -231,6 +270,18 @@ def main():
     if not engine.rootObjects():
         raise SystemExit("the fixture would not load")
     root = engine.rootObjects()[0]
+    main_pid = os.getpid()
+
+    def resource_report(tag):
+        mem = resource_mb(main_pid)
+        print("  resource %-18s rss=%8.1f MB  pss=%8.1f MB  private=%8.1f MB"
+              % (tag, mem["rss"], mem["pss"], mem["private"]))
+        return mem
+
+    # A loaded QML fixture and persistent scratch profile, before navigation.
+    # This is the closest safe measure of WebEngine's blank application floor.
+    pump(1500)
+    resource_report("blank fixture")
 
     # collect the fixture's views (win0..win5) and load the first `n` of them
     def collect():
@@ -254,7 +305,6 @@ def main():
     # give page-side JS (the canvas + 64MB alloc) a moment to settle
     pump(1500)
 
-    main_pid = os.getpid()
     base_mb = rss_mb(main_pid)
 
     # probe QtWebEngine's lifecycleState property + enum values
@@ -280,6 +330,7 @@ def main():
 
     print("== mode: %s, %d tabs loaded ==" % (mode, n))
     report("all loaded, only 0 on screen")
+    resource_report("tabs loaded")
 
     # how many child (renderer/gpu/utility) processes exist now?
     kids = []
@@ -304,6 +355,7 @@ def main():
                 print("  trace: set lifecycleState[%d] failed: %r" % (i, e))
         pump(3000)
         report("after %s of the %d hidden tabs" % (mode, n - 1))
+        resource_report("after " + mode)
     else:
         # baseline mode: never discard — shows what hidden tabs pin
         pump(3000)
@@ -323,6 +375,11 @@ def main():
 
     for srv in servers:
         srv.shutdown()
+    # Delete the fixture and let WebEngine reap its renderer processes.  This
+    # measures teardown residue without touching the persistent user profile.
+    root.deleteLater()
+    pump(5000)
+    resource_report("fixture cleanup")
     app.exit(0)
 
 
