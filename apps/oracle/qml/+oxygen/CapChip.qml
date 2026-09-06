@@ -5,13 +5,12 @@ import QtQuick.Controls as QQC
 //
 // `+plasma/CapChip.qml` already gets the frame from the style — a real Button's
 // background, never in the input path, because a chip that reads as pressable
-// but does nothing is an affordance lie in any style. What it still carries is
-// `opacity: 0.75` standing in for "this is subordinate", and a fraction of the
-// live foreground is not a colour Oxygen has: KColorScheme publishes a DISABLED
-// foreground for exactly this reading, and that is what every greyed caption in
-// the same window is wearing. Measured under Oxygen offscreen: the live label
-// is #f4eaf4 and the disabled one #736162 — a different hue, not a dimmer one,
-// so the fraction was never going to land on it.
+// but does nothing is an affordance lie in any style. What this face adds is
+// the LABEL COLOUR. It wore KColorScheme's disabled foreground for a while,
+// on the reading that a chip is subordinate; measured under Oxygen offscreen
+// that is #736162 against a live #f4eaf4 — a different hue, not a dimmer one,
+// and at chip size he could not read it [his, 2026-09-05]. Subordination here
+// is the chip's size and its frame; the words are full strength.
 //
 // The chip's geometry stays the sibling's rather than the Button's own: letting
 // the style size it gives Oxygen's full 32px button height (measured), and this
@@ -46,8 +45,10 @@ Item {
         id: capText
         anchors.centerIn: parent
         text: root.label
-        // The style's own subordinated foreground, not a fraction of the live
-        // one.
-        enabled: false
+        // The LIVE foreground, not KColorScheme's disabled one. That disabled
+        // grey (#736162 against the chip's frame) is what a greyed caption
+        // wears, and at chip size he could not read it [his, 2026-09-05]. The
+        // frame and the size are what say "subordinate" here.
+        enabled: true
     }
 }
