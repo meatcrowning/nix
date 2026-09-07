@@ -228,7 +228,13 @@ Item {
                             source: (tile.a && tile.a.thumbPath) ? "file://" + tile.a.thumbPath : ""
                             fillMode: Image.PreserveAspectCrop
                             asynchronous: true
-                            cache: true
+                            // A decoded 256px cover is 256 KiB.  Keeping every
+                            // source in Qt's global image cache retained roughly
+                            // 600 MiB after browsing air's ~2,300 albums.  The
+                            // ListView already retains nearby delegates through
+                            // cacheBuffer, and thumbnails are local JPEGs, so
+                            // bound caching to the viewport instead.
+                            cache: false
                             sourceSize.width: 256
                             sourceSize.height: 256
                             visible: status === Image.Ready
