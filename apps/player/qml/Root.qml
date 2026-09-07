@@ -37,6 +37,13 @@ Item {
         var v = Prefs.get("view", "albums");
         return v === "detail" ? "albums" : v;
     }
+    // The gallery has one tile tree per album.  It used to be constructed even
+    // while the saved view was now-playing or playlists, making air open a
+    // hidden ~2,400-cover gallery before it could show the actual page.  Once
+    // visited it stays resident, so changing pages still preserves browsing
+    // position and the open inline album section for this session.
+    property bool albumsLoaded: false
+    onViewChanged: if (view === "albums") albumsLoaded = true
     // The album whose inline section is open in the gallery (0 = none).
     property int openAlbumId: 0
     property bool searching: false          // full results overlay
@@ -227,6 +234,7 @@ Item {
     }
 
     Component.onCompleted: {
+        albumsLoaded = view === "albums";
         Library.setSort(sortMode);
         // opt in to the footer sitting below the scrub track (hyprvtb >= 2.72);
         // older plugin builds just ignore the FOOTERPOS line.
@@ -428,19 +436,25 @@ Item {
         anchors { top: menuBar.bottom; left: parent.left
                   right: parent.right; bottom: parent.bottom }
 
-        AlbumGrid {
-            objectName: "albumGrid"
+        Loader {
             anchors.fill: parent
-            visible: win.view === "albums"
-            filtered: searchInput.text !== ""
-            expandedAlbumId: win.openAlbumId
-            cols: win.albumCols
-            fgText: win.fgText
-            fgDim: win.fgDim
-            fgAccent: win.fgAccent
-            fgArt: win.fgArt
-            onOpened: function(albumId) { win.openAlbum(albumId); }
-            onSearchArtist: function(artist) { win.browseArtist(artist); }
+            active: win.albumsLoaded
+            sourceComponent: Component {
+                AlbumGrid {
+                    objectName: "albumGrid"
+                    anchors.fill: parent
+                    visible: win.view === "albums"
+                    filtered: searchInput.text !== ""
+                    expandedAlbumId: win.openAlbumId
+                    cols: win.albumCols
+                    fgText: win.fgText
+                    fgDim: win.fgDim
+                    fgAccent: win.fgAccent
+                    fgArt: win.fgArt
+                    onOpened: function(albumId) { win.openAlbum(albumId); }
+                    onSearchArtist: function(artist) { win.browseArtist(artist); }
+                }
+            }
         }
         PlaylistsView {
             id: playlists
