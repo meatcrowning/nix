@@ -219,6 +219,28 @@ in
       advanceRatio = f.advanceRatio or 0;
     }) selectableFaces));
 
+  # Modern macOS-style baseline for every fontconfig consumer: preserve the
+  # outline and fractional metrics, then let grayscale coverage smooth its
+  # edges.  Keep this late in the cascade so Fedora's KDE-only RGB rule and
+  # distro hinting defaults cannot make book differ from top.  The later
+  # family rules retain the desktop's deliberate pixel-font and terminal-cell
+  # exceptions.
+  xdg.configFile."fontconfig/conf.d/99-00-outline-rendering.conf".text = ''
+    <?xml version="1.0"?>
+    <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+    <fontconfig>
+      <match target="font">
+        <test name="outline"><bool>true</bool></test>
+        <edit name="antialias" mode="assign"><bool>true</bool></edit>
+        <edit name="autohint" mode="assign"><bool>false</bool></edit>
+        <edit name="hinting" mode="assign"><bool>false</bool></edit>
+        <edit name="hintstyle" mode="assign"><const>hintnone</const></edit>
+        <edit name="rgba" mode="assign"><const>none</const></edit>
+        <edit name="lcdfilter" mode="assign"><const>none</const></edit>
+      </match>
+    </fontconfig>
+  '';
+
   # "More Perfect DOS VGA" ships ONLY a Regular face. Without this, KDE/Qt apps
   # faux-bold (and oblique-shear) it wherever the UI asks for bold/italic text —
   # info-panel labels, selected tabs, section headers, etc. On a pixel font
@@ -251,7 +273,7 @@ in
   # advances, uneven stems; autohint+hintfull = uniform 8px advances, near-
   # mono edges, and Chromium canvas parity with QML holds (tools/../
   # font-parity: greys 1, identical ink and advances).
-  xdg.configFile."fontconfig/conf.d/50-more-perfect-dos-vga-regular.conf".text = ''
+  xdg.configFile."fontconfig/conf.d/99-10-more-perfect-dos-vga-regular.conf".text = ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
     <fontconfig>
@@ -280,7 +302,7 @@ in
   # the @font-face alias it replaces (the pin on the plain name does not
   # reach it — the twin's family is its own name). Mirror the base rule so
   # the scaled face rasterises pixel-crisp everywhere the plain one does.
-  xdg.configFile."fontconfig/conf.d/50-more-perfect-dos-vga-web-regular.conf".text = ''
+  xdg.configFile."fontconfig/conf.d/99-11-more-perfect-dos-vga-web-regular.conf".text = ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
     <fontconfig>
@@ -319,7 +341,7 @@ in
   # Chromium ignores hinting pins outright for aliased faces — surfer layers
   # its own Botis antialias carve-out over this config (home/prog/surfer.nix,
   # the measurements are there).
-  xdg.configFile."fontconfig/conf.d/50-botis-4x6-regular.conf".text = ''
+  xdg.configFile."fontconfig/conf.d/99-12-botis-4x6-regular.conf".text = ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
     <fontconfig>
@@ -348,7 +370,7 @@ in
   # visibly kinks the connected baseline joins at small sizes (its strong
   # vertical-stem model fights a monoline script); grayscale AA rather than
   # subpixel keeps the thick curved strokes free of colour fringes.
-  xdg.configFile."fontconfig/conf.d/50-phenex-regular.conf".text = ''
+  xdg.configFile."fontconfig/conf.d/99-13-phenex-regular.conf".text = ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
     <fontconfig>
@@ -380,7 +402,7 @@ in
   # on the grid without the heavy grid-fit a pixel-font full-hint would force.
   # embeddedbitmap off: the TTF carries no bitmap strike, this only makes the
   # intent explicit.
-  xdg.configFile."fontconfig/conf.d/50-cozette-vector.conf".text = ''
+  xdg.configFile."fontconfig/conf.d/99-14-cozette-vector.conf".text = ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
     <fontconfig>
@@ -403,7 +425,7 @@ in
   # OFF (there is no outline to hint; the autohinter would mangle the strike).
   # rgba=none keeps it off the LCD-subpixel path like the rest of the desktop.
   # Bold ships in the package, so no single-weight regular pin.
-  xdg.configFile."fontconfig/conf.d/50-terminus-bitmap.conf".text = ''
+  xdg.configFile."fontconfig/conf.d/99-15-terminus-bitmap.conf".text = ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
     <fontconfig>
@@ -431,7 +453,7 @@ in
   # with grayscale AA and rgba=none — the classic ClearType-off look, matching
   # the desktop convention (§2.1). No weight pin: Tahoma has a real Bold; the
   # user may add tahomabd.ttf. See the board ask on legally sourcing it.
-  xdg.configFile."fontconfig/conf.d/50-tahoma.conf".text = ''
+  xdg.configFile."fontconfig/conf.d/99-16-tahoma.conf".text = ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
     <fontconfig>
@@ -449,7 +471,7 @@ in
 
   # Keep Oxygen Mono grayscale in both Hyprland and Plasma. Fedora's KDE rule
   # otherwise appends rgb subpixel rendering only for the latter session.
-  xdg.configFile."fontconfig/conf.d/50-oxygen-mono.conf".text = ''
+  xdg.configFile."fontconfig/conf.d/99-17-oxygen-mono.conf".text = ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
     <fontconfig>
