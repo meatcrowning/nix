@@ -65,8 +65,10 @@ lib.mkIf (host == "air") {
       ${pkgs.coreutils}/bin/chmod 700 "$RUN"
       METRICS="$RUN/metrics.tsv"
       CGROUP=/sys/fs/cgroup/system.slice/nix-daemon.service
-      printf 'timestamp\tmemory_current_bytes\tmemory_peak_bytes\tmemory_events\tmem_available_kib\tswap_free_kib\tpsi_full_avg10\ttmp_available_bytes\tnix_store_available_bytes\n' >"$METRICS"
-      printf 'revision=%s\ncores=%s\nmax_jobs=%s\n' "$REV" "$BUILD_CORES" "$BUILD_JOBS" >"$RUN/meta"
+      printf 'timestamp\tmemory_current_bytes\tcgroup_lifetime_peak_bytes\tmemory_events\tmem_available_kib\tswap_free_kib\tpsi_full_avg10\ttmp_available_bytes\tnix_store_available_bytes\n' >"$METRICS"
+      peak_at_start=$(${pkgs.coreutils}/bin/cat "$CGROUP/memory.peak" 2>/dev/null || printf '?')
+      printf 'revision=%s\ncores=%s\nmax_jobs=%s\ncgroup_lifetime_peak_at_start_bytes=%s\n' \
+        "$REV" "$BUILD_CORES" "$BUILD_JOBS" "$peak_at_start" >"$RUN/meta"
 
       sample() {
         now=$(${pkgs.coreutils}/bin/date --iso-8601=seconds)
@@ -103,7 +105,9 @@ lib.mkIf (host == "air") {
       home-manager switch --max-jobs "$BUILD_JOBS" --cores "$BUILD_CORES" \
         --print-build-logs --flake "$FLAKE#air" "$@" 2>&1 | ${pkgs.coreutils}/bin/tee "$RUN/build.log"
       result=''${PIPESTATUS[0]}
-      printf 'exit=%s\nfinished=%s\n' "$result" "$(${pkgs.coreutils}/bin/date --iso-8601=seconds)" >>"$RUN/meta"
+      sampled_peak=$(${pkgs.gawk}/bin/awk 'NR > 1 && $2 ~ /^[0-9]+$/ && $2 > peak { peak = $2 } END { print peak + 0 }' "$METRICS")
+      printf 'sampled_memory_peak_bytes=%s\nexit=%s\nfinished=%s\n' \
+        "$sampled_peak" "$result" "$(${pkgs.coreutils}/bin/date --iso-8601=seconds)" >>"$RUN/meta"
       exit "$result"
     '')
   ];
