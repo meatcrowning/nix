@@ -83,6 +83,11 @@ otherwise require that PID's sole window and call `error()` on ambiguity. Keep
 window searches in their own scope and raise the Lua error after all handles
 are destroyed; `luaL_error` longjmps past C++ destructors.
 
+`refresh_icons()` is the narrow live icon-theme refresh path. The asynchronous
+Oxygen renderer calls it only after the accent-qualified theme is complete and
+active; it clears both the class-to-file resolver and every bar's rendered icon
+texture without reloading the compositor config.
+
 For an empty app-button column, dump the server first:
 
 ```bash

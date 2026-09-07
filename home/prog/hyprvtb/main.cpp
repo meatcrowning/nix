@@ -921,6 +921,19 @@ static int luaRefreshFonts(lua_State*) {
     return 0;
 }
 
+// lua: hyprvtb.refresh_icons() — re-resolve the active icon theme and repaint
+// existing titlebars after oxygen-live-icons.py activates a new immutable
+// accent-qualified theme.
+static int luaRefreshIcons(lua_State*) {
+    if (g_pGlobalState) {
+        for (auto& b : g_pGlobalState->bars) {
+            if (b)
+                b->refreshIcon();
+        }
+    }
+    return 0;
+}
+
 // The last window rolled up through the no-arg keybind path, so a second press
 // of the same key un-shades it: a rolled window is hidden and can't be the
 // active window, so the toggle can't find it through focus — we remember it.
@@ -1706,6 +1719,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // `hl.plugin.hyprvtb.<fn>()` directly. See PORTING.md.
     if (Hl::luaConfig()) {
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "refresh_fonts", ::luaRefreshFonts);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "refresh_icons", ::luaRefreshIcons);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "minimize_active", ::luaMinimizeActive);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "toggle_maximize_active", ::luaToggleMaximizeActive);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "close_active", ::luaCloseActive);
@@ -1778,7 +1792,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / program icon / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.48"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / program icon / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.49"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

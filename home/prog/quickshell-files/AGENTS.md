@@ -645,7 +645,9 @@ outlines, shading and semantic warning/error colours stay as authored.
 Vivaldi is the one foreign brand folded into that generated theme: the helper
 finds `vivaldi` on `top` or `com.vivaldi.Vivaldi` on `book`, remaps only the
 logo's red material paint, and publishes both names (plus `vivaldi-stable`) so
-the launcher and task list resolve the same live-coloured pixels.
+the launcher, task list and hyprvtb titlebar resolve the same live-coloured
+pixels. After activation it calls `hyprvtb.refresh_icons()` so open titlebars
+drop their resolved-path and texture caches immediately.
 
 **Verify a change here on the sandbox output** (`tools/sandbox.sh` + `qs -p
 <test shell.qml>`, then read the pixels back): `QT_QPA_PLATFORM=offscreen` has

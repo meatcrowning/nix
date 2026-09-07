@@ -108,6 +108,9 @@ def activate(name):
     if dbus_send := shutil.which("dbus-send"):
         subprocess.run([dbus_send, "--session", "--type=signal", "/KGlobalSettings",
                         "org.kde.KGlobalSettings.notifyChange", "int32:4", "int32:0"], check=False)
+    if hyprctl := shutil.which("hyprctl"):
+        subprocess.run([hyprctl, "eval", "hl.plugin.hyprvtb.refresh_icons()"],
+                       check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def active_theme():

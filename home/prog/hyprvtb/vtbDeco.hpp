@@ -109,6 +109,11 @@ class CVtbDeco : public IHyprWindowDecoration {
     // window slides it back in.
     void                               onFocusGained();
 
+    // The live icon-theme generator calls hyprvtb.refresh_icons() after it
+    // activates a newly coloured Oxygen theme. Drop both the resolved path and
+    // rendered texture so an already-open window changes with the wallpaper.
+    void                               refreshIcon();
+
     // Called from main.cpp's 150ms main-thread timer: damages the bar when
     // the app-button registration changed, and pops the hover tooltip once
     // its dwell has passed (a motionless cursor generates no move events).

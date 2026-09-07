@@ -1252,9 +1252,10 @@ static std::vector<std::string> iconThemeChain() {
 }
 
 // A named icon -> a file on disk. Handles absolute paths, then searches each
-// theme in the inherit chain (two directory levels deep, which covers both the
-// <category>/<size> and <size>/<category> layouts), preferring SVG and the
-// largest declared size, then falls back to /usr/share/pixmaps.
+// theme in the inherit chain (three directory levels deep, covering
+// <category>/<size>, <size>/<category>, and Oxygen's base/<size>/<category>),
+// preferring SVG and the largest declared size, then falls back to
+// /usr/share/pixmaps.
 static std::string iconFileForName(const std::string& name) {
     std::error_code ec;
     if (!name.empty() && name.front() == '/') {
@@ -1300,9 +1301,15 @@ static std::string iconFileForName(const std::string& name) {
                     continue;
                 consider(l1->path()); // theme/<name>.svg (rare, but cheap)
                 std::error_code ec2;
-                for (auto l2 = std::filesystem::directory_iterator(l1->path(), ec2); !ec2 && l2 != std::filesystem::directory_iterator(); l2.increment(ec2))
-                    if (l2->is_directory(ec2))
-                        consider(l2->path());
+                for (auto l2 = std::filesystem::directory_iterator(l1->path(), ec2); !ec2 && l2 != std::filesystem::directory_iterator(); l2.increment(ec2)) {
+                    if (!l2->is_directory(ec2))
+                        continue;
+                    consider(l2->path());
+                    std::error_code ec3;
+                    for (auto l3 = std::filesystem::directory_iterator(l2->path(), ec3); !ec3 && l3 != std::filesystem::directory_iterator(); l3.increment(ec3))
+                        if (l3->is_directory(ec3))
+                            consider(l3->path());
+                }
             }
         }
         // a theme match anywhere in the chain wins over a later (more generic) theme
@@ -1345,6 +1352,12 @@ static const std::string& iconSynonym(const std::string& name) {
 static std::map<std::string, std::string> g_iconFileCache;
 static void                               clearIconFileCache() {
     g_iconFileCache.clear();
+}
+
+void CVtbDeco::refreshIcon() {
+    clearIconFileCache();
+    m_iconCache.clear();
+    damageEntire();
 }
 static const std::string& iconFileForClass(const std::string& cls) {
     auto it = g_iconFileCache.find(cls);
