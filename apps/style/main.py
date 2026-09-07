@@ -244,11 +244,14 @@ class Appearance(QObject):
             self.applyingChanged.emit()
             self.errorChanged.emit()
             self.statusChanged.emit()
-            self._pending_reply = QDBusPendingCallWatcher(interface.asyncCall("Apply", self._draft), self)
+            pending = interface.asyncCallWithArgumentList("Apply", [self._draft])
+            self._pending_reply = QDBusPendingCallWatcher(pending, self)
             self._pending_reply.finished.connect(self._apply_reply)
         except Exception as exc:
+            self._applying = False
             self._error = str(exc)
             self._status = "not applied"
+            self.applyingChanged.emit()
             self.errorChanged.emit()
             self.statusChanged.emit()
 
