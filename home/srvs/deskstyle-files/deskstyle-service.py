@@ -87,6 +87,18 @@ def elapsed_ms(started_at: float, now: float | None = None) -> float:
     """Return a non-negative whole-transaction duration from monotonic time."""
     return round(max(0.0, (time.monotonic() if now is None else now) - started_at) * 1000, 3)
 
+
+def _pid_alive(pid: int) -> bool:
+    """Whether a registered participant process can still acknowledge."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
 NODE_XML = """<node>
   <interface name='org.lam.DeskStyle1'>
     <method name='Apply'>
@@ -233,7 +245,10 @@ class DeskStyleService:
         self._next_generation = 0
         self._running: tuple[int, Path] | None = None
         self._queued: tuple[int, Path] | None = None
-        self._participants: set[str] = set()
+        # A registration belongs to a concrete process, not an application
+        # name forever.  A crashed or closed app must not make every later
+        # appearance transition wait for the acknowledgement timeout.
+        self._participants: dict[str, int] = {}
         self._waiting: set[str] = set()
         self._profile: StyleProfile | None = None
         self._started_at: float | None = None
@@ -296,7 +311,7 @@ class DeskStyleService:
         if not isinstance(participant, str) or not participant or len(participant) > 128:
             return False
         if record.get("type") == "register" and isinstance(record.get("pid"), int):
-            self._participants.add(participant)
+            self._participants[participant] = record["pid"]
         elif record.get("type") == "acknowledge":
             self._acknowledge(record.get("generation"), participant, record.get("profileHash"))
         return False
@@ -357,6 +372,14 @@ class DeskStyleService:
     def _start_locked(self, request: tuple[int, Path]) -> None:
         self._running = request
         self._started_at = time.monotonic()
+        # Participants are best-effort, but an exited client is certain not to
+        # repaint. Drop it before taking this transaction's acknowledgement
+        # snapshot so the overlay reflects only programs that can respond.
+        self._participants = {
+            participant: pid
+            for participant, pid in self._participants.items()
+            if _pid_alive(pid)
+        }
         self._waiting = set(self._participants)
         self._progress(request[0], "preparing", 0.02, "Validating prepared wallpaper and colors")
         threading.Thread(target=self._apply_worker, args=request, daemon=True).start()
