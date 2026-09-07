@@ -53,9 +53,9 @@ in
     # colours already follow whatever KDE global theme is picked, so this is
     # just picking Oxygen as that theme rather than adding a new mechanism.
     # The colour scheme is a separate desktop-wide choice in
-    # home/prog/plasma-colors.nix: both hosts use the brighter,
-    # focus-invariant OxygenDarkFlat palette. The wallpaper, Plasma style and
-    # look-and-feel are shared here too; monitor scale remains the host seam.
+    # home/prog/plasma-colors.nix: both hosts use OxygenDark. The wallpaper,
+    # Plasma style and look-and-feel are shared here too; monitor scale remains
+    # the host seam.
     # soundTheme is NOT declared [2026-08-29]: plasma-manager re-asserted it on
     # every Plasma login, so a pack picked in System Settings was silently put
     # back to oxygen at the next session start, with nothing saying why. His
