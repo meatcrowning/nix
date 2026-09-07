@@ -344,6 +344,44 @@ if [ "$PLASMA_SESSION" = 1 ]; then
             string:aeroglassblur >/dev/null 2>&1 || true
         echo "wal-set: aero glass -> hue $AH sat $AS val $AV intensity $AI"
     fi
+
+    # The scheme file is also the source for the custom Oxygen panel surface.
+    # Path activation is asynchronous, so wait for the narrow renderer here:
+    # DeskStyle's completion must mean the panel image has been published, not
+    # merely that a future path unit may eventually notice the colour write.
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl --user start plasma-panel-surface.service
+    fi
+
+    # wal's historic live wallpaper target is Quickshell's $CACHE/current.
+    # Plasma does not read that file; commit the same selection through its
+    # scripting API so every desktop containment repaints immediately.  Return
+    # a marker from JavaScript because qdbus itself can exit zero while
+    # evaluateScript reports a JavaScript exception as its string result.
+    QDBUS="$(command -v qdbus || command -v qdbus6 || true)"
+    [ -n "$QDBUS" ] || { echo "wal-set: qdbus is required to set the Plasma wallpaper" >&2; exit 1; }
+    WALL_URL="file://$WALL"
+    PLASMA_SCRIPT="$(jq -rn --arg url "$WALL_URL" '
+      "(function() {" +
+      " var values = desktops();" +
+      " if (!values.length) throw new Error(\"no Plasma desktops\");" +
+      " for (var i = 0; i < values.length; ++i) {" +
+      "  values[i].wallpaperPlugin = \"org.kde.image\";" +
+      "  values[i].currentConfigGroup = [\"Wallpaper\", \"org.kde.image\", \"General\"];" +
+      "  values[i].writeConfig(\"Image\", " + ($url | @json) + ");" +
+      " }" +
+      " print(\"deskstyle-wallpaper-ok:\" + values.length);" +
+      "})()"
+    ')"
+    PLASMA_RESULT="$($QDBUS org.kde.plasmashell /PlasmaShell \
+        org.kde.PlasmaShell.evaluateScript "$PLASMA_SCRIPT" 2>&1)" || {
+        echo "wal-set: Plasma wallpaper call failed: $PLASMA_RESULT" >&2
+        exit 1
+    }
+    case "$PLASMA_RESULT" in
+        deskstyle-wallpaper-ok:*) ;;
+        *) echo "wal-set: Plasma rejected wallpaper: $PLASMA_RESULT" >&2; exit 1 ;;
+    esac
 elif command -v kwriteconfig6 >/dev/null 2>&1; then
     hx() { printf '%d,%d,%d' "0x${1:0:2}" "0x${1:2:2}" "0x${1:4:2}"; }   # "rrggbb" -> "R,G,B"
     kw() { kwriteconfig6 --file "$KG" "$@"; }
