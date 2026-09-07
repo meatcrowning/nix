@@ -28,6 +28,7 @@ import argparse
 import configparser
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import socket
@@ -56,6 +57,7 @@ PROFILE_PATH = STATE_DIR / "active-profile.json"
 STATUS_PATH = STATE_DIR / "status.json"
 ACK_TIMEOUT_SECONDS = 12
 IMAGE_SUFFIXES = frozenset((".png", ".jpg", ".jpeg", ".webp", ".bmp"))
+LOG = logging.getLogger("deskstyle")
 
 
 def wallpaper_library() -> Path:
@@ -312,6 +314,7 @@ class DeskStyleService:
             return False
         if record.get("type") == "register" and isinstance(record.get("pid"), int):
             self._participants[participant] = record["pid"]
+            LOG.info("participant registered name=%s pid=%d", participant, record["pid"])
         elif record.get("type") == "acknowledge":
             self._acknowledge(record.get("generation"), participant, record.get("profileHash"))
         return False
@@ -381,6 +384,8 @@ class DeskStyleService:
             if _pid_alive(pid)
         }
         self._waiting = set(self._participants)
+        LOG.info("apply generation=%d start participants=%s", request[0],
+                 ",".join(sorted(self._waiting)) or "none")
         self._progress(request[0], "preparing", 0.02, "Validating prepared wallpaper and colors")
         threading.Thread(target=self._apply_worker, args=request, daemon=True).start()
 
@@ -394,18 +399,24 @@ class DeskStyleService:
                 raise RuntimeError(f"wallpaper prepare script is unavailable: {prepare}")
             # This can be a cache hit (normally near-instant) or a first-use
             # warm-up.  Crucially it has no desktop-visible side effects.
+            prepared_at = time.monotonic()
             prepared = subprocess.run([str(prepare), str(wallpaper)], text=True,
                                       capture_output=True, timeout=120, check=False)
             if prepared.returncode:
                 raise RuntimeError((prepared.stderr or prepared.stdout or "wal-prepare failed").strip()[-600:])
+            LOG.info("apply generation=%d prepared elapsedMs=%.1f", generation,
+                     elapsed_ms(prepared_at))
             selected_scheme = _scheme_name()
             prepared_profile(wallpaper, selected_scheme)
             self.GLib.idle_add(self._progress, generation, "applying", 0.18,
                                "Switching the prepared wallpaper and colors")
+            applied_at = time.monotonic()
             run = subprocess.run([str(script), "--prepared", "--scheme", selected_scheme, str(wallpaper)], text=True,
                                  capture_output=True, timeout=120, check=False)
             if run.returncode:
                 raise RuntimeError((run.stderr or run.stdout or "wal-set failed").strip()[-600:])
+            LOG.info("apply generation=%d desktopSwitch elapsedMs=%.1f", generation,
+                     elapsed_ms(applied_at))
             profile = build_profile(generation, wallpaper, selected_scheme)
             write_profile(PROFILE_PATH, profile)
             self.GLib.idle_add(self._pipeline_finished, generation, profile)
@@ -423,6 +434,8 @@ class DeskStyleService:
             self._start_locked(queued)
             return False
         if self._waiting:
+            LOG.info("apply generation=%d waiting participants=%s", generation,
+                     ",".join(sorted(self._waiting)))
             self._progress(generation, "waiting-for-apps", 0.9, ", ".join(sorted(self._waiting)))
             self.GLib.timeout_add_seconds(ACK_TIMEOUT_SECONDS, self._ack_timeout, generation, profile.digest)
         else:
@@ -435,6 +448,8 @@ class DeskStyleService:
         if not isinstance(profile_hash, str) or profile_hash != self._profile.digest or participant not in self._waiting:
             return
         self._waiting.remove(participant)
+        LOG.info("apply generation=%d acknowledged participant=%s remaining=%s", generation,
+                 participant, ",".join(sorted(self._waiting)) or "none")
         if not self._waiting:
             self._complete(generation, profile_hash, True)
 
@@ -455,6 +470,8 @@ class DeskStyleService:
         self._status = {"state": "complete", "generation": generation, "profileHash": profile_hash,
                         "allLive": all_live, "elapsedMs": elapsed, "deferred": missing}
         self._write_status()
+        LOG.info("apply generation=%d complete elapsedMs=%.1f allLive=%s deferred=%s", generation,
+                 elapsed, all_live, missing or "none")
         self._emit("Completed", self.GLib.Variant("(usb)", (generation, profile_hash, all_live)))
 
     def _pipeline_failed(self, generation: int, message: str) -> bool:
@@ -464,6 +481,7 @@ class DeskStyleService:
             self._waiting.clear()
             self._status = {"state": "failed", "generation": generation, "detail": message, "profileHash": ""}
             self._write_status()
+            LOG.error("apply generation=%d failed detail=%s", generation, message)
             self._emit("Failed", self.GLib.Variant("(us)", (generation, message)))
             if self._queued is not None:
                 queued = self._queued
@@ -482,6 +500,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="DeskStyle session controller")
     parser.add_argument("--print-interface", action="store_true")
     args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="deskstyle: %(message)s")
     if args.print_interface:
         print(NODE_XML)
         return 0
