@@ -6,6 +6,7 @@
 #   - the tile-vs-scale mode decision + source dimensions
 #   - the tiled PNG per current monitor resolution (tile mode only)
 #   - the extracted colour palette (wal-extract.py)
+#   - a versioned profile manifest and the three writable Oxygen schemes
 #
 # Idempotent and safe to call repeatedly — each step is skipped if its cache
 # is already newer than the source image. wal-set.sh calls this itself as its
@@ -14,7 +15,9 @@
 # ~/Pictures/wall whenever that directory changes (see wal-prepare.path), so
 # that by the time you flip to one in WallpaperPicker.qml the slow part
 # (ImageMagick, PIL) has already happened and applying it is just a handful of
-# small file writes.
+# small file writes.  The profile manifest is deliberately separate from the
+# live files: a future appearance controller can validate and install a whole
+# already-prepared generation without treating this warm-cache job as an apply.
 #
 # Everything this script caches is a property of the IMAGE, which is what makes
 # it worth warming over the whole directory. Anything that depends on the LIVE
@@ -29,7 +32,8 @@ CONFIG="$HOME/.config"
 CACHE="$HOME/.cache/wal"
 SCRIPTS="$CONFIG/scripts"
 THEMES="$CACHE/themes"
-mkdir -p "$CACHE" "$THEMES"
+PROFILES="$CACHE/profiles"
+mkdir -p "$CACHE" "$THEMES" "$PROFILES"
 
 WALL="${1:?usage: wal-prepare.sh /path/to/image}"
 [ -f "$WALL" ] || { echo "wal-prepare: not found: $WALL" >&2; exit 1; }
@@ -138,5 +142,132 @@ mkdir -p "$THUMBS"
 if [ ! -f "$THUMB" ] || [ "$WALL" -nt "$THUMB" ]; then
     magick "${WALL}[0]" -auto-orient -strip -thumbnail '400x400>' -quality 82 "$THUMB" 2>/dev/null || true
 fi
+
+# ---- prepared profile ----------------------------------------------------
+# A profile is an immutable-in-practice cache entry for one wallpaper and the
+# palette inputs that produced it.  It is NOT the active theme state: writing it
+# must never repaint Plasma, notify applications, or replace a live scheme.
+#
+# Keep the three scheme bodies beside the palette rather than in their live
+# ~/.local/share/color-schemes destination.  plasma-scheme.py's --no-apply
+# mode only mints files; it deliberately avoids KConfig, D-Bus, and KWin.  The
+# appearance controller can later copy the selected already-minted body into
+# that live destination as its short critical transaction.
+PROFILE_DIR="$PROFILES/$KEY"
+MANIFEST="$PROFILE_DIR/manifest.json"
+PROFILE_SIG="$PROFILE_DIR/input.sha256"
+mkdir -p "$PROFILE_DIR"
+
+# The resolved paths are content-addressed for Nix-installed scripts/templates,
+# unlike their epoch mtimes.  Include both script and template identities so a
+# rebuild that changes scheme minting invalidates old prepared artifacts.
+scheme_sig() {
+    for f in \
+        "$SCRIPTS/plasma-scheme.py" \
+        "$SCRIPTS/plasma-scheme-template.colors" \
+        "$SCRIPTS/plasma-light-scheme-template.colors"; do
+        [ -e "$f" ] && readlink -f "$f" || printf 'missing:%s\n' "$f"
+    done
+}
+INPUT_SIG="$(
+    {
+        printf 'profile-v1\nwall=%s\n' "$WALL"
+        # The extractor's output is itself the complete set of wallpaper and
+        # Settings-derived palette inputs.  Include its bytes, not only its
+        # mtime, so profileHash changes whenever a palette option changes.
+        printf 'palette='
+        sha256sum "$THEMEFILE" | cut -d' ' -f1
+        scheme_sig
+    } | sha256sum | cut -d' ' -f1
+)"
+
+# shellcheck disable=SC1090
+. "$THEMEFILE"
+UI_ACCENT="${PLASMA_ACCENT:-$ACCENT}"
+
+prepare_scheme() {
+    name="$1"
+    template="$2"
+    shift 2
+    out="$PROFILE_DIR/$name.colors"
+    # The profile's signature covers the script/template identities, while the
+    # palette file mtime covers every Settings-derived colour input.
+    if [ ! -f "$out" ] || [ "$THEMEFILE" -nt "$out" ] \
+       || [ "$(cat "$PROFILE_SIG" 2>/dev/null)" != "$INPUT_SIG" ]; then
+        "$SCRIPTS/plasma-scheme.py" --template "$template" --name "$name" \
+            --out "$out" --accent "$ACCENT" --ui-accent "$UI_ACCENT" \
+            --no-apply "$@"
+    fi
+}
+
+# These templates are installed by plasma-colors.nix.  A non-Plasma host or a
+# partial activation may not have them yet; leave a valid palette/asset profile
+# behind and mark its scheme set incomplete in the manifest instead of failing
+# the wallpaper pre-warm job.
+SCHEMES_READY=true
+DARK_TEMPLATE="$SCRIPTS/plasma-scheme-template.colors"
+LIGHT_TEMPLATE="$SCRIPTS/plasma-light-scheme-template.colors"
+if [ -f "$DARK_TEMPLATE" ] && [ -f "$LIGHT_TEMPLATE" ] \
+   && [ -x "$SCRIPTS/plasma-scheme.py" ]; then
+    if [ "$BG" = "464540" ]; then
+        prepare_scheme OxygenDarkFlat "$DARK_TEMPLATE" --background "$BG" || SCHEMES_READY=false
+    else
+        prepare_scheme OxygenDarkFlat "$DARK_TEMPLATE" || SCHEMES_READY=false
+    fi
+    prepare_scheme OxygenDarkNeutral "$DARK_TEMPLATE" --surface-color "$BGALT" || SCHEMES_READY=false
+    prepare_scheme OxygenLightFlat "$LIGHT_TEMPLATE" || SCHEMES_READY=false
+    for scheme in OxygenDarkFlat OxygenDarkNeutral OxygenLightFlat; do
+        [ -s "$PROFILE_DIR/$scheme.colors" ] || SCHEMES_READY=false
+    done
+else
+    SCHEMES_READY=false
+fi
+
+# Aero is installed only where the matching Plasma theme is present.  It is an
+# owned candidate in plasma-scheme.py, but unlike the three shared Oxygen
+# shapes it has no portable template.  Pre-mint it when the host supplies its
+# own source; an absent Aero body remains an explicit unsupported selected
+# scheme rather than falling back to minting during Apply.
+for AERO_TEMPLATE in \
+    /run/current-system/sw/share/color-schemes/Aero.colors \
+    /usr/share/color-schemes/Aero.colors; do
+    if [ -f "$AERO_TEMPLATE" ]; then
+        prepare_scheme Aero "$AERO_TEMPLATE" || true
+        break
+    fi
+done
+
+# Atomic publication makes a reader see either the prior complete manifest or
+# this complete one, never a half-written JSON document.  Artifact paths are
+# deterministic and live in PROFILE_DIR; the controller must still check
+# `schemesReady` before it treats this profile as apply-ready.
+tmp_manifest="$(mktemp "$PROFILE_DIR/.manifest.json.XXXXXX")"
+if ! jq -n \
+    --arg source "$WALL" \
+    --arg key "$KEY" \
+    --arg mode "$MODE" \
+    --arg blur "$BLUR" \
+    --arg thumbnail "$THUMB" \
+    --arg palette "$THEMEFILE" \
+    --arg profileDir "$PROFILE_DIR" \
+    --arg profileHash "$INPUT_SIG" \
+    --arg accent "$ACCENT" \
+    --arg uiAccent "$UI_ACCENT" \
+    --argjson schemesReady "$SCHEMES_READY" \
+    '{version: 1, source: $source, key: $key, mode: $mode,
+      palette: {path: $palette, accent: $accent, uiAccent: $uiAccent},
+      assets: {blur: $blur, thumbnail: $thumbnail},
+      schemes: {ready: $schemesReady, directory: $profileDir,
+                dark: ($profileDir + "/OxygenDarkFlat.colors"),
+                darkNeutral: ($profileDir + "/OxygenDarkNeutral.colors"),
+                light: ($profileDir + "/OxygenLightFlat.colors"),
+                aero: ($profileDir + "/Aero.colors")},
+      profileHash: $profileHash}' > "$tmp_manifest"; then
+    rm -f "$tmp_manifest"
+    echo "wal-prepare: could not publish profile manifest" >&2
+    exit 1
+fi
+mv -f "$tmp_manifest" "$MANIFEST"
+printf '%s\n' "$INPUT_SIG" > "$PROFILE_SIG"
 
 echo "wal-prepare: $WALL ready (mode=$MODE, ${IW}x${IH})"

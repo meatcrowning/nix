@@ -375,6 +375,8 @@ def main():
     ap.add_argument("--name", default=None,
                     help="scheme name to force for --template")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--apply-file", default=None,
+                    help="push this already-minted .colors body; do not mint on the apply path")
     ap.add_argument("--background", default=None,
                     help="optional bare hex override for Colors:Window BackgroundNormal")
     ap.add_argument("--surface-color", default=None,
@@ -383,6 +385,35 @@ def main():
                     help="accent roles without changing the scheme's surface hue")
     ap.add_argument("--no-apply", action="store_true")
     args = ap.parse_args()
+
+    # The appearance controller pre-mints its candidate schemes while the old
+    # desktop remains visible.  Applying that exact body avoids doing palette
+    # maths and template IO in the frame-sensitive part of a wallpaper switch.
+    # `--name` is deliberately required: filenames are not a trustworthy KDE
+    # scheme identity (Aero is the notable counterexample).
+    if args.apply_file:
+        if not args.name:
+            ap.error("--apply-file requires --name")
+        try:
+            with open(args.apply_file, encoding="utf-8") as stream:
+                minted = stream.read()
+        except OSError as exc:
+            print("plasma-scheme: cannot read prepared scheme (%s)" % exc,
+                  file=sys.stderr)
+            return 1
+        if scheme_name(minted) != args.name:
+            print("plasma-scheme: prepared scheme name does not match --name",
+                  file=sys.stderr)
+            return 1
+        # Do not use live_scheme() as a gate here.  The controller selected the
+        # live file and has already installed this body; pushing it is the
+        # transaction's explicit commit, including a repair for a missing
+        # ColorScheme key in inherited kdeglobals.
+        push_to_kdeglobals(minted, args.name,
+                           hashlib.sha1(minted.encode()).hexdigest(),
+                           args.ui_accent or args.accent)
+        print("plasma-scheme: pushed prepared %s" % args.name)
+        return 0
 
     candidates = ([(args.template, args.name, bool(args.surface_color))] if args.template
                   else list(CANDIDATES))
