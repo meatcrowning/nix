@@ -29,7 +29,7 @@ from pathlib import Path
 
 # Long enough that an idle tab is doing nothing measurable, short enough that a
 # palette change lands while he is still looking at the result.
-POLL_SECONDS = 30
+POLL_SECONDS = 2
 
 HEADER = """\
 // ==UserScript==

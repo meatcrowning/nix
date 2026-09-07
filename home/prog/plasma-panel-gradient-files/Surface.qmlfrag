@@ -10,7 +10,7 @@
     FolderListModel {
         id: panelSurfaceGeneration
         folder: "file:///home/lam/.local/state"
-        nameFilters: [ "plasma-panel-surface.serial" ]
+        nameFilters: [ "plasma-panel-surface.*.serial" ]
         showDirs: false
     }
 
@@ -30,7 +30,7 @@
         anchors.fill: floatingTranslucentItem
         source: "file:///home/lam/.local/state/plasma-panel-surface.png?generation="
                 + (panelSurfaceGeneration.count === 1
-                   ? panelSurfaceGeneration.get(0, "fileModified") : "0")
+                   ? panelSurfaceGeneration.get(0, "fileName") : "0")
         sourceClipRect: Qt.rect(Math.round(panel.x), Math.round(panel.y),
                                 Math.round(width), Math.round(height))
         fillMode: Image.Pad

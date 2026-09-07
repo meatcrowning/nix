@@ -30,14 +30,23 @@ def render_surface(width: int, height: int, palette: QPalette) -> QImage:
 
 
 def publish_generation(state: Path, target: Path) -> None:
-    """Publish the already-installed image's content token atomically."""
-    serial = state / "plasma-panel-surface.serial"
-    digest = hashlib.sha256(target.read_bytes()).hexdigest() + "\n"
-    if serial.exists() and serial.read_text() == digest:
+    """Publish the image token as a directory-model row replacement."""
+    digest = hashlib.sha256(target.read_bytes()).hexdigest()
+    serial = state / f"plasma-panel-surface.{digest}.serial"
+    if serial.exists():
         return
-    serial_tmp = serial.with_suffix(".new")
-    serial_tmp.write_text(digest)
-    serial_tmp.replace(serial)
+    # FolderListModel does not reliably emit dataChanged when only metadata on
+    # one fixed filename moves.  Removing the prior generation and adding this
+    # content-named row forces count/fileName to change in the running panel.
+    for old in state.glob("plasma-panel-surface.*.serial"):
+        old.unlink()
+    temporary = state / ".plasma-panel-surface.serial.new"
+    temporary.write_text(digest + "\n")
+    temporary.replace(serial)
+    # Retire the fixed-name token used by the broken metadata-only watcher.
+    legacy = state / "plasma-panel-surface.serial"
+    if legacy.exists():
+        legacy.unlink()
 
 
 def main() -> int:

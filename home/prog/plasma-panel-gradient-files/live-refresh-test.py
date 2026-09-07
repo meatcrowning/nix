@@ -24,9 +24,9 @@ def require(text: str, needle: str, where: str) -> None:
 
 def main() -> int:
     for needle in (
-        "plasma-panel-surface.serial",
+        "plasma-panel-surface.*.serial",
         "FolderListModel",
-        "fileModified",
+        "fileName",
         "?generation=",
     ):
         require(FRAGMENT, needle, "Surface.qmlfrag")
@@ -39,12 +39,17 @@ def main() -> int:
     if replace >= publish:
         raise AssertionError("renderer publishes the generation before replacing the PNG")
     require(RENDERER, "hashlib.sha256", "render-surface.py")
+    require(RENDERER, 'state.glob("plasma-panel-surface.*.serial")', "render-surface.py")
 
     require(NIX, "import Qt.labs.folderlistmodel", "plasma-oxygen-scheme.nix")
     refresh = NIX.split('panel-surface-refresh =', 1)[1].split('panel-gradient-view =', 1)[0]
     for forbidden in ("try-restart plasma-plasmashell.service", "/bin/sleep", "last-restart"):
         if forbidden in refresh:
             raise AssertionError(f"live refresh still contains restart-era operation: {forbidden}")
+
+    oxygen = (ROOT.parent / "srvs/wal-files/oxygen-live-icons.py").read_text()
+    if "plasma-plasmashell.service" in oxygen:
+        raise AssertionError("Oxygen icon completion still restarts Plasma")
 
     print("panel live-refresh contract: ok")
     return 0
