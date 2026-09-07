@@ -38,11 +38,14 @@ def publish_generation(state: Path, target: Path) -> None:
     # FolderListModel does not reliably emit dataChanged when only metadata on
     # one fixed filename moves.  Removing the prior generation and adding this
     # content-named row forces count/fileName to change in the running panel.
+    # The name is already content-unique and Panel.qml never reads its body,
+    # so create it directly.  QFileSystemWatcher missed the previous hidden
+    # temporary -> matching-name rename; a matching file creation is the event
+    # FolderListModel reliably turns into an inserted row.
+    serial.write_text(digest + "\n")
     for old in state.glob("plasma-panel-surface.*.serial"):
-        old.unlink()
-    temporary = state / ".plasma-panel-surface.serial.new"
-    temporary.write_text(digest + "\n")
-    temporary.replace(serial)
+        if old != serial:
+            old.unlink()
     # Retire the fixed-name token used by the broken metadata-only watcher.
     legacy = state / "plasma-panel-surface.serial"
     if legacy.exists():

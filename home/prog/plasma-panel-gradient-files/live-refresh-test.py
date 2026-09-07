@@ -40,6 +40,8 @@ def main() -> int:
         raise AssertionError("renderer publishes the generation before replacing the PNG")
     require(RENDERER, "hashlib.sha256", "render-surface.py")
     require(RENDERER, 'state.glob("plasma-panel-surface.*.serial")', "render-surface.py")
+    if 'temporary.replace(serial)' in RENDERER:
+        raise AssertionError("generation token still uses the missed rename event")
 
     require(NIX, "import Qt.labs.folderlistmodel", "plasma-oxygen-scheme.nix")
     refresh = NIX.split('panel-surface-refresh =', 1)[1].split('panel-gradient-view =', 1)[0]
