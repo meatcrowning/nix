@@ -78,6 +78,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import time
 
 from PySide6.QtCore import Qt, QUrl, QMetaObject, Q_ARG
 from PySide6.QtGui import QAction, QIcon
@@ -90,6 +91,19 @@ from kdeshell_icons import (
     select_plasma_files,
     themed_icon,
 )
+
+
+def _startup_trace(label, started=None):
+    """Share player's opt-in startup trace without coupling this module to it."""
+    path = os.environ.get("PLAYER_STARTUP_TRACE")
+    if not path:
+        return
+    suffix = f" {time.perf_counter() - started:.6f}s" if started is not None else ""
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"shell {label}{suffix}\n")
+    except OSError:
+        pass
 
 
 def qt_version() -> str:
@@ -449,6 +463,7 @@ def _build_background_classes():
             super().__init__(QQuickImageProvider.Image)
 
         def requestImage(self, path, size, requested):
+            trace_started = time.perf_counter()
             # "winW,winH,offX,offY,viewW,viewH,dpr,a|i#serial" — the last field
             # is the window's activation state (see `_group_palette`).
             try:
@@ -487,6 +502,7 @@ def _build_background_classes():
             if size is not None:
                 size.setWidth(crop.width())
                 size.setHeight(crop.height())
+            _startup_trace(f"background-render {win_w}x{win_h}@{dpr:g}", trace_started)
             return crop
 
     class _StyledBackground(QObject):
@@ -774,7 +790,9 @@ def _build_shell_class():
             return self.window.windowHandle()
 
         def show(self):
+            started = time.perf_counter()
             self._restore_state()
+            _startup_trace("restore-state", started)
             # RESTORE PUTS THE TOOLBAR BACK IN A TOOLBAR AREA. `saveState()`
             # records where every toolbar lived, by objectName, and
             # `restoreState()` re-docks it — which for an overlay toolbar means
@@ -783,8 +801,12 @@ def _build_shell_class():
             # buttons pushed to the bottom of that band. He had exactly that
             # after the first relaunch. Re-assert the overlay afterwards, every
             # time; a saved state cannot outvote what the app asked for.
+            started = time.perf_counter()
             self._reassert_overlay()
+            _startup_trace("reassert-overlay", started)
+            started = time.perf_counter()
             self.window.show()
+            _startup_trace("window-show", started)
             return self.window.windowHandle()
 
         def _reassert_overlay(self):
