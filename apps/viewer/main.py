@@ -62,6 +62,7 @@ from vtbclient import VtbClient, close_animated  # noqa: E402  (needs the path i
 from handoff import Listener, send as handoff_send  # noqa: E402  (pylib; the running-app socket)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
 from kdetheme import theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+from styleparticipant import StyleParticipant  # noqa: E402  (live theme acknowledgement)
 from glyphs import px  # noqa: E402  (pylib; docs/DESIGN.md 2.3 - map at INGEST)
 
 # Same set filer classifies as images, so anything filer shows a thumbnail for
@@ -287,15 +288,18 @@ class Palette(QObject):
         try:
             txt = open(self._path, encoding="utf-8").read()
         except OSError:
-            return
+            return False
         colors = dict(self._colors)
+        parsed = False
         for m in re.finditer(r'property\s+color\s+(\w+)\s*:\s*"(#[0-9a-fA-F]{3,8})"', txt):
             name, val = m.group(1), m.group(2)
             if name in PALETTE_KEYS:
                 colors[name] = val
+                parsed = True
         if colors != self._colors:
             self._colors = colors
             self.changed.emit()
+        return parsed
 
     def _c(self, k):
         return QColor(self._colors.get(k, PALETTE_DEFAULTS[k]))
@@ -611,6 +615,7 @@ def main():
     ctx = engine.rootContext()
 
     palette = Palette(theme_source(PANEL_THEME))
+    style_participant = StyleParticipant("viewer", palette._load, app)
     style = DeskStyle()
     titlebar = Titlebar()
     files = Files()

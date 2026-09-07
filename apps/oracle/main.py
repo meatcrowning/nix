@@ -80,6 +80,7 @@ from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 from warden import BackendClientLease, Warden  # noqa: E402  (arbiter + daemon lifetime)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
 from kdetheme import theme_source, watch_palette, is_plasma  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+from styleparticipant import StyleParticipant  # noqa: E402  (live theme acknowledgement)
 from oxygenstyle import is_oxygen, read_oxygen  # noqa: E402  (pylib; Plasma AND the widget style is Oxygen, and its settings)
 import kdeshell  # noqa: E402  (pylib; the Plasma session's real QtWidgets window)
 import lastfm as lastfmlib  # noqa: E402  (pylib; his Last.fm account, shared with player)
@@ -3451,7 +3452,7 @@ class Palette(QObject):
         try:
             txt = open(self._path, encoding="utf-8").read()
         except OSError:
-            return
+            return False
         colors = dict(self._colors)
         for m in re.finditer(r'property\s+color\s+(\w+)\s*:\s*"(#[0-9a-fA-F]{3,8})"', txt):
             name, val = m.group(1), m.group(2)
@@ -3460,6 +3461,7 @@ class Palette(QObject):
         if colors != self._colors:
             self._colors = colors
             self.changed.emit()
+        return True
 
     def _c(self, k):
         return QColor(self._colors.get(k, PALETTE_DEFAULTS[k]))
@@ -11974,6 +11976,9 @@ def main():
     app.setDesktopFileName("oracle")
 
     palette = Palette(theme_source(PANEL_THEME))
+    # Completion means chatter has read the newly committed source, not merely
+    # that the desktop controller wrote a profile file.
+    style_participant = StyleParticipant("chatter", palette._load, app)
     style = DeskStyle()
     # Chatter's Plasma/Oxygen roof substitutes Qt Quick Controls and QLabel-like
     # items for much of the Hyprland tree. Those inherit QApplication's font,

@@ -57,6 +57,7 @@ sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402
 from deskstyle import DeskStyle  # noqa: E402
 from kdetheme import theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+from styleparticipant import StyleParticipant  # noqa: E402  (live theme acknowledgement)
 
 REPO = Path(os.environ.get("NIX_UPGRADABLE_REPO", str(Path.home() / "nix")))
 COMMAND_RUNNER = shlex.split(os.environ.get("UPDATER_COMMAND_RUNNER", ""))
@@ -127,15 +128,18 @@ class Palette(QObject):
         try:
             txt = open(self._path, encoding="utf-8").read()
         except OSError:
-            return
+            return False
         colors = dict(self._colors)
+        parsed = False
         for m in re.finditer(r'property\s+color\s+(\w+)\s*:\s*"(#[0-9a-fA-F]{3,8})"', txt):
             name, val = m.group(1), m.group(2)
             if name in PALETTE_KEYS:
                 colors[name] = val
+                parsed = True
         if colors != self._colors:
             self._colors = colors
             self.changed.emit()
+        return parsed
 
     def _c(self, k):
         return QColor(self._colors.get(k, PALETTE_DEFAULTS[k]))
@@ -474,6 +478,7 @@ def main():
     ctx = engine.rootContext()
 
     palette = Palette(theme_source(PANEL_THEME))
+    style_participant = StyleParticipant("updater", palette._load, app)
     style = DeskStyle()
     titlebar = Titlebar()
     inputs = Inputs()

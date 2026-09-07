@@ -30,7 +30,7 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Slot, Signal, Property, QUrl, QTimer
+from PySide6.QtCore import QObject, Slot, Signal, Property, QUrl, QTimer, QFileSystemWatcher
 from PySide6.QtGui import QGuiApplication, QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 
@@ -41,6 +41,7 @@ sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402
 from deskstyle import DeskStyle  # noqa: E402
 from kdetheme import theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+from styleparticipant import StyleParticipant  # noqa: E402  (live theme acknowledgement)
 
 import slskapi  # noqa: E402  (beside this file)
 
@@ -66,22 +67,40 @@ class Palette(QObject):
         super().__init__(parent)
         self._path = str(path)
         self._colors = dict(PALETTE_DEFAULTS)
+        self._watcher = QFileSystemWatcher(self)
+        self._watcher.fileChanged.connect(self._on_change)
+        self._watcher.directoryChanged.connect(self._on_change)
+        directory = os.path.dirname(self._path)
+        if os.path.isdir(directory):
+            self._watcher.addPath(directory)
+        self._rewatch()
+        self._load()
+
+    def _rewatch(self):
+        if os.path.exists(self._path) and self._path not in self._watcher.files():
+            self._watcher.addPath(self._path)
+
+    def _on_change(self, _):
+        self._rewatch()
         self._load()
 
     def _load(self):
         try:
             txt = open(self._path, encoding="utf-8").read()
         except OSError:
-            return
+            return False
         colors = dict(self._colors)
+        parsed = False
         for m in __import__("re").finditer(
                 r'property\s+color\s+(\w+)\s*:\s*"(#[0-9a-fA-F]{3,8})"', txt):
             name, val = m.group(1), m.group(2)
             if name in PALETTE_KEYS:
                 colors[name] = val
+                parsed = True
         if colors != self._colors:
             self._colors = colors
             self.changed.emit()
+        return parsed
 
     def _c(self, k):
         return QColor(self._colors.get(k, PALETTE_DEFAULTS[k]))
@@ -161,6 +180,7 @@ def main():
 
     settings = Settings()
     palette = Palette(theme_source(PANEL_THEME))
+    style_participant = StyleParticipant("slsk", palette._load, app)
     style = DeskStyle()
     titlebar = Titlebar()
     api = slskapi.SlskApi()

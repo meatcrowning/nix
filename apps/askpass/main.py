@@ -57,6 +57,7 @@ try:
     # pylib; imports PySide6 itself, so it can only fail where PySide6 does.
     from deskstyle import DeskStyle
     from kdetheme import theme_source   # pylib; the KDE theme in a Plasma session
+    from styleparticipant import StyleParticipant  # pylib; live theme acknowledgement
 except Exception as exc:  # noqa: BLE001 - any import failure at all
     print(f"askpass: cannot load PySide6: {exc}", file=sys.stderr)
     sys.exit(3)
@@ -103,15 +104,18 @@ class Palette(QObject):
         try:
             txt = open(self._path, encoding="utf-8").read()
         except OSError:
-            return
+            return False
         colors = dict(self._colors)
+        parsed = False
         for m in re.finditer(r'property\s+color\s+(\w+)\s*:\s*"(#[0-9a-fA-F]{3,8})"', txt):
             name, val = m.group(1), m.group(2)
             if name in PALETTE_KEYS:
                 colors[name] = val
+                parsed = True
         if colors != self._colors:
             self._colors = colors
             self.changed.emit()
+        return parsed
 
     def _c(self, k):
         return QColor(self._colors.get(k, PALETTE_DEFAULTS[k]))
@@ -327,6 +331,7 @@ def main():
     ctx = engine.rootContext()
 
     palette = Palette(theme_source(PANEL_THEME))
+    style_participant = StyleParticipant("askpass", palette._load, app)
     style = DeskStyle()
     sudo = Sudo()
     ctx.setContextProperty("WalPalette", palette)
