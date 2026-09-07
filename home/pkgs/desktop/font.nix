@@ -475,7 +475,7 @@ in
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
     <fontconfig>
-      <match target="font">
+      <match target="pattern">
         <test name="family"><string>Oxygen-Sans</string></test>
         <edit name="antialias" mode="assign_replace" binding="strong"><bool>true</bool></edit>
         <edit name="autohint" mode="assign_replace" binding="strong"><bool>false</bool></edit>
@@ -493,7 +493,7 @@ in
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
     <fontconfig>
-      <match target="font">
+      <match target="pattern">
         <test name="family"><string>Oxygen Mono</string></test>
         <edit name="antialias" mode="assign_replace" binding="strong"><bool>true</bool></edit>
         <edit name="autohint" mode="assign_replace" binding="strong"><bool>false</bool></edit>
