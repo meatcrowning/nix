@@ -2184,8 +2184,10 @@ class Player(QObject):
     # A restored queue can hold hundreds of files on air's SMB mount. Loading
     # every one into mpv before QApplication reaches its event loop held the
     # visible launch for 18 seconds with a 298-track queue. Restore the paused
-    # current track immediately, then append this many entries per turn.
-    RESTORE_APPEND_BATCH = 4
+    # current track immediately, then add one future SMB path between event
+    # turns. A zero-delay chain still monopolises the loop on a long queue.
+    RESTORE_APPEND_BATCH = 1
+    RESTORE_APPEND_INTERVAL_MS = 100
 
     def __init__(self, library, prefs, parent=None):
         super().__init__(parent)
@@ -2485,7 +2487,8 @@ class Player(QObject):
         self._mpv.pause = paused
         if defer_rest and len(paths) > 1:
             self._mpv_fill_pending = True
-            QTimer.singleShot(0, lambda: self._append_restored_tail(token, start_idx + 1))
+            QTimer.singleShot(self.RESTORE_APPEND_INTERVAL_MS,
+                              lambda: self._append_restored_tail(token, start_idx + 1))
         else:
             for p in paths[1:]:
                 self._mpv.command("loadfile", p, "append")
@@ -2498,7 +2501,8 @@ class Player(QObject):
         for row in self._queue[next_idx:end]:
             self._mpv.command("loadfile", row["path"], "append")
         if end < len(self._queue):
-            QTimer.singleShot(0, lambda: self._append_restored_tail(token, end))
+            QTimer.singleShot(self.RESTORE_APPEND_INTERVAL_MS,
+                              lambda: self._append_restored_tail(token, end))
         else:
             self._mpv_fill_pending = False
 
