@@ -41,8 +41,8 @@ scheme="$(kreadconfig6 --file kdeglobals --group General --key ColorScheme 2>/de
 # schemes changes only kdeglobals: text follows immediately while that image
 # keeps the previous scheme's background.  Queue one refresh for a genuine
 # scheme-name transition.  The cache also absorbs this script's own KConfig
-# notifications, and the renderer itself avoids a plasmashell restart when the
-# resulting pixels are unchanged.
+# notifications; the mapped Panel.qml watches the renderer's generation and
+# changes its image in place.
 panel_scheme_cache="$WAL_CACHE/plasma-panel-scheme"
 if [ "$(cat "$panel_scheme_cache" 2>/dev/null || true)" != "$scheme" ]; then
     mkdir -p "$WAL_CACHE"

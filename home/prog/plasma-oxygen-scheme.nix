@@ -60,30 +60,11 @@ let
     exec ${panel-surface-python}/bin/python ${./plasma-panel-gradient-files/render-surface.py}
   '';
   panel-surface-refresh = pkgs.writeShellScript "plasma-panel-surface-refresh" ''
-    target="$HOME/.local/state/plasma-panel-surface.png"
-    restart_stamp="''${XDG_RUNTIME_DIR:-/run/user/$UID}/plasma-panel-surface.last-restart"
-    now="$(${pkgs.coreutils}/bin/date +%s)"
-    last="$(${pkgs.coreutils}/bin/cat "$restart_stamp" 2>/dev/null || true)"
-    case "$last" in ""|*[!0-9]*) last=0 ;; esac
-    # Plasma permits only three starts in 60 seconds, including its normal
-    # session start.  One automatic restart per 65 seconds leaves that guard
-    # untouched even when the user flips through wallpapers rapidly.  Path
-    # events arriving while we wait are coalesced; the render below reads the
-    # final selected scheme rather than restarting once per click.
-    wait_for=$((65 - (now - last)))
-    if [ "$wait_for" -gt 0 ]; then
-      ${pkgs.coreutils}/bin/sleep "$wait_for"
-    fi
-    before="$(stat -c '%y:%s' "$target" 2>/dev/null || true)"
-    ${panel-surface-renderer}/bin/plasma-panel-surface-renderer
-    after="$(stat -c '%y:%s' "$target" 2>/dev/null || true)"
-    # A palette write changes several KConfig files.  Restart only for a new
-    # image, never for the duplicate events or Plasma's own config saves.
-    if [ "$before" != "$after" ]; then
-      if ${pkgs.systemd}/bin/systemctl --user try-restart plasma-plasmashell.service; then
-        ${pkgs.coreutils}/bin/date +%s > "$restart_stamp"
-      fi
-    fi
+    # The running Panel.qml observes the renderer's content generation and
+    # reloads its Image in place.  Keep this service deliberately narrow: the
+    # normal wallpaper/theme path must not restart plasmashell or wait behind a
+    # restart rate-limit.
+    exec ${panel-surface-renderer}/bin/plasma-panel-surface-renderer
   '';
   # Plasma's FrameSvg tiles its five-pixel centre.  That works for a texture,
   # but cannot represent one gradient shared by a horizontal panel.  Overlay
@@ -99,6 +80,7 @@ let
       chmod -R u+w $out
       panel_qml=$out/contents/views/Panel.qml
       perl -0pi -e 's/(id: opaqueItem.*?opacity:) root\.panelOpacity/$1 0/s' $panel_qml
+      perl -0pi -e 's|(import QtQml\n)|$1import Qt.labs.folderlistmodel\n|' $panel_qml
       awk -v surface=${./plasma-panel-gradient-files/Surface.qmlfrag} -v shadow=${./plasma-panel-gradient-files/Shadow.qmlfrag} '
         /^    Keys.onEscapePressed: \{$/ {
           while ((getline line < surface) > 0) print line
@@ -144,10 +126,9 @@ in
     Unit.Description = "render and apply the shared Plasma panel surface";
     Service = {
       Type = "oneshot";
-      # Scheme minting writes several files in a burst.  Let that settle into
-      # one render/restart, avoiding Plasma's start-limit during a wallpaper
-      # switch.
-      ExecStartPre = "${pkgs.coreutils}/bin/sleep 1";
+      # Path activation coalesces a scheme's burst of writes.  The panel is
+      # updated in place by its generation watcher, so no shell restart is
+      # required here.
       ExecStart = panel-surface-refresh;
     };
   };
