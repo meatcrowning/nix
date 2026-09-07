@@ -554,6 +554,29 @@ def convert(src, dst, report=None):
                  surface_opaque=0)
     parents = {c: p for p in root.iter() for c in p}
 
+    def place_base(body, base):
+        """Keep an addressable FrameSVG slice and its inserted base together."""
+        p = parents[body]
+        pos = list(p).index(body)
+        eid = body.get('id')
+        if eid and addressable(eid):
+            # Plasma extracts a FrameSVG slice by its id. A base inserted as a
+            # sibling is therefore discarded, leaving only the alpha gloss and
+            # making the slice transparent. Move the id onto a wrapper so the
+            # extracted slice contains both layers.
+            group = ET.Element(S+'g', {'id': eid})
+            body.attrib.pop('id', None)
+            p[pos] = group
+            group.extend((base, body))
+            parents[group] = p
+            parents[base] = group
+            parents[body] = group
+            # Geometry helpers below still need the painted element itself.
+            doc.idx[eid] = body
+        else:
+            p.insert(pos, base)
+            parents[base] = p
+
     def ancestry(el):
         out, n = [], el
         while n is not None:
@@ -614,6 +637,7 @@ def convert(src, dst, report=None):
     centre_ramp = {}     # framesvg prefix -> gradient the centre ended up with
 
     for el in targets:
+        target_id = el.get('id') or ''
         body = first_body(el)
         if body is None: stats['no_body'] += 1; continue
         fill, fop, sd = get_fill(body)
@@ -637,7 +661,7 @@ def convert(src, dst, report=None):
                 # by the ordinary and solid variants.  Give it the SAME derived
                 # white titlebar ramp instead of preserving Oxygen's dark gloss.
                 if is_panel and ALPHA_MODE == 'titlebar':
-                    eid_l = (el.get('id') or '').lower()
+                    eid_l = target_id.lower()
                     ax = 'h' if eid_l.startswith(('east-', 'west-')) else 'v'
                     inv = panel_gradient_invert(body, parents, ax,
                                                 eid_l.split('-', 1)[0])
@@ -649,7 +673,7 @@ def convert(src, dst, report=None):
                     bd.pop('fill-opacity', None); set_style(base, bd)
                     base.set('class', role)
                     od = style_dict(body); od['fill'] = f'url(#{gid})'; set_style(body, od)
-                    p = parents[body]; p.insert(list(p).index(body), base)
+                    place_base(body, base)
                     if eid_l.endswith('-center'):
                         centre_ramp[eid_l[:-len('-center')]] = gid
                     stats['based_colour'] += 1
@@ -661,7 +685,7 @@ def convert(src, dst, report=None):
                 bd.pop('fill-opacity', None); set_style(base, bd)
                 base.set('class', role)
                 od = style_dict(body); od['fill'] = f'url(#{gid})'; set_style(body, od)
-                p = parents[body]; p.insert(list(p).index(body), base)
+                place_base(body, base)
                 stats['based_colour'] += 1
             elif da > ALPHA_SPREAD:
                 # alpha ramp: it IS the shading. Put the scheme colour
@@ -671,9 +695,8 @@ def convert(src, dst, report=None):
                 bd = style_dict(base); bd['fill'] = 'currentColor'
                 bd.pop('fill-opacity', None); set_style(base, bd)
                 base.set('class', role)
-                p = parents[body]; p.insert(list(p).index(body), base)
                 if ALPHA_MODE in ('flip', 'centre', 'titlebar'):
-                    eid_l = (el.get('id') or '').lower()
+                    eid_l = target_id.lower()
                     is_panel = os.path.basename(src).startswith('panel-background')
                     ax = (('h' if eid_l.startswith(('east-', 'west-')) else 'v')
                           if is_panel else
@@ -688,9 +711,10 @@ def convert(src, dst, report=None):
                     set_style(body, od)
                 else:
                     gid = fill[5:-1]
-                eid = el.get('id') or ''
+                eid = target_id
                 if eid.endswith('-center'):
                     centre_ramp[eid[:-len('-center')]] = gid
+                place_base(body, base)
                 stats['based_alpha'] += 1
             else:
                 stats['untouched_art'] += 1
@@ -707,7 +731,7 @@ def convert(src, dst, report=None):
             bd = style_dict(base); bd['fill'] = 'currentColor'
             bd.pop('fill-opacity', None); set_style(base, bd)
             base.set('class', role)
-            p = parents[body]; p.insert(list(p).index(body), base)
+            place_base(body, base)
             stats['based_alpha'] += 1
 
     # A framesvg's edge slices whose body is a flat solid read as a lighter
