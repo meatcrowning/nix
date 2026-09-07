@@ -17,6 +17,26 @@ import dbsync
 LIVE = Path(sys.argv[1]) if len(sys.argv) > 1 else dbsync.db_path()
 TD = tempfile.TemporaryDirectory()
 SD = Path(TD.name)
+
+# A committed WAL write must invalidate the cheap pull stamp even while the
+# main database file itself remains unchanged.  This is the exact shape of a
+# running player: auto-checkpoint has not yet moved the new page into lib.db.
+STAMP_DB = SD / "stamp.db"
+sc = sqlite3.connect(STAMP_DB)
+sc.execute("PRAGMA journal_mode=WAL")
+sc.execute("CREATE TABLE probe (value INTEGER)")
+sc.commit()
+sc.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+stamp_before = dbsync._local_stamp(STAMP_DB)
+main_before = STAMP_DB.stat().st_mtime_ns, STAMP_DB.stat().st_size
+sc.execute("INSERT INTO probe VALUES (1)")
+sc.commit()
+main_after = STAMP_DB.stat().st_mtime_ns, STAMP_DB.stat().st_size
+stamp_after = dbsync._local_stamp(STAMP_DB)
+assert main_after == main_before, "fixture checkpointed into the main database"
+assert stamp_after != stamp_before, "committed WAL write did not change the sync stamp"
+sc.close()
+
 BASE = SD / "lib.db"
 dbsync.snapshot(str(LIVE), str(BASE))   # WAL-safe; never `cp` a live database
 A, B = SD / "a.db", SD / "b.db"

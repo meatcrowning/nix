@@ -332,11 +332,11 @@ def _seedable(db):
 # case free: one multiplexed round trip (~30ms) for the remote file's size and
 # mtime, compared against what we recorded at the last successful pull.
 #
-# Size+mtime is a sound "nothing happened" test here because the only writer is
-# the player on top, and sqlite cannot update a page without touching the file.
-# It is deliberately conservative in the safe direction: a false "changed" costs
-# a pull we didn't need, a false "unchanged" would need the mtime to go
-# backwards to a previously-seen value at an identical size.
+# Main-file plus WAL size+mtime is a sound "nothing happened" test here because
+# the only writer is the player on top, and sqlite cannot commit a page without
+# touching one of them.  It is deliberately conservative in the safe direction:
+# a checkpoint or WAL lifecycle change can cost a pull we did not need; it
+# cannot hide committed work still waiting in the WAL.
 
 
 def stamp_cache():
@@ -345,11 +345,24 @@ def stamp_cache():
 
 
 def _local_stamp(db):
-    try:
-        st = Path(db).stat()
-        return f"{st.st_mtime_ns} {st.st_size}"
-    except OSError:
-        return ""
+    """Cheap signature for the database and its uncheckpointed WAL.
+
+    SQLite can leave committed writes entirely in ``library.db-wal`` while the
+    main database file remains byte-for-byte unchanged.  A stamp of only the
+    main file therefore called a live remote database "up to date" and skipped
+    the merge.  Include the WAL's size and nanosecond mtime; its appearance,
+    disappearance, growth, or in-place rewrite must all force a snapshot.
+    """
+    parts = ["v2"]
+    for suffix in ("", "-wal"):
+        try:
+            st = Path(str(db) + suffix).stat()
+            parts.extend((str(st.st_mtime_ns), str(st.st_size)))
+        except OSError:
+            if not suffix:
+                return ""
+            parts.extend(("-", "-"))
+    return " ".join(parts)
 
 
 def _read_stamp():
