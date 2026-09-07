@@ -468,8 +468,27 @@ in
     </fontconfig>
   '';
 
-  # Keep Oxygen Mono grayscale in both Hyprland and Plasma. Fedora's KDE rule
-  # otherwise appends rgb subpixel rendering only for the latter session.
+  # Oxygen Sans is the proportional Plasma face.  Its small 8-9pt UI sizes at
+  # book's 1.5x scale benefit from native slight grid fitting, while grayscale
+  # coverage keeps the Retina panel free of RGB fringes.
+  xdg.configFile."fontconfig/conf.d/99-17-oxygen-sans.conf".text = ''
+    <?xml version="1.0"?>
+    <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+    <fontconfig>
+      <match target="font">
+        <test name="family"><string>Oxygen-Sans</string></test>
+        <edit name="antialias" mode="assign_replace" binding="strong"><bool>true</bool></edit>
+        <edit name="autohint" mode="assign_replace" binding="strong"><bool>false</bool></edit>
+        <edit name="hinting" mode="assign_replace" binding="strong"><bool>true</bool></edit>
+        <edit name="hintstyle" mode="assign_replace" binding="strong"><const>hintslight</const></edit>
+        <edit name="rgba" mode="assign_replace" binding="strong"><const>none</const></edit>
+        <edit name="lcdfilter" mode="assign_replace" binding="strong"><const>none</const></edit>
+      </match>
+    </fontconfig>
+  '';
+
+  # Keep Oxygen Mono grayscale in both Hyprland and Plasma. Its fixed cells
+  # use native full hinting so stems and advances stay stable at small sizes.
   xdg.configFile."fontconfig/conf.d/99-17-oxygen-mono.conf".text = ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
@@ -479,7 +498,7 @@ in
         <edit name="antialias" mode="assign_replace" binding="strong"><bool>true</bool></edit>
         <edit name="autohint" mode="assign_replace" binding="strong"><bool>false</bool></edit>
         <edit name="hinting" mode="assign_replace" binding="strong"><bool>true</bool></edit>
-        <edit name="hintstyle" mode="assign_replace" binding="strong"><const>hintslight</const></edit>
+        <edit name="hintstyle" mode="assign_replace" binding="strong"><const>hintfull</const></edit>
         <edit name="rgba" mode="assign_replace" binding="strong"><const>none</const></edit>
         <edit name="lcdfilter" mode="assign_replace" binding="strong"><const>none</const></edit>
       </match>
