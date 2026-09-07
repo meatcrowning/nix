@@ -10,6 +10,7 @@ prepared palette and selected Plasma scheme rather than a wall-clock value.
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import os
 from pathlib import Path
@@ -42,6 +43,8 @@ with tempfile.TemporaryDirectory() as directory:
     old_library = os.environ.get("DESKSTYLE_WALLPAPER_DIR")
     try:
         service = load_service()
+        check(len(inspect.signature(service.DeskStyleService._on_call).parameters) == 8,
+              "uses PyGObject's seven-argument D-Bus method callback")
         wallpaper = home / "Pictures" / "wall" / "blue.png"
         wallpaper.parent.mkdir(parents=True)
         os.environ["DESKSTYLE_WALLPAPER_DIR"] = str(wallpaper.parent)
@@ -104,6 +107,9 @@ with tempfile.TemporaryDirectory() as directory:
               "builds a stable profile digest from the prepared palette")
         check(service.elapsed_ms(10.0, 22.345) == 12345.0,
               "reports completion elapsed time across the full acknowledgement interval")
+        source = inspect.getsource(service.DeskStyleService._complete)
+        check('"elapsedMs": elapsed' in source and "elapsed * 1000" not in source,
+              "stores the millisecond duration without multiplying it twice")
 
         try:
             service.prepared_profile(wallpaper, "Breeze")
