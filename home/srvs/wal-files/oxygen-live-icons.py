@@ -14,7 +14,8 @@ from pathlib import Path
 from PIL import Image
 
 SOURCE = Path("@oxygenIcons@") / "share" / "icons" / "oxygen"
-RENDER_VERSION = "3"  # bump when the pixel transform changes
+RENDER_VERSION = "4"  # bump when the pixel transform changes
+VIVALDI_NAMES = ("vivaldi", "vivaldi-stable", "com.vivaldi.Vivaldi")
 
 
 def theme_index(source, destination, name):
@@ -51,6 +52,53 @@ def recolour(source, destination, accent):
             tinted = Image.new("RGBA", rgba.size)
             tinted.putdata([replace_blue(pixel) for pixel in rgba.getdata()])
             tinted.save(target)
+
+
+def icon_data_roots():
+    """Icon roots from both hosts, including Flatpak's exported app icons."""
+    home = Path.home()
+    roots = [Path(p) for p in __import__("os").environ.get(
+        "XDG_DATA_DIRS", "/usr/local/share:/usr/share").split(":") if p]
+    roots += [home / ".local/share", home / ".nix-profile/share",
+              Path("/run/current-system/sw/share"),
+              home / ".local/share/flatpak/exports/share",
+              Path("/var/lib/flatpak/exports/share")]
+    return list(dict.fromkeys(roots))
+
+
+def recolour_vivaldi(destination, accent, data_roots=None):
+    """Replace Vivaldi's red paint while retaining its white mark and shading."""
+    accent_rgb = tuple(channel / 255.0 for channel in bytes.fromhex(accent))
+    accent_hue, accent_saturation, _ = colorsys.rgb_to_hsv(*accent_rgb)
+    roots = icon_data_roots() if data_roots is None else data_roots
+
+    def replace_red(pixel):
+        red, green, blue, alpha = pixel
+        if alpha == 0:
+            return pixel
+        hue, saturation, value = colorsys.rgb_to_hsv(red / 255.0, green / 255.0,
+                                                      blue / 255.0)
+        if not (saturation >= 0.30 and (hue <= 0.08 or hue >= 0.92)):
+            return pixel
+        red, green, blue = colorsys.hsv_to_rgb(accent_hue, accent_saturation, value)
+        return (round(red * 255), round(green * 255), round(blue * 255), alpha)
+
+    for size_dir in SOURCE.glob("base/*x*"):
+        size = size_dir.name
+        source = next((root / "icons/hicolor" / size / "apps" / (name + ".png")
+                       for root in roots for name in VIVALDI_NAMES
+                       if (root / "icons/hicolor" / size / "apps" /
+                           (name + ".png")).is_file()), None)
+        if source is None:
+            continue
+        with Image.open(source) as image:
+            rgba = image.convert("RGBA")
+            tinted = Image.new("RGBA", rgba.size)
+            tinted.putdata([replace_red(pixel) for pixel in rgba.getdata()])
+            target_dir = destination / "base" / size / "apps"
+            target_dir.mkdir(parents=True, exist_ok=True)
+            for name in VIVALDI_NAMES:
+                tinted.save(target_dir / (name + ".png"))
 
 
 def activate(name):
@@ -113,6 +161,7 @@ def main():
                 shutil.rmtree(destination)
             theme_index(SOURCE, destination, "Oxygen Live " + accent)
             recolour(SOURCE, destination, accent)
+            recolour_vivaldi(destination, accent)
             state.write_text(RENDER_VERSION + " " + accent + "\n")
         if not args.no_activate:
             activate(name)
