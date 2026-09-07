@@ -642,6 +642,10 @@ tree's blue material paint — folders, files, devices, apps and actions — wit
 the current wallpaper hue, then alternates the theme name to flush KDE's icon
 cache in open programs. It never block-fills an icon: white highlights, black
 outlines, shading and semantic warning/error colours stay as authored.
+Vivaldi is the one foreign brand folded into that generated theme: the helper
+finds `vivaldi` on `top` or `com.vivaldi.Vivaldi` on `book`, remaps only the
+logo's red material paint, and publishes both names (plus `vivaldi-stable`) so
+the launcher and task list resolve the same live-coloured pixels.
 
 **Verify a change here on the sandbox output** (`tools/sandbox.sh` + `qs -p
 <test shell.qml>`, then read the pixels back): `QT_QPA_PLATFORM=offscreen` has
