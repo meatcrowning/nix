@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import os
 from pathlib import Path
@@ -17,11 +18,19 @@ module = importlib.util.module_from_spec(spec)
 assert spec and spec.loader
 spec.loader.exec_module(module)
 
+qml = (ROOT / "apps" / "style" / "qml" / "Main.qml").read_text(encoding="utf-8")
+
 
 def check(condition, message):
     if not condition:
         raise AssertionError(message)
     print("ok -", message)
+
+
+check("import QtQuick.Controls.Basic" not in qml and "import QtQuick.Controls\n" in qml,
+      "uses the desktop controls style instead of the Basic face")
+check("kdeshell.pin_controls_style()" in inspect.getsource(module.main),
+      "pins the Plasma QStyle before constructing the application")
 
 
 with tempfile.TemporaryDirectory() as temporary:

@@ -25,7 +25,13 @@ let
         version = "live";
         dontUnpack = true;
         nativeBuildInputs = [ pkgs.qt6.wrapQtAppsHook pkgs.makeWrapper ];
-        buildInputs = [ pyEnv pkgs.qt6.qtdeclarative ];
+        buildInputs = [
+          pyEnv
+          pkgs.qt6.qtdeclarative
+          pkgs.kdePackages.qqc2-desktop-style
+          pkgs.kdePackages.plasma-integration
+          pkgs.kdePackages.oxygen
+        ];
         dontWrapQtApps = true;
         installPhase = ''
           runHook preInstall

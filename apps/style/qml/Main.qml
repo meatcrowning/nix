@@ -1,202 +1,143 @@
 import QtQuick
-import QtQuick.Window
-import QtQuick.Controls.Basic
+import QtQuick.Controls
+import QtQuick.Layouts
 import "../../qmlcommon"
 
-// A small first page, not a fake clone of System Settings: it has one job and
-// makes the draft/active distinction explicit.  The controller reports the
-// only completion state that matters: the desktop and its live participants
-// adopted one generation.
-Window {
+// Plasma uses qqc2-desktop-style here: every control is painted by the live
+// KDE QStyle (Oxygen on this desktop), rather than by a parallel custom face.
+ApplicationWindow {
     id: win
     title: "style"
     width: 980
     height: 700
-    minimumWidth: 500
-    minimumHeight: 380
+    minimumWidth: 560
+    minimumHeight: 420
     visible: true
-    color: Theme.bg
 
-    TextMetrics {
-        id: metrics
-        font.family: Theme.font
-        font.pixelSize: Theme.fontSize
-        text: "MMMMMMMMMM"
-    }
-    readonly property real cellW: metrics.width > 0 ? metrics.width / 10 : Theme.fontSize * 0.53
-
-    component Label: PixelText {
-        color: Theme.text
-        font.family: Theme.font
-        font.pixelSize: Theme.fontSize
-    }
-
-    component Button: Rectangle {
-        id: button
-        property string label: ""
-        property bool enabled: true
-        property bool emphasis: false
-        signal activated()
-        implicitWidth: Math.max(96, textItem.implicitWidth + 5 * win.cellW)
-        implicitHeight: Theme.lineHeight + Theme.gap
-        color: !enabled ? Theme.bg
-             : mouse.pressed ? Theme.highlight
-             : mouse.containsMouse ? Theme.bgAlt : Theme.bg
-        border.width: Theme.ctrlBorder
-        border.color: !enabled ? Theme.inactive
-                    : emphasis ? Theme.accent
-                    : mouse.containsMouse ? Theme.accent : Theme.border
-        Label {
-            id: textItem
-            anchors.centerIn: parent
-            text: button.label
-            color: !button.enabled ? Theme.inactive : Theme.text
-        }
-        MouseArea {
-            id: mouse
+    header: ToolBar {
+        RowLayout {
             anchors.fill: parent
-            enabled: button.enabled
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: button.activated()
-        }
-    }
-
-    Rectangle {
-        anchors.fill: parent
-        color: Theme.bg
-        border.width: Theme.ctrlBorder
-        border.color: Theme.accent
-    }
-
-    Column {
-        anchors.fill: parent
-        anchors.margins: 2 * Theme.gap
-        spacing: Theme.gap
-
-        Row {
-            id: header
-            width: parent.width
-            spacing: Theme.gap
-            Label { text: "appearance"; color: Theme.accent }
-            Label { text: "wallpaper"; color: Theme.textDim }
-            Item { width: 1; height: 1 }
-            Button {
-                anchors.verticalCenter: parent.verticalCenter
-                label: "refresh"
+            anchors.leftMargin: 8
+            anchors.rightMargin: 8
+            Label { text: "appearance"; font.bold: true }
+            Label { text: "wallpaper"; opacity: 0.7 }
+            Item { Layout.fillWidth: true }
+            ToolButton {
+                text: "refresh"
+                icon.name: "view-refresh"
                 enabled: !Appearance.applying
-                onActivated: Appearance.refresh()
+                onClicked: Appearance.refresh()
             }
         }
+    }
 
-        Rectangle { width: parent.width; height: 1; color: Theme.border }
+    ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: 10
+        spacing: 8
 
-        Row {
-            width: parent.width
-            spacing: Theme.gap
-            Label { text: Appearance.applying ? "applying" : (Appearance.hasDraft ? "draft" : "active")
-                     color: Appearance.applying ? Theme.warn : (Appearance.hasDraft ? Theme.accent : Theme.ok) }
-            Label { text: Appearance.status; color: Theme.textDim; elide: Text.ElideRight
-                     width: Math.max(80, parent.width - 150) }
+        RowLayout {
+            Layout.fillWidth: true
+            Label {
+                text: Appearance.applying ? "applying" : (Appearance.hasDraft ? "draft" : "active")
+                font.bold: true
+            }
+            Label {
+                text: Appearance.status
+                opacity: 0.7
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+            }
         }
 
         Label {
             visible: Appearance.error !== ""
-            width: parent.width
             text: Appearance.error
-            color: Theme.crit
+            color: palette.link
             wrapMode: Text.Wrap
+            Layout.fillWidth: true
         }
 
-        Item {
-            id: gridFrame
-            width: parent.width
-            height: Math.max(100, win.height - 180)
-
-            readonly property real tileWidth: Math.max(150, Math.min(250, (width - Theme.gap) / 4))
-            readonly property real tileHeight: tileWidth * 0.70 + Theme.lineHeight + Theme.gap
+        Frame {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            padding: 4
 
             KineticGridView {
                 id: grid
                 anchors.fill: parent
-                anchors.rightMargin: gridScroll.barW
+                anchors.rightMargin: scrollBar.width
                 model: Appearance.wallpapers
-                cellWidth: gridFrame.tileWidth
-                cellHeight: gridFrame.tileHeight
+                readonly property int columns: Math.max(1, Math.floor(width / 210))
+                cellWidth: Math.floor(width / columns)
+                cellHeight: 164
                 clip: true
+
                 delegate: Item {
                     required property var modelData
                     width: grid.cellWidth
                     height: grid.cellHeight
-                    readonly property bool selected: modelData.path === Appearance.draftPath
-                    readonly property bool active: modelData.path === Appearance.activePath
-                    Rectangle {
+
+                    Button {
                         anchors.fill: parent
-                        anchors.margins: Theme.gap / 2
-                        color: selected ? Theme.bgAlt : Theme.bg
-                        border.width: selected ? 2 : 1
-                        border.color: selected ? Theme.accent : (active ? Theme.ok : Theme.border)
-                        Image {
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.top: parent.top
-                            anchors.margins: 1
-                            height: parent.height - Theme.lineHeight - Theme.gap - 2
-                            source: "file://" + modelData.thumbnail
-                            fillMode: Image.PreserveAspectCrop
-                            asynchronous: true
-                            retainWhileLoading: true
-                        }
-                        Label {
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.bottom: parent.bottom
-                            anchors.margins: Theme.gap / 2
-                            text: modelData.name
-                            color: selected ? Theme.text : Theme.textDim
-                            elide: Text.ElideMiddle
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            enabled: !Appearance.applying
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: Appearance.select(modelData.path)
+                        anchors.margins: 4
+                        checkable: true
+                        checked: modelData.path === Appearance.draftPath
+                        enabled: !Appearance.applying
+                        onClicked: Appearance.select(modelData.path)
+
+                        contentItem: ColumnLayout {
+                            spacing: 4
+                            Image {
+                                source: "file://" + modelData.thumbnail
+                                fillMode: Image.PreserveAspectCrop
+                                asynchronous: true
+                                retainWhileLoading: true
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                            }
+                            Label {
+                                text: modelData.name
+                                elide: Text.ElideMiddle
+                                horizontalAlignment: Text.AlignHCenter
+                                Layout.fillWidth: true
+                            }
                         }
                     }
                 }
-                ScrollBar.vertical: VScroll { id: gridScroll }
+
+                ScrollBar.vertical: ScrollBar { id: scrollBar }
             }
+
             Label {
                 anchors.centerIn: parent
                 visible: Appearance.wallpapers.length === 0
                 text: "no wallpapers in ~/Pictures/wall"
-                color: Theme.textDim
+                opacity: 0.7
             }
         }
 
-        Row {
-            id: footer
-            width: parent.width
-            spacing: Theme.gap
+        RowLayout {
+            Layout.fillWidth: true
             Label {
-                width: Math.max(100, parent.width - applyButton.width - cancelButton.width - 2 * Theme.gap)
-                text: Appearance.hasDraft ? "the selected wallpaper will also set the desktop palette" : "the active wallpaper owns the desktop palette"
-                color: Theme.textDim
+                text: Appearance.hasDraft
+                    ? "the selected wallpaper will also set the desktop palette"
+                    : "the active wallpaper owns the desktop palette"
+                opacity: 0.7
                 elide: Text.ElideRight
+                Layout.fillWidth: true
             }
             Button {
-                id: cancelButton
-                label: "cancel"
+                text: "cancel"
                 enabled: Appearance.hasDraft && !Appearance.applying
-                onActivated: Appearance.cancel()
+                onClicked: Appearance.cancel()
             }
             Button {
-                id: applyButton
-                label: Appearance.applying ? "applying" : "apply"
-                emphasis: true
+                text: Appearance.applying ? "applying" : "apply"
+                icon.name: "dialog-ok-apply"
+                highlighted: true
                 enabled: Appearance.hasDraft && !Appearance.applying
-                onActivated: Appearance.apply()
+                onClicked: Appearance.apply()
             }
         }
     }
