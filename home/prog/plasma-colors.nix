@@ -1,7 +1,8 @@
 { lib, pkgs, ... }:
 
-# Keep the wallpaper-tinted flattened Oxygen palettes available as optional
-# schemes. Plasma Manager applies the selected scheme after look-and-feel.
+# Both hosts select flattened Oxygen palettes: inactive effects are disabled and
+# their desired colors are baked into the templates. Plasma Manager applies the
+# scheme after look-and-feel.
 #
 # These are templates, not live files. wal-set.sh/plasma-scheme.py mint writable
 # wallpaper-tinted copies under ~/.local/share/color-schemes; activation only
@@ -39,7 +40,5 @@
     done
   '';
 
-  # Match the OxygenDark appearance already selected on top. This is shared so
-  # air and top do not drift into different launcher/window palettes again.
-  programs.plasma.workspace.colorScheme = "OxygenDark";
+  programs.plasma.workspace.colorScheme = "OxygenDarkFlat";
 }
