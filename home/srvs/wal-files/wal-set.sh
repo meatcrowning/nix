@@ -358,7 +358,21 @@ if [ "$PLASMA_SESSION" = 1 ]; then
     # scripting API so every desktop containment repaints immediately.  Return
     # a marker from JavaScript because qdbus itself can exit zero while
     # evaluateScript reports a JavaScript exception as its string result.
-    QDBUS="$(command -v qdbus || command -v qdbus6 || true)"
+    QDBUS=""
+    for candidate in \
+        "$HOME/.nix-profile/bin/qdbus" \
+        "/etc/profiles/per-user/${USER:-$(id -un)}/bin/qdbus" \
+        /run/current-system/sw/bin/qdbus \
+        /usr/bin/qdbus \
+        /usr/bin/qdbus6; do
+        if [ -x "$candidate" ]; then
+            QDBUS="$candidate"
+            break
+        fi
+    done
+    if [ -z "$QDBUS" ]; then
+        QDBUS="$(command -v qdbus 2>/dev/null || command -v qdbus6 2>/dev/null || true)"
+    fi
     [ -n "$QDBUS" ] || { echo "wal-set: qdbus is required to set the Plasma wallpaper" >&2; exit 1; }
     WALL_URL="file://$WALL"
     PLASMA_SCRIPT="$(jq -rn --arg url "$WALL_URL" '
