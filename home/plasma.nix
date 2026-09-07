@@ -366,6 +366,10 @@ in
       # pinned: wal-set.sh selects an accent-qualified oxygen-live theme, then
       # refreshes PlasmaShell's applet pixmaps after a real theme transition.
       kdeglobals.KDE.widgetStyle = "oxygen";
+      # Keep KRunner in the usable desktop rather than attaching it to the
+      # physical top edge, where its surface covers the top panel. This is
+      # Plasma's built-in floating placement and is shared by top and book.
+      krunnerrc.General.FreeFloating = true;
       kwalletrc.Wallet."First Use" = false;
       # The exact titlebar top uses: close / minimize / maximize at left, keep
       # above at right, Oxygen decoration, no decoration shadow. These used to
