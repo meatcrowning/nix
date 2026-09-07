@@ -37,7 +37,7 @@ STABLE CLI (a player right-click "create systheme" action shells out to this):
     options
       --name NAME            output basename (default: cover's stem, slugified)
       --out-dir DIR          where the wallpaper PNG lands
-                             (default: ~/Pictures/wall)
+                             (default: ~/Pictures/Wallpapers)
       --width N --height N   target wallpaper size (default 1920x1080)
       --method auto|comfy|flat   force a route (default auto)
       --comfy-url URL        ComfyUI base (default http://127.0.0.1:8188)
@@ -74,7 +74,7 @@ except Exception as e:  # pragma: no cover - environment guard
     raise SystemExit(2)
 
 HOME = Path.home()
-DEFAULT_OUT = HOME / "Pictures" / "wall"
+DEFAULT_OUT = HOME / "Pictures" / "Wallpapers"
 SCRIPTS = HOME / ".config" / "scripts"
 DEFAULT_COMFY = "http://127.0.0.1:8188"
 

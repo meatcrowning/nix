@@ -232,7 +232,7 @@ hl.on("hyprland.start", function()
     -- the event socket and drives `kitty @ set-colors` (see kitty-focus-dim.py).
     hl.exec_cmd("python3 $HOME/.config/kitty/kitty-focus-dim.py")
     -- Same for wal-prepare.path, which pre-caches tile/theme data for every
-    -- image under ~/Pictures/wall as soon as it's added — see
+    -- image under ~/Pictures/Wallpapers as soon as it's added — see
     -- scripts/wal-prepare.sh — so WallpaperPicker.qml flips land fast. Also
     -- backfill anything already in that directory from before this existed.
     hl.exec_cmd("systemctl --user start wal-prepare.path")
@@ -807,7 +807,7 @@ hl.bind(mainMod .. " + K", hl.dsp.exec_cmd("qs ipc call cheatsheet toggle"), { d
 hl.bind(mainMod .. " + L", hl.dsp.exec_cmd("qs ipc call lock activate"), { description = "Lock screen" })
 -- Power menu: logout/sleep/reboot/poweroff, slides out near the clock.
 hl.bind(mainMod .. " + M", hl.dsp.exec_cmd("qs ipc call powermenu toggle"), { description = "Power menu" })
--- Wallpaper picker: flip through ~/Pictures/wall with arrow keys, each
+-- Wallpaper picker: flip through ~/Pictures/Wallpapers with arrow keys, each
 -- highlight live-applies (wal-set.sh) as both wallpaper and theme.
 hl.bind(mainMod .. " + W", hl.dsp.exec_cmd("qs ipc call wallpaper toggle"), { description = "Wallpaper picker" })
 -- Hide/show the wallpaper image (the "no wallpaper" setting); the palette and

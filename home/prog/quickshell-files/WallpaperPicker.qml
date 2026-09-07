@@ -3,7 +3,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 
-// Wallpaper picker: a two-column grid of previews from ~/Pictures/wall that
+// Wallpaper picker: a two-column grid of previews from ~/Pictures/Wallpapers that
 // slides out like the Launcher/Cheatsheet. On open it lands on (and centres)
 // the wallpaper you're already using. Flipping through it with the arrow
 // keys (or clicking a thumbnail) *is* setting the wallpaper — each

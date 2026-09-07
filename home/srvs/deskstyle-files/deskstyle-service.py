@@ -67,7 +67,7 @@ def wallpaper_library() -> Path:
     wallpaper writer.
     """
     configured = os.environ.get("DESKSTYLE_WALLPAPER_DIR")
-    return Path(configured or (Path.home() / "Pictures" / "wall")).expanduser().resolve()
+    return Path(configured or (Path.home() / "Pictures" / "Wallpapers")).expanduser().resolve()
 
 
 def authorized_wallpaper(value: str) -> Path:

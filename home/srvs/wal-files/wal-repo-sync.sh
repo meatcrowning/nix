@@ -1,7 +1,7 @@
 #!/bin/sh
 # wal-repo-sync.sh — auto-version dropped wallpapers.
 #
-# Fired by the wal-repo-sync.path unit whenever ~/Pictures/wall changes: copy any
+# Fired by the wal-repo-sync.path unit whenever ~/Pictures/Wallpapers changes: copy any
 # image files into the repo's versioned set (home/srvs/wal-files/wallpapers) and
 # commit + push them, together with the completed wallpaper selection, so a
 # wallpaper dropped or picked on one machine shows up on the others after a
@@ -18,13 +18,13 @@
 #     (`git update-ref HEAD new old`); if HEAD moved underneath us (a concurrent
 #     commit), we bail and let the next drop retry, never clobbering that commit.
 #   * The image set is reconciled both ways: a supported image removed from
-#     ~/Pictures/wall is removed from the versioned source in the same focused
+#     ~/Pictures/Wallpapers is removed from the versioned source in the same focused
 #     commit. Home Manager seeds that source on activation, so without this a
 #     deleted image would return at the next rebuild.
 # Paths default to the live locations; the WAL_SYNC_* overrides exist only so the
 # script can be exercised end-to-end against a throwaway repo in a test.
 REPO="${WAL_SYNC_REPO:-$HOME/nix}"
-WALL="${WAL_SYNC_WALL:-$HOME/Pictures/wall}"
+WALL="${WAL_SYNC_WALL:-$HOME/Pictures/Wallpapers}"
 WALL_REL="home/srvs/wal-files/wallpapers"
 SELECTOR_REL="home/srvs/wal-files/current-wallpaper"
 LOG="${WAL_SYNC_LOG:-$HOME/.cache/wal/repo-sync.log}"
@@ -43,7 +43,7 @@ sleep 3
 
 # Mirror supported image files wall -> repo. Re-copying an unchanged file is a
 # no-op as far as git CONTENT is concerned, but git does track the exec bit —
-# `cp -p` used to carry 755 modes over from ~/Pictures/wall, flipping every
+# `cp -p` used to carry 755 modes over from the live wallpaper directory, flipping every
 # wallpaper to git-modified (mode-only) and keeping the tree permanently dirty.
 # install -m 644 pins the mode so an unchanged file really is a no-op.
 for f in "$WALL"/*; do

@@ -39,7 +39,7 @@ IMAGE_SUFFIXES = frozenset((".png", ".jpg", ".jpeg", ".webp", ".bmp"))
 
 def wallpaper_dir() -> Path:
     """The same writable collection used by the panel's wallpaper picker."""
-    return Path(os.environ.get("DESKSTYLE_WALLPAPER_DIR") or (Path.home() / "Pictures" / "wall"))
+    return Path(os.environ.get("DESKSTYLE_WALLPAPER_DIR") or (Path.home() / "Pictures" / "Wallpapers"))
 
 
 def state_dir() -> Path:

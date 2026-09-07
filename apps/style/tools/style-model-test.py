@@ -34,6 +34,8 @@ check("kdeshell.pin_controls_style()" in inspect.getsource(module.main),
 apply_source = inspect.getsource(module.Appearance.apply)
 check("asyncCallWithArgumentList" in apply_source and '"Apply", [self._draft]' in apply_source,
       "sends the wallpaper as a QtDBus argument list without blocking the UI")
+check('"Pictures" / "Wallpapers"' in inspect.getsource(module.wallpaper_dir),
+      "uses the canonical Wallpapers library by default")
 check("self._applying = False" in apply_source,
       "a client-side D-Bus failure releases the applying state")
 

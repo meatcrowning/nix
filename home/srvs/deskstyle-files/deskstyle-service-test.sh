@@ -18,6 +18,7 @@ done
 rg -F 'prepared_profile(wallpaper, selected_scheme)' "$SERVICE" >/dev/null
 rg -F '"--prepared", "--scheme", selected_scheme, str(wallpaper)' "$SERVICE" >/dev/null
 rg -F '"preparing"' "$SERVICE" >/dev/null
+rg -F 'Path.home() / "Pictures" / "Wallpapers"' "$SERVICE" >/dev/null
 
 WAL="$ROOT/home/srvs/wal-files/wal-set.sh"
 SCHEME="$ROOT/home/srvs/wal-files/plasma-scheme.py"

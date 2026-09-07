@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # wal-prepare-all.sh
 #
-# Runs wal-prepare.sh on every image under ~/Pictures/wall, so by the time you
+# Runs wal-prepare.sh on every image under ~/Pictures/Wallpapers, so by the time you
 # flip to one in quickshell's WallpaperPicker its tile/theme cache is already
 # warm and wal-set.sh just has to apply it. Triggered by wal-prepare.path
 # whenever that directory changes (a new image dropped in), and once at

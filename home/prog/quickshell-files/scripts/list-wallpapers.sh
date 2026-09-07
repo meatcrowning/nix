@@ -1,7 +1,7 @@
 #!/bin/sh
 # list-wallpapers.sh
 #
-# One line per image directly under ~/Pictures/wall, name-sorted, as three
+# One line per image directly under ~/Pictures/Wallpapers, name-sorted, as three
 # TAB-separated fields:
 #
 #     <source-path>\t<thumbnail-path>\t<palette>
@@ -42,7 +42,8 @@ get() {   # get KEY DEFAULT
     [ -n "$v" ] && printf '%s' "$v" || printf '%s' "$2"
 }
 
-DIR="$(get wallpaperDir '~/Pictures/wall')"
+DIR="$(get wallpaperDir '~/Pictures/Wallpapers')"
+[ "$DIR" = "~/Pictures/wall" ] && DIR="~/Pictures/Wallpapers"
 case "$DIR" in
     "~") DIR="$HOME" ;;
     "~/"*) DIR="$HOME/${DIR#\~/}" ;;

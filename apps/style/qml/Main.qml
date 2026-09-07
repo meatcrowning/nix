@@ -112,7 +112,7 @@ ApplicationWindow {
             Label {
                 anchors.centerIn: parent
                 visible: Appearance.wallpapers.length === 0
-                text: "no wallpapers in ~/Pictures/wall"
+                text: "no wallpapers in ~/Pictures/Wallpapers"
                 opacity: 0.7
             }
         }

@@ -105,7 +105,7 @@ fi
 # the basename with any newly imported image, so the next Plasma login on both
 # hosts starts from the picture the user actually selected.  Previews stop
 # above and never alter the durable choice.
-WALL_DIR="$(realpath "$HOME/Pictures/wall" 2>/dev/null || true)"
+WALL_DIR="$(realpath "$HOME/Pictures/Wallpapers" 2>/dev/null || true)"
 if [ -n "$WALL_DIR" ] && [ "$(dirname "$WALL")" = "$WALL_DIR" ]; then
     printf '%s\n' "${WALL##*/}" > "$WALL_DIR/.current-wallpaper"
 fi

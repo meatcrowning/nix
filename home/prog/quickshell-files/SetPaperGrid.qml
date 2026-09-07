@@ -233,7 +233,7 @@ Item {
         ingestProc.command = ["sh", "-c",
               'SETTINGS="$HOME/.config/quickshell/settings.json"; '
             + 'DIR="$(jq -r \'.wallpaperDir // empty\' "$SETTINGS" 2>/dev/null)"; '
-            + '[ -n "$DIR" ] || DIR="~/Pictures/wall"; '
+            + '[ -n "$DIR" ] || DIR="~/Pictures/Wallpapers"; '
             + 'case "$DIR" in "~") DIR="$HOME";; "~/"*) DIR="$HOME/${DIR#\\~/}";; esac; '
             + 'mkdir -p "$DIR"; '
             + 'for u in "$@"; do '
