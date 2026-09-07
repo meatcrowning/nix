@@ -29,8 +29,7 @@
         opacity: 1
         anchors.fill: floatingTranslucentItem
         source: "file:///home/lam/.local/state/plasma-panel-surface.png?generation="
-                + (panelSurfaceGeneration.count === 1
-                   ? panelSurfaceGeneration.get(0, "fileName") : "0")
+                + panelSurfaceGeneration.count
         sourceClipRect: Qt.rect(Math.round(panel.x), Math.round(panel.y),
                                 Math.round(width), Math.round(height))
         fillMode: Image.Pad

@@ -11,6 +11,7 @@ from pathlib import Path
 import hashlib
 import os
 import sys
+import time
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QGuiApplication, QImage, QPalette, QRegion
@@ -32,20 +33,12 @@ def render_surface(width: int, height: int, palette: QPalette) -> QImage:
 def publish_generation(state: Path, target: Path) -> None:
     """Publish the image token as a directory-model row replacement."""
     digest = hashlib.sha256(target.read_bytes()).hexdigest()
-    serial = state / f"plasma-panel-surface.{digest}.serial"
-    if serial.exists():
-        return
-    # FolderListModel does not reliably emit dataChanged when only metadata on
-    # one fixed filename moves.  Removing the prior generation and adding this
-    # content-named row forces count/fileName to change in the running panel.
-    # The name is already content-unique and Panel.qml never reads its body,
-    # so create it directly.  QFileSystemWatcher missed the previous hidden
-    # temporary -> matching-name rename; a matching file creation is the event
-    # FolderListModel reliably turns into an inserted row.
+    serial = state / f"plasma-panel-surface.{time.time_ns()}.{digest}.serial"
+    # FolderListModel does not reliably emit dataChanged for one fixed file,
+    # and it can coalesce a create+delete pair into no net model change.  Keep
+    # each tiny token: one direct creation is one durable inserted row, so the
+    # running panel's count changes exactly once for every changed render.
     serial.write_text(digest + "\n")
-    for old in state.glob("plasma-panel-surface.*.serial"):
-        if old != serial:
-            old.unlink()
     # Retire the fixed-name token used by the broken metadata-only watcher.
     legacy = state / "plasma-panel-surface.serial"
     if legacy.exists():
