@@ -69,18 +69,10 @@ in
       wallpaperFillMode = "preserveAspectCrop";
     };
 
-    # The type layout top is using. Plasma's mutable kdeglobals had drifted on
-    # book (Breeze/Oxygen Mono 10), so applications on the two hosts were not
-    # merely scaled differently: they were different faces. Screen scaling is
-    # still host-specific below; the actual type choices are desktop-global.
-    fonts = {
-      general = { family = "Oxygen-Sans"; pointSize = 8; };
-      fixedWidth = { family = "Oxygen Mono"; pointSize = 9; };
-      small = { family = "Oxygen-Sans"; pointSize = 8; };
-      toolbar = { family = "Oxygen-Sans"; pointSize = 8; };
-      menu = { family = "Oxygen-Sans"; pointSize = 8; };
-      windowTitle = { family = "Oxygen-Sans"; pointSize = 8; };
-    };
+    # Font family and size are personal KDE settings. Do not declare
+    # `programs.plasma.fonts`: plasma-manager would rewrite these kdeglobals
+    # keys whenever its configuration is applied, erasing choices made in
+    # System Settings. Plasma owns and preserves them on both hosts instead.
 
     # One semantic panel layout, recreated without copying top's containment
     # ids, activity UUIDs or four-screen map to book. The panels live on the
