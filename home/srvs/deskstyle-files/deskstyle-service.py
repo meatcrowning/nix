@@ -327,7 +327,7 @@ class DeskStyleService:
         return self.GLib.Variant("(a{sv})", (values,))
 
     def _on_call(self, _conn: Any, _sender: str, _object: str, _iface: str,
-                 method: str, params: Any, invocation: Any, _data: Any) -> None:
+                 method: str, params: Any, invocation: Any) -> None:
         try:
             if method == "GetStatus":
                 invocation.return_value(self._variant_status())
@@ -430,7 +430,7 @@ class DeskStyleService:
         self._running = None
         self._started_at = None
         self._status = {"state": "complete", "generation": generation, "profileHash": profile_hash,
-                        "allLive": all_live, "elapsedMs": round(elapsed * 1000, 3), "deferred": missing}
+                        "allLive": all_live, "elapsedMs": elapsed, "deferred": missing}
         self._write_status()
         self._emit("Completed", self.GLib.Variant("(usb)", (generation, profile_hash, all_live)))
 
