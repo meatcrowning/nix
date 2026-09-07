@@ -361,20 +361,16 @@ def gloss_gradient(doc, src_gid, stops):
     gid = doc.uid(src_gid); new.set('id', gid)
     return doc.publish(gid, new)
 
-def surface_gradient(doc):
-    """The same palette-relative field the rendered Plasma panels use."""
+def surface_gradient(doc, role, stops):
+    """One palette-relative layer of the rendered Plasma panel field."""
     new = ET.Element(S+'linearGradient')
     new.set('gradientUnits', 'objectBoundingBox')
     new.set('x1', '0'); new.set('y1', '0')
     new.set('x2', '0'); new.set('y2', '1')
-    # Measured from plasma-panel-surface.png: the top edge is Background plus
-    # 31% Highlight, falling through 11% at 3.2% of the screen and 3.5% at
-    # 9.4%, then reaching the unmodified Background role by 28.1%.
-    for off, alpha in ((0.0, 0.31), (0.032, 0.11), (0.094, 0.035),
-                       (0.281, 0.0), (1.0, 0.0)):
+    for off, alpha in stops:
         st = ET.SubElement(new, S+'stop')
         st.set('offset', f"{off:.4f}")
-        st.set('class', 'ColorScheme-Highlight')
+        st.set('class', role)
         st.set('style', f"stop-opacity:{alpha:.4f}")
     gid = doc.uid('surface'); new.set('id', gid)
     new.set('data-oxysch', 'body')
@@ -866,10 +862,29 @@ def convert(src, dst, report=None):
         # notifications and every other Plasma popup using these FrameSVGs.
         centre = doc.idx.get('center')
         if centre is not None:
+            # The panel's measured top pixel is not the scheme's selection
+            # colour alone. It is Background with a small Highlight tint and
+            # white Oxygen gloss: on the current palette these two layers turn
+            # (25,37,56) into (32,47,71), matching the top panel instead of the
+            # dark (18,26,40) produced by a 31% selection-blue overlay.
+            shape = ((0.0, 1.0), (0.032, 0.36), (0.094, 0.115),
+                     (0.281, 0.0), (1.0, 0.0))
+            tint = surface_gradient(doc, 'ColorScheme-Highlight',
+                                    [(p, a * 0.075) for p, a in shape])
             sd = style_dict(centre)
-            sd['fill'] = f'url(#{surface_gradient(doc)})'
+            sd['fill'] = f'url(#{tint})'
             sd['fill-opacity'] = '1'
             set_style(centre, sd)
+            gloss = copy.deepcopy(centre)
+            gloss.attrib.pop('id', None)
+            gd = style_dict(gloss)
+            white = surface_gradient(doc, 'ColorScheme-Text',
+                                     [(p, a * 0.04) for p, a in shape])
+            gd['fill'] = f'url(#{white})'
+            set_style(gloss, gd)
+            p = parents[centre]
+            p.insert(list(p).index(centre) + 1, gloss)
+            parents[gloss] = p
             stats['surface_gradient'] += 1
         for el in root.iter():
             fill, _, _ = get_fill(el)
