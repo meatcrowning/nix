@@ -121,11 +121,12 @@
   # An internal Start Page is not inside custom.css at all: Vivaldi reads its
   # background from the selected theme's Preferences entry.  It owns that file
   # while running, so writing it then would be lost at shutdown.  Watch its
-  # SingletonLock instead: creation is harmless (the helper deliberately
-  # skips a live profile), and deletion occurs after Vivaldi's final Prefs
-  # flush, when the helper can safely make the next launch current.  This is
-  # the missing automatic hand-off for the Start Page; no manual theme command
-  # is needed after a normal browser close.
+  # SingletonLock's *existence* instead: `PathChanged` only observes content
+  # changes, while Chromium creates and removes this dangling symlink.  On
+  # creation the helper waits; deletion is after Vivaldi's final Prefs flush,
+  # when it can safely make the next launch current.  This is the missing
+  # automatic hand-off for the Start Page; no manual theme command is needed
+  # after a normal browser close.
   systemd.user.services.vivaldi-theme-prefs = {
     Unit.Description = "Refresh Vivaldi's saved desktop theme after exit";
     Service = {
@@ -143,7 +144,7 @@
   systemd.user.paths.vivaldi-theme-prefs = {
     Unit.Description = "Apply Vivaldi's Start Page theme when its profile closes";
     Path = {
-      PathChanged = [
+      PathExists = [
         "%h/.config/vivaldi/SingletonLock"
         "%h/.var/app/com.vivaldi.Vivaldi/config/vivaldi/SingletonLock"
       ];
