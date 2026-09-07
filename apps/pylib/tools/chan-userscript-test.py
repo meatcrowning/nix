@@ -158,7 +158,7 @@ check("it asks through GM_xmlhttpRequest (a 4chan page is https)",
 check("it sends If-None-Match, so an unmoved palette costs a 304",
       "If-None-Match" in text)
 check("it re-polls on an interval rather than once",
-      "setInterval(pull" in text)
+      "setInterval(pull" in text and "var POLL = 2 * 1000" in text)
 check("the baked sheet is still applied first, as the courier-down fallback",
       "apply(CSS);" in text)
 

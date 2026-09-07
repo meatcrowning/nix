@@ -56,6 +56,10 @@
     };
   };
 
+  home.activation.generateChanThemeScript = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    $DRY_RUN_CMD ${pkgs.python3}/bin/python3 /home/lam/nix/apps/pylib/tools/chan-userscript.py
+  '';
+
   systemd.user.paths.chan-theme-script = {
     Unit.Description = "Watch the desktop 4chan userscript sources";
     Path = {
