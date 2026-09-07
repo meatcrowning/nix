@@ -31,6 +31,11 @@ check("import QtQuick.Controls.Basic" not in qml and "import QtQuick.Controls\n"
       "uses the desktop controls style instead of the Basic face")
 check("kdeshell.pin_controls_style()" in inspect.getsource(module.main),
       "pins the Plasma QStyle before constructing the application")
+apply_source = inspect.getsource(module.Appearance.apply)
+check("asyncCallWithArgumentList" in apply_source and '"Apply", [self._draft]' in apply_source,
+      "sends the wallpaper as a QtDBus argument list without blocking the UI")
+check("self._applying = False" in apply_source,
+      "a client-side D-Bus failure releases the applying state")
 
 
 with tempfile.TemporaryDirectory() as temporary:
