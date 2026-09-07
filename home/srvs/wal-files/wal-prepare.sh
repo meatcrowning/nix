@@ -12,7 +12,7 @@
 # is already newer than the source image. wal-set.sh calls this itself as its
 # first step (so a one-off manual wallpaper change still works standalone),
 # and wal-prepare-all.sh calls it in bulk for every image under
-# ~/Pictures/wall whenever that directory changes (see wal-prepare.path), so
+# ~/Pictures/Wallpapers whenever that directory changes (see wal-prepare.path), so
 # that by the time you flip to one in WallpaperPicker.qml the slow part
 # (ImageMagick, PIL) has already happened and applying it is just a handful of
 # small file writes.  The profile manifest is deliberately separate from the

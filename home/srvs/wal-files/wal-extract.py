@@ -228,7 +228,7 @@ def contrast_ratio(a, b):
 # The `fidelity` variant lifts its main colour VERBATIM off the wallpaper — but a
 # colour that cannot be read on the background it sits on is not a palette, it
 # is an invisible desktop. Measured 2026-08-09 across all 69 wallpapers in
-# ~/Pictures/wall: on `1658782593057758.jpg` the dominant real cluster and the
+# the former wallpaper library: on `1658782593057758.jpg` the dominant real cluster and the
 # darkest cluster were the SAME pixel (272216), text and background identical;
 # ten more came out under a 3:1 ratio.
 #

@@ -316,7 +316,7 @@ Singleton {
             property bool   reduceMotion: false
             property real   animSpeed: 1.0             // 1.0 = the baked 220ms; <1 faster
             // Wallpaper
-            property string wallpaperDir: "~/Pictures/wall"
+            property string wallpaperDir: "~/Pictures/Wallpapers"
             property string wallpaperFit: "auto"       // auto | tile | scale
             property string wallpaperSort: "name"      // name | random | mtime
             // No wallpaper image: paint Theme.bg (the wallpaper-derived theme
@@ -577,7 +577,7 @@ Singleton {
         paletteDropped: ({}),
         wallpaperHidden: [], wallpaperShowHidden: false,
         rgbFollowTheme: true, reduceMotion: false, animSpeed: 1.0,
-        wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",
+        wallpaperDir: "~/Pictures/Wallpapers", wallpaperFit: "auto", wallpaperSort: "name",
         wallpaperSolid: false, wallpaperFlip: false, wallpaperFlipVertical: false,
         viewMode: "classic", dockWidthFrac: 0.15,
         barWidth: 48, barEdge: "right", barGap: 8, barCell: 40, taskbarClickMinimizes: true, dockHeader: true, dockUptime: true,

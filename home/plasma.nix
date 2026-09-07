@@ -9,7 +9,7 @@ let
   sharedWallpaperName = lib.removeSuffix "\n"
     (builtins.readFile ./srvs/wal-files/current-wallpaper);
   sharedWallpaper =
-    "${config.home.homeDirectory}/Pictures/wall/${sharedWallpaperName}";
+    "${config.home.homeDirectory}/Pictures/Wallpapers/${sharedWallpaperName}";
   plasmaManagerLogin = pkgs.writeShellScript "plasma-manager-login" ''
     export PATH=${lib.makeBinPath [ pkgs.kdePackages.qttools ]}:$PATH
     exec ${config.xdg.dataHome}/plasma-manager/run_all.sh

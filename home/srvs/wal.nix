@@ -104,17 +104,29 @@ in
   home.packages = with pkgs; [ xcur2png xcursorgen ];
 
   # The wallpaper set is versioned in the repo (./wal-files/wallpapers) so it's
-  # shared across machines. We *copy* (not symlink) each into ~/Pictures/wall on
+  # shared across machines. We *copy* (not symlink) each into ~/Pictures/Wallpapers on
   # activation, so the directory stays a real writable dir: the picker's live
   # rescan and the "drop a new wallpaper in" workflow (wal-prepare.path) keep
   # working, and the store copies aren't read-only symlinks. Existing files are
   # left untouched (`[ -e ] ||`), so hand-added or edited wallpapers survive.
   home.activation.seedWallpapers = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-    mkdir -p "$HOME/Pictures/wall"
+    mkdir -p "$HOME/Pictures/Wallpapers"
     for f in ${./wal-files/wallpapers}/*; do
-      dest="$HOME/Pictures/wall/$(basename "$f")"
+      dest="$HOME/Pictures/Wallpapers/$(basename "$f")"
       [ -e "$dest" ] || install -m644 "$f" "$dest"
     done
+  '';
+
+  # The old default was ~/Pictures/wall.  Migrate only that exact shipped
+  # value; a genuinely custom directory remains the user's choice.
+  home.activation.migrateWallpaperDirectory = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    settings="$HOME/.config/quickshell/settings.json"
+    if [ -f "$settings" ] \
+       && [ "$(${pkgs.jq}/bin/jq -r '.wallpaperDir // empty' "$settings" 2>/dev/null)" = "~/Pictures/wall" ]; then
+      temporary="$settings.wallpaper-dir-new"
+      ${pkgs.jq}/bin/jq '.wallpaperDir = "~/Pictures/Wallpapers"' "$settings" > "$temporary" \
+        && mv "$temporary" "$settings"
+    fi
   '';
 
   # wall.png is the "drop a new wallpaper here" trigger wal-set.path watches
@@ -152,7 +164,7 @@ in
 
   systemd.user.services.wal-prepare = {
     Unit = {
-      Description = "Pre-cache tile/theme data for every image in ~/Pictures/wall";
+      Description = "Pre-cache tile/theme data for every image in ~/Pictures/Wallpapers";
       After = [ "graphical-session.target" ];
     };
     Service = {
@@ -162,12 +174,12 @@ in
   };
 
   systemd.user.paths.wal-prepare = {
-    Unit.Description = "Watch ~/Pictures/wall and pre-cache any new wallpaper's tile/theme";
-    Path.PathModified = "%h/Pictures/wall";
+    Unit.Description = "Watch ~/Pictures/Wallpapers and pre-cache any new wallpaper's tile/theme";
+    Path.PathModified = "%h/Pictures/Wallpapers";
     Install.WantedBy = [ "default.target" ];
   };
 
-  # Reconcile wallpapers dropped into or removed from ~/Pictures/wall with the
+  # Reconcile wallpapers dropped into or removed from ~/Pictures/Wallpapers with the
   # repo's wallpaper set and commit + push (see wal-repo-sync.sh for the
   # paranoid git handling). PATH is pinned so the service finds git + gh (the
   # credential helper is `!gh auth git-credential`, so gh must be resolvable)
@@ -189,8 +201,8 @@ in
   };
 
   systemd.user.paths.wal-repo-sync = {
-    Unit.Description = "Watch ~/Pictures/wall and sync wallpaper changes into the nix repo";
-    Path.PathModified = "%h/Pictures/wall";
+    Unit.Description = "Watch ~/Pictures/Wallpapers and sync wallpaper changes into the nix repo";
+    Path.PathModified = "%h/Pictures/Wallpapers";
     Install.WantedBy = [ "default.target" ];
   };
 
