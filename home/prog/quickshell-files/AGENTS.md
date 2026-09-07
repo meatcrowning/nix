@@ -647,7 +647,9 @@ finds `vivaldi` on `top` or `com.vivaldi.Vivaldi` on `book`, remaps only the
 logo's red material paint, and publishes both names (plus `vivaldi-stable`) so
 the launcher, task list and hyprvtb titlebar resolve the same live-coloured
 pixels. After activation it calls `hyprvtb.refresh_icons()` so open titlebars
-drop their resolved-path and texture caches immediately.
+drop their resolved-path and texture caches immediately, and asks KWin to
+reconfigure so its Oxygen decoration drops the corresponding Plasma-session
+cache.
 
 **Verify a change here on the sandbox output** (`tools/sandbox.sh` + `qs -p
 <test shell.qml>`, then read the pixels back): `QT_QPA_PLATFORM=offscreen` has
