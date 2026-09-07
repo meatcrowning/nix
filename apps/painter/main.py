@@ -54,6 +54,7 @@ except Exception:  # noqa: BLE001 - the titlebar bridge is optional
     VtbClient = None
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
 from kdetheme import theme_source, is_plasma  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+from styleparticipant import StyleParticipant  # noqa: E402  (live theme acknowledgement)
 import kdeshell  # noqa: E402  (pylib; the Plasma session's real QtWidgets window)
 from spellcheck import SpellCheck  # noqa: E402  (pylib; the prompt boxes' spelling)
 from warden import BackendClientLease, Warden  # noqa: E402  (arbiter + daemon lifetime)
@@ -157,7 +158,7 @@ class Palette(QObject):
         try:
             text = Path(self._path).read_text(encoding="utf-8", errors="replace")
         except OSError:
-            return
+            return False
         import re
 
         found = {}
@@ -168,6 +169,9 @@ class Palette(QObject):
         if found and found != {k: self._colors.get(k) for k in found}:
             self._colors.update(found)
             self.changed.emit()
+        if not found:
+            return False
+        return True
 
     def _c(self, k):
         return QColor(self._colors.get(k, PALETTE_DEFAULTS[k]))
@@ -2760,6 +2764,7 @@ def main():
                          % app.platformName())
 
     palette = Palette(theme_source(PANEL_THEME))
+    style_participant = StyleParticipant("painter", palette._load, app)
     style = DeskStyle()
     prefs = Prefs()
     ctl = Painter()
