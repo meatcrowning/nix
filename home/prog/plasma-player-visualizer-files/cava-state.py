@@ -32,7 +32,6 @@ def main() -> int:
                 with os.fdopen(fd, "w", encoding="utf-8") as f:
                     json.dump({"levels": levels}, f, separators=(",", ":"))
                     f.flush()
-                    os.fsync(f.fileno())
                 os.replace(tmp, target)
             finally:
                 if os.path.exists(tmp):

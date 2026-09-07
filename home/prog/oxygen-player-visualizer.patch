@@ -29,7 +29,7 @@
      updateShadow();
 +    if (window()->windowClass().contains(QStringLiteral("player"), Qt::CaseInsensitive)) {
 +        auto *visualizerTimer = new QTimer(this);
-+        visualizerTimer->setInterval(34);
++        visualizerTimer->setInterval(16);
 +        connect(visualizerTimer, &QTimer::timeout, this, [this]() { update(titleBar()); });
 +        visualizerTimer->start();
 +    }
