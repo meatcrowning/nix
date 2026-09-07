@@ -362,6 +362,12 @@ in
       kdeglobals."KFileDialog Settings"."Show Inline Previews" = true;
       kdeglobals."KFileDialog Settings"."Sort by" = "Name";
       kdeglobals."KFileDialog Settings"."Sort directories first" = true;
+      # Keep Plasma's own startup/KCM rendering request aligned with the
+      # fontconfig rules: grayscale coverage, native slight hinting, no LCD
+      # subpixel path. Oxygen Mono overrides this to full hinting by family.
+      kdeglobals.General.XftAntialias = true;
+      kdeglobals.General.XftHintStyle = "hintslight";
+      kdeglobals.General.XftSubPixel = "none";
       # Plasma visuals are shared. The live icon theme is intentionally not
       # pinned: wal-set.sh selects an accent-qualified oxygen-live theme, then
       # refreshes PlasmaShell's applet pixmaps after a real theme transition.
