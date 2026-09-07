@@ -162,7 +162,7 @@ in
             name = "org.kde.plasma.icontasks";
             config.General = {
               forceStripes = true;
-              launchers = "applications:systemsettings.desktop,preferred://filemanager,preferred://browser,applications:painter.desktop,applications:player.desktop,applications:oracle.desktop";
+              launchers = "applications:systemsettings.desktop,preferred://filemanager,preferred://browser,applications:painter.desktop,applications:player.desktop,applications:oracle.desktop,applications:org.kde.konsole.desktop";
               maxStripes = 1;
             };
           }
