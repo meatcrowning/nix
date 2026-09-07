@@ -361,6 +361,25 @@ def gloss_gradient(doc, src_gid, stops):
     gid = doc.uid(src_gid); new.set('id', gid)
     return doc.publish(gid, new)
 
+def surface_gradient(doc):
+    """The same palette-relative field the rendered Plasma panels use."""
+    new = ET.Element(S+'linearGradient')
+    new.set('gradientUnits', 'objectBoundingBox')
+    new.set('x1', '0'); new.set('y1', '0')
+    new.set('x2', '0'); new.set('y2', '1')
+    # Measured from plasma-panel-surface.png: the top edge is Background plus
+    # 31% Highlight, falling through 11% at 3.2% of the screen and 3.5% at
+    # 9.4%, then reaching the unmodified Background role by 28.1%.
+    for off, alpha in ((0.0, 0.31), (0.032, 0.11), (0.094, 0.035),
+                       (0.281, 0.0), (1.0, 0.0)):
+        st = ET.SubElement(new, S+'stop')
+        st.set('offset', f"{off:.4f}")
+        st.set('class', 'ColorScheme-Highlight')
+        st.set('style', f"stop-opacity:{alpha:.4f}")
+    gid = doc.uid('surface'); new.set('id', gid)
+    new.set('data-oxysch', 'body')
+    return doc.publish(gid, new)
+
 def respin_alpha(doc, src_gid, stops, mode, axis='v', invert=False, panel=False,
                  band=None, panel_location=None):
     """Rebuild an alpha-ramp gradient under `flip` or `centre`."""
@@ -551,7 +570,7 @@ def convert(src, dst, report=None):
                  skipped_chromatic=0, no_body=0, edge_shaded=0, glow_damped=0,
                  raster_glow=0, raster_kept=0, raster_undecodable=0,
                  panel_shadows_removed=0, panel_inner_edge_flattened=0,
-                 surface_opaque=0)
+                 surface_opaque=0, surface_gradient=0)
     parents = {c: p for p in root.iter() for c in p}
 
     def place_base(body, base):
@@ -845,6 +864,13 @@ def convert(src, dst, report=None):
         # no glass: keep the converted Oxygen gradient and relief, but make its
         # scheme-coloured base fully opaque. That one set covers Kickoff,
         # notifications and every other Plasma popup using these FrameSVGs.
+        centre = doc.idx.get('center')
+        if centre is not None:
+            sd = style_dict(centre)
+            sd['fill'] = f'url(#{surface_gradient(doc)})'
+            sd['fill-opacity'] = '1'
+            set_style(centre, sd)
+            stats['surface_gradient'] += 1
         for el in root.iter():
             fill, _, _ = get_fill(el)
             surface = (fill == 'currentColor' and
