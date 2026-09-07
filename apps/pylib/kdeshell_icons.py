@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
+from pathlib import Path
 
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPalette, QPixmap
@@ -56,7 +58,36 @@ def apply_icon_theme() -> None:
 # Replace only Oxygen's blue material band; its highlights, shadows and semantic
 # colours survive. The palette is live: kdeshell refreshes these QIcons on every
 # ApplicationPaletteChange from the wallpaper scheme writer.
-_ICON_SIZES = (16, 22, 32, 48, 64, 128, 256)
+# Menus and toolbars request small action artwork.  Rendering Oxygen's raster
+# icons at 128 and 256 here made every new QAction walk another 327,680 pixels
+# in Python before its window could be shown (12.61s for player's first chrome
+# build on book).  Qt can scale the 64px rendition for the uncommon larger
+# request; eagerly manufacturing those two sizes buys no visible shell detail.
+_ICON_SIZES = (16, 22, 32, 48, 64)
+_THEMED_CACHE = {}
+_DISK_CACHE_VERSION = "2"
+
+
+def _disk_cache_dir(key) -> Path:
+    digest = hashlib.sha256(repr(key).encode("utf-8")).hexdigest()
+    base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    return base / "kdeshell-icons" / _DISK_CACHE_VERSION / digest
+
+
+def _disk_cached_icon(key) -> QIcon | None:
+    directory = _disk_cache_dir(key)
+    out = QIcon()
+    modes = (QIcon.Normal, QIcon.Active, QIcon.Selected, QIcon.Disabled)
+    paths = [(size, mode, directory / f"{size}-{mode.value}.png")
+             for size in _ICON_SIZES for mode in modes]
+    if not paths or not all(path.is_file() for _, _, path in paths):
+        return None
+    for _size, mode, path in paths:
+        pixmap = QPixmap(str(path))
+        if pixmap.isNull():
+            return None
+        out.addPixmap(pixmap, mode)
+    return out
 
 
 def themed_icon(name: str, palette: QPalette | None = None) -> QIcon:
@@ -65,10 +96,25 @@ def themed_icon(name: str, palette: QPalette | None = None) -> QIcon:
     Only Oxygen's blue is remapped to the applicable palette role. A null lookup
     stays null so the caller keeps Qt's ordinary missing-icon behaviour.
     """
+    palette = palette or QGuiApplication.palette()
+    groups_roles = (
+        (QPalette.Active, QPalette.ButtonText),
+        (QPalette.Active, QPalette.HighlightedText),
+        (QPalette.Disabled, QPalette.ButtonText),
+    )
+    cache_key = (name, QIcon.themeName(), tuple(
+        palette.color(group, role).rgba() for group, role in groups_roles))
+    cached = _THEMED_CACHE.get(cache_key)
+    if cached is not None:
+        return QIcon(cached)
+    cached = _disk_cached_icon(cache_key)
+    if cached is not None:
+        _THEMED_CACHE[cache_key] = QIcon(cached)
+        return cached
+
     source = QIcon.fromTheme(name)
     if source.isNull():
         return source
-    palette = palette or QGuiApplication.palette()
     out = QIcon()
     modes = (
         (QIcon.Normal, QPalette.Active, QPalette.ButtonText),
@@ -76,6 +122,11 @@ def themed_icon(name: str, palette: QPalette | None = None) -> QIcon:
         (QIcon.Selected, QPalette.Active, QPalette.HighlightedText),
         (QIcon.Disabled, QPalette.Disabled, QPalette.ButtonText),
     )
+    directory = _disk_cache_dir(cache_key)
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        directory = None
     for size in _ICON_SIZES:
         for mode, group, role in modes:
             pixmap = source.pixmap(QSize(size, size), mode)
@@ -95,6 +146,14 @@ def themed_icon(name: str, palette: QPalette | None = None) -> QIcon:
                     image.setPixelColor(x, y, QColor.fromHsvF(target_hue, target_sat,
                                                                value, alpha))
             out.addPixmap(QPixmap.fromImage(image), mode)
+            if directory is not None:
+                image.save(str(directory / f"{size}-{mode.value}.png"), "PNG")
+    # QAction rows reuse names between menus and toolbars, and palette refreshes
+    # ask for the same set again.  QIcon copies are implicitly shared, so this
+    # avoids repeating the Python pixel walk without retaining image copies.
+    if len(_THEMED_CACHE) >= 256:
+        _THEMED_CACHE.clear()
+    _THEMED_CACHE[cache_key] = QIcon(out)
     return out
 
 
