@@ -551,7 +551,7 @@ def convert(src, dst, report=None):
                  skipped_chromatic=0, no_body=0, edge_shaded=0, glow_damped=0,
                  raster_glow=0, raster_kept=0, raster_undecodable=0,
                  panel_shadows_removed=0, panel_inner_edge_flattened=0,
-                 panel_surface_opaque=0)
+                 surface_opaque=0)
     parents = {c: p for p in root.iter() for c in p}
 
     def ancestry(el):
@@ -811,11 +811,16 @@ def convert(src, dst, report=None):
 
     convert_rasters(doc, root, parents, family, stats)
 
-    if is_panel_file:
-        # Plasma's stock panel surface is deliberately 70% transparent so the
-        # dark Oxygen bar can float above a wallpaper.  This theme instead uses
-        # the panel as a continuation of an empty window: the Background role
-        # must therefore be opaque, with only the white titlebar tint varying.
+    opaque_surface_file = os.path.basename(src) in {
+        'panel-background.svgz', 'background.svgz',
+        'translucentbackground.svgz', 'tooltip.svgz',
+    }
+    if opaque_surface_file:
+        # Oxygen authors panel, dialog, tooltip and generic popup bodies as
+        # translucent surfaces for a compositor blur to fill. This desktop has
+        # no glass: keep the converted Oxygen gradient and relief, but make its
+        # scheme-coloured base fully opaque. That one set covers Kickoff,
+        # notifications and every other Plasma popup using these FrameSVGs.
         for el in root.iter():
             fill, _, _ = get_fill(el)
             surface = (fill == 'currentColor' and
@@ -829,7 +834,7 @@ def convert(src, dst, report=None):
                 if sd.get('opacity') != '1':
                     sd['opacity'] = '1'
                     set_style(el, sd)
-                    stats['panel_surface_opaque'] += 1
+                    stats['surface_opaque'] += 1
 
     st = None
     for e in root.iter(S+'style'):
