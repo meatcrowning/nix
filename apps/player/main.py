@@ -4770,7 +4770,14 @@ def main():
             win.activateWindow()
 
     start_queue_server(player, app, lyrics, raise_window=present)
-    QTimer.singleShot(400, library.rescan)  # incremental; UI is already up
+    # On air the launcher has just pulled top's authoritative SQLite database.
+    # Walking every file over CIFS merely to rediscover that unchanged metadata
+    # takes minutes and competes with first-frame gallery construction.  The
+    # remote library is not watched (inotify does not cross CIFS); its next
+    # launch pulls a fresh DB, and Configure player still offers a deliberate
+    # Rescan when that is needed.  Keep the local-SSD startup catch-up.
+    if not library_is_remote_cached():
+        QTimer.singleShot(400, library.rescan)
 
     app.aboutToQuit.connect(player.save_state)
     sys.exit(app.exec())
