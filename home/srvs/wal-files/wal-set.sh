@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # wal-set.sh — set a tiled wallpaper and recolour the whole desktop from it.
 #
-#   wal-set.sh [--wallpaper-only] [/path/to/wallpaper]
+#   wal-set.sh [--wallpaper-only] [--prepared [--scheme NAME]] [/path/to/wallpaper]
 #
 # With no argument it reapplies the last wallpaper (or wall.png). wal-prepare.sh
 # supplies cached mode, tiles, and palette; this script publishes `current`,
@@ -17,9 +17,23 @@
 set -u
 
 WALLPAPER_ONLY=0
+PREPARED=0
+PREPARED_SCHEME=""
 if [ "${1:-}" = "--wallpaper-only" ]; then
     WALLPAPER_ONLY=1
     shift
+fi
+if [ "${1:-}" = "--prepared" ]; then
+    PREPARED=1
+    shift
+fi
+if [ "${1:-}" = "--scheme" ]; then
+    PREPARED_SCHEME="${2:-}"
+    if [ -z "$PREPARED_SCHEME" ]; then
+        echo "wal-set: --scheme requires a color scheme name" >&2
+        exit 2
+    fi
+    shift 2
 fi
 
 CONFIG="$HOME/.config"
@@ -39,20 +53,42 @@ if [ ! -f "$WALL" ]; then
     exit 1
 fi
 WALL="$(realpath "$WALL")"
-printf '%s' "$WALL" > "$STATE"
 echo "wal-set: wallpaper = $WALL"
 
 # ---- 2. mode/tile/palette (delegated, cached — see wal-prepare.sh) -----------
-"$SCRIPTS/wal-prepare.sh" "$WALL"
+if [ "$PREPARED" = 0 ]; then
+    "$SCRIPTS/wal-prepare.sh" "$WALL"
+fi
 THEMES="$CACHE/themes"
 KEY="$(printf '%s' "$WALL" | md5sum | cut -d' ' -f1)"
+if [ "$PREPARED" = 1 ] && { [ ! -s "$THEMES/$KEY.mode" ] || [ ! -s "$THEMES/$KEY.env" ]; }; then
+    echo "wal-set: prepared profile is incomplete for: $WALL" >&2
+    exit 1
+fi
 # shellcheck disable=SC1090
 . "$THEMES/$KEY.mode"   # sets MODE, IW, IH
+
+# Validate the scheme snapshot before publishing the wallpaper.  A controller
+# request that loses a race with the Colours KCM must leave the old wallpaper
+# and the old complete desktop theme in place, rather than changing only one.
+PLASMA_SESSION=0
+case ":$(printf '%s' "${XDG_CURRENT_DESKTOP:-}" | tr '[:lower:]' '[:upper:]'):" in
+    *:KDE:*) PLASMA_SESSION=1 ;;
+esac
+LIVE_SCHEME=""
+if [ "$PLASMA_SESSION" = 1 ] && command -v kreadconfig6 >/dev/null 2>&1; then
+    LIVE_SCHEME="$(kreadconfig6 --file kdeglobals --group General --key ColorScheme 2>/dev/null)"
+fi
+if [ -n "$PREPARED_SCHEME" ] && [ "$LIVE_SCHEME" != "$PREPARED_SCHEME" ]; then
+    echo "wal-set: selected color scheme changed during preparation; retry apply" >&2
+    exit 1
+fi
 
 # ---- 2b. publish it for the panel to draw ------------------------------------
 # The panel watches `current` (absolute path), `current.mode` (`tile`/`scale`),
 # and `current.blur`. Publish them on every run, in place (same inode); an
 # atomic rename would leave Quickshell watching the old file.
+printf '%s' "$WALL" > "$STATE"
 printf '%s' "$MODE" > "$STATE.mode"
 # `current.blur` names wal-prepare.sh's cached backdrop; Quickshell falls back if
 # it is missing or stale.
@@ -78,10 +114,6 @@ fi
 eval "$(cat "$THEMES/$KEY.env")"
 echo "wal-set: source = ${IW}x${IH}, mode = $MODE, accent = #$ACCENT"
 
-PLASMA_SESSION=0
-case ":$(printf '%s' "${XDG_CURRENT_DESKTOP:-}" | tr '[:lower:]' '[:upper:]'):" in
-    *:KDE:*) PLASMA_SESSION=1 ;;
-esac
 KDE_ACCENT="$ACCENT"
 if [ "$PLASMA_SESSION" = 1 ]; then
     KDE_ACCENT="${PLASMA_ACCENT:-$ACCENT}"
@@ -232,13 +264,35 @@ else
 fi
 if [ "$PLASMA_SESSION" = 1 ]; then
     # Keep the selected theme/shape; only move its colour family to the accent.
-    echo "wal-set: Plasma session — KDE theme untouched, re-minting its colour scheme"
-    if [ "$BG" = "464540" ]; then
-        "$SCRIPTS/plasma-scheme.py" --accent "$ACCENT" --ui-accent "$KDE_ACCENT" --background "$BG" \
-            --surface-color "$BGALT"
+    PROFILE="$CACHE/profiles/$KEY"
+    PREPARED_SCHEME="$PROFILE/$LIVE_SCHEME.colors"
+    if [ "$PREPARED" = 1 ] \
+       && [ "$LIVE_SCHEME" != "" ] \
+       && [ -s "$PREPARED_SCHEME" ] \
+       && jq -e '.schemes.ready == true' "$PROFILE/manifest.json" >/dev/null 2>&1; then
+        # Same inode is intentional: Plasma/KWin watchers may hold the live
+        # scheme file open.  The following push is the visible commit and is
+        # sent only after the complete prepared body is installed.
+        LIVE_SCHEME_FILE="$HOME/.local/share/color-schemes/$LIVE_SCHEME.colors"
+        mkdir -p "$(dirname "$LIVE_SCHEME_FILE")"
+        cat "$PREPARED_SCHEME" > "$LIVE_SCHEME_FILE"
+        "$SCRIPTS/plasma-scheme.py" --apply-file "$PREPARED_SCHEME" \
+            --name "$LIVE_SCHEME" --accent "$ACCENT" --ui-accent "$KDE_ACCENT"
+    elif [ "$PREPARED" = 1 ]; then
+        # DeskStyle promised a prepared critical path.  Re-minting here both
+        # breaks that latency contract and can touch a scheme it did not
+        # validate, so fail before any Plasma colour write instead.
+        echo "wal-set: prepared selected scheme is unavailable: ${LIVE_SCHEME:-'(none)'}" >&2
+        exit 1
     else
-        "$SCRIPTS/plasma-scheme.py" --accent "$ACCENT" --ui-accent "$KDE_ACCENT" \
-            --surface-color "$BGALT"
+        echo "wal-set: Plasma session — prepared scheme unavailable, re-minting"
+        if [ "$BG" = "464540" ]; then
+            "$SCRIPTS/plasma-scheme.py" --accent "$ACCENT" --ui-accent "$KDE_ACCENT" --background "$BG" \
+                --surface-color "$BGALT"
+        else
+            "$SCRIPTS/plasma-scheme.py" --accent "$ACCENT" --ui-accent "$KDE_ACCENT" \
+                --surface-color "$BGALT"
+        fi
     fi
 
     # ---- AeroThemePlasma glass ------------------------------------------
