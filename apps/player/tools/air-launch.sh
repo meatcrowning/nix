@@ -44,6 +44,9 @@ DBSYNC="$HERE/dbsync.py"
 ART_LOCAL="${XDG_CACHE_HOME:-$HOME/.cache}/player/art"
 PREFS="${XDG_STATE_HOME:-$HOME/.local/state}/player/prefs.json"
 PY="${PLAYER_PYTHON:-/usr/bin/python3}"
+export PLAYER_STARTUP_TRACE="${XDG_CACHE_HOME:-$HOME/.cache}/player/startup.trace"
+mkdir -p "$(dirname "$PLAYER_STARTUP_TRACE")"
+: > "$PLAYER_STARTUP_TRACE"
 
 # ssh connection multiplexing. dbsync and the two art rsyncs are four separate
 # ssh invocations, each otherwise paying a full TCP + key-exchange + auth

@@ -72,12 +72,29 @@ sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
 from kdetheme import theme_source, watch_palette, is_plasma  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+from styleparticipant import StyleParticipant  # noqa: E402  (live theme acknowledgement)
 import kdeshell  # noqa: E402  (pylib; the Plasma session's real QtWidgets window)
 from glyphs import Glyphs  # noqa: E402  (pylib; docs/DESIGN.md 2.3 display-site px())
 
 import atomicsave  # noqa: E402  (sibling module; also used by lyrics.py)
 import lyrics as lyricslib  # noqa: E402  (sibling module; also used by tools/)
 from scrobble import Scrobbler  # noqa: E402  (sibling module; Last.fm, off the GUI thread)
+
+
+_STARTUP_T0 = time.perf_counter()
+
+
+def startup_mark(label):
+    """Append one opt-in launch timestamp for air startup diagnosis."""
+    path = os.environ.get("PLAYER_STARTUP_TRACE")
+    if not path:
+        return
+    try:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"{time.perf_counter() - _STARTUP_T0:.6f} {label}\n")
+    except OSError:
+        pass
 import trackmatch  # noqa: E402  (pylib; the one artist/title normaliser)
 import mutagen  # noqa: E402
 from mutagen.flac import FLAC, Picture  # noqa: E402
@@ -219,7 +236,7 @@ class Palette(QObject):
         try:
             txt = open(self._path, encoding="utf-8").read()
         except OSError:
-            return
+            return False
         colors = dict(self._colors)
         for m in re.finditer(r'property\s+color\s+(\w+)\s*:\s*"(#[0-9a-fA-F]{3,8})"', txt):
             name, val = m.group(1), m.group(2)
@@ -228,6 +245,7 @@ class Palette(QObject):
         if colors != self._colors:
             self._colors = colors
             self.changed.emit()
+        return True
 
     def _c(self, k):
         return QColor(self._colors.get(k, PALETTE_DEFAULTS[k]))
@@ -4524,6 +4542,7 @@ def _has_audio(d):
 # ---------------------------------------------------------------------------
 
 def main():
+    startup_mark("main-enter")
     # --selftest: build the whole app OFFSCREEN, look at it, and quit. It is the
     # only way to check the Plasma face, which is chrome we do not draw — the
     # menubar, the two toolbars, the status bar and the window background all
@@ -4543,6 +4562,7 @@ def main():
     open_paths = paths_from_argv(sys.argv[1:])
     if handoff_paths(open_paths):
         return
+    startup_mark("handoff-clear")
 
     # The Controls style, and with it the whole face: `Basic` in the Hyprland
     # session, `org.kde.desktop` under Plasma — which is not an imitation of the
@@ -4554,6 +4574,7 @@ def main():
     # otherwise: QStyle is a QtWidgets class, and without it there is no system
     # style to paint with. See kdeshell.make_app.
     app = kdeshell.make_app(sys.argv, "player")
+    startup_mark("application-created")
     if (selftest or resource_fixture) and app.platformName() != "offscreen":
         raise SystemExit("selftest refuses to run on platform %r, not offscreen"
                          % app.platformName())
@@ -4563,7 +4584,9 @@ def main():
     prefs = Prefs()
     tagwriter = TagWriter(prefs)
     library = Library(tagwriter)
+    startup_mark("library-created")
     player = Player(library, prefs)
+    startup_mark("player-created")
     # Last.fm. Wired in rather than constructed into either, so both still
     # build with no account and every harness in tools/ is unaffected. A
     # scrobble is decided by Player._maybe_count (one listen, one play count,
@@ -4582,7 +4605,11 @@ def main():
     autoscan = AutoScanner(library, app)
     titlebar = Titlebar()
     palette = Palette(theme_source(PANEL_THEME))
+    # Acknowledge only after Palette has read the newly committed source.  The
+    # controller is best-effort; palette repainting remains independent of it.
+    style_participant = StyleParticipant("player", palette._load, app)
     style = DeskStyle()
+    startup_mark("objects-created")
 
     # TWO ROOFS, ONE APP (docs/DESIGN.md §7.6). Under Hyprland the QML tree IS
     # the window and all the chrome is the hyprvtb titlebar. Under Plasma the
@@ -4595,6 +4622,7 @@ def main():
     shell = kdeshell.shell("player", size=(1080, 720),
                            min_size=(480, 320)) if plasma else None
     engine = shell.engine() if plasma else QQmlApplicationEngine()
+    startup_mark("shell-created")
     if plasma:
         # THE SELECTOR IS HOW THE CONTENT CHANGES CLOTHES WITHOUT CHANGING CODE.
         # With "plasma" set, `qml/+plasma/Foo.qml` transparently replaces
@@ -4646,6 +4674,7 @@ def main():
             for w in shell.errors() + warnings:
                 print(f"  {w}", file=sys.stderr)
             sys.exit(1)
+        startup_mark("qml-loaded")
         root = shell.root
         # The menubar, the view toolbar and their shortcuts, out of `tbButtons`.
         # `titlebar` is the vtb bridge: its socket is dead in this session, but
@@ -4744,6 +4773,7 @@ def main():
         shell.on_action("settings", show_settings)
 
         win = shell.show()
+        startup_mark("window-shown")
     else:
         engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
         if not engine.rootObjects():
@@ -4779,14 +4809,17 @@ def main():
         sys.exit(app.exec())
 
     bridge.refreshAlbums()
+    startup_mark("albums-refreshed")
     # With files on the command line, restore the SESSION (shuffle, loop, the
     # saved queue) but not the playhead: `restore_state` re-syncs mpv and posts
     # a delayed seek to the saved position, which would land 300 ms later on the
     # queue playPaths has replaced by then and seek the wrong track.
     player.restore_state(resume=not open_paths)
+    startup_mark("state-restored")
     if open_paths:
         player.playPaths(open_paths)
     start_mpris(player, app)
+    startup_mark("mpris-started")
 
     def present():
         """Bring the window forward for a second launch (RAISE). `show()`
@@ -4801,6 +4834,7 @@ def main():
             win.activateWindow()
 
     start_queue_server(player, app, lyrics, raise_window=present)
+    startup_mark("queue-server-started")
     # On air the launcher has just pulled top's authoritative SQLite database.
     # Walking every file over CIFS merely to rediscover that unchanged metadata
     # takes minutes and competes with first-frame gallery construction.  The
