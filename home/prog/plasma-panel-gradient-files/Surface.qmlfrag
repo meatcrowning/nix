@@ -1,3 +1,19 @@
+    // The panel's image has to change its URL when a new palette has been
+    // rendered: Image deliberately caches a stable file URL, even with
+    // cache:false.  The renderer publishes this content generation only after
+    // atomically replacing the PNG.  FolderListModel is backed by a directory
+    // watcher, so the serial's modification time changes the query string
+    // without polling or spawning a process.  QML then reloads this
+    // already-mapped Image in place.  It must never restart plasmashell: that
+    // turns a colour change into a panel teardown and was the source of the
+    // old 65-second delay.
+    FolderListModel {
+        id: panelSurfaceGeneration
+        folder: "file:///home/lam/.local/state"
+        nameFilters: [ "plasma-panel-surface.serial" ]
+        showDirs: false
+    }
+
     Image {
         // This is a crop of ONE screen-sized, real Oxygen window background.
         // Both panels therefore take their pixels from the same field: where
@@ -12,7 +28,9 @@
         visible: root.floatingness === 0
         opacity: 1
         anchors.fill: floatingTranslucentItem
-        source: "file:///home/lam/.local/state/plasma-panel-surface.png"
+        source: "file:///home/lam/.local/state/plasma-panel-surface.png?generation="
+                + (panelSurfaceGeneration.count === 1
+                   ? panelSurfaceGeneration.get(0, "fileModified") : "0")
         sourceClipRect: Qt.rect(Math.round(panel.x), Math.round(panel.y),
                                 Math.round(width), Math.round(height))
         fillMode: Image.Pad

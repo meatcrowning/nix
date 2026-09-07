@@ -8,6 +8,7 @@ interact with the desktop.
 """
 
 from pathlib import Path
+import hashlib
 import os
 import sys
 
@@ -26,6 +27,17 @@ def render_surface(width: int, height: int, palette: QPalette) -> QImage:
     proxy.render(image, QPoint(), QRegion(0, 0, width, height),
                  QWidget.DrawWindowBackground)
     return image
+
+
+def publish_generation(state: Path, target: Path) -> None:
+    """Publish the already-installed image's content token atomically."""
+    serial = state / "plasma-panel-surface.serial"
+    digest = hashlib.sha256(target.read_bytes()).hexdigest() + "\n"
+    if serial.exists() and serial.read_text() == digest:
+        return
+    serial_tmp = serial.with_suffix(".new")
+    serial_tmp.write_text(digest)
+    serial_tmp.replace(serial)
 
 
 def main() -> int:
@@ -58,13 +70,19 @@ def main() -> int:
     temporary = target.with_suffix(".new.png")
     if not image.save(str(temporary), "PNG"):
         return 1
-    # Do not replace identical pixels.  The service below uses this file's
-    # timestamp as its update token; retaining it coalesces a burst of KConfig
-    # writes into one Plasma restart instead of repeatedly restarting the shell.
+    # Do not replace identical pixels.  The content hash is also the panel's
+    # live update token: after the PNG is atomically replaced, publish it to a
+    # one-line serial file which the already-mapped Panel.qml watches.  The
+    # query-string change makes QML reload the Image in place, so this path
+    # needs neither a plasmashell restart nor an arbitrary settling delay.
     if target.exists() and temporary.read_bytes() == target.read_bytes():
         temporary.unlink()
+        # An older activation may have created the image before generations
+        # existed.  Backfill its token so the live watcher starts in sync.
+        publish_generation(state, target)
         return 0
     temporary.replace(target)
+    publish_generation(state, target)
     return 0
 
 
