@@ -18,7 +18,7 @@ module = importlib.util.module_from_spec(spec)
 assert spec and spec.loader
 spec.loader.exec_module(module)
 
-qml = (ROOT / "apps" / "style" / "qml" / "Main.qml").read_text(encoding="utf-8")
+qml = (ROOT / "apps" / "style" / "qml" / "Root.qml").read_text(encoding="utf-8")
 
 
 def check(condition, message):
@@ -31,6 +31,9 @@ check("import QtQuick.Controls.Basic" not in qml and "import QtQuick.Controls\n"
       "uses the desktop controls style instead of the Basic face")
 check("kdeshell.pin_controls_style()" in inspect.getsource(module.main),
       "pins the Plasma QStyle before constructing the application")
+check('kdeshell.shell("style"' in inspect.getsource(module.main)
+      and "StyledBackground" in qml,
+      "extends the native Plasma window surface through the program body")
 apply_source = inspect.getsource(module.Appearance.apply)
 check("asyncCallWithArgumentList" in apply_source and '"Apply", [self._draft]' in apply_source,
       "sends the wallpaper as a QtDBus argument list without blocking the UI")

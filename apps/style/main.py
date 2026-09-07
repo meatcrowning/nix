@@ -27,7 +27,7 @@ QML = HERE / "qml"
 sys.path.insert(0, str(HERE.parent / "pylib"))
 
 from deskstyle import DeskStyle  # noqa: E402
-from kdetheme import theme_source  # noqa: E402
+from kdetheme import is_plasma, theme_source  # noqa: E402
 import kdeshell  # noqa: E402
 
 
@@ -348,7 +348,12 @@ class Appearance(QObject):
 def main() -> int:
     kdeshell.pin_controls_style()
     app = kdeshell.make_app(sys.argv, "style")
-    engine = QQmlApplicationEngine()
+    plasma = is_plasma()
+    shell = kdeshell.shell("style", size=(980, 700),
+                           min_size=(560, 420)) if plasma else None
+    engine = shell.engine() if plasma else QQmlApplicationEngine()
+    if plasma:
+        kdeshell.select_plasma_files(engine)
     context = engine.rootContext()
     palette = Palette(theme_source(Path.home() / ".config" / "quickshell" / "Theme.qml"), app)
     style = DeskStyle(parent=app)
@@ -363,8 +368,16 @@ def main() -> int:
         return 1
     theme.setParent(app)
     context.setContextProperty("Theme", theme)
-    engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
-    return app.exec() if engine.rootObjects() else 1
+    if plasma:
+        if not shell.load(QML / "Root.qml"):
+            print("Root.qml failed:\n" + "\n".join(shell.errors()), file=sys.stderr)
+            return 1
+        shell.show(return_handle=False)
+    else:
+        engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
+        if not engine.rootObjects():
+            return 1
+    return app.exec()
 
 
 if __name__ == "__main__":
