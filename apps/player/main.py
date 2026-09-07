@@ -4767,7 +4767,12 @@ def main():
 
         shell.on_action("settings", show_settings)
 
-        win = shell.show()
+        # Do not synchronously ask Wayland for windowHandle() here.  On air it
+        # waits for the surface configure that QApplication cannot dispatch
+        # until its event loop starts (measured: 14.15 seconds).  The QWidget
+        # can be shown immediately; handle-only WinState wiring follows once
+        # the compositor has had a turn.
+        win = shell.show(return_handle=False)
         startup_mark("window-shown")
     else:
         engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
@@ -4777,9 +4782,17 @@ def main():
             sys.exit(1)
         win = engine.rootObjects()[0]
 
-    if not selftest and not resource_fixture:
+    win_state = []
+    if not selftest and not resource_fixture and plasma:
         from winstate import WinState
-        win_state = WinState(win, "player")  # keep ref: geometry
+
+        def bind_win_state():
+            win_state.append(WinState(shell.handle, "player"))
+
+        QTimer.singleShot(250, bind_win_state)
+    elif not selftest and not resource_fixture:
+        from winstate import WinState
+        win_state.append(WinState(win, "player"))  # keep ref: geometry
 
     if selftest:
         # The album models, so a shot shows a library rather than "no albums —
