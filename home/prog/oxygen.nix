@@ -1,4 +1,4 @@
-{ host, ... }:
+{ host, pkgs, lib, ... }:
 
 # `oxygenrc` is live input to both hosts' Plasma apps and their QML DeskStyle
 # bridge. Values declared here are reset at each switch; undeclared values stay
@@ -47,4 +47,50 @@
     # the same Oxygen decoration.
     Windeco.TitleAlignment = "AlignLeft";
   };
+
+  # book's KWin and KDecoration are Fedora binaries. Build the patched Oxygen
+  # decoration with Fedora's matching toolchain, never Nix's Qt/KF ABI:
+  #   oxygen-vivaldi-build
+  # Loading a replacement decoration into the running compositor remains the
+  # user's visual step; the helper installs it for the next Plasma login.
+  home.packages = lib.optionals (host == "air") [
+    (pkgs.writeShellScriptBin "oxygen-vivaldi-build" ''
+      set -euo pipefail
+      SOURCE=${pkgs.kdePackages.oxygen.src}
+      PATCH=${./oxygen-themed-vivaldi.patch}
+      DEST="$HOME/.local/lib64/qt6/plugins/org.kde.kdecoration3/org.kde.oxygen.so"
+      FEDORA_VERSION=$(/usr/bin/rpm -q --qf '%{VERSION}' plasma-oxygen)
+      SOURCE_VERSION=${pkgs.kdePackages.oxygen.version}
+
+      [ "$FEDORA_VERSION" = "$SOURCE_VERSION" ] || {
+        echo "oxygen-vivaldi-build: Fedora Oxygen $FEDORA_VERSION != source $SOURCE_VERSION" >&2
+        exit 1
+      }
+      for tool in /usr/bin/cmake /usr/bin/gcc /usr/bin/g++ /usr/bin/git; do
+        [ -x "$tool" ] || {
+          echo "oxygen-vivaldi-build: $tool is missing" >&2
+          exit 1
+        }
+      done
+
+      WORK=$(/usr/bin/mktemp -d "$HOME/.cache/oxygen-vivaldi-build.XXXXXX")
+      trap '/usr/bin/rm -rf -- "$WORK"' EXIT
+      /usr/bin/cp -a "$SOURCE/." "$WORK/source"
+      /usr/bin/chmod -R u+w "$WORK/source"
+      /usr/bin/git apply --unsafe-paths --directory="$WORK/source" "$PATCH"
+
+      env -u CMAKE_PREFIX_PATH -u LIBRARY_PATH -u CPATH -u C_INCLUDE_PATH \
+          -u CPLUS_INCLUDE_PATH -u PKG_CONFIG_PATH -u NIX_CFLAGS_COMPILE \
+        /usr/bin/cmake -S "$WORK/source" -B "$WORK/build" -G Ninja \
+          -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
+          -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+          -DBUILD_QT6=ON -DBUILD_QT5=OFF
+      env -u CMAKE_PREFIX_PATH -u LIBRARY_PATH -u CPATH -u C_INCLUDE_PATH \
+          -u CPLUS_INCLUDE_PATH -u PKG_CONFIG_PATH -u NIX_CFLAGS_COMPILE \
+        /usr/bin/cmake --build "$WORK/build" --target oxygendecoration -j2
+      /usr/bin/install -Dm755 "$WORK/build/bin/org.kde.oxygen.so" "$DEST"
+      echo "oxygen-vivaldi-build: installed $DEST"
+      echo "  takes effect at the next Plasma login"
+    '')
+  ];
 }

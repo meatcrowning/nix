@@ -88,6 +88,13 @@ Oxygen renderer calls it only after the accent-qualified theme is complete and
 active; it clears both the class-to-file resolver and every bar's rendered icon
 texture without reloading the compositor config.
 
+Plasma's native-Wayland Vivaldi titlebar is different: Chromium supplies a raw
+`xdg-toplevel-icon` buffer and KWin intentionally prefers it. The Oxygen patch
+substitutes the live themed icon while painting Vivaldi's menu button. top gets
+it through `sys/dsk/oxygen-player-visualizer.nix`; book must build against
+Fedora's Qt/KDecoration ABI with `oxygen-vivaldi-build`, then take effect at the
+next Plasma login. Never put the Nix-built decoration into book's plugin path.
+
 For an empty app-button column, dump the server first:
 
 ```bash

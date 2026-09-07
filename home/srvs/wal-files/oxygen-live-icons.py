@@ -111,10 +111,6 @@ def activate(name):
     if hyprctl := shutil.which("hyprctl"):
         subprocess.run([hyprctl, "eval", "hl.plugin.hyprvtb.refresh_icons()"],
                        check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if busctl := shutil.which("busctl"):
-        subprocess.run([busctl, "--user", "call", "org.kde.KWin", "/KWin",
-                        "org.kde.KWin", "reconfigure"], check=False,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def active_theme():

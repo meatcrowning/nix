@@ -1,0 +1,18 @@
+--- a/kdecoration/oxygenbutton.cpp
++++ b/kdecoration/oxygenbutton.cpp
+@@ -192,7 +192,14 @@ void Button::paint(QPainter *painter, const QRectF &repaintRegion)
+     // menu buttons
+     if (isMenuButton()) {
+         const QRectF iconRect(geometry().topLeft(), m_iconSize);
+-        clientPtr->icon().paint(painter, iconRect.toRect());
++        // Native-Wayland Chromium sends a private bitmap through
++        // xdg-toplevel-icon. KWin correctly prefers it, but that bypasses the
++        // wallpaper-coloured icon theme. Oxygen owns the pixels in this slot,
++        // so resolve Vivaldi's published live-theme alias here instead.
++        const QIcon icon = clientPtr->windowClass().contains(QStringLiteral("vivaldi"), Qt::CaseInsensitive)
++            ? QIcon::fromTheme(QStringLiteral("com.vivaldi.Vivaldi"))
++            : clientPtr->icon();
++        icon.paint(painter, iconRect.toRect());
+         painter->restore();
+         return;
+     }

@@ -2,7 +2,10 @@
 
 let
   oxygenVisualizer = pkgs.kdePackages.oxygen.overrideAttrs (old: {
-    patches = (old.patches or []) ++ [ ../../home/prog/oxygen-player-visualizer.patch ];
+    patches = (old.patches or []) ++ [
+      ../../home/prog/oxygen-player-visualizer.patch
+      ../../home/prog/oxygen-themed-vivaldi.patch
+    ];
   });
 in {
   # KWin loads decorations from the system Qt plugin path, not an application's
