@@ -231,12 +231,12 @@ in
     <fontconfig>
       <match target="font">
         <test name="outline"><bool>true</bool></test>
-        <edit name="antialias" mode="assign"><bool>true</bool></edit>
-        <edit name="autohint" mode="assign"><bool>false</bool></edit>
-        <edit name="hinting" mode="assign"><bool>false</bool></edit>
-        <edit name="hintstyle" mode="assign"><const>hintnone</const></edit>
-        <edit name="rgba" mode="assign"><const>none</const></edit>
-        <edit name="lcdfilter" mode="assign"><const>none</const></edit>
+        <edit name="antialias" mode="assign" binding="strong"><bool>true</bool></edit>
+        <edit name="autohint" mode="assign" binding="strong"><bool>false</bool></edit>
+        <edit name="hinting" mode="assign" binding="strong"><bool>false</bool></edit>
+        <edit name="hintstyle" mode="assign" binding="strong"><const>hintnone</const></edit>
+        <edit name="rgba" mode="assign" binding="strong"><const>none</const></edit>
+        <edit name="lcdfilter" mode="assign" binding="strong"><const>none</const></edit>
       </match>
     </fontconfig>
   '';
@@ -286,11 +286,11 @@ in
       <match target="font">
         <test name="family"><string>More Perfect DOS VGA</string></test>
         <edit name="embolden"  mode="assign"><bool>false</bool></edit>
-        <edit name="antialias" mode="assign"><bool>false</bool></edit>
-        <edit name="autohint"  mode="assign"><bool>true</bool></edit>
-        <edit name="hinting"   mode="assign"><bool>true</bool></edit>
-        <edit name="hintstyle" mode="assign"><const>hintfull</const></edit>
-        <edit name="rgba"      mode="assign"><const>none</const></edit>
+        <edit name="antialias" mode="assign" binding="strong"><bool>false</bool></edit>
+        <edit name="autohint"  mode="assign" binding="strong"><bool>true</bool></edit>
+        <edit name="hinting"   mode="assign" binding="strong"><bool>true</bool></edit>
+        <edit name="hintstyle" mode="assign" binding="strong"><const>hintfull</const></edit>
+        <edit name="rgba"      mode="assign" binding="strong"><const>none</const></edit>
       </match>
     </fontconfig>
   '';
@@ -315,11 +315,11 @@ in
       <match target="font">
         <test name="family"><string>More Perfect DOS VGA (web)</string></test>
         <edit name="embolden"  mode="assign"><bool>false</bool></edit>
-        <edit name="antialias" mode="assign"><bool>false</bool></edit>
-        <edit name="autohint"  mode="assign"><bool>true</bool></edit>
-        <edit name="hinting"   mode="assign"><bool>true</bool></edit>
-        <edit name="hintstyle" mode="assign"><const>hintfull</const></edit>
-        <edit name="rgba"      mode="assign"><const>none</const></edit>
+        <edit name="antialias" mode="assign" binding="strong"><bool>false</bool></edit>
+        <edit name="autohint"  mode="assign" binding="strong"><bool>true</bool></edit>
+        <edit name="hinting"   mode="assign" binding="strong"><bool>true</bool></edit>
+        <edit name="hintstyle" mode="assign" binding="strong"><const>hintfull</const></edit>
+        <edit name="rgba"      mode="assign" binding="strong"><const>none</const></edit>
       </match>
     </fontconfig>
   '';
@@ -354,11 +354,11 @@ in
       <match target="font">
         <test name="family"><string>Botis 4x6</string></test>
         <edit name="embolden"  mode="assign"><bool>false</bool></edit>
-        <edit name="antialias" mode="assign"><bool>false</bool></edit>
-        <edit name="autohint"  mode="assign"><bool>false</bool></edit>
-        <edit name="hinting"   mode="assign"><bool>false</bool></edit>
-        <edit name="hintstyle" mode="assign"><const>hintnone</const></edit>
-        <edit name="rgba"      mode="assign"><const>none</const></edit>
+        <edit name="antialias" mode="assign" binding="strong"><bool>false</bool></edit>
+        <edit name="autohint"  mode="assign" binding="strong"><bool>false</bool></edit>
+        <edit name="hinting"   mode="assign" binding="strong"><bool>false</bool></edit>
+        <edit name="hintstyle" mode="assign" binding="strong"><const>hintnone</const></edit>
+        <edit name="rgba"      mode="assign" binding="strong"><const>none</const></edit>
       </match>
     </fontconfig>
   '';
@@ -383,11 +383,11 @@ in
       <match target="font">
         <test name="family"><string>Phenex</string></test>
         <edit name="embolden"  mode="assign"><bool>false</bool></edit>
-        <edit name="antialias" mode="assign"><bool>true</bool></edit>
-        <edit name="autohint"  mode="assign"><bool>false</bool></edit>
-        <edit name="hinting"   mode="assign"><bool>false</bool></edit>
-        <edit name="hintstyle" mode="assign"><const>hintnone</const></edit>
-        <edit name="rgba"      mode="assign"><const>none</const></edit>
+        <edit name="antialias" mode="assign" binding="strong"><bool>true</bool></edit>
+        <edit name="autohint"  mode="assign" binding="strong"><bool>false</bool></edit>
+        <edit name="hinting"   mode="assign" binding="strong"><bool>false</bool></edit>
+        <edit name="hintstyle" mode="assign" binding="strong"><const>hintnone</const></edit>
+        <edit name="rgba"      mode="assign" binding="strong"><const>none</const></edit>
       </match>
     </fontconfig>
   '';
@@ -408,11 +408,11 @@ in
     <fontconfig>
       <match target="font">
         <test name="family"><string>CozetteVector</string></test>
-        <edit name="antialias"      mode="assign"><bool>true</bool></edit>
-        <edit name="autohint"       mode="assign"><bool>false</bool></edit>
-        <edit name="hinting"        mode="assign"><bool>true</bool></edit>
-        <edit name="hintstyle"      mode="assign"><const>hintslight</const></edit>
-        <edit name="rgba"           mode="assign"><const>none</const></edit>
+        <edit name="antialias"      mode="assign" binding="strong"><bool>true</bool></edit>
+        <edit name="autohint"       mode="assign" binding="strong"><bool>false</bool></edit>
+        <edit name="hinting"        mode="assign" binding="strong"><bool>true</bool></edit>
+        <edit name="hintstyle"      mode="assign" binding="strong"><const>hintslight</const></edit>
+        <edit name="rgba"           mode="assign" binding="strong"><const>none</const></edit>
         <edit name="embeddedbitmap" mode="assign"><bool>false</bool></edit>
       </match>
     </fontconfig>
@@ -432,11 +432,11 @@ in
       <match target="font">
         <test name="family"><string>Terminus</string></test>
         <edit name="embeddedbitmap" mode="assign"><bool>true</bool></edit>
-        <edit name="antialias"      mode="assign"><bool>false</bool></edit>
-        <edit name="autohint"       mode="assign"><bool>false</bool></edit>
-        <edit name="hinting"        mode="assign"><bool>false</bool></edit>
-        <edit name="hintstyle"      mode="assign"><const>hintnone</const></edit>
-        <edit name="rgba"           mode="assign"><const>none</const></edit>
+        <edit name="antialias"      mode="assign" binding="strong"><bool>false</bool></edit>
+        <edit name="autohint"       mode="assign" binding="strong"><bool>false</bool></edit>
+        <edit name="hinting"        mode="assign" binding="strong"><bool>false</bool></edit>
+        <edit name="hintstyle"      mode="assign" binding="strong"><const>hintnone</const></edit>
+        <edit name="rgba"           mode="assign" binding="strong"><const>none</const></edit>
       </match>
     </fontconfig>
   '';
@@ -459,11 +459,11 @@ in
     <fontconfig>
       <match target="font">
         <test name="family"><string>Tahoma</string></test>
-        <edit name="antialias"      mode="assign"><bool>true</bool></edit>
-        <edit name="autohint"       mode="assign"><bool>false</bool></edit>
-        <edit name="hinting"        mode="assign"><bool>true</bool></edit>
-        <edit name="hintstyle"      mode="assign"><const>hintfull</const></edit>
-        <edit name="rgba"           mode="assign"><const>none</const></edit>
+        <edit name="antialias"      mode="assign" binding="strong"><bool>true</bool></edit>
+        <edit name="autohint"       mode="assign" binding="strong"><bool>false</bool></edit>
+        <edit name="hinting"        mode="assign" binding="strong"><bool>true</bool></edit>
+        <edit name="hintstyle"      mode="assign" binding="strong"><const>hintfull</const></edit>
+        <edit name="rgba"           mode="assign" binding="strong"><const>none</const></edit>
         <edit name="embeddedbitmap" mode="assign"><bool>false</bool></edit>
       </match>
     </fontconfig>
@@ -477,12 +477,12 @@ in
     <fontconfig>
       <match target="font">
         <test name="family"><string>Oxygen Mono</string></test>
-        <edit name="antialias" mode="assign"><bool>true</bool></edit>
-        <edit name="autohint" mode="assign"><bool>false</bool></edit>
-        <edit name="hinting" mode="assign"><bool>true</bool></edit>
-        <edit name="hintstyle" mode="assign"><const>hintslight</const></edit>
-        <edit name="rgba" mode="assign"><const>none</const></edit>
-        <edit name="lcdfilter" mode="assign"><const>none</const></edit>
+        <edit name="antialias" mode="assign" binding="strong"><bool>true</bool></edit>
+        <edit name="autohint" mode="assign" binding="strong"><bool>false</bool></edit>
+        <edit name="hinting" mode="assign" binding="strong"><bool>true</bool></edit>
+        <edit name="hintstyle" mode="assign" binding="strong"><const>hintslight</const></edit>
+        <edit name="rgba" mode="assign" binding="strong"><const>none</const></edit>
+        <edit name="lcdfilter" mode="assign" binding="strong"><const>none</const></edit>
       </match>
     </fontconfig>
   '';
