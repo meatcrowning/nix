@@ -28,3 +28,5 @@ rg -F 'prepared scheme unavailable, re-minting' "$WAL" >/dev/null
 rg -F 'systemctl --user start plasma-panel-surface.service' "$WAL" >/dev/null
 rg -F 'org.kde.PlasmaShell.evaluateScript' "$WAL" >/dev/null
 rg -F 'deskstyle-wallpaper-ok:' "$WAL" >/dev/null
+rg -F '"$HOME/.nix-profile/bin/qdbus"' "$WAL" >/dev/null
+rg -F '/usr/bin/qdbus6' "$WAL" >/dev/null
