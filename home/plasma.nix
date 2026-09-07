@@ -1,15 +1,6 @@
 { config, pkgs, lib, host, ... }:
 
 let
-  # The active wallpaper is a basename, not a host path: wal-repo-sync.sh
-  # versions the image beside this selector. Both machines seed that directory
-  # at activation, so Plasma can use one durable choice without copying mutable
-  # monitor ids between hosts. Update this selector when the shared wallpaper
-  # choice changes; mutable containment files remain host-local.
-  sharedWallpaperName = lib.removeSuffix "\n"
-    (builtins.readFile ./srvs/wal-files/current-wallpaper);
-  sharedWallpaper =
-    "${config.home.homeDirectory}/Pictures/Wallpapers/${sharedWallpaperName}";
   plasmaManagerLogin = pkgs.writeShellScript "plasma-manager-login" ''
     export PATH=${lib.makeBinPath [ pkgs.kdePackages.qttools ]}:$PATH
     exec ${config.xdg.dataHome}/plasma-manager/run_all.sh
@@ -54,8 +45,9 @@ in
     # just picking Oxygen as that theme rather than adding a new mechanism.
     # The colour scheme is a separate desktop-wide choice in
     # home/prog/plasma-colors.nix: both hosts use the brighter,
-    # focus-invariant OxygenDarkFlat palette. The wallpaper, Plasma style and
-    # look-and-feel are shared here too; monitor scale remains the host seam.
+    # focus-invariant OxygenDarkFlat palette. Plasma style and look-and-feel
+    # are shared here; wallpaper selection is deliberately host-local, as are
+    # monitor scale and containment ids.
     # soundTheme is NOT declared [2026-08-29]: plasma-manager re-asserted it on
     # every Plasma login, so a pack picked in System Settings was silently put
     # back to oxygen at the next session start, with nothing saying why. His
@@ -65,8 +57,6 @@ in
     workspace = {
       lookAndFeel = "org.kde.oxygen";
       theme = "oxygen-scheme";
-      wallpaper = sharedWallpaper;
-      wallpaperFillMode = "preserveAspectCrop";
     };
 
     # Font family and size are personal KDE settings. Do not declare

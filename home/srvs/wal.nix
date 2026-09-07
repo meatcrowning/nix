@@ -64,10 +64,6 @@ in
       source = oxygenLiveIcons;
       executable = true;
     };
-    "scripts/wal-repo-sync.sh" = {
-      source = ./wal-files/wal-repo-sync.sh;
-      executable = true;
-    };
     "scripts/plasma-wallpaper-watch.sh" = {
       source = ./wal-files/plasma-wallpaper-watch.sh;
       executable = true;
@@ -175,33 +171,6 @@ in
 
   systemd.user.paths.wal-prepare = {
     Unit.Description = "Watch ~/Pictures/Wallpapers and pre-cache any new wallpaper's tile/theme";
-    Path.PathModified = "%h/Pictures/Wallpapers";
-    Install.WantedBy = [ "default.target" ];
-  };
-
-  # Reconcile wallpapers dropped into or removed from ~/Pictures/Wallpapers with the
-  # repo's wallpaper set and commit + push (see wal-repo-sync.sh for the
-  # paranoid git handling). PATH is pinned so the service finds git + gh (the
-  # credential helper is `!gh auth git-credential`, so gh must be resolvable)
-  # without depending on the ambient systemd-user PATH.
-  systemd.user.services.wal-repo-sync = {
-    Unit = {
-      Description = "Commit + push wallpaper additions and removals to the nix repo";
-      After = [ "graphical-session.target" ];
-    };
-    Service = {
-      Type = "oneshot";
-      # findutils for xargs: sync_index() clears phantom staged deletions with
-      # `git diff -z | xargs -0 git reset`, and coreutils has no xargs — without
-      # it every sync left the committed wallpaper staged-for-deletion in the
-      # shared index.
-      Environment = [ "PATH=${lib.makeBinPath [ pkgs.git pkgs.gh pkgs.coreutils pkgs.findutils ]}" ];
-      ExecStart = "%h/.config/scripts/wal-repo-sync.sh";
-    };
-  };
-
-  systemd.user.paths.wal-repo-sync = {
-    Unit.Description = "Watch ~/Pictures/Wallpapers and sync wallpaper changes into the nix repo";
     Path.PathModified = "%h/Pictures/Wallpapers";
     Install.WantedBy = [ "default.target" ];
   };
