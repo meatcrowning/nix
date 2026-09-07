@@ -17,8 +17,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QObject, Property, QProcess, QUrl, Signal, Slot
-from PySide6.QtGui import QGuiApplication, QColor
+from PySide6.QtCore import QFileSystemWatcher, QObject, Property, QProcess, QUrl, Signal, Slot
+from PySide6.QtGui import QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 
 
@@ -28,6 +28,7 @@ sys.path.insert(0, str(HERE.parent / "pylib"))
 
 from deskstyle import DeskStyle  # noqa: E402
 from kdetheme import theme_source  # noqa: E402
+import kdeshell  # noqa: E402
 
 
 SERVICE = "org.lam.DeskStyle1"
@@ -156,9 +157,13 @@ class Appearance(QObject):
         self._error = ""
         self._applying = False
         self._generation = 0
-        self._bus = None
+        self._pending_reply = None
+        self._status_path = state_dir() / "status.json"
+        self._status_watcher = QFileSystemWatcher(self)
+        self._status_watcher.fileChanged.connect(self._status_file_changed)
+        self._status_watcher.directoryChanged.connect(self._status_file_changed)
+        self._watch_status()
         self.refresh()
-        self._connect_bus()
 
     @Property("QVariantList", notify=wallpapersChanged)
     def wallpapers(self):
@@ -229,47 +234,73 @@ class Appearance(QObject):
         if self._applying or not self.hasDraft:
             return
         try:
-            from PySide6.QtDBus import QDBusInterface
+            from PySide6.QtDBus import QDBusInterface, QDBusPendingCallWatcher
             interface = QDBusInterface(SERVICE, OBJECT_PATH, INTERFACE)
             if not interface.isValid():
                 raise RuntimeError("appearance service is unavailable")
-            reply = interface.call("Apply", self._draft)
-            if reply.type().name != "ReplyMessage" or not reply.arguments():
-                raise RuntimeError(reply.errorMessage() or "appearance service rejected the request")
-            self._generation = int(reply.arguments()[0])
-            # The overlay is a separate process on purpose: the service owns
-            # terminal state, and an in-app busy card could disappear if the
-            # Qt scene itself is repolished during the switch.  It self-gates
-            # below 120ms and exits from the controller's real terminal state.
-            overlay = HERE / "apply-overlay.py"
-            if overlay.is_file():
-                QProcess.startDetached(sys.executable, [str(overlay), "--generation",
-                                                        str(self._generation), "--wallpaper", self._draft])
             self._applying = True
             self._error = ""
-            self._status = "queued"
+            self._status = "submitting"
             self.applyingChanged.emit()
             self.errorChanged.emit()
             self.statusChanged.emit()
+            self._pending_reply = QDBusPendingCallWatcher(interface.asyncCall("Apply", self._draft), self)
+            self._pending_reply.finished.connect(self._apply_reply)
         except Exception as exc:
             self._error = str(exc)
             self._status = "not applied"
             self.errorChanged.emit()
             self.statusChanged.emit()
 
-    def _connect_bus(self):
+    @Slot(object)
+    def _apply_reply(self, watcher):
+        reply = watcher.reply()
+        watcher.deleteLater()
+        self._pending_reply = None
+        if reply.type().name != "ReplyMessage" or not reply.arguments():
+            self._applying = False
+            self._error = reply.errorMessage() or "appearance service rejected the request"
+            self._status = "not applied"
+            self.applyingChanged.emit()
+            self.errorChanged.emit()
+            self.statusChanged.emit()
+            return
+        self._generation = int(reply.arguments()[0])
+        self._status = "queued"
+        self.statusChanged.emit()
+        overlay = HERE / "apply-overlay.py"
+        if overlay.is_file():
+            QProcess.startDetached(sys.executable, [str(overlay), "--generation",
+                                                    str(self._generation), "--wallpaper", self._draft])
+        self._read_status()
+
+    def _watch_status(self):
+        known = set(self._status_watcher.files()) | set(self._status_watcher.directories())
+        for candidate in (self._status_path.parent, self._status_path):
+            if candidate.exists() and str(candidate) not in known:
+                self._status_watcher.addPath(str(candidate))
+
+    @Slot(str)
+    def _status_file_changed(self, _path):
+        self._watch_status()
+        self._read_status()
+
+    def _read_status(self):
         try:
-            from PySide6.QtDBus import QDBusConnection
-            self._bus = QDBusConnection.sessionBus()
-            if not self._bus.isConnected():
-                self._bus = None
+            status = json.loads(self._status_path.read_text(encoding="utf-8"))
+            if int(status.get("generation", 0)) != self._generation:
                 return
-            self._bus.connect(SERVICE, OBJECT_PATH, INTERFACE, "Progress", self, b"_progress")
-            self._bus.connect(SERVICE, OBJECT_PATH, INTERFACE, "Completed", self, b"_completed")
-            self._bus.connect(SERVICE, OBJECT_PATH, INTERFACE, "Superseded", self, b"_superseded")
-            self._bus.connect(SERVICE, OBJECT_PATH, INTERFACE, "Failed", self, b"_failed")
-        except Exception:
-            self._bus = None
+        except (OSError, ValueError, TypeError):
+            return
+        state = str(status.get("state", ""))
+        if state == "complete":
+            self._completed(self._generation, str(status.get("profileHash", "")),
+                            bool(status.get("allLive", False)))
+        elif state == "failed":
+            self._failed(self._generation, str(status.get("detail", "apply failed")))
+        elif state:
+            self._status = str(status.get("detail") or state.replace("-", " "))
+            self.statusChanged.emit()
 
     @Slot(int, str, float, str)
     def _progress(self, generation, phase, _fraction, detail):
@@ -312,9 +343,8 @@ class Appearance(QObject):
 
 
 def main() -> int:
-    app = QGuiApplication(sys.argv)
-    app.setApplicationName("style")
-    app.setDesktopFileName("style")
+    kdeshell.pin_controls_style()
+    app = kdeshell.make_app(sys.argv, "style")
     engine = QQmlApplicationEngine()
     context = engine.rootContext()
     palette = Palette(theme_source(Path.home() / ".config" / "quickshell" / "Theme.qml"), app)
