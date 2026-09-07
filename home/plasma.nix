@@ -423,6 +423,47 @@ in
     DBusActivatable=false
   '';
 
+  # Plasma Manager creates the declared panel layout but deliberately leaves
+  # settings on already-existing applets alone. Reconcile the spacer that
+  # anchors Kickoff's popup so an existing desktop gets the same clear corner
+  # as a fresh one, without relying on containment ids.
+  systemd.user.services.plasma-launcher-offset = {
+    Unit = {
+      Description = "keep the Plasma launcher popup clear of panels";
+      After = [ "graphical-session.target" ];
+    };
+    Service = {
+      Type = "oneshot";
+      ExecStart = pkgs.writeShellScript "plasma-launcher-offset" ''
+        for attempt in $(seq 1 60); do
+          if ${pkgs.kdePackages.qttools}/bin/qdbus org.kde.plasmashell /PlasmaShell \
+              org.kde.PlasmaShell.evaluateScript ${lib.escapeShellArg ''
+                for (var i = 0; i < panelIds.length; ++i) {
+                  var panel = panelById(panelIds[i]);
+                  if (panel.location !== "top") continue;
+                  var widgets = panel.widgets();
+                  for (var j = 1; j < widgets.length; ++j) {
+                    if (widgets[j].type !== "org.kde.plasma.kickoff") continue;
+                    var spacer = widgets[j - 1];
+                    if (spacer.type !== "org.kde.plasma.panelspacer") continue;
+                    spacer.currentConfigGroup = ["General"];
+                    spacer.writeConfig("expanding", false);
+                    spacer.writeConfig("length", 48);
+                    spacer.reloadConfig();
+                    break;
+                  }
+                }
+              ''} >/dev/null 2>&1; then
+            exit 0
+          fi
+          sleep 1
+        done
+        exit 1
+      '';
+    };
+    Install.WantedBy = [ "graphical-session.target" ];
+  };
+
   # Push the `mice` values at a RUNNING KWin, because writing kcminputrc does
   # not reach one: KWin reads a device's libinput settings when the device is
   # ADDED and never re-reads the file, so a switch used to land silently and
