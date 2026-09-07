@@ -381,10 +381,10 @@ in
       };
       kwinrc.Desktops.Number = 1;
       kwinrc.Desktops.Rows = 1;
-      # Oxygen's popup frame is translucent by construction. Without KWin's
-      # blur effect it reads as a transparent hole on air instead of the solid
-      # frosted launcher surface top draws.
-      kwinrc.Plugins.blurEnabled = true;
+      # The generated Oxygen Plasma theme makes popup bodies opaque; blur would
+      # reintroduce glass behind their gradient and make the hosts compositor-
+      # dependent again.
+      kwinrc.Plugins.blurEnabled = false;
       kwinrc.Tiling.padding = 4;
       kwinrc.Xwayland.Scale = if host == "air" then 2 else 1;
       plasma-localerc.Formats.LANG = "en_US.UTF-8";
