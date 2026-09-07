@@ -2181,13 +2181,12 @@ class Player(QObject):
     _sigIdle = Signal(bool)
 
     LOOP_NONE, LOOP_TRACK, LOOP_ALL = 0, 1, 2
-    # A restored queue can hold hundreds of files on air's SMB mount. Loading
-    # every one into mpv before QApplication reaches its event loop held the
-    # visible launch for 18 seconds with a 298-track queue. Restore the paused
-    # current track immediately, then add one future SMB path between event
-    # turns. A zero-delay chain still monopolises the loop on a long queue.
-    RESTORE_APPEND_BATCH = 1
-    RESTORE_APPEND_INTERVAL_MS = 100
+    # A restored queue can hold hundreds of files on air's SMB mount.  The
+    # local queue remains authoritative; mpv needs only the current entry and
+    # a short look-ahead to play gaplessly.  Mirroring all remote paths at
+    # launch made a 302-track restore consume the first half-minute.
+    REMOTE_LOOKAHEAD_SECS = 15.0
+    RESTORE_APPEND_BATCH = 4
 
     def __init__(self, library, prefs, parent=None):
         super().__init__(parent)
@@ -2214,6 +2213,10 @@ class Player(QObject):
         self._idle = True
         self._mpv_fill_token = 0
         self._mpv_fill_pending = False
+        # Last Python queue index already handed to mpv.  On air this stays at
+        # most one ahead of the playing item; on a local library mpv mirrors
+        # the ordinary full tail.
+        self._mpv_loaded_until = -1
 
         import mpv as libmpv
         opts = dict(vid="no", audio_display="no",
@@ -2298,6 +2301,9 @@ class Player(QObject):
         if abs(pos - self._position) >= 0.2:
             self._position = pos
             self.positionChanged.emit()
+        if (library_is_remote_cached() and self._duration > 0
+                and self._duration - pos <= self.REMOTE_LOOKAHEAD_SECS):
+            self._ensure_mpv_lookahead()
 
     def _on_dur(self, dur):
         if dur != self._duration:
@@ -2478,6 +2484,7 @@ class Player(QObject):
         token = self._mpv_fill_token
         self._mpv_fill_pending = False
         self._mpv_base = start_idx
+        self._mpv_loaded_until = start_idx
         self._set_index(start_idx)
         # Decide album-vs-track BEFORE the load: mpv reads the option when it
         # starts decoding each file.
@@ -2485,13 +2492,33 @@ class Player(QObject):
         self.replayGainChanged.emit()
         self._mpv.command("loadfile", paths[0], "replace")
         self._mpv.pause = paused
-        if defer_rest and len(paths) > 1:
+        if library_is_remote_cached() and len(paths) > 1:
+            # One next item is enough for gapless playback.  Do this on the
+            # next turn so the restored current track is the only SMB work in
+            # startup's synchronous path.
+            QTimer.singleShot(0, lambda: self._ensure_mpv_lookahead(token))
+        elif defer_rest and len(paths) > 1:
             self._mpv_fill_pending = True
-            QTimer.singleShot(self.RESTORE_APPEND_INTERVAL_MS,
-                              lambda: self._append_restored_tail(token, start_idx + 1))
+            QTimer.singleShot(0, lambda: self._append_restored_tail(token, start_idx + 1))
         else:
             for p in paths[1:]:
                 self._mpv.command("loadfile", p, "append")
+            self._mpv_loaded_until = len(self._queue) - 1
+
+    def _ensure_mpv_lookahead(self, token=None):
+        """Append exactly one remote queue item beyond mpv's current tail."""
+        if token is not None and token != self._mpv_fill_token:
+            return
+        if not library_is_remote_cached() or self._mpv_loaded_until >= len(self._queue) - 1:
+            return
+        try:
+            next_idx = self._mpv_loaded_until + 1
+            self._mpv.command("loadfile", self._queue[next_idx]["path"], "append")
+            self._mpv_loaded_until = next_idx
+        except Exception:
+            # A later clock update gets another chance; never let a transient
+            # SMB/mpv refusal break the visible player's event loop.
+            pass
 
     def _append_restored_tail(self, token, next_idx):
         """Append one bounded restore batch without monopolising the UI thread."""
@@ -2501,10 +2528,10 @@ class Player(QObject):
         for row in self._queue[next_idx:end]:
             self._mpv.command("loadfile", row["path"], "append")
         if end < len(self._queue):
-            QTimer.singleShot(self.RESTORE_APPEND_INTERVAL_MS,
-                              lambda: self._append_restored_tail(token, end))
+            QTimer.singleShot(0, lambda: self._append_restored_tail(token, end))
         else:
             self._mpv_fill_pending = False
+            self._mpv_loaded_until = len(self._queue) - 1
 
     def currentTrackDict(self):
         if 0 <= self._index < len(self._queue):
