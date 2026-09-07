@@ -1,0 +1,16 @@
+{
+    "KPackageStructure": "KWin/Script",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "lam"
+            }
+        ],
+        "Description": "Moves the Meta-key application launcher popup clear of the desktop panels.",
+        "Icon": "system-run",
+        "Id": "kickoffpopup",
+        "License": "GPL",
+        "Name": "Clear Application Launcher Popup"
+    },
+    "X-Plasma-API": "javascript"
+}
