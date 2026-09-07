@@ -789,7 +789,7 @@ def _build_shell_class():
             `show()` returns it."""
             return self.window.windowHandle()
 
-        def show(self):
+        def show(self, return_handle=True):
             started = time.perf_counter()
             self._restore_state()
             _startup_trace("restore-state", started)
@@ -807,7 +807,11 @@ def _build_shell_class():
             started = time.perf_counter()
             self.window.show()
             _startup_trace("window-show", started)
-            return self.window.windowHandle()
+            # Asking Wayland for the native handle before QApplication's event
+            # loop starts can synchronously wait for the surface configure.
+            # Callers that can defer handle-dependent setup take the QWidget
+            # now and ask through `handle` once the loop is running.
+            return self.window.windowHandle() if return_handle else self.window
 
         def _reassert_overlay(self):
             if self._overlay is None or self._toolbar is None:
