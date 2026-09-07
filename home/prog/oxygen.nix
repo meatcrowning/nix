@@ -75,7 +75,8 @@
 
       WORK=$(/usr/bin/mktemp -d "$HOME/.cache/oxygen-vivaldi-build.XXXXXX")
       trap '/usr/bin/rm -rf -- "$WORK"' EXIT
-      /usr/bin/cp -a "$SOURCE/." "$WORK/source"
+      /usr/bin/tar -xf "$SOURCE" -C "$WORK"
+      /usr/bin/mv "$WORK/oxygen-$SOURCE_VERSION" "$WORK/source"
       /usr/bin/chmod -R u+w "$WORK/source"
       /usr/bin/git apply --unsafe-paths --directory="$WORK/source" "$PATCH"
 
