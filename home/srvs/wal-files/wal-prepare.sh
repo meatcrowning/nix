@@ -223,14 +223,6 @@ else
     SCHEMES_READY=false
 fi
 
-# Raster Oxygen icons are the other wallpaper-coloured Plasma surface. Build
-# their immutable accent-qualified theme while the old appearance is still
-# live; wal-set activates this already-complete directory in the short commit.
-if [ -x "$SCRIPTS/oxygen-live-icons.py" ]; then
-    "$SCRIPTS/oxygen-live-icons.py" --accent "$UI_ACCENT" --no-activate \
-        >/dev/null || SCHEMES_READY=false
-fi
-
 # Aero is installed only where the matching Plasma theme is present.  It is an
 # owned candidate in plasma-scheme.py, but unlike the three shared Oxygen
 # shapes it has no portable template.  Pre-mint it when the host supplies its

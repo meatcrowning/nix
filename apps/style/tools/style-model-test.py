@@ -42,6 +42,9 @@ check('"SetScheme", [scheme]' in scheme_source,
       "switches live Plasma schemes through the same controller transaction")
 check('Popup {' in qml and 'visible: Appearance.applying' in qml,
       "keeps apply progress inside the Style window")
+check("class ApplyProgressDialog" in inspect.getsource(module)
+      and "appearance.use_native_progress()" in inspect.getsource(module.main),
+      "uses a native KDE dialog for Plasma apply progress")
 check('apply-overlay.py' not in inspect.getsource(module.Appearance._apply_reply),
       "does not start a fullscreen apply overlay")
 check('"Pictures" / "Wallpapers"' in inspect.getsource(module.wallpaper_dir),
