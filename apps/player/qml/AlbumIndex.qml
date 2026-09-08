@@ -7,12 +7,16 @@ Item {
     id: root
     height: Theme.lineHeight + 2
 
+    Motion { id: motion }
+
     property string sortMode: "orig_year"
     property int revision: 0
     property int zoomDecade: -1
     property color fgText: Theme.text
     property color fgDim: Theme.textDim
     property color fgAccent: Theme.accent
+    property var displayEntries: []
+    property bool ready: false
     signal jumpRequested(int albumIndex)
 
     onSortModeChanged: zoomDecade = -1
@@ -50,16 +54,23 @@ Item {
         return out;
     }
 
+    onEntriesChanged: if (ready) swap.restart()
+    Component.onCompleted: {
+        displayEntries = entries;
+        ready = true;
+    }
+
     Rectangle { anchors.fill: parent; color: Theme.bgAlt }
     Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.border }
 
     Row {
+        id: labels
         anchors.fill: parent
         Repeater {
-            model: root.entries
+            model: root.displayEntries
             delegate: Item {
                 required property var modelData
-                width: root.width / Math.max(1, root.entries.length)
+                width: root.width / Math.max(1, root.displayEntries.length)
                 height: root.height
 
                 PixelText {
@@ -85,6 +96,41 @@ Item {
                         w.accepted = true;
                     }
                 }
+            }
+        }
+    }
+
+
+    SequentialAnimation {
+        id: swap
+        ParallelAnimation {
+            NumberAnimation {
+                target: labels; property: "opacity"; to: 0
+                duration: motion.ms(motion.slideMs / 2)
+                easing.type: motion.slideEasing
+            }
+            NumberAnimation {
+                target: labels; property: "scale"; to: 0.96
+                duration: motion.ms(motion.slideMs / 2)
+                easing.type: motion.slideEasing
+            }
+        }
+        ScriptAction {
+            script: {
+                root.displayEntries = root.entries;
+                labels.scale = 1.04;
+            }
+        }
+        ParallelAnimation {
+            NumberAnimation {
+                target: labels; property: "opacity"; to: 1
+                duration: motion.ms(motion.slideMs / 2)
+                easing.type: motion.slideEasing
+            }
+            NumberAnimation {
+                target: labels; property: "scale"; to: 1
+                duration: motion.ms(motion.slideMs / 2)
+                easing.type: motion.slideEasing
             }
         }
     }
