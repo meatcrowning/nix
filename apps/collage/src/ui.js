@@ -8,17 +8,19 @@ function init() {
   const host = document.createElement('div'); host.id = id;
   document.body.append(host);
   const root = host.attachShadow({ mode: 'open' });
-  // Inherit the page's typography/colours. No local desktop service or font download.
+  // Self-contained dark controls; thread selection buttons retain their yellow fill.
   root.innerHTML = `<style>
-    :host { font: inherit; color: inherit; }
+    :host { font: inherit; color: #e8eaed; color-scheme:dark; }
     * { box-sizing: border-box; }
-    button,input,select { font: inherit; color: inherit; }
+    button,input,select { font: inherit; color: #e8eaed; background:#303134; border:1px solid #757575; }
+    input[type=range],input[type=checkbox] { accent-color:#a8c7fa; }
     button,a,input,select { min-height: 28px; }
-    button { cursor: pointer; } button:disabled { cursor: default; }
+    button { cursor: pointer; } button:disabled { cursor: default; color:#9aa0a6; }
+    button:not(:disabled):hover { background:#414348; }
     :focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
     #open { position:fixed; bottom:8px; right:8px; z-index:2147483647; }
-    #panel { position:fixed; inset:4%; z-index:2147483647; background:Canvas;
-      color:CanvasText; border:1px solid; padding:8px; overflow:auto; font:15px sans-serif; }
+    #panel { position:fixed; inset:4%; z-index:2147483647; background:#202124;
+      color:#e8eaed; border:1px solid #757575; padding:8px; overflow:auto; font:15px sans-serif; }
     [hidden] { display:none !important; }
     .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
     #list { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:4px; }
@@ -28,7 +30,7 @@ function init() {
     .source-preview img { pointer-events:none; }
     .tile label { display:block; } .tile input { vertical-align:middle; }
     #panel-head { position:sticky; top:-8px; z-index:2; display:flex; gap:8px;
-      align-items:flex-start; background:Canvas; padding:8px 0; }
+      align-items:flex-start; background:#202124; padding:8px 0; }
     #message { flex:1; min-width:0; margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
     #close { flex:none; margin-left:auto; }
     #preview { position:fixed; inset:0; margin:0; border:0; padding:0; width:100vw; height:100vh;
@@ -41,6 +43,11 @@ function init() {
     #preview-close { position:absolute; top:8px; right:8px; z-index:1; }
     summary { cursor:pointer; min-height:28px; }
     .help { font-size:0.9em; } fieldset { border:0; padding:0; margin:0; }
+    @media (forced-colors:active) {
+      #panel,#panel-head { background:Canvas; color:CanvasText; border-color:CanvasText; }
+      button,input,select,button:not(:disabled):hover { background:ButtonFace; color:ButtonText; border-color:ButtonText; }
+      button:disabled { color:GrayText; }
+    }
   </style>
   <button id="open" aria-expanded="false" aria-controls="panel">collage</button>
   <section id="panel" role="dialog" aria-modal="true" aria-label="collage" hidden>
