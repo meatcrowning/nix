@@ -55,6 +55,7 @@ let
     export XDG_DATA_DIRS=${pkgs.kdePackages.oxygen}/share:${pkgs.kdePackages.plasma-integration}/share''${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}
     # The user manager does not inherit Plasma's platform-theme selection.
     # Without this, Oxygen loads but receives Qt's default white palette.
+    export QT_QPA_PLATFORM=offscreen
     export QT_QPA_PLATFORMTHEME=kde
     export QT_STYLE_OVERRIDE=oxygen
     exec ${panel-surface-python}/bin/python ${./plasma-panel-gradient-files/render-surface.py}
