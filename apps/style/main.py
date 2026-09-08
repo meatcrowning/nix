@@ -58,6 +58,16 @@ def _thumbnail(path: Path) -> Path:
     return thumbnail if thumbnail.is_file() else path
 
 
+def _free_destination(root: Path, source: Path) -> Path:
+    """Return a collision-free local filename without overwriting anything."""
+    candidate = root / source.name
+    number = 2
+    while candidate.exists():
+        candidate = root / f"{source.stem}-{number}{source.suffix.lower()}"
+        number += 1
+    return candidate
+
+
 def _active_wallpaper(profile: Path) -> str:
     """Read only the controller's atomically-written active identity."""
     try:
@@ -181,6 +191,7 @@ class Appearance(QObject):
         self._applying = False
         self._generation = 0
         self._pending_reply = None
+        self._pending_delete = ""
         self._native_progress = False
         self._status_path = state_dir() / "status.json"
         self._status_watcher = QFileSystemWatcher(self)
@@ -243,6 +254,72 @@ class Appearance(QObject):
         if items != self._items:
             self._items = items
             self.wallpapersChanged.emit()
+
+    @Slot("QVariantList")
+    def importFiles(self, urls):
+        if self._applying:
+            return
+        added = 0
+        errors = []
+        self._root.mkdir(parents=True, exist_ok=True)
+        for value in urls:
+            source = Path(value.toLocalFile() if hasattr(value, "toLocalFile") else str(value)).resolve()
+            if source.parent == self._root.resolve():
+                continue
+            if not source.is_file() or source.suffix.lower() not in IMAGE_SUFFIXES:
+                errors.append(source.name or "unsupported file")
+                continue
+            try:
+                shutil.copy2(source, _free_destination(self._root, source))
+                added += 1
+            except OSError as exc:
+                errors.append(f"{source.name}: {exc}")
+        self.refresh()
+        self._error = ", ".join(errors)
+        self._status = f"added {added}" if added else ("not added" if errors else "ready")
+        self.errorChanged.emit()
+        self.statusChanged.emit()
+
+    def _trash(self, path: Path) -> str:
+        command = shutil.which("gio")
+        if not command:
+            return "trash is unavailable"
+        run = subprocess.run([command, "trash", "--", str(path)], text=True,
+                             capture_output=True, timeout=15, check=False)
+        return "" if run.returncode == 0 else (run.stderr or run.stdout or "not removed").strip()
+
+    @Slot(str)
+    def removeWallpaper(self, path):
+        if self._applying:
+            return
+        resolved = str(Path(path).resolve())
+        offered = [item["path"] for item in self._items]
+        if resolved not in offered:
+            return
+        if resolved == self._active:
+            replacements = [candidate for candidate in offered if candidate != resolved]
+            if not replacements:
+                self._error = "add another wallpaper first"
+                self.errorChanged.emit()
+                return
+            index = offered.index(resolved)
+            replacement = replacements[min(index, len(replacements) - 1)]
+            self._pending_delete = resolved
+            self._draft = replacement
+            self.selectionChanged.emit()
+            self.apply()
+            return
+        error = self._trash(Path(resolved))
+        if error:
+            self._error = error
+            self.errorChanged.emit()
+            return
+        if self._draft == resolved:
+            self._draft = self._active
+            self.selectionChanged.emit()
+        self._status = "moved to trash"
+        self.statusChanged.emit()
+        self.refresh()
 
     @Slot(str)
     def select(self, path):
@@ -380,11 +457,18 @@ class Appearance(QObject):
         self._scheme = _active_scheme(self._profile)
         self._draft = self._active
         self._applying = False
-        self._status = "live" if all_live else "live; apps deferred"
+        removed = self._pending_delete
+        self._pending_delete = ""
+        remove_error = self._trash(Path(removed)) if removed else ""
+        self._error = remove_error
+        self._status = ("moved to trash" if removed and not remove_error
+                        else ("live" if all_live else "live; apps deferred"))
+        self.refresh()
         self.activeChanged.emit()
         self.selectionChanged.emit()
         self.applyingChanged.emit()
         self.statusChanged.emit()
+        self.errorChanged.emit()
 
     @Slot(int, int)
     def _superseded(self, generation, by_generation):
@@ -399,6 +483,10 @@ class Appearance(QObject):
         if generation != self._generation:
             return
         self._applying = False
+        if self._pending_delete:
+            self._pending_delete = ""
+            self._draft = self._active
+            self.selectionChanged.emit()
         self._status = "not applied"
         self._error = message
         self.applyingChanged.emit()

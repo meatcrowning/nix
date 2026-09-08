@@ -101,16 +101,21 @@ in
 
   # The wallpaper set is versioned in the repo (./wal-files/wallpapers) so it's
   # shared across machines. We *copy* (not symlink) each into ~/Pictures/Wallpapers on
-  # activation, so the directory stays a real writable dir: the picker's live
-  # rescan and the "drop a new wallpaper in" workflow (wal-prepare.path) keep
-  # working, and the store copies aren't read-only symlinks. Existing files are
-  # left untouched (`[ -e ] ||`), so hand-added or edited wallpapers survive.
+  # activation, so the directory stays a real writable dir. This is a one-time
+  # bootstrap of an empty library: after that Style owns additions and
+  # removals, so an intentionally trashed bundled wallpaper never reappears.
   home.activation.seedWallpapers = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-    mkdir -p "$HOME/Pictures/Wallpapers"
-    for f in ${./wal-files/wallpapers}/*; do
-      dest="$HOME/Pictures/Wallpapers/$(basename "$f")"
-      [ -e "$dest" ] || install -m644 "$f" "$dest"
-    done
+    library="$HOME/Pictures/Wallpapers"
+    stamp="$HOME/.local/state/deskstyle/wallpapers-bootstrapped"
+    if [ ! -e "$stamp" ]; then
+      mkdir -p "$library" "$(dirname "$stamp")"
+      if ! find "$library" -mindepth 1 -maxdepth 1 -type f -print -quit | grep -q .; then
+        for f in ${./wal-files/wallpapers}/*; do
+          install -m644 "$f" "$library/$(basename "$f")"
+        done
+      fi
+      touch "$stamp"
+    fi
   '';
 
   # The old default was ~/Pictures/wall.  Migrate only that exact shipped

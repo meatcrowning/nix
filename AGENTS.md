@@ -180,7 +180,9 @@ private `docs/agents/` runbooks.
 - Plasma's cross-host visual source is `home/plasma.nix` plus the shared
   Oxygen/colour modules under `home/prog/`. Wallpaper selection is deliberately
   host-local in Plasma's containment config and `~/Pictures/Wallpapers`; do not
-  commit or sync it between top and book. Treat mutable KConfig on top as a
+  commit or sync it between top and book. Style owns adding, trashing, and
+  selecting wallpapers after activation bootstraps an empty library once.
+  Treat mutable KConfig on top as a
   measured input, not the durable source: capture non-hardware visual changes
   in those shared declarations so book receives them without copying output ids.
 - `apps/` is inert vendored source outside those imports. Sources run from

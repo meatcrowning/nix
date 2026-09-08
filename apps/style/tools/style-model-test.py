@@ -78,6 +78,30 @@ with tempfile.TemporaryDirectory() as temporary:
     model.select(str(root / "not wallpaper.txt"))
     check(model.draftPath == model.activePath, "refuses a path outside the offered wallpaper model")
 
+    incoming = Path(temporary) / "incoming"
+    incoming.mkdir()
+    imported = incoming / "new paper.png"
+    imported.write_bytes(b"first")
+    model.importFiles([module.QUrl.fromLocalFile(str(imported))])
+    model.importFiles([module.QUrl.fromLocalFile(str(imported))])
+    check((root / "new paper.png").read_bytes() == b"first"
+          and (root / "new paper-2.png").read_bytes() == b"first",
+          "imports without overwriting a same-named wallpaper")
+
+    trashed = []
+    model._trash = lambda path: (trashed.append(path) or "")
+    model.select(str(root / "new paper.png"))
+    model.removeWallpaper(str(root / "new paper.png"))
+    check(trashed == [root / "new paper.png"] and model.draftPath == model.activePath,
+          "moves an inactive wallpaper to trash and restores the active selection")
+
+    submitted = []
+    model.apply = lambda: submitted.append(model.draftPath)
+    model.removeWallpaper(model.activePath)
+    check(model._pending_delete == str(first.resolve()) and submitted
+          and submitted[0] != str(first.resolve()),
+          "selects a replacement before trashing the active wallpaper")
+
     profile.unlink()
     (root / ".current-wallpaper").write_text(first.name + "\n", encoding="utf-8")
     legacy = module.Appearance(root=root, profile=profile)
