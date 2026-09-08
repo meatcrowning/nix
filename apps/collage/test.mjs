@@ -343,5 +343,43 @@ try {
   assert(!(await ui.locator('#panel').isVisible()));
   console.log(result.videoUnavailable ? 'UI image export passed; video unavailable in this browser build'
     : 'UI image export, slow export, looping, cancellation, frame counts and timestamps passed');
+  // Linked videos use their own thumbnail, or capture one without playing audio.
+  if (result.video) {
+    await page.goto('http://localhost/');
+    const mediaURL = `https://files.catbox.moe/linked.${result.video.extension}`;
+    let videoRequests = 0;
+    await page.route('https://files.catbox.moe/**', route => {
+      if (route.request().url().endsWith('.png')) return route.fulfill({contentType:'image/png',body:Buffer.from(result.still.bytes)});
+      if (route.request().url().endsWith('/broken.mp4')) return route.fulfill({status:404,body:'missing'});
+      videoRequests++;
+      return route.fulfill({contentType:`video/${result.video.extension}`,body:Buffer.from(result.video.bytes)});
+    });
+    await page.evaluate(url => {
+      document.body.innerHTML = `<blockquote class="postMessage"><a href="${url}">linked video</a>
+        <a href="https://files.catbox.moe/poster.webm"><img src="https://files.catbox.moe/poster.png"></a>
+        <a href="https://files.catbox.moe/broken.mp4">unavailable video</a></blockquote>`;
+    }, mediaURL);
+    await page.addScriptTag({content:`(function () {\n${library}${artifact}\n})();`});
+    assert.equal(videoRequests,0);
+    const gallery = page.locator('#ldg-collage-v2');
+    await gallery.getByRole('button',{name:'collage',exact:true}).click();
+    await page.waitForFunction(() => document.querySelector('#ldg-collage-v2').shadowRoot.querySelector('.tile canvas'));
+    assert.equal(await gallery.locator('.tile canvas').count(),1);
+    assert.equal(await gallery.locator('.tile img').count(),1);
+    assert.equal(await gallery.locator('.tile video').count(),0);
+    assert.equal(await gallery.locator('.tile input:checked').count(),0);
+    assert.equal(await gallery.locator('.tile canvas').evaluate(c=>Math.max(c.width,c.height)),320);
+    await gallery.locator('.source-preview').first().click();
+    assert.equal(await gallery.locator('#preview video').getAttribute('src'),mediaURL);
+    await gallery.getByRole('button',{name:'close preview',exact:true}).click();
+    assert.equal(await gallery.locator('.tile input:checked').count(),0);
+    assert.equal(await gallery.locator('.source-preview').last().textContent(),'preview');
+    await gallery.locator('.source-preview').last().click();
+    await page.waitForFunction(() => document.querySelector('#ldg-collage-v2').shadowRoot.querySelector('#preview-status').textContent === 'this file could not be previewed');
+    await gallery.getByRole('button',{name:'close preview',exact:true}).click();
+    await gallery.locator('.tile input').first().check();
+    assert.equal(await gallery.locator('.tile input:checked').count(),1);
+    console.log('linked video frame capture, existing thumbnail and full preview passed');
+  }
   assert.deepEqual(runtimeErrors,[]);
 } finally { clearTimeout(watchdog); await browser?.close(); await rm(dir,{recursive:true,force:true}); }

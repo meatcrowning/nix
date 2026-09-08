@@ -25,9 +25,9 @@ function init() {
     .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
     #list { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:4px; }
     .tile { border:1px solid GrayText; padding:4px; overflow-wrap:anywhere; }
-    .tile img { width:100%; height:90px; object-fit:contain; }
+    .tile img,.tile canvas { width:100%; height:90px; object-fit:contain; }
     .tile .source-preview { display:block; width:100%; min-height:90px; }
-    .source-preview img { pointer-events:none; }
+    .source-preview img,.source-preview canvas { pointer-events:none; }
     .tile label { display:block; } .tile input { vertical-align:middle; }
     #panel-head { position:sticky; top:-8px; z-index:2; display:flex; gap:8px;
       align-items:flex-start; background:#202124; padding:8px 0; }
@@ -146,6 +146,56 @@ function init() {
   };
   $('view').onchange = count;
   $('edge').oninput = () => { $('scale-value').value = `${Math.round(Number($('edge').value) / 12.8)}% · ${$('edge').value}px`; };
+  const thumbnailEntries = new WeakMap(), thumbnailQueue = new Set();
+  let thumbnailActive = 0;
+  const thumbnailObserver = new IntersectionObserver(records => {
+    for (const record of records) {
+      const entry = thumbnailEntries.get(record.target);
+      if (record.isIntersecting) thumbnailQueue.add(entry);
+      else thumbnailQueue.delete(entry);
+    }
+    pumpThumbnails();
+  }, { root: $('panel'), rootMargin: '180px' });
+  function pumpThumbnails() {
+    while (thumbnailActive < 2 && thumbnailQueue.size) {
+      const entry = thumbnailQueue.values().next().value;
+      thumbnailQueue.delete(entry);
+      if (!entry.tile.isConnected || entry.thumb || entry.thumbnailDone || entry.cancelThumbnail) continue;
+      thumbnailObserver.unobserve(entry.tile);
+      thumbnailActive++;
+      // Decode one paused frame, then release the network request and decoder.
+      // Drawing is allowed without CORS; this canvas is display-only, never read back.
+      const video = document.createElement('video');
+      video.muted = true; video.playsInline = true; video.preload = 'auto';
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true; clearTimeout(timer);
+        video.onloadeddata = video.onerror = null;
+        video.pause(); video.removeAttribute('src'); video.load();
+        entry.cancelThumbnail = null; entry.thumbnailDone = true;
+        thumbnailActive--; pumpThumbnails();
+      };
+      const timer = setTimeout(finish, 12000);
+      entry.cancelThumbnail = finish;
+      video.onerror = finish;
+      video.onloadeddata = () => {
+        try {
+          if (entry.tile.isConnected && !entry.thumb && video.videoWidth && video.videoHeight) {
+            const canvas = document.createElement('canvas');
+            const scale = Math.min(1, 320 / Math.max(video.videoWidth, video.videoHeight));
+            canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+            canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+            canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+            entry.show.replaceChildren(canvas);
+          }
+        } catch { /* Keep the full-preview button usable if capture fails. */ }
+        finally { finish(); }
+      };
+      if (!entry.url && !entry.previewUrl) entry.previewUrl = URL.createObjectURL(entry.file);
+      video.src = entry.url || entry.previewUrl;
+    }
+  }
   function add(entry) {
     if (entries.has(entry.key)) return;
     entries.set(entry.key, entry);
@@ -164,7 +214,10 @@ function init() {
     box.type = 'checkbox'; box.checked = !!entry.selected;
     box.addEventListener('change', () => { entry.selected = box.checked; count(); persist(); syncMarks(); });
     label.append(box, document.createTextNode(` ${entry.name}`)); tile.append(label);
-    entry.box = box; entry.tile = tile; $('list').append(tile);
+    entry.box = box; entry.tile = tile; entry.show = show; $('list').append(tile);
+    if (!entry.thumb && (entry.file?.type.startsWith('video/') || /\.(webm|mp4)(?:[?#]|$)/i.test(entry.url || entry.name))) {
+      thumbnailEntries.set(tile, entry); thumbnailObserver.observe(tile);
+    }
   }
   function scan() {
     for (const a of document.querySelectorAll('a.fileThumb, .postMessage a[href]')) {
@@ -172,7 +225,7 @@ function init() {
       if (url.protocol !== 'https:' || !hosts.has(url.hostname)
         || !/\.(?:jpe?g|png|webp|gif|webm|mp4)$/i.test(url.pathname)) continue;
       add({ key: url.href, url: url.href, name: url.pathname.split('/').pop(),
-        thumb: a.matches('a.fileThumb') ? a.querySelector('img')?.src : null,
+        thumb: a.querySelector('img')?.src || a.querySelector('video[poster]')?.poster,
         selected: remembered.has(url.href) || a.closest('.highlighted') !== null });
     }
     count();
@@ -214,6 +267,7 @@ function init() {
   $('clear').onclick = () => {
     closePreview();
     for (const [key, e] of entries) if (e.file) {
+      thumbnailObserver.unobserve(e.tile); thumbnailQueue.delete(e); e.cancelThumbnail?.();
       if (e.thumb) URL.revokeObjectURL(e.thumb);
       if (e.previewUrl) URL.revokeObjectURL(e.previewUrl);
       e.tile.remove(); entries.delete(key);
