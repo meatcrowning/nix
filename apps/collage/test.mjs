@@ -78,6 +78,22 @@ try {
     }
     const ratioLayout=E.layout([{width:320,height:240}],1280,3/7);
     if(Math.abs(ratioLayout.width/ratioLayout.height-3/7)>0.002)throw new Error('output aspect ratio');
+    for (const header of [false, true]) for (const aspect of [0.4, 1, 2.5]) {
+      const media=[{width:640,height:100},{width:320,height:240},{width:240,height:320},{width:853,height:480}];
+      const l=E.layout(media,640,aspect,header,true);
+      const coverage=new Uint8Array(l.width*l.height);
+      for(const p of l.placements) {
+        if(p.x<0 || p.y<0 || p.x+p.width>l.width || p.y+p.height>l.height) throw Error('cropped tile');
+        for(let y=p.y;y<p.y+p.height;y++) for(let x=p.x;x<p.x+p.width;x++) coverage[y*l.width+x]++;
+        const source=media[p.index];
+        if(Math.abs(p.width-source.width/source.height*p.height)>4) throw Error('stretched tile');
+      }
+      if(coverage.some(n=>n!==1)) throw Error('video layout gap or overlap');
+    }
+    const single=E.layout([{width:320,height:240}],1280,3/7,false,true);
+    if(single.width!==1280 || single.height!==960) throw Error('single video padded');
+    const square=E.layout(Array.from({length:4},()=>({width:320,height:240})),640,4/3,false,true);
+    if(Math.abs(square.width/square.height-4/3)>0.01) throw Error('missed matching arrangement');
     const probes=[];
     const fallback=await E.selectCodec('webm',320,240,1_000_000,async (c,o)=>{probes.push([c,o]);return c==='vp9';});
     if(fallback!=='vp9' || probes.length!==2 || probes.some(([,o])=>o.latencyMode!=='quality' || o.hardwareAcceleration!=='no-preference')) throw new Error('codec probing');
@@ -237,6 +253,7 @@ try {
   await ui.getByRole('button',{name:'collage',exact:true}).click();
   await ui.locator('summary').click();
   await ui.getByRole('button',{name:'select all',exact:true}).click();
+  assert.equal(await page.locator('[data-ldg-mark]').first().evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(144, 238, 144)');
   await ui.getByRole('button',{name:'create collage'}).click();
   assert((await ui.locator('#message').innerText()).includes('at most 64'));
   await ui.locator('#panel').evaluate(el=>{el.scrollTop=el.scrollHeight;});
@@ -246,8 +263,12 @@ try {
     assert(bounds.y>=panelBounds.y && bounds.y+bounds.height<=panelBounds.y+panelBounds.height);
   }
   await ui.getByRole('button',{name:'select none',exact:true}).click();
+  assert.equal(await ui.locator('.tile.selected').count(),0);
+  assert.equal(await page.locator('[data-ldg-mark]').first().evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 255, 0)');
   await page.locator('#ldg-collage-v2').getByLabel('add files').setInputFiles(join(dir,'still.png'));
   assert.equal(await ui.locator('.tile').count(),71);
+  assert.equal(await ui.locator('.tile.selected').count(),1);
+  assert.equal(await ui.locator('.tile.selected').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(144, 238, 144)');
   assert.equal(await ui.getByRole('button',{name:'move earlier'}).count(),0);
   await ui.getByLabel('gallery view').selectOption('selected');
   assert.equal(await ui.locator('.tile:visible').count(),1);
@@ -368,7 +389,7 @@ try {
     assert.equal(await gallery.locator('.tile img').count(),1);
     assert.equal(await gallery.locator('.tile video').count(),0);
     assert.equal(await gallery.locator('.tile input:checked').count(),0);
-    assert.equal(await gallery.locator('.tile canvas').evaluate(c=>Math.max(c.width,c.height)),320);
+    assert.equal(await gallery.locator('.tile canvas').evaluate(c=>Math.max(c.width,c.height)),Math.min(320,Math.max(result.video.width,result.video.height)));
     await gallery.locator('.source-preview').first().click();
     assert.equal(await gallery.locator('#preview video').getAttribute('src'),mediaURL);
     await gallery.getByRole('button',{name:'close preview',exact:true}).click();

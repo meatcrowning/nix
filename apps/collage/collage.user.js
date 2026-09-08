@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ldg collage
 // @namespace    ldg-collage
-// @version      2.5.5
+// @version      2.5.6
 // @description  Image and fixed-frame-rate video collages, entirely in your browser
 // @match        https://boards.4chan.org/*/thread/*
 // @match        https://boards.4channel.org/*/thread/*
@@ -123,8 +123,9 @@
   function canvasBlob(c, type, quality) {
     return new Promise((resolve, reject) => c.toBlob((b) => b ? resolve(b) : reject(new Error("image encoding failed")), type, quality));
   }
-  function layout(media, edge, aspect = 1, header = false) {
-    const content = contentLayout(media, edge, aspect, header);
+  function layout(media, edge, aspect = 1, header = false, borderless = false) {
+    const content = contentLayout(media, edge, aspect, header, borderless);
+    if (borderless) return content;
     const width = Math.max(2, Math.floor(edge * Math.min(1, aspect) / 2) * 2);
     const height = Math.max(2, Math.floor(edge / Math.max(1, aspect) / 2) * 2);
     const scale = Math.min(width / content.width, height / content.height);
@@ -140,10 +141,11 @@
       };
     }) };
   }
-  function contentLayout(media, edge, aspect = 1, header = false) {
+  function contentLayout(media, edge, aspect = 1, header = false, borderless = false) {
     if (!media.length) throw new Error("select at least one file");
     if (header && media.length > 1) {
-      const body = contentLayout(media.slice(1), edge, aspect);
+      const bodyAspect = borderless ? 1 / Math.max(1 / aspect - media[0].height / media[0].width, 1e-6) : aspect;
+      const body = contentLayout(media.slice(1), edge, bodyAspect, false, borderless);
       const headerH = body.width * media[0].height / media[0].width;
       const scale = Math.min(1, edge / (body.height + headerH));
       const width = Math.max(2, Math.floor(body.width * scale / 2) * 2);
@@ -155,32 +157,43 @@
           index: p.index + 1,
           x: Math.round(p.x * width / body.width),
           y: hh + Math.round(p.y * (height2 - hh) / body.height),
-          width: Math.max(1, Math.round(p.width * width / body.width)),
-          height: Math.max(1, Math.round(p.height * (height2 - hh) / body.height))
+          width: Math.max(1, Math.round((p.x + p.width) * width / body.width) - Math.round(p.x * width / body.width)),
+          height: Math.max(1, Math.round((p.y + p.height) * (height2 - hh) / body.height) - Math.round(p.y * (height2 - hh) / body.height))
         }))
       ] };
     }
     const ratios = media.map((m) => m.width / m.height);
     const ideal = Math.sqrt(1 / (aspect * ratios.reduce((a, b) => a + b, 0)));
-    const cost = [0], prev = [0];
-    for (let end2 = 1; end2 <= ratios.length; end2++) {
-      cost[end2] = Infinity;
-      let sum = 0;
-      for (let start = end2 - 1; start >= 0; start--) {
-        sum += ratios[start];
-        const h = 1 / sum, score = cost[start] + (h - ideal) ** 2;
-        if (score < cost[end2]) {
-          cost[end2] = score;
-          prev[end2] = start;
+    let rows, bestError = Infinity;
+    const trials = borderless ? 65 : 1;
+    for (let trial = 0; trial < trials; trial++) {
+      const target = ideal * (borderless ? 2 ** ((trial - 32) / 8) : 1);
+      const cost = [0], prev = [0];
+      for (let end2 = 1; end2 <= ratios.length; end2++) {
+        cost[end2] = Infinity;
+        let sum = 0;
+        for (let start = end2 - 1; start >= 0; start--) {
+          sum += ratios[start];
+          const h = 1 / sum, score = cost[start] + (h - target) ** 2;
+          if (score < cost[end2]) {
+            cost[end2] = score;
+            prev[end2] = start;
+          }
         }
       }
-    }
-    const rows = [];
-    let end = ratios.length;
-    while (end) {
-      const start = prev[end];
-      rows.unshift([start, end]);
-      end = start;
+      const candidate = [];
+      let end = ratios.length;
+      while (end) {
+        const start = prev[end];
+        candidate.unshift([start, end]);
+        end = start;
+      }
+      const totalHeight = candidate.reduce((sum, [a, b]) => sum + 1 / ratios.slice(a, b).reduce((s, r) => s + r, 0), 0);
+      const error = Math.abs(Math.log(totalHeight * aspect));
+      if (error < bestError) {
+        rows = candidate;
+        bestError = error;
+      }
     }
     const heights = rows.map(([a, b]) => 1 / ratios.slice(a, b).reduce((s, r) => s + r, 0));
     const height = heights.reduce((a, b) => a + b, 0);
@@ -377,7 +390,7 @@
         o.frameCount = Math.max(1, Math.ceil((longest || 5) * o.fps - 1e-8));
         o.duration = o.frameCount / o.fps;
       }
-      const l = layout(media, o.edge, o.aspect, o.header);
+      const l = layout(media, o.edge, o.aspect, o.header, isVideo(o.format));
       const base = canvas(l.width, l.height);
       try {
         for (const p of l.placements) {
@@ -556,6 +569,7 @@
     .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
     #list { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:4px; }
     .tile { border:1px solid GrayText; padding:4px; overflow-wrap:anywhere; }
+    .tile.selected { background:#90ee90; color:#000; }
     .tile img,.tile canvas { width:100%; height:90px; object-fit:contain; }
     .tile .source-preview { display:block; width:100%; min-height:90px; }
     .source-preview img,.source-preview canvas { pointer-events:none; }
@@ -704,7 +718,10 @@
     };
     const count = () => {
       $("count").textContent = `${[...entries.values()].filter((e) => e.selected).length}/${entries.size} selected`;
-      for (const e of entries.values()) if (e.tile) e.tile.hidden = $("view").value === "selected" && !e.selected;
+      for (const e of entries.values()) if (e.tile) {
+        e.tile.hidden = $("view").value === "selected" && !e.selected;
+        e.tile.classList.toggle("selected", !!e.selected);
+      }
     };
     $("view").onchange = count;
     $("edge").oninput = () => {
@@ -1099,7 +1116,9 @@
           continue;
         }
         button.setAttribute("aria-pressed", String(entries.get(url)?.selected ?? remembered.has(url)));
-        const label = button.getAttribute("aria-pressed") === "true" ? "collage \u2212" : "collage +";
+        const selected = button.getAttribute("aria-pressed") === "true";
+        button.style.backgroundColor = selected ? "#90ee90" : "yellow";
+        const label = selected ? "collage \u2212" : "collage +";
         if (button.textContent !== label) button.textContent = label;
         button.disabled = !!controller;
       }

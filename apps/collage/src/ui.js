@@ -8,7 +8,7 @@ function init() {
   const host = document.createElement('div'); host.id = id;
   document.body.append(host);
   const root = host.attachShadow({ mode: 'open' });
-  // Self-contained dark controls; thread selection buttons retain their yellow fill.
+  // Self-contained dark controls; selected thread buttons and gallery tiles share a green fill.
   root.innerHTML = `<style>
     :host { font: inherit; color: #e8eaed; color-scheme:dark; }
     * { box-sizing: border-box; }
@@ -25,6 +25,7 @@ function init() {
     .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
     #list { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:4px; }
     .tile { border:1px solid GrayText; padding:4px; overflow-wrap:anywhere; }
+    .tile.selected { background:#90ee90; color:#000; }
     .tile img,.tile canvas { width:100%; height:90px; object-fit:contain; }
     .tile .source-preview { display:block; width:100%; min-height:90px; }
     .source-preview img,.source-preview canvas { pointer-events:none; }
@@ -142,7 +143,10 @@ function init() {
   };
   const count = () => {
     $('count').textContent = `${[...entries.values()].filter(e => e.selected).length}/${entries.size} selected`;
-    for (const e of entries.values()) if (e.tile) e.tile.hidden = $('view').value === 'selected' && !e.selected;
+    for (const e of entries.values()) if (e.tile) {
+      e.tile.hidden = $('view').value === 'selected' && !e.selected;
+      e.tile.classList.toggle('selected', !!e.selected);
+    }
   };
   $('view').onchange = count;
   $('edge').oninput = () => { $('scale-value').value = `${Math.round(Number($('edge').value) / 12.8)}% · ${$('edge').value}px`; };
@@ -374,7 +378,9 @@ function init() {
     for (const [button, url] of marks) {
       if (!button.isConnected) { marks.delete(button); continue; }
       button.setAttribute('aria-pressed', String(entries.get(url)?.selected ?? remembered.has(url)));
-      const label = button.getAttribute('aria-pressed') === 'true' ? 'collage −' : 'collage +';
+      const selected = button.getAttribute('aria-pressed') === 'true';
+      button.style.backgroundColor = selected ? '#90ee90' : 'yellow';
+      const label = selected ? 'collage −' : 'collage +';
       if (button.textContent !== label) button.textContent = label;
       button.disabled = !!controller;
     }
