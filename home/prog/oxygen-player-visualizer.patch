@@ -46,7 +46,7 @@
 +    QRect visualizer;
 +    if (player && cR.first.width() >= 112) {
 +        visualizer = QRect(cR.first.left(), cR.first.top(), 72, cR.first.height());
-+        cR.first.setLeft(visualizer.right() + settings()->smallSpacing());
++        cR.first.setLeft(visualizer.right() + 2 * settings()->smallSpacing());
 +    }
  
      // copy caption
