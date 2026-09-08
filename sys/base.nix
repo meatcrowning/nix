@@ -93,7 +93,7 @@
   # was already full, so auth/sudo history rotated in ~a week). 1G roughly
   # doubles the trail for spotting a late-noticed compromise; trivial on a 1.8T
   # root that currently sits ~72% used.
-  services.journald.extraConfig = "SystemMaxUse=1G";
+  services.journald.settings.Journal.SystemMaxUse = "1G";
   zramSwap.enable = true;                                   # RAM-compressed swap
                                                             # ahead of the on-disk swapfile
 
