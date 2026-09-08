@@ -27,12 +27,10 @@ function init() {
     .tile .source-preview { display:block; width:100%; min-height:90px; }
     .source-preview img { pointer-events:none; }
     .tile label { display:block; } .tile input { vertical-align:middle; }
-    #message { white-space:pre-wrap; overflow-wrap:anywhere; }
-    #close { margin-left:auto; }
-    #results { display:flex; flex-wrap:wrap; gap:8px; }
-    #results article { max-width:240px; }
-    #results a { display:block; padding:4px 0; }
-    #results img,#results video { width:100%; max-height:180px; object-fit:contain; }
+    #panel-head { position:sticky; top:-8px; z-index:2; display:flex; gap:8px;
+      align-items:flex-start; background:Canvas; padding:8px 0; }
+    #message { flex:1; min-width:0; margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+    #close { flex:none; margin-left:auto; }
     #preview { position:fixed; inset:0; margin:0; border:0; padding:0; width:100vw; height:100vh;
       max-width:none; max-height:none; background:#000; color:#fff;
       align-items:center; justify-content:center; }
@@ -46,7 +44,7 @@ function init() {
   </style>
   <button id="open" aria-expanded="false" aria-controls="panel">collage</button>
   <section id="panel" role="dialog" aria-modal="true" aria-label="collage" hidden>
-    <div class="bar"><button id="close" aria-label="close collage">X</button></div>
+    <div id="panel-head"><p id="message" role="status" aria-live="polite"></p><button id="close" aria-label="close collage">X</button></div>
     <fieldset id="settings">
     <div class="bar">
       <label>aspect ratio <input id="aspect" type="text" value="1:1" placeholder="2:3, 0.5, 3/7" size="12" list="ratios"></label>
@@ -69,7 +67,6 @@ function init() {
       <button id="all">select all</button><button id="none">select none</button>
       <button id="clear">clear list</button><span id="count"></span></div>
     <div id="list" aria-label="media selection"></div>
-    <p id="message" role="status" aria-live="polite"></p><div id="results"></div>
   </section>
   <dialog id="preview" aria-label="media preview" hidden>
     <button id="preview-close" aria-label="close preview">X</button>
@@ -79,7 +76,7 @@ function init() {
   for (const name of ['format', 'edge', 'aspect', 'fps', 'duration', 'limit', 'parts'])
     $(name).setAttribute('aria-label', { format: 'output', edge: 'scale', aspect: 'aspect ratio',
       fps: 'fps', duration: 'seconds', limit: 'limit (MB)', parts: 'collages' }[name]);
-  const entries = new Map(); const resultUrls = []; let header = null, controller = null;
+  const entries = new Map(); let header = null, controller = null;
   const storageKey = `ldg-collage-v2:${location.pathname}`;
   let remembered = new Set();
   try {
@@ -190,7 +187,7 @@ function init() {
     controller = new AbortController(); const signal = controller.signal;
     const controls = [...$('panel').querySelectorAll('button,input,select')].filter(el => !['close', 'cancel'].includes(el.id));
     const disabled = controls.map(e => e.disabled); controls.forEach(e => { e.disabled = true; }); $('cancel').disabled = false;
-    closePreview(); $('results').replaceChildren(); resultUrls.splice(0).forEach(url => URL.revokeObjectURL(url));
+    closePreview();
     try {
       const groups = Array.from({ length: parts }, () => []);
       chosen.forEach((entry, i) => groups[i % parts].push(entry));
@@ -207,23 +204,21 @@ function init() {
         const result = await exportCollage(blobs, { ...opts, header: !!header }, signal,
           text => message(`collage ${part + 1}/${parts}: ${text}`));
         check(signal);
-        const url = URL.createObjectURL(result.blob); resultUrls.push(url);
+        const url = URL.createObjectURL(result.blob);
         const link = document.createElement('a'); link.href = url;
         const board = location.pathname.split('/')[1] || 'custom';
         const thread = /\/thread\/(\d+)/.exec(location.pathname)?.[1] || 'custom';
         link.download = `highlights_${board}_${thread}_${Math.floor(Date.now() / 1000)}_${part + 1}.${result.extension}`;
-        link.textContent = `save collage ${part + 1} · ${result.width}×${result.height} · ${(result.blob.size / 1e6).toFixed(2)} MB`
-          + (result.frames ? ` · ${result.frames} frames at ${result.fps} fps` : '');
-        const card = document.createElement('article'), show = document.createElement('button');
-        show.setAttribute('aria-label', `preview collage ${part + 1}`);
-        const thumbnail = document.createElement(result.frames ? 'video' : 'img');
-        thumbnail.src = url;
-        if (result.frames) { thumbnail.muted = true; thumbnail.preload = 'metadata'; }
-        else thumbnail.alt = `collage ${part + 1}`;
-        show.append(thumbnail); show.onclick = () => openPreview(url, !!result.frames, show);
-        card.append(show, link); $('results').append(card);
+        link.hidden = true; root.append(link);
+        try { link.click(); }
+        finally {
+          link.remove();
+          // Firefox consumes the URL asynchronously. Do not revoke on the next export.
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+        }
       }
-      message('ready to save');
+      // An anchor cannot confirm a disk write or bypass browser download permissions.
+      message(`${parts} download${parts === 1 ? '' : 's'} requested; check browser downloads`);
     } catch (e) { message(signal.aborted ? 'cancelled' : e.message || String(e)); }
     finally { controls.forEach((el, i) => { el.disabled = disabled[i]; }); $('cancel').disabled = true; controller = null; }
   };
@@ -262,7 +257,7 @@ function init() {
     for (const [button, url] of marks) {
       if (!button.isConnected) { marks.delete(button); continue; }
       button.setAttribute('aria-pressed', String(entries.get(url)?.selected ?? remembered.has(url)));
-      button.textContent = button.getAttribute('aria-pressed') === 'true' ? 'selected' : 'collage +';
+      button.textContent = button.getAttribute('aria-pressed') === 'true' ? 'collage −' : 'collage +';
       button.disabled = !!controller;
     }
   }
@@ -275,9 +270,11 @@ function init() {
       if (u.protocol !== 'https:' || !hosts.has(u.hostname) || !/\.(jpe?g|png|webp|gif|webm|mp4)$/i.test(u.pathname)) continue;
       a.dataset.ldgMarked = '1';
       const button = document.createElement('button'); button.type = 'button'; button.dataset.ldgMark = '1';
-      button.style.cssText = 'font:inherit;min-height:28px;cursor:pointer';
+      button.style.cssText = 'display:inline-block;font:inherit;line-height:1;height:1em;min-height:0;width:9ch;padding:0;margin:0 0 0 4px;border:0;background:transparent;color:inherit;vertical-align:baseline;white-space:nowrap;cursor:pointer';
       button.setAttribute('aria-label', `select ${u.pathname.split('/').pop()} for collage`);
-      marks.set(button, u.href); a.after(button);
+      marks.set(button, u.href);
+      const info = a.matches('a.fileThumb') && a.closest('.file')?.querySelector('.fileText, .file-info');
+      if (info) info.append(button); else a.after(button);
       button.onclick = () => {
         if (controller) return;
         // Seed the complete remembered selection before saving changes.
