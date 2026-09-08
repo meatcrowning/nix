@@ -91,18 +91,19 @@ in
           {
             name = "org.kde.plasma.digitalclock";
             config.Appearance = {
-              autoFontAndSize = false;
               dateDisplayFormat = "BesideTime";
               dateFormat = "longDate";
               displayTimezoneFormat = "FullText";
+              use24hFormat = 0;
+            } // lib.optionalAttrs (host == "top") {
+              # Match the 8-point Oxygen Sans inherited by the global-menu
+              # labels on top. Keep these keys host-local so applying the
+              # shared panel layout does not replace air's own clock font.
+              autoFontAndSize = false;
               fontFamily = "Oxygen-Sans";
-              # The deliberately compact clock text from the live panel. Keep
-              # this in the shared layout so a panel migration/rebuild does
-              # not restore the earlier 9-point setting on either host.
-              fontSize = 6;
+              fontSize = 8;
               fontStyleName = "Sans-Book";
               fontWeight = 400;
-              use24hFormat = 0;
             };
           }
           "org.kde.plasma.panelspacer"
