@@ -1,4 +1,4 @@
-import { exportCollage, LIMITS, check, isVideo, normalizeBlob } from './engine.js';
+import { exportCollage, LIMITS, check, isVideo, normalizeBlob, parseAspect } from './engine.js';
 
 const hosts = new Set(['i.4cdn.org', 'files.catbox.moe', 'litter.catbox.moe', 'uguu.se']);
 const id = 'ldg-collage-v2';
@@ -24,6 +24,8 @@ function init() {
     #list { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:4px; }
     .tile { border:1px solid GrayText; padding:4px; overflow-wrap:anywhere; }
     .tile img { width:100%; height:90px; object-fit:contain; }
+    .tile .source-preview { display:block; width:100%; min-height:90px; }
+    .source-preview img { pointer-events:none; }
     .tile label { display:block; } .tile input { vertical-align:middle; }
     #message { white-space:pre-wrap; overflow-wrap:anywhere; }
     #close { margin-left:auto; }
@@ -31,9 +33,13 @@ function init() {
     #results article { max-width:240px; }
     #results a { display:block; padding:4px 0; }
     #results img,#results video { width:100%; max-height:180px; object-fit:contain; }
-    #preview { position:fixed; inset:0; z-index:2147483647; background:#000; color:#fff;
-      display:flex; align-items:center; justify-content:center; }
-    #preview img,#preview video { max-width:100%; max-height:100%; object-fit:contain; }
+    #preview { position:fixed; inset:0; margin:0; border:0; padding:0; width:100vw; height:100vh;
+      max-width:none; max-height:none; background:#000; color:#fff;
+      align-items:center; justify-content:center; }
+    #preview[open] { display:flex; }
+    #preview img,#preview video { max-width:calc(100vw - 64px); max-height:calc(100vh - 64px); object-fit:contain; }
+    #preview img { cursor:zoom-out; }
+    #preview-status { position:absolute; bottom:8px; }
     #preview-close { position:absolute; top:8px; right:8px; z-index:1; }
     summary { cursor:pointer; min-height:28px; }
     .help { font-size:0.9em; } fieldset { border:0; padding:0; margin:0; }
@@ -43,8 +49,9 @@ function init() {
     <div class="bar"><button id="close" aria-label="close collage">X</button></div>
     <fieldset id="settings">
     <div class="bar">
-      <label>aspect ratio <select id="aspect"><option value="1">1:1</option><option value="1.7777777778">16:9</option><option value="0.5625">9:16</option></select></label>
-      <label>scale <select id="edge"><option value="640">50% · 640px</option><option value="960">75% · 960px</option><option value="1280" selected>100% · 1280px</option><option value="1920">150% · 1920px</option><option value="2048">160% · 2048px</option></select></label>
+      <label>aspect ratio <input id="aspect" type="text" value="1:1" placeholder="2:3, 0.5, 3/7" size="12" list="ratios"></label>
+      <datalist id="ratios"><option value="1:1"><option value="16:9"><option value="9:16"><option value="4:3"><option value="3:2"><option value="2:3"><option value="21:9"></datalist>
+      <label>scale <input id="edge" type="range" min="320" max="2048" step="2" value="1280"><output id="scale-value" for="edge">100% · 1280px</output></label>
       <button id="export">create collage</button><button id="cancel" disabled>cancel</button>
     </div>
     <details id="advanced"><summary>advanced</summary>
@@ -54,18 +61,20 @@ function init() {
     <div class="bar">
       <label>output <select id="format"><option value="auto">automatic</option><option value="webm">video · webm</option><option value="mp4">video · mp4 (h.264)</option><option value="jpeg">image · jpeg</option><option value="png">image · png</option></select></label>
       <label>fps <select id="fps"><option>15</option><option>24</option><option selected>30</option><option>60</option></select></label>
-      <label>seconds <input id="duration" type="number" min="1" max="15" step="1" value="5" size="3"></label>
+      <label>seconds <input id="duration" type="number" min="0.01" max="300" step="any" placeholder="auto" size="6"></label>
       <label>limit (MB) <input id="limit" type="number" min="0.1" max="32" step="0.1" value="4" size="3"></label>
       <label>collages <input id="parts" type="number" min="1" max="16" step="1" value="1" size="3"></label>
     </div></details></fieldset>
-    <div class="bar"><button id="all">select all</button><button id="none">select none</button>
+    <div class="bar"><label>show <select id="view" aria-label="gallery view"><option value="all">all files</option><option value="selected">selected only</option></select></label>
+      <button id="all">select all</button><button id="none">select none</button>
       <button id="clear">clear list</button><span id="count"></span></div>
     <div id="list" aria-label="media selection"></div>
     <p id="message" role="status" aria-live="polite"></p><div id="results"></div>
   </section>
-  <section id="preview" role="dialog" aria-modal="true" aria-label="collage preview" hidden>
+  <dialog id="preview" aria-label="media preview" hidden>
     <button id="preview-close" aria-label="close preview">X</button>
-  </section>`;
+    <p id="preview-status" role="status"></p>
+  </dialog>`;
   const $ = name => root.getElementById(name);
   for (const name of ['format', 'edge', 'aspect', 'fps', 'duration', 'limit', 'parts'])
     $(name).setAttribute('aria-label', { format: 'output', edge: 'scale', aspect: 'aspect ratio',
@@ -85,27 +94,31 @@ function init() {
       localStorage.setItem(storageKey, JSON.stringify([...remembered])); }
     catch { message('selection could not be saved; browser storage is full'); }
   };
-  const count = () => { $('count').textContent = `${[...entries.values()].filter(e => e.selected).length}/${entries.size} selected`; };
+  const count = () => {
+    $('count').textContent = `${[...entries.values()].filter(e => e.selected).length}/${entries.size} selected`;
+    for (const e of entries.values()) if (e.tile) e.tile.hidden = $('view').value === 'selected' && !e.selected;
+  };
+  $('view').onchange = count;
+  $('edge').oninput = () => { $('scale-value').value = `${Math.round(Number($('edge').value) / 12.8)}% · ${$('edge').value}px`; };
   function add(entry) {
     if (entries.has(entry.key)) return;
-    if (entries.size >= LIMITS.items) { message('list limit: 64 files'); return; }
     entries.set(entry.key, entry);
     const tile = document.createElement('div'); tile.className = 'tile';
-    if (entry.thumb) { const img = new Image(); img.src = entry.thumb; img.loading = 'lazy'; img.alt = ''; tile.append(img); }
+    const show = document.createElement('button'); show.className = 'source-preview';
+    show.setAttribute('aria-label', `preview ${entry.name}`);
+    if (entry.thumb) { const img = new Image(); img.src = entry.thumb; img.loading = 'lazy'; img.alt = ''; show.append(img); }
+    else show.textContent = 'preview';
+    show.onclick = () => {
+      if (!entry.url && !entry.previewUrl) entry.previewUrl = URL.createObjectURL(entry.file);
+      const video = entry.file?.type.startsWith('video/') || /\.(webm|mp4)(?:[?#]|$)/i.test(entry.url || entry.name);
+      openPreview(entry.url || entry.previewUrl, video, show);
+    };
+    tile.append(show);
     const label = document.createElement('label'), box = document.createElement('input');
     box.type = 'checkbox'; box.checked = !!entry.selected;
     box.addEventListener('change', () => { entry.selected = box.checked; count(); persist(); syncMarks(); });
     label.append(box, document.createTextNode(` ${entry.name}`)); tile.append(label);
-    const up = document.createElement('button'); up.textContent = 'move earlier';
-    up.onclick = () => {
-      if (controller) return;
-      const items = [...entries.values()], i = items.indexOf(entry);
-      if (i < 1) return;
-      [items[i - 1], items[i]] = [items[i], items[i - 1]];
-      entries.clear(); for (const item of items) entries.set(item.key, item);
-      tile.parentNode.insertBefore(tile, tile.previousElementSibling); persist();
-    };
-    tile.append(up); entry.box = box; entry.tile = tile; $('list').append(tile); count();
+    entry.box = box; entry.tile = tile; $('list').append(tile); count();
   }
   function scan() {
     for (const a of document.querySelectorAll('a.fileThumb, .postMessage a[href]')) {
@@ -123,7 +136,7 @@ function init() {
         message(`unsupported file: ${file.name}`); continue;
       }
       const key = `file:${file.name}:${file.size}:${file.lastModified}`;
-      if (entries.has(key) || entries.size >= LIMITS.items) continue;
+      if (entries.has(key)) continue;
       const thumb = file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
       add({ key, file, name: file.name, thumb, selected: true });
     }
@@ -151,7 +164,9 @@ function init() {
     for (const entry of entries.values()) { entry.selected = selected; entry.box.checked = selected; } count(); persist(); syncMarks();
   };
   $('clear').onclick = () => {
+    closePreview();
     for (const e of entries.values()) if (e.file && e.thumb) URL.revokeObjectURL(e.thumb);
+    for (const e of entries.values()) if (e.previewUrl) URL.revokeObjectURL(e.previewUrl);
     entries.clear(); $('list').replaceChildren(); remembered.clear(); count(); persist(); syncMarks();
   };
   $('cancel').onclick = () => controller?.abort(new DOMException('cancelled', 'AbortError'));
@@ -165,8 +180,13 @@ function init() {
     if (!chosen.length) { message('select at least one file'); return; }
     const parts = Number($('parts').value);
     if (!Number.isInteger(parts) || parts < 1 || parts > Math.min(16, chosen.length)) { message('invalid collage count'); return; }
-    const opts = { format: $('format').value, edge: Number($('edge').value), aspect: Number($('aspect').value),
-      fps: Number($('fps').value), duration: Number($('duration').value), maxBytes: Number($('limit').value) * 1e6 };
+    if (Math.ceil(chosen.length / parts) + (header ? 1 : 0) > LIMITS.items) {
+      message('at most 64 files per collage; increase collages or select fewer files'); return;
+    }
+    let aspect;
+    try { aspect = parseAspect($('aspect').value); } catch (e) { message(e.message); $('aspect').focus(); return; }
+    const opts = { format: $('format').value, edge: Number($('edge').value), aspect,
+      fps: Number($('fps').value), duration: $('duration').value === '' ? 'auto' : Number($('duration').value), maxBytes: Number($('limit').value) * 1e6 };
     controller = new AbortController(); const signal = controller.signal;
     const controls = [...$('panel').querySelectorAll('button,input,select')].filter(el => !['close', 'cancel'].includes(el.id));
     const disabled = controls.map(e => e.disabled); controls.forEach(e => { e.disabled = true; }); $('cancel').disabled = false;
@@ -212,6 +232,7 @@ function init() {
     const media = $('preview').querySelector('img,video');
     if (media) { if (media.tagName === 'VIDEO') { media.pause(); media.removeAttribute('src'); media.load(); } media.remove(); }
     const wasOpen = !$('preview').hidden;
+    if ($('preview').open) $('preview').close();
     $('preview').hidden = true; $('panel').inert = false; $('open').disabled = false;
     if (wasOpen) previewFocus?.focus();
   }
@@ -220,11 +241,15 @@ function init() {
     const media = document.createElement(video ? 'video' : 'img'); media.src = url;
     if (video) { media.controls = true; media.loop = true; media.muted = true; media.playsInline = true; }
     else media.alt = 'collage preview';
-    $('preview').append(media); $('preview').hidden = false;
+    $('preview-status').textContent = '';
+    media.onerror = () => { $('preview-status').textContent = 'this file could not be previewed'; };
+    if (!video) media.onclick = closePreview;
+    $('preview').append(media); $('preview').hidden = false; $('preview').showModal();
     $('panel').inert = true; $('open').disabled = true; $('preview-close').focus();
     if (video) media.play().catch(() => {}); // Native controls remain available.
   }
   $('preview-close').onclick = closePreview;
+  $('preview').oncancel = e => { e.preventDefault(); closePreview(); };
   $('preview').onclick = e => { if (e.target === $('preview')) closePreview(); };
   $('preview').onkeydown = e => {
     if (e.key === 'Escape') { e.preventDefault(); closePreview(); }
