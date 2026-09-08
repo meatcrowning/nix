@@ -623,6 +623,9 @@ Custom-tool manifests may declare `"host": "top"` or `"host": "book"`.
 route when that is not the window's host; absent/invalid means local. This is
 what keeps `soulseek_album` on `top`, beside slskd and the canonical library,
 even when chatter is open on `book`.
+`soulseek_status` uses the same host route for a read-only live queue summary;
+status prompts must use it rather than guessing sockets, database schemas, or
+filesystem state.
 
 **So the default model is the parent's, deliberately.** Spawning
 `qwen3-coder:30b` from a `qwen3.6:35b-a3b` turn means ollama unloading 22.3 GiB
