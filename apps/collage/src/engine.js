@@ -79,8 +79,9 @@ export function canvasBlob(c, type, quality) {
 
 // Justified rows preserve source aspect ratios and order. Dynamic programming
 // selects row breaks; no random layout or completion-order-dependent placement.
-export function layout(media, edge, aspect = 1, header = false) {
-  const content = contentLayout(media, edge, aspect, header);
+export function layout(media, edge, aspect = 1, header = false, borderless = false) {
+  const content = contentLayout(media, edge, aspect, header, borderless);
+  if (borderless) return content;
   const width = Math.max(2, Math.floor(edge * Math.min(1, aspect) / 2) * 2);
   const height = Math.max(2, Math.floor(edge / Math.max(1, aspect) / 2) * 2);
   const scale = Math.min(width / content.width, height / content.height);
@@ -92,10 +93,11 @@ export function layout(media, edge, aspect = 1, header = false) {
       height: Math.max(1, Math.round(y + (p.y + p.height) * scale) - top) };
   }) };
 }
-function contentLayout(media, edge, aspect = 1, header = false) {
+function contentLayout(media, edge, aspect = 1, header = false, borderless = false) {
   if (!media.length) throw new Error('select at least one file');
   if (header && media.length > 1) {
-    const body = contentLayout(media.slice(1), edge, aspect);
+    const bodyAspect = borderless ? 1 / Math.max(1 / aspect - media[0].height / media[0].width, 1e-6) : aspect;
+    const body = contentLayout(media.slice(1), edge, bodyAspect, false, borderless);
     const headerH = body.width * media[0].height / media[0].width;
     const scale = Math.min(1, edge / (body.height + headerH));
     const width = Math.max(2, Math.floor(body.width * scale / 2) * 2);
@@ -104,22 +106,33 @@ function contentLayout(media, edge, aspect = 1, header = false) {
     return { width, height, placements: [{ index: 0, x: 0, y: 0, width, height: hh },
       ...body.placements.map(p => ({ index: p.index + 1, x: Math.round(p.x * width / body.width),
         y: hh + Math.round(p.y * (height - hh) / body.height),
-        width: Math.max(1, Math.round(p.width * width / body.width)),
-        height: Math.max(1, Math.round(p.height * (height - hh) / body.height)) }))] };
+        width: Math.max(1, Math.round((p.x + p.width) * width / body.width) - Math.round(p.x * width / body.width)),
+        height: Math.max(1, Math.round((p.y + p.height) * (height - hh) / body.height) - Math.round(p.y * (height - hh) / body.height)) }))] };
   }
   const ratios = media.map(m => m.width / m.height);
   const ideal = Math.sqrt(1 / (aspect * ratios.reduce((a, b) => a + b, 0)));
-  const cost = [0], prev = [0];
-  for (let end = 1; end <= ratios.length; end++) {
-    cost[end] = Infinity; let sum = 0;
-    for (let start = end - 1; start >= 0; start--) {
-      sum += ratios[start];
-      const h = 1 / sum, score = cost[start] + (h - ideal) ** 2;
-      if (score < cost[end]) { cost[end] = score; prev[end] = start; }
+  // Compare deterministic justified arrangements across row-height targets.
+  // The requested ratio guides row breaks; video never pads to enforce it.
+  let rows, bestError = Infinity;
+  const trials = borderless ? 65 : 1;
+  for (let trial = 0; trial < trials; trial++) {
+    const target = ideal * (borderless ? 2 ** ((trial - 32) / 8) : 1);
+    const cost = [0], prev = [0];
+    for (let end = 1; end <= ratios.length; end++) {
+      cost[end] = Infinity; let sum = 0;
+      for (let start = end - 1; start >= 0; start--) {
+        sum += ratios[start];
+        const h = 1 / sum, score = cost[start] + (h - target) ** 2;
+        if (score < cost[end]) { cost[end] = score; prev[end] = start; }
+      }
     }
+    const candidate = []; let end = ratios.length;
+    while (end) { const start = prev[end]; candidate.unshift([start, end]); end = start; }
+    const totalHeight = candidate.reduce((sum, [a, b]) =>
+      sum + 1 / ratios.slice(a, b).reduce((s, r) => s + r, 0), 0);
+    const error = Math.abs(Math.log(totalHeight * aspect));
+    if (error < bestError) { rows = candidate; bestError = error; }
   }
-  const rows = []; let end = ratios.length;
-  while (end) { const start = prev[end]; rows.unshift([start, end]); end = start; }
   const heights = rows.map(([a, b]) => 1 / ratios.slice(a, b).reduce((s, r) => s + r, 0));
   const height = heights.reduce((a, b) => a + b, 0);
   const widthPx = Math.max(2, Math.floor(edge / Math.max(1, height) / 2) * 2);
@@ -269,7 +282,7 @@ export async function exportCollage(blobs, raw, signal, progress = () => {}, war
       o.frameCount = Math.max(1, Math.ceil((longest || 5) * o.fps - 1e-8));
       o.duration = o.frameCount / o.fps;
     }
-    const l = layout(media, o.edge, o.aspect, o.header);
+    const l = layout(media, o.edge, o.aspect, o.header, isVideo(o.format));
     const base = canvas(l.width, l.height);
     try {
       for (const p of l.placements) {

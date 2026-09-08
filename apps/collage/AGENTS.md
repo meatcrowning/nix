@@ -80,7 +80,8 @@ are rejected before downloads; disabled video fields cannot block image exports.
 
 The main panel exposes a positive decimal/colon/fraction aspect ratio and a
 dark theme shared with the main collage button and controls; respect forced
-colours for accessibility, and keep the thread selection buttons yellow. It has a
+colours for accessibility, and keep unselected thread buttons yellow; selected buttons and gallery tiles
+share a light green background with black text. It has a
 scale slider (1280px longest edge at 100%) above the gallery, with one create action. Advanced contains
 format, fps, duration, size limit, collage count, local files and header input.
 The default automatic format is resolved from decoded input types per collage:
@@ -112,6 +113,8 @@ their object URLs; it preserves thread files, their selection and saved selectio
 the 64-input export limit is separate from the gallery's size. No reorder buttons.
 Blank seconds means longest input video, rounded up to the next output frame;
 image-only video export defaults to five seconds. Explicit seconds overrides it.
-Reject auto durations over 300s rather than silently truncating. Layout fits
-undistorted tiles inside the requested output ratio with padding as needed;
+Reject auto durations over 300s rather than silently truncating. Image layout fits
+undistorted tiles inside the requested output ratio with padding as needed. Video
+layout compares justified row arrangements against the requested ratio and uses
+the actual content dimensions, without added borders or cropping;
 dimensions are rounded to even pixels. Keep the distributed namespace anonymous.
