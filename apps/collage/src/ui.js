@@ -1,4 +1,4 @@
-import { exportCollage, LIMITS, check, isVideo, normalizeBlob, parseAspect } from './engine.js';
+import { exportCollage, LIMITS, check, isVideo, normalizeBlob, parseAspect, options } from './engine.js';
 
 const hosts = new Set(['i.4cdn.org', 'files.catbox.moe', 'litter.catbox.moe', 'uguu.se']);
 const id = 'ldg-collage-v2';
@@ -164,7 +164,7 @@ function init() {
     box.type = 'checkbox'; box.checked = !!entry.selected;
     box.addEventListener('change', () => { entry.selected = box.checked; count(); persist(); syncMarks(); });
     label.append(box, document.createTextNode(` ${entry.name}`)); tile.append(label);
-    entry.box = box; entry.tile = tile; $('list').append(tile); count();
+    entry.box = box; entry.tile = tile; $('list').append(tile);
   }
   function scan() {
     for (const a of document.querySelectorAll('a.fileThumb, .postMessage a[href]')) {
@@ -175,18 +175,20 @@ function init() {
         thumb: a.matches('a.fileThumb') ? a.querySelector('img')?.src : null,
         selected: remembered.has(url.href) || a.closest('.highlighted') !== null });
     }
+    count();
   }
   function addFiles(files) {
     for (const file of files) {
-      if (!file.type.startsWith('image/') && !/\.(webm|mp4)$/i.test(file.name)) {
+      const image = file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif)$/i.test(file.name);
+      if (!image && !/\.(webm|mp4)$/i.test(file.name)) {
         message(`unsupported file: ${file.name}`); continue;
       }
       const key = `file:${file.name}:${file.size}:${file.lastModified}`;
       if (entries.has(key)) continue;
-      const thumb = file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
+      const thumb = image ? URL.createObjectURL(file) : null;
       add({ key, file, name: file.name, thumb, selected: true });
     }
-    persist();
+    count(); persist();
   }
   let previousFocus;
   $('open').onclick = () => { if (!$('panel').hidden) { $('close').click(); return; }
@@ -237,8 +239,13 @@ function init() {
     try { aspect = parseAspect($('aspect').value); } catch (e) { message(e.message); $('aspect').focus(); return; }
     const opts = { format: $('format').value, edge: Number($('edge').value), aspect,
       fps: Number($('fps').value), duration: $('duration').value === '' ? 'auto' : Number($('duration').value), maxBytes: Number($('limit').value) * 1e6 };
+    // Disabled video-only fields must not prevent an image export.
+    if (opts.format !== 'auto' && !isVideo(opts.format)) { opts.duration = 5; opts.fps = 30; }
+    try { options(opts); } catch (e) { message(e.message); return; }
+    if (header && header.size > LIMITS.bytes) { message('header exceeds 256 MiB'); return; }
     warningAccepted = false;
     controller = new AbortController(); const signal = controller.signal;
+    syncMarks();
     const controls = [...$('panel').querySelectorAll('button,input,select')].filter(el => !['close', 'cancel'].includes(el.id));
     const disabled = controls.map(e => e.disabled); controls.forEach(e => { e.disabled = true; }); $('cancel').disabled = false;
     closePreview();
@@ -253,7 +260,7 @@ function init() {
           const blob = entry.file || await fetchBlob(entry.url, signal, LIMITS.bytes - bytes);
           bytes += blob.size;
           if (bytes > LIMITS.bytes) throw new Error('selected files exceed 256 MiB; split this collage');
-          blobs.push(blob);
+          blobs.push(entry.file || new File([blob], entry.name, { type:blob.type }));
         }
         const result = await exportCollage(blobs, { ...opts, header: !!header }, signal,
           text => message(`collage ${part + 1}/${parts}: ${text}`), info => warnLargeJob(info, signal));
@@ -274,7 +281,7 @@ function init() {
       // An anchor cannot confirm a disk write or bypass browser download permissions.
       message(`${parts} download${parts === 1 ? '' : 's'} requested; check browser downloads`);
     } catch (e) { message(signal.aborted ? 'cancelled' : e.message || String(e)); }
-    finally { controls.forEach((el, i) => { el.disabled = disabled[i]; }); $('cancel').disabled = true; controller = null; }
+    finally { controls.forEach((el, i) => { el.disabled = disabled[i]; }); $('cancel').disabled = true; controller = null; syncMarks(); }
   };
   let previewFocus;
   function closePreview() {
@@ -307,28 +314,47 @@ function init() {
   // One small button per media link; process only newly inserted subtrees.
   // Marking works with a keyboard, touch or a mouse, without modifier keys.
   const marks = new Map();
+  const linkMarks = new WeakMap();
   function syncMarks() {
     for (const [button, url] of marks) {
       if (!button.isConnected) { marks.delete(button); continue; }
       button.setAttribute('aria-pressed', String(entries.get(url)?.selected ?? remembered.has(url)));
-      button.textContent = button.getAttribute('aria-pressed') === 'true' ? 'collage −' : 'collage +';
+      const label = button.getAttribute('aria-pressed') === 'true' ? 'collage −' : 'collage +';
+      if (button.textContent !== label) button.textContent = label;
       button.disabled = !!controller;
     }
+  }
+  function placeMark(a, button) {
+    const info = a.matches('a.fileThumb') && a.closest('.file')?.querySelector('.fileText, .file-info');
+    if (!info) { if (a.nextSibling !== button) a.after(button); return; }
+    // X/XT put formatted dimensions in .file-info and keep a hidden native copy.
+    // Insert outside that span so formatting never absorbs our button.
+    const formatted = info.matches('.file-info') ? info : info.querySelector('.file-info');
+    if (formatted) { if (formatted.nextSibling !== button) formatted.after(button); return; }
+    let sauce = info.querySelector('a.sauce');
+    if (sauce) {
+      while (sauce.parentElement !== info) sauce = sauce.parentElement;
+      if (sauce.previousSibling !== button) info.insertBefore(button, sauce);
+    } else if (info.lastChild !== button) info.append(button);
   }
   function markLinks(node) {
     if (!(node instanceof Element) || node === host || node.hasAttribute('data-ldg-mark')) return;
     const links = node.matches('a.fileThumb, .postMessage a[href]') ? [node] : node.querySelectorAll('a.fileThumb, .postMessage a[href]');
     for (const a of links) {
-      if (a.dataset.ldgMarked) continue;
+      const existing = linkMarks.get(a);
+      if (existing) { placeMark(a, existing); marks.set(existing, a.href); continue; }
       let u; try { u = new URL(a.href); } catch { continue; }
       if (u.protocol !== 'https:' || !hosts.has(u.hostname) || !/\.(jpe?g|png|webp|gif|webm|mp4)$/i.test(u.pathname)) continue;
       a.dataset.ldgMarked = '1';
-      const button = document.createElement('button'); button.type = 'button'; button.dataset.ldgMark = '1';
+      const label = `select ${u.pathname.split('/').pop()} for collage`;
+      // Extension post clones copy our markup but not event handlers/WeakMap keys.
+      const orphan = a.matches('a.fileThumb') && [...(a.closest('.file')?.querySelectorAll('button[data-ldg-mark]') || [])]
+        .find(b => !marks.has(b) && b.getAttribute('aria-label') === label);
+      const button = orphan || document.createElement('button'); button.type = 'button'; button.dataset.ldgMark = '1';
       button.style.cssText = 'display:inline-block;font:inherit;line-height:1;height:1em;min-height:0;width:9ch;padding:0;margin:0 0 0 4px;border:0;background:yellow;color:black;vertical-align:baseline;white-space:nowrap;cursor:pointer';
-      button.setAttribute('aria-label', `select ${u.pathname.split('/').pop()} for collage`);
+      button.setAttribute('aria-label', label);
       marks.set(button, u.href);
-      const info = a.matches('a.fileThumb') && a.closest('.file')?.querySelector('.fileText, .file-info');
-      if (info) info.append(button); else a.after(button);
+      linkMarks.set(a, button); placeMark(a, button);
       button.onclick = () => {
         if (controller) return;
         // Seed the complete remembered selection before saving changes.
@@ -340,7 +366,14 @@ function init() {
     syncMarks();
   }
   const observer = new MutationObserver(records => {
-    for (const record of records) for (const node of record.addedNodes) markLinks(node);
+    const files = new Set();
+    for (const record of records) {
+      const file = record.target instanceof Element && record.target.closest('.file');
+      if (file) files.add(file);
+      for (const node of record.addedNodes) markLinks(node);
+    }
+    // Handle extensions adding sauce links or rebuilding file info after us.
+    for (const file of files) markLinks(file);
   });
   markLinks(document.body); observer.observe(document.body, { childList: true, subtree: true });
   count();
