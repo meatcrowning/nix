@@ -23,6 +23,7 @@ details.
 | updater/ | flake-input updater | home/prog/updater.nix |
 | oracle/ | local-ollama chat | home/prog/oracle.nix |
 | pylib/ | shared Python helpers | imported, not packaged |
+| collage/ | portable browser collage userscript | self-contained `.user.js`, no host package |
 | qmlcommon/ | shared QML components | imported, not packaged |
 
 ## Packaging, defaults, and source layout
