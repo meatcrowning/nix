@@ -223,7 +223,41 @@ try {
     assert.equal(await downloads[2].failure(),null);
     const probe=JSON.parse(execFileSync('ffprobe',['-v','error','-count_frames','-show_streams','-of','json',join(dir,'ui.webm')],{encoding:'utf8'}));
     assert.equal(Number(probe.streams[0].nb_read_frames),24);
+    // Nine actual video inputs now warn instead of failing; verify every dismissal path.
+    await ui.getByRole('button',{name:'select none',exact:true}).click();
+    await ui.locator('summary').click();
+    const videoBytes=await readFile(join(dir,'delayed.webm'));
+    await ui.getByLabel('add files').setInputFiles(Array.from({length:9},(_,i)=>({name:`large-${i}.webm`,mimeType:'video/webm',buffer:videoBytes})));
+    await ui.getByLabel('collages',{exact:true}).fill('1');
+    await ui.getByLabel('seconds',{exact:true}).fill('0.1');
+    await ui.locator('summary').click();
+    await ui.getByRole('button',{name:'create collage'}).click();
+    await ui.getByRole('dialog',{name:'large video collage'}).waitFor();
+    assert((await ui.locator('#warning-text').innerText()).includes('9 videos'));
+    await ui.getByRole('button',{name:'continue rendering',exact:true}).press('Escape');
+    await page.waitForFunction(()=>document.querySelector('#ldg-collage-v2').shadowRoot.querySelector('#message').textContent==='cancelled');
+    assert.equal(downloads.length,3);
+    for (const permanent of [false,true]) {
+      await ui.getByRole('button',{name:'create collage'}).click();
+      await ui.getByRole('dialog',{name:'large video collage'}).waitFor();
+      if(permanent) await ui.getByLabel("don't warn me again").check();
+      const downloaded=page.waitForEvent('download');
+      await ui.getByRole('button',{name:'continue rendering',exact:true}).click();
+      assert((await downloaded).suggestedFilename().endsWith('.webm'));
+    }
+    assert.equal(await page.evaluate(()=>localStorage.getItem('ldg-collage-hide-large-video-warning')),'true');
+    const downloaded=page.waitForEvent('download');
+    await ui.getByRole('button',{name:'create collage'}).click();
+    await downloaded;
+    assert(!(await ui.getByRole('dialog',{name:'large video collage'}).isVisible()));
   }
+  await ui.getByLabel('gallery view').selectOption('all');
+  await ui.locator('.tile input').first().check();
+  await ui.getByRole('button',{name:'Clear imported',exact:true}).click();
+  assert.equal(await ui.locator('.tile').count(),70);
+  assert(await ui.locator('.tile input').first().isChecked());
+  assert.equal(await ui.locator('#header').evaluate(el=>el.files.length),0);
+  assert((await page.evaluate(()=>localStorage.getItem('ldg-collage-v2:/'))).includes('https://i.4cdn.org/g/0.png'));
   await ui.getByRole('button',{name:'close collage',exact:true}).click();
   assert(!(await ui.locator('#panel').isVisible()));
   console.log(result.videoUnavailable ? 'UI image export passed; video unavailable in this browser build'

@@ -3,11 +3,13 @@ import { readFile } from 'node:fs/promises';
 const header = `// ==UserScript==
 // @name         ldg collage
 // @namespace    ldg-collage
-// @version      2.4.2
+// @version      2.5.0
 // @description  Image and fixed-frame-rate video collages, entirely in your browser
 // @match        https://boards.4chan.org/*/thread/*
 // @match        https://boards.4channel.org/*/thread/*
 // @grant        GM_xmlhttpRequest
+// @grant        GM_getValue
+// @grant        GM_setValue
 // @connect      i.4cdn.org
 // @connect      files.catbox.moe
 // @connect      litter.catbox.moe

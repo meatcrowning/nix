@@ -28,8 +28,15 @@ then reload the thread. Selection is per-thread; the first run reads the old
 or automatic installation. A public raw file URL can be used for installation.
 
 Limits: WebM (VP8, then VP9 if supported) or explicit MP4 (AVC/H.264), silent SDR video, up to 300 seconds,
-15/24/30/60 fps; 64 inputs, 8 video decoders, 24 MP total video dimensions,
+15/24/30/60 fps; 64 inputs,
 32 MP resized stills, 256 MiB compressed inputs per collage. HDR video is refused.
+Video jobs exceeding 8 videos or 24 × 1024² source pixels warn after metadata
+loading, before export decoders start; these are warning thresholds, not limits.
+Continue accepts the whole create operation; the next operation warns again.
+The optional permanent dismissal uses userscript-manager storage across threads
+and sites (origin localStorage fallback only without GM APIs). Escape/cancel aborts;
+storage failures remain visible and never pretend the preference was saved.
+Frame/timestamp validation remains mandatory regardless of warning dismissal.
 Animated images become stills. Header is a full-width first row; multiple
 collages distribute items round-robin. Output limits use decimal MB. PNG refuses
 oversize; JPEG searches quality; video retries bitrate up to three passes.
@@ -69,6 +76,8 @@ object URLs are retained until clear. A top-layer dialog covers the viewport;
 clicking its background, an image, X or Escape returns to the gallery (video
 controls remain interactive). Never test this by clicking the user's desktop.
 All/selected is a display filter, not a selection change. List every thread file;
+Clear imported removes local gallery entries and the local header, releasing
+their object URLs; it preserves thread files, their selection and saved selection.
 the 64-input export limit is separate from the gallery's size. No reorder buttons.
 Blank seconds means longest input video, rounded up to the next output frame;
 image-only video export defaults to five seconds. Explicit seconds overrides it.

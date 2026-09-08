@@ -3,8 +3,9 @@ import {
   Output, BufferTarget, WebMOutputFormat, Mp4OutputFormat, CanvasSource, canEncodeVideo,
 } from 'mediabunny';
 
-export const LIMITS = Object.freeze({ items: 64, videos: 8, bytes: 256 * 1024 ** 2,
-  sourcePixels: 32 * 1024 ** 2, videoPixels: 24 * 1024 ** 2 });
+export const LIMITS = Object.freeze({ items: 64, bytes: 256 * 1024 ** 2,
+  sourcePixels: 32 * 1024 ** 2 });
+export const LARGE_VIDEO_JOB = Object.freeze({ videos: 8, pixels: 24 * 1024 ** 2 });
 // Yield to input/cancellation without the nested-timer clamp on every frame.
 // No animation frames: export must not depend on visible-tab refresh rate.
 let channel;
@@ -191,7 +192,7 @@ function* times(m, o) {
   for (let i = 0; i < o.frameCount; i++) yield (start + Math.round(i * 1e6 / o.fps) % span) / 1e6;
 }
 
-export async function exportCollage(blobs, raw, signal, progress = () => {}) {
+export async function exportCollage(blobs, raw, signal, progress = () => {}, warn = async () => {}) {
   const o = options(raw); const media = [];
   let total = 0, videoPixels = 0, videoCount = 0, imagePixels = 0;
   if (!blobs.length || blobs.length > LIMITS.items) throw new Error('select 1–64 files');
@@ -205,12 +206,14 @@ export async function exportCollage(blobs, raw, signal, progress = () => {}) {
       if (imagePixels > LIMITS.sourcePixels) throw new Error('still images exceed 32 megapixels after resizing; split this collage');
       if (m.kind === 'video') {
         videoPixels += m.width * m.height; videoCount++;
-        if (videoCount > LIMITS.videos || videoPixels > LIMITS.videoPixels)
-          throw new Error('use at most 8 videos totalling 24 megapixels; split this collage');
       }
       await yieldTask();
     }
     if (o.format === 'auto') o.format = media.some(m => m.kind === 'video') ? 'webm' : 'jpeg';
+    if (isVideo(o.format) && (videoCount > LARGE_VIDEO_JOB.videos || videoPixels > LARGE_VIDEO_JOB.pixels)) {
+      await warn({ videos: videoCount, pixels: videoPixels });
+      check(signal);
+    }
     if (o.duration === 'auto') {
       const longest = Math.max(0, ...media.filter(m => m.kind === 'video').map(m => m.duration));
       if (isVideo(o.format) && longest > 300) throw new Error('longest video exceeds 300 seconds; set seconds explicitly');

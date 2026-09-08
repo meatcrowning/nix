@@ -41,10 +41,12 @@ function init() {
     #preview img { cursor:zoom-out; }
     #preview-status { position:absolute; bottom:8px; }
     #preview-close { position:absolute; top:8px; right:8px; z-index:1; }
+    #warning { max-width:min(440px,90vw); background:#202124; color:#e8eaed; border:1px solid #757575; }
+    #warning::backdrop { background:#0009; }
     summary { cursor:pointer; min-height:28px; }
     .help { font-size:0.9em; } fieldset { border:0; padding:0; margin:0; }
     @media (forced-colors:active) {
-      #panel,#panel-head { background:Canvas; color:CanvasText; border-color:CanvasText; }
+      #panel,#panel-head,#warning { background:Canvas; color:CanvasText; border-color:CanvasText; }
       button,input,select,button:not(:disabled):hover { background:ButtonFace; color:ButtonText; border-color:ButtonText; }
       button:disabled { color:GrayText; }
     }
@@ -72,9 +74,15 @@ function init() {
     </div></details></fieldset>
     <div class="bar"><label>show <select id="view" aria-label="gallery view"><option value="all">all files</option><option value="selected">selected only</option></select></label>
       <button id="all">select all</button><button id="none">select none</button>
-      <button id="clear">clear list</button><span id="count"></span></div>
+      <button id="clear">Clear imported</button><span id="count"></span></div>
     <div id="list" aria-label="media selection"></div>
   </section>
+  <dialog id="warning" aria-label="large video collage" aria-describedby="warning-text">
+    <p id="warning-text"></p>
+    <label><input id="warning-remember" type="checkbox">don't warn me again</label>
+    <p id="warning-error" role="status"></p>
+    <div class="bar"><button id="warning-continue">continue rendering</button><button id="warning-cancel">cancel</button></div>
+  </dialog>
   <dialog id="preview" aria-label="media preview" hidden>
     <button id="preview-close" aria-label="close preview">X</button>
     <p id="preview-status" role="status"></p>
@@ -93,6 +101,40 @@ function init() {
     remembered = new Set(saved !== null ? JSON.parse(saved) : legacy.map(e => e.fullSrc));
   } catch {}
   const message = text => { $('message').textContent = text; };
+  const warningKey = 'ldg-collage-hide-large-video-warning';
+  let warningAccepted = false;
+  function warnLargeJob(info, signal) {
+    let hidden = false;
+    try { hidden = typeof GM_getValue === 'function' ? GM_getValue(warningKey, false) === true : localStorage.getItem(warningKey) === 'true'; } catch {}
+    if (hidden || warningAccepted) return Promise.resolve();
+    check(signal);
+    return new Promise((resolve, reject) => {
+      const dialog = $('warning');
+      $('warning-text').textContent = `${info.videos} videos · ${(info.pixels / 1e6).toFixed(1)} MP. this large collage may slow or freeze your browser, run out of memory, or fail to export. slow rendering alone does not make the output choppy`;
+      $('warning-remember').checked = false; $('warning-error').textContent = '';
+      const focus = root.activeElement;
+      const finish = error => {
+        signal.removeEventListener('abort', abort);
+        dialog.close(); $('panel').inert = false; $('open').disabled = false;
+        dialog.oncancel = $('warning-continue').onclick = $('warning-cancel').onclick = null;
+        focus?.focus(); error ? reject(error) : resolve();
+      };
+      const abort = () => finish(signal.reason || new DOMException('cancelled', 'AbortError'));
+      $('warning-continue').onclick = () => {
+        if ($('warning-remember').checked) {
+          try {
+            if (typeof GM_setValue === 'function') GM_setValue(warningKey, true);
+            else localStorage.setItem(warningKey, 'true');
+          } catch { $('warning-error').textContent = 'preference could not be saved; uncheck to continue once'; return; }
+        }
+        warningAccepted = true; finish();
+      };
+      $('warning-cancel').onclick = () => controller.abort(new DOMException('cancelled', 'AbortError'));
+      dialog.oncancel = e => { e.preventDefault(); $('warning-cancel').click(); };
+      signal.addEventListener('abort', abort, { once:true });
+      dialog.showModal(); $('panel').inert = true; $('open').disabled = true; $('warning-continue').focus();
+    });
+  }
   const persist = () => {
     try { remembered = new Set([...entries.values()].filter(e => e.selected && e.url).map(e => e.url));
       localStorage.setItem(storageKey, JSON.stringify([...remembered])); }
@@ -169,9 +211,13 @@ function init() {
   };
   $('clear').onclick = () => {
     closePreview();
-    for (const e of entries.values()) if (e.file && e.thumb) URL.revokeObjectURL(e.thumb);
-    for (const e of entries.values()) if (e.previewUrl) URL.revokeObjectURL(e.previewUrl);
-    entries.clear(); $('list').replaceChildren(); remembered.clear(); count(); persist(); syncMarks();
+    for (const [key, e] of entries) if (e.file) {
+      if (e.thumb) URL.revokeObjectURL(e.thumb);
+      if (e.previewUrl) URL.revokeObjectURL(e.previewUrl);
+      e.tile.remove(); entries.delete(key);
+    }
+    header = null; $('header').value = ''; $('files').value = '';
+    count(); persist(); syncMarks();
   };
   $('cancel').onclick = () => controller?.abort(new DOMException('cancelled', 'AbortError'));
   $('format').onchange = () => {
@@ -191,6 +237,7 @@ function init() {
     try { aspect = parseAspect($('aspect').value); } catch (e) { message(e.message); $('aspect').focus(); return; }
     const opts = { format: $('format').value, edge: Number($('edge').value), aspect,
       fps: Number($('fps').value), duration: $('duration').value === '' ? 'auto' : Number($('duration').value), maxBytes: Number($('limit').value) * 1e6 };
+    warningAccepted = false;
     controller = new AbortController(); const signal = controller.signal;
     const controls = [...$('panel').querySelectorAll('button,input,select')].filter(el => !['close', 'cancel'].includes(el.id));
     const disabled = controls.map(e => e.disabled); controls.forEach(e => { e.disabled = true; }); $('cancel').disabled = false;
@@ -209,7 +256,7 @@ function init() {
           blobs.push(blob);
         }
         const result = await exportCollage(blobs, { ...opts, header: !!header }, signal,
-          text => message(`collage ${part + 1}/${parts}: ${text}`));
+          text => message(`collage ${part + 1}/${parts}: ${text}`), info => warnLargeJob(info, signal));
         check(signal);
         const url = URL.createObjectURL(result.blob);
         const link = document.createElement('a'); link.href = url;
