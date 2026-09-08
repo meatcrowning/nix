@@ -65,7 +65,7 @@ Item {
                 PixelText {
                     anchors.centerIn: parent
                     text: modelData.label
-                    color: hit.containsMouse ? root.fgAccent : root.fgDim
+                    color: hit.containsMouse ? root.fgAccent : root.fgText
                 }
                 MouseArea {
                     id: hit
