@@ -1,12 +1,35 @@
 import {
   Input, BlobSource, MP4, WEBM, MATROSKA, VideoSampleSink,
-  Output, BufferTarget, WebMOutputFormat, CanvasSource, canEncodeVideo,
+  Output, BufferTarget, WebMOutputFormat, Mp4OutputFormat, CanvasSource, canEncodeVideo,
 } from 'mediabunny';
 
 export const LIMITS = Object.freeze({ items: 64, videos: 8, bytes: 256 * 1024 ** 2,
   sourcePixels: 32 * 1024 ** 2, videoPixels: 24 * 1024 ** 2 });
-export const yieldTask = () => new Promise(resolve => setTimeout(resolve, 0));
-export function check(signal) { signal?.throwIfAborted(); }
+// Yield to input/cancellation without the nested-timer clamp on every frame.
+// No animation frames: export must not depend on visible-tab refresh rate.
+let channel;
+const pending = [];
+export const yieldTask = () => new Promise(resolve => {
+  if (typeof MessageChannel === 'undefined') { setTimeout(resolve, 0); return; }
+  if (!channel) {
+    channel = new MessageChannel();
+    channel.port1.onmessage = () => pending.shift()?.();
+  }
+  pending.push(resolve); channel.port2.postMessage(null);
+});
+export function check(signal) {
+  if (signal?.aborted) throw signal.reason || new DOMException('cancelled', 'AbortError');
+}
+export const isVideo = format => format === 'webm' || format === 'mp4';
+export function normalizeBlob(value) {
+  if (value instanceof Blob) return value;
+  // Userscript managers may return a Blob from a different JS realm.
+  if (!['[object Blob]', '[object File]'].includes(Object.prototype.toString.call(value)))
+    throw new Error('invalid media file');
+  const blob = new Blob([value], { type: value.type });
+  if (blob.size !== value.size) throw new Error('browser could not read the media file');
+  return blob;
+}
 export function dimensions(w, h) {
   if (!Number.isFinite(w * h) || w < 1 || h < 1 || w * h > LIMITS.sourcePixels)
     throw new Error('source exceeds 32 megapixels or has invalid dimensions');
@@ -14,9 +37,9 @@ export function dimensions(w, h) {
 export function options(raw = {}) {
   const o = { format: 'webm', fps: 30, duration: 5, edge: 1280, aspect: 1,
     maxBytes: 4_000_000, ...raw };
-  if (!['webm', 'jpeg', 'png'].includes(o.format) || ![15, 24, 30, 60].includes(o.fps)
+  if (!['webm', 'mp4', 'jpeg', 'png'].includes(o.format) || ![15, 24, 30, 60].includes(o.fps)
     || !Number.isFinite(o.duration) || o.duration < 1 || o.duration > 15
-    || !Number.isFinite(o.edge) || o.edge < 320 || o.edge > (o.format === 'webm' ? 2048 : 4096)
+    || !Number.isFinite(o.edge) || o.edge < 320 || o.edge > (isVideo(o.format) ? 2048 : 4096)
     || !Number.isFinite(o.aspect) || o.aspect < 0.25 || o.aspect > 4
     || !Number.isFinite(o.maxBytes) || o.maxBytes < 100_000 || o.maxBytes > 32_000_000)
     throw new Error('invalid export settings');
@@ -94,7 +117,8 @@ function rejectHDR(color) {
 // No ImageDecoder requirement: ordinary static image decoding works on older browsers.
 export async function prepare(blob, signal, edge = 2048) {
   check(signal);
-  if (!(blob instanceof Blob) || !blob.size) throw new Error('empty media file');
+  blob = normalizeBlob(blob);
+  if (!blob.size) throw new Error('empty media file');
   const head = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
   const image = /image\//.test(blob.type) || head[0] === 0xff && head[1] === 0xd8
     || head[0] === 0x89 && head[1] === 0x50 || String.fromCharCode(...head.slice(0, 3)) === 'GIF'
@@ -168,19 +192,21 @@ export async function exportCollage(blobs, raw, signal, progress = () => {}) {
     try {
       for (const p of l.placements) {
         const m = media[p.index]; check(signal);
-        if (m.kind === 'image') await m.paint(base.ctx, p);
-        else if (o.format !== 'webm') {
+        if (m.kind === 'image') {
+          await m.paint(base.ctx, p);
+          // The composited base is reused by every frame and bitrate retry.
+          // Release redundant tile canvases before allocating video decoders.
+          m.dispose();
+        } else if (!isVideo(o.format)) {
           const s = await new VideoSampleSink(m.track).getSample(m.start);
           if (!s) throw new Error('video has no first frame');
           try { rejectHDR(s.colorSpace); s.draw(base.ctx, p.x, p.y, p.width, p.height); } finally { s.close(); }
         }
       }
-      if (o.format !== 'webm') return await encodeImage(base.canvas, o, signal, progress);
+      if (!isVideo(o.format)) return await encodeImage(base.canvas, o, signal, progress);
       if (typeof VideoEncoder === 'undefined') throw new Error('this browser has no WebCodecs video encoder');
       let bitrate = Math.floor(o.maxBytes * 8 * 0.88 / o.duration);
-      const codec = await canEncodeVideo('vp8', { width: l.width, height: l.height, bitrate }) ? 'vp8'
-        : await canEncodeVideo('vp9', { width: l.width, height: l.height, bitrate }) ? 'vp9' : null;
-      if (!codec) throw new Error('this browser cannot encode WebM at these dimensions');
+      const codec = await selectCodec(o.format, l.width, l.height, bitrate);
       for (let attempt = 1; attempt <= 3; attempt++) {
         const result = await encodeVideo(media, l, base.canvas, o, codec, bitrate, signal, progress, attempt);
         if (result.blob.size <= o.maxBytes) return result;
@@ -190,6 +216,18 @@ export async function exportCollage(blobs, raw, signal, progress = () => {}) {
       throw new Error('video exceeds the size limit after 3 passes; reduce dimensions or duration');
     } finally { base.canvas.width = base.canvas.height = 1; }
   } finally { for (const m of media) m.dispose(); }
+}
+
+// Probe the actual export mode, not a browser name, CPU count, or hardware-only
+// preference. macOS and Linux on the same machine can expose different codecs.
+export async function selectCodec(format, width, height, bitrate, probe = canEncodeVideo) {
+  for (const codec of format === 'mp4' ? ['avc'] : ['vp8', 'vp9']) {
+    if (await probe(codec, { width, height, bitrate, latencyMode: 'quality',
+      hardwareAcceleration: 'no-preference' })) return codec;
+  }
+  throw new Error(format === 'mp4'
+    ? 'this browser cannot encode mp4 at these dimensions; try webm or image output'
+    : 'this browser cannot encode webm at these dimensions; try mp4 or image output');
 }
 
 async function encodeImage(c, o, signal, progress) {
@@ -215,10 +253,10 @@ async function encodeImage(c, o, signal, progress) {
 
 async function encodeVideo(media, l, base, o, codec, bitrate, signal, progress, attempt) {
   const target = new BufferTarget();
-  const output = new Output({ format: new WebMOutputFormat(), target });
+  const output = new Output({ format: o.format === 'mp4' ? new Mp4OutputFormat() : new WebMOutputFormat(), target });
   const frame = canvas(l.width, l.height);
   const stamps = [];
-  const source = new CanvasSource(frame.canvas, { codec, bitrate, latencyMode: 'quality',
+  const source = new CanvasSource(frame.canvas, { codec, bitrate, latencyMode: 'quality', hardwareAcceleration: 'no-preference',
     keyFrameInterval: 2, onEncodedPacket: packet => { stamps.push(packet.timestamp); } });
   output.addVideoTrack(source, { frameRate: o.fps });
   const readers = new Map();
@@ -251,7 +289,7 @@ async function encodeVideo(media, l, base, o, codec, bitrate, signal, progress, 
     stamps.sort((a, b) => a - b);
     if (stamps.length !== o.frameCount || stamps.some((t, i) => Math.abs(t - i / o.fps) > 0.00001))
       throw new Error('encoder returned missing or mistimed frames');
-    return { blob: new Blob([target.buffer], { type: 'video/webm' }), extension: 'webm',
+    return { blob: new Blob([target.buffer], { type: `video/${o.format}` }), extension: o.format,
       width: l.width, height: l.height, frames: stamps.length, fps: o.fps, duration: o.duration };
   } finally {
     signal?.removeEventListener('abort', abort);

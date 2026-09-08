@@ -10,17 +10,24 @@ never substitute MediaRecorder or wall-clock playback. Reject unsupported
 codecs/HDR explicitly. Preserve selected order, source timing, colour metadata,
 and size-limit checks. Do not touch the live Vivaldi profile for installation.
 
-Run `npm test` through `test.sh`: isolated headless Chromium, private profile,
+Run `npm test` through `test.sh`: isolated headless browser, private profile,
 no live D-Bus/display, and FFmpeg probes of generated synthetic fixtures.
 No screenshots or real media are needed. Tests must not navigate to 4chan or
-contact external hosts. `COLLAGE_BROWSER` may specify a browser executable.
+contact external hosts. `COLLAGE_ENGINE=chromium|firefox|webkit` selects the
+engine (default Chromium); `COLLAGE_BROWSER` may specify its executable.
+Use matching Playwright/browser revisions for Firefox/WebKit. Set
+`PLAYWRIGHT_BROWSERS_PATH` and optionally `COLLAGE_PLAYWRIGHT` to a matching
+driver's absolute `index.mjs` when using system-provided test browsers.
+`COLLAGE_CPU_RATE=6` exercises Chromium with 6× JavaScript CPU throttling;
+this is not a low-memory device or hardware-codec emulator. Tests report an
+image-only pass separately when a browser build lacks usable video encoders.
 
 Install `collage.user.js` in a userscript manager, disable older collage copies,
 then reload the thread. Selection is per-thread; the first run reads the old
 `highlightedImages_<thread>` list without modifying it. No browser profile writes
 or automatic installation. A public raw file URL can be used for installation.
 
-Limits: WebM (VP8, then VP9 if supported), silent SDR video, 1–15 seconds,
+Limits: WebM (VP8, then VP9 if supported) or explicit MP4 (AVC/H.264), silent SDR video, 1–15 seconds,
 15/24/30/60 fps; 64 inputs, 8 video decoders, 24 MP total video dimensions,
 32 MP resized stills, 256 MiB compressed inputs per collage. HDR video is refused.
 Animated images become stills. Header is a full-width first row; multiple
@@ -31,3 +38,12 @@ Performance checks use deliberate >frame-period delays and frame-changing
 synthetic video. Verify decoded output cadence and colour patches, not just the
 encoder's frame counter. Do not claim older-browser or exact-colour compatibility
 from API presence alone; the tested browser and tolerances belong in test reports.
+
+Probe codecs with quality latency and no hardware preference. Do not infer
+codec availability or reduce output settings from OS, CPU count or deviceMemory;
+macOS and Asahi can expose different codecs on identical hardware. Retain WebM
+as the posting default; never silently change containers. Unsupported video
+encoding must leave image output usable. MP4 is not accepted by every destination.
+Release still tiles after drawing the reusable base; yield through MessageChannel
+without a per-frame timer clamp. Keep output timestamps independent of work time.
+No MediaRecorder fallback, runtime codec downloads or platform-specific service.
