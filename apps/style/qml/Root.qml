@@ -175,7 +175,7 @@ Item {
         modal: true
         focus: true
         closePolicy: Popup.NoAutoClose
-        visible: Appearance.applying
+        visible: Appearance.applying && !Appearance.nativeProgress
         padding: 12
 
         contentItem: ColumnLayout {

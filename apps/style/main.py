@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QFileSystemWatcher, QObject, Property, QUrl, Signal, Slot
+from PySide6.QtCore import QFileSystemWatcher, QObject, Property, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 
@@ -168,6 +168,7 @@ class Appearance(QObject):
         self._applying = False
         self._generation = 0
         self._pending_reply = None
+        self._native_progress = False
         self._status_path = state_dir() / "status.json"
         self._status_watcher = QFileSystemWatcher(self)
         self._status_watcher.fileChanged.connect(self._status_file_changed)
@@ -198,6 +199,14 @@ class Appearance(QObject):
     @Property(bool, notify=applyingChanged)
     def applying(self):
         return self._applying
+
+    @Property(bool, notify=applyingChanged)
+    def nativeProgress(self):
+        return self._native_progress
+
+    def use_native_progress(self) -> None:
+        self._native_progress = True
+
 
     @Property(str, notify=statusChanged)
     def status(self):
@@ -384,6 +393,41 @@ class Appearance(QObject):
         self.errorChanged.emit()
 
 
+class ApplyProgressDialog:
+    """A small real KDE-styled dialog for Plasma's appearance transaction."""
+
+    def __init__(self, parent, appearance: Appearance) -> None:
+        from PySide6.QtWidgets import QDialog, QLabel, QProgressBar, QVBoxLayout
+
+        self._appearance = appearance
+        self.dialog = QDialog(parent)
+        self.dialog.setWindowTitle("applying")
+        self.dialog.setWindowModality(Qt.WindowModal)
+        self.dialog.setModal(True)
+        self.dialog.setMinimumWidth(320)
+        self.dialog.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
+        self.dialog.setWindowFlag(Qt.WindowCloseButtonHint, False)
+        layout = QVBoxLayout(self.dialog)
+        layout.setContentsMargins(14, 14, 14, 14)
+        self.label = QLabel(self.dialog)
+        self.label.setWordWrap(True)
+        self.progress = QProgressBar(self.dialog)
+        self.progress.setRange(0, 0)
+        layout.addWidget(self.label)
+        layout.addWidget(self.progress)
+        appearance.applyingChanged.connect(self.sync)
+        appearance.statusChanged.connect(self.sync)
+        self.sync()
+
+    def sync(self) -> None:
+        self.label.setText(self._appearance.status)
+        if self._appearance.applying:
+            self.dialog.show()
+            self.dialog.raise_()
+        else:
+            self.dialog.hide()
+
+
 def main() -> int:
     kdeshell.pin_controls_style()
     app = kdeshell.make_app(sys.argv, "style")
@@ -397,6 +441,8 @@ def main() -> int:
     palette = Palette(theme_source(Path.home() / ".config" / "quickshell" / "Theme.qml"), app)
     style = DeskStyle(parent=app)
     appearance = Appearance(parent=app)
+    if plasma:
+        appearance.use_native_progress()
     context.setContextProperty("WalPalette", palette)
     context.setContextProperty("DeskStyle", style)
     context.setContextProperty("Appearance", appearance)
@@ -412,6 +458,7 @@ def main() -> int:
             print("Root.qml failed:\n" + "\n".join(shell.errors()), file=sys.stderr)
             return 1
         shell.show(return_handle=False)
+        shell.apply_progress = ApplyProgressDialog(shell.window, appearance)
     else:
         engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
         if not engine.rootObjects():

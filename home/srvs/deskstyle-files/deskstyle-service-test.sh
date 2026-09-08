@@ -34,4 +34,4 @@ rg -F 'org.kde.PlasmaShell.evaluateScript' "$WAL" >/dev/null
 rg -F 'deskstyle-wallpaper-ok:' "$WAL" >/dev/null
 rg -F '"$HOME/.nix-profile/bin/qdbus"' "$WAL" >/dev/null
 rg -F '/usr/bin/qdbus6' "$WAL" >/dev/null
-rg -F -- '--activate-only' "$WAL" "$ROOT/home/srvs/wal-files/oxygen-live-icons.py" >/dev/null
+rg -F 'systemd-run --user --quiet --no-block --collect' "$WAL" >/dev/null
