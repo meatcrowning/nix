@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import "../../qmlcommon"
 
@@ -43,6 +44,12 @@ Item {
                     onClicked: Appearance.selectScheme("OxygenLightFlat")
                 }
                 Item { Layout.fillWidth: true }
+                ToolButton {
+                    text: "add"
+                    icon.name: "list-add"
+                    enabled: !Appearance.applying
+                    onClicked: importDialog.open()
+                }
                 ToolButton {
                     text: "refresh"
                     icon.name: "view-refresh"
@@ -150,6 +157,12 @@ Item {
                     Layout.fillWidth: true
                 }
                 Button {
+                    text: "trash"
+                    icon.name: "edit-delete"
+                    enabled: Appearance.draftPath !== "" && !Appearance.applying
+                    onClicked: Appearance.removeWallpaper(Appearance.draftPath)
+                }
+                Button {
                     text: "cancel"
                     enabled: Appearance.hasDraft && !Appearance.applying
                     onClicked: Appearance.cancel()
@@ -163,6 +176,14 @@ Item {
                 }
             }
         }
+    }
+
+    FileDialog {
+        id: importDialog
+        title: "add wallpapers"
+        fileMode: FileDialog.OpenFiles
+        nameFilters: ["images (*.png *.jpg *.jpeg *.webp *.bmp)"]
+        onAccepted: Appearance.importFiles(selectedFiles)
     }
 
     Popup {
