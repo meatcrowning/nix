@@ -76,11 +76,9 @@ try {
     for(const bad of ['1/0','0','-1','Infinity','1:2:3','alert(1)']) {
       let rejected=false;try{E.parseAspect(bad);}catch{rejected=true;}if(!rejected)throw new Error('invalid ratio accepted');
     }
-    const ratioLayout=E.layout([{width:320,height:240}],1280,3/7);
-    if(Math.abs(ratioLayout.width/ratioLayout.height-3/7)>0.002)throw new Error('output aspect ratio');
     for (const header of [false, true]) for (const aspect of [0.4, 1, 2.5]) {
       const media=[{width:640,height:100},{width:320,height:240},{width:240,height:320},{width:853,height:480}];
-      const l=E.layout(media,640,aspect,header,true);
+      const l=E.layout(media,640,aspect,header);
       const coverage=new Uint8Array(l.width*l.height);
       for(const p of l.placements) {
         if(p.x<0 || p.y<0 || p.x+p.width>l.width || p.y+p.height>l.height) throw Error('cropped tile');
@@ -88,14 +86,14 @@ try {
         const source=media[p.index];
         if(Math.abs(p.width-source.width/source.height*p.height)>4) throw Error('stretched tile');
       }
-      if(coverage.some(n=>n!==1)) throw Error('video layout gap or overlap');
+      if(coverage.some(n=>n!==1)) throw Error('layout gap or overlap');
     }
-    const single=E.layout([{width:320,height:240}],1280,3/7,false,true);
-    if(single.width!==1280 || single.height!==960) throw Error('single video padded');
-    const square=E.layout(Array.from({length:4},()=>({width:320,height:240})),640,4/3,false,true);
+    const single=E.layout([{width:320,height:240}],1280,3/7);
+    if(single.width!==1280 || single.height!==960) throw Error('single tile padded');
+    const square=E.layout(Array.from({length:4},()=>({width:320,height:240})),640,4/3);
     if(Math.abs(square.width/square.height-4/3)>0.01) throw Error('missed matching arrangement');
-    for (const borderless of [false, true]) {
-      const balanced=E.layout(Array.from({length:5},()=>({width:100,height:100})),1280,2/3,false,borderless);
+    {
+      const balanced=E.layout(Array.from({length:5},()=>({width:100,height:100})),1280,2/3);
       const areas=balanced.placements.map(p=>p.width*p.height);
       if(Math.max(...areas)/Math.min(...areas)>2.52) throw Error('one tile dominates the collage');
     }
@@ -108,6 +106,19 @@ try {
     if(!unavailable) throw new Error('unsupported format error');
     const array = async r => ({...r, blob:undefined, bytes:Array.from(new Uint8Array(await r.blob.arrayBuffer()))});
     console.log('image export');
+    // Decode the actual exports: layout-only checks missed the image padding path.
+    for (const format of ['png','jpeg','auto']) for (const header of [false,true]) {
+      const exported=await E.exportCollage([red,gray,red,gray,red],{...opts,format,header,aspect:1});
+      const bitmap=await createImageBitmap(exported.blob);
+      const {canvas,ctx}=E.canvas(bitmap.width,bitmap.height);
+      ctx.drawImage(bitmap,0,0);bitmap.close();
+      const pixels=ctx.getImageData(0,0,canvas.width,canvas.height).data;
+      for(let i=0;i<pixels.length;i+=4)
+        if(pixels[i]>245 && pixels[i+1]>245 && pixels[i+2]>245)
+          throw Error(`${format} export contains white padding (header=${header})`);
+      canvas.width=canvas.height=1;
+    }
+
     const still = await E.exportCollage([red,gray],{...opts,format:'png'});
     if((await E.exportCollage([red],{...opts,format:'auto'})).extension!=='jpg') throw new Error('automatic image format');
     const supported={};
