@@ -42,6 +42,11 @@ check('"SetScheme", [scheme]' in scheme_source,
       "switches live Plasma schemes through the same controller transaction")
 check('Popup {' in qml and 'visible: Appearance.applying' in qml,
       "keeps apply progress inside the Style window")
+check('DropArea {' in qml and 'Appearance.importFiles(drop.urls)' in qml
+      and 'drop.accept(Qt.CopyAction)' in qml,
+      "accepts dropped local images through the existing copy-only import path")
+check('visible: wallpaperDrop.containsDrag' in qml,
+      "highlights the wallpaper library while a valid drag hovers it")
 check("class ApplyProgressDialog" in inspect.getsource(module)
       and "appearance.use_native_progress()" in inspect.getsource(module.main),
       "uses a native KDE dialog for Plasma apply progress")
