@@ -139,8 +139,13 @@ try {
   }
   // Exercise the installed artifact's UI in an isolated page; no real-site requests.
   await page.goto('http://localhost/');
+  await page.evaluate(()=>{document.body.innerHTML='<div class="file" style="font:13px sans-serif"><div class="fileText">File: example.png (2.83 MB, 3344x2512)</div><a class="fileThumb" href="https://i.4cdn.org/g/0.png">thumbnail</a></div>';});
+  const rowBefore=await page.locator('.fileText').boundingBox();
   await page.evaluate(()=>{for(let i=0;i<70;i++){const a=document.createElement('a');a.className='fileThumb';a.href=`https://i.4cdn.org/g/${i}.png`;document.body.append(a);}});
   await page.addScriptTag({ content:await readFile('collage.user.js','utf8') });
+  assert.equal(await page.locator('.fileText [data-ldg-mark]').count(),1);
+  assert.equal((await page.locator('.fileText').boundingBox()).height,rowBefore.height);
+  const downloads=[]; page.on('download',d=>downloads.push(d));
   await page.locator('#ldg-collage-v2').getByRole('button',{name:'collage',exact:true}).click();
   const ui=page.locator('#ldg-collage-v2');
   assert.equal(await ui.locator('#advanced').getAttribute('open'),null);
@@ -154,6 +159,12 @@ try {
   await ui.getByRole('button',{name:'select all',exact:true}).click();
   await ui.getByRole('button',{name:'create collage'}).click();
   assert((await ui.locator('#message').innerText()).includes('at most 64'));
+  await ui.locator('#panel').evaluate(el=>{el.scrollTop=el.scrollHeight;});
+  const panelBounds=await ui.locator('#panel').boundingBox();
+  for(const selector of ['#close','#message']) {
+    const bounds=await ui.locator(selector).boundingBox();
+    assert(bounds.y>=panelBounds.y && bounds.y+bounds.height<=panelBounds.y+panelBounds.height);
+  }
   await ui.getByRole('button',{name:'select none',exact:true}).click();
   await page.locator('#ldg-collage-v2').getByLabel('add files').setInputFiles(join(dir,'still.png'));
   assert.equal(await ui.locator('.tile').count(),71);
@@ -176,14 +187,15 @@ try {
   assert((await ui.locator('#scale-value').innerText()).includes('640px'));
   await ui.getByLabel('aspect ratio',{exact:true}).fill('3/7');
   await ui.locator('summary').click();
-  await page.locator('#ldg-collage-v2').getByRole('button',{name:'create collage'}).click();
-  await page.locator('#ldg-collage-v2').getByRole('link',{name:/save collage/}).waitFor();
-  await ui.getByRole('button',{name:'preview collage 1'}).click();
-  assert(await ui.getByRole('dialog',{name:'media preview',exact:true}).isVisible());
-  assert(await ui.locator('#panel').evaluate(el=>el.inert));
-  await ui.getByRole('button',{name:'close preview'}).press('Escape');
-  assert(!(await ui.locator('#preview').isVisible()));
-  assert(!(await ui.locator('#panel').evaluate(el=>el.inert)));
+  const imageDownload=page.waitForEvent('download');
+  await ui.getByRole('button',{name:'create collage'}).click();
+  const savedImage=await imageDownload;
+  assert(savedImage.suggestedFilename().endsWith('.png'));
+  await savedImage.saveAs(join(dir,'ui.png'));
+  assert.equal(await savedImage.failure(),null);
+  assert.equal(await ui.locator('#results').count(),0);
+  assert.equal(await ui.getByRole('link').count(),0);
+  assert((await ui.locator('#message').innerText()).includes('download requested'));
   if(result.video && result.video.extension==='webm') {
     await ui.locator('summary').click();
     await ui.getByLabel('add files').setInputFiles(join(dir,'delayed.webm'));
@@ -199,16 +211,15 @@ try {
     await ui.getByLabel('collages',{exact:true}).fill('2');
     await ui.locator('summary').click();
     await ui.getByRole('button',{name:'create collage'}).click();
-    const second=ui.getByRole('link',{name:/save collage 2/});
-    await second.waitFor();
-    assert((await second.getAttribute('download')).endsWith('.webm'));
-    assert((await second.innerText()).includes('24 frames at 24 fps'));
-    assert((await ui.getByRole('link',{name:/save collage 1/}).getAttribute('download')).endsWith('.jpg'));
-    await ui.getByRole('button',{name:'preview collage 2'}).click();
-    assert(await ui.locator('#preview video').isVisible());
-    assert(await ui.locator('#preview video').evaluate(v=>v.controls && v.muted));
-    await ui.getByRole('button',{name:'close preview'}).click();
-    assert.equal(await ui.locator('#preview video').count(),0);
+    await page.waitForFunction(()=>document.querySelector('#ldg-collage-v2').shadowRoot.querySelector('#message').textContent.includes('2 downloads requested'));
+    for(let i=0;i<100 && downloads.length<3;i++) await new Promise(resolve=>setTimeout(resolve,50));
+    assert.equal(downloads.length,3);
+    assert(downloads[1].suggestedFilename().endsWith('.jpg'));
+    assert(downloads[2].suggestedFilename().endsWith('.webm'));
+    await downloads[2].saveAs(join(dir,'ui.webm'));
+    assert.equal(await downloads[2].failure(),null);
+    const probe=JSON.parse(execFileSync('ffprobe',['-v','error','-count_frames','-show_streams','-of','json',join(dir,'ui.webm')],{encoding:'utf8'}));
+    assert.equal(Number(probe.streams[0].nb_read_frames),24);
   }
   await ui.getByRole('button',{name:'close collage',exact:true}).click();
   assert(!(await ui.locator('#panel').isVisible()));

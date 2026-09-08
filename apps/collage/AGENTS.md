@@ -55,9 +55,12 @@ The default automatic format is resolved from decoded input types per collage:
 any video selects WebM, otherwise JPEG. Explicit formats always override this.
 Opening/creating discovers thread media without a separate import step; creation
 uses the checked selection, never silently selects unchecked files. The collage
-button toggles the panel; its X closes it. Generated thumbnails open viewport-
-filling image/video previews with separate save links, Escape/X dismissal and
-video/object-URL cleanup. Every source tile also has a preview button, independent
+button toggles the panel; progress and X share a sticky top row. Thread selection
+buttons sit inline after file dimensions without increasing the text row height.
+Finished files request native browser downloads automatically, with no result cards;
+download permissions/save dialogs remain browser-controlled. Revoke download URLs
+after 60 seconds, not immediately or on the next export. Never claim a confirmed
+disk write from an anchor click. Every source tile has a preview button, independent
 of its checkbox. Source previews use full media URLs, not thumbnails; local
 object URLs are retained until clear. A top-layer dialog covers the viewport;
 clicking its background, an image, X or Escape returns to the gallery (video
