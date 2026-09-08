@@ -29,7 +29,7 @@
      updateShadow();
 +    if (window()->windowClass().contains(QStringLiteral("player"), Qt::CaseInsensitive)) {
 +        auto *visualizerTimer = new QTimer(this);
-+        visualizerTimer->setInterval(16);
++        visualizerTimer->setInterval(8);
 +        connect(visualizerTimer, &QTimer::timeout, this, [this]() { update(titleBar()); });
 +        visualizerTimer->start();
 +    }
@@ -45,8 +45,8 @@
 +    const bool player = window()->windowClass().contains(QStringLiteral("player"), Qt::CaseInsensitive);
 +    QRect visualizer;
 +    if (player && cR.first.width() >= 112) {
-+        visualizer = QRect(cR.first.right() - 71, cR.first.top(), 72, cR.first.height());
-+        cR.first.setRight(visualizer.left() - settings()->smallSpacing());
++        visualizer = QRect(cR.first.left(), cR.first.top(), 72, cR.first.height());
++        cR.first.setLeft(visualizer.right() + settings()->smallSpacing());
 +    }
  
      // copy caption
