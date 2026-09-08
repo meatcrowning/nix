@@ -263,7 +263,9 @@ reuse for any further change here.
 
 **The album gallery has one compact jump index above its covers.** In year
 order it starts with the decades actually present; wheel up over a decade shows
-its individual years and wheel down returns to decades. Artist and album order
+its individual years and wheel down returns to decades. That level change uses
+the shared `Motion` timing (fade/scale out, swap, fade/scale in), so reduced
+motion and the desktop animation-speed setting still govern it. Artist and album order
 show the leading groups present in that ordering. An entry positions the real
 `AlbumGrid` list and records the resulting browse position. Album-model removals
 capture the top visible album and restore that anchor after reconciliation, so
