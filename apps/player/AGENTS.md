@@ -261,6 +261,16 @@ reuse for any further change here.
 
 **Track list, album grid and both lyrics panes are `Kinetic*` views from `../qmlcommon/`** — player's scrolling policy is the scrollbar and the wheel only, never drag-flicking, so the compositor's momentum is the only momentum. `WheelScroll.qml` used to live in `player/qml/`; it is shared now and player is no longer its owner. `TrackList` passes `wheelEnabled: root.scrollable` so a table sized to hold every row (AlbumPanel) hands the wheel out to the gallery behind it. See [`../AGENTS.md`](../AGENTS.md).
 
+**The album gallery has one compact jump index above its covers.** In year
+order it starts with the decades actually present; wheel up over a decade shows
+its individual years and wheel down returns to decades. Artist and album order
+show the leading groups present in that ordering. An entry positions the real
+`AlbumGrid` list and records the resulting browse position. Album-model removals
+capture the top visible album and restore that anchor after reconciliation, so
+trashing one track's last release or a whole release cannot reset the viewport.
+The cover context menu's `move album to trash` uses the same `QFile` platform
+trash path as `TrackMenu` and removes queued copies only after each file moved.
+
 ## Focus: three tones, derived once, handed down — the fade is RETIRED (`docs/DESIGN.md` §3.1.1)
 
 **No file under `qml/` may read `Theme.text`, `Theme.textDim` or `Theme.accent`

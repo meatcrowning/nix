@@ -55,6 +55,7 @@ Item {
     // stay flush left and right with 0px gaps. N comes from the settings
     // drawer and can change live.
     property int cols: 7
+    property string sortMode: "orig_year"
     readonly property int safeCols: Math.max(1, cols)     // never divide by 0
     // Flush left and right means flush against the SCROLLBAR, which is always
     // on and up to 16px wide now (docs/DESIGN.md 9.2). Dividing the full width
@@ -82,9 +83,54 @@ Item {
     }
 
     property int revision: 0
+    property int _anchorAlbumId: 0
+    property int _anchorAlbumIndex: 0
+    property real _anchorOffset: 0
+
+    function captureViewport() {
+        var rowIndex = list.indexAt(1, list.contentY + 1);
+        if (rowIndex < 0)
+            rowIndex = Math.max(0, Math.floor((list.contentY - list.originY) / root.cellW));
+        var item = list.itemAtIndex(rowIndex);
+        _anchorAlbumIndex = rowIndex * safeCols;
+        var a = albumAt(_anchorAlbumIndex);
+        _anchorAlbumId = a ? a.albumId : 0;
+        _anchorOffset = item ? list.contentY - item.y : 0;
+    }
+
+    function restoreViewport() {
+        var albumIndex = -1;
+        for (var i = 0; i < AlbumsModel.count; ++i) {
+            if (AlbumsModel.get(i).albumId === _anchorAlbumId) {
+                albumIndex = i;
+                break;
+            }
+        }
+        if (albumIndex < 0)
+            albumIndex = Math.min(_anchorAlbumIndex, AlbumsModel.count - 1);
+        if (albumIndex < 0)
+            return;
+        var rowIndex = Math.floor(albumIndex / safeCols);
+        list.positionViewAtIndex(rowIndex, ListView.Beginning);
+        Qt.callLater(function() {
+            var item = list.itemAtIndex(rowIndex);
+            if (item)
+                list.contentY = Math.max(list.originY, item.y + root._anchorOffset);
+            list.rememberPos();
+        });
+    }
+
     Connections {
         target: AlbumsModel
         function onModelReset() { root.revision++; }
+        function onRowsAboutToBeRemoved() { root.captureViewport(); }
+        function onRowsRemoved() {
+            root.revision++;
+            Qt.callLater(root.restoreViewport);
+        }
+        function onRowsInserted() { root.revision++; }
+        function onRowsMoved() { root.revision++; }
+        function onDataChanged() { root.revision++; }
     }
 
     function albumAt(i) {
@@ -123,7 +169,8 @@ Item {
     KineticListView {
         id: list
         objectName: "albumList"
-        anchors.fill: parent
+        anchors { top: albumIndex.bottom; left: parent.left
+                  right: parent.right; bottom: parent.bottom }
         clip: true
         model: Math.max(0, Math.ceil(AlbumsModel.count / root.safeCols))
         cacheBuffer: 900
@@ -135,6 +182,12 @@ Item {
         function showExpanded() {
             if (root.expandedRow >= 0)
                 positionViewAtIndex(root.expandedRow, ListView.Contain);
+        }
+
+        function jumpToAlbum(albumIndex) {
+            positionViewAtIndex(Math.floor(albumIndex / root.safeCols), ListView.Beginning);
+            restored = true;
+            Qt.callLater(rememberPos);
         }
 
         // ---- scroll memory ----------------------------------------------
@@ -352,6 +405,9 @@ Item {
                                           enabled: Library.canSystheme === true
                                                    && !!Library.albumInfo(aid).fullArt,
                                           trigger: function() { Library.createSysthemeFromAlbum(aid); } },
+                                        { separator: true },
+                                        { label: "move album to trash",
+                                          trigger: function() { Library.trashAlbum(aid); } },
                                     ]);
                                 } else {
                                     // A second click on the open cover closes it.
@@ -402,6 +458,17 @@ Item {
                 }
             }
         }
+    }
+
+    AlbumIndex {
+        id: albumIndex
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        sortMode: root.sortMode
+        revision: root.revision
+        fgText: root.fgText
+        fgDim: root.fgDim
+        fgAccent: root.fgAccent
+        onJumpRequested: function(albumIndex) { list.jumpToAlbum(albumIndex); }
     }
 
     PixelText {
