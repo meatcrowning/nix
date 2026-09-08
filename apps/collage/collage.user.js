@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ldg collage
 // @namespace    ldg-collage
-// @version      2.5.6
+// @version      2.5.7
 // @description  Image and fixed-frame-rate video collages, entirely in your browser
 // @match        https://boards.4chan.org/*/thread/*
 // @match        https://boards.4channel.org/*/thread/*
@@ -164,10 +164,10 @@
     }
     const ratios = media.map((m) => m.width / m.height);
     const ideal = Math.sqrt(1 / (aspect * ratios.reduce((a, b) => a + b, 0)));
-    let rows, bestError = Infinity;
-    const trials = borderless ? 65 : 1;
+    const candidates = [];
+    const trials = 65;
     for (let trial = 0; trial < trials; trial++) {
-      const target = ideal * (borderless ? 2 ** ((trial - 32) / 8) : 1);
+      const target = ideal * 2 ** ((trial - 32) / 8);
       const cost = [0], prev = [0];
       for (let end2 = 1; end2 <= ratios.length; end2++) {
         cost[end2] = Infinity;
@@ -190,11 +190,16 @@
       }
       const totalHeight = candidate.reduce((sum, [a, b]) => sum + 1 / ratios.slice(a, b).reduce((s, r) => s + r, 0), 0);
       const error = Math.abs(Math.log(totalHeight * aspect));
-      if (error < bestError) {
-        rows = candidate;
-        bestError = error;
-      }
+      const areas = candidate.flatMap(([a, b]) => {
+        const sum = ratios.slice(a, b).reduce((s, r) => s + r, 0);
+        return ratios.slice(a, b).map((r) => r / (sum * sum));
+      });
+      areas.sort((a, b) => a - b);
+      const median = areas[Math.floor((areas.length - 1) / 2)];
+      candidates.push({ rows: candidate, error, spread: areas.at(-1) / median });
     }
+    const spreadLimit = Math.max(2.5, Math.min(...candidates.map((c) => c.spread)) * (1 + 1e-9));
+    const { rows } = candidates.filter((c) => c.spread <= spreadLimit).sort((a, b) => a.error - b.error || a.spread - b.spread)[0];
     const heights = rows.map(([a, b]) => 1 / ratios.slice(a, b).reduce((s, r) => s + r, 0));
     const height = heights.reduce((a, b) => a + b, 0);
     const widthPx = Math.max(2, Math.floor(edge / Math.max(1, height) / 2) * 2);
@@ -568,12 +573,13 @@
     [hidden] { display:none !important; }
     .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
     #list { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:4px; }
-    .tile { border:1px solid GrayText; padding:4px; overflow-wrap:anywhere; }
+    .tile { cursor:pointer; border:1px solid GrayText; padding:4px; overflow-wrap:anywhere; }
     .tile.selected { background:#90ee90; color:#000; }
     .tile img,.tile canvas { width:100%; height:90px; object-fit:contain; }
     .tile .source-preview { display:block; width:100%; min-height:90px; }
     .source-preview img,.source-preview canvas { pointer-events:none; }
-    .tile label { display:block; } .tile input { vertical-align:middle; }
+    .selection { display:block; }
+    .selection:focus-visible { outline:2px solid currentColor; outline-offset:1px; }
     #panel-head { position:sticky; top:-8px; z-index:2; display:flex; gap:8px;
       align-items:flex-start; background:#202124; padding:8px 0; }
     #message { flex:1; min-width:0; margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
@@ -721,6 +727,7 @@
       for (const e of entries.values()) if (e.tile) {
         e.tile.hidden = $("view").value === "selected" && !e.selected;
         e.tile.classList.toggle("selected", !!e.selected);
+        e.selection.setAttribute("aria-checked", String(!!e.selected));
       }
     };
     $("view").onchange = count;
@@ -805,18 +812,27 @@
         openPreview(entry.url || entry.previewUrl, video, show);
       };
       tile.append(show);
-      const label = document.createElement("label"), box = document.createElement("input");
-      box.type = "checkbox";
-      box.checked = !!entry.selected;
-      box.addEventListener("change", () => {
-        entry.selected = box.checked;
+      const selection = document.createElement("div");
+      selection.className = "selection";
+      selection.setAttribute("role", "checkbox");
+      selection.tabIndex = 0;
+      selection.setAttribute("aria-checked", String(!!entry.selected));
+      selection.textContent = entry.name;
+      tile.append(selection);
+      tile.onclick = (e) => {
+        if (e.target.closest(".source-preview") || controller) return;
+        entry.selected = !entry.selected;
         count();
         persist();
         syncMarks();
-      });
-      label.append(box, document.createTextNode(` ${entry.name}`));
-      tile.append(label);
-      entry.box = box;
+      };
+      selection.onkeydown = (e) => {
+        if (e.key === " " || e.key === "Enter") {
+          e.preventDefault();
+          selection.click();
+        }
+      };
+      entry.selection = selection;
       entry.tile = tile;
       entry.show = show;
       $("list").append(tile);
@@ -908,7 +924,6 @@
     for (const [name, selected] of [["all", true], ["none", false]]) $(name).onclick = () => {
       for (const entry of entries.values()) {
         entry.selected = selected;
-        entry.box.checked = selected;
       }
       count();
       persist();
@@ -1110,6 +1125,7 @@
     const marks = /* @__PURE__ */ new Map();
     const linkMarks = /* @__PURE__ */ new WeakMap();
     function syncMarks() {
+      for (const entry of entries.values()) entry.tile.inert = !!controller;
       for (const [button, url] of marks) {
         if (!button.isConnected) {
           marks.delete(button);
@@ -1174,7 +1190,6 @@
           const e = entries.get(u.href);
           if (!e) return;
           e.selected = !e.selected;
-          e.box.checked = e.selected;
           count();
           persist();
           syncMarks();
