@@ -22,6 +22,7 @@ try {
     ...(engine === 'chromium' ? {args: ['--disable-gpu', '--no-first-run', '--disable-background-networking', '--disable-extensions', '--disable-dev-shm-usage']} : {}) });
   console.log('browser',engine,browser.version());
   const page = await browser.newPage();
+  const runtimeErrors=[];page.on('pageerror',e=>runtimeErrors.push(e.message));
   console.log('isolated page created');
   if(process.env.COLLAGE_CPU_RATE) {
     if(engine!=='chromium') throw new Error('CPU throttling requires Chromium');
@@ -43,6 +44,18 @@ try {
     const normalized=E.normalizeBlob(foreign);iframe.remove();
     if(!(normalized instanceof Blob) || normalized.size!==red.size) throw new Error('cross-realm blob');
     const opts = { edge:320, duration:1, fps:30, maxBytes:1_000_000 };
+    // VFR, fractional start offsets, final-frame hold and multiple loop boundaries.
+    let live=0,peak=0;
+    const offsets=[0,0.04,0.11,0.2], start=0.1234567;
+    const reader=E.videoReader({start,duration:0.25},undefined,()=>{
+      let i=0;return {async next(){if(i===offsets.length)return {done:true};live++;peak=Math.max(peak,live);let closed=false;return {value:{timestamp:start+offsets[i++],close(){if(closed)throw Error('double close');closed=true;live--;}}};},async return(){}};
+    });
+    try {for(let i=0;i<60;i++) {
+      const sample=await reader.at(i,60), time=(i%15)/60;
+      const expected=start+offsets.filter(t=>t<=time+1e-7).at(-1);
+      if(Math.abs(sample.timestamp-expected)>1e-9)throw Error('VFR resampling/looping');
+    }}finally{await reader.close();}
+    if(live || peak>2)throw Error('video reader leaked or retained excess frames');
     for(const [text,expected] of [['2:3',2/3],['0.5',0.5],['3/7',3/7],['16 x 9',16/9],['.25',.25]])
       if(Math.abs(E.parseAspect(text)-expected)>1e-12) throw new Error('aspect parser');
     for(const bad of ['1/0','0','-1','Infinity','1:2:3','alert(1)']) {
@@ -117,6 +130,37 @@ try {
     assert(result.cancelled); assert(result.sizeRejected);assert(result.unsupported);assert(result.imageFallback);
   }
   console.log('mp4',result.mp4 ? 'supported' : result.mp4Unavailable || 'unavailable');
+  if(!result.videoUnavailable) {
+    // A P-frame before a keyframe in presentation order can follow B-frames in
+    // decode order. The former sparse lookup failed at precisely output frame 306.
+    const bframes=join(dir,'bframes.mp4');
+    execFileSync('ffmpeg',['-v','error','-f','lavfi','-i','testsrc2=size=160x120:rate=24:duration=12','-c:v','libx264','-threads','2','-x264-params','keyint=245:min-keyint=245:scenecut=0:bframes=3:b-adapt=0','-crf','18',bframes]);
+    await page.evaluate(()=>{const el=document.createElement('input');el.type='file';el.id='regression';document.body.append(el);});
+    await page.locator('#regression').setInputFiles(bframes);
+    const regression=await page.evaluate(async()=>{
+      const E=CollageEngine,file=document.querySelector('#regression').files[0];let m;
+      try {m=await E.prepare(file);} catch(e) {
+        if(e.message==='this browser cannot decode this video codec')return {unsupported:true};
+        throw e;
+      }
+      const reader=E.videoReader(m);let checked=0;
+      try {for(let i=0;i<360;i++) {
+        const sample=await reader.at(i,30);
+        if(Math.abs(sample.timestamp-Math.floor(i*24/30)/24)>1e-6)throw Error(`B-frame timing at output frame ${i+1}: ${sample.timestamp}`);
+        checked++;
+      }}finally{await reader.close();m.dispose();}
+      const r=await E.exportCollage([file],{format:'webm',edge:320,aspect:4/3,duration:12,fps:30,maxBytes:2e6});
+      return {checked,frames:r.frames,bytes:Array.from(new Uint8Array(await r.blob.arrayBuffer()))};
+    });
+    if(regression.unsupported) console.log('B-frame regression skipped: this browser build has no H.264 decoder');
+    else {
+      assert.equal(regression.checked,360); assert.equal(regression.frames,360);
+      await writeFile(join(dir,'bframes.webm'),new Uint8Array(regression.bytes));
+      const probe=JSON.parse(execFileSync('ffprobe',['-v','error','-count_frames','-show_streams','-of','json',join(dir,'bframes.webm')],{encoding:'utf8'}));
+      assert.equal(Number(probe.streams[0].nb_read_frames),360);
+      console.log('B-frame boundary regression: 360 correctly sampled and encoded frames');
+    }
+  }
   for (const name of ['still','video','delayed','mixed','mp4'].filter(name=>result[name])) {
     const r=result[name], file=join(dir,`${name}.${r.extension}`);
     await writeFile(file,new Uint8Array(r.bytes));
@@ -146,6 +190,21 @@ try {
   assert.equal(await page.locator('.fileText [data-ldg-mark]').count(),1);
   assert.equal(await page.locator('.fileText [data-ldg-mark]').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 255, 0)');
   assert.equal((await page.locator('.fileText').boundingBox()).height,rowBefore.height);
+  // X/XT-style sauce links can exist before installation or arrive afterward.
+  await page.evaluate(()=>{
+    const file=document.createElement('div');file.className='file';file.id='extension-file';file.style.font='13px sans-serif';
+    file.innerHTML='<div class="fileText"><span class="file-info">example.png (1 MB, 320x240)</span><span class="fileText-original" hidden>original</span> <a class="sauce" href="https://example.invalid/">google</a> <a class="sauce" href="https://example.invalid/y">yandex</a></div><a class="fileThumb" href="https://i.4cdn.org/g/0.png">thumbnail</a>';
+    document.body.append(file);
+  });
+  await page.waitForFunction(()=>document.querySelector('#extension-file .file-info').nextSibling?.matches?.('[data-ldg-mark]'));
+  assert.equal(await page.locator('#extension-file [data-ldg-mark]').count(),1);
+  await page.evaluate(()=>{const info=document.querySelector('#extension-file .fileText');info.innerHTML='example.png (1 MB, 320x240) <a class="sauce" href="https://example.invalid/">google</a>';});
+  await page.waitForFunction(()=>document.querySelector('#extension-file a.sauce').previousSibling?.matches?.('[data-ldg-mark]'));
+  assert.equal(await page.locator('#extension-file [data-ldg-mark]').count(),1);
+  assert.equal(await page.locator('#extension-file a.sauce').getAttribute('href'),'https://example.invalid/');
+  await page.evaluate(()=>{const copy=document.querySelector('#extension-file').cloneNode(true);copy.id='extension-clone';document.body.append(copy);});
+  await page.waitForFunction(()=>typeof document.querySelector('#extension-clone [data-ldg-mark]')?.onclick==='function');
+  assert.equal(await page.locator('#extension-clone [data-ldg-mark]').count(),1);
   const downloads=[]; page.on('download',d=>downloads.push(d));
   await page.locator('#ldg-collage-v2').getByRole('button',{name:'collage',exact:true}).click();
   const ui=page.locator('#ldg-collage-v2');
@@ -189,6 +248,8 @@ try {
   await ui.getByLabel('scale',{exact:true}).evaluate(el=>{el.value='640';el.dispatchEvent(new Event('input',{bubbles:true}));});
   assert((await ui.locator('#scale-value').innerText()).includes('640px'));
   await ui.getByLabel('aspect ratio',{exact:true}).fill('3/7');
+  // Disabled seconds must not invalidate image output.
+  await ui.locator('#duration').evaluate(el=>{el.value='999';});
   await ui.locator('summary').click();
   const imageDownload=page.waitForEvent('download');
   await ui.getByRole('button',{name:'create collage'}).click();
@@ -234,9 +295,11 @@ try {
     await ui.getByRole('button',{name:'create collage'}).click();
     await ui.getByRole('dialog',{name:'large video collage'}).waitFor();
     assert((await ui.locator('#warning-text').innerText()).includes('9 videos'));
+    assert(await page.locator('#extension-file [data-ldg-mark]').isDisabled());
     await ui.getByRole('button',{name:'continue rendering',exact:true}).press('Escape');
     await page.waitForFunction(()=>document.querySelector('#ldg-collage-v2').shadowRoot.querySelector('#message').textContent==='cancelled');
     assert.equal(downloads.length,3);
+    assert(await page.locator('#extension-file [data-ldg-mark]').isEnabled());
     for (const permanent of [false,true]) {
       await ui.getByRole('button',{name:'create collage'}).click();
       await ui.getByRole('dialog',{name:'large video collage'}).waitFor();
@@ -262,4 +325,5 @@ try {
   assert(!(await ui.locator('#panel').isVisible()));
   console.log(result.videoUnavailable ? 'UI image export passed; video unavailable in this browser build'
     : 'UI image export, slow export, looping, cancellation, frame counts and timestamps passed');
+  assert.deepEqual(runtimeErrors,[]);
 } finally { clearTimeout(watchdog); await browser?.close(); await rm(dir,{recursive:true,force:true}); }

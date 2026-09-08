@@ -172,7 +172,11 @@ export async function prepare(blob, signal, edge = 2048) {
   }
   if (typeof VideoDecoder === 'undefined') throw new Error('this browser has no WebCodecs video decoder');
   const input = new Input({ source: new BlobSource(blob), formats: [MP4, WEBM, MATROSKA] });
+  const abort = () => input.dispose();
+  const dispose = () => { signal?.removeEventListener('abort', abort); input.dispose(); };
+  signal?.addEventListener('abort', abort, { once:true });
   try {
+    check(signal);
     const track = await input.getPrimaryVideoTrack();
     if (!track || !await track.canDecode()) throw new Error('this browser cannot decode this video codec');
     rejectHDR(await track.getColorSpace());
@@ -182,14 +186,49 @@ export async function prepare(blob, signal, edge = 2048) {
     if (!Number.isFinite(end - start) || end <= start) throw new Error('video has invalid timestamps');
     check(signal);
     return { kind: 'video', blob, input, track, width, height, start, duration: end - start,
-      dispose() { input.dispose(); } };
-  } catch (e) { input.dispose(); throw e; }
+      dispose };
+  } catch (e) { dispose(); throw e; }
 }
 
-function* times(m, o) {
-  const span = Math.max(1, Math.round(m.duration * 1e6));
-  const start = Math.round(m.start * 1e6);
-  for (let i = 0; i < o.frameCount; i++) yield (start + Math.round(i * 1e6 / o.fps) % span) / 1e6;
+// Sequential decoding preserves B-frame dependencies across keyframe boundaries.
+// Keep only the current frame and one lookahead (plus the sink's bounded queue).
+// Returned samples are borrowed: the reader owns and closes them.
+export function videoReader(m, signal, samples = () => new VideoSampleSink(m.track).samples(m.start)) {
+  let iterator, current, next, cycle = -1;
+  const close = async () => {
+    current?.close(); next?.close(); current = next = undefined;
+    const old = iterator; iterator = undefined;
+    if (old) await old.return();
+  };
+  const read = async () => {
+    check(signal);
+    const { value } = await iterator.next();
+    if (signal?.aborted) { value?.close(); check(signal); }
+    if (value && (!Number.isFinite(value.timestamp) || current && value.timestamp < current.timestamp)) {
+      value.close(); throw new Error('video has invalid frame timestamps');
+    }
+    return value;
+  };
+  return {
+    async at(index, fps) {
+      check(signal);
+      const elapsed = index / fps;
+      const loop = Math.floor((elapsed + 1e-9) / m.duration);
+      const time = m.start + Math.max(0, elapsed - loop * m.duration);
+      if (loop !== cycle) {
+        await close(); cycle = loop; iterator = samples();
+        current = await read(); next = await read();
+      }
+      while (next && next.timestamp <= time + 1e-7) {
+        current?.close(); current = next; next = undefined;
+        next = await read();
+      }
+      if (!current || current.timestamp > time + 1e-7)
+        throw new Error(`no decoded source frame at ${time.toFixed(6)}s`);
+      return current;
+    },
+    close,
+  };
 }
 
 export async function exportCollage(blobs, raw, signal, progress = () => {}, warn = async () => {}) {
@@ -201,7 +240,11 @@ export async function exportCollage(blobs, raw, signal, progress = () => {}, war
   try {
     for (let i = 0; i < blobs.length; i++) {
       check(signal); progress(`reading ${i + 1}/${blobs.length}`);
-      const m = await prepare(blobs[i], signal, o.edge); media.push(m);
+      const name = blobs[i].name || `source ${i + 1}`;
+      let m;
+      try { m = await prepare(blobs[i], signal, o.edge); }
+      catch (e) { check(signal); throw new Error(`${name}: ${e.message || e}`); }
+      m.name = name; media.push(m);
       imagePixels += m.pixels || 0;
       if (imagePixels > LIMITS.sourcePixels) throw new Error('still images exceed 32 megapixels after resizing; split this collage');
       if (m.kind === 'video') {
@@ -240,13 +283,15 @@ export async function exportCollage(blobs, raw, signal, progress = () => {}, war
       if (typeof VideoEncoder === 'undefined') throw new Error('this browser has no WebCodecs video encoder');
       let bitrate = Math.floor(o.maxBytes * 8 * 0.88 / o.duration);
       const codec = await selectCodec(o.format, l.width, l.height, bitrate);
+      let lastBytes = 0;
       for (let attempt = 1; attempt <= 3; attempt++) {
         const result = await encodeVideo(media, l, base.canvas, o, codec, bitrate, signal, progress, attempt);
         if (result.blob.size <= o.maxBytes) return result;
+        lastBytes = result.blob.size;
         bitrate = Math.floor(bitrate * o.maxBytes / result.blob.size * 0.8);
         check(signal); await yieldTask();
       }
-      throw new Error('video exceeds the size limit after 3 passes; reduce dimensions or duration');
+      throw new Error(`video is ${(lastBytes / 1e6).toFixed(2)} MB after 3 passes; limit is ${(o.maxBytes / 1e6).toFixed(2)} MB. increase limit (MB), or reduce scale or seconds in advanced`);
     } finally { base.canvas.width = base.canvas.height = 1; }
   } finally { for (const m of media) m.dispose(); }
 }
@@ -300,17 +345,20 @@ async function encodeVideo(media, l, base, o, codec, bitrate, signal, progress, 
     check(signal); await output.start();
     for (const p of l.placements) {
       const m = media[p.index];
-      if (m.kind === 'video') readers.set(p.index, new VideoSampleSink(m.track).samplesAtTimestamps(times(m, o)));
+      if (m.kind === 'video') readers.set(p.index, videoReader(m, signal));
     }
     for (let i = 0; i < o.frameCount; i++) {
       check(signal);
       frame.ctx.drawImage(base, 0, 0);
       for (const p of l.placements) {
         const reader = readers.get(p.index); if (!reader) continue;
-        const { value: sample } = await reader.next();
-        if (!sample) throw new Error(`missing source frame at output frame ${i + 1}`);
-        try { rejectHDR(sample.colorSpace); sample.draw(frame.ctx, p.x, p.y, p.width, p.height); }
-        finally { sample.close(); }
+        try {
+          const sample = await reader.at(i, o.fps);
+          rejectHDR(sample.colorSpace); sample.draw(frame.ctx, p.x, p.y, p.width, p.height);
+        } catch (e) {
+          check(signal);
+          throw new Error(`${media[p.index].name}, output frame ${i + 1}: ${e.message || e}`);
+        }
       }
       // Presentation time is independent of how long decoding/drawing took.
       await source.add(i / o.fps, 1 / o.fps);
@@ -326,7 +374,7 @@ async function encodeVideo(media, l, base, o, codec, bitrate, signal, progress, 
       width: l.width, height: l.height, frames: stamps.length, fps: o.fps, duration: o.duration };
   } finally {
     signal?.removeEventListener('abort', abort);
-    for (const reader of readers.values()) await reader.return().catch(() => {});
+    for (const reader of readers.values()) await reader.close().catch(() => {});
     if (!finalized) await output.cancel().catch(() => {});
     frame.canvas.width = frame.canvas.height = 1;
   }

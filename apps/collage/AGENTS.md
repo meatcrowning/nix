@@ -54,6 +54,15 @@ encoding must leave image output usable. MP4 is not accepted by every destinatio
 Release still tiles after drawing the reusable base; yield through MessageChannel
 without a per-frame timer clamp. Keep output timestamps independent of work time.
 No MediaRecorder fallback, runtime codec downloads or platform-specific service.
+Video export uses sequential VideoSampleSink.samples decoding, not sparse
+samplesAtTimestamps: sparse GOP flushes can miss reordered H.264 frames. Each
+reader owns its current frame and one lookahead, resamples by presentation time,
+and restarts only at loop boundaries. Never close a borrowed frame in the draw
+loop. Release both samples and the iterator on retry, cancellation and failure.
+Keep synthetic B-frame/keyframe-boundary, VFR/offset/loop and ownership tests;
+report the H.264 regression as skipped if the test browser lacks that decoder.
+Source diagnostics include the file name and output-frame index. Invalid settings
+are rejected before downloads; disabled video fields cannot block image exports.
 
 The main panel exposes a positive decimal/colon/fraction aspect ratio and a
 dark theme shared with the main collage button and controls; respect forced
@@ -67,6 +76,9 @@ uses the checked selection, never silently selects unchecked files. The collage
 button toggles the panel; progress and X share a sticky top row. Thread selection
 buttons use black text on yellow and sit inline after file dimensions without
 increasing the text row height.
+Place buttons after X/XT's formatted .file-info and before sauce links, without
+rewriting or removing those links. Reconcile late file-info rebuilds via the
+existing observer; avoid unconditional text mutations that create observer loops.
 Finished files request native browser downloads automatically, with no result cards;
 download permissions/save dialogs remain browser-controlled. Revoke download URLs
 after 60 seconds, not immediately or on the next export. Never claim a confirmed
