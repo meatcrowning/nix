@@ -13,6 +13,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -67,6 +69,17 @@ def _active_wallpaper(profile: Path) -> str:
 
 
 def _active_scheme(profile: Path) -> str:
+    reader = shutil.which("kreadconfig6")
+    if reader:
+        try:
+            result = subprocess.run([reader, "--file", "kdeglobals", "--group", "General",
+                                     "--key", "ColorScheme"], text=True, capture_output=True,
+                                    timeout=5, check=False)
+            value = result.stdout.strip()
+            if value in {"OxygenDarkFlat", "OxygenLightFlat"}:
+                return value
+        except (OSError, subprocess.SubprocessError):
+            pass
     try:
         data = json.loads(profile.read_text(encoding="utf-8"))
         value = data["colorScheme"]["name"]
