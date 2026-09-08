@@ -2270,12 +2270,6 @@ do is leave the bar undimmed. Full seam: `apps/askpass/AGENTS.md`.
 
 ## The panel draws the wallpaper — hyprpaper is gone
 
-Both wallpaper-library surfaces accept local image drops: `SetPaperGrid.qml`
-in Settings and the Meta+W `WallpaperPicker.qml`. They share a copy-only
-contract: resolve `SettingsStore.wallpaperDir`, never clobber an existing name,
-run `wal-prepare.sh`, refresh, and reveal the first added paper without silently
-applying it. Non-local and non-image payloads are refused at the border.
-
 Removed 2026-07-26. `Wall.qml` (which image + tile/scale), `WallpaperLayer.qml`
 (a Background layer surface per monitor), `WallpaperImage.qml` (one cross-fade
 frame). Two reasons it had to change: hyprpaper re-rendered its whole background
