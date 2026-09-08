@@ -223,6 +223,8 @@ FINISHES = [
     "Would you like me to play one of these tracks, or help with something else?",
     "I found 15 tracks. Should I go ahead and queue one?",
     "I'll search the library next. Would you like me to?",
+    "Let me know if you want me to check anything else.",
+    "Let me know whether I should retry the failed tracks.",
 ]
 for t in ANNOUNCES:
     check("announced work is unfinished: %r" % t[:34], o.looksUnfinished(t))

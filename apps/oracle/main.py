@@ -5593,6 +5593,12 @@ class Ollama(QObject):
             return False
         if tail.rstrip().endswith("?"):
             return False
+        # This is an OFFER, even when a model punctuates it as a statement:
+        # "let me know if you want me to check anything else." Without this
+        # guard the generic "let me ... check" pattern answers the offer for
+        # him and can authorize work he never requested.
+        if re.search(r"\blet me know (?:if|whether)\b", tail):
+            return False
         return any(re.search(p, tail) for p in UNFINISHED_PATTERNS)
 
     @Slot(str, result="QVariant")
