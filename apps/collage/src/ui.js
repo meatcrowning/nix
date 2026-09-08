@@ -1,4 +1,4 @@
-import { exportCollage, LIMITS, check, isVideo, normalizeBlob, parseAspect, options } from './engine.js';
+import { exportCollage, LIMITS, check, isVideo, normalizeBlob, parseAspect, options, DEFAULT_MAX_BYTES, checkOutputSize } from './engine.js';
 
 const hosts = new Set(['i.4cdn.org', 'files.catbox.moe', 'litter.catbox.moe', 'uguu.se']);
 const id = 'ldg-collage-v2';
@@ -69,7 +69,7 @@ function init() {
       <label>output <select id="format"><option value="auto">automatic</option><option value="webm">video · webm</option><option value="mp4">video · mp4 (h.264)</option><option value="jpeg">image · jpeg</option><option value="png">image · png</option></select></label>
       <label>fps <select id="fps"><option>15</option><option>24</option><option selected>30</option><option>60</option></select></label>
       <label>seconds <input id="duration" type="number" min="0.01" max="300" step="any" placeholder="auto" size="6"></label>
-      <label>limit (MB) <input id="limit" type="number" min="0.1" max="32" step="0.1" value="4" size="3"></label>
+      <label>limit (MB) <input id="limit" type="number" min="0.1" max="32" step="any" value="${DEFAULT_MAX_BYTES / 1e6}" size="8" title="maximum size of each finished collage, not its input files"></label>
       <label>collages <input id="parts" type="number" min="1" max="16" step="1" value="1" size="3"></label>
     </div></details></fieldset>
     <div class="bar"><label>show <select id="view" aria-label="gallery view"><option value="all">all files</option><option value="selected">selected only</option></select></label>
@@ -265,6 +265,7 @@ function init() {
         const result = await exportCollage(blobs, { ...opts, header: !!header }, signal,
           text => message(`collage ${part + 1}/${parts}: ${text}`), info => warnLargeJob(info, signal));
         check(signal);
+        checkOutputSize(result.blob, opts.maxBytes);
         const url = URL.createObjectURL(result.blob);
         const link = document.createElement('a'); link.href = url;
         const board = location.pathname.split('/')[1] || 'custom';

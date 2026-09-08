@@ -44,6 +44,14 @@ try {
     const normalized=E.normalizeBlob(foreign);iframe.remove();
     if(!(normalized instanceof Blob) || normalized.size!==red.size) throw new Error('cross-realm blob');
     const opts = { edge:320, duration:1, fps:30, maxBytes:1_000_000 };
+    if(E.options().maxBytes!==4194304)throw Error('default output byte budget');
+    E.checkOutputSize(new Blob([new Uint8Array(10)]),10);
+    let oversize=false;try{E.checkOutputSize(new Blob([new Uint8Array(11)]),10);}catch{oversize=true;}
+    if(!oversize)throw Error('oversize output accepted');
+    // Inputs may exceed the requested output size; only the result must fit.
+    const padded=new Blob([await red.arrayBuffer(),new Uint8Array(200000)],{type:'image/png'});
+    const small=await E.exportCollage([padded],{...opts,format:'jpeg',maxBytes:100000});
+    if(padded.size<=100000 || small.blob.size>100000)throw Error('input/output budgets confused');
     // VFR, fractional start offsets, final-frame hold and multiple loop boundaries.
     let live=0,peak=0;
     const offsets=[0,0.04,0.11,0.2], start=0.1234567;
@@ -208,6 +216,7 @@ try {
   const downloads=[]; page.on('download',d=>downloads.push(d));
   await page.locator('#ldg-collage-v2').getByRole('button',{name:'collage',exact:true}).click();
   const ui=page.locator('#ldg-collage-v2');
+  assert.equal(await ui.locator('#limit').inputValue(),'4.194304');
   assert.equal(await ui.locator('#panel').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(32, 33, 36)');
   assert(['rgb(48, 49, 52)','rgb(65, 67, 72)'].includes(await ui.locator('#open').evaluate(el=>getComputedStyle(el).backgroundColor)));
   assert.equal(await ui.locator('#advanced').getAttribute('open'),null);
