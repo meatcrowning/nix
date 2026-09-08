@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ldg collage
 // @namespace    ldg-collage
-// @version      2.5.4
+// @version      2.5.5
 // @description  Image and fixed-frame-rate video collages, entirely in your browser
 // @match        https://boards.4chan.org/*/thread/*
 // @match        https://boards.4channel.org/*/thread/*
@@ -556,9 +556,9 @@
     .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
     #list { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:4px; }
     .tile { border:1px solid GrayText; padding:4px; overflow-wrap:anywhere; }
-    .tile img { width:100%; height:90px; object-fit:contain; }
+    .tile img,.tile canvas { width:100%; height:90px; object-fit:contain; }
     .tile .source-preview { display:block; width:100%; min-height:90px; }
-    .source-preview img { pointer-events:none; }
+    .source-preview img,.source-preview canvas { pointer-events:none; }
     .tile label { display:block; } .tile input { vertical-align:middle; }
     #panel-head { position:sticky; top:-8px; z-index:2; display:flex; gap:8px;
       align-items:flex-start; background:#202124; padding:8px 0; }
@@ -710,6 +710,63 @@
     $("edge").oninput = () => {
       $("scale-value").value = `${Math.round(Number($("edge").value) / 12.8)}% \xB7 ${$("edge").value}px`;
     };
+    const thumbnailEntries = /* @__PURE__ */ new WeakMap(), thumbnailQueue = /* @__PURE__ */ new Set();
+    let thumbnailActive = 0;
+    const thumbnailObserver = new IntersectionObserver((records) => {
+      for (const record of records) {
+        const entry = thumbnailEntries.get(record.target);
+        if (record.isIntersecting) thumbnailQueue.add(entry);
+        else thumbnailQueue.delete(entry);
+      }
+      pumpThumbnails();
+    }, { root: $("panel"), rootMargin: "180px" });
+    function pumpThumbnails() {
+      while (thumbnailActive < 2 && thumbnailQueue.size) {
+        const entry = thumbnailQueue.values().next().value;
+        thumbnailQueue.delete(entry);
+        if (!entry.tile.isConnected || entry.thumb || entry.thumbnailDone || entry.cancelThumbnail) continue;
+        thumbnailObserver.unobserve(entry.tile);
+        thumbnailActive++;
+        const video = document.createElement("video");
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = "auto";
+        let finished = false;
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
+          video.onloadeddata = video.onerror = null;
+          video.pause();
+          video.removeAttribute("src");
+          video.load();
+          entry.cancelThumbnail = null;
+          entry.thumbnailDone = true;
+          thumbnailActive--;
+          pumpThumbnails();
+        };
+        const timer = setTimeout(finish, 12e3);
+        entry.cancelThumbnail = finish;
+        video.onerror = finish;
+        video.onloadeddata = () => {
+          try {
+            if (entry.tile.isConnected && !entry.thumb && video.videoWidth && video.videoHeight) {
+              const canvas2 = document.createElement("canvas");
+              const scale = Math.min(1, 320 / Math.max(video.videoWidth, video.videoHeight));
+              canvas2.width = Math.max(1, Math.round(video.videoWidth * scale));
+              canvas2.height = Math.max(1, Math.round(video.videoHeight * scale));
+              canvas2.getContext("2d").drawImage(video, 0, 0, canvas2.width, canvas2.height);
+              entry.show.replaceChildren(canvas2);
+            }
+          } catch {
+          } finally {
+            finish();
+          }
+        };
+        if (!entry.url && !entry.previewUrl) entry.previewUrl = URL.createObjectURL(entry.file);
+        video.src = entry.url || entry.previewUrl;
+      }
+    }
     function add(entry) {
       if (entries.has(entry.key)) return;
       entries.set(entry.key, entry);
@@ -744,7 +801,12 @@
       tile.append(label);
       entry.box = box;
       entry.tile = tile;
+      entry.show = show;
       $("list").append(tile);
+      if (!entry.thumb && (entry.file?.type.startsWith("video/") || /\.(webm|mp4)(?:[?#]|$)/i.test(entry.url || entry.name))) {
+        thumbnailEntries.set(tile, entry);
+        thumbnailObserver.observe(tile);
+      }
     }
     function scan() {
       for (const a of document.querySelectorAll("a.fileThumb, .postMessage a[href]")) {
@@ -759,7 +821,7 @@
           key: url.href,
           url: url.href,
           name: url.pathname.split("/").pop(),
-          thumb: a.matches("a.fileThumb") ? a.querySelector("img")?.src : null,
+          thumb: a.querySelector("img")?.src || a.querySelector("video[poster]")?.poster,
           selected: remembered.has(url.href) || a.closest(".highlighted") !== null
         });
       }
@@ -838,6 +900,9 @@
     $("clear").onclick = () => {
       closePreview();
       for (const [key, e] of entries) if (e.file) {
+        thumbnailObserver.unobserve(e.tile);
+        thumbnailQueue.delete(e);
+        e.cancelThumbnail?.();
         if (e.thumb) URL.revokeObjectURL(e.thumb);
         if (e.previewUrl) URL.revokeObjectURL(e.previewUrl);
         e.tile.remove();

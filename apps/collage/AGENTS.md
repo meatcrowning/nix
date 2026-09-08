@@ -97,7 +97,12 @@ Finished files request native browser downloads automatically, with no result ca
 download permissions/save dialogs remain browser-controlled. Revoke download URLs
 after 60 seconds, not immediately or on the next export. Never claim a confirmed
 disk write from an anchor click. Every source tile has a preview button, independent
-of its checkbox. Source previews use full media URLs, not thumbnails; local
+of its checkbox. Source previews use full media URLs, not thumbnails.
+Gallery thumbnails reuse images/posters inside attachment or post links. Videos
+without one decode a single paused frame into a display-only canvas when near
+the visible gallery, with at most two decoders and a 12-second timeout. Release
+each video source after capture/failure; never read back cross-origin canvases.
+Thumbnail failures must leave the full preview button and export usable. Local
 object URLs are retained until clear. A top-layer dialog covers the viewport;
 clicking its background, an image, X or Escape returns to the gallery (video
 controls remain interactive). Never test this by clicking the user's desktop.
