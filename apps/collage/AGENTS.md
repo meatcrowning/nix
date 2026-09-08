@@ -1,9 +1,13 @@
 # Browser collage exporter
 
 Portable userscript for both top and book and other users' browsers. No local
-service or runtime CDN imports. `collage.user.js` is the installable artifact;
+service. `collage.user.js` is the installable artifact;
 edit `src/`, then `npm ci && npm run build` in this directory. The pinned
-Mediabunny code and its license are bundled, not fetched by the installed script.
+Mediabunny browser build is loaded by the manager through a version-pinned jsDelivr
+`@require` with SHA-256 integrity computed from the installed npm package. Keep
+the collage artifact unminified with readable names and comments; `src/mediabunny.js`
+adapts the library's global namespace to named imports. Installation requires CDN
+access; all media processing remains local. No Nix package or rebuild is involved.
 
 Export video by timestamps with WebCodecs and bounded decoder/encoder queues;
 never substitute MediaRecorder or wall-clock playback. Reject unsupported
@@ -13,7 +17,9 @@ and size-limit checks. Do not touch the live Vivaldi profile for installation.
 Run `npm test` through `test.sh`: isolated headless browser, private profile,
 no live D-Bus/display, and FFmpeg probes of generated synthetic fixtures.
 No screenshots or real media are needed. Tests must not navigate to 4chan or
-contact external hosts. `COLLAGE_ENGINE=chromium|firefox|webkit` selects the
+contact external hosts. Load the exact npm browser build before the engine and
+installed artifact, matching `@require` ordering, and check the metadata hash.
+`COLLAGE_ENGINE=chromium|firefox|webkit` selects the
 engine (default Chromium); `COLLAGE_BROWSER` may specify its executable.
 Use matching Playwright/browser revisions for Firefox/WebKit. Set
 `PLAYWRIGHT_BROWSERS_PATH` and optionally `COLLAGE_PLAYWRIGHT` to a matching
