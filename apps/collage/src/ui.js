@@ -1,4 +1,4 @@
-import { exportCollage, LIMITS, check } from './engine.js';
+import { exportCollage, LIMITS, check, isVideo, normalizeBlob } from './engine.js';
 
 const hosts = new Set(['i.4cdn.org', 'files.catbox.moe', 'litter.catbox.moe', 'uguu.se']);
 const id = 'ldg-collage-v2';
@@ -39,7 +39,7 @@ function init() {
       <button id="clear">clear list</button><span id="count"></span></div>
     <div id="list" aria-label="media selection"></div>
     <fieldset id="settings"><div class="bar">
-      <label>output <select id="format"><option value="webm">video · webm</option><option value="jpeg">image · jpeg</option><option value="png">image · png</option></select></label>
+      <label>output <select id="format"><option value="webm">video · webm</option><option value="mp4">video · mp4 (h.264)</option><option value="jpeg">image · jpeg</option><option value="png">image · png</option></select></label>
       <label>longest edge <select id="edge"><option>640</option><option>960</option><option selected>1280</option><option>1920</option><option>2048</option></select></label>
       <label>shape <select id="aspect"><option value="1">square</option><option value="1.7777777778">wide</option><option value="0.5625">tall</option></select></label>
       <label>fps <select id="fps"><option>15</option><option>24</option><option selected>30</option><option>60</option></select></label>
@@ -49,7 +49,9 @@ function init() {
     </div></fieldset>
     <p class="help">video is silent, SDR, and rendered frame by frame. slower machines take longer.
     shorter videos loop; lower-fps sources repeat frames. image output uses the first video frame.
-    animated images export as stills. layout preserves order and proportions; shape is approximate.</p>
+    animated images export as stills. layout preserves order and proportions; shape is approximate.
+    mp4 is an alternative when webm encoding is unavailable; check the destination accepts it.
+    video needs WebCodecs and supported codecs. keep this tab open until export finishes.</p>
     <div class="bar"><button id="export">export selected</button><button id="cancel" disabled>cancel</button></div>
     <p id="message" role="status" aria-live="polite"></p><div id="results"></div>
   </section>`;
@@ -142,7 +144,7 @@ function init() {
   };
   $('cancel').onclick = () => controller?.abort(new DOMException('cancelled', 'AbortError'));
   $('format').onchange = () => {
-    const image = $('format').value !== 'webm'; $('fps').disabled = $('duration').disabled = image;
+    const image = !isVideo($('format').value); $('fps').disabled = $('duration').disabled = image;
   };
   $('export').onclick = async () => {
     if (controller) return;
@@ -239,8 +241,11 @@ export function fetchBlob(url, signal, budget) {
           finish(new Error('download exceeds remaining memory budget')); request?.abort(); } },
         onload: r => {
           if (r.status !== 200) finish(new Error(`download failed (${r.status}): ${url}`));
-          else if (!(r.response instanceof Blob) || r.response.size > budget) finish(new Error('invalid or oversized download'));
-          else finish(null, r.response);
+          else try {
+            const blob = normalizeBlob(r.response);
+            if (blob.size > budget) finish(new Error('invalid or oversized download'));
+            else finish(null, blob);
+          } catch (e) { finish(e); }
         },
         onerror: () => finish(new Error(`download failed: ${url}`)),
         ontimeout: () => finish(new Error(`download timed out: ${url}`)),
