@@ -10,12 +10,42 @@ interact with the desktop.
 from pathlib import Path
 import hashlib
 import os
+import re
+import subprocess
 import sys
 import time
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QGuiApplication, QImage, QPalette, QRegion
 from PySide6.QtWidgets import QApplication, QWidget
+
+
+def plasma_screen_size() -> tuple[int, int] | None:
+    """Read the live logical primary-output size before Qt goes offscreen."""
+    try:
+        result = subprocess.run(
+            ["kscreen-doctor", "-o"], capture_output=True, text=True,
+            timeout=3, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode:
+        return None
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
+    outputs = []
+    for block in re.split(r"(?=^Output: )", plain, flags=re.MULTILINE):
+        if "\n\tenabled" not in block:
+            continue
+        geometry = re.search(r"Geometry:\s*-?\d+,-?\d+\s+(\d+)x(\d+)", block)
+        if geometry is None:
+            continue
+        priority = re.search(r"priority\s+(\d+)", block)
+        outputs.append((int(priority.group(1)) if priority else 999,
+                        int(geometry.group(1)), int(geometry.group(2))))
+    if not outputs:
+        return None
+    _, width, height = min(outputs)
+    return width, height
 
 def render_surface(width: int, height: int, palette: QPalette) -> QImage:
     """Render an actual Oxygen styled top-level widget, never mapping it."""
@@ -46,6 +76,7 @@ def publish_generation(state: Path, target: Path) -> None:
 
 
 def main() -> int:
+    live_size = plasma_screen_size()
     app = QApplication.instance() or QApplication(sys.argv[:1])
     if app.style().objectName().lower() != "oxygen":
         print(f"refusing non-Oxygen style: {app.style().objectName()}", file=sys.stderr)
@@ -54,7 +85,7 @@ def main() -> int:
     if screen is None:
         return 1
     rect = screen.geometry()
-    width, height = max(1, rect.width()), max(1, rect.height())
+    width, height = live_size or (max(1, rect.width()), max(1, rect.height()))
 
     # Oxygen only draws this primitive for a real top-level QWidget.  It also
     # treats an unseen window as inactive unless every colour group is pinned;

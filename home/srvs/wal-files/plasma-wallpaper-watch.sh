@@ -20,6 +20,7 @@ set -u
 
 CACHE="$HOME/.cache/wal"
 LOG="$CACHE/wallpaper-picker.log"
+SESSION_RESTORED="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/plasma-wallpaper-restored"
 
 # A containment config is named after the SHELL package that owns it, so the
 # file to read depends on which Plasma session is running: stock Plasma writes
@@ -54,6 +55,25 @@ done < <(grep '^Image=' "$APPLETSRC" 2>/dev/null)
 
 [ -n "$WALL" ] || exit 0
 WALL="$(realpath "$WALL")"
+
+# The Plasma containment file survives while wallpaper choices made in the
+# Hyprland session are recorded in the shared library marker.  On the first
+# containment write of a Plasma login, restore that newer cross-session choice
+# before treating Plasma's stale on-disk image as a new selection.
+if [ ! -e "$SESSION_RESTORED" ]; then
+    : > "$SESSION_RESTORED"
+    library="$(realpath "$HOME/Pictures/Wallpapers" 2>/dev/null || true)"
+    selected="$(cat "$library/.current-wallpaper" 2>/dev/null || true)"
+    selected="$library/$selected"
+    if [ -n "$library" ] && [ -f "$selected" ]; then
+        selected="$(realpath "$selected")"
+        if [ "$selected" != "$WALL" ]; then
+            mkdir -p "$CACHE"
+            echo "plasma-wallpaper-watch: restoring $selected at login" >> "$LOG"
+            exec "$HOME/.config/scripts/wal-set.sh" "$selected" >> "$LOG" 2>&1
+        fi
+    fi
+fi
 
 # Already themed from this image? Then this appletsrc write was some other
 # applet's state and there is nothing to do.
