@@ -149,6 +149,8 @@ try {
   const downloads=[]; page.on('download',d=>downloads.push(d));
   await page.locator('#ldg-collage-v2').getByRole('button',{name:'collage',exact:true}).click();
   const ui=page.locator('#ldg-collage-v2');
+  assert.equal(await ui.locator('#panel').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(32, 33, 36)');
+  assert(['rgb(48, 49, 52)','rgb(65, 67, 72)'].includes(await ui.locator('#open').evaluate(el=>getComputedStyle(el).backgroundColor)));
   assert.equal(await ui.locator('#advanced').getAttribute('open'),null);
   assert(await ui.getByLabel('scale',{exact:true}).isVisible());
   assert(await ui.getByLabel('aspect ratio',{exact:true}).isVisible());

@@ -49,6 +49,8 @@ without a per-frame timer clamp. Keep output timestamps independent of work time
 No MediaRecorder fallback, runtime codec downloads or platform-specific service.
 
 The main panel exposes a positive decimal/colon/fraction aspect ratio and a
+dark theme shared with the main collage button and controls; respect forced
+colours for accessibility, and keep the thread selection buttons yellow. It has a
 scale slider (1280px longest edge at 100%) above the gallery, with one create action. Advanced contains
 format, fps, duration, size limit, collage count, local files and header input.
 The default automatic format is resolved from decoded input types per collage:
