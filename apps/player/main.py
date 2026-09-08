@@ -52,7 +52,7 @@ import time
 import urllib.parse
 from pathlib import Path
 
-from PySide6.QtCore import (QObject, QProcess, Qt, QThread, QTimer, QUrl, Signal,
+from PySide6.QtCore import (QFile, QObject, QProcess, Qt, QThread, QTimer, QUrl, Signal,
                             Slot, Property, QFileSystemWatcher, QMetaObject,
                             Q_ARG)
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QProcessEnvironment
@@ -1673,6 +1673,25 @@ class Library(QObject):
         # Queued, not emitted: `changed` drives the very refresh we are inside.
         QTimer.singleShot(0, self.changed.emit)
         return len(paths)
+
+    def trash_track(self, track_id):
+        """Move one owned library file to the desktop trash, then forget it.
+
+        QFile delegates to the platform trash implementation on both hosts. The
+        DB changes only after that move succeeds, so a failed trash operation
+        cannot make an extant track disappear from the player.
+        """
+        row = self._con.execute(
+            "SELECT path FROM tracks WHERE id=?", (int(track_id),)).fetchone()
+        if not row or not os.path.isfile(row["path"]):
+            return False
+        if not QFile.moveToTrash(row["path"]):
+            return False
+        self._con.execute("DELETE FROM tracks WHERE id=?", (int(track_id),))
+        self._con.commit()
+        rebuild_albums(self._con)
+        self.changed.emit()
+        return True
 
     # ---- opening a file by path (argv / the OPEN verb) ----
 
@@ -3807,6 +3826,20 @@ class Bridge(QObject):
     @Slot(int, bool)
     def setInstrumental(self, track_id, yes):
         self._library.setInstrumental(int(track_id), bool(yes))
+
+    @Slot(int, result=bool)
+    def trashTrack(self, track_id):
+        """Trash a track and remove every queued copy after the move lands."""
+        track_id = int(track_id)
+        if not self._library.trash_track(track_id):
+            self.scanStatus.emit("couldn't trash track")
+            return False
+        indices = [i for i, row in enumerate(self._player.queue_dicts())
+                   if int(row.get("id", 0)) == track_id]
+        if indices:
+            self._player.removeFromQueue(indices)
+        self.scanStatus.emit("")
+        return True
 
     # ---- reveal (the track menu's "open folder in filer") ----
 
