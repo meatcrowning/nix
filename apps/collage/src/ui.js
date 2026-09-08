@@ -16,7 +16,7 @@ function init() {
     button,a,input,select { min-height: 28px; }
     button { cursor: pointer; } button:disabled { cursor: default; }
     :focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
-    #open { position:fixed; bottom:8px; right:8px; z-index:2147483646; }
+    #open { position:fixed; bottom:8px; right:8px; z-index:2147483647; }
     #panel { position:fixed; inset:4%; z-index:2147483647; background:Canvas;
       color:CanvasText; border:1px solid; padding:8px; overflow:auto; font:15px sans-serif; }
     [hidden] { display:none !important; }
@@ -26,38 +26,49 @@ function init() {
     .tile img { width:100%; height:90px; object-fit:contain; }
     .tile label { display:block; } .tile input { vertical-align:middle; }
     #message { white-space:pre-wrap; overflow-wrap:anywhere; }
-    #results a { display:block; padding:8px 0; }
+    #close { margin-left:auto; }
+    #results { display:flex; flex-wrap:wrap; gap:8px; }
+    #results article { max-width:240px; }
+    #results a { display:block; padding:4px 0; }
+    #results img,#results video { width:100%; max-height:180px; object-fit:contain; }
+    #preview { position:fixed; inset:0; z-index:2147483647; background:#000; color:#fff;
+      display:flex; align-items:center; justify-content:center; }
+    #preview img,#preview video { max-width:100%; max-height:100%; object-fit:contain; }
+    #preview-close { position:absolute; top:8px; right:8px; z-index:1; }
+    summary { cursor:pointer; min-height:28px; }
     .help { font-size:0.9em; } fieldset { border:0; padding:0; margin:0; }
   </style>
-  <button id="open">collage</button>
+  <button id="open" aria-expanded="false" aria-controls="panel">collage</button>
   <section id="panel" role="dialog" aria-modal="true" aria-label="collage" hidden>
-    <div class="bar"><strong>collage</strong><button id="close">close</button></div>
-    <div class="bar"><button id="thread">add thread media</button>
+    <div class="bar"><button id="close" aria-label="close collage">X</button></div>
+    <fieldset id="settings">
+    <div class="bar">
+      <label>aspect ratio <select id="aspect"><option value="1">1:1</option><option value="1.7777777778">16:9</option><option value="0.5625">9:16</option></select></label>
+      <label>scale <select id="edge"><option value="640">50% · 640px</option><option value="960">75% · 960px</option><option value="1280" selected>100% · 1280px</option><option value="1920">150% · 1920px</option><option value="2048">160% · 2048px</option></select></label>
+      <button id="export">create collage</button><button id="cancel" disabled>cancel</button>
+    </div>
+    <details id="advanced"><summary>advanced</summary>
+    <div class="bar">
       <label>add files <input id="files" type="file" accept="image/*,video/webm,video/mp4" multiple></label>
       <label>header image <input id="header" type="file" accept="image/*"></label></div>
-    <div class="bar"><button id="all">select all</button><button id="none">select none</button>
-      <button id="clear">clear list</button><span id="count"></span></div>
-    <div id="list" aria-label="media selection"></div>
-    <fieldset id="settings"><div class="bar">
-      <label>output <select id="format"><option value="webm">video · webm</option><option value="mp4">video · mp4 (h.264)</option><option value="jpeg">image · jpeg</option><option value="png">image · png</option></select></label>
-      <label>longest edge <select id="edge"><option>640</option><option>960</option><option selected>1280</option><option>1920</option><option>2048</option></select></label>
-      <label>shape <select id="aspect"><option value="1">square</option><option value="1.7777777778">wide</option><option value="0.5625">tall</option></select></label>
+    <div class="bar">
+      <label>output <select id="format"><option value="auto">automatic</option><option value="webm">video · webm</option><option value="mp4">video · mp4 (h.264)</option><option value="jpeg">image · jpeg</option><option value="png">image · png</option></select></label>
       <label>fps <select id="fps"><option>15</option><option>24</option><option selected>30</option><option>60</option></select></label>
       <label>seconds <input id="duration" type="number" min="1" max="15" step="1" value="5" size="3"></label>
       <label>limit (MB) <input id="limit" type="number" min="0.1" max="32" step="0.1" value="4" size="3"></label>
       <label>collages <input id="parts" type="number" min="1" max="16" step="1" value="1" size="3"></label>
-    </div></fieldset>
-    <p class="help">video is silent, SDR, and rendered frame by frame. slower machines take longer.
-    shorter videos loop; lower-fps sources repeat frames. image output uses the first video frame.
-    animated images export as stills. layout preserves order and proportions; shape is approximate.
-    mp4 is an alternative when webm encoding is unavailable; check the destination accepts it.
-    video needs WebCodecs and supported codecs. keep this tab open until export finishes.</p>
-    <div class="bar"><button id="export">export selected</button><button id="cancel" disabled>cancel</button></div>
+    </div></details></fieldset>
+    <div class="bar"><button id="all">select all</button><button id="none">select none</button>
+      <button id="clear">clear list</button><span id="count"></span></div>
+    <div id="list" aria-label="media selection"></div>
     <p id="message" role="status" aria-live="polite"></p><div id="results"></div>
+  </section>
+  <section id="preview" role="dialog" aria-modal="true" aria-label="collage preview" hidden>
+    <button id="preview-close" aria-label="close preview">X</button>
   </section>`;
   const $ = name => root.getElementById(name);
   for (const name of ['format', 'edge', 'aspect', 'fps', 'duration', 'limit', 'parts'])
-    $(name).setAttribute('aria-label', { format: 'output', edge: 'longest edge', aspect: 'shape',
+    $(name).setAttribute('aria-label', { format: 'output', edge: 'scale', aspect: 'aspect ratio',
       fps: 'fps', duration: 'seconds', limit: 'limit (MB)', parts: 'collages' }[name]);
   const entries = new Map(); const resultUrls = []; let header = null, controller = null;
   const storageKey = `ldg-collage-v2:${location.pathname}`;
@@ -119,18 +130,19 @@ function init() {
     persist();
   }
   let previousFocus;
-  $('open').onclick = () => { previousFocus = document.activeElement; scan(); $('panel').hidden = false; $('close').focus();
+  $('open').onclick = () => { if (!$('panel').hidden) { $('close').click(); return; }
+    previousFocus = document.activeElement; if (!controller) scan(); $('panel').hidden = false;
+    $('open').setAttribute('aria-expanded', 'true'); $('close').focus();
     if (document.querySelector('.chan-hv-options-menu')) message('the old collage script is also running; disable its older copies in your userscript manager'); };
-  $('close').onclick = () => { $('panel').hidden = true; previousFocus?.focus(); };
+  $('close').onclick = () => { $('panel').hidden = true; $('open').setAttribute('aria-expanded', 'false'); previousFocus?.focus(); };
   $('panel').addEventListener('keydown', e => {
     if (e.key === 'Escape') { e.preventDefault(); $('close').click(); }
     if (e.key !== 'Tab') return;
-    const focusable = [...$('panel').querySelectorAll('button,input,select,a[href]')].filter(e => !e.disabled && !e.hidden);
+    const focusable = [...$('panel').querySelectorAll('button,input,select,a[href],summary'), $('open')].filter(e => !e.disabled && e.getClientRects().length);
     const first = focusable[0], last = focusable.at(-1);
     if (e.shiftKey && root.activeElement === first) { e.preventDefault(); last.focus(); }
     else if (!e.shiftKey && root.activeElement === last) { e.preventDefault(); first.focus(); }
   });
-  $('thread').onclick = scan;
   $('files').onchange = e => { addFiles(e.target.files); e.target.value = ''; };
   $('header').onchange = e => { header = e.target.files[0] || null; };
   $('panel').ondragover = e => e.preventDefault();
@@ -144,10 +156,11 @@ function init() {
   };
   $('cancel').onclick = () => controller?.abort(new DOMException('cancelled', 'AbortError'));
   $('format').onchange = () => {
-    const image = !isVideo($('format').value); $('fps').disabled = $('duration').disabled = image;
+    const image = $('format').value !== 'auto' && !isVideo($('format').value); $('fps').disabled = $('duration').disabled = image;
   };
   $('export').onclick = async () => {
     if (controller) return;
+    scan();
     const chosen = [...entries.values()].filter(e => e.selected);
     if (!chosen.length) { message('select at least one file'); return; }
     const parts = Number($('parts').value);
@@ -157,7 +170,7 @@ function init() {
     controller = new AbortController(); const signal = controller.signal;
     const controls = [...$('panel').querySelectorAll('button,input,select')].filter(el => !['close', 'cancel'].includes(el.id));
     const disabled = controls.map(e => e.disabled); controls.forEach(e => { e.disabled = true; }); $('cancel').disabled = false;
-    $('results').replaceChildren(); resultUrls.splice(0).forEach(url => URL.revokeObjectURL(url));
+    closePreview(); $('results').replaceChildren(); resultUrls.splice(0).forEach(url => URL.revokeObjectURL(url));
     try {
       const groups = Array.from({ length: parts }, () => []);
       chosen.forEach((entry, i) => groups[i % parts].push(entry));
@@ -181,11 +194,41 @@ function init() {
         link.download = `highlights_${board}_${thread}_${Math.floor(Date.now() / 1000)}_${part + 1}.${result.extension}`;
         link.textContent = `save collage ${part + 1} · ${result.width}×${result.height} · ${(result.blob.size / 1e6).toFixed(2)} MB`
           + (result.frames ? ` · ${result.frames} frames at ${result.fps} fps` : '');
-        $('results').append(link);
+        const card = document.createElement('article'), show = document.createElement('button');
+        show.setAttribute('aria-label', `preview collage ${part + 1}`);
+        const thumbnail = document.createElement(result.frames ? 'video' : 'img');
+        thumbnail.src = url;
+        if (result.frames) { thumbnail.muted = true; thumbnail.preload = 'metadata'; }
+        else thumbnail.alt = `collage ${part + 1}`;
+        show.append(thumbnail); show.onclick = () => openPreview(url, !!result.frames, show);
+        card.append(show, link); $('results').append(card);
       }
       message('ready to save');
     } catch (e) { message(signal.aborted ? 'cancelled' : e.message || String(e)); }
     finally { controls.forEach((el, i) => { el.disabled = disabled[i]; }); $('cancel').disabled = true; controller = null; }
+  };
+  let previewFocus;
+  function closePreview() {
+    const media = $('preview').querySelector('img,video');
+    if (media) { if (media.tagName === 'VIDEO') { media.pause(); media.removeAttribute('src'); media.load(); } media.remove(); }
+    const wasOpen = !$('preview').hidden;
+    $('preview').hidden = true; $('panel').inert = false; $('open').disabled = false;
+    if (wasOpen) previewFocus?.focus();
+  }
+  function openPreview(url, video, trigger) {
+    closePreview(); previewFocus = trigger;
+    const media = document.createElement(video ? 'video' : 'img'); media.src = url;
+    if (video) { media.controls = true; media.loop = true; media.muted = true; media.playsInline = true; }
+    else media.alt = 'collage preview';
+    $('preview').append(media); $('preview').hidden = false;
+    $('panel').inert = true; $('open').disabled = true; $('preview-close').focus();
+    if (video) media.play().catch(() => {}); // Native controls remain available.
+  }
+  $('preview-close').onclick = closePreview;
+  $('preview').onclick = e => { if (e.target === $('preview')) closePreview(); };
+  $('preview').onkeydown = e => {
+    if (e.key === 'Escape') { e.preventDefault(); closePreview(); }
+    if (e.key === 'Tab' && !$('preview').querySelector('video')) { e.preventDefault(); $('preview-close').focus(); }
   };
   // One small button per media link; process only newly inserted subtrees.
   // Marking works with a keyboard, touch or a mouse, without modifier keys.

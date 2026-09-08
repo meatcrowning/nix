@@ -47,3 +47,14 @@ encoding must leave image output usable. MP4 is not accepted by every destinatio
 Release still tiles after drawing the reusable base; yield through MessageChannel
 without a per-frame timer clamp. Keep output timestamps independent of work time.
 No MediaRecorder fallback, runtime codec downloads or platform-specific service.
+
+The main panel exposes aspect ratio and output scale (1280px longest edge at
+100%) above the selection gallery, with one create action. Advanced contains
+format, fps, duration, size limit, collage count, local files and header input.
+The default automatic format is resolved from decoded input types per collage:
+any video selects WebM, otherwise JPEG. Explicit formats always override this.
+Opening/creating discovers thread media without a separate import step; creation
+uses the checked selection, never silently selects unchecked files. The collage
+button toggles the panel; its X closes it. Generated thumbnails open viewport-
+filling image/video previews with separate save links, Escape/X dismissal and
+video/object-URL cleanup. Keep the distributed namespace anonymous.

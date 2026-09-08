@@ -37,9 +37,9 @@ export function dimensions(w, h) {
 export function options(raw = {}) {
   const o = { format: 'webm', fps: 30, duration: 5, edge: 1280, aspect: 1,
     maxBytes: 4_000_000, ...raw };
-  if (!['webm', 'mp4', 'jpeg', 'png'].includes(o.format) || ![15, 24, 30, 60].includes(o.fps)
+  if (!['auto', 'webm', 'mp4', 'jpeg', 'png'].includes(o.format) || ![15, 24, 30, 60].includes(o.fps)
     || !Number.isFinite(o.duration) || o.duration < 1 || o.duration > 15
-    || !Number.isFinite(o.edge) || o.edge < 320 || o.edge > (isVideo(o.format) ? 2048 : 4096)
+    || !Number.isFinite(o.edge) || o.edge < 320 || o.edge > (isVideo(o.format) || o.format === 'auto' ? 2048 : 4096)
     || !Number.isFinite(o.aspect) || o.aspect < 0.25 || o.aspect > 4
     || !Number.isFinite(o.maxBytes) || o.maxBytes < 100_000 || o.maxBytes > 32_000_000)
     throw new Error('invalid export settings');
@@ -187,6 +187,7 @@ export async function exportCollage(blobs, raw, signal, progress = () => {}) {
       }
       await yieldTask();
     }
+    if (o.format === 'auto') o.format = media.some(m => m.kind === 'video') ? 'webm' : 'jpeg';
     const l = layout(media, o.edge, o.aspect, o.header);
     const base = canvas(l.width, l.height);
     try {
