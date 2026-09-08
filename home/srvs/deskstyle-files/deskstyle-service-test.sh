@@ -36,6 +36,7 @@ rg -F '"$HOME/.nix-profile/bin/qdbus"' "$WAL" >/dev/null
 rg -F '/usr/bin/qdbus6' "$WAL" >/dev/null
 rg -F 'systemd-run --user --quiet --no-block --collect' "$WAL" >/dev/null
 rg -F 'LIVE_SCHEME="$PREPARED_SCHEME"' "$WAL" >/dev/null
+rg -F '.plasma-scheme.lock' "$WAL" "$ROOT/home/srvs/wal-files/plasma-scheme-watch.sh" >/dev/null
 if rg -F 'selected color scheme changed during preparation' "$WAL" >/dev/null; then
     echo "wal-set still rejects an explicit Style scheme switch" >&2
     exit 1

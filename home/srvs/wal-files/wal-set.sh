@@ -77,6 +77,14 @@ case ":$(printf '%s' "${XDG_CURRENT_DESKTOP:-}" | tr '[:lower:]' '[:upper:]'):" 
 esac
 LIVE_SCHEME=""
 if [ "$PLASMA_SESSION" = 1 ] && command -v kreadconfig6 >/dev/null 2>&1; then
+    # Icon-theme and colour-role writes both wake plasma-scheme-watch.path.
+    # Hold one transaction lock before the first of them so that watcher can
+    # only inspect the final selected scheme, never restore the old scheme in
+    # the middle of a Style light/dark switch.
+    if command -v flock >/dev/null 2>&1; then
+        exec 9>"$CACHE/.plasma-scheme.lock"
+        flock 9
+    fi
     LIVE_SCHEME="$(kreadconfig6 --file kdeglobals --group General --key ColorScheme 2>/dev/null)"
 fi
 # A regular prepared wallpaper request snapshots the existing scheme; a

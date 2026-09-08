@@ -11,6 +11,16 @@ set -u
 WAL_CACHE="$HOME/.cache/wal"
 THEME="$HOME/.config/quickshell/Theme.qml"
 
+# wal-set changes the icon theme and every colour role as one appearance
+# transaction. Path activation may start this watcher after its first KConfig
+# write; wait for the transaction to finish before deciding which named scheme
+# is live, or an old dark read can overwrite a new light commit.
+mkdir -p "$WAL_CACHE"
+if command -v flock >/dev/null 2>&1; then
+    exec 9>"$WAL_CACHE/.plasma-scheme.lock"
+    flock 9
+fi
+
 # wal-set publishes `current` before it writes the live Plasma roles.  Reading
 # Theme.qml here races its deliberately-last hot reload: the kdeglobals write
 # wakes this unit while Theme.qml still has the previous wallpaper's accent,
