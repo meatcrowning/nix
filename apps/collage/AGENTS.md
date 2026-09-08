@@ -115,9 +115,9 @@ their object URLs; it preserves thread files, their selection and saved selectio
 the 64-input export limit is separate from the gallery's size. No reorder buttons.
 Blank seconds means longest input video, rounded up to the next output frame;
 image-only video export defaults to five seconds. Explicit seconds overrides it.
-Reject auto durations over 300s rather than silently truncating. Image layout fits
-undistorted tiles inside the requested output ratio with padding as needed. Video
-layout compares justified row arrangements against the requested ratio and uses
+Reject auto durations over 300s rather than silently truncating. All export
+formats use the same borderless layout, which compares justified row arrangements
+against the requested ratio and uses
 the actual content dimensions, without added borders or cropping. For all formats,
 choose ratio accuracy only among layouts with at most 2.5x largest/median tile
 area; if none qualify, use the least unequal candidate. An explicit header
