@@ -955,10 +955,12 @@ changed and what it did not:
   argv[1] and still the default cwd — a scratch dir, which is all it usefully
   ever was — and a call may name its own `cwd` (absolute, or relative to that
   root; a missing directory is an error, never a silent fallback).
-- **The resource caps are unchanged and stay**: wall clock (default 10 s, max
-  30), CPU, address space, file size, per-stream output, and a timeout that
-  kills the whole process group. Those protect this desktop from a runaway
-  program, not from its author.
+- **The resource caps stay**: wall clock (default 10 s, max 30), CPU, address
+  space (4 GiB), per-file size (16 GiB), per-stream output, and a timeout that
+  kills the whole process group. The file cap is deliberately large enough for
+  normal media work; it is only a single-file runaway guard, not a total-write
+  quota. Those caps protect this desktop from a runaway program, not from its
+  author.
 - **`EXEC_TOOL`'s and `BASH_TOOL`'s descriptions, and `CAPABILITY_NOTE`, say
   all of this plainly**
   (docs/DESIGN.md §10 — never overstate a jail *or* a freedom), and they tell
