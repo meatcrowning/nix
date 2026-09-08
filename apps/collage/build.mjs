@@ -2,8 +2,8 @@ import { build } from 'esbuild';
 import { readFile } from 'node:fs/promises';
 const header = `// ==UserScript==
 // @name         ldg collage
-// @namespace    https://github.com/meatcrowning/nix
-// @version      2.1.0
+// @namespace    ldg-collage
+// @version      2.2.0
 // @description  Image and fixed-frame-rate video collages, entirely in your browser
 // @match        https://boards.4chan.org/*/thread/*
 // @match        https://boards.4channel.org/*/thread/*

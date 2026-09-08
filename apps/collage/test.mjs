@@ -53,6 +53,7 @@ try {
     const array = async r => ({...r, blob:undefined, bytes:Array.from(new Uint8Array(await r.blob.arrayBuffer()))});
     console.log('image export');
     const still = await E.exportCollage([red,gray],{...opts,format:'png'});
+    if((await E.exportCollage([red],{...opts,format:'auto'})).extension!=='jpg') throw new Error('automatic image format');
     const supported={};
     for(const format of ['webm','mp4']) {
       try {supported[format]=await E.selectCodec(format,212,318,7_040_000);} catch(e) {console.log(format,e.message);}
@@ -77,7 +78,7 @@ try {
     out.addVideoTrack(source,{frameRate:10}); await out.start();
     for(let i=0;i<4;i++) {pattern.ctx.fillStyle=['#101010','#808080','#e0e0e0','#d03030'][i];pattern.ctx.fillRect(0,0,320,240);await source.add(i/10,0.1);}
     source.close();await out.finalize();const input=new Blob([target.buffer],{type:`video/${opts.format}`});
-    const delayed = await E.exportCollage([input], {...opts,duration:2}, undefined, () => {
+    const delayed = await E.exportCollage([input], {...opts,format:supported.webm ? 'auto' : 'mp4',duration:2}, undefined, () => {
       // Deliberately miss the real-time frame budget; output must stay CFR.
       const stop = performance.now()+40; while(performance.now()<stop) {}
     });
@@ -87,6 +88,7 @@ try {
       if(t.includes('frame 3/')) ac.abort(new DOMException('cancelled','AbortError'));
     }); } catch { cancelled=ac.signal.aborted; }
     const mixed = await E.exportCollage([input,input,red,gray],{...opts,edge:1280,fps:60});
+    if((await E.exportCollage([input],{...opts,format:'png'})).extension!=='png') throw new Error('explicit image override');
     if(mixed.frames!==60 || mixed.fps!==60 || Math.max(mixed.width,mixed.height)<1278)
       throw new Error('requested output settings changed');
     let sizeRejected=false;
@@ -128,12 +130,54 @@ try {
   await page.goto('http://localhost/');
   await page.addScriptTag({ content:await readFile('collage.user.js','utf8') });
   await page.locator('#ldg-collage-v2').getByRole('button',{name:'collage',exact:true}).click();
+  const ui=page.locator('#ldg-collage-v2');
+  assert.equal(await ui.locator('#advanced').getAttribute('open'),null);
+  assert(await ui.getByLabel('scale',{exact:true}).isVisible());
+  assert(await ui.getByLabel('aspect ratio',{exact:true}).isVisible());
+  assert(!(await ui.getByLabel('output',{exact:true}).isVisible()));
+  await ui.getByRole('button',{name:'collage',exact:true}).click();
+  assert(!(await ui.locator('#panel').isVisible()));
+  await ui.getByRole('button',{name:'collage',exact:true}).click();
+  await ui.locator('summary').click();
   await page.locator('#ldg-collage-v2').getByLabel('add files').setInputFiles(join(dir,'still.png'));
   await page.locator('#ldg-collage-v2').getByLabel('output',{exact:true}).selectOption('mp4');
   assert(await page.locator('#ldg-collage-v2').getByLabel('fps',{exact:true}).isEnabled());
   await page.locator('#ldg-collage-v2').getByLabel('output',{exact:true}).selectOption('png');
-  await page.locator('#ldg-collage-v2').getByRole('button',{name:'export selected'}).click();
+  await ui.getByLabel('scale',{exact:true}).selectOption('640');
+  await ui.getByLabel('aspect ratio',{exact:true}).selectOption('0.5625');
+  await ui.locator('summary').click();
+  await page.locator('#ldg-collage-v2').getByRole('button',{name:'create collage'}).click();
   await page.locator('#ldg-collage-v2').getByRole('link',{name:/save collage/}).waitFor();
+  await ui.getByRole('button',{name:'preview collage 1'}).click();
+  assert(await ui.getByRole('dialog',{name:'collage preview',exact:true}).isVisible());
+  assert(await ui.locator('#panel').evaluate(el=>el.inert));
+  await ui.getByRole('button',{name:'close preview'}).press('Escape');
+  assert(!(await ui.locator('#preview').isVisible()));
+  assert(!(await ui.locator('#panel').evaluate(el=>el.inert)));
+  if(result.video && result.video.extension==='webm') {
+    await ui.locator('summary').click();
+    await ui.getByLabel('add files').setInputFiles(join(dir,'delayed.webm'));
+    await ui.getByLabel('header image').setInputFiles(join(dir,'still.png'));
+    await ui.getByLabel('output',{exact:true}).selectOption('auto');
+    await ui.getByLabel('fps',{exact:true}).selectOption('24');
+    await ui.getByLabel('seconds',{exact:true}).fill('1');
+    await ui.getByLabel('limit (MB)',{exact:true}).fill('0.5');
+    await ui.getByLabel('collages',{exact:true}).fill('2');
+    await ui.locator('summary').click();
+    await ui.getByRole('button',{name:'create collage'}).click();
+    const second=ui.getByRole('link',{name:/save collage 2/});
+    await second.waitFor();
+    assert((await second.getAttribute('download')).endsWith('.webm'));
+    assert((await second.innerText()).includes('24 frames at 24 fps'));
+    assert((await ui.getByRole('link',{name:/save collage 1/}).getAttribute('download')).endsWith('.jpg'));
+    await ui.getByRole('button',{name:'preview collage 2'}).click();
+    assert(await ui.locator('#preview video').isVisible());
+    assert(await ui.locator('#preview video').evaluate(v=>v.controls && v.muted));
+    await ui.getByRole('button',{name:'close preview'}).click();
+    assert.equal(await ui.locator('#preview video').count(),0);
+  }
+  await ui.getByRole('button',{name:'close collage',exact:true}).click();
+  assert(!(await ui.locator('#panel').isVisible()));
   console.log(result.videoUnavailable ? 'UI image export passed; video unavailable in this browser build'
     : 'UI image export, slow export, looping, cancellation, frame counts and timestamps passed');
 } finally { clearTimeout(watchdog); await browser?.close(); await rm(dir,{recursive:true,force:true}); }
