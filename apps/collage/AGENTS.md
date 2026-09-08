@@ -40,6 +40,11 @@ Frame/timestamp validation remains mandatory regardless of warning dismissal.
 Animated images become stills. Header is a full-width first row; multiple
 collages distribute items round-robin. Output limits use decimal MB. PNG refuses
 oversize; JPEG searches quality; video retries bitrate up to three passes.
+The MB setting applies to each final collage, never individual inputs. Default
+to 4,194,304 bytes (/g/'s 4 MiB), displayed as 4.194304 decimal MB. Check the
+finished Blob size again immediately before download; refuse oversize output
+without silently resizing, truncating or changing fps. Input memory guards remain
+separate from this output budget.
 
 Performance checks use deliberate >frame-period delays and frame-changing
 synthetic video. Verify decoded output cadence and colour patches, not just the

@@ -6,6 +6,12 @@ import {
 export const LIMITS = Object.freeze({ items: 64, bytes: 256 * 1024 ** 2,
   sourcePixels: 32 * 1024 ** 2 });
 export const LARGE_VIDEO_JOB = Object.freeze({ videos: 8, pixels: 24 * 1024 ** 2 });
+// /g/ attachment limit, verified against a.4cdn.org/boards.json.
+export const DEFAULT_MAX_BYTES = 4 * 1024 ** 2;
+export function checkOutputSize(blob, maxBytes) {
+  if (!Number.isFinite(maxBytes) || maxBytes <= 0 || blob.size > Math.floor(maxBytes))
+    throw new Error('finished collage exceeds the selected output size limit');
+}
 // Yield to input/cancellation without the nested-timer clamp on every frame.
 // No animation frames: export must not depend on visible-tab refresh rate.
 let channel;
@@ -45,7 +51,7 @@ export function parseAspect(value) {
 }
 export function options(raw = {}) {
   const o = { format: 'webm', fps: 30, duration: 5, edge: 1280, aspect: 1,
-    maxBytes: 4_000_000, ...raw };
+    maxBytes: DEFAULT_MAX_BYTES, ...raw };
   if (!['auto', 'webm', 'mp4', 'jpeg', 'png'].includes(o.format) || ![15, 24, 30, 60].includes(o.fps)
     || o.duration !== 'auto' && (!Number.isFinite(o.duration) || o.duration <= 0 || o.duration > 300)
     || !Number.isFinite(o.edge) || o.edge < 320 || o.edge > (isVideo(o.format) || o.format === 'auto' ? 2048 : 4096)
