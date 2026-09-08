@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QFileSystemWatcher, QObject, Property, QProcess, QUrl, Signal, Slot
+from PySide6.QtCore import QFileSystemWatcher, QObject, Property, QUrl, Signal, Slot
 from PySide6.QtGui import QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 
@@ -64,6 +64,15 @@ def _active_wallpaper(profile: Path) -> str:
         return str(Path(value).resolve()) if isinstance(value, str) else ""
     except (OSError, ValueError, KeyError, TypeError):
         return ""
+
+
+def _active_scheme(profile: Path) -> str:
+    try:
+        data = json.loads(profile.read_text(encoding="utf-8"))
+        value = data["colorScheme"]["name"]
+        return value if value in {"OxygenDarkFlat", "OxygenLightFlat"} else "OxygenDarkFlat"
+    except (OSError, ValueError, KeyError, TypeError):
+        return "OxygenDarkFlat"
 
 
 def _picker_active_wallpaper(root: Path) -> str:
@@ -152,6 +161,7 @@ class Appearance(QObject):
         self._profile = profile or active_profile_path()
         self._items: list[dict[str, str]] = []
         self._active = _active_wallpaper(self._profile) or _picker_active_wallpaper(self._root)
+        self._scheme = _active_scheme(self._profile)
         self._draft = self._active
         self._status = "ready" if self._active else "choose a wallpaper"
         self._error = ""
@@ -176,6 +186,10 @@ class Appearance(QObject):
     @Property(str, notify=activeChanged)
     def activePath(self):
         return self._active
+
+    @Property(str, notify=activeChanged)
+    def activeScheme(self):
+        return self._scheme
 
     @Property(bool, notify=selectionChanged)
     def hasDraft(self):
@@ -255,6 +269,34 @@ class Appearance(QObject):
             self.errorChanged.emit()
             self.statusChanged.emit()
 
+    @Slot(str)
+    def selectScheme(self, scheme):
+        if self._applying or scheme == self._scheme:
+            return
+        if scheme not in {"OxygenDarkFlat", "OxygenLightFlat"}:
+            return
+        try:
+            from PySide6.QtDBus import QDBusInterface, QDBusPendingCallWatcher
+            interface = QDBusInterface(SERVICE, OBJECT_PATH, INTERFACE)
+            if not interface.isValid():
+                raise RuntimeError("appearance service is unavailable")
+            self._applying = True
+            self._error = ""
+            self._status = "submitting"
+            self.applyingChanged.emit()
+            self.errorChanged.emit()
+            self.statusChanged.emit()
+            pending = interface.asyncCallWithArgumentList("SetScheme", [scheme])
+            self._pending_reply = QDBusPendingCallWatcher(pending, self)
+            self._pending_reply.finished.connect(self._apply_reply)
+        except Exception as exc:
+            self._applying = False
+            self._error = str(exc)
+            self._status = "not applied"
+            self.applyingChanged.emit()
+            self.errorChanged.emit()
+            self.statusChanged.emit()
+
     @Slot(object)
     def _apply_reply(self, watcher):
         reply = watcher.reply()
@@ -271,10 +313,6 @@ class Appearance(QObject):
         self._generation = int(reply.arguments()[0])
         self._status = "queued"
         self.statusChanged.emit()
-        overlay = HERE / "apply-overlay.py"
-        if overlay.is_file():
-            QProcess.startDetached(sys.executable, [str(overlay), "--generation",
-                                                    str(self._generation), "--wallpaper", self._draft])
         self._read_status()
 
     def _watch_status(self):
@@ -317,6 +355,7 @@ class Appearance(QObject):
         if generation != self._generation:
             return
         self._active = _active_wallpaper(self._profile) or self._draft
+        self._scheme = _active_scheme(self._profile)
         self._draft = self._active
         self._applying = False
         self._status = "live" if all_live else "live; apps deferred"

@@ -37,6 +37,13 @@ check('kdeshell.shell("style"' in inspect.getsource(module.main)
 apply_source = inspect.getsource(module.Appearance.apply)
 check("asyncCallWithArgumentList" in apply_source and '"Apply", [self._draft]' in apply_source,
       "sends the wallpaper as a QtDBus argument list without blocking the UI")
+scheme_source = inspect.getsource(module.Appearance.selectScheme)
+check('"SetScheme", [scheme]' in scheme_source,
+      "switches live Plasma schemes through the same controller transaction")
+check('Popup {' in qml and 'visible: Appearance.applying' in qml,
+      "keeps apply progress inside the Style window")
+check('apply-overlay.py' not in inspect.getsource(module.Appearance._apply_reply),
+      "does not start a fullscreen apply overlay")
 check('"Pictures" / "Wallpapers"' in inspect.getsource(module.wallpaper_dir),
       "uses the canonical Wallpapers library by default")
 check("self._applying = False" in apply_source,

@@ -31,6 +31,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import shutil
 import socket
 import stat
 import subprocess
@@ -45,7 +46,7 @@ for candidate in (HERE.parents[3] / "apps" / "pylib", Path("/home/lam/nix/apps/p
         sys.path.insert(0, str(candidate))
         break
 
-from styleprofile import StyleProfile, write_profile  # noqa: E402
+from styleprofile import StyleProfile, read_profile, write_profile  # noqa: E402
 from styleparticipant import PROTOCOL_VERSION, SOCKET_NAME, runtime_dir  # noqa: E402
 
 
@@ -57,6 +58,7 @@ PROFILE_PATH = STATE_DIR / "active-profile.json"
 STATUS_PATH = STATE_DIR / "status.json"
 ACK_TIMEOUT_SECONDS = 12
 IMAGE_SUFFIXES = frozenset((".png", ".jpg", ".jpeg", ".webp", ".bmp"))
+LIVE_SCHEMES = frozenset(("OxygenDarkFlat", "OxygenLightFlat"))
 LOG = logging.getLogger("deskstyle")
 
 
@@ -107,6 +109,10 @@ NODE_XML = """<node>
       <arg type='s' name='wallpaper' direction='in'/>
       <arg type='u' name='generation' direction='out'/>
     </method>
+    <method name='SetScheme'>
+      <arg type='s' name='scheme' direction='in'/>
+      <arg type='u' name='generation' direction='out'/>
+    </method>
     <method name='GetStatus'>
       <arg type='a{sv}' name='status' direction='out'/>
     </method>
@@ -149,6 +155,16 @@ def _read_env(path: Path) -> dict[str, str]:
 
 
 def _scheme_name() -> str:
+    command = shutil.which("kreadconfig6")
+    if command:
+        try:
+            result = subprocess.run([command, "--file", "kdeglobals", "--group", "General",
+                                     "--key", "ColorScheme"], text=True, capture_output=True,
+                                    timeout=5, check=False)
+            if result.stdout.strip():
+                return result.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            pass
     parser = configparser.ConfigParser(interpolation=None)
     try:
         parser.read(Path.home() / ".config" / "kdeglobals", encoding="utf-8")
@@ -245,8 +261,8 @@ class DeskStyleService:
         self.conn.register_object(OBJECT_PATH, self.iface, self._on_call, None, None)
         self._lock = threading.Lock()
         self._next_generation = 0
-        self._running: tuple[int, Path] | None = None
-        self._queued: tuple[int, Path] | None = None
+        self._running: tuple[int, Path, str] | None = None
+        self._queued: tuple[int, Path, str] | None = None
         # A registration belongs to a concrete process, not an application
         # name forever.  A crashed or closed app must not make every later
         # appearance transition wait for the acknowledgement timeout.
@@ -351,17 +367,24 @@ class DeskStyleService:
                 invocation.return_value(self._variant_status())
             elif method == "Apply":
                 wallpaper = authorized_wallpaper(params.unpack()[0])
-                generation = self._submit(wallpaper)
+                generation = self._submit(wallpaper, _scheme_name())
+                invocation.return_value(self.GLib.Variant("(u)", (generation,)))
+            elif method == "SetScheme":
+                scheme = params.unpack()[0]
+                if scheme not in LIVE_SCHEMES:
+                    raise ValueError("color scheme is not a live Style scheme")
+                wallpaper = authorized_wallpaper(read_profile(PROFILE_PATH).wallpaper_path)
+                generation = self._submit(wallpaper, scheme)
                 invocation.return_value(self.GLib.Variant("(u)", (generation,)))
             else:
                 invocation.return_dbus_error("org.lam.DeskStyle1.Error.UnknownMethod", method)
         except (OSError, ValueError) as exc:
             invocation.return_dbus_error("org.lam.DeskStyle1.Error.InvalidRequest", str(exc))
 
-    def _submit(self, wallpaper: Path) -> int:
+    def _submit(self, wallpaper: Path, scheme: str) -> int:
         with self._lock:
             self._next_generation += 1
-            request = (self._next_generation, wallpaper)
+            request = (self._next_generation, wallpaper, scheme)
             if self._running is not None:
                 old = self._queued
                 self._queued = request
@@ -372,7 +395,7 @@ class DeskStyleService:
             self._start_locked(request)
             return request[0]
 
-    def _start_locked(self, request: tuple[int, Path]) -> None:
+    def _start_locked(self, request: tuple[int, Path, str]) -> None:
         self._running = request
         self._started_at = time.monotonic()
         # Participants are best-effort, but an exited client is certain not to
@@ -384,12 +407,12 @@ class DeskStyleService:
             if _pid_alive(pid)
         }
         self._waiting = set(self._participants)
-        LOG.info("apply generation=%d start participants=%s", request[0],
+        LOG.info("apply generation=%d start scheme=%s participants=%s", request[0], request[2],
                  ",".join(sorted(self._waiting)) or "none")
         self._progress(request[0], "preparing", 0.02, "Validating prepared wallpaper and colors")
         threading.Thread(target=self._apply_worker, args=request, daemon=True).start()
 
-    def _apply_worker(self, generation: int, wallpaper: Path) -> None:
+    def _apply_worker(self, generation: int, wallpaper: Path, selected_scheme: str) -> None:
         script = Path(os.environ.get("DESKSTYLE_WAL_SET", Path.home() / ".config" / "scripts" / "wal-set.sh"))
         prepare = Path(os.environ.get("DESKSTYLE_WAL_PREPARE", Path.home() / ".config" / "scripts" / "wal-prepare.sh"))
         try:
@@ -406,7 +429,6 @@ class DeskStyleService:
                 raise RuntimeError((prepared.stderr or prepared.stdout or "wal-prepare failed").strip()[-600:])
             LOG.info("apply generation=%d prepared elapsedMs=%.1f", generation,
                      elapsed_ms(prepared_at))
-            selected_scheme = _scheme_name()
             prepared_profile(wallpaper, selected_scheme)
             self.GLib.idle_add(self._progress, generation, "applying", 0.18,
                                "Switching the prepared wallpaper and colors")
