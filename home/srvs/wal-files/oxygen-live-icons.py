@@ -108,6 +108,12 @@ def activate(name):
     if dbus_send := shutil.which("dbus-send"):
         subprocess.run([dbus_send, "--session", "--type=signal", "/KGlobalSettings",
                         "org.kde.KGlobalSettings.notifyChange", "int32:4", "int32:0"], check=False)
+    # KWin's decoration keeps a separate QIcon cache.  The color-scheme
+    # transaction already reconfigures it, but the icon theme finishes after
+    # that transaction unless we ask it to re-read here.
+    if busctl := shutil.which("busctl"):
+        subprocess.run([busctl, "--user", "call", "org.kde.KWin", "/KWin",
+                        "org.kde.KWin", "reconfigure"], check=False)
     if hyprctl := shutil.which("hyprctl"):
         subprocess.run([hyprctl, "eval", "hl.plugin.hyprvtb.refresh_icons()"],
                        check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -118,6 +124,7 @@ def main():
     parser.add_argument("--accent", required=True, metavar="RRGGBB")
     parser.add_argument("--root", default=str(Path.home() / ".local/share/icons"))
     parser.add_argument("--no-activate", action="store_true")
+    parser.add_argument("--activate-only", action="store_true")
     args = parser.parse_args()
     accent = args.accent.removeprefix("#").lower()
     if not re.fullmatch(r"[0-9a-f]{6}", accent):
@@ -134,7 +141,9 @@ def main():
         # immutable pixels: both the transform version and the accent belong
         # in it, rather than reusing one of two mutable directories.
         name = "oxygen-live-v" + RENDER_VERSION + "-" + accent
-        if previous != [RENDER_VERSION, accent] or not (root / name).is_dir():
+        if args.activate_only and not (root / name).is_dir():
+            raise SystemExit("oxygen-live-icons: prepared icon theme is unavailable")
+        if not args.activate_only and (previous != [RENDER_VERSION, accent] or not (root / name).is_dir()):
             destination = root / name
             if destination.exists():
                 shutil.rmtree(destination)

@@ -28,6 +28,20 @@ Item {
                 anchors.rightMargin: 8
                 Label { text: "appearance"; font.bold: true }
                 Label { text: "wallpaper"; opacity: 0.7 }
+                ToolButton {
+                    text: "dark"
+                    checkable: true
+                    checked: Appearance.activeScheme === "OxygenDarkFlat"
+                    enabled: !Appearance.applying
+                    onClicked: Appearance.selectScheme("OxygenDarkFlat")
+                }
+                ToolButton {
+                    text: "light"
+                    checkable: true
+                    checked: Appearance.activeScheme === "OxygenLightFlat"
+                    enabled: !Appearance.applying
+                    onClicked: Appearance.selectScheme("OxygenLightFlat")
+                }
                 Item { Layout.fillWidth: true }
                 ToolButton {
                     text: "refresh"
@@ -147,6 +161,44 @@ Item {
                     enabled: Appearance.hasDraft && !Appearance.applying
                     onClicked: Appearance.apply()
                 }
+            }
+        }
+    }
+
+    Popup {
+        id: applyingPopup
+        parent: Overlay.overlay
+        x: Math.round((parent.width - width) / 2)
+        y: Math.round((parent.height - height) / 2)
+        width: 280
+        height: 94
+        modal: true
+        focus: true
+        closePolicy: Popup.NoAutoClose
+        visible: Appearance.applying
+        padding: 12
+
+        contentItem: ColumnLayout {
+            spacing: 7
+            Label { text: "applying"; font.bold: true }
+            RowLayout {
+                Layout.fillWidth: true
+                BusyIndicator {
+                    running: Appearance.applying
+                    Layout.preferredWidth: 20
+                    Layout.preferredHeight: 20
+                }
+                Label {
+                    text: Appearance.status
+                    opacity: 0.7
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                }
+            }
+            ProgressBar {
+                Layout.fillWidth: true
+                indeterminate: true
+                value: 0
             }
         }
     }

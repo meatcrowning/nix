@@ -247,21 +247,15 @@ fi
 # kdeglobals is the user's desktop theme, so re-mint the selected colour-scheme
 # file instead of overwriting widget style, icons, or fonts.
 KG="$CONFIG/kdeglobals"
-# Oxygen's application art is raster and otherwise remains on its baked
-# palette. Mint it off the critical path: recolouring the full icon set can take
-# tens of seconds, but it must not hold the palette apply (or an app launch)
-# hostage. The helper alternates its theme name and notifies KDE when done.
-if command -v systemd-run >/dev/null 2>&1; then
-    systemd-run --user --quiet --no-block --collect \
-        --unit="wal-oxygen-icons-${KDE_ACCENT}-$$" \
-        "$SCRIPTS/oxygen-live-icons.py" --accent "$KDE_ACCENT" \
-        >>"$CACHE/wallpaper-picker.log" 2>&1 \
-        || setsid "$SCRIPTS/oxygen-live-icons.py" --accent "$KDE_ACCENT" \
-            >>"$CACHE/wallpaper-picker.log" 2>&1 </dev/null &
-else
-    setsid "$SCRIPTS/oxygen-live-icons.py" --accent "$KDE_ACCENT" \
-        >>"$CACHE/wallpaper-picker.log" 2>&1 </dev/null &
-fi
+# Oxygen's raster icon set is prepared beside the palette, while the old
+# desktop is still visible.  Switching its immutable name is now a fast part
+# of the transaction, so Dolphin, panel folders and KWin titlebars never spend
+# an interval on different icon colours.
+"$SCRIPTS/oxygen-live-icons.py" --accent "$KDE_ACCENT" --activate-only \
+    >>"$CACHE/wallpaper-picker.log" 2>&1 || {
+    echo "wal-set: prepared Oxygen icon theme is unavailable" >&2
+    exit 1
+}
 if [ "$PLASMA_SESSION" = 1 ]; then
     # Keep the selected theme/shape; only move its colour family to the accent.
     PROFILE="$CACHE/profiles/$KEY"
