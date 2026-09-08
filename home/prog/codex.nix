@@ -23,9 +23,10 @@
     Name=codex
     GenericName=codex
     Comment=start codex in the nix checkout
-    Exec=${config.home.profileDirectory}/bin/konsole --workdir /home/lam/nix -e codex
+    Exec=${config.home.profileDirectory}/bin/konsole --desktopfile codex --separate --workdir /home/lam/nix -e codex
     Icon=codex
     Terminal=false
+    StartupWMClass=codex
     Categories=Development;Utility;
     Keywords=codex;openai;agent;nix;
   '';
