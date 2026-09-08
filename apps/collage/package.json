@@ -1,0 +1,12 @@
+{
+  "name": "ldg-collage",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node test.mjs"
+  },
+  "dependencies": { "mediabunny": "1.55.7" },
+  "devDependencies": { "esbuild": "0.28.2", "playwright-core": "1.63.0" }
+}
