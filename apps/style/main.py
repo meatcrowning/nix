@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QFileSystemWatcher, QObject, Property, Qt, QUrl, Signal, Slot
+from PySide6.QtCore import QFile, QFileSystemWatcher, QObject, Property, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 
@@ -191,7 +191,7 @@ class Appearance(QObject):
         self._applying = False
         self._generation = 0
         self._pending_reply = None
-        self._pending_delete = ""
+        self._pending_delete: list[str] = []
         self._native_progress = False
         self._status_path = state_dir() / "status.json"
         self._status_watcher = QFileSystemWatcher(self)
@@ -281,43 +281,48 @@ class Appearance(QObject):
         self.statusChanged.emit()
 
     def _trash(self, path: Path) -> str:
-        command = shutil.which("gio")
-        if not command:
-            return "trash is unavailable"
-        run = subprocess.run([command, "trash", "--", str(path)], text=True,
-                             capture_output=True, timeout=15, check=False)
-        return "" if run.returncode == 0 else (run.stderr or run.stdout or "not removed").strip()
+        try:
+            return "" if QFile.moveToTrash(str(path)) else f"not removed: {path.name}"
+        except OSError as exc:
+            return f"not removed: {path.name}: {exc}"
 
     @Slot(str)
     def removeWallpaper(self, path):
+        self.removeWallpapers([path])
+
+    @Slot("QVariantList")
+    def removeWallpapers(self, paths):
         if self._applying:
             return
-        resolved = str(Path(path).resolve())
         offered = [item["path"] for item in self._items]
-        if resolved not in offered:
+        selected = []
+        for path in paths:
+            resolved = str(Path(path).resolve())
+            if resolved in offered and resolved not in selected:
+                selected.append(resolved)
+        if not selected:
             return
-        if resolved == self._active:
-            replacements = [candidate for candidate in offered if candidate != resolved]
+        if self._active in selected:
+            replacements = [candidate for candidate in offered if candidate not in selected]
             if not replacements:
                 self._error = "add another wallpaper first"
                 self.errorChanged.emit()
                 return
-            index = offered.index(resolved)
-            replacement = replacements[min(index, len(replacements) - 1)]
-            self._pending_delete = resolved
+            index = offered.index(self._active)
+            replacement = min(replacements, key=lambda candidate: abs(offered.index(candidate) - index))
+            self._pending_delete = selected
             self._draft = replacement
             self.selectionChanged.emit()
             self.apply()
             return
-        error = self._trash(Path(resolved))
-        if error:
-            self._error = error
-            self.errorChanged.emit()
-            return
-        if self._draft == resolved:
+        errors = [error for path in selected if (error := self._trash(Path(path)))]
+        self._error = ", ".join(errors)
+        if self._draft in selected:
             self._draft = self._active
             self.selectionChanged.emit()
-        self._status = "moved to trash"
+        removed = len(selected) - len(errors)
+        self._status = f"moved {removed} to trash" if len(selected) > 1 else "moved to trash"
+        self.errorChanged.emit()
         self.statusChanged.emit()
         self.refresh()
 
@@ -458,10 +463,12 @@ class Appearance(QObject):
         self._draft = self._active
         self._applying = False
         removed = self._pending_delete
-        self._pending_delete = ""
-        remove_error = self._trash(Path(removed)) if removed else ""
-        self._error = remove_error
-        self._status = ("moved to trash" if removed and not remove_error
+        self._pending_delete = []
+        remove_errors = [error for path in removed if (error := self._trash(Path(path)))]
+        self._error = ", ".join(remove_errors)
+        removed_count = len(removed) - len(remove_errors)
+        removed_status = (f"moved {removed_count} to trash" if len(removed) > 1 else "moved to trash")
+        self._status = (removed_status if removed and not remove_errors
                         else ("live" if all_live else "live; apps deferred"))
         self.refresh()
         self.activeChanged.emit()
@@ -484,7 +491,7 @@ class Appearance(QObject):
             return
         self._applying = False
         if self._pending_delete:
-            self._pending_delete = ""
+            self._pending_delete = []
             self._draft = self._active
             self.selectionChanged.emit()
         self._status = "not applied"
