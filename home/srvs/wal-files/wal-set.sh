@@ -79,9 +79,13 @@ LIVE_SCHEME=""
 if [ "$PLASMA_SESSION" = 1 ] && command -v kreadconfig6 >/dev/null 2>&1; then
     LIVE_SCHEME="$(kreadconfig6 --file kdeglobals --group General --key ColorScheme 2>/dev/null)"
 fi
-if [ -n "$PREPARED_SCHEME" ] && [ "$LIVE_SCHEME" != "$PREPARED_SCHEME" ]; then
-    echo "wal-set: selected color scheme changed during preparation; retry apply" >&2
-    exit 1
+# A regular prepared wallpaper request snapshots the existing scheme; a
+# Style light/dark request deliberately names a different prepared body.  In
+# both cases the controller has validated that body before this visible phase,
+# so make the requested scheme the transaction's target rather than rejecting
+# it for differing from the currently running one.
+if [ -n "$PREPARED_SCHEME" ]; then
+    LIVE_SCHEME="$PREPARED_SCHEME"
 fi
 
 # ---- 2b. publish it for the panel to draw ------------------------------------

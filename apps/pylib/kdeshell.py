@@ -384,10 +384,12 @@ def _redress_palette_views():
     old palette."""
     from PySide6.QtWidgets import QApplication
     pal = QApplication.palette()
+    font = QApplication.font()
     for views in _palette_view_lists:
         for view in list(views):
             try:
                 view.setPalette(pal)
+                view.setFont(font)
                 view.setClearColor(pal.window().color())
             except RuntimeError:      # the view is gone; forget it
                 views.remove(view)
@@ -674,6 +676,7 @@ def _build_shell_class():
             # palette propagates it down the QML item tree.
             from PySide6.QtWidgets import QApplication
             self.view.setPalette(QApplication.palette())
+            self.view.setFont(QApplication.font())
             # Not transparent (see above) — but not Qt's default WHITE either:
             # anything the styled background image does not cover for a frame
             # should read as the window, not as a flash.
