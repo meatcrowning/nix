@@ -11,7 +11,10 @@ import Quickshell.Wayland
 // repeat doesn't hammer it), which tiles/scales exactly like every other
 // wallpaper change in this config and regenerates the theme. There is no
 // separate confirm step and no revert: whatever you land on stays when you
-// close the picker. Single instance, like Launcher/Cheatsheet/PowerMenu.
+// close the picker. The card is also a copy-only drop target: local images are
+// added to the configured wallpaper folder under a non-clobbering name,
+// prepared, and revealed in the grid. Single instance, like
+// Launcher/Cheatsheet/PowerMenu.
 PanelWindow {
     id: root
 
@@ -113,6 +116,61 @@ PanelWindow {
         return i >= 0 ? p.substring(i + 1) : p;
     }
 
+    // ---- drop-to-upload --------------------------------------------------
+    // Keep this contract parallel with SetPaperGrid: local images only,
+    // copy-only, auto-versioned rather than clobbered, and decoded outside QML
+    // URI string handling (DESIGN §13).
+    function isImageUrl(u) {
+        const s = String(u);
+        return /^file:\/\//i.test(s) && /\.(png|jpe?g|webp|bmp)$/i.test(s);
+    }
+    property string revealPath: ""
+    function tryReveal() {
+        if (!revealPath) return;
+        const i = images.indexOf(revealPath);
+        if (i < 0) return;
+        list.currentIndex = i;
+        updateSelected();
+        list.positionViewAtIndex(i, GridView.Center);
+        revealPath = "";
+    }
+
+    Process {
+        id: ingestProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const added = (this.text || "").split("\n").map(s => s.trim()).filter(s => s.length > 0);
+                if (added.length > 0) root.revealPath = added[0];
+                root.refresh(false);
+            }
+        }
+    }
+
+    function ingest(urls) {
+        const args = [];
+        for (let i = 0; i < urls.length; i++)
+            if (isImageUrl(urls[i])) args.push(String(urls[i]));
+        if (args.length === 0 || ingestProc.running) return;
+        ingestProc.command = ["sh", "-c",
+              'SETTINGS="$HOME/.config/quickshell/settings.json"; '
+            + 'DIR="$(jq -r \'.wallpaperDir // empty\' "$SETTINGS" 2>/dev/null)"; '
+            + '[ -n "$DIR" ] || DIR="~/Pictures/Wallpapers"; '
+            + 'case "$DIR" in "~") DIR="$HOME";; "~/"*) DIR="$HOME/${DIR#\\~/}";; esac; '
+            + 'mkdir -p "$DIR"; '
+            + 'for u in "$@"; do '
+            +   'p="$(python3 -c \'import sys; from urllib.parse import urlparse, unquote; print(unquote(urlparse(sys.argv[1]).path))\' "$u")" || continue; '
+            +   '[ -f "$p" ] || continue; '
+            +   'base="$(basename "$p")"; stem="${base%.*}"; ext="${base##*.}"; '
+            +   'dest="$DIR/$base"; n=2; '
+            +   'while [ -e "$dest" ]; do dest="$DIR/$stem-$n.$ext"; n=$((n+1)); done; '
+            +   'cp -- "$p" "$dest" || continue; '
+            +   '"$HOME/.config/scripts/wal-prepare.sh" "$dest" >>"$HOME/.cache/wal/wallpaper-picker.log" 2>&1; '
+            +   'printf "%s\\n" "$dest"; '
+            + 'done',
+            "_"].concat(args);
+        ingestProc.running = true;
+    }
+
     // Re-scan the directory (picks up newly-added images) and re-read which
     // wallpaper is currently active, then (re)sync the selection to it.
     //
@@ -199,6 +257,7 @@ PanelWindow {
                 root.rawPalettes = nextPalettes;
                 root.applyFilter();
                 root.trySyncSelection();
+                root.tryReveal();
             }
         }
     }
@@ -504,6 +563,32 @@ PanelWindow {
                     }
                 }
             }
+        }
+
+        DropArea {
+            id: dropZone
+            anchors.fill: parent
+            keys: ["text/uri-list"]
+            onEntered: (drag) => {
+                let ok = false;
+                if (drag.hasUrls)
+                    for (let i = 0; i < drag.urls.length && !ok; i++)
+                        ok = root.isImageUrl(drag.urls[i]);
+                drag.accepted = ok && !ingestProc.running;
+            }
+            onDropped: (drop) => {
+                if (!drop.hasUrls || ingestProc.running) return;
+                root.ingest(drop.urls);
+                drop.accept(Qt.CopyAction);
+            }
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            visible: dropZone.containsDrag
+            color: "transparent"
+            border.width: 2
+            border.color: Theme.accent
         }
 
         // The shared right-click hide/unhide menu (§7.2, written once) — same
