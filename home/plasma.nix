@@ -3,7 +3,29 @@
 let
   plasmaManagerLogin = pkgs.writeShellScript "plasma-manager-login" ''
     export PATH=${lib.makeBinPath [ pkgs.kdePackages.qttools ]}:$PATH
-    exec ${config.xdg.dataHome}/plasma-manager/run_all.sh
+
+    # Panel regeneration deletes plasma-org.kde.plasma.desktop-appletsrc,
+    # which also deletes Plasma's host-local wallpaper choices. Snapshot the
+    # library marker before plasma-manager can trigger the wallpaper watcher,
+    # then restore that selection through the normal wallpaper/theme path.
+    wallpaper=""
+    marker="$HOME/Pictures/Wallpapers/.current-wallpaper"
+    if [ -f "$marker" ]; then
+      selected=$(cat "$marker")
+      if [ -f "$HOME/Pictures/Wallpapers/$selected" ]; then
+        wallpaper=$(realpath "$HOME/Pictures/Wallpapers/$selected")
+      fi
+    fi
+
+    ${config.xdg.dataHome}/plasma-manager/run_all.sh
+    status=$?
+
+    current=$(cat "$HOME/.cache/wal/current" 2>/dev/null || true)
+    if [ -n "$wallpaper" ] && [ "$current" != "$wallpaper" ]; then
+      "$HOME/.config/scripts/wal-set.sh" "$wallpaper"
+    fi
+
+    exit "$status"
   '';
 
   # See the comment on `input.mice` below. Hoisted into a `let` so the
