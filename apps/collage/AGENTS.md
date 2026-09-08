@@ -56,7 +56,8 @@ any video selects WebM, otherwise JPEG. Explicit formats always override this.
 Opening/creating discovers thread media without a separate import step; creation
 uses the checked selection, never silently selects unchecked files. The collage
 button toggles the panel; progress and X share a sticky top row. Thread selection
-buttons sit inline after file dimensions without increasing the text row height.
+buttons use black text on yellow and sit inline after file dimensions without
+increasing the text row height.
 Finished files request native browser downloads automatically, with no result cards;
 download permissions/save dialogs remain browser-controlled. Revoke download URLs
 after 60 seconds, not immediately or on the next export. Never claim a confirmed

@@ -270,7 +270,7 @@ function init() {
       if (u.protocol !== 'https:' || !hosts.has(u.hostname) || !/\.(jpe?g|png|webp|gif|webm|mp4)$/i.test(u.pathname)) continue;
       a.dataset.ldgMarked = '1';
       const button = document.createElement('button'); button.type = 'button'; button.dataset.ldgMark = '1';
-      button.style.cssText = 'display:inline-block;font:inherit;line-height:1;height:1em;min-height:0;width:9ch;padding:0;margin:0 0 0 4px;border:0;background:transparent;color:inherit;vertical-align:baseline;white-space:nowrap;cursor:pointer';
+      button.style.cssText = 'display:inline-block;font:inherit;line-height:1;height:1em;min-height:0;width:9ch;padding:0;margin:0 0 0 4px;border:0;background:yellow;color:black;vertical-align:baseline;white-space:nowrap;cursor:pointer';
       button.setAttribute('aria-label', `select ${u.pathname.split('/').pop()} for collage`);
       marks.set(button, u.href);
       const info = a.matches('a.fileThumb') && a.closest('.file')?.querySelector('.fileText, .file-info');

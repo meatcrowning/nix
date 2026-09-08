@@ -144,6 +144,7 @@ try {
   await page.evaluate(()=>{for(let i=0;i<70;i++){const a=document.createElement('a');a.className='fileThumb';a.href=`https://i.4cdn.org/g/${i}.png`;document.body.append(a);}});
   await page.addScriptTag({ content:await readFile('collage.user.js','utf8') });
   assert.equal(await page.locator('.fileText [data-ldg-mark]').count(),1);
+  assert.equal(await page.locator('.fileText [data-ldg-mark]').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 255, 0)');
   assert.equal((await page.locator('.fileText').boundingBox()).height,rowBefore.height);
   const downloads=[]; page.on('download',d=>downloads.push(d));
   await page.locator('#ldg-collage-v2').getByRole('button',{name:'collage',exact:true}).click();
