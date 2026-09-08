@@ -22,10 +22,14 @@ from PySide6.QtWidgets import QApplication, QWidget
 
 def plasma_screen_size() -> tuple[int, int] | None:
     """Read the live logical primary-output size before Qt goes offscreen."""
+    probe_env = os.environ.copy()
+    # The renderer itself must stay offscreen, but kscreen-doctor must connect
+    # to the real session or it reports Qt's synthetic 800x800 output.
+    probe_env.pop("QT_QPA_PLATFORM", None)
     try:
         result = subprocess.run(
             ["kscreen-doctor", "-o"], capture_output=True, text=True,
-            timeout=3, check=False,
+            timeout=3, check=False, env=probe_env,
         )
     except (OSError, subprocess.SubprocessError):
         return None
