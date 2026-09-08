@@ -1,7 +1,7 @@
 import {
   Input, BlobSource, MP4, WEBM, MATROSKA, VideoSampleSink,
   Output, BufferTarget, WebMOutputFormat, Mp4OutputFormat, CanvasSource, canEncodeVideo,
-} from 'mediabunny';
+} from './mediabunny.js';
 
 export const LIMITS = Object.freeze({ items: 64, bytes: 256 * 1024 ** 2,
   sourcePixels: 32 * 1024 ** 2 });

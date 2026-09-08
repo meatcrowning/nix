@@ -5,13 +5,19 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 if (process.env.DISPLAY || process.env.WAYLAND_DISPLAY || process.env.DBUS_SESSION_BUS_ADDRESS
   || process.env.QT_QPA_PLATFORM !== 'offscreen') throw new Error('run through test.sh');
 const dir = await mkdtemp(join(tmpdir(), 'collage-test-'));
 let browser;
 const watchdog = setTimeout(() => { console.error('test timed out'); browser?.close(); }, 90000);
 try {
-  const bundle = await build({ stdin: { contents: "export * from './src/engine.js'; export {Output, BufferTarget, WebMOutputFormat, Mp4OutputFormat, CanvasSource} from 'mediabunny';", resolveDir: process.cwd() }, bundle: true, write: false,
+  const library = await readFile('node_modules/mediabunny/dist/bundles/mediabunny.cjs', 'utf8');
+  const artifact = await readFile('collage.user.js', 'utf8');
+  const {version, dependencies} = JSON.parse(await readFile('package.json', 'utf8'));
+  assert(artifact.includes(`// @version      ${version}\n`));
+  assert(artifact.includes(`// @require      https://cdn.jsdelivr.net/npm/mediabunny@${dependencies.mediabunny}/dist/bundles/mediabunny.cjs#sha256=${createHash('sha256').update(library).digest('hex')}\n`));
+  const bundle = await build({ stdin: { contents: "export * from './src/engine.js'; export {Output, BufferTarget, WebMOutputFormat, Mp4OutputFormat, CanvasSource} from './src/mediabunny.js';", resolveDir: process.cwd() }, bundle: true, write: false,
     format: 'iife', globalName: 'CollageEngine' });
   const engine = process.env.COLLAGE_ENGINE || 'chromium';
   const driver = {chromium, firefox, webkit}[engine];
@@ -34,6 +40,7 @@ try {
   await page.route('**/*', route => route.request().url().startsWith('blob:') ? route.continue()
     : route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>isolated collage test</title>' }));
   await page.goto('http://localhost/');
+  await page.addScriptTag({ content: library });
   await page.addScriptTag({ content: bundle.outputFiles[0].text });
   const result = await page.evaluate(async () => {
     const E = CollageEngine;
@@ -194,7 +201,8 @@ try {
   await page.evaluate(()=>{document.body.innerHTML='<div class="file" style="font:13px sans-serif"><div class="fileText">File: example.png (2.83 MB, 3344x2512)</div><a class="fileThumb" href="https://i.4cdn.org/g/0.png">thumbnail</a></div>';});
   const rowBefore=await page.locator('.fileText').boundingBox();
   await page.evaluate(()=>{for(let i=0;i<70;i++){const a=document.createElement('a');a.className='fileThumb';a.href=`https://i.4cdn.org/g/${i}.png`;document.body.append(a);}});
-  await page.addScriptTag({ content:await readFile('collage.user.js','utf8') });
+  await page.addScriptTag({ content: library });
+  await page.addScriptTag({ content: artifact });
   assert.equal(await page.locator('.fileText [data-ldg-mark]').count(),1);
   assert.equal(await page.locator('.fileText [data-ldg-mark]').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 255, 0)');
   assert.equal((await page.locator('.fileText').boundingBox()).height,rowBefore.height);

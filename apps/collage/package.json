@@ -1,7 +1,7 @@
 {
   "name": "ldg-collage",
   "private": true,
-  "version": "2.5.2",
+  "version": "2.5.3",
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
