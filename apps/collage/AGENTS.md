@@ -98,7 +98,9 @@ Finished files request native browser downloads automatically, with no result ca
 download permissions/save dialogs remain browser-controlled. Revoke download URLs
 after 60 seconds, not immediately or on the next export. Never claim a confirmed
 disk write from an anchor click. Every source tile has a preview button, independent
-of its checkbox. Source previews use full media URLs, not thumbnails.
+of selection. Clicking elsewhere on the card toggles selection; there are no
+visible checkboxes. The filename exposes a keyboard-accessible checkbox role
+with Space/Enter activation and aria-checked state. Source previews use full media URLs, not thumbnails.
 Gallery thumbnails reuse images/posters inside attachment or post links. Videos
 without one decode a single paused frame into a display-only canvas when near
 the visible gallery, with at most two decoders and a 12-second timeout. Release
@@ -116,5 +118,8 @@ image-only video export defaults to five seconds. Explicit seconds overrides it.
 Reject auto durations over 300s rather than silently truncating. Image layout fits
 undistorted tiles inside the requested output ratio with padding as needed. Video
 layout compares justified row arrangements against the requested ratio and uses
-the actual content dimensions, without added borders or cropping;
+the actual content dimensions, without added borders or cropping. For all formats,
+choose ratio accuracy only among layouts with at most 2.5x largest/median tile
+area; if none qualify, use the least unequal candidate. An explicit header
+remains a separate full-width row;
 dimensions are rounded to even pixels. Keep the distributed namespace anonymous.

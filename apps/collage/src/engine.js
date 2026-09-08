@@ -113,10 +113,10 @@ function contentLayout(media, edge, aspect = 1, header = false, borderless = fal
   const ideal = Math.sqrt(1 / (aspect * ratios.reduce((a, b) => a + b, 0)));
   // Compare deterministic justified arrangements across row-height targets.
   // The requested ratio guides row breaks; video never pads to enforce it.
-  let rows, bestError = Infinity;
-  const trials = borderless ? 65 : 1;
+  const candidates = [];
+  const trials = 65;
   for (let trial = 0; trial < trials; trial++) {
-    const target = ideal * (borderless ? 2 ** ((trial - 32) / 8) : 1);
+    const target = ideal * 2 ** ((trial - 32) / 8);
     const cost = [0], prev = [0];
     for (let end = 1; end <= ratios.length; end++) {
       cost[end] = Infinity; let sum = 0;
@@ -131,8 +131,21 @@ function contentLayout(media, edge, aspect = 1, header = false, borderless = fal
     const totalHeight = candidate.reduce((sum, [a, b]) =>
       sum + 1 / ratios.slice(a, b).reduce((s, r) => s + r, 0), 0);
     const error = Math.abs(Math.log(totalHeight * aspect));
-    if (error < bestError) { rows = candidate; bestError = error; }
+    const areas = candidate.flatMap(([a, b]) => {
+      const sum = ratios.slice(a, b).reduce((s, r) => s + r, 0);
+      return ratios.slice(a, b).map(r => r / (sum * sum));
+    });
+    areas.sort((a, b) => a - b);
+    const median = areas[Math.floor((areas.length - 1) / 2)];
+    candidates.push({ rows: candidate, error, spread: areas.at(-1) / median });
   }
+  // Area balance takes precedence over ratio accuracy: a lone full-width tile
+  // must not dwarf a row of small tiles just to match the requested shape.
+  // Mixed source shapes can make the normal 2.5x median-area ceiling unattainable;
+  // then use the most balanced candidate instead of stretching or cropping.
+  const spreadLimit = Math.max(2.5, Math.min(...candidates.map(c => c.spread)) * (1 + 1e-9));
+  const { rows } = candidates.filter(c => c.spread <= spreadLimit)
+    .sort((a, b) => a.error - b.error || a.spread - b.spread)[0];
   const heights = rows.map(([a, b]) => 1 / ratios.slice(a, b).reduce((s, r) => s + r, 0));
   const height = heights.reduce((a, b) => a + b, 0);
   const widthPx = Math.max(2, Math.floor(edge / Math.max(1, height) / 2) * 2);

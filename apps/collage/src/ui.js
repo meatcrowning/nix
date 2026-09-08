@@ -24,12 +24,13 @@ function init() {
     [hidden] { display:none !important; }
     .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
     #list { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:4px; }
-    .tile { border:1px solid GrayText; padding:4px; overflow-wrap:anywhere; }
+    .tile { cursor:pointer; border:1px solid GrayText; padding:4px; overflow-wrap:anywhere; }
     .tile.selected { background:#90ee90; color:#000; }
     .tile img,.tile canvas { width:100%; height:90px; object-fit:contain; }
     .tile .source-preview { display:block; width:100%; min-height:90px; }
     .source-preview img,.source-preview canvas { pointer-events:none; }
-    .tile label { display:block; } .tile input { vertical-align:middle; }
+    .selection { display:block; }
+    .selection:focus-visible { outline:2px solid currentColor; outline-offset:1px; }
     #panel-head { position:sticky; top:-8px; z-index:2; display:flex; gap:8px;
       align-items:flex-start; background:#202124; padding:8px 0; }
     #message { flex:1; min-width:0; margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
@@ -146,6 +147,7 @@ function init() {
     for (const e of entries.values()) if (e.tile) {
       e.tile.hidden = $('view').value === 'selected' && !e.selected;
       e.tile.classList.toggle('selected', !!e.selected);
+      e.selection.setAttribute('aria-checked', String(!!e.selected));
     }
   };
   $('view').onchange = count;
@@ -214,11 +216,18 @@ function init() {
       openPreview(entry.url || entry.previewUrl, video, show);
     };
     tile.append(show);
-    const label = document.createElement('label'), box = document.createElement('input');
-    box.type = 'checkbox'; box.checked = !!entry.selected;
-    box.addEventListener('change', () => { entry.selected = box.checked; count(); persist(); syncMarks(); });
-    label.append(box, document.createTextNode(` ${entry.name}`)); tile.append(label);
-    entry.box = box; entry.tile = tile; entry.show = show; $('list').append(tile);
+    const selection = document.createElement('div'); selection.className = 'selection';
+    selection.setAttribute('role', 'checkbox'); selection.tabIndex = 0;
+    selection.setAttribute('aria-checked', String(!!entry.selected));
+    selection.textContent = entry.name; tile.append(selection);
+    tile.onclick = e => {
+      if (e.target.closest('.source-preview') || controller) return;
+      entry.selected = !entry.selected; count(); persist(); syncMarks();
+    };
+    selection.onkeydown = e => {
+      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); selection.click(); }
+    };
+    entry.selection = selection; entry.tile = tile; entry.show = show; $('list').append(tile);
     if (!entry.thumb && (entry.file?.type.startsWith('video/') || /\.(webm|mp4)(?:[?#]|$)/i.test(entry.url || entry.name))) {
       thumbnailEntries.set(tile, entry); thumbnailObserver.observe(tile);
     }
@@ -266,7 +275,7 @@ function init() {
   $('panel').ondragover = e => e.preventDefault();
   $('panel').ondrop = e => { e.preventDefault(); if (!controller) addFiles(e.dataTransfer.files); };
   for (const [name, selected] of [['all', true], ['none', false]]) $(name).onclick = () => {
-    for (const entry of entries.values()) { entry.selected = selected; entry.box.checked = selected; } count(); persist(); syncMarks();
+    for (const entry of entries.values()) { entry.selected = selected; } count(); persist(); syncMarks();
   };
   $('clear').onclick = () => {
     closePreview();
@@ -375,6 +384,7 @@ function init() {
   const marks = new Map();
   const linkMarks = new WeakMap();
   function syncMarks() {
+    for (const entry of entries.values()) entry.tile.inert = !!controller;
     for (const [button, url] of marks) {
       if (!button.isConnected) { marks.delete(button); continue; }
       button.setAttribute('aria-pressed', String(entries.get(url)?.selected ?? remembered.has(url)));
@@ -421,7 +431,7 @@ function init() {
         // Seed the complete remembered selection before saving changes.
         scan();
         const e = entries.get(u.href); if (!e) return;
-        e.selected = !e.selected; e.box.checked = e.selected; count(); persist(); syncMarks();
+        e.selected = !e.selected; count(); persist(); syncMarks();
       };
     }
     syncMarks();

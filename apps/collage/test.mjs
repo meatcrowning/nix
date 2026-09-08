@@ -94,6 +94,11 @@ try {
     if(single.width!==1280 || single.height!==960) throw Error('single video padded');
     const square=E.layout(Array.from({length:4},()=>({width:320,height:240})),640,4/3,false,true);
     if(Math.abs(square.width/square.height-4/3)>0.01) throw Error('missed matching arrangement');
+    for (const borderless of [false, true]) {
+      const balanced=E.layout(Array.from({length:5},()=>({width:100,height:100})),1280,2/3,false,borderless);
+      const areas=balanced.placements.map(p=>p.width*p.height);
+      if(Math.max(...areas)/Math.min(...areas)>2.52) throw Error('one tile dominates the collage');
+    }
     const probes=[];
     const fallback=await E.selectCodec('webm',320,240,1_000_000,async (c,o)=>{probes.push([c,o]);return c==='vp9';});
     if(fallback!=='vp9' || probes.length!==2 || probes.some(([,o])=>o.latencyMode!=='quality' || o.hardwareAcceleration!=='no-preference')) throw new Error('codec probing');
@@ -267,6 +272,7 @@ try {
   assert.equal(await page.locator('[data-ldg-mark]').first().evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 255, 0)');
   await page.locator('#ldg-collage-v2').getByLabel('add files').setInputFiles(join(dir,'still.png'));
   assert.equal(await ui.locator('.tile').count(),71);
+  assert.equal(await ui.locator('.tile input[type=checkbox]').count(),0);
   assert.equal(await ui.locator('.tile.selected').count(),1);
   assert.equal(await ui.locator('.tile.selected').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(144, 238, 144)');
   assert.equal(await ui.getByRole('button',{name:'move earlier'}).count(),0);
@@ -276,10 +282,11 @@ try {
   assert(await ui.getByRole('dialog',{name:'media preview',exact:true}).isVisible());
   await ui.locator('#preview img').click();
   assert(!(await ui.locator('#preview').isVisible()));
-  await ui.locator('.tile:visible input').uncheck();
+  await ui.locator('.tile:visible').click({position:{x:2,y:2}});
   assert.equal(await ui.locator('.tile:visible').count(),0);
   await ui.getByLabel('gallery view').selectOption('all');
-  await ui.locator('.tile input').last().check();
+  await ui.locator('.tile .selection').last().press('Space');
+  assert(await ui.locator('.tile .selection').last().isChecked());
   await ui.getByLabel('gallery view').selectOption('selected');
   await page.locator('#ldg-collage-v2').getByLabel('output',{exact:true}).selectOption('mp4');
   assert(await page.locator('#ldg-collage-v2').getByLabel('fps',{exact:true}).isEnabled());
@@ -354,10 +361,10 @@ try {
     assert(!(await ui.getByRole('dialog',{name:'large video collage'}).isVisible()));
   }
   await ui.getByLabel('gallery view').selectOption('all');
-  await ui.locator('.tile input').first().check();
+  await ui.locator('.tile .selection').first().check();
   await ui.getByRole('button',{name:'Clear imported',exact:true}).click();
   assert.equal(await ui.locator('.tile').count(),70);
-  assert(await ui.locator('.tile input').first().isChecked());
+  assert(await ui.locator('.tile .selection').first().isChecked());
   assert.equal(await ui.locator('#header').evaluate(el=>el.files.length),0);
   assert((await page.evaluate(()=>localStorage.getItem('ldg-collage-v2:/'))).includes('https://i.4cdn.org/g/0.png'));
   await ui.getByRole('button',{name:'close collage',exact:true}).click();
@@ -388,18 +395,18 @@ try {
     assert.equal(await gallery.locator('.tile canvas').count(),1);
     assert.equal(await gallery.locator('.tile img').count(),1);
     assert.equal(await gallery.locator('.tile video').count(),0);
-    assert.equal(await gallery.locator('.tile input:checked').count(),0);
+    assert.equal(await gallery.locator('.tile .selection[aria-checked="true"]').count(),0);
     assert.equal(await gallery.locator('.tile canvas').evaluate(c=>Math.max(c.width,c.height)),Math.min(320,Math.max(result.video.width,result.video.height)));
     await gallery.locator('.source-preview').first().click();
     assert.equal(await gallery.locator('#preview video').getAttribute('src'),mediaURL);
     await gallery.getByRole('button',{name:'close preview',exact:true}).click();
-    assert.equal(await gallery.locator('.tile input:checked').count(),0);
+    assert.equal(await gallery.locator('.tile .selection[aria-checked="true"]').count(),0);
     assert.equal(await gallery.locator('.source-preview').last().textContent(),'preview');
     await gallery.locator('.source-preview').last().click();
     await page.waitForFunction(() => document.querySelector('#ldg-collage-v2').shadowRoot.querySelector('#preview-status').textContent === 'this file could not be previewed');
     await gallery.getByRole('button',{name:'close preview',exact:true}).click();
-    await gallery.locator('.tile input').first().check();
-    assert.equal(await gallery.locator('.tile input:checked').count(),1);
+    await gallery.locator('.tile .selection').first().check();
+    assert.equal(await gallery.locator('.tile .selection[aria-checked="true"]').count(),1);
     console.log('linked video frame capture, existing thumbnail and full preview passed');
   }
   assert.deepEqual(runtimeErrors,[]);
