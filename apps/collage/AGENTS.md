@@ -18,7 +18,10 @@ Run `npm test` through `test.sh`: isolated headless browser, private profile,
 no live D-Bus/display, and FFmpeg probes of generated synthetic fixtures.
 No screenshots or real media are needed. Tests must not navigate to 4chan or
 contact external hosts. Load the exact npm browser build before the engine and
-installed artifact, matching `@require` ordering, and check the metadata hash.
+check the metadata hash. Test the installed artifact concatenated directly after
+that build inside one function, as Tampermonkey injects it; separate script tags
+miss automatic-semicolon-insertion failures. Keep the artifact's leading separator:
+Mediabunny's final CommonJS conditional has no semicolon and can swallow our IIFE.
 `COLLAGE_ENGINE=chromium|firefox|webkit` selects the
 engine (default Chromium); `COLLAGE_BROWSER` may specify its executable.
 Use matching Playwright/browser revisions for Firefox/WebKit. Set
