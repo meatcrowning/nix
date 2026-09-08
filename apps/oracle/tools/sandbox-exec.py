@@ -80,7 +80,11 @@ CPU_SECONDS = 20              # RLIMIT_CPU — a hair above the wall cap, a back
 #: hurt the machine — is still bounded by the wall clock, the CPU cap and
 #: oomd's own watch on the user slice.
 MEM_BYTES = 4 * 1024 * 1024 * 1024  # RLIMIT_AS — 4 GiB of address space per run
-FSIZE_BYTES = 16 * 1024 * 1024  # RLIMIT_FSIZE — biggest file the code may write
+#: RLIMIT_FSIZE is per file, not a total-write quota. 16 MiB was small enough
+#: to truncate ordinary high-bitrate audio during an ffmpeg remux; 16 GiB keeps
+#: the simple runaway-single-file guard without making normal media, archives
+#: or database work lower quality merely to fit the runner.
+FSIZE_BYTES = 16 * 1024 * 1024 * 1024
 
 #: The interpreters a request may ask for. Python was the only one until
 #: 2026-08-22; bash is the second because the file work the model does is shell
