@@ -57,6 +57,10 @@ Item {
         selectedPaths = next
         if (next.length > 0) selectionAnchor = next[0]
     }
+    function isImageUrl(url) {
+        var value = String(url)
+        return /^file:\/\//i.test(value) && /\.(png|jpe?g|webp|bmp)$/i.test(value)
+    }
 
     Shortcut { sequence: "Delete"; enabled: selectedPaths.length > 0; onActivated: root.deleteSelection() }
     Shortcut { sequence: StandardKey.SelectAll; onActivated: root.selectAll() }
@@ -142,6 +146,7 @@ Item {
             }
 
             Frame {
+                id: wallpaperFrame
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 padding: 4
@@ -215,6 +220,33 @@ Item {
                     visible: Appearance.wallpapers.length === 0
                     text: "no wallpapers in ~/Pictures/Wallpapers"
                     opacity: 0.7
+                }
+
+                DropArea {
+                    id: wallpaperDrop
+                    anchors.fill: parent
+                    keys: ["text/uri-list"]
+                    onEntered: function(drag) {
+                        var valid = false
+                        if (drag.hasUrls) {
+                            for (var i = 0; i < drag.urls.length && !valid; i++)
+                                valid = root.isImageUrl(drag.urls[i])
+                        }
+                        drag.accepted = valid && !Appearance.applying
+                    }
+                    onDropped: function(drop) {
+                        if (!drop.hasUrls || Appearance.applying) return
+                        Appearance.importFiles(drop.urls)
+                        drop.accept(Qt.CopyAction)
+                    }
+                }
+
+                Rectangle {
+                    anchors.fill: parent
+                    visible: wallpaperDrop.containsDrag
+                    color: "transparent"
+                    border.width: 2
+                    border.color: palette.highlight
                 }
             }
 
