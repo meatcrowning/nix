@@ -1693,6 +1693,25 @@ class Library(QObject):
         self.changed.emit()
         return True
 
+    def trash_album(self, album_id):
+        """Trash every track in a release, returning moved ids and failures."""
+        rows = self._rows(
+            "SELECT id, path FROM tracks WHERE album_id=?", (int(album_id),))
+        moved = []
+        failed = 0
+        for row in rows:
+            if os.path.isfile(row["path"]) and QFile.moveToTrash(row["path"]):
+                moved.append(int(row["id"]))
+            else:
+                failed += 1
+        if moved:
+            marks = ",".join("?" * len(moved))
+            self._con.execute(f"DELETE FROM tracks WHERE id IN ({marks})", moved)
+            self._con.commit()
+            rebuild_albums(self._con)
+            self.changed.emit()
+        return moved, failed
+
     # ---- opening a file by path (argv / the OPEN verb) ----
 
     def ids_for_paths(self, paths):
@@ -3840,6 +3859,22 @@ class Bridge(QObject):
             self._player.removeFromQueue(indices)
         self.scanStatus.emit("")
         return True
+
+    @Slot(int, result=bool)
+    def trashAlbum(self, album_id):
+        moved, failed = self._library.trash_album(int(album_id))
+        if moved:
+            moved_set = set(moved)
+            indices = [i for i, row in enumerate(self._player.queue_dicts())
+                       if int(row.get("id", 0)) in moved_set]
+            if indices:
+                self._player.removeFromQueue(indices)
+        if failed:
+            self.scanStatus.emit(f"couldn't trash {failed} track"
+                                 + ("s" if failed != 1 else ""))
+        else:
+            self.scanStatus.emit("")
+        return bool(moved) and not failed
 
     # ---- reveal (the track menu's "open folder in filer") ----
 

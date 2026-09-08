@@ -447,6 +447,7 @@ Item {
                     filtered: searchInput.text !== ""
                     expandedAlbumId: win.openAlbumId
                     cols: win.albumCols
+                    sortMode: win.sortMode
                     fgText: win.fgText
                     fgDim: win.fgDim
                     fgAccent: win.fgAccent
