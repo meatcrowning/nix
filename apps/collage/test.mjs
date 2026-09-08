@@ -201,8 +201,9 @@ try {
   await page.evaluate(()=>{document.body.innerHTML='<div class="file" style="font:13px sans-serif"><div class="fileText">File: example.png (2.83 MB, 3344x2512)</div><a class="fileThumb" href="https://i.4cdn.org/g/0.png">thumbnail</a></div>';});
   const rowBefore=await page.locator('.fileText').boundingBox();
   await page.evaluate(()=>{for(let i=0;i<70;i++){const a=document.createElement('a');a.className='fileThumb';a.href=`https://i.4cdn.org/g/${i}.png`;document.body.append(a);}});
-  await page.addScriptTag({ content: library });
-  await page.addScriptTag({ content: artifact });
+  // Tampermonkey concatenates @require and script text inside one function.
+  // Separate script tags hide missing-semicolon bugs at the dependency boundary.
+  await page.addScriptTag({ content: `(function () {\n${library}${artifact}\n})();` });
   assert.equal(await page.locator('.fileText [data-ldg-mark]').count(),1);
   assert.equal(await page.locator('.fileText [data-ldg-mark]').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 255, 0)');
   assert.equal((await page.locator('.fileText').boundingBox()).height,rowBefore.height);

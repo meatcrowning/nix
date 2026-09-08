@@ -26,7 +26,9 @@ const header = `// ==UserScript==
 // Media processing stays in your browser; no server or external application.
 // Mediabunny ${dependencies.mediabunny} (MPL-2.0) is loaded separately by the userscript manager.
 // Library source: https://github.com/Vanilagy/mediabunny
-// Collage source: https://github.com/meatcrowning/nix/tree/main/apps/collage/src`;
+// Collage source: https://github.com/meatcrowning/nix/tree/main/apps/collage/src
+// Separate our IIFE from @require code that may end without a semicolon.
+;`;
 await build({ entryPoints: ['src/ui.js'], bundle: true, minify: false,
   target: ['chrome106', 'firefox130', 'safari16.4'], format: 'iife',
   outfile: 'collage.user.js', banner: { js: header }, legalComments: 'inline' });
