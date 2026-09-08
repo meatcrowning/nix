@@ -309,7 +309,9 @@ def _chrome_css(ch, i):
         # including them they retain OneeChan's black mainColor background.
         # This follows the field rule, so submit inputs do not land in the
         # sunken field surface.
-        "button,input[type=submit],input[type=button],input[type=reset],"
+        # Collage's thread markers use yellow/green to convey selection.
+        # Keep their own inline state colours instead of the KStyle gradient.
+        "button:not([data-ldg-mark]),input[type=submit],input[type=button],input[type=reset],"
         "#oneechan-options .options-button,#oneechan-options .options-button:hover,"
         ".qr-link,.qr-link:hover,.pages.cataloglink,.pages.cataloglink:hover,"
         ".pages strong>a,.pages strong>a:hover{"
