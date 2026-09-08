@@ -8,8 +8,8 @@ import QtQuick
 //
 // It is a CtxMenu (§7.2 owns the look) that knows the player's verbs; the
 // arrangement follows §7.2's ordering rule — the play actions first, navigation
-// next, and the one destructive entry LAST behind a separator, so the pointer
-// never lands on "remove from queue".
+// next, and destructive entries LAST behind a separator, so the pointer never
+// lands on one when the menu opens.
 //
 // Honesty, per §7.2: an action that cannot work here is ABSENT when the whole
 // site can never offer it (no "remove from queue" outside the queue, no "go to
@@ -73,12 +73,18 @@ CtxMenu {
                      enabled: have && Library.canReveal,
                      trigger: function () { Library.revealTrack(id); } });
 
+        items.push({ separator: true });
         if ((c.queueIndex !== undefined ? c.queueIndex : -1) >= 0) {
             var qi = c.queueIndex;
-            items.push({ separator: true });
             items.push({ label: "remove from queue",
                          trigger: function () { Player.removeFromQueue([qi]); } });
         }
+
+        // A transient file opened from outside the library has a negative id:
+        // it is playable, but the player does not own it and must not offer to
+        // delete it. QFile's platform trash is recoverable on both hosts.
+        items.push({ label: "move to trash", enabled: have && id > 0,
+                     trigger: function () { Library.trashTrack(id); } });
 
         root.open(x, y, items);
     }
