@@ -95,10 +95,14 @@ with tempfile.TemporaryDirectory() as temporary:
     check(trashed == [root / "new paper.png"] and model.draftPath == model.activePath,
           "moves an inactive wallpaper to trash and restores the active selection")
 
+    model.removeWallpapers([str(root / "new paper-2.png"), str(second)])
+    check(trashed[-2:] == [root / "new paper-2.png", second],
+          "moves an arbitrary wallpaper selection to trash")
+
     submitted = []
     model.apply = lambda: submitted.append(model.draftPath)
     model.removeWallpaper(model.activePath)
-    check(model._pending_delete == str(first.resolve()) and submitted
+    check(model._pending_delete == [str(first.resolve())] and submitted
           and submitted[0] != str(first.resolve()),
           "selects a replacement before trashing the active wallpaper")
 

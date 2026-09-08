@@ -9,6 +9,60 @@ import "../../qmlcommon"
 // window body. Under Hyprland Main.qml supplies the ordinary QML window roof.
 Item {
     id: root
+    focus: true
+    property var selectedPaths: []
+    property string selectionAnchor: ""
+
+    function isSelected(path) { return selectedPaths.indexOf(path) >= 0 }
+    function selectOnly(path) {
+        selectedPaths = [path]
+        selectionAnchor = path
+        Appearance.select(path)
+    }
+    function selectToggle(path) {
+        var next = selectedPaths.slice()
+        var index = next.indexOf(path)
+        if (index >= 0) next.splice(index, 1); else next.push(path)
+        selectedPaths = next
+        selectionAnchor = path
+        if (index < 0) Appearance.select(path)
+    }
+    function selectRange(path) {
+        var start = -1
+        var end = -1
+        for (var i = 0; i < Appearance.wallpapers.length; i++) {
+            if (Appearance.wallpapers[i].path === selectionAnchor) start = i
+            if (Appearance.wallpapers[i].path === path) end = i
+        }
+        if (start < 0 || end < 0) { selectOnly(path); return }
+        var next = []
+        for (var j = Math.min(start, end); j <= Math.max(start, end); j++)
+            next.push(Appearance.wallpapers[j].path)
+        selectedPaths = next
+        Appearance.select(path)
+    }
+    function clickSelect(path, modifiers) {
+        if (modifiers & Qt.ShiftModifier) selectRange(path)
+        else if (modifiers & Qt.ControlModifier) selectToggle(path)
+        else selectOnly(path)
+    }
+    function deleteSelection() {
+        if (selectedPaths.length > 0 && !Appearance.applying)
+            Appearance.removeWallpapers(selectedPaths)
+    }
+    function selectAll() {
+        var next = []
+        for (var i = 0; i < Appearance.wallpapers.length; i++)
+            next.push(Appearance.wallpapers[i].path)
+        selectedPaths = next
+        if (next.length > 0) selectionAnchor = next[0]
+    }
+
+    Shortcut { sequence: "Delete"; enabled: selectedPaths.length > 0; onActivated: root.deleteSelection() }
+    Shortcut { sequence: StandardKey.SelectAll; onActivated: root.selectAll() }
+    Component.onCompleted: {
+        if (Appearance.draftPath !== "") selectedPaths = [Appearance.draftPath]
+    }
 
     Rectangle {
         anchors.fill: parent
@@ -111,9 +165,8 @@ Item {
                             anchors.fill: parent
                             anchors.margins: 4
                             checkable: true
-                            checked: modelData.path === Appearance.draftPath
+                            checked: root.isSelected(modelData.path)
                             enabled: !Appearance.applying
-                            onClicked: Appearance.select(modelData.path)
 
                             contentItem: ColumnLayout {
                                 spacing: 4
@@ -130,6 +183,25 @@ Item {
                                     elide: Text.ElideMiddle
                                     horizontalAlignment: Text.AlignHCenter
                                     Layout.fillWidth: true
+                                }
+                            }
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            onClicked: function(mouse) {
+                                root.forceActiveFocus()
+                                if (mouse.button === Qt.RightButton) {
+                                    if (!root.isSelected(modelData.path)) root.selectOnly(modelData.path)
+                                    var point = mapToItem(root, mouse.x, mouse.y)
+                                    contextMenu.open(point.x, point.y, [
+                                        { label: root.selectedPaths.length > 1
+                                                 ? "delete " + root.selectedPaths.length + " wallpapers"
+                                                 : "delete",
+                                          trigger: function() { root.deleteSelection() } }
+                                    ])
+                                } else {
+                                    root.clickSelect(modelData.path, mouse.modifiers)
                                 }
                             }
                         }
@@ -157,10 +229,10 @@ Item {
                     Layout.fillWidth: true
                 }
                 Button {
-                    text: "trash"
+                    text: selectedPaths.length > 1 ? "delete " + selectedPaths.length : "delete"
                     icon.name: "edit-delete"
-                    enabled: Appearance.draftPath !== "" && !Appearance.applying
-                    onClicked: Appearance.removeWallpaper(Appearance.draftPath)
+                    enabled: selectedPaths.length > 0 && !Appearance.applying
+                    onClicked: root.deleteSelection()
                 }
                 Button {
                     text: "cancel"
@@ -185,6 +257,22 @@ Item {
         nameFilters: ["images (*.png *.jpg *.jpeg *.webp *.bmp)"]
         onAccepted: Appearance.importFiles(selectedFiles)
     }
+
+    Connections {
+        target: Appearance
+        function onSelectionChanged() {
+            if (Appearance.applying && Appearance.draftPath !== "")
+                selectedPaths = [Appearance.draftPath]
+        }
+        function onWallpapersChanged() {
+            var offered = []
+            for (var i = 0; i < Appearance.wallpapers.length; i++)
+                offered.push(Appearance.wallpapers[i].path)
+            selectedPaths = selectedPaths.filter(function(path) { return offered.indexOf(path) >= 0 })
+        }
+    }
+
+    CtxMenu { id: contextMenu; anchors.fill: parent }
 
     Popup {
         id: applyingPopup
