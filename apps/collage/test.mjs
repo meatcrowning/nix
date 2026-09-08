@@ -43,6 +43,13 @@ try {
     const normalized=E.normalizeBlob(foreign);iframe.remove();
     if(!(normalized instanceof Blob) || normalized.size!==red.size) throw new Error('cross-realm blob');
     const opts = { edge:320, duration:1, fps:30, maxBytes:1_000_000 };
+    for(const [text,expected] of [['2:3',2/3],['0.5',0.5],['3/7',3/7],['16 x 9',16/9],['.25',.25]])
+      if(Math.abs(E.parseAspect(text)-expected)>1e-12) throw new Error('aspect parser');
+    for(const bad of ['1/0','0','-1','Infinity','1:2:3','alert(1)']) {
+      let rejected=false;try{E.parseAspect(bad);}catch{rejected=true;}if(!rejected)throw new Error('invalid ratio accepted');
+    }
+    const ratioLayout=E.layout([{width:320,height:240}],1280,3/7);
+    if(Math.abs(ratioLayout.width/ratioLayout.height-3/7)>0.002)throw new Error('output aspect ratio');
     const probes=[];
     const fallback=await E.selectCodec('webm',320,240,1_000_000,async (c,o)=>{probes.push([c,o]);return c==='vp9';});
     if(fallback!=='vp9' || probes.length!==2 || probes.some(([,o])=>o.latencyMode!=='quality' || o.hardwareAcceleration!=='no-preference')) throw new Error('codec probing');
@@ -78,10 +85,14 @@ try {
     out.addVideoTrack(source,{frameRate:10}); await out.start();
     for(let i=0;i<4;i++) {pattern.ctx.fillStyle=['#101010','#808080','#e0e0e0','#d03030'][i];pattern.ctx.fillRect(0,0,320,240);await source.add(i/10,0.1);}
     source.close();await out.finalize();const input=new Blob([target.buffer],{type:`video/${opts.format}`});
+    const shortAuto=await E.exportCollage([input],{...opts,duration:'auto'});
+    if(shortAuto.frames!==12 || shortAuto.duration!==0.4)throw new Error('automatic short duration');
     const delayed = await E.exportCollage([input], {...opts,format:supported.webm ? 'auto' : 'mp4',duration:2}, undefined, () => {
       // Deliberately miss the real-time frame budget; output must stay CFR.
       const stop = performance.now()+40; while(performance.now()<stop) {}
     });
+    const longestAuto=await E.exportCollage([input,delayed.blob],{...opts,duration:'auto'});
+    if(longestAuto.frames!==60 || longestAuto.duration!==2)throw new Error('longest source duration');
     console.log('cancellation');
     const ac = new AbortController(); let cancelled=false;
     try { await E.exportCollage([input], {...opts,duration:2}, ac.signal, t => {
@@ -94,7 +105,7 @@ try {
     let sizeRejected=false;
     try { E.options({...opts,maxBytes:1}); } catch { sizeRejected=true; }
     const withHeader = E.layout([{width:640,height:100},{width:320,height:240},{width:240,height:320}],640,1,true);
-    if(withHeader.placements[0].width!==withHeader.width || withHeader.placements[1].y<withHeader.placements[0].height) throw new Error('header layout');
+    if(withHeader.placements[1].y<withHeader.placements[0].y+withHeader.placements[0].height) throw new Error('header layout');
     const encoder=globalThis.VideoEncoder; globalThis.VideoEncoder=undefined;
     let unsupported=false;
     try {await E.exportCollage([red],opts);} catch(e) {unsupported=e.message.includes('no WebCodecs');}
@@ -117,7 +128,7 @@ try {
       const frames=JSON.parse(execFileSync('ffprobe',['-v','error','-select_streams','v','-show_frames','-show_entries','frame=best_effort_timestamp_time','-of','json',file],{encoding:'utf8'})).frames;
       frames.forEach((f,i)=>assert(Math.abs(Number(f.best_effort_timestamp_time)-i/r.fps)<0.0011));
       if(name==='delayed') {
-        const pixels=execFileSync('ffmpeg',['-v','error','-i',file,'-vf','scale=1:1','-pix_fmt','rgb24','-f','rawvideo','-'],{maxBuffer:1_000_000});
+        const pixels=execFileSync('ffmpeg',['-v','error','-i',file,'-vf','crop=2:2:(iw-2)/2:(ih-2)/2,scale=1:1','-pix_fmt','rgb24','-f','rawvideo','-'],{maxBuffer:1_000_000});
         const colors=[[16,16,16],[128,128,128],[224,224,224],[208,48,48]];
         for(let i=0;i<60;i++) for(let channel=0;channel<3;channel++)
           assert(Math.abs(pixels[i*3+channel]-colors[Math.floor(i/3)%4][channel])<=8,
@@ -128,6 +139,7 @@ try {
   }
   // Exercise the installed artifact's UI in an isolated page; no real-site requests.
   await page.goto('http://localhost/');
+  await page.evaluate(()=>{for(let i=0;i<70;i++){const a=document.createElement('a');a.className='fileThumb';a.href=`https://i.4cdn.org/g/${i}.png`;document.body.append(a);}});
   await page.addScriptTag({ content:await readFile('collage.user.js','utf8') });
   await page.locator('#ldg-collage-v2').getByRole('button',{name:'collage',exact:true}).click();
   const ui=page.locator('#ldg-collage-v2');
@@ -139,17 +151,35 @@ try {
   assert(!(await ui.locator('#panel').isVisible()));
   await ui.getByRole('button',{name:'collage',exact:true}).click();
   await ui.locator('summary').click();
+  await ui.getByRole('button',{name:'select all',exact:true}).click();
+  await ui.getByRole('button',{name:'create collage'}).click();
+  assert((await ui.locator('#message').innerText()).includes('at most 64'));
+  await ui.getByRole('button',{name:'select none',exact:true}).click();
   await page.locator('#ldg-collage-v2').getByLabel('add files').setInputFiles(join(dir,'still.png'));
+  assert.equal(await ui.locator('.tile').count(),71);
+  assert.equal(await ui.getByRole('button',{name:'move earlier'}).count(),0);
+  await ui.getByLabel('gallery view').selectOption('selected');
+  assert.equal(await ui.locator('.tile:visible').count(),1);
+  await ui.getByRole('button',{name:'preview still.png',exact:true}).click();
+  assert(await ui.getByRole('dialog',{name:'media preview',exact:true}).isVisible());
+  await ui.locator('#preview img').click();
+  assert(!(await ui.locator('#preview').isVisible()));
+  await ui.locator('.tile:visible input').uncheck();
+  assert.equal(await ui.locator('.tile:visible').count(),0);
+  await ui.getByLabel('gallery view').selectOption('all');
+  await ui.locator('.tile input').last().check();
+  await ui.getByLabel('gallery view').selectOption('selected');
   await page.locator('#ldg-collage-v2').getByLabel('output',{exact:true}).selectOption('mp4');
   assert(await page.locator('#ldg-collage-v2').getByLabel('fps',{exact:true}).isEnabled());
   await page.locator('#ldg-collage-v2').getByLabel('output',{exact:true}).selectOption('png');
-  await ui.getByLabel('scale',{exact:true}).selectOption('640');
-  await ui.getByLabel('aspect ratio',{exact:true}).selectOption('0.5625');
+  await ui.getByLabel('scale',{exact:true}).evaluate(el=>{el.value='640';el.dispatchEvent(new Event('input',{bubbles:true}));});
+  assert((await ui.locator('#scale-value').innerText()).includes('640px'));
+  await ui.getByLabel('aspect ratio',{exact:true}).fill('3/7');
   await ui.locator('summary').click();
   await page.locator('#ldg-collage-v2').getByRole('button',{name:'create collage'}).click();
   await page.locator('#ldg-collage-v2').getByRole('link',{name:/save collage/}).waitFor();
   await ui.getByRole('button',{name:'preview collage 1'}).click();
-  assert(await ui.getByRole('dialog',{name:'collage preview',exact:true}).isVisible());
+  assert(await ui.getByRole('dialog',{name:'media preview',exact:true}).isVisible());
   assert(await ui.locator('#panel').evaluate(el=>el.inert));
   await ui.getByRole('button',{name:'close preview'}).press('Escape');
   assert(!(await ui.locator('#preview').isVisible()));
@@ -157,6 +187,10 @@ try {
   if(result.video && result.video.extension==='webm') {
     await ui.locator('summary').click();
     await ui.getByLabel('add files').setInputFiles(join(dir,'delayed.webm'));
+    await ui.getByRole('button',{name:'preview delayed.webm',exact:true}).click();
+    assert(await ui.locator('#preview video').isVisible());
+    await ui.locator('#preview').click({position:{x:5,y:5}});
+    assert(!(await ui.locator('#preview').isVisible()));
     await ui.getByLabel('header image').setInputFiles(join(dir,'still.png'));
     await ui.getByLabel('output',{exact:true}).selectOption('auto');
     await ui.getByLabel('fps',{exact:true}).selectOption('24');

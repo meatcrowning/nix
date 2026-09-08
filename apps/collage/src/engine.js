@@ -34,17 +34,27 @@ export function dimensions(w, h) {
   if (!Number.isFinite(w * h) || w < 1 || h < 1 || w * h > LIMITS.sourcePixels)
     throw new Error('source exceeds 32 megapixels or has invalid dimensions');
 }
+export function parseAspect(value) {
+  const text = String(value).trim();
+  const number = '(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:e[+-]?\\d+)?';
+  const match = new RegExp(`^(${number})(?:\\s*[:/x×]\\s*(${number}))?$`, 'i').exec(text);
+  const ratio = match ? Number(match[1]) / (match[2] === undefined ? 1 : Number(match[2])) : NaN;
+  if (!Number.isFinite(ratio) || ratio <= 0) throw new Error('enter a positive aspect ratio, such as 2:3, 0.5 or 3/7');
+  return ratio;
+}
 export function options(raw = {}) {
   const o = { format: 'webm', fps: 30, duration: 5, edge: 1280, aspect: 1,
     maxBytes: 4_000_000, ...raw };
   if (!['auto', 'webm', 'mp4', 'jpeg', 'png'].includes(o.format) || ![15, 24, 30, 60].includes(o.fps)
-    || !Number.isFinite(o.duration) || o.duration < 1 || o.duration > 15
+    || o.duration !== 'auto' && (!Number.isFinite(o.duration) || o.duration <= 0 || o.duration > 300)
     || !Number.isFinite(o.edge) || o.edge < 320 || o.edge > (isVideo(o.format) || o.format === 'auto' ? 2048 : 4096)
-    || !Number.isFinite(o.aspect) || o.aspect < 0.25 || o.aspect > 4
+    || !Number.isFinite(o.aspect) || o.aspect < 2 / o.edge || o.aspect > o.edge / 2
     || !Number.isFinite(o.maxBytes) || o.maxBytes < 100_000 || o.maxBytes > 32_000_000)
     throw new Error('invalid export settings');
-  o.frameCount = Math.round(o.duration * o.fps);
-  o.duration = o.frameCount / o.fps;
+  if (o.duration !== 'auto') {
+    o.frameCount = Math.max(1, Math.round(o.duration * o.fps));
+    o.duration = o.frameCount / o.fps;
+  }
   return o;
 }
 export function canvas(w, h) {
@@ -63,9 +73,22 @@ export function canvasBlob(c, type, quality) {
 // Justified rows preserve source aspect ratios and order. Dynamic programming
 // selects row breaks; no random layout or completion-order-dependent placement.
 export function layout(media, edge, aspect = 1, header = false) {
+  const content = contentLayout(media, edge, aspect, header);
+  const width = Math.max(2, Math.floor(edge * Math.min(1, aspect) / 2) * 2);
+  const height = Math.max(2, Math.floor(edge / Math.max(1, aspect) / 2) * 2);
+  const scale = Math.min(width / content.width, height / content.height);
+  const x = (width - content.width * scale) / 2, y = (height - content.height * scale) / 2;
+  return { width, height, placements: content.placements.map(p => {
+    const left = Math.round(x + p.x * scale), top = Math.round(y + p.y * scale);
+    return { ...p, x: left, y: top,
+      width: Math.max(1, Math.round(x + (p.x + p.width) * scale) - left),
+      height: Math.max(1, Math.round(y + (p.y + p.height) * scale) - top) };
+  }) };
+}
+function contentLayout(media, edge, aspect = 1, header = false) {
   if (!media.length) throw new Error('select at least one file');
   if (header && media.length > 1) {
-    const body = layout(media.slice(1), edge, aspect);
+    const body = contentLayout(media.slice(1), edge, aspect);
     const headerH = body.width * media[0].height / media[0].width;
     const scale = Math.min(1, edge / (body.height + headerH));
     const width = Math.max(2, Math.floor(body.width * scale / 2) * 2);
@@ -188,6 +211,12 @@ export async function exportCollage(blobs, raw, signal, progress = () => {}) {
       await yieldTask();
     }
     if (o.format === 'auto') o.format = media.some(m => m.kind === 'video') ? 'webm' : 'jpeg';
+    if (o.duration === 'auto') {
+      const longest = Math.max(0, ...media.filter(m => m.kind === 'video').map(m => m.duration));
+      if (isVideo(o.format) && longest > 300) throw new Error('longest video exceeds 300 seconds; set seconds explicitly');
+      o.frameCount = Math.max(1, Math.ceil((longest || 5) * o.fps - 1e-8));
+      o.duration = o.frameCount / o.fps;
+    }
     const l = layout(media, o.edge, o.aspect, o.header);
     const base = canvas(l.width, l.height);
     try {

@@ -27,7 +27,7 @@ then reload the thread. Selection is per-thread; the first run reads the old
 `highlightedImages_<thread>` list without modifying it. No browser profile writes
 or automatic installation. A public raw file URL can be used for installation.
 
-Limits: WebM (VP8, then VP9 if supported) or explicit MP4 (AVC/H.264), silent SDR video, 1–15 seconds,
+Limits: WebM (VP8, then VP9 if supported) or explicit MP4 (AVC/H.264), silent SDR video, up to 300 seconds,
 15/24/30/60 fps; 64 inputs, 8 video decoders, 24 MP total video dimensions,
 32 MP resized stills, 256 MiB compressed inputs per collage. HDR video is refused.
 Animated images become stills. Header is a full-width first row; multiple
@@ -48,8 +48,8 @@ Release still tiles after drawing the reusable base; yield through MessageChanne
 without a per-frame timer clamp. Keep output timestamps independent of work time.
 No MediaRecorder fallback, runtime codec downloads or platform-specific service.
 
-The main panel exposes aspect ratio and output scale (1280px longest edge at
-100%) above the selection gallery, with one create action. Advanced contains
+The main panel exposes a positive decimal/colon/fraction aspect ratio and a
+scale slider (1280px longest edge at 100%) above the gallery, with one create action. Advanced contains
 format, fps, duration, size limit, collage count, local files and header input.
 The default automatic format is resolved from decoded input types per collage:
 any video selects WebM, otherwise JPEG. Explicit formats always override this.
@@ -57,4 +57,15 @@ Opening/creating discovers thread media without a separate import step; creation
 uses the checked selection, never silently selects unchecked files. The collage
 button toggles the panel; its X closes it. Generated thumbnails open viewport-
 filling image/video previews with separate save links, Escape/X dismissal and
-video/object-URL cleanup. Keep the distributed namespace anonymous.
+video/object-URL cleanup. Every source tile also has a preview button, independent
+of its checkbox. Source previews use full media URLs, not thumbnails; local
+object URLs are retained until clear. A top-layer dialog covers the viewport;
+clicking its background, an image, X or Escape returns to the gallery (video
+controls remain interactive). Never test this by clicking the user's desktop.
+All/selected is a display filter, not a selection change. List every thread file;
+the 64-input export limit is separate from the gallery's size. No reorder buttons.
+Blank seconds means longest input video, rounded up to the next output frame;
+image-only video export defaults to five seconds. Explicit seconds overrides it.
+Reject auto durations over 300s rather than silently truncating. Layout fits
+undistorted tiles inside the requested output ratio with padding as needed;
+dimensions are rounded to even pixels. Keep the distributed namespace anonymous.
