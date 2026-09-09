@@ -1,43 +1,14 @@
 #!/usr/bin/env python3
-"""player — standalone Qt/QML music player for the `top` desktop.
+"""Shared Qt/QML music player for top and book, with libmpv playback.
 
-The fourth sibling of surfer/filer/viewer: a PySide6 + QML app themed by the
-live wallpaper palette (parsed from the panel's Theme.qml and file-watched),
-with its transport controls in the hyprvtb titlebar (play/pause/skip buttons +
-the PLAYBAR scrub bar, same bridge viewer uses for video).
+The tag-driven library is indexed in SQLite. Ratings, favourites and listening
+history remain authoritative database state when tagWrites is off or log (the
+default); this database is not a disposable scan cache. Metadata writes are
+serialized off the GUI thread, and file rewrites use atomicsave.
 
-The library is the external SSD at /run/media/lam/SSD/aud (~11k mixed-format
-files: FLAC/MP3/M4A/DSF, loose tracks and album folders in several layouts).
-Organisation is tag-driven, never path-driven: a background mutagen scan mirrors
-every file's tags into ~/.local/share/player/library.db (SQLite, WAL) and the
-album grid / search / smart playlists are all DB queries — the SSD is never
-touched just to browse. Ratings (FMPS_RATING 0..1), play counts
-(FMPS_PLAYCOUNT) and favourites (FAVORITE=1) live IN the files' tags, like the
-rest of this library's history (fooyin/Strawberry wrote the existing ones); the
-DB is a queryable mirror, rebuilt from tags at any time. Tag writes go through
-a journaling worker with a prefs kill-switch (tagWrites: off|log|on), and every
-write to a library file — ratings here, lyrics in lyrics.py — is atomic (copy →
-mutate → fsync → os.replace, see atomicsave.py), because an interrupted
-in-place rewrite is the one way this app could damage the library and exFAT has
-no snapshots to undo it.
-
-Playback is libmpv (python-mpv): decodes everything including DSF/DSD (to PCM),
-gapless-audio=weak joins compatible streams. The app owns the queue and mirrors
-it into mpv's playlist so the next track is prefetched. MPRIS is exported so
-the panel's MediaPanel widget controls this player like any other.
-
-Lyrics: TIMESTAMPED embedded tags → sidecar .lrc → LRCLIB (lrclib.net), cached
-in the DB (including negative results); synced [mm:ss.xx] lyrics scroll in the
-UI. Plain unsynced lyrics never end the search — a synced version is a strict
-upgrade — and anything fetched is written back into the file's own lyrics frame
-so it outlives this DB. The matching rules live in lyrics.py, shared with
-tools/lyrics-sync.py, which sweeps the whole library in one go.
-
-ReplayGain: the scan mirrors each file's REPLAYGAIN_* / R128_* tags into the DB
-and mpv applies the gain itself while decoding, so volume is levelled library
-wide without touching the volume slider. Mode is off/track/album/auto (auto =
-album gain inside an album, track gain for anything mixed); the ~4% of files
-with no tags fall back to the library's own median gain.
+Root.qml hosts the shared views inside native KDE chrome under Plasma or a
+QML window under Hyprland. See AGENTS.md for module boundaries, persistence,
+playback/IPC contracts and isolated verification commands.
 """
 import hashlib
 import json
@@ -48,6 +19,7 @@ import socket
 import sqlite3
 import sys
 import threading
+import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -78,6 +50,7 @@ import kdeshell  # noqa: E402  (pylib; the Plasma session's real QtWidgets windo
 from glyphs import Glyphs  # noqa: E402  (pylib; docs/DESIGN.md 2.3 display-site px())
 
 import atomicsave  # noqa: E402  (sibling module; also used by lyrics.py)
+from metadatawrites import MetadataWrites  # noqa: E402
 import lyrics as lyricslib  # noqa: E402  (sibling module; also used by tools/)
 from scrobble import Scrobbler  # noqa: E402  (sibling module; Last.fm, off the GUI thread)
 import lastfm as lastfmlib  # noqa: E402  (pylib; credentials stay in its owner)
@@ -332,6 +305,8 @@ class Prefs(QObject):
     """Small persisted preferences (view/sort mode, volume, tag-write mode, the
     saved queue) in $XDG_STATE_HOME/player/prefs.json — surfer's Prefs shape."""
 
+    saveFailed = Signal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._path = STATE / "prefs.json"
@@ -344,11 +319,30 @@ class Prefs(QObject):
             pass
 
     def _write(self):
+        tmp = None
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(json.dumps(self._d), encoding="utf-8")
-        except OSError:
-            pass
+            data = json.dumps(self._d)
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                             dir=self._path.parent,
+                                             prefix=".prefs-", suffix=".tmp",
+                                             delete=False) as f:
+                tmp = Path(f.name)
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self._path)
+            return True
+        except (OSError, TypeError, ValueError) as exc:
+            print("preferences: save failed:", exc, flush=True)
+            self.saveFailed.emit("couldn't save player settings")
+            return False
+        finally:
+            if tmp is not None:
+                try:
+                    tmp.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     @Slot(str, "QVariant", result="QVariant")
     def get(self, key, fallback=None):
@@ -356,8 +350,12 @@ class Prefs(QObject):
 
     @Slot(str, "QVariant")
     def set(self, key, value):
+        if key in self._d and self._d[key] == value:
+            return
+        old = self._d.copy()
         self._d[key] = value
-        self._write()
+        if not self._write():
+            self._d = old
 
 
 # ---------------------------------------------------------------------------
@@ -849,13 +847,24 @@ class Scanner(QThread):
     summary = Signal("QVariantMap")  # scan stats at the end
     done = Signal()
 
+    def _cancelled(self, con):
+        if not self.isInterruptionRequested():
+            return False
+        con.rollback()
+        return True
+
     def run(self):
         t0 = time.time()
-        con = open_db()
+        con = None
         try:
+            con = open_db()
             self._run(con, t0)
+        except Exception as exc:
+            self.summary.emit({"error": str(exc), "secs": round(time.time() - t0, 1)})
         finally:
-            con.close()
+            if con is not None:
+                con.close()
+            self.done.emit()
 
     def _run(self, con, t0):
         root = LIBRARY_ROOT
@@ -863,22 +872,27 @@ class Scanner(QThread):
             # SSD not mounted: never prune, just report and bail — the app
             # keeps browsing the existing DB with tracks greyed unavailable.
             self.summary.emit({"mounted": False, "secs": 0.0})
-            self.done.emit()
             return
 
         seen = {}
+        walk_errors = []
         stack = [str(root)]
         while stack:
+            if self._cancelled(con):
+                return
             d = stack.pop()
             try:
-                for e in os.scandir(d):
-                    if e.is_dir(follow_symlinks=False):
-                        stack.append(e.path)
-                    elif e.is_file() and os.path.splitext(e.name)[1].lower() in AUDIO_EXTS:
-                        st = e.stat()
-                        seen[e.path] = (st.st_mtime, st.st_size)
-            except OSError:
-                continue
+                with os.scandir(d) as entries:
+                    for e in entries:
+                        if self._cancelled(con):
+                            return
+                        if e.is_dir(follow_symlinks=False):
+                            stack.append(e.path)
+                        elif e.is_file() and os.path.splitext(e.name)[1].lower() in AUDIO_EXTS:
+                            st = e.stat()
+                            seen[e.path] = (st.st_mtime, st.st_size)
+            except OSError as exc:
+                walk_errors.append(f"{d}: {exc}")
 
         known = {r["path"]: (r["mtime"], r["size"])
                  for r in con.execute("SELECT path, mtime, size FROM tracks")}
@@ -918,6 +932,8 @@ class Scanner(QThread):
             pending.clear()
 
         for i, p in enumerate(todo):
+            if self._cancelled(con):
+                return
             t = read_tags(p)
             if t is None:
                 bad += 1
@@ -929,14 +945,19 @@ class Scanner(QThread):
                 flush_pending()
                 self.progress.emit(i + 1, len(todo))
                 self.batch.emit()
+        if self._cancelled(con):
+            return
         flush_pending()
 
-        # Prune vanished files — safe here: the root IS mounted and was walked.
-        # (An empty walk of a mounted-but-hosed root still can't run: seen would
-        # be empty AND known non-empty → require some survivors before pruning.)
-        if gone and (len(gone) < len(known) or seen):
+        # A partial traversal cannot prove absence, even if other tracks survive.
+        # Also retain the empty-root safeguard against a missing mount.
+        if self._cancelled(con):
+            return
+        pruned = 0
+        if not walk_errors and gone and (len(gone) < len(known) or seen):
             con.executemany("DELETE FROM tracks WHERE path=?", [(p,) for p in gone])
             con.commit()
+            pruned = len(gone)
 
         rebuild_albums(con)
 
@@ -946,6 +967,8 @@ class Scanner(QThread):
         # the grid frozen on the old one for ever (Millie & Andrea, 2026-08-25).
         # Anything whose tags we just re-read gives its album's cached art up.
         for i in range(0, len(todo), 500):
+            if self._cancelled(con):
+                return
             chunk = todo[i:i + 500]
             con.execute(
                 "UPDATE albums SET art_src=NULL, thumb=NULL, full_art=NULL "
@@ -957,6 +980,8 @@ class Scanner(QThread):
 
         self.batch.emit()
         self._art_pass(con)
+        if self._cancelled(con):
+            return
 
         albums = con.execute("SELECT COUNT(*) c FROM albums").fetchone()["c"]
         total = con.execute("SELECT COUNT(*) c FROM tracks").fetchone()["c"]
@@ -964,10 +989,11 @@ class Scanner(QThread):
         rated = con.execute("SELECT COUNT(*) c FROM tracks WHERE rating IS NOT NULL").fetchone()["c"]
         gained = con.execute("SELECT COUNT(rg_track_gain) c FROM tracks").fetchone()["c"]
         self.summary.emit({"mounted": True, "tracks": total, "albums": albums,
+                           "walked": len(seen),
                            "albumless": loose, "rated": rated, "parsed": len(todo),
-                           "unreadable": bad, "pruned": len(gone), "replaygain": gained,
+                           "unreadable": bad, "pruned": pruned, "replaygain": gained,
+                           "walk_errors": walk_errors, "incomplete": bool(walk_errors),
                            "secs": round(time.time() - t0, 1)})
-        self.done.emit()
 
     def _art_pass(self, con):
         """Give every album art: embedded (authoritative — folder images in the
@@ -985,15 +1011,24 @@ class Scanner(QThread):
                 src[5:] if src.startswith("file:") else None)
             return p is not None and not os.path.exists(p)
 
-        targets = [r for r in rows if r["thumb"] is None or dead(r["art_src"])]
+        targets = []
+        for r in rows:
+            if self._cancelled(con):
+                return
+            if r["thumb"] is None or dead(r["art_src"]):
+                targets.append(r)
         n = 0
         for r in targets:
+            if self._cancelled(con):
+                return
             aid = r["id"]
             donors = con.execute(
                 "SELECT path FROM tracks WHERE album_id=? AND has_art=1",
                 (aid,)).fetchall()
             counts, first = {}, {}
             for d in donors:
+                if self._cancelled(con):
+                    return
                 data = embedded_art(d["path"])
                 if not data:
                     continue
@@ -1528,6 +1563,7 @@ class Library(QObject):
     scanProgress = Signal(int, int)
     scanSummary = Signal("QVariantMap")
     scanRunning = Signal(bool)
+    writeFailed = Signal(str)
 
     def __init__(self, tagwriter, parent=None):
         super().__init__(parent)
@@ -1551,7 +1587,13 @@ class Library(QObject):
             (time.time() - LyricsProvider.RETRY_NONE_AFTER,))
         self._con.commit()
         self._tagwriter = tagwriter
+        self._metadata_writes = MetadataWrites(DB_PATH, self)
+        self._metadata_writes.completed.connect(self._metadata_done)
+        self._pending_metadata = {}
+        self._metadata_seq = 0
         self._scanner = None
+        self._scan_pending = False
+        self._closed = False
         self._search_rows = None  # lazy [(haystack, id, genre, year)]
         self._album_meta = None   # lazy {album_id: (genre blob, year)}
         # Album artist is a release-level credit, not a full contributor list.
@@ -1571,27 +1613,56 @@ class Library(QObject):
 
     @Slot()
     def rescan(self):
-        if self._scanner and self._scanner.isRunning():
+        if self._closed:
             return
+        if self._scanner and self._scanner.isRunning():
+            self._scan_pending = True
+            return
+        self._scan_pending = False
+        if self._scanner is not None:
+            self._scanner.deleteLater()
         self._scanner = Scanner(self)
         self._scanner.progress.connect(self.scanProgress)
         self._scanner.batch.connect(self._on_batch)
         self._scanner.summary.connect(self._on_summary)
-        self._scanner.done.connect(lambda: self.scanRunning.emit(False))
+        self._scanner.finished.connect(self._on_scan_finished)
         self.scanRunning.emit(True)
         self._scanner.start()
 
+    def _on_scan_finished(self):
+        if self._closed:
+            return
+        if self._scan_pending:
+            self.rescan()
+        else:
+            self.scanRunning.emit(False)
+
     def _on_batch(self):
-        self.changed.emit()
+        if not self._closed:
+            self.changed.emit()
 
     def _on_summary(self, s):
+        if self._closed:
+            return
         print("scan:", dict(s), flush=True)
         self.scanSummary.emit(s)
+        if s.get("error"):
+            self.writeFailed.emit(f"scan failed: {s['error']}")
+        elif s.get("incomplete"):
+            self.writeFailed.emit(f"scan incomplete: {len(s['walk_errors'])} unreadable folders")
 
     # ---- queries (all return lists of plain dicts for the models) ----
 
     def _rows(self, sql, params=()):
-        return [dict(r) for r in self._con.execute(sql, params)]
+        return [self._pending_row(dict(r)) for r in self._con.execute(sql, params)]
+
+    def _pending_row(self, row):
+        # Only full track rows, never album aggregates with overlapping ids.
+        if row is not None and "path" in row and "id" in row:
+            for job in self._pending_metadata.values():
+                if job["id"] == row["id"] and job["path"] == row["path"]:
+                    row.update(job["overlay"])
+        return row
 
     def albums(self, sort="orig_year", descending=False):
         # Album-level browse facts come from the tracks that make up the
@@ -1846,6 +1917,10 @@ class Library(QObject):
         return out
 
     def search(self, text):
+        """Return every matching track, in stable library order."""
+        return self.tracks_by_ids(self.search_ids(text))
+
+    def search_ids(self, text):
         """Casefolded substring search over title/artist/album, plus the
         `genre:` / `year:` field filters (`parse_query`) — Unicode-correct (the
         Japanese titles) and instant at 11k rows against a cached haystack.
@@ -1869,7 +1944,7 @@ class Library(QObject):
                if all(w in hay for w in words)
                and all(g in gen for g in genres)
                and year_in(yr, lo, hi)]
-        return self.tracks_by_ids(ids[:400])
+        return ids
 
     def album_meta(self):
         """{album_id: (folded genre blob, year)} — every genre any of an
@@ -1953,20 +2028,53 @@ class Library(QObject):
 
     def _track(self, track_id):
         r = self._con.execute("SELECT * FROM tracks WHERE id=?", (track_id,)).fetchone()
-        return dict(r) if r else None
+        return self._pending_row(dict(r)) if r else None
+
+    def _queue_metadata(self, track_id, field, value=None):
+        if track_id <= 0:
+            return  # external files have no persistent library metadata
+        row = self._track(track_id)
+        if row is None:
+            return
+        now = time.time()
+        if field == "play_count":
+            overlay = {"play_count": (row["play_count"] or 0) + 1,
+                       "last_played": now}
+        else:
+            overlay = {field: value, "meta_mtime": now}
+        self._metadata_seq += 1
+        job = {"seq": self._metadata_seq, "id": track_id, "path": row["path"],
+               "field": field,
+               "value": value, "time": now, "overlay": overlay}
+        self._pending_metadata[job["seq"]] = job
+        self._metadata_writes.submit(job)
+        # Immediate UI feedback, including rapid favourite toggles. Failed
+        # commits remove this overlay and re-read the persisted value.
+        self.trackChanged.emit(track_id)
+
+    @Slot()
+    def _metadata_done(self):
+        for job, row, error in self._metadata_writes.results():
+            self._pending_metadata.pop(job["seq"], None)
+            if error:
+                print("metadata: save failed:", error, flush=True)
+                label = {"rating": "rating", "favorite": "favourite",
+                         "play_count": "play count"}[job["field"]]
+                self.writeFailed.emit(f"couldn't save {label}")
+            elif row is not None:
+                field = job["field"]
+                if self._tagwriter is not None:
+                    value = bool(row[field]) if field == "favorite" else row[field]
+                    self._tagwriter.enqueue(row["path"], **{field: value})
+                if field == "favorite" and self._scrobbler is not None:
+                    self._scrobbler.setLoved(row, bool(row["favorite"]))
+            self.trackChanged.emit(job["id"])
 
     @Slot(int, float)
     def setRating(self, track_id, rating):
         """rating: FMPS 0..1 (UI passes stars/5); negative clears."""
         val = None if rating < 0 else max(0.0, min(1.0, rating))
-        # meta_mtime: the tiebreaker tools/dbsync.py merges rating/favorite on.
-        self._con.execute("UPDATE tracks SET rating=?, meta_mtime=? WHERE id=?",
-                          (val, time.time(), track_id))
-        self._con.commit()
-        t = self._track(track_id)
-        if t:
-            self._tagwriter.enqueue(t["path"], rating=val)
-        self.trackChanged.emit(track_id)
+        self._queue_metadata(track_id, "rating", val)
 
     def set_scrobbler(self, scrobbler):
         """Last.fm, wired in after construction by main.py. A heart here is a
@@ -1976,15 +2084,7 @@ class Library(QObject):
 
     @Slot(int, bool)
     def setFavorite(self, track_id, fav):
-        self._con.execute("UPDATE tracks SET favorite=?, meta_mtime=? WHERE id=?",
-                          (1 if fav else 0, time.time(), track_id))
-        self._con.commit()
-        t = self._track(track_id)
-        if t:
-            self._tagwriter.enqueue(t["path"], favorite=bool(fav))
-            if self._scrobbler is not None:
-                self._scrobbler.setLoved(dict(t), bool(fav))
-        self.trackChanged.emit(track_id)
+        self._queue_metadata(track_id, "favorite", int(bool(fav)))
 
     def merge_lastfm(self, payload):
         """Fold a Last.fm account's loves, play counts and last-played times
@@ -2105,18 +2205,20 @@ class Library(QObject):
         return stats
 
     def bump_playcount(self, track_id):
-        self._con.execute(
-            "UPDATE tracks SET play_count=play_count+1, last_played=? WHERE id=?",
-            (time.time(), track_id))
-        self._con.commit()
-        t = self._track(track_id)
-        if t:
-            self._tagwriter.enqueue(t["path"], play_count=t["play_count"])
-        self.trackChanged.emit(track_id)
+        self._queue_metadata(track_id, "play_count")
 
     # ---- lyrics cache (used by LyricsProvider from its worker via own conn) ----
 
     def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        self._scan_pending = False
+        if self._scanner is not None and self._scanner.isRunning():
+            self._scanner.requestInterruption()
+            self._scanner.wait()
+        self._metadata_writes.wait()
+        self._metadata_done()
         self._con.close()
 
 
@@ -2157,9 +2259,13 @@ class TagWriter(QObject):
     def enqueue(self, path, rating="keep", favorite="keep", play_count="keep"):
         if self.mode() == "off":
             return
+        entry = {"path": path, "rating": rating, "favorite": favorite,
+                 "play_count": play_count, "ts": time.time()}
+        # Record accepted intent before the daemon's coalescing delay. A quit
+        # may precede its file write; the committed DB and journal survive it.
+        self._journal(entry, "queued")
         with self._cv:
-            self._q.append({"path": path, "rating": rating, "favorite": favorite,
-                            "play_count": play_count, "ts": time.time()})
+            self._q.append(entry)
             self._cv.notify()
 
     def _journal(self, entry, status):
@@ -3889,6 +3995,9 @@ class Bridge(QObject):
     """The QML-facing coordinator: owns the models and translates between the
     Library/Player and the views (which never see SQL or dicts-of-rows)."""
 
+    searchChanged = Signal()
+    SEARCH_PAGE_SIZE = 400
+
     scanStatus = Signal(str)
     scanRunning = Signal(bool)
     smartListsChanged = Signal()
@@ -3917,6 +4026,9 @@ class Bridge(QObject):
         self.albumsModel = DictListModel(ALBUM_ROLES, self)
         self.albumTracksModel = DictListModel(TRACK_ROLES, self)
         self.playlistModel = DictListModel(TRACK_ROLES, self)
+        self._search_ids = []
+        self._search_text = ""
+        self._search_offset = 0
         self.searchModel = DictListModel(TRACK_ROLES, self)
         self.queueModel = DictListModel(TRACK_ROLES, self)
 
@@ -3948,6 +4060,7 @@ class Bridge(QObject):
             lambda done, total: self.scanStatus.emit(f"scanning {done}/{total}"))
         library.scanSummary.connect(self._on_summary)
         library.scanRunning.connect(self.scanRunning)
+        library.writeFailed.connect(self.scanStatus)
         QTimer.singleShot(0, self._request_now_info)
 
     def _on_summary(self, s):
@@ -4332,15 +4445,56 @@ class Bridge(QObject):
         if self._current_smart:
             self.openSmart(self._current_smart, merge=True)
 
+    @Property(int, notify=searchChanged)
+    def searchTotal(self):
+        return len(self._search_ids)
+
+    @Property(int, notify=searchChanged)
+    def searchOffset(self):
+        return self._search_offset
+
     @Slot(str)
     def search(self, text):
-        rows = self._library.search(text)
-        self.searchModel.set_rows(self._track_rows(rows))
+        self._search_text = text
+        self._search_ids = self._library.search_ids(text)
+        self._search_offset = 0
+        self._show_search_page()
+
+    def _show_search_page(self):
+        ids = self._search_ids[self._search_offset:
+                               self._search_offset + self.SEARCH_PAGE_SIZE]
+        # Searching metadata must not stat hundreds of files over SMB. File
+        # availability is checked when playback opens a track.
+        self.searchModel.set_rows([track_row(r) for r in
+                                   self._library.tracks_by_ids(ids)])
+        self.searchChanged.emit()
+
+    @Slot(int)
+    def searchPage(self, direction):
+        offset = self._search_offset + direction * self.SEARCH_PAGE_SIZE
+        if 0 <= offset < len(self._search_ids):
+            self._search_offset = offset
+            self._show_search_page()
+
+    @Slot(int)
+    def playSearch(self, start):
+        if 0 <= start < self.searchModel.count:
+            track_id = self.searchModel.get(start)["trackId"]
+            self._player.playTracks(self._search_ids[:],
+                                    self._search_ids.index(track_id))
+
+    @Slot()
+    def playSearchAll(self):
+        if self._search_ids:
+            self._player.playTracks(self._search_ids[:], -1)
 
     # ---- play actions (ids resolved from whichever model the view used) ----
 
     @Slot("QVariant", int)
     def playFromModel(self, model, start):
+        if model is self.searchModel:
+            self.playSearch(start)
+            return
         ids = [model.get(i)["trackId"] for i in range(model.count)]
         self._player.playTracks(ids, start)
 
@@ -4442,6 +4596,12 @@ class Bridge(QObject):
     # ---- refresh plumbing ----
 
     def _refresh_current(self):
+        if self._search_text:
+            self._search_ids = self._library.search_ids(self._search_text)
+            last_page = max(0, (len(self._search_ids) - 1) // self.SEARCH_PAGE_SIZE)
+            self._search_offset = min(self._search_offset,
+                                      last_page * self.SEARCH_PAGE_SIZE)
+            self._show_search_page()
         # Driven by library.changed — the open album section and playlist keep
         # their scroll (merge), unlike a user navigating to a new one.
         if self._current_album:
@@ -4967,6 +5127,21 @@ def handoff_paths(paths, timeout=2.0):
         s.close()
 
 
+class WatchDirectories(QThread):
+    """Enumerate local watch roots without walking folders on the GUI thread."""
+    def __init__(self, roots, parent=None):
+        super().__init__(parent)
+        self.roots = roots
+        self.paths = []
+
+    def run(self):
+        for root in self.roots:
+            for directory, _, _ in os.walk(root):
+                if self.isInterruptionRequested():
+                    return
+                self.paths.append(directory)
+
+
 class AutoScanner(QObject):
     """Pick newly-downloaded tracks up without a manual rescan.
 
@@ -4999,8 +5174,16 @@ class AutoScanner(QObject):
         super().__init__(parent)
         self._library = library
         self._proc = None
+        self._import_pending = False
+        self._watch_worker = None
+        app = QGuiApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self._stop_watching)
         self._watcher = QFileSystemWatcher(self)
         self._watcher.directoryChanged.connect(self._on_dir_changed)
+        self._watch_refresh = QTimer(self)
+        self._watch_refresh.setSingleShot(True)
+        self._watch_refresh.timeout.connect(self._watch_dirs)
         # Debounce: a download or copy writes a burst of filesystem events.
         self._rescan_timer = QTimer(self)
         self._rescan_timer.setSingleShot(True)
@@ -5025,10 +5208,12 @@ class AutoScanner(QObject):
         self._rg_timer.timeout.connect(self._maybe_rg_scan)
         self._library.scanRunning.connect(self._on_scan_running)
         # Catch up anything already sitting in downloads/ from a previous session.
-        if SLSKD_DOWNLOADS.is_dir() and _has_audio(SLSKD_DOWNLOADS):
+        if SLSKD_DOWNLOADS.is_dir():
             self._import_timer.start(500)
 
     def _watch_dirs(self):
+        if self._watch_worker is not None:
+            return
         dirs = [str(SLSKD_DOWNLOADS)]
         # Never stat or watch the library root when it is a network mount: this
         # runs on the GUI thread at startup and every REWATCH_S, and a stat on
@@ -5038,31 +5223,74 @@ class AutoScanner(QObject):
         # there; a manual Rescan still works. Local library (top's SSD): watch.
         if not library_is_remote_cached():
             dirs.insert(0, str(LIBRARY_ROOT))
-        for p in dirs:
-            if os.path.isdir(p) and p not in self._watcher.directories():
-                self._watcher.addPath(p)
+        self._watch_worker = WatchDirectories(dirs, self)
+        self._watch_worker.finished.connect(self._on_watches_ready)
+        self._watch_worker.start()
+
+    def _stop_watching(self):
+        self._rewatch_timer.stop()
+        self._watch_refresh.stop()
+        self._rescan_timer.stop()
+        self._import_timer.stop()
+        self._rg_timer.stop()
+        if self._watch_worker is not None:
+            self._watch_worker.requestInterruption()
+            self._watch_worker.wait()
+
+    def _on_watches_ready(self):
+        worker = self._watch_worker
+        self._watch_worker = None
+        current = set(self._watcher.directories())
+        wanted = set(worker.paths)
+        if current - wanted:
+            self._watcher.removePaths(sorted(current - wanted))
+        if wanted - current:
+            failed = self._watcher.addPaths(sorted(wanted - current))
+            if failed:
+                print(f"auto scan: could not watch {len(failed)} folders", file=sys.stderr, flush=True)
+        worker.deleteLater()
 
     def _on_dir_changed(self, path):
-        self._watch_dirs()  # in case the dir structure changed under us
-        if path == str(LIBRARY_ROOT):
+        # Tag replacement/imports can emit hundreds of directory events. Rewalk
+        # the watch tree once the burst settles, not once per replacement.
+        self._watch_refresh.start(self.RESCAN_DEBOUNCE_MS)
+        if Path(path).is_relative_to(LIBRARY_ROOT):
             self._rescan_timer.start(self.RESCAN_DEBOUNCE_MS)
-        elif path == str(SLSKD_DOWNLOADS):
+        elif Path(path).is_relative_to(SLSKD_DOWNLOADS):
             self._import_timer.start(self.IMPORT_DEBOUNCE_MS)
 
     def _run_import(self):
         if self._proc is not None:
-            return  # an import is already moving the current batch
+            self._import_pending = True
+            return
+        self._import_pending = False
         self._proc = QProcess(self)
+        self._proc.setProcessChannelMode(QProcess.ForwardedChannels)
         self._proc.finished.connect(self._on_import_done)
+        self._proc.errorOccurred.connect(self._on_import_error)
         self._proc.start(sys.executable, [str(HERE / "tools" / "player-add.py")])
 
     def _on_import_done(self, _code, _status):
+        if self._proc is None:
+            return
+        proc = self._proc
         self._proc = None
+        if _code or _status != QProcess.NormalExit:
+            print(f"auto import: failed ({_code})", file=sys.stderr, flush=True)
+            self._library.writeFailed.emit(f"import failed: exit {_code}")
+        proc.deleteLater()
         # player-add rescans the DB itself, but out-of-process: this app's
         # models are untouched, so re-scan in-process to refresh the open smart
         # playlist ("recently added" included). The scan is incremental and
         # emits `changed`, which re-opens the current smart playlist.
         self._library.rescan()
+        if self._import_pending:
+            self._import_timer.start(self.IMPORT_DEBOUNCE_MS)
+
+    def _on_import_error(self, error):
+        if error == QProcess.FailedToStart and self._proc is not None:
+            print(f"auto import: {self._proc.errorString()}", file=sys.stderr, flush=True)
+            self._on_import_done(-1, QProcess.CrashExit)
 
     def _on_scan_running(self, running):
         # scanRunning(True) at scan start, (False) at done. Debounce so a burst
@@ -5076,13 +5304,27 @@ class AutoScanner(QObject):
         if not self._untagged_pending():
             return
         self._rg_proc = QProcess(self)
+        self._rg_proc.setProcessChannelMode(QProcess.ForwardedChannels)
         self._rg_proc.finished.connect(self._on_rg_done)
+        self._rg_proc.errorOccurred.connect(self._on_rg_error)
         self._rg_proc.start(sys.executable,
                             [str(HERE / "tools" / "replaygain.py"),
                              "scan", "--write", "--auto"])
 
     def _on_rg_done(self, _code, _status):
+        if self._rg_proc is None:
+            return
+        proc = self._rg_proc
         self._rg_proc = None
+        if _code or _status != QProcess.NormalExit:
+            print(f"auto replaygain: failed ({_code})", file=sys.stderr, flush=True)
+            self._library.writeFailed.emit(f"replaygain failed: exit {_code}")
+        proc.deleteLater()
+
+    def _on_rg_error(self, error):
+        if error == QProcess.FailedToStart and self._rg_proc is not None:
+            print(f"auto replaygain: {self._rg_proc.errorString()}", file=sys.stderr, flush=True)
+            self._on_rg_done(-1, QProcess.CrashExit)
 
     def _untagged_pending(self):
         """True if any supported-format track lacks a ReplayGain tag and has
@@ -5190,6 +5432,7 @@ def main():
     scrobbler.authUrlReady.connect(lambda u: QDesktopServices.openUrl(QUrl(u)))
     lyrics = LyricsProvider(prefs)
     bridge = Bridge(library, player, lyrics)
+    prefs.saveFailed.connect(bridge.scanStatus)
     autoscan = AutoScanner(library, app)
     titlebar = Titlebar()
     palette = Palette(theme_source(PANEL_THEME))
@@ -5490,6 +5733,7 @@ def main():
         QTimer.singleShot(400, library.rescan)
 
     app.aboutToQuit.connect(player.save_state)
+    app.aboutToQuit.connect(library.close)
     sys.exit(app.exec())
 
 
