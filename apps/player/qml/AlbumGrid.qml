@@ -34,6 +34,8 @@ Item {
     property color fgDim: Theme.textDim
     property color fgAccent: Theme.accent
     property real fgArt: 1.0
+    readonly property bool plasma: (typeof DeskStyle !== "undefined" && DeskStyle)
+                                   ? DeskStyle.plasma === true : false
 
     // The album to expand; 0 collapses. Owned by Main (so the mouse
     // back/forward history can restore it), toggled through `opened`.
@@ -56,6 +58,9 @@ Item {
     // drawer and can change live.
     property int cols: 7
     property string sortMode: "orig_year"
+    property bool sortDescending: false
+    signal sortRequested(string mode)
+    signal sortDirectionRequested(bool descending)
     readonly property int safeCols: Math.max(1, cols)     // never divide by 0
     // Flush left and right means flush against the SCROLLBAR, which is always
     // on and up to 16px wide now (docs/DESIGN.md 9.2). Dividing the full width
@@ -303,6 +308,24 @@ Item {
                             color: Theme.dim
                         }
 
+                        // The mockup's lacquered cover face: a restrained
+                        // highlight across the upper third and a hairline over
+                        // the art. It is Plasma-only; Hyprland keeps the flat,
+                        // zero-gap gallery required by the pixel face.
+                        Rectangle {
+                            anchors.fill: parent
+                            visible: root.plasma
+                            color: "transparent"
+                            border.width: 1
+                            border.color: Theme.border
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.16) }
+                                GradientStop { position: 0.38; color: Qt.rgba(1, 1, 1, 0.025) }
+                                GradientStop { position: 0.40; color: "transparent" }
+                                GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.06) }
+                            }
+                        }
+
                         // Hover: the metadata, inside the cover's lower edge.
                         Rectangle {
                             anchors.left: parent.left
@@ -464,11 +487,16 @@ Item {
         id: albumIndex
         anchors { top: parent.top; left: parent.left; right: parent.right }
         sortMode: root.sortMode
+        sortDescending: root.sortDescending
         revision: root.revision
         fgText: root.fgText
         fgDim: root.fgDim
         fgAccent: root.fgAccent
         onJumpRequested: function(albumIndex) { list.jumpToAlbum(albumIndex); }
+        onSortRequested: function(mode) { root.sortRequested(mode); }
+        onSortDirectionRequested: function(descending) {
+            root.sortDirectionRequested(descending);
+        }
     }
 
     PixelText {
