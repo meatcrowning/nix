@@ -21,7 +21,8 @@ SMB setup and recovery live in `docs/agents/air-library-share.md`.
 | Plasma composition and controls | `qml/+plasma/`, `transport.py`, shared `pylib/kdeshell.py` |
 | Safe audio-file replacement | `atomicsave.py` |
 | Lyrics lookup/cache/writeback | `lyrics.py`, `LyricsProvider` in `main.py` |
-| Web album/artist information | `NowPlayingMetadata` in `main.py`, `qml/NowInfoPane.qml` |
+| Release identity, details and credits | `releaseinfo.py`, `albuminfo.py`, `infostore.py`, `qml/NowInfoPane.qml` |
+| Related music and contributor connections | `relatedmusic.py`; `albuminfo.py` owns queries and requests |
 | Last.fm integration | `scrobble.py`, shared `pylib/lastfm.py` |
 | Acquisition, repair, migration tools | `tools/`; private maintenance runbook |
 
@@ -152,11 +153,32 @@ use the library median. `tools/replaygain.py` computes with rsgain then writes
 through atomicsave; retain unsupported-format handling and automatic-failure
 memory to avoid retry loops.
 
-Web identity/prose belongs in the metadata cache, never audio tags. Preserve
-loading/error/stale/ambiguous states, candidate selection, and manual
-override/revert. MusicBrainz gates identity; linked Wikipedia/Wikidata supplies
-prose; Last.fm suggestions intersect local tracks. `tools/library-ipc.py info`
-exposes effective cached facts and their provenance using the shared cache key.
+Release details and credits precede related music and optional prose. Embedded
+MusicBrainz release/recording identifiers are read during scans and lazily on
+the metadata worker for existing tracks; never force a full rescan to add them.
+Release search must corroborate album tracks and preserve ambiguous candidates.
+Recording IDs and multidisc positions are constraints, not title hints. Never
+choose the first release attached to a recording.
+
+`albuminfo.py` owns a single worker and generation-checked GUI delivery. Network
+requests must occur outside SQLite transactions. Drain accepted corrections on
+shutdown without waiting for network requests. Cache downloaded releases by
+entity ID in `music_info_cache`, with album-directory scopes in
+`music_info_links`; `music_info_user` stores independent timestamped corrections
+and revert tombstones. `tools/dbsync.py` merges these across top/book. Cache
+clearing and transient failures preserve choices and edits. Failed and partial
+lookups retry after a short backoff while retaining usable cached details.
+Legacy web tables remain readable during migration; old recording choices stay
+track-scoped. No web correction writes an audio tag.
+
+Related music remains available when release lookup fails. Rank local tracks
+using recording/artist identity, scoped credits, labels, and genre; a shared
+year alone is insufficient. Track credits require matching disc/position/title;
+credits from another edition must not leak through a release-group match.
+Keep owned tracks playable and outside Last.fm discoveries as source links.
+Fetch linked Wikipedia/Wikidata prose only after publishing release details
+and recommendations. `tools/library-ipc.py info` exposes effective cached
+facts, choices and provenance without triggering downloads.
 
 ## QML and desktop integration
 
@@ -205,7 +227,8 @@ not a CI suite:
 | Smart lists/search/Last.fm | `smartlist-test.py`, `smartlist-ui-test.py`, `lastfm-test.py`, `search-page-test.py`, `search-ui-test.py` |
 | Queue/path/socket | `queue-ops-test.py`, `album-playnext-test.py`, `open-path-test.py`, `queue-lyrics-test.py` |
 | Preference/metadata persistence | `state-write-test.py`, `metadata-worker-test.py` |
-| Metadata/sync | `now-info-test.py`, `library-ipc-test.py`, `test-dbsync.py` |
+| Metadata/sync | `now-info-test.py`, `release-info-test.py`, `related-music-test.py`, `info-sync-test.py`, `info-connection-test.py`, `library-ipc-test.py`, `test-dbsync.py` |
+| Album information UI | `album-info-ui-test.py` |
 | Native/QML presentation | `plasma-chrome-test.py`, `transport-test.py`, `focus-fade-test.py`, `view-preserve-test.py`, `favourite-surfaces-test.py`, `trash-track-test.py` |
 
 Atomic-write probes operate on copies and hash decoded audio only

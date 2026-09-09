@@ -30,10 +30,13 @@ import socket
 import sqlite3
 import sys
 import urllib.parse
+import hashlib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pylib"))
 import trackmatch
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import infostore
 
 DB = os.path.expanduser(
     os.environ.get("PLAYER_DB", "~/.local/share/player/library.db"))
@@ -228,6 +231,91 @@ def _decode(raw, fallback):
         return fallback
 
 
+def _has_table(con, name):
+    return bool(con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                            (name,)).fetchone())
+
+
+def _new_info(con, row):
+    """Read the effective infostore view without creating or writing schema."""
+    if not _has_table(con, "music_info_cache"):
+        return None
+    plain = dict(row)
+    scope = infostore.scope_key(plain)
+    users = {}
+    edited = []
+    if _has_table(con, "music_info_user"):
+        for item in con.execute("SELECT * FROM music_info_user WHERE scope_key=?", (scope,)):
+            if not item["deleted"]:
+                users[item["kind"]] = _decode(item["body_json"], {})
+                edited.append(item["kind"])
+
+    cache = {}
+    for item in con.execute("SELECT * FROM music_info_cache WHERE cache_key=?", (scope,)):
+        cache[(item["cache_key"], item["kind"])] = item
+    link = None
+    if _has_table(con, "music_info_links"):
+        link = con.execute("SELECT * FROM music_info_links WHERE scope_key=?", (scope,)).fetchone()
+    release_id = link["release_id"] if link else ""
+    if release_id:
+        for item in con.execute("SELECT * FROM music_info_cache WHERE cache_key=?",
+                                ("release:" + release_id,)):
+            cache[(item["cache_key"], item["kind"])] = item
+    album_row = cache.get(("release:" + release_id, "album")) if release_id else None
+    if album_row is None:
+        album_row = cache.get((scope, "album"))
+    album = _decode(album_row["body_json"], {}) if album_row else {}
+    if isinstance(album, dict):
+        album = dict(album)
+    else:
+        album = {}
+    if isinstance(users.get("album"), dict):
+        album.update(users["album"])
+
+    resolution = cache.get((scope, "resolution"))
+    match_row = cache.get((scope, "match"))
+    match_body = _decode((resolution or match_row)["body_json"], {}) if (resolution or match_row) else {}
+    if not isinstance(match_body, dict):
+        match_body = {}
+    match = match_body.get("match") or match_body.get("result")
+    if not match and match_row is not None:
+        match = match_body
+    if not isinstance(match, dict):
+        match = {}
+    if isinstance(users.get("match"), dict):
+        match = {**match, **users["match"], "manual": True}
+
+    similar_key = "track:" + hashlib.sha256(str(plain.get("path") or "").encode()).hexdigest()
+    for item in con.execute("SELECT * FROM music_info_cache WHERE cache_key=?", (similar_key,)):
+        cache[(item["cache_key"], item["kind"])] = item
+    similar_row = cache.get((similar_key, "similar"))
+    similar_body = _decode(similar_row["body_json"], {}) if similar_row else {}
+    if isinstance(similar_body, dict):
+        similar = similar_body.get("items", [])
+    else:
+        similar = similar_body if isinstance(similar_body, list) else []
+    errors = {}
+    provenance = {}
+    for kind, item in (("album", album_row), ("match", resolution or match_row),
+                       ("similar", similar_row)):
+        if item is not None:
+            provenance[kind] = "music_info_cache"
+            if item["error"]:
+                errors[kind] = item["error"]
+    present = {"album": album_row is not None or "album" in users,
+               "match": resolution is not None or match_row is not None or "match" in users,
+               "similar": similar_row is not None}
+    return {"scope": scope, "album": album, "match": match,
+            "status": (match_body.get("status") if isinstance(match_body, dict) else "") or "uncached",
+            "similar": similar, "present": present,
+            "cache": {k: {"source": "music_info_cache", "fetched_at": v["fetched_at"],
+                            "expires_at": v["expires_at"], "error": v["error"]}
+                       for k, v in (("album", album_row), ("match", resolution or match_row),
+                                    ("similar", similar_row)) if v is not None},
+            "provenance": provenance, "errors": errors,
+            "editedScopes": sorted(set(edited))}
+
+
 def op_info(req):
     """Return local tags plus player's cached and corrected web knowledge."""
     con = db()
@@ -265,29 +353,53 @@ def op_info(req):
                 "matches": [{c: r[c] for c in TRACK_COLS} for r in found]}
     row = found[0]
     key = _cache_key(row)
-    metadata = {r["kind"]: r for r in con.execute(
+    new = _new_info(con, row)
+    metadata = ({r["kind"]: r for r in con.execute(
         "SELECT * FROM web_metadata WHERE cache_key=?", (key,))}
-    overrides = {r["kind"]: _decode(r["body_json"], {}) for r in con.execute(
+                if _has_table(con, "web_metadata") else {})
+    overrides = ({r["kind"]: _decode(r["body_json"], {}) for r in con.execute(
         "SELECT * FROM web_metadata_overrides WHERE cache_key=?", (key,))}
-    match = con.execute(
+                 if _has_table(con, "web_metadata_overrides") else {})
+    legacy_match = (con.execute(
         "SELECT * FROM web_entity_matches WHERE cache_key=?", (key,)).fetchone()
-    album = _decode(metadata.get("album")["body_json"], {}) if metadata.get("album") else {}
+                   if _has_table(con, "web_entity_matches") else None)
+
+    legacy_album = _decode(metadata.get("album")["body_json"], {}) if metadata.get("album") else {}
+    album = dict((new or {}).get("album") if (new and new.get("present", {}).get("album"))
+                 else legacy_album)
     album.update(overrides.get("album", {}))
-    similar = _decode(metadata.get("similar")["body_json"], []) if metadata.get("similar") else []
+    legacy_similar = _decode(metadata.get("similar")["body_json"], []) if metadata.get("similar") else []
     if "similar" in overrides:
-        similar = overrides["similar"].get("items", similar)
-    return {"ok": True, "status": (match["status"] if match else "uncached"),
+        legacy_similar = overrides["similar"].get("items", legacy_similar)
+    similar = (new["similar"] if (new and new.get("present", {}).get("similar")) else legacy_similar)
+
+    if new is not None and new.get("present", {}).get("match"):
+        effective_match = dict(new["match"])
+        status = new.get("status") or ("ready" if effective_match.get("id") else "uncached")
+    else:
+        effective_match = ({"provider": legacy_match["provider"], "entity_id": legacy_match["entity_id"],
+                            "label": legacy_match["label"], "confidence": legacy_match["confidence"],
+                            "manual": bool(legacy_match["manual"]),
+                            "candidates": _decode(legacy_match["candidates_json"], [])}
+                           if legacy_match else None)
+        status = legacy_match["status"] if legacy_match else "uncached"
+    cache = {kind: {"source": r["source"], "fetched_at": r["fetched_at"],
+                    "expires_at": r["expires_at"], "error": r["error"]}
+             for kind, r in metadata.items()}
+    if new is not None:
+        cache.update(new["cache"])
+    errors = dict((new or {}).get("errors") or {})
+    errors.update({kind: r["error"] for kind, r in metadata.items()
+                   if r["error"] and kind not in (new or {}).get("provenance", {})})
+    corrected = set(overrides)
+    corrected.update((new or {}).get("editedScopes") or [])
+    return {"ok": True, "status": status,
             "local": {c: row[c] for c in TRACK_COLS},
-            "match": ({"provider": match["provider"], "entity_id": match["entity_id"],
-                       "label": match["label"], "confidence": match["confidence"],
-                       "manual": bool(match["manual"]),
-                       "candidates": _decode(match["candidates_json"], [])}
-                      if match else None),
-            "album": album, "similar": similar,
-            "cache": {kind: {"source": r["source"], "fetched_at": r["fetched_at"],
-                              "expires_at": r["expires_at"], "error": r["error"]}
-                      for kind, r in metadata.items()},
-            "corrected": sorted(overrides)}
+            "match": effective_match, "album": album, "similar": similar,
+            "cache": cache, "corrected": sorted(corrected),
+            "provenance": (new or {}).get("provenance", {}) | {
+                kind: "legacy" for kind in cache if kind not in (new or {}).get("provenance", {})},
+            "errors": errors, "editedScopes": sorted(corrected)}
 
 
 def _send(verb, paths):
