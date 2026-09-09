@@ -29,7 +29,7 @@ import os
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QLinearGradient, QPainter, QPen
+from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QSlider, QStyle,
                                QStyleOptionSlider, QWidget)
 
@@ -71,30 +71,17 @@ class SpectrumWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, False)
         pal = self.palette()
-        base = pal.color(pal.ColorRole.Base)
-        edge = pal.color(pal.ColorRole.Mid)
-        accent = pal.color(pal.ColorRole.Highlight)
-        shine = pal.color(pal.ColorRole.Light)
-        bg = QLinearGradient(0, 0, 0, self.height())
-        bg.setColorAt(0.0, base.lighter(112))
-        bg.setColorAt(1.0, base.darker(112))
-        painter.fillRect(self.rect(), bg)
-        painter.setPen(QPen(edge, 1))
-        painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
+        color = pal.color(pal.ColorRole.WindowText)
         if not self._levels:
             return
-        inner = self.rect().adjusted(3, 3, -3, -3)
+        inner = self.rect()
         count = len(self._levels)
         for i, level in enumerate(self._levels):
             x0 = round(inner.left() + inner.width() * i / count)
             x1 = round(inner.left() + inner.width() * (i + 1) / count)
             height = max(1, round(inner.height() * (level / 100.0) ** 0.55))
-            bar = QLinearGradient(0, inner.bottom() - height, 0, inner.bottom())
-            bar.setColorAt(0.0, shine)
-            bar.setColorAt(0.35, accent.lighter(120))
-            bar.setColorAt(1.0, accent.darker(125))
             painter.fillRect(x0, inner.bottom() - height + 1,
-                             max(1, x1 - x0 - 1), height, bar)
+                             max(1, x1 - x0), height, color)
 
 
 def _fmt(secs):

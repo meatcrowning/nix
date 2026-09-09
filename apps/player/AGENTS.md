@@ -257,7 +257,10 @@ reuse for any further change here.
 **PLASMA NOW-PLAYING IS ITS OWN SELECTED COMPOSITION** (2026-09-08).
 `qml/+plasma/NowPlaying.qml` replaces the shared responsive pane only through
 the existing file selector: fitted cover + identity/info across the top and a
-full-width queue below. `NowInfoPane.qml` owns the `lyrics` / `album` /
+full-width queue below. Its vertical art/info split and horizontal upper/queue
+split are both draggable and persisted as fractions, with readable minimums on
+each side. The art surround is transparent so the QQuickWidget's one
+style-owned window gradient remains continuous. `NowInfoPane.qml` owns the `lyrics` / `album` /
 `similar` notebook. `Bridge.nowInfo` is cached web state from
 `NowPlayingMetadata`: MusicBrainz gates identity, linked Wikipedia/Wikidata
 supplies prose, and Last.fm results are intersected with local tracks. Preserve
@@ -265,10 +268,11 @@ the explicit loading/error/stale/ambiguous states, candidate chooser, and
 manual override/revert path; never write these facts into audio tags.
 
 The Plasma visualizer still has one Cava producer. `transport.SpectrumWidget`
-reads its runtime snapshot only while Now Playing is visible. `main.py` writes
-the short-lived `player-view.json` lease; the panel plasmoid collapses while
-that lease says `now` and restores itself after three seconds if player dies.
-Do not start a second analyzer.
+uses the Oxygen decoration's same solid-bar treatment and reads its runtime
+snapshot only while Now Playing is visible. `main.py` writes the short-lived
+`player-view.json` lease; both the Oxygen titlebar visualizer and panel plasmoid
+stand down while that lease says `now`, and restore themselves after three
+seconds if player dies. Do not start a second analyzer.
 
 On Plasma, album sort is no longer a top-toolbar action. `AlbumIndex.qml`
 reserves its right edge for the six-choice sort combo and a separate direction

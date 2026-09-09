@@ -55,7 +55,7 @@ Item {
         id: actions
         anchors.right: parent.right
         anchors.rightMargin: 4
-        y: tabs.y + tabs.height + 2
+        y: tabs.y
         spacing: 1
         visible: root.tab !== "lyrics"
         HeaderButton {
@@ -63,11 +63,11 @@ Item {
             onClicked: Library.refreshNowInfo()
         }
         HeaderButton {
-            label: "change match"; plainLabel: "change match"; iconName: "edit-find-replace"
+            label: "change match"; plainLabel: "change match"; iconName: "edit-find-replace"; iconOnly: true
             onClicked: candidates.visible = !candidates.visible
         }
         HeaderButton {
-            label: "edit"; plainLabel: "edit"; iconName: "document-edit"
+            label: "edit"; plainLabel: "edit"; iconName: "document-edit"; iconOnly: true
             visible: root.tab === "album"
             onClicked: {
                 editTitle.text = (root.info.album || {}).title || "";
@@ -81,7 +81,7 @@ Item {
     Item {
         id: body
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom
-                  top: actions.visible ? actions.bottom : tabs.bottom; topMargin: 4 }
+                  top: tabs.bottom; topMargin: 4 }
 
         LyricsView {
             anchors.fill: parent
