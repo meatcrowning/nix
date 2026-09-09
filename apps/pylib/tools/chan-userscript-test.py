@@ -263,6 +263,18 @@ try:
               re.search(r"@version\s+(\S+)", meta).group(1)
               == re.search(r"@version\s+(\S+)", body).group(1))
 
+    with urllib.request.urlopen(base + "/collage.user.js", timeout=5) as r:
+        collage_body = r.read().decode("utf-8")
+    check("the personal collage copy updates only through loopback",
+          "@updateURL    http://127.0.0.1:8791/collage.meta.js" in collage_body
+          and "@downloadURL  http://127.0.0.1:8791/collage.user.js" in collage_body
+          and "meatcrowning" not in collage_body)
+    with urllib.request.urlopen(base + "/collage.meta.js", timeout=5) as r:
+        collage_meta = r.read().decode("utf-8")
+    check("the collage update check is metadata only",
+          collage_meta.endswith("// ==/UserScript==\n")
+          and len(collage_meta) < len(collage_body) / 4)
+
     with urllib.request.urlopen(base + "/twitter.css", timeout=5) as r:
         twitter_served = r.read().decode("utf-8")
     check("the courier serves Twitter/X from the live palette",

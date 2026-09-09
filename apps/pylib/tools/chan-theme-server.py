@@ -107,6 +107,18 @@ def _inline_oxygen_surface(css):
                        "url(data:image/png;base64,%s)" % payload)
 
 
+def _collage_script(_source=None):
+    """The portable collage artifact plus this desktop's local updater seat."""
+    path = HERE.parents[1] / "collage" / "collage.user.js"
+    text = path.read_text(encoding="utf-8")
+    marker = "// @description  Image and fixed-frame-rate video collages, entirely in your browser\n"
+    local = ("// @updateURL    http://127.0.0.1:8791/collage.meta.js\n"
+             "// @downloadURL  http://127.0.0.1:8791/collage.user.js\n")
+    if marker not in text:
+        raise RuntimeError("collage userscript metadata marker is missing")
+    return text.replace(marker, marker + local, 1), "local collage updater"
+
+
 # --------------------------------------------------------------------------- #
 #  Which session is this, at REQUEST time
 # --------------------------------------------------------------------------- #
@@ -204,6 +216,7 @@ class Handler(BaseHTTPRequestHandler):
         "/chan.user.js": (lambda src: chan_script.build(src), JS),
         "/scrollbar.user.js": (lambda src: scrollbar_script.build(src), JS),
         "/twitter.user.js": (lambda src: twitter_script.build(src), JS),
+        "/collage.user.js": (_collage_script, JS),
         # The update CHECK, which is all a `.meta.js` is: the header block on
         # its own, so the daily poll costs a few hundred bytes rather than the
         # whole baked sheet. Greasyfork's shape, and what @updateURL points at.
@@ -213,6 +226,8 @@ class Handler(BaseHTTPRequestHandler):
             scrollbar_script.build(src)[0]), "meta"), JS),
         "/twitter.meta.js": (lambda src: (userscript.metadata_block(
             twitter_script.build(src)[0]), "meta"), JS),
+        "/collage.meta.js": (lambda src: (userscript.metadata_block(
+            _collage_script(src)[0]), "meta"), JS),
     }
 
     # A browser extension asking for a cross-origin URL with headers of its own
@@ -250,8 +265,8 @@ class Handler(BaseHTTPRequestHandler):
         route = self.ROUTES.get(path)
         if route is None and path not in ("/version", "/web.css"):
             self._send(404, head=head, body=b"chan-theme: /chan.css, /scrollbar.css, /twitter.css, "
-                            b"/chan.user.js, /scrollbar.user.js, /twitter.user.js, "
-                            b"/chan.meta.js, /scrollbar.meta.js, /twitter.meta.js or /version\n")
+                            b"/chan.user.js, /scrollbar.user.js, /twitter.user.js, /collage.user.js, "
+                            b"/chan.meta.js, /scrollbar.meta.js, /twitter.meta.js, /collage.meta.js or /version\n")
             return
         try:
             if path == "/version":
