@@ -41,10 +41,36 @@ def pre_effects_config(source: str, runtime_dir: str) -> str:
     return target
 
 
+def write_levels(target: str, levels: list[int]) -> None:
+    fd, tmp = tempfile.mkstemp(prefix="player-visualizer.",
+                               dir=os.path.dirname(target))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"levels": levels}, f, separators=(",", ":"))
+            f.flush()
+        os.replace(tmp, target)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def player_owns_visualizer(runtime_dir: str) -> bool:
+    try:
+        with open(os.path.join(runtime_dir, "player-view.json"),
+                  encoding="utf-8") as f:
+            state = json.load(f)
+        return (state.get("view") == "now"
+                and time.time() - float(state.get("updated", 0)) < 3)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return False
+
+
 def main() -> int:
     runtime_dir = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
     target = os.path.join(runtime_dir,
                           "player-visualizer.json")
+    player_target = os.path.join(runtime_dir,
+                                 "player-visualizer-player.json")
     while True:
         dump = subprocess.run([os.environ["PW_DUMP"]], capture_output=True,
                               text=True, check=False)
@@ -62,16 +88,9 @@ def main() -> int:
                       for v in line.strip().split(";") if v != ""]
             if not levels:
                 continue
-            fd, tmp = tempfile.mkstemp(prefix="player-visualizer.",
-                                       dir=os.path.dirname(target))
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    json.dump({"levels": levels}, f, separators=(",", ":"))
-                    f.flush()
-                os.replace(tmp, target)
-            finally:
-                if os.path.exists(tmp):
-                    os.unlink(tmp)
+            write_levels(player_target, levels)
+            write_levels(target, [] if player_owns_visualizer(runtime_dir)
+                         else levels)
     finally:
         cava.terminate()
         cava.wait(timeout=2)

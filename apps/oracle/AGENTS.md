@@ -2563,6 +2563,13 @@ is a no-op in player's adapter. `music_library` is the other half:
 ssh master as the file executor) and does two things — a READ-ONLY sqlite query
 against player's own `library.db` (search / albums / album_tracks / stats, with
 ratings, favourites and play counts), and the queue verbs on player's socket.
+Its `info` read joins an exact library track to the web metadata player has
+already cached: the chosen/ambiguous MusicBrainz identity, linked Wikipedia
+album and artist facts, local similar-track intersection, fetch errors and the
+user's effective manual corrections. The tool description tells every main or
+subagent to ask this before searching the web; `music_library` is also in the
+default subagent set (the read-only library seam, not playback control). A broad
+match returns candidates rather than silently choosing a recording.
 Every row carries its `path`, which is the whole point: search, then hand those
 paths to `control_player` `play_these` (replace the queue and start) or
 `queue_these` (append).

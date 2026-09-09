@@ -44,6 +44,13 @@ con.execute("""CREATE TABLE tracks (id INTEGER PRIMARY KEY, path TEXT,
     title TEXT, artist TEXT, album TEXT, album_artist TEXT, track INT, disc INT,
     year INT, genre TEXT, duration REAL, rating INT, favorite INT,
     play_count INT, added_at INT, last_played INT)""")
+con.execute("""CREATE TABLE web_metadata (cache_key TEXT, kind TEXT, source TEXT,
+    body_json TEXT, fetched_at REAL, expires_at REAL, error TEXT)""")
+con.execute("""CREATE TABLE web_metadata_overrides (cache_key TEXT, kind TEXT,
+    body_json TEXT, edited_at REAL)""")
+con.execute("""CREATE TABLE web_entity_matches (cache_key TEXT, entity_type TEXT,
+    provider TEXT, entity_id TEXT, label TEXT, confidence REAL, status TEXT,
+    candidates_json TEXT, manual INT, fetched_at REAL, error TEXT)""")
 FILES = []
 rows = [
     ("Roygbiv", "Boards of Canada", "Music Has the Right to Children", "Boards of Canada", 1, 1998, 5, 1, 12),
@@ -62,6 +69,17 @@ for i, (title, artist, album, album_artist, tno, year, rating, fav, plays) in en
     con.execute("INSERT INTO tracks VALUES (?,?,?,?,?,?,?,1,?,?,?,?,?,?,?,?)",
                 (i, str(f), title, artist, album, album_artist, tno, year, "electronic",
                  300.0, rating, fav, plays, 1000 + i, 2000 + i))
+cache_key = "boards of canada|music has the right to children|boards of canada|roygbiv"
+con.execute("INSERT INTO web_metadata VALUES (?,?,?,?,?,?,?)",
+            (cache_key, "album", "musicbrainz+wikipedia",
+             json.dumps({"title": "Music Has the Right to Children",
+                         "description": "original web description",
+                         "artistInfo": {"name": "Boards of Canada"}}), 10, 20, None))
+con.execute("INSERT INTO web_metadata_overrides VALUES (?,?,?,?)",
+            (cache_key, "album", json.dumps({"description": "his correction"}), 11))
+con.execute("INSERT INTO web_entity_matches VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (cache_key, "recording", "musicbrainz", "mbid-1", "Roygbiv", .98,
+             "chosen", "[]", 1, 10, None))
 con.commit()
 con.close()
 
@@ -108,6 +126,16 @@ check("an album comes back in play order",
 r = call({"op": "stats"})
 check("stats size the library", r.get("library", {}).get("tracks") == 6,
       json.dumps(r)[:160])
+r = call({"op": "info", "track_id": 1})
+check("info returns cached web facts and manual corrections",
+      r.get("album", {}).get("description") == "his correction"
+      and r.get("match", {}).get("entity_id") == "mbid-1"
+      and r.get("local", {}).get("play_count") == 12,
+      json.dumps(r)[:240])
+r = call({"op": "info", "artist": "Boards of Canada"})
+check("a broad info match asks the agent to choose",
+      r.get("status") == "ambiguous" and len(r.get("matches", [])) == 2,
+      json.dumps(r)[:200])
 
 # ---- the database is opened READ-ONLY ------------------------------------
 before = DB.stat().st_mtime

@@ -640,9 +640,9 @@ Item {
         anchors.bottom: parent.bottom
         anchors.margins: 8
         z: 60
-        // Under Plasma this sentence is the status bar's (see `statusLine`);
-        // drawing it here too would say it twice.
-        visible: text !== "" && !win.plasma
+        // Plasma has no always-empty status bar; this appears only when there
+        // is an actual scan or mount fact to report.
+        visible: text !== ""
         text: win.scanStatus
         color: win.fgDim
     }
