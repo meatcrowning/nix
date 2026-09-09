@@ -231,6 +231,9 @@ check("...and in the Playback menu, off the same QAction",
 check("the redundant status bar stays disabled",
       "Show Status&bar" not in section(plasma, "Se&ttings"),
       str(section(plasma, "Se&ttings")))
+check("the redundant status bar is not attached to the window",
+      "statusbar: absent" in plasma,
+      next((r for r in plasma.splitlines() if r.startswith("statusbar:")), "missing"))
 check("kdeshell did not have to fall back to polling the chrome",
       "publishes no buttonsChanged" not in plasma, "see stderr")
 
