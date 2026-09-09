@@ -12,6 +12,11 @@ Item {
     property color fgText: Theme.text
     property color fgDim: Theme.textDim
     property color fgAccent: Theme.accent
+    property bool continuousBackground: false
+    property real backgroundX: 0
+    property real backgroundY: 0
+    property real backgroundWidth: width
+    property real backgroundHeight: height
     property string tab: "lyrics"
     property bool editing: false
     readonly property var info: Library.nowInfo || ({})
@@ -25,14 +30,18 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: Theme.bgAlt
+        color: root.continuousBackground ? "transparent" : Theme.bgAlt
         border.width: Theme.ctrlBorder
         border.color: Theme.border
         radius: Math.max(2, Theme.rounding)
-        gradient: Gradient {
-            GradientStop { position: 0; color: root.lighter(Theme.bgAlt, 0.10) }
-            GradientStop { position: 0.10; color: Theme.bgAlt }
-            GradientStop { position: 1; color: Qt.darker(Theme.bgAlt, 1.10) }
+        clip: true
+        StyledBackgroundSlice {
+            anchors.fill: parent
+            visible: root.continuousBackground
+            sourceX: root.backgroundX
+            sourceY: root.backgroundY
+            sourceWidth: root.backgroundWidth
+            sourceHeight: root.backgroundHeight
         }
     }
 

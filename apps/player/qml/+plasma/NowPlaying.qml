@@ -73,6 +73,11 @@ Item {
                       top: identity.bottom; leftMargin: 8; rightMargin: 8; bottomMargin: 8 }
             trackId: root.cur.id === undefined ? -1 : root.cur.id
             track: root.cur
+            continuousBackground: true
+            backgroundX: upperRight.x + 8
+            backgroundY: identity.y + identity.height
+            backgroundWidth: root.width
+            backgroundHeight: root.height
             fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
         }
     }
@@ -102,11 +107,14 @@ Item {
         id: queueWell
         anchors { left: parent.left; right: parent.right; top: artBox.bottom; bottom: parent.bottom }
         anchors.topMargin: 1
-        color: Qt.darker(Theme.bgAlt, 1.08)
+        color: "transparent"
         border.width: Theme.ctrlBorder; border.color: Theme.border
-        gradient: Gradient {
-            GradientStop { position: 0; color: root.lighter(Theme.bgAlt, 0.07) }
-            GradientStop { position: 1; color: Qt.darker(Theme.bgAlt, 1.13) }
+        clip: true
+        StyledBackgroundSlice {
+            anchors.fill: parent
+            sourceY: queueWell.y
+            sourceWidth: root.width
+            sourceHeight: root.height
         }
         PixelText { id: queueHead; x: 8; y: 5
             text: "queue  (" + Player.queueLength + ")"; color: root.fgDim }

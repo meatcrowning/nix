@@ -190,7 +190,9 @@ before touching any of it; only what is player-specific is here.
   at the VIEW origin (`x: -root.x`) and cut by the overlay's own clip: the
   provider crops the style's render to the view's rectangle and pads from the
   item's top-left, so an overlay inset from the top would otherwise restart the
-  gradient at its own edge.
+  gradient at its own edge. Section-sized Plasma wells use
+  `qmlcommon/StyledBackgroundSlice.qml` with their coordinates in view space
+  for the same reason; do not approximate the window gradient with local stops.
 - **The QML `Shortcut`s all stand down under Plasma** (`enabled: !win.plasma`),
   except Escape: the sequences are on the QActions there, and two owners of one
   sequence in one window is an ambiguous shortcut, which Qt answers by firing
