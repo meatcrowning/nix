@@ -126,6 +126,10 @@ def run():
     check(group_result["owned"] and group_result["owned"][0]["reason"] == "same release group",
           group_result)
 
+    single_cached = related_tracks(group_target, [group_target, group_candidate],
+                                   known_albums=group_editions[:1])
+    check(single_cached["owned"][0]["reason"] == "same release group", single_cached)
+
     # Instrument attributes normalized by releaseinfo are source-backed
     # performer evidence, not a guessed genre/name association.
     instrument_target = track(12, "String One", artist="Three", album="A",
