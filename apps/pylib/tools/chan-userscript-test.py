@@ -81,6 +81,9 @@ check("OneeChan's alternating options rows use the desktop surface",
       "#oneechan-options #main-section>.option:nth-of-type(even){background:#203040!important}" in flat)
 check("OneeChan's anchor actions do not retain its black button fill",
       "#oneechan-options .options-button,#oneechan-options .options-button:hover,.qr-link,.qr-link:hover,.pages.cataloglink,.pages.cataloglink:hover,.pages strong>a,.pages strong>a:hover{background:#203040!important}" in flat)
+check("the live sheet preserves collage's yellow and green thread states",
+      "button[data-ldg-mark][aria-pressed=false]{background:yellow!important;background-image:none!important;color:black!important}" in flat
+      and "button[data-ldg-mark][aria-pressed=true]{background:#90ee90!important;background-image:none!important;color:black!important}" in flat)
 
 # The panel-palette parser reads exactly the literal shape every app's Palette
 # does (and the shape kdetheme itself generates).
@@ -136,6 +139,13 @@ check("the Twitter/X sheet carries the base palette", "--desk-bg:#102030" in twi
 check("the Twitter/X canvas uses the shared fixed Oxygen surface",
       "--desk-window-surface:url(http://127.0.0.1:8791/oxygen-window.png)" in twitter_sheet
       and "background-size:100vw 100vh!important" in twitter_sheet)
+oxygen_chan = chantheme.css(PAL.__getitem__, {
+    "windowBottom": "#102030", "panelTop": "#203040", "panelBottom": "#182838",
+    "headerTop": "#304050", "headerBottom": "#203040", "buttonTop": "#405060",
+    "buttonBottom": "#304050", "bevel": "#506070", "shade": "#081018", "radius": 3,
+})
+check("the 4chan Oxygen surface covers the root canvas and constrained body",
+      "html,html body{background-color:#102030!important" in oxygen_chan)
 check("the Twitter/X sheet targets semantic X hooks, not generated classes",
       '[data-testid="tweet"]' in twitter_sheet and "css-" not in twitter_sheet)
 check("the Twitter/X sheet keeps post copy at the primary ink and themes composer/sidebar wrappers",

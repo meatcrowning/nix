@@ -185,6 +185,13 @@ def css(pal, chrome=None):
         "#oneechan-options .options-button,#oneechan-options .options-button:hover,"
         ".qr-link,.qr-link:hover,.pages.cataloglink,.pages.cataloglink:hover,"
         ".pages strong>a,.pages strong>a:hover{background:%s%s}" % (reply, i),
+        # Collage owns these two semantic states.  Its inline colours lose to
+        # OneeChan and this sheet's `!important` button rules, so preserve the
+        # states explicitly in the later desktop sheet.
+        "button[data-ldg-mark][aria-pressed=false]{background:yellow%s;"
+        "background-image:none%s;color:black%s}" % (i, i, i),
+        "button[data-ldg-mark][aria-pressed=true]{background:#90ee90%s;"
+        "background-image:none%s;color:black%s}" % (i, i, i),
         # --- borders ---
         ".reply,:root.op-background .postContainer.opContainer,.dialog,.entry,"
         ".inline,fieldset,#post-preview,select{border-color:%s%s}" % (border, i),
@@ -255,7 +262,11 @@ def _chrome_css(ch, i):
         # The browser page carries the same fixed window gradient as Vivaldi's
         # surrounding chrome: light at its top, settling into the base rather
         # than becoming a single flat field down a long thread.
-        "html body{background-color:%s%s;background-image:url(http://127.0.0.1:8791/oxygen-window.png)%s;"
+        # OneeChan can constrain `body` to the board column while fixed side
+        # panes occupy the rest of the viewport.  Paint the root canvas too;
+        # otherwise the Oxygen raster ends at body's right edge and exposes
+        # html's flat fallback behind those panes.
+        "html,html body{background-color:%s%s;background-image:url(http://127.0.0.1:8791/oxygen-window.png)%s;"
         # Keep the copied KStyle canvas in viewport coordinates.  `100%` is
         # the document height here, which turns a long thread into a
         # nearly-flat stretch; the desktop surface is a window-sized paint.
