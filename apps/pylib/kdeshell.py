@@ -358,7 +358,7 @@ def _redress_palette_views():
 
 
 def _group_palette(group):
-    """The app palette with `group`'s colours copied into every group.
+    """The app palette with `group` selected for active/inactive rendering.
 
     Two callers, one reason: something has to render in a chosen colour group
     rather than in the one Qt would pick for it.
@@ -380,7 +380,7 @@ def _group_palette(group):
         if role == QPalette.NColorRoles:
             continue
         colour = src.color(group, role)
-        for g in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
+        for g in (QPalette.Active, QPalette.Inactive):
             out.setColor(g, role, colour)
     return out
 
