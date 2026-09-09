@@ -112,7 +112,10 @@ def _collage_script(_source=None):
     path = HERE.parents[1] / "collage" / "collage.user.js"
     text = path.read_text(encoding="utf-8")
     marker = "// @description  Image and fixed-frame-rate video collages, entirely in your browser\n"
-    local = ("// @updateURL    http://127.0.0.1:8791/collage.meta.js\n"
+    # Tampermonkey 5.5 records the update URL as its download source for a
+    # localhost-installed script. Point both fields at the full artifact;
+    # using a metadata-only endpoint here replaced the program with its header.
+    local = ("// @updateURL    http://127.0.0.1:8791/collage.user.js\n"
              "// @downloadURL  http://127.0.0.1:8791/collage.user.js\n")
     if marker not in text:
         raise RuntimeError("collage userscript metadata marker is missing")
