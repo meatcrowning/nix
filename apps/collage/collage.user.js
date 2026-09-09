@@ -1,10 +1,8 @@
 // ==UserScript==
 // @name         ldg collage
 // @namespace    ldg-collage
-// @version      2.5.9
+// @version      2.5.10
 // @description  Image and fixed-frame-rate video collages, entirely in your browser
-// @updateURL    https://raw.githubusercontent.com/meatcrowning/nix/main/apps/collage/collage.user.js
-// @downloadURL  https://raw.githubusercontent.com/meatcrowning/nix/main/apps/collage/collage.user.js
 // @match        https://boards.4chan.org/*/thread/*
 // @match        https://boards.4channel.org/*/thread/*
 // @grant        GM_xmlhttpRequest
@@ -22,7 +20,6 @@
 // Media processing stays in your browser; no server or external application.
 // Mediabunny 1.55.7 (MPL-2.0) is loaded separately by the userscript manager.
 // Library source: https://github.com/Vanilagy/mediabunny
-// Collage source: https://github.com/meatcrowning/nix/tree/main/apps/collage/src
 // Separate our IIFE from @require code that may end without a semicolon.
 ;
 (() => {
