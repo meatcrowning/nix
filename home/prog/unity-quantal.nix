@@ -95,7 +95,7 @@ lib.mkIf (host == "top") {
     GenericName=Virtual Desktop
     Comment=Original Unity desktop
     Exec=${unityQuantal}/bin/unity-quantal
-    Icon=distributor-logo-ubuntu
+    Icon=computer
     Terminal=false
     Categories=System;Emulator;
     Keywords=ubuntu;unity;virtual machine;
