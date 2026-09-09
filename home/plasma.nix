@@ -117,13 +117,12 @@ in
               dateFormat = "longDate";
               displayTimezoneFormat = "FullText";
               use24hFormat = 0;
-            } // lib.optionalAttrs (host == "top") {
-              # Match the 8-point Oxygen Sans inherited by the global-menu
-              # labels on top. Keep these keys host-local so applying the
-              # shared panel layout does not replace air's own clock font.
+            } // lib.optionalAttrs (host == "top" || host == "air") {
               autoFontAndSize = false;
               fontFamily = "Oxygen-Sans";
-              fontSize = 8;
+              # Air's 22px top panel uses a slightly smaller clock; top keeps
+              # matching the 8-point global-menu labels beside it.
+              fontSize = if host == "air" then 7 else 8;
               fontStyleName = "Sans-Book";
               fontWeight = 400;
             };
@@ -185,7 +184,17 @@ in
             name = "org.kde.plasma.icontasks";
             config.General = {
               forceStripes = true;
-              launchers = "applications:systemsettings.desktop,preferred://filemanager,preferred://browser,applications:painter.desktop,applications:player.desktop,applications:oracle.desktop,applications:org.kde.konsole.desktop";
+              launchers = lib.concatStringsSep "," ([
+                "applications:systemsettings.desktop"
+                "preferred://filemanager"
+                "preferred://browser"
+                "applications:painter.desktop"
+                "applications:player.desktop"
+                "applications:oracle.desktop"
+                "applications:org.kde.konsole.desktop"
+              ] ++ lib.optionals (host == "air") [
+                "applications:codex.desktop"
+              ]);
               maxStripes = 1;
             };
           }
