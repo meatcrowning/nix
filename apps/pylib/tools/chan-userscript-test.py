@@ -266,7 +266,7 @@ try:
     with urllib.request.urlopen(base + "/collage.user.js", timeout=5) as r:
         collage_body = r.read().decode("utf-8")
     check("the personal collage copy updates only through loopback",
-          "@updateURL    http://127.0.0.1:8791/collage.meta.js" in collage_body
+          "@updateURL    http://127.0.0.1:8791/collage.user.js" in collage_body
           and "@downloadURL  http://127.0.0.1:8791/collage.user.js" in collage_body
           and "meatcrowning" not in collage_body)
     with urllib.request.urlopen(base + "/collage.meta.js", timeout=5) as r:
