@@ -18,8 +18,8 @@ import "../../qmlcommon"
 // sort cycler, a search toggle whose bar slides in from the titlebar edge, and
 // a bottom-anchored settings button whose drawer slides out from that edge
 // (rescan + the gallery's column count) — no in-window header row. Under Plasma
-// that same table becomes a menubar, a view toolbar, a transport toolbar along
-// the bottom and a status bar, all real widgets built by `pylib/kdeshell.py`.
+// that same table becomes a menubar, a view toolbar and a transport toolbar
+// along the bottom, all real widgets built by `pylib/kdeshell.py`.
 // Everything flows through the context properties main.py installs: Library
 // (the Bridge), Player, the *Model list models, Prefs, Titlebar.
 Item {
@@ -113,21 +113,7 @@ Item {
     // the position readout (see tbTime), below the scrub track.
     readonly property string windowTitle: footerStr !== "" ? footerStr : "player"
 
-    // ---- the Plasma status bar, and the Plasma finder ----------------------
-    // Two properties the KDE status bar is driven from (`kdeshell.bind_status`):
-    // what is HAPPENING on the left, a standing fact on the right — Dolphin's
-    // shape. Under Hyprland nothing reads them and the scan line is drawn in
-    // the window's bottom corner as it always was.
-    readonly property string statusLine: win.scanStatus
-    // No fraction to be honest about: the library scan reports a sentence, not
-    // a count, so the bar stays hidden and the sentence goes in the line.
-    readonly property real statusProgress: -1
-    readonly property string statusRight: {
-        if (Player.queueLength <= 0)
-            return "";
-        return (Player.index + 1) + " / " + Player.queueLength;
-    }
-
+    // ---- the Plasma finder -------------------------------------------------
     // The finder's text, out and in. The QML `searchInput` below stays the one
     // source of truth in both sessions; under Plasma main.py mirrors it onto a
     // real QLineEdit on the toolbar and back again.
@@ -432,7 +418,7 @@ Item {
 
     // The menubar the Plasma session USED to get in place of the titlebar
     // column. player's Plasma face is a real QMainWindow with a real QMenuBar,
-    // a view toolbar, a transport toolbar and a status bar now
+    // a view toolbar and a transport toolbar now
     // (`pylib/kdeshell.py`), so this stands down in BOTH sessions — `systemBar`
     // — and is kept only for its 0-height contribution to the layout below and
     // for the harness that still drives it.
