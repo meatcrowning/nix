@@ -16,6 +16,8 @@ try {
   const artifact = await readFile('collage.user.js', 'utf8');
   const {version, dependencies} = JSON.parse(await readFile('package.json', 'utf8'));
   assert(artifact.includes(`// @version      ${version}\n`));
+  assert(artifact.includes('// @updateURL    https://raw.githubusercontent.com/meatcrowning/nix/main/apps/collage/collage.user.js\n'));
+  assert(artifact.includes('// @downloadURL  https://raw.githubusercontent.com/meatcrowning/nix/main/apps/collage/collage.user.js\n'));
   assert(artifact.includes(`// @require      https://cdn.jsdelivr.net/npm/mediabunny@${dependencies.mediabunny}/dist/bundles/mediabunny.cjs#sha256=${createHash('sha256').update(library).digest('hex')}\n`));
   const bundle = await build({ stdin: { contents: "export * from './src/engine.js'; export {Output, BufferTarget, WebMOutputFormat, Mp4OutputFormat, CanvasSource} from './src/mediabunny.js';", resolveDir: process.cwd() }, bundle: true, write: false,
     format: 'iife', globalName: 'CollageEngine' });

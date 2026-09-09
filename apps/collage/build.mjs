@@ -9,6 +9,8 @@ const header = `// ==UserScript==
 // @namespace    ldg-collage
 // @version      ${version}
 // @description  Image and fixed-frame-rate video collages, entirely in your browser
+// @updateURL    https://raw.githubusercontent.com/meatcrowning/nix/main/apps/collage/collage.user.js
+// @downloadURL  https://raw.githubusercontent.com/meatcrowning/nix/main/apps/collage/collage.user.js
 // @match        https://boards.4chan.org/*/thread/*
 // @match        https://boards.4channel.org/*/thread/*
 // @grant        GM_xmlhttpRequest
