@@ -280,9 +280,9 @@ seconds if player dies. The producer also publishes an ungated
 feed during that lease; this makes an already-loaded decoration obey the move
 without restarting KWin. Do not start a second analyzer.
 
-Player has no permanent Plasma status bar: queue position was redundant with
-the selected queue row and count. Scan/mount messages draw only while nonempty
-in the client corner instead.
+Player has no Plasma status bar widget: queue position was redundant with the
+selected queue row and count. Scan/mount messages draw only while nonempty in
+the client corner instead.
 
 `tools/library-ipc.py` is Chatter's read-only view of this database. Its `info`
 operation exposes the effective cached metadata (including overrides and

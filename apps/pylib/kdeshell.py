@@ -1041,8 +1041,9 @@ def _build_shell_class():
             # carries "Show Toolbar"/"Show Statusbar", which need something to
             # toggle.
             self._ensure_toolbar()
-            self._ensure_status()
-            if not self._status_allowed:
+            if self._status_allowed:
+                self._ensure_status()
+            elif self._status is not None:
                 self._status.hide()
 
             bar = self.window.menuBar()
@@ -2190,10 +2191,13 @@ def _build_shell_class():
                 for a in tb2.actions():
                     out.append(self._row_text(tb2, a))
             st = self._status
-            out.append("statusbar: %r | %r%s" % (
-                self._status_label.text() if self._status_label is not None else "",
-                self._status_right.text() if self._status_right is not None else "",
-                "" if st is not None and st.isVisible() else " (hidden)"))
+            if st is None:
+                out.append("statusbar: absent")
+            else:
+                out.append("statusbar: %r | %r%s" % (
+                    self._status_label.text() if self._status_label is not None else "",
+                    self._status_right.text() if self._status_right is not None else "",
+                    "" if st.isVisible() else " (hidden)"))
             # The bar's button style, which no row above can show: with
             # labels on, every row on the main toolbar wears its own name
             # (`bar_labels`, Konsole's toolbar).
