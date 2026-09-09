@@ -113,6 +113,7 @@ with tempfile.TemporaryDirectory(prefix='player-scan-safe-') as td:
         def isRunning(self): return self.running
     library = P.Library.__new__(P.Library)
     QObject.__init__(library)
+    library._closed = False
     library._scanner = None
     library._scan_pending = False
     states = []
