@@ -58,7 +58,7 @@ PROFILE_PATH = STATE_DIR / "active-profile.json"
 STATUS_PATH = STATE_DIR / "status.json"
 ACK_TIMEOUT_SECONDS = 12
 IMAGE_SUFFIXES = frozenset((".png", ".jpg", ".jpeg", ".webp", ".bmp"))
-LIVE_SCHEMES = frozenset(("OxygenDarkFlat", "OxygenLightFlat"))
+LIVE_SCHEMES = frozenset(("OxygenDarkFlat", "OxygenLightFlat", "OxygenMixed"))
 LOG = logging.getLogger("deskstyle")
 
 
@@ -219,7 +219,7 @@ def prepared_profile(wallpaper: Path, selected_scheme: str) -> dict[str, Any]:
     schemes = value.get("schemes")
     if not isinstance(schemes, dict) or schemes.get("ready") is not True:
         raise RuntimeError("prepared profile has no complete Plasma schemes")
-    for name in ("dark", "darkNeutral", "light"):
+    for name in ("dark", "darkNeutral", "light", "mixed"):
         path = schemes.get(name)
         if not isinstance(path, str) or not Path(path).is_file():
             raise RuntimeError(f"prepared profile is missing its {name} scheme")
@@ -231,6 +231,7 @@ def prepared_profile(wallpaper: Path, selected_scheme: str) -> dict[str, Any]:
         "OxygenDarkFlat": "dark",
         "OxygenDarkNeutral": "darkNeutral",
         "OxygenLightFlat": "light",
+        "OxygenMixed": "mixed",
         "Aero": "aero",
     }
     try:

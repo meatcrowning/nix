@@ -19,7 +19,7 @@ rg -F 'prepared_profile(wallpaper, selected_scheme)' "$SERVICE" >/dev/null
 rg -F '"--prepared", "--scheme", selected_scheme, str(wallpaper)' "$SERVICE" >/dev/null
 rg -F '"preparing"' "$SERVICE" >/dev/null
 rg -F 'Path.home() / "Pictures" / "Wallpapers"' "$SERVICE" >/dev/null
-rg -F 'LIVE_SCHEMES = frozenset(("OxygenDarkFlat", "OxygenLightFlat"))' "$SERVICE" >/dev/null
+rg -F 'LIVE_SCHEMES = frozenset(("OxygenDarkFlat", "OxygenLightFlat", "OxygenMixed"))' "$SERVICE" >/dev/null
 rg -F 'read_profile(PROFILE_PATH).wallpaper_path' "$SERVICE" >/dev/null
 rg -F 'shutil.which("kreadconfig6")' "$SERVICE" >/dev/null
 

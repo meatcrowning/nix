@@ -143,6 +143,7 @@ in
       "%h/.local/share/color-schemes/OxygenDarkFlat.colors"
       "%h/.local/share/color-schemes/OxygenDarkNeutral.colors"
       "%h/.local/share/color-schemes/OxygenLightFlat.colors"
+      "%h/.local/share/color-schemes/OxygenMixed.colors"
     ];
     Install.WantedBy = [ "default.target" ];
   };

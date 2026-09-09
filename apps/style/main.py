@@ -86,14 +86,14 @@ def _active_scheme(profile: Path) -> str:
                                      "--key", "ColorScheme"], text=True, capture_output=True,
                                     timeout=5, check=False)
             value = result.stdout.strip()
-            if value in {"OxygenDarkFlat", "OxygenLightFlat"}:
+            if value in {"OxygenDarkFlat", "OxygenLightFlat", "OxygenMixed"}:
                 return value
         except (OSError, subprocess.SubprocessError):
             pass
     try:
         data = json.loads(profile.read_text(encoding="utf-8"))
         value = data["colorScheme"]["name"]
-        return value if value in {"OxygenDarkFlat", "OxygenLightFlat"} else "OxygenDarkFlat"
+        return value if value in {"OxygenDarkFlat", "OxygenLightFlat", "OxygenMixed"} else "OxygenDarkFlat"
     except (OSError, ValueError, KeyError, TypeError):
         return "OxygenDarkFlat"
 
@@ -377,7 +377,7 @@ class Appearance(QObject):
     def selectScheme(self, scheme):
         if self._applying or scheme == self._scheme:
             return
-        if scheme not in {"OxygenDarkFlat", "OxygenLightFlat"}:
+        if scheme not in {"OxygenDarkFlat", "OxygenLightFlat", "OxygenMixed"}:
             return
         try:
             from PySide6.QtDBus import QDBusInterface, QDBusPendingCallWatcher

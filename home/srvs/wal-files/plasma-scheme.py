@@ -27,8 +27,8 @@ NOT tinted: `ForegroundNormal` (near-white body text), the three semantic
 roles (`ForegroundNegative`/`Neutral`/`Positive` — a red error stays red on a
 green wallpaper), and everything outside `[Colors:*]`/`[WM]`.
 
-FOUR SCHEMES ARE TEMPLATED: OxygenDarkFlat, OxygenDarkNeutral,
-OxygenLightFlat, and
+FIVE SCHEMES ARE GENERATED: OxygenDarkFlat, OxygenDarkNeutral,
+OxygenLightFlat, OxygenMixed (dark chrome with white View roles), and
 AeroThemePlasma's `Aero` — read out of the system profile, so it exists only
 where the aeroshell module put it. The same maths serves each; light schemes'
 greys have no saturation to move, so the titlebar, selection and focus
@@ -125,6 +125,7 @@ CANDIDATES = [
     # ladder uses the wallpaper's dark structural hue, not its bright accent.
     (os.path.join(HOME, ".config", "scripts", "plasma-scheme-template.colors"), "OxygenDarkNeutral", True),
     (os.path.join(HOME, ".config", "scripts", "plasma-light-scheme-template.colors"), None, False),
+    (os.path.join(HOME, ".config", "scripts", "plasma-scheme-template.colors"), "OxygenMixed", False),
     ("/run/current-system/sw/share/color-schemes/Aero.colors", "Aero", False),
     # book installs AeroThemePlasma from source into Fedora's own prefix, so the
     # same scheme lives here instead. Both paths are listed unconditionally —
@@ -148,6 +149,29 @@ def tint(rgb, hue, sat_scale):
 
 def mint(template_text, accent_hex, force_name=None, background_hex=None,
          surface_hex=None, ui_accent_hex=None):
+    if force_name == "OxygenMixed":
+        # Derive chrome from the exact dark mint, including background overrides.
+        dark = mint(template_text, accent_hex, background_hex=background_hex,
+                    surface_hex=surface_hex, ui_accent_hex=ui_accent_hex)
+        view = """[Colors:View]
+BackgroundNormal=255,255,255
+BackgroundAlternate=245,245,245
+DecorationFocus=0,88,203
+DecorationHover=0,88,203
+ForegroundActive=38,89,193
+ForegroundInactive=100,100,100
+ForegroundLink=0,87,174
+ForegroundNegative=191,3,3
+ForegroundNeutral=130,95,0
+ForegroundNormal=0,0,0
+ForegroundPositive=0,110,40
+ForegroundVisited=100,74,155
+
+"""
+        view = mint(view, accent_hex, ui_accent_hex=ui_accent_hex)
+        dark = re.sub(r"\[Colors:View\]\n.*?(?=\[)", lambda _: view, dark, flags=re.S)
+        dark = re.sub(r"^ColorScheme=.*$", "ColorScheme=OxygenMixed", dark, flags=re.M)
+        return re.sub(r"^Name=.*$", "Name=Oxygen Mixed", dark, flags=re.M)
     ar, ag, ab = hex_to_rgb(accent_hex)
     hue, _, accent_s = colorsys.rgb_to_hls(ar / 255.0, ag / 255.0, ab / 255.0)
     sat_scale = min(1.0, accent_s / SAT_REFERENCE)

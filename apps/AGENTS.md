@@ -111,6 +111,9 @@ one owner and one implementation; do not fork their algorithms into an app.
   reference. animSpeed accepts any finite value > 0, otherwise 1.0.
 - kdetheme.py selects the theme source: wallpaper palette under Hyprland and
   generated ~/.cache/deskstyle/kde-Theme.qml from kdeglobals under Plasma.
+  Style offers dark, light, and mixed KDE schemes; mixed shares dark chrome
+  with white native Base/Text content. The twelve-token QML adapter retains
+  a dark inset when WindowText cannot contrast against the View background.
   Use Palette(theme_source(PANEL_THEME)); do not branch in Theme.qml or
   components. DESK_SESSION=plasma|hypr and DESK_KDEGLOBALS let harnesses select
   a session/scheme. kde_chrome() is only for surfer's web re-skin;
