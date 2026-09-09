@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls.Basic
+import QtQuick.Controls
 import "../../qmlcommon"
 
 // Lyrics pane. Synced (.lrc-style) lyrics scroll a ListView, the current line

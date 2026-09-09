@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls.Basic
+import QtQuick.Controls
 
 // The desktop's scrollbar, shared by every app that needs one (`docs/DESIGN.md`
 // §9.2). `DeskStyle.scrollbarStyle` chooses among the three pixel-era variants;

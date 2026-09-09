@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Window
-import QtQuick.Controls.Basic
+import QtQuick.Controls
 import "../../qmlcommon"
 
 // Standalone port of the Quickshell panel's FileBrowser.qml. Runs as its own
@@ -14,6 +14,7 @@ import "../../qmlcommon"
 // `execDetached`, argv arrays only, so paths with spaces/metachars are safe.
 // `Theme` is a pragma-singleton (qml/qmldir); `FileOps` is a context property.
 Window {
+    NativeContentContext {}
     id: win
 
     // startDir is a context property from main.py (the arg-given dir, or home).

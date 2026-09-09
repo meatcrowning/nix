@@ -1,4 +1,5 @@
 import QtQuick
+import "../../qmlcommon"
 import QtQuick.Window
 
 // The sudo password dialog, drawn entirely by us.
@@ -19,6 +20,7 @@ import QtQuick.Window
 // centres, pins and dims around it, and the panel dims its own bar while it
 // exists.
 Window {
+    NativeContentContext {}
     id: win
 
     readonly property int pad: 16

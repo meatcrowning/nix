@@ -123,7 +123,13 @@ one owner and one implementation; do not fork their algorithms into an app.
   Style's mixed scheme uses dark Window roles and light-theme Window roles
   as its View. Native content gradients are painted by Oxygen, not QML maths.
   kdeshell.py installs a View context on QQuickWidget content while its real
-  window/menu/toolbar keeps the native Window context. Theme aliases are
+  window/menu/toolbar keeps the native Window context. Native QML roots must
+  also install NativeContentContext to select Kirigami View roles; native
+  toolbars explicitly select Window. Never import QtQuick.Controls.Basic in
+  shared QML: make_app/pin_controls_style choose the native Plasma style or
+  the Basic Hyprland style before Qt starts. Select Plasma files in every app.
+  QQuickWidget.setPalette alone does not select the Kirigami colour group.
+  Use native-controls-test.py through an app qtenv helper. Theme aliases are
   compatibility names for these native roles, never a second palette.
   chantheme.py, twittertheme.py, scrollcss.py, userscript.py, and
   vivaldichrome.py generate browser sheets/userscripts and share the loopback

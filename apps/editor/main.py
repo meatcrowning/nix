@@ -841,11 +841,15 @@ def start_paths(argv, settings):
 
 
 def main():
-    app = QGuiApplication(sys.argv)
+    import kdeshell
+    kdeshell.pin_controls_style()
+    app = kdeshell.make_app(sys.argv, "editor")
     app.setApplicationName("editor")
     app.setDesktopFileName("editor")
 
     engine = QQmlApplicationEngine()
+    if kdeshell.is_plasma():
+        kdeshell.select_plasma_files(engine)
     ctx = engine.rootContext()
 
     settings = Settings()
