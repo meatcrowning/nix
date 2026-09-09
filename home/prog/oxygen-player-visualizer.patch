@@ -14,6 +14,7 @@
  #include <KSharedConfig>
  
  #include <QPainter>
++#include <QDateTime>
 +#include <QFile>
 +#include <QJsonArray>
 +#include <QJsonDocument>
@@ -44,7 +45,16 @@
 +    auto cR = captionRect();
 +    const bool player = window()->windowClass().contains(QStringLiteral("player"), Qt::CaseInsensitive);
 +    QRect visualizer;
-+    if (player && cR.first.width() >= 112) {
++    bool playerOwnsVisualizer = false;
++    if (player) {
++        QFile viewState(QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation) + QStringLiteral("/player-view.json"));
++        if (viewState.open(QIODevice::ReadOnly)) {
++            const auto view = QJsonDocument::fromJson(viewState.readAll()).object();
++            playerOwnsVisualizer = view.value(QStringLiteral("view")).toString() == QStringLiteral("now")
++                && QDateTime::currentSecsSinceEpoch() - qint64(view.value(QStringLiteral("updated")).toDouble()) < 3;
++        }
++    }
++    if (player && !playerOwnsVisualizer && cR.first.width() >= 112) {
 +        visualizer = QRect(cR.first.left(), cR.first.top(), 72, cR.first.height());
 +        cR.first.setLeft(visualizer.right() + 2 * settings()->smallSpacing());
 +    }
