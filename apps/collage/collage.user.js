@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ldg collage
 // @namespace    ldg-collage
-// @version      2.5.10
+// @version      2.5.11
 // @description  Image and fixed-frame-rate video collages, entirely in your browser
 // @match        https://boards.4chan.org/*/thread/*
 // @match        https://boards.4channel.org/*/thread/*
