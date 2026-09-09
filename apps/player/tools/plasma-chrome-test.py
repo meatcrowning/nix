@@ -115,7 +115,7 @@ top = section(plasma, "toolbar")
 transport = section(plasma, "toolbar[transport]")
 
 # ---- the menus are the COMPLETE set, the toolbar the primary verbs -------
-for name in ("Albums", "Playlists"):
+for name in ("Albums", "Playlists", "Now Playing"):
     check(f"{name} is in the View menu",
           any(verb(r).startswith(name) for r in view), str(view))
     check(f"{name} is on the toolbar",
@@ -125,12 +125,16 @@ check("Now Playing is a radio row (checked, not just present)",
           or r.replace("&", "").startswith("[ ] Now Playing")
           for r in view), str(view))
 
-# ---- the sort row carries the WORD, not the titlebar's two-character cell -
-check("sort names the mode in full on the toolbar",
-      any(r.replace("&", "").startswith("<QToolButton 'sort: ") for r in top),
-      str(top))
-check("...and in the View menu", any(r.startswith("Sort by ") for r in view),
+# ---- sort moved beside the album index; its menu fallback remains ----------
+check("sort is not duplicated on the top toolbar",
+      not any("sort:" in r.replace("&", "").lower() for r in top), str(top))
+check("sort remains in the View menu", any(r.startswith("Sort by ") for r in view),
       str(view))
+index_source = (APP / "qml" / "AlbumIndex.qml").read_text(encoding="utf-8")
+for label in ("year", "artist", "album title", "date added", "play count", "rating"):
+    check(f"album index offers {label}", f'label: "{label}"' in index_source)
+check("album index owns a separate direction control",
+      'view-sort-descending' in index_source and 'view-sort-ascending' in index_source)
 check("no two-character titlebar cell reached the chrome",
       not any(r.strip() in ("yr", "ar", "al", "fs", "st", "<<", ">>") for r in top + view),
       str(top + view))

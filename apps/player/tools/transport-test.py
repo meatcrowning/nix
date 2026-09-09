@@ -101,6 +101,13 @@ slider = seek._slider
 
 print("transport bar seek widget")
 
+check("visualizer stays out of the other views", not seek._spectrum.isVisible())
+seek.set_now_playing(True)
+check("now playing moves a larger visualizer into the bar",
+      seek._spectrum.isVisible() and seek._spectrum.width() >= 100
+      and seek._spectrum.height() >= 24)
+seek.set_now_playing(False)
+
 # ---- nothing playing ----------------------------------------------------
 check("idle: slider disabled", not slider.isEnabled())
 check("idle: clocks read -:--",

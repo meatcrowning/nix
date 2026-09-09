@@ -10,6 +10,7 @@ PlasmoidItem {
     Plasmoid.status: PlasmaCore.Types.ActiveStatus
     preferredRepresentation: compactRepresentation
     property var levels: []
+    property bool playerOwnsVisualizer: false
 
     P5Support.DataSource {
         id: state
@@ -32,9 +33,29 @@ PlasmoidItem {
         onTriggered: state.connectSource("sh -c 'cat \"$XDG_RUNTIME_DIR/player-visualizer.json\" 2>/dev/null || true'")
     }
 
+    Timer {
+        interval: 500; repeat: true; running: true; triggeredOnStart: true
+        onTriggered: viewState.connectSource("sh -c 'cat \"$XDG_RUNTIME_DIR/player-view.json\" 2>/dev/null || true'")
+    }
+
+    P5Support.DataSource {
+        id: viewState
+        engine: "executable"
+        onNewData: (source, data) => {
+            try {
+                const parsed = JSON.parse(data.stdout || "{}");
+                root.playerOwnsVisualizer = parsed.view === "now"
+                    && Date.now() / 1000 - Number(parsed.updated || 0) < 3;
+            } catch (_) {
+                root.playerOwnsVisualizer = false;
+            }
+        }
+    }
+
     compactRepresentation: Item {
-        implicitWidth: 72
+        implicitWidth: root.playerOwnsVisualizer ? 0 : 72
         implicitHeight: Math.max(22, Plasmoid.configuration.panelHeight || 22)
+        visible: !root.playerOwnsVisualizer
         Repeater {
             model: root.levels.length
             Rectangle {

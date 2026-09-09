@@ -49,6 +49,7 @@ Item {
     property bool searching: false          // full results overlay
     property bool searchOpen: false         // slide-out bar
     property string sortMode: Prefs.get("sort", "orig_year")
+    property bool sortDescending: Prefs.get("sortDescending", false) === true
     property string scanStatus: ""
     property bool scanning: false
 
@@ -211,6 +212,18 @@ Item {
         Prefs.set("sort", sortMode);
     }
 
+    function chooseSort(mode) {
+        sortMode = mode;
+        Library.setSort(mode);
+        Prefs.set("sort", mode);
+    }
+
+    function chooseSortDirection(descending) {
+        sortDescending = descending === true;
+        Library.setSortDescending(sortDescending);
+        Prefs.set("sortDescending", sortDescending);
+    }
+
     function openSearch() {
         searchOpen = true;
         searchInput.forceActiveFocus();
@@ -236,6 +249,7 @@ Item {
     Component.onCompleted: {
         albumsLoaded = view === "albums";
         Library.setSort(sortMode);
+        Library.setSortDescending(sortDescending);
         // opt in to the footer sitting below the scrub track (hyprvtb >= 2.72);
         // older plugin builds just ignore the FOOTERPOS line.
         Titlebar.setFooterBottom(true);
@@ -328,7 +342,8 @@ Item {
             // the name beside the icon for this one row).
             { id: "sort",      label: sortLabel, state: 0, tip: sortTip,
               menu: "view", menuText: "Sort by " + sortWord,
-              icon: "view-sort-ascending", bar: true, barText: "sort: " + sortWord },
+              icon: "view-sort-ascending", bar: !win.plasma,
+              barText: "sort: " + sortWord },
             // Under Plasma this row does NOT go on the toolbar: the finder is a
             // real QLineEdit at its right-hand end, where Dolphin and Gwenview
             // keep theirs (kdeshell.toolbar_search). The menu row focuses it.
@@ -448,12 +463,17 @@ Item {
                     expandedAlbumId: win.openAlbumId
                     cols: win.albumCols
                     sortMode: win.sortMode
+                    sortDescending: win.sortDescending
                     fgText: win.fgText
                     fgDim: win.fgDim
                     fgAccent: win.fgAccent
                     fgArt: win.fgArt
                     onOpened: function(albumId) { win.openAlbum(albumId); }
                     onSearchArtist: function(artist) { win.browseArtist(artist); }
+                    onSortRequested: function(mode) { win.chooseSort(mode); }
+                    onSortDirectionRequested: function(descending) {
+                        win.chooseSortDirection(descending);
+                    }
                 }
             }
         }
