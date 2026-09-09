@@ -24,7 +24,12 @@ values are the exceptions, both bounded and both deferring to the source:
     stale position.
 """
 
+import json
+import os
+from pathlib import Path
+
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QSlider, QStyle,
                                QStyleOptionSlider, QWidget)
 
@@ -35,6 +40,61 @@ WHEEL_STEP = 0.05
 ECHO_EPS = 0.004      # how close the source has to get before we let go
 ECHO_MS = 1500        # ...and how long we wait for it before giving up anyway
 STEPS = 1000          # slider resolution; the value IS the fraction * 1000
+
+
+class SpectrumWidget(QWidget):
+    """The panel visualizer moved into the transport bar on now-playing."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._levels = []
+        self.setFixedSize(104, 28)
+        self.setVisible(False)
+        self._timer = QTimer(self)
+        self._timer.setInterval(34)
+        self._timer.timeout.connect(self._pull)
+        runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+        self._path = Path(runtime) / "player-visualizer.json"
+        self._timer.start()
+
+    def _pull(self):
+        if not self.isVisible():
+            return
+        try:
+            levels = json.loads(self._path.read_text()).get("levels", [])
+            self._levels = [max(0.0, min(100.0, float(v))) for v in levels]
+        except (OSError, ValueError, TypeError):
+            self._levels = []
+        self.update()
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, False)
+        pal = self.palette()
+        base = pal.color(pal.ColorRole.Base)
+        edge = pal.color(pal.ColorRole.Mid)
+        accent = pal.color(pal.ColorRole.Highlight)
+        shine = pal.color(pal.ColorRole.Light)
+        bg = QLinearGradient(0, 0, 0, self.height())
+        bg.setColorAt(0.0, base.lighter(112))
+        bg.setColorAt(1.0, base.darker(112))
+        painter.fillRect(self.rect(), bg)
+        painter.setPen(QPen(edge, 1))
+        painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
+        if not self._levels:
+            return
+        inner = self.rect().adjusted(3, 3, -3, -3)
+        count = len(self._levels)
+        for i, level in enumerate(self._levels):
+            x0 = round(inner.left() + inner.width() * i / count)
+            x1 = round(inner.left() + inner.width() * (i + 1) / count)
+            height = max(1, round(inner.height() * (level / 100.0) ** 0.55))
+            bar = QLinearGradient(0, inner.bottom() - height, 0, inner.bottom())
+            bar.setColorAt(0.0, shine)
+            bar.setColorAt(0.35, accent.lighter(120))
+            bar.setColorAt(1.0, accent.darker(125))
+            painter.fillRect(x0, inner.bottom() - height + 1,
+                             max(1, x1 - x0 - 1), height, bar)
 
 
 def _fmt(secs):
@@ -149,10 +209,12 @@ class TransportSeek(QWidget):
             # every second.
             lab.setMinimumWidth(lab.fontMetrics().horizontalAdvance("000:00"))
         self._slider = SeekSlider(self)
+        self._spectrum = SpectrumWidget(self)
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(6, 0, 6, 0)
         lay.setSpacing(8)
+        lay.addWidget(self._spectrum)
         lay.addWidget(self._elapsed)
         lay.addWidget(self._slider, 1)
         lay.addWidget(self._total)
@@ -170,6 +232,11 @@ class TransportSeek(QWidget):
         player.durationChanged.connect(self._pull)
         player.indexChanged.connect(self._pull)
         self._pull()
+
+    def set_now_playing(self, on):
+        self._spectrum.setVisible(bool(on))
+        if on:
+            self._spectrum._pull()
 
     # ---- the source -> the handle -------------------------------------
     def _has_track(self):

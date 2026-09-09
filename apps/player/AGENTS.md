@@ -241,23 +241,40 @@ because plugin builds ≤2.44 abort the compositor on a zero-height fill rect
 (fixed plugin-side in v2.45 — guard every computed rect when adding hyprvtb
 drawing).
 
-**The now-playing cover art is RESPONSIVE, and the narrow window is the
+**The Hyprland now-playing cover art is RESPONSIVE, and the narrow window is the
 reference.** `NowPlaying.qml`'s art is a full-width top row in the ~480x826
 window this page normally lives in, and a full-height LEFT COLUMN once the
 window is wide (`sideArt`) — because a top row scales a square cover to the
 window's *width*, so maximized it kept a 1406x472 band, 30% of the art. Both
-branches bleed to the window outline; neither letterboxes (docs/DESIGN.md §5.1)
-— **except in a Plasma session, where the cover is never cropped**: his call,
-2026-08-18, so there `fillMode` is `PreserveAspectFit` and the shortfall shows
-`artBox`'s own `bgAlt`. That is a straight trade of §5.1's edge-to-edge fill for
-the whole picture, taken in that session only; the responsive row/column switch
-above is unchanged and still runs in both.
+branches bleed to the window outline; neither letterboxes (docs/DESIGN.md §5.1).
 Two constraints when touching it: the switch reads **window geometry only**,
 never `artFrac` (a layout that flipped mid-drag would rearrange the page under
 the cursor), and it must be a **strict no-op below the breakpoint** — verified
 by rendering both branches offscreen and comparing PNGs byte-for-byte across
 sizes, `artFrac` values and with/without lyrics, which is the harness pattern to
 reuse for any further change here.
+
+**PLASMA NOW-PLAYING IS ITS OWN SELECTED COMPOSITION** (2026-09-08).
+`qml/+plasma/NowPlaying.qml` replaces the shared responsive pane only through
+the existing file selector: fitted cover + identity/info across the top and a
+full-width queue below. `NowInfoPane.qml` owns the `lyrics` / `album` /
+`similar` notebook. `Bridge.nowInfo` is cached web state from
+`NowPlayingMetadata`: MusicBrainz gates identity, linked Wikipedia/Wikidata
+supplies prose, and Last.fm results are intersected with local tracks. Preserve
+the explicit loading/error/stale/ambiguous states, candidate chooser, and
+manual override/revert path; never write these facts into audio tags.
+
+The Plasma visualizer still has one Cava producer. `transport.SpectrumWidget`
+reads its runtime snapshot only while Now Playing is visible. `main.py` writes
+the short-lived `player-view.json` lease; the panel plasmoid collapses while
+that lease says `now` and restores itself after three seconds if player dies.
+Do not start a second analyzer.
+
+On Plasma, album sort is no longer a top-toolbar action. `AlbumIndex.qml`
+reserves its right edge for the six-choice sort combo and a separate direction
+button; the decade/year zoom strip yields the remaining width. The old sort
+cell remains on the Hyprland titlebar. Persist both `sort` and
+`sortDescending`.
 
 **Track list, album grid and both lyrics panes are `Kinetic*` views from `../qmlcommon/`** — player's scrolling policy is the scrollbar and the wheel only, never drag-flicking, so the compositor's momentum is the only momentum. `WheelScroll.qml` used to live in `player/qml/`; it is shared now and player is no longer its owner. `TrackList` passes `wheelEnabled: root.scrollable` so a table sized to hold every row (AlbumPanel) hands the wheel out to the gallery behind it. See [`../AGENTS.md`](../AGENTS.md).
 

@@ -13,6 +13,17 @@ import "../../qmlcommon"
 // §7.1 — everything selectable is right-clickable).
 Item {
     id: root
+    readonly property bool plasma: (typeof DeskStyle !== "undefined" && DeskStyle)
+                                   ? DeskStyle.plasma === true : false
+    function raised(c, amount) {
+        return Qt.rgba(c.r + (1 - c.r) * amount,
+                       c.g + (1 - c.g) * amount,
+                       c.b + (1 - c.b) * amount, c.a)
+    }
+    function sunken(c, amount) {
+        return Qt.rgba(c.r * (1 - amount), c.g * (1 - amount),
+                       c.b * (1 - amount), c.a)
+    }
     property string current: ""
     // Foreground tones, handed in already faded by Main (docs/DESIGN.md §3.1.1).
     property color fgText: Theme.text
@@ -72,15 +83,35 @@ Item {
 
     Item {
         id: side
-        width: 190
+        width: root.plasma ? 178 : 190
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.left: parent.left
 
+        // Plasma keeps Oxygen's window gradient visible around a raised,
+        // scheme-derived sidebar. The pixel face remains completely flat.
+        Rectangle {
+            anchors.fill: parent
+            anchors.leftMargin: root.plasma ? 8 : 0
+            anchors.topMargin: root.plasma ? 8 : 0
+            anchors.bottomMargin: root.plasma ? 8 : 0
+            color: root.plasma ? Theme.bgAlt : "transparent"
+            radius: root.plasma ? Math.max(2, Theme.rounding) : 0
+            border.width: root.plasma ? Theme.ctrlBorder : 0
+            border.color: Theme.border
+            gradient: Gradient {
+                GradientStop { position: 0; color: root.plasma ? root.raised(Theme.bgAlt, 0.14) : "transparent" }
+                GradientStop { position: 1; color: root.plasma ? root.sunken(Theme.bgAlt, 0.08) : "transparent" }
+            }
+        }
+
         KineticListView {
             id: sideList
             anchors.fill: parent
-            anchors.topMargin: 10
+            anchors.leftMargin: root.plasma ? 9 : 0
+            anchors.rightMargin: root.plasma ? 1 : 0
+            anchors.topMargin: root.plasma ? 14 : 10
+            anchors.bottomMargin: root.plasma ? 12 : 0
             clip: true
             spacing: 2
             model: Library.smartLists
@@ -89,12 +120,40 @@ Item {
             delegate: Rectangle {
                 id: listRow
                 required property var modelData
-                width: side.width
-                height: 20
-                color: nameMouse.containsMouse || modelData.name === root.current
+                width: root.plasma ? sideList.width : side.width
+                height: root.plasma ? Math.max(22, Theme.lineHeight + 7) : 20
+                color: !root.plasma && (nameMouse.containsMouse || modelData.name === root.current)
                        ? Theme.highlight : "transparent"
+                gradient: Gradient {
+                    GradientStop {
+                        position: 0
+                        color: root.plasma && (nameMouse.containsMouse || modelData.name === root.current)
+                               ? root.raised(Theme.highlight, modelData.name === root.current ? 0.28 : 0.12)
+                               : "transparent"
+                    }
+                    GradientStop {
+                        position: 0.55
+                        color: root.plasma && (nameMouse.containsMouse || modelData.name === root.current)
+                               ? Theme.highlight : "transparent"
+                    }
+                    GradientStop {
+                        position: 1
+                        color: root.plasma && (nameMouse.containsMouse || modelData.name === root.current)
+                               ? root.sunken(Theme.highlight, 0.22) : "transparent"
+                    }
+                }
+                Rectangle {
+                    visible: root.plasma && listRow.modelData.name === root.current
+                    anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+                    height: 1; color: root.raised(Theme.accent, 0.35)
+                }
+                Rectangle {
+                    visible: root.plasma && listRow.modelData.name === root.current
+                    anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+                    height: 1; color: root.sunken(Theme.accent, 0.36)
+                }
                 PixelText {
-                    x: 10
+                    x: root.plasma ? 9 : 10
                     width: parent.width - 20
                     anchors.verticalCenter: parent.verticalCenter
                     elide: Text.ElideRight
@@ -126,7 +185,7 @@ Item {
                 width: side.width
                 height: 30
                 HeaderButton {
-                    x: 6
+                    x: root.plasma ? 7 : 6
                     anchors.verticalCenter: parent.verticalCenter
                     label: "+ new"
                     plainLabel: "new"; iconName: "list-add"
@@ -159,45 +218,79 @@ Item {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         width: 1
-        color: Theme.border
+        color: root.plasma ? "transparent" : Theme.border
     }
 
     Item {
+        id: content
         anchors.left: side.right
         anchors.leftMargin: 1
         anchors.top: parent.top
         anchors.right: parent.right
         anchors.bottom: parent.bottom
 
-        Row {
+        Rectangle {
             id: listHead
-            x: 8
-            y: 8
-            spacing: 12
-            PixelText {
+            x: root.plasma ? 0 : 8
+            y: root.plasma ? 8 : 8
+            width: parent.width - x
+            height: root.plasma ? Math.max(34, headRow.implicitHeight + 10) : headRow.implicitHeight
+            color: root.plasma ? Theme.bgAlt : "transparent"
+            radius: root.plasma ? Math.max(2, Theme.rounding) : 0
+            border.width: root.plasma ? Theme.ctrlBorder : 0
+            border.color: Theme.border
+            gradient: Gradient {
+                GradientStop { position: 0; color: root.plasma ? root.raised(Theme.bgAlt, 0.22) : "transparent" }
+                GradientStop { position: 1; color: root.plasma ? root.sunken(Theme.bgAlt, 0.09) : "transparent" }
+            }
+            Row {
+                id: headRow
+                anchors.left: parent.left
+                anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                text: root.current + "  (" + PlaylistModel.count + ")"
-                color: root.fgDim
-            }
-            HeaderButton {
-                label: "> play all"
-                plainLabel: "play all"; iconName: "media-playback-start"
-                fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
-                onClicked: Player.playSmart(root.current)
-            }
-            HeaderButton {
-                label: "edit rules"
-                iconName: "document-edit"
-                fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
-                onClicked: editor.edit(root.current)
+                anchors.leftMargin: root.plasma ? 9 : 0
+                anchors.rightMargin: root.plasma ? 7 : 0
+                spacing: root.plasma ? 6 : 12
+                PixelText {
+                    width: root.plasma ? Math.max(0, parent.width - playAll.width - editRules.width - parent.spacing * 2) : implicitWidth
+                    anchors.verticalCenter: parent.verticalCenter
+                    elide: Text.ElideRight
+                    text: root.current + "  (" + PlaylistModel.count + ")"
+                    color: root.plasma ? root.fgText : root.fgDim
+                }
+                HeaderButton {
+                    id: playAll
+                    label: "> play all"
+                    plainLabel: "play all"; iconName: "media-playback-start"
+                    fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
+                    onClicked: Player.playSmart(root.current)
+                }
+                HeaderButton {
+                    id: editRules
+                    label: "edit rules"
+                    plainLabel: "edit"; iconName: "document-edit"
+                    fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
+                    onClicked: editor.edit(root.current)
+                }
             }
         }
-        TrackList {
+        Rectangle {
+            id: trackWell
             anchors.top: listHead.bottom
-            anchors.topMargin: 4
+            anchors.topMargin: root.plasma ? 0 : 4
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
+            anchors.rightMargin: root.plasma ? 8 : 0
+            anchors.bottomMargin: root.plasma ? 8 : 0
+            color: root.plasma ? root.sunken(Theme.bgAlt, 0.18) : "transparent"
+            radius: root.plasma ? Math.max(2, Theme.rounding) : 0
+            border.width: root.plasma ? Theme.ctrlBorder : 0
+            border.color: Theme.border
+        }
+        TrackList {
+            anchors.fill: trackWell
+            anchors.margins: root.plasma ? Theme.ctrlBorder : 0
             model: PlaylistModel
             fgText: root.fgText
             fgDim: root.fgDim

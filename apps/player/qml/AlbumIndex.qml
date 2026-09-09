@@ -5,11 +5,13 @@ import "../../qmlcommon"
 // over one decade opens its individual years, and wheel down returns out.
 Item {
     id: root
-    height: Theme.lineHeight + 2
+    height: plasma ? Math.max(Theme.lineHeight + 2, sortControls.implicitHeight + 4)
+                   : Theme.lineHeight + 2
 
     Motion { id: motion }
 
     property string sortMode: "orig_year"
+    property bool sortDescending: false
     property int revision: 0
     property int zoomDecade: -1
     property color fgText: Theme.text
@@ -18,6 +20,21 @@ Item {
     property var displayEntries: []
     property bool ready: false
     signal jumpRequested(int albumIndex)
+    signal sortRequested(string mode)
+    signal sortDirectionRequested(bool descending)
+
+    readonly property bool plasma: (typeof DeskStyle !== "undefined" && DeskStyle)
+                                   ? DeskStyle.plasma === true : false
+    readonly property string sortLabel: {
+        switch (sortMode) {
+        case "artist": return "artist";
+        case "album": return "album title";
+        case "added": return "date added";
+        case "plays": return "play count";
+        case "rating": return "rating";
+        default: return "year";
+        }
+    }
 
     onSortModeChanged: zoomDecade = -1
 
@@ -63,14 +80,21 @@ Item {
     Rectangle { anchors.fill: parent; color: Theme.bgAlt }
     Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.border }
 
+    Item {
+        id: indexArea
+        anchors { top: parent.top; bottom: parent.bottom; left: parent.left
+                  right: sortControls.visible ? sortControls.left : parent.right }
+        anchors.rightMargin: sortControls.visible ? 6 : 0
+        clip: true
+
     Row {
         id: labels
-        anchors.fill: parent
+        anchors.fill: indexArea
         Repeater {
             model: root.displayEntries
             delegate: Item {
                 required property var modelData
-                width: root.width / Math.max(1, root.displayEntries.length)
+                width: indexArea.width / Math.max(1, root.displayEntries.length)
                 height: root.height
 
                 PixelText {
@@ -97,6 +121,49 @@ Item {
                     }
                 }
             }
+        }
+    }
+    }
+
+    Row {
+        id: sortControls
+        visible: root.plasma
+        anchors { right: parent.right; rightMargin: 3; verticalCenter: parent.verticalCenter }
+        spacing: 2
+
+        PixelText {
+            anchors.verticalCenter: parent.verticalCenter
+            text: "sort by"
+            color: root.fgDim
+        }
+        SelectButton {
+            id: sortChoice
+            width: 112
+            label: root.sortLabel
+            fgText: root.fgText
+            fgDim: root.fgDim
+            fgAccent: root.fgAccent
+            options: [
+                { label: "year", value: "orig_year" },
+                { label: "artist", value: "artist" },
+                { label: "album title", value: "album" },
+                { label: "date added", value: "added" },
+                { label: "play count", value: "plays" },
+                { label: "rating", value: "rating" }
+            ]
+            onChose: function(mode) { root.sortRequested(mode); }
+        }
+        HeaderButton {
+            width: implicitWidth
+            height: sortChoice.height
+            label: root.sortDescending ? "dn" : "up"
+            plainLabel: root.sortDescending ? "descending" : "ascending"
+            iconName: root.sortDescending ? "view-sort-descending" : "view-sort-ascending"
+            iconOnly: true
+            fgText: root.fgText
+            fgDim: root.fgDim
+            fgAccent: root.fgAccent
+            onClicked: root.sortDirectionRequested(!root.sortDescending)
         }
     }
 
