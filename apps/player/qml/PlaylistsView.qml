@@ -95,13 +95,18 @@ Item {
             anchors.leftMargin: root.plasma ? 8 : 0
             anchors.topMargin: root.plasma ? 8 : 0
             anchors.bottomMargin: root.plasma ? 8 : 0
-            color: root.plasma ? Theme.bgAlt : "transparent"
+            color: "transparent"
             radius: root.plasma ? Math.max(2, Theme.rounding) : 0
             border.width: root.plasma ? Theme.ctrlBorder : 0
             border.color: Theme.border
-            gradient: Gradient {
-                GradientStop { position: 0; color: root.plasma ? root.raised(Theme.bgAlt, 0.14) : "transparent" }
-                GradientStop { position: 1; color: root.plasma ? root.sunken(Theme.bgAlt, 0.08) : "transparent" }
+            clip: true
+            StyledBackgroundSlice {
+                anchors.fill: parent
+                visible: root.plasma
+                sourceX: parent.x
+                sourceY: parent.y
+                sourceWidth: root.width
+                sourceHeight: root.height
             }
         }
 
@@ -235,13 +240,18 @@ Item {
             y: root.plasma ? 8 : 8
             width: parent.width - x
             height: root.plasma ? Math.max(34, headRow.implicitHeight + 10) : headRow.implicitHeight
-            color: root.plasma ? Theme.bgAlt : "transparent"
+            color: "transparent"
             radius: root.plasma ? Math.max(2, Theme.rounding) : 0
             border.width: root.plasma ? Theme.ctrlBorder : 0
             border.color: Theme.border
-            gradient: Gradient {
-                GradientStop { position: 0; color: root.plasma ? root.raised(Theme.bgAlt, 0.22) : "transparent" }
-                GradientStop { position: 1; color: root.plasma ? root.sunken(Theme.bgAlt, 0.09) : "transparent" }
+            clip: true
+            StyledBackgroundSlice {
+                anchors.fill: parent
+                visible: root.plasma
+                sourceX: content.x + listHead.x
+                sourceY: listHead.y
+                sourceWidth: root.width
+                sourceHeight: root.height
             }
             Row {
                 id: headRow
