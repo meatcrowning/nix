@@ -227,11 +227,11 @@ def relief_css(pal, chrome=None) -> str:
         ".menu,.menubar,.observer,.dialog,.OmniDropdown,.PanelGroup{"
         "background:%s!important;border-radius:%s!important;border:1px solid %s!important}"
         % (bg, r, border),
-        # Vivaldi leaves its own 1px client frame around the entire UI and
-        # paints the exposed gutters (including the 6px beside
-        # #webpage-stack) with the theme's background image.  That is the
-        # otherwise-light seam between hyprvtb and the page view.  Keep the
-        # frame, but make both it and the surface use our structural colours.
+        # Vivaldi's auto-hide/non-unified layout adds a 6px border around the
+        # whole client: dead space below the native titlebar and along every
+        # window edge. The compositor already owns the frame, so remove it.
+        "#browser.auto-hide:not(.unified-ui){border:0!important;border-radius:0!important}",
+        # Keep Vivaldi's remaining 1px client seams in structural colours.
         "#browser{color:%s!important;%s;border-color:%s!important}"
         % (fg, window_slab(), border),
     ])

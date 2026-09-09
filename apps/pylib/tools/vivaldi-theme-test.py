@@ -115,6 +115,8 @@ if m:
 check("Vivaldi's outer client frame uses the structural border",
       "#browser{color:%s!important;" % PAL["text"] in oxy
       and "border-color:%s!important}" % PAL["border"] in oxy)
+check("Vivaldi's 6px auto-hide client gutter is removed",
+      "#browser.auto-hide:not(.unified-ui){border:0!important;border-radius:0!important}" in oxy)
 
 # --- the whole sheet ---------------------------------------------------------
 css = vivaldichrome.css(PAL.__getitem__, CHROME, extra="::-webkit-scrollbar{width:9px}")

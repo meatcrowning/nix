@@ -401,11 +401,6 @@ in
       # old `| LFIX` layout. A future layout change belongs here so both hosts
       # move together.
       kwinrc."org.kde.kdecoration2" = {
-        # Oxygen's Tiny/Normal sizes both reserve a resize frame outside its
-        # painted outline, conspicuous around native-Wayland Chromium at
-        # Retina scale. Keep the outline but remove that empty frame.
-        BorderSize = "None";
-        BorderSizeAuto = false;
         ButtonsOnActiveWindowGlow = false;
         ButtonsOnLeft = "XIM";
         ButtonsOnRight = "F";
