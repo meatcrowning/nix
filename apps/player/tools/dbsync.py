@@ -36,6 +36,7 @@ And one rule about deletion: there is none. A row missing from one side means
 prune only ever happens in the app, against a mounted root it just walked.
 """
 import argparse
+import json
 import os
 import shlex
 import sqlite3
@@ -57,7 +58,29 @@ def db_path():
 # schema
 # ---------------------------------------------------------------------------
 
-def ensure_columns(con):
+INFO_SCHEMA = """
+CREATE TABLE IF NOT EXISTS music_info_cache (
+ cache_key TEXT NOT NULL, kind TEXT NOT NULL, body_json TEXT NOT NULL,
+ fetched_at REAL NOT NULL, expires_at REAL NOT NULL, error TEXT NOT NULL DEFAULT '',
+ PRIMARY KEY(cache_key,kind)
+);
+CREATE TABLE IF NOT EXISTS music_info_user (
+ scope_key TEXT NOT NULL, kind TEXT NOT NULL, body_json TEXT NOT NULL,
+ updated_at REAL NOT NULL, deleted INTEGER NOT NULL DEFAULT 0,
+ PRIMARY KEY(scope_key,kind)
+);
+CREATE TABLE IF NOT EXISTS music_info_links (
+ scope_key TEXT PRIMARY KEY, release_id TEXT NOT NULL,
+ release_group_id TEXT NOT NULL DEFAULT '', updated_at REAL NOT NULL
+);
+"""
+
+
+def _table_columns(con, table):
+    return {r[1] for r in con.execute("PRAGMA table_info(%s)" % table)}
+
+
+def ensure_columns(con, mutate=True):
     """Add the sync-only columns if this database predates them.
 
     Deliberately NOT a copy of main.py's open_db(): that clears the mtime cache
@@ -65,13 +88,182 @@ def ensure_columns(con):
     11k-file re-read of a library it may be reaching across SMB.
     """
     for table, col, decl in (("tracks", "meta_mtime", "REAL"),
+                             ("tracks", "identity_json", "TEXT"),
                              ("lyrics", "attempts", "INTEGER DEFAULT 0")):
-        have = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
+        have = _table_columns(con, table)
         if not have:
             continue  # table itself missing — an empty/fresh db, nothing to merge
-        if col not in have:
+        if mutate and col not in have:
             con.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
-    con.commit()
+    if mutate:
+        con.commit()
+
+
+def _row_value(row, key, default=None):
+    try:
+        return row[key] if key in row.keys() else default
+    except (AttributeError, IndexError, KeyError):
+        return default
+
+
+def _json_value(raw):
+    try:
+        return json.loads(raw or "")
+    except (TypeError, ValueError):
+        return None
+
+
+def _identity_meaningful(raw):
+    value = _json_value(raw) if not isinstance(raw, dict) else raw
+    if not isinstance(value, dict):
+        return False
+    names = ("recordingId", "recording_id", "releaseId", "release_id",
+             "releaseGroupId", "release_group_id", "releaseTrackId",
+             "release_track_id", "artistId", "artist_id", "artistIds")
+    return any(value.get(name) not in (None, "", [], {}) for name in names)
+
+
+def _identity_stamp(row):
+    value = _row_value(row, "meta_mtime")
+    if value is None:
+        value = _row_value(row, "mtime")
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _canonical_json(raw):
+    value = _json_value(raw)
+    if value is None:
+        return str(raw or "")
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return str(raw or "")
+
+
+def _user_newer(src, dst):
+    """Last writer wins; equal timestamps get a stable tombstone/JSON order."""
+    try:
+        sm, dm = float(src["updated_at"] or 0), float(dst["updated_at"] or 0)
+    except (TypeError, ValueError, KeyError):
+        sm = dm = 0.0
+    if sm != dm:
+        return sm > dm
+    if bool(src["deleted"]) != bool(dst["deleted"]):
+        return bool(src["deleted"])
+    sj, dj = _canonical_json(src["body_json"]), _canonical_json(dst["body_json"])
+    if sj != dj:
+        return sj > dj
+    return False
+
+
+def _cache_success(row):
+    if _row_value(row, "error", ""):
+        return False
+    body = _json_value(_row_value(row, "body_json", ""))
+    if not body:
+        return False
+    return not (isinstance(body, dict) and body.get("status") == "error")
+
+
+def _cache_newer(src, dst):
+    try:
+        sm, dm = float(src["fetched_at"] or 0), float(dst["fetched_at"] or 0)
+    except (TypeError, ValueError, KeyError):
+        sm = dm = 0.0
+    if sm != dm:
+        return sm > dm
+    return _canonical_json(src["body_json"]) > _canonical_json(dst["body_json"])
+
+
+def _link_newer(src, dst):
+    try:
+        sm, dm = float(src["updated_at"] or 0), float(dst["updated_at"] or 0)
+    except (TypeError, ValueError, KeyError):
+        sm = dm = 0.0
+    if sm != dm:
+        return sm > dm
+    return (str(src["release_id"] or ""), str(src["release_group_id"] or "")) > \
+           (str(dst["release_id"] or ""), str(dst["release_group_id"] or ""))
+
+
+def _merge_info_tables(con, src, dry_run, stats):
+    """Merge optional release metadata tables without importing infostore.
+
+    This function deliberately carries the tiny schema text above: dbsync.py
+    is piped to a remote system python, where the checkout (and its imports)
+    need not exist.
+    """
+    source_tables = {r[0] for r in src.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'music_info_%'")}
+    if not source_tables:
+        return
+    destination_tables = {r[0] for r in con.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'music_info_%'")}
+    if not dry_run and source_tables - destination_tables:
+        con.executescript(INFO_SCHEMA)
+        destination_tables = {r[0] for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'music_info_%'")}
+
+    # User choices are last-writer-wins.  A tombstone is just another value,
+    # so a revert remains present even after the other machine has no body.
+    if "music_info_user" in source_tables and "music_info_user" in destination_tables:
+        dst_rows = {(r["scope_key"], r["kind"]): r for r in con.execute(
+            "SELECT * FROM music_info_user")}
+        for row in src.execute("SELECT * FROM music_info_user"):
+            key = (row["scope_key"], row["kind"])
+            old = dst_rows.get(key)
+            if old is None:
+                con.execute("INSERT INTO music_info_user "
+                            "(scope_key,kind,body_json,updated_at,deleted) VALUES (?,?,?,?,?)",
+                            (row["scope_key"], row["kind"], row["body_json"],
+                             row["updated_at"], row["deleted"]))
+                stats["info_user_new"] += 1
+            elif _user_newer(row, old):
+                con.execute("UPDATE music_info_user SET body_json=?,updated_at=?,deleted=? "
+                            "WHERE scope_key=? AND kind=?",
+                            (row["body_json"], row["updated_at"], row["deleted"], *key))
+                stats["info_user_upd"] += 1
+
+    # Cache rows are SWR payloads.  A failed/empty fetch is useful as an error
+    # signal on its originating machine, but cannot replace a successful body
+    # already held on the destination.
+    if "music_info_cache" in source_tables and "music_info_cache" in destination_tables:
+        dst_rows = {(r["cache_key"], r["kind"]): r for r in con.execute(
+            "SELECT * FROM music_info_cache")}
+        for row in src.execute("SELECT * FROM music_info_cache"):
+            key = (row["cache_key"], row["kind"])
+            old = dst_rows.get(key)
+            if old is None:
+                con.execute("INSERT INTO music_info_cache "
+                            "(cache_key,kind,body_json,fetched_at,expires_at,error) VALUES (?,?,?,?,?,?)",
+                            (row["cache_key"], row["kind"], row["body_json"], row["fetched_at"],
+                             row["expires_at"], row["error"]))
+                stats["info_cache_new"] += 1
+            elif ((_cache_success(row) and not _cache_success(old)) or
+                  (_cache_success(row) == _cache_success(old) and _cache_newer(row, old))):
+                con.execute("UPDATE music_info_cache SET body_json=?,fetched_at=?,expires_at=?,error=? "
+                            "WHERE cache_key=? AND kind=?",
+                            (row["body_json"], row["fetched_at"], row["expires_at"], row["error"], *key))
+                stats["info_cache_upd"] += 1
+
+    if "music_info_links" in source_tables and "music_info_links" in destination_tables:
+        dst_rows = {r["scope_key"]: r for r in con.execute("SELECT * FROM music_info_links")}
+        for row in src.execute("SELECT * FROM music_info_links"):
+            key = row["scope_key"]
+            old = dst_rows.get(key)
+            if old is None:
+                con.execute("INSERT INTO music_info_links "
+                            "(scope_key,release_id,release_group_id,updated_at) VALUES (?,?,?,?)",
+                            (key, row["release_id"], row["release_group_id"], row["updated_at"]))
+                stats["info_links"] += 1
+            elif _link_newer(row, old):
+                con.execute("UPDATE music_info_links SET release_id=?,release_group_id=?,updated_at=? "
+                            "WHERE scope_key=?",
+                            (row["release_id"], row["release_group_id"], row["updated_at"], key))
+                stats["info_links"] += 1
 
 
 def snapshot(src, dst):
@@ -97,7 +289,7 @@ NEW_TRACK_COLS = [
     "path", "mtime", "size", "title", "artist", "album", "album_artist",
     "track", "disc", "date", "year", "orig_year", "genre", "duration",
     "codec", "samplerate", "bitdepth", "rating", "favorite", "play_count",
-    "meta_mtime", "added_at", "last_played", "has_art",
+    "meta_mtime", "identity_json", "added_at", "last_played", "has_art",
     "rg_track_gain", "rg_track_peak", "rg_album_gain", "rg_album_peak",
 ]
 
@@ -124,26 +316,32 @@ def merge(src_path, dst_path, dry_run=False, quiet=False):
     con = sqlite3.connect(dst_path, timeout=60)
     con.execute("PRAGMA busy_timeout=60000")
     con.row_factory = sqlite3.Row
-    ensure_columns(con)
+    # DDL is durable immediately in SQLite.  A dry-run must therefore avoid
+    # adding columns/tables as well as avoiding row changes.
+    ensure_columns(con, mutate=not dry_run)
 
     src = sqlite3.connect(f"file:{src_path}?mode=ro", uri=True, timeout=60)
     src.row_factory = sqlite3.Row
     has_meta = "meta_mtime" in {r[1] for r in src.execute("PRAGMA table_info(tracks)")}
 
     st = {"tracks_new": 0, "plays": 0, "rating": 0, "favorite": 0,
-          "lyrics_new": 0, "lyrics_upd": 0}
+          "lyrics_new": 0, "lyrics_upd": 0, "identity": 0,
+          "info_user_new": 0, "info_user_upd": 0,
+          "info_cache_new": 0, "info_cache_upd": 0, "info_links": 0}
 
     dst_tracks = {r["path"]: r for r in con.execute("SELECT * FROM tracks")}
+    dst_track_cols = _table_columns(con, "tracks")
 
     for s in src.execute("SELECT * FROM tracks"):
         d = dst_tracks.get(s["path"])
         if d is None:
+            cols = [c for c in NEW_TRACK_COLS if c in dst_track_cols]
             vals = []
-            for c in NEW_TRACK_COLS:
-                vals.append(s[c] if (c != "meta_mtime" or has_meta) else None)
+            for c in cols:
+                vals.append(_row_value(s, c))
             con.execute(
-                f"INSERT INTO tracks ({','.join(NEW_TRACK_COLS)}) "
-                f"VALUES ({','.join('?' * len(NEW_TRACK_COLS))})", vals)
+                f"INSERT INTO tracks ({','.join(cols)}) "
+                f"VALUES ({','.join('?' * len(cols))})", vals)
             st["tracks_new"] += 1
             continue
 
@@ -152,44 +350,57 @@ def merge(src_path, dst_path, dry_run=False, quiet=False):
         # play_count: max. Two machines each playing a track five times is ten
         # plays of it, but we cannot tell that from two numbers, and max() at
         # least never invents plays or loses a whole machine's history.
-        if (s["play_count"] or 0) > (d["play_count"] or 0):
+        if (_row_value(s, "play_count") or 0) > (_row_value(d, "play_count") or 0):
             sets.append("play_count=?")
-            args.append(s["play_count"])
+            args.append(_row_value(s, "play_count"))
             st["plays"] += 1
-        if _num(s["last_played"]) > _num(d["last_played"]):
+        if _num(_row_value(s, "last_played")) > _num(_row_value(d, "last_played")):
             sets.append("last_played=?")
-            args.append(s["last_played"])
+            args.append(_row_value(s, "last_played"))
 
         # rating/favorite: last writer wins, by meta_mtime. A NULL meta_mtime
         # is a value written before this column existed (or by a scan, from the
         # file's own tags) — it loses to any real timestamp, and when NEITHER
         # side has one we only fill in what the destination is missing rather
         # than guess.
-        sm = s["meta_mtime"] if has_meta else None
-        dm = d["meta_mtime"]
+        sm = _row_value(s, "meta_mtime") if has_meta else None
+        dm = _row_value(d, "meta_mtime")
         if sm is not None and (dm is None or sm > dm):
-            take_rating = s["rating"] != d["rating"]
-            take_fav = bool(s["favorite"]) != bool(d["favorite"])
+            take_rating = _row_value(s, "rating") != _row_value(d, "rating")
+            take_fav = bool(_row_value(s, "favorite")) != bool(_row_value(d, "favorite"))
             if take_rating:
                 sets.append("rating=?")
-                args.append(s["rating"])
+                args.append(_row_value(s, "rating"))
                 st["rating"] += 1
             if take_fav:
                 sets.append("favorite=?")
-                args.append(1 if s["favorite"] else 0)
+                args.append(1 if _row_value(s, "favorite") else 0)
                 st["favorite"] += 1
             if take_rating or take_fav:
                 sets.append("meta_mtime=?")
                 args.append(sm)
         elif sm is None and dm is None:
-            if d["rating"] is None and s["rating"] is not None:
+            if _row_value(d, "rating") is None and _row_value(s, "rating") is not None:
                 sets.append("rating=?")
-                args.append(s["rating"])
+                args.append(_row_value(s, "rating"))
                 st["rating"] += 1
-            if not d["favorite"] and s["favorite"]:
+            if not _row_value(d, "favorite") and _row_value(s, "favorite"):
                 sets.append("favorite=?")
                 args.append(1)
                 st["favorite"] += 1
+
+        # Identity is tag-derived metadata.  It may be absent on an older
+        # source, but an absent source value can never erase a useful local
+        # identity.  A meaningful source update wins only when its file/tag
+        # freshness is newer than the destination's.
+        if "identity_json" in dst_track_cols and "identity_json" in s.keys():
+            si = _row_value(s, "identity_json")
+            di = _row_value(d, "identity_json")
+            if _identity_meaningful(si) and (
+                    not _identity_meaningful(di) or _identity_stamp(s) > _identity_stamp(d)):
+                sets.append("identity_json=?")
+                args.append(si)
+                st["identity"] += 1
 
         if sets:
             args.append(d["id"])
@@ -230,6 +441,8 @@ def merge(src_path, dst_path, dry_run=False, quiet=False):
             da = (d["attempts"] if "attempts" in d.keys() else 0) or 0
             if sa > da:
                 con.execute("UPDATE lyrics SET attempts=? WHERE track_id=?", (sa, tid))
+
+    _merge_info_tables(con, src, dry_run, st)
 
     if dry_run:
         con.rollback()

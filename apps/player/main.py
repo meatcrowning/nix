@@ -51,6 +51,9 @@ from glyphs import Glyphs  # noqa: E402  (pylib; docs/DESIGN.md 2.3 display-site
 
 import atomicsave  # noqa: E402  (sibling module; also used by lyrics.py)
 from metadatawrites import MetadataWrites  # noqa: E402
+from albuminfo import AlbumInformation  # noqa: E402
+from releaseinfo import read_identity  # noqa: E402
+import infostore  # noqa: E402
 import lyrics as lyricslib  # noqa: E402  (sibling module; also used by tools/)
 from scrobble import Scrobbler  # noqa: E402  (sibling module; Last.fm, off the GUI thread)
 import lastfm as lastfmlib  # noqa: E402  (pylib; credentials stay in its owner)
@@ -589,6 +592,7 @@ def read_tags(path):
         else:
             t["has_art"] = bool(v("metadata_block_picture"))
 
+    t["identity_json"] = json.dumps({**read_identity(audio), "scanned": True})
     t.update(read_replaygain(audio))
     t["year"] = _year_of(t["date"])
     t["date"] = _first(t["date"])
@@ -734,6 +738,7 @@ MIGRATIONS = [
     # and last_played by newest, but rating is a value with no natural
     # ordering, so cross-machine merges need an explicit "who wrote last".
     ("tracks", "meta_mtime", "REAL", False),
+    ("tracks", "identity_json", "TEXT", False),
 ]
 
 
@@ -747,6 +752,7 @@ def open_db():
     con.execute("PRAGMA busy_timeout=60000")
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
+    infostore.ensure_schema(con)
     # An early development build keyed this cache by source as well as entity.
     # Collapse that shape before the feature ships so each kind has one
     # authoritative cached payload and refreshes cannot expose stale siblings.
@@ -917,11 +923,11 @@ class Scanner(QThread):
                                     track, disc, date, year, orig_year, genre, duration,
                                     codec, samplerate, bitdepth, rating, favorite,
                                     play_count, added_at, has_art,
-                                    rg_track_gain, rg_track_peak, rg_album_gain, rg_album_peak)
+                                    rg_track_gain, rg_track_peak, rg_album_gain, rg_album_peak, identity_json)
                 VALUES (:path,:mtime,:size,:title,:artist,:album,:album_artist,
                         :track,:disc,:date,:year,:orig_year,:genre,:duration,
                         :codec,:samplerate,:bitdepth,:rating,:favorite,:play_count,:added_at,:has_art,
-                        :rg_track_gain,:rg_track_peak,:rg_album_gain,:rg_album_peak)
+                        :rg_track_gain,:rg_track_peak,:rg_album_gain,:rg_album_peak,:identity_json)
                 ON CONFLICT(path) DO UPDATE SET
                     mtime=:mtime, size=:size, title=:title, artist=:artist, album=:album,
                     album_artist=:album_artist, track=:track, disc=:disc, date=:date,
@@ -930,7 +936,8 @@ class Scanner(QThread):
                     rating=:rating, favorite=:favorite, play_count=:play_count,
                     has_art=:has_art,
                     rg_track_gain=:rg_track_gain, rg_track_peak=:rg_track_peak,
-                    rg_album_gain=:rg_album_gain, rg_album_peak=:rg_album_peak
+                    rg_album_gain=:rg_album_gain, rg_album_peak=:rg_album_peak,
+                    identity_json=:identity_json
             """, pending)
             con.commit()
             pending.clear()
@@ -943,7 +950,7 @@ class Scanner(QThread):
                 bad += 1
                 continue
             mtime, size = seen[p]
-            pending.append({**t, "path": p, "mtime": mtime, "size": size,
+            pending.append({"identity_json": None, **t, "path": p, "mtime": mtime, "size": size,
                             "added_at": now})
             if len(pending) == 200:
                 flush_pending()
@@ -3462,389 +3469,12 @@ class LyricsProvider(QObject):
 # Now-playing web information
 # ---------------------------------------------------------------------------
 
-class NowPlayingMetadata(QObject):
-    """Cached, correctable web facts for the current recording.
-
-    MusicBrainz is the identity gate: descriptive sources are followed only
-    from links on the selected MusicBrainz entities, never from a title-only
-    web search. That deliberately turns a weak match into ``ambiguous`` rather
-    than attaching a plausible-looking biography to the wrong release. Network
-    work and SQLite writes happen on one private worker thread.
-    """
-
-    changed = Signal("QVariantMap")
-    CACHE_AGE = 30 * 86400
-    USER_AGENT = "player/1.0 (+https://github.com/meatcrowning/nix)"
+class NowPlayingMetadata(AlbumInformation):
+    """Bind the shared coordinator to this application's database/tag reader."""
 
     def __init__(self, library, parent=None, fetch_json=None, lastfm_call=None):
-        super().__init__(parent)
-        self._library = library
-        self._fetch_json_fn = fetch_json
-        self._lastfm_call = lastfm_call or lastfmlib.call
-        self._jobs = []
-        self._cv = threading.Condition()
-        self._state = self._empty()
-        self._last_mb_request = 0.0
-        threading.Thread(target=self._loop, daemon=True).start()
-
-    @staticmethod
-    def _empty(status="idle", track_id=0):
-        return {"trackId": int(track_id), "status": status, "error": "",
-                "album": {}, "similar": [], "candidates": [],
-                "match": {}, "fetchedAt": 0.0, "stale": False,
-                "similarFallback": False}
-
-    @property
-    def state(self):
-        return dict(self._state)
-
-    def _emit(self, state):
-        self._state = dict(state)
-        self.changed.emit(self.state)
-
-    def request(self, track_id, force=False):
-        tid = int(track_id or 0)
-        if not tid:
-            self._emit(self._empty())
-            return
-        cached = self._cached_state(tid)
-        if cached and not force:
-            self._emit(cached)
-            if not cached["stale"]:
-                return
-        loading = cached or self._empty("loading", tid)
-        loading.update(status="loading", error="")
-        self._emit(loading)
-        with self._cv:
-            self._jobs[:] = [(tid, bool(force))]
-            self._cv.notify()
-
-    def refresh(self, track_id):
-        self.request(track_id, True)
-
-    def clear(self, track_id):
-        tid = int(track_id or 0)
-        if not tid:
-            return
-        con = open_db()
-        try:
-            key = self._key_for_track(con, tid)
-            if key:
-                con.execute("DELETE FROM web_metadata WHERE cache_key=?", (key,))
-                con.execute("DELETE FROM web_entity_matches WHERE cache_key=?", (key,))
-                con.execute("DELETE FROM web_metadata_overrides WHERE cache_key=?", (key,))
-                con.commit()
-        finally:
-            con.close()
-        self._emit(self._empty("idle", tid))
-
-    def choose(self, track_id, entity_id):
-        tid, entity_id = int(track_id or 0), str(entity_id or "")
-        con = open_db()
-        try:
-            row = con.execute("SELECT * FROM tracks WHERE id=?", (tid,)).fetchone()
-            if row is None:
-                return False
-            key = self._cache_key(row)
-            match = con.execute(
-                "SELECT * FROM web_entity_matches WHERE cache_key=? AND entity_type='recording' AND provider='musicbrainz'",
-                (key,)).fetchone()
-            candidates = json.loads(match["candidates_json"] or "[]") if match else []
-            picked = next((c for c in candidates if c.get("id") == entity_id), None)
-            if not picked:
-                return False
-            con.execute("INSERT OR REPLACE INTO web_entity_matches VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                        (key, "recording", "musicbrainz", entity_id,
-                         picked.get("label", ""), float(picked.get("confidence", 0)),
-                         "chosen", json.dumps(candidates), 1, time.time(), None))
-            con.execute("DELETE FROM web_metadata WHERE cache_key=?", (key,))
-            con.commit()
-        finally:
-            con.close()
-        self.request(tid, True)
-        return True
-
-    def edit(self, track_id, kind, values):
-        tid, kind = int(track_id or 0), str(kind or "")
-        if kind not in ("album", "similar") or not isinstance(values, dict):
-            return False
-        con = open_db()
-        try:
-            key = self._key_for_track(con, tid)
-            if not key:
-                return False
-            con.execute("INSERT OR REPLACE INTO web_metadata_overrides VALUES (?,?,?,?)",
-                        (key, kind, json.dumps(values, ensure_ascii=False), time.time()))
-            con.commit()
-        finally:
-            con.close()
-        cached = self._cached_state(tid)
-        if cached:
-            self._emit(cached)
-        return True
-
-    def revert(self, track_id, kind):
-        tid, kind = int(track_id or 0), str(kind or "")
-        con = open_db()
-        try:
-            key = self._key_for_track(con, tid)
-            if not key:
-                return False
-            con.execute("DELETE FROM web_metadata_overrides WHERE cache_key=? AND kind=?",
-                        (key, kind))
-            con.commit()
-        finally:
-            con.close()
-        cached = self._cached_state(tid)
-        if cached:
-            self._emit(cached)
-        return True
-
-    def _loop(self):
-        while True:
-            with self._cv:
-                while not self._jobs:
-                    self._cv.wait()
-                tid, force = self._jobs.pop()
-                self._jobs.clear()
-            try:
-                state = self._resolve(tid, force)
-            except Exception as e:
-                state = self._cached_state(tid) or self._empty("error", tid)
-                state.update(status="error", error=str(e))
-            self._emit(state)
-
-    @staticmethod
-    def _cache_key(row):
-        # Stable across the database's host-local row ids and dbsync merges.
-        parts = (row["album_artist"] or row["artist"] or "", row["album"] or "",
-                 row["artist"] or "", row["title"] or "")
-        return "|".join(trackmatch.fold(x) for x in parts)
-
-    def _key_for_track(self, con, tid):
-        row = con.execute("SELECT * FROM tracks WHERE id=?", (tid,)).fetchone()
-        return self._cache_key(row) if row else ""
-
-    @staticmethod
-    def _json(raw, fallback):
-        try:
-            obj = json.loads(raw or "")
-            return obj if isinstance(obj, type(fallback)) else fallback
-        except (ValueError, TypeError):
-            return fallback
-
-    def _cached_state(self, tid):
-        con = open_db()
-        try:
-            key = self._key_for_track(con, int(tid))
-            if not key:
-                return None
-            match = con.execute("SELECT * FROM web_entity_matches WHERE cache_key=? AND entity_type='recording' AND provider='musicbrainz'", (key,)).fetchone()
-            rows = {r["kind"]: r for r in con.execute(
-                "SELECT * FROM web_metadata WHERE cache_key=?", (key,))}
-            overrides = {r["kind"]: self._json(r["body_json"], {}) for r in con.execute(
-                "SELECT * FROM web_metadata_overrides WHERE cache_key=?", (key,))}
-            if not match and not rows and not overrides:
-                return None
-            album = self._json(rows.get("album")["body_json"], {}) if rows.get("album") else {}
-            similar = self._json(rows.get("similar")["body_json"], []) if rows.get("similar") else []
-            album.update(overrides.get("album", {}))
-            if "similar" in overrides:
-                similar = overrides["similar"].get("items", similar)
-            stamps = [float(r["fetched_at"] or 0) for r in rows.values()]
-            stamp = min(stamps) if stamps else float(match["fetched_at"] or 0) if match else 0
-            status = (match["status"] if match and match["status"] in
-                      ("ambiguous", "no_match", "error") else "ready")
-            errors = [str(r["error"]) for r in rows.values() if r["error"]]
-            if match and match["error"]:
-                errors.insert(0, str(match["error"]))
-            return {"trackId": int(tid), "status": status,
-                    "error": "; ".join(errors), "album": album,
-                    "similar": similar,
-                    "candidates": self._json(match["candidates_json"], []) if match else [],
-                    "match": ({"id": match["entity_id"] or "", "label": match["label"] or "",
-                               "confidence": float(match["confidence"] or 0),
-                               "manual": bool(match["manual"])} if match else {}),
-                    "fetchedAt": stamp, "stale": not stamp or time.time() - stamp > self.CACHE_AGE,
-                    "similarFallback": bool(rows.get("similar") and rows["similar"]["source"] == "local")}
-        finally:
-            con.close()
-
-    def _fetch_json(self, url):
-        if self._fetch_json_fn:
-            return self._fetch_json_fn(url)
-        if "musicbrainz.org/" in url:
-            delay = 1.05 - (time.monotonic() - self._last_mb_request)
-            if delay > 0:
-                time.sleep(delay)
-            self._last_mb_request = time.monotonic()
-        req = urllib.request.Request(url, headers={"User-Agent": self.USER_AGENT,
-                                                   "Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=15) as response:
-            return json.loads(response.read())
-
-    def _mb_candidates(self, row):
-        query = " AND ".join((f'recording:"{row["title"]}"',
-                              f'artist:"{row["artist"]}"'))
-        url = "https://musicbrainz.org/ws/2/recording/?fmt=json&limit=8&query=" + urllib.parse.quote(query)
-        out = []
-        for rec in self._fetch_json(url).get("recordings", []):
-            credits = rec.get("artist-credit") or []
-            artist = "".join(str(x.get("name", "")) + str(x.get("joinphrase", "")) for x in credits)
-            releases = rec.get("releases") or []
-            albums = [x.get("title", "") for x in releases]
-            score = 0.0
-            if trackmatch.title_matches(row["title"], rec.get("title", "")): score += .42
-            if trackmatch.artist_matches(row["artist"], artist): score += .35
-            if row["album"] and any(trackmatch.fold(row["album"]) == trackmatch.fold(x) for x in albums): score += .15
-            length = float(rec.get("length") or 0) / 1000
-            if row["duration"] and length and abs(float(row["duration"]) - length) <= max(3, float(row["duration"]) * .03): score += .08
-            rg = next((x.get("release-group", {}) for x in releases if x.get("release-group")), {})
-            artist_id = next(((x.get("artist") or {}).get("id", "") for x in credits
-                              if isinstance(x, dict)), "")
-            out.append({"id": rec.get("id", ""), "label": f'{rec.get("title", "")} · {artist}',
-                        "title": rec.get("title", ""), "artist": artist,
-                        "album": albums[0] if albums else "", "releaseGroupId": rg.get("id", ""),
-                        "artistId": artist_id,
-                        "confidence": round(score, 3)})
-        return sorted(out, key=lambda x: x["confidence"], reverse=True)
-
-    @staticmethod
-    def _linked_page(relations):
-        for kind in ("wikipedia", "wikidata"):
-            for rel in relations or []:
-                if rel.get("type") == kind:
-                    return kind, (rel.get("url") or {}).get("resource", "")
-        return "", ""
-
-    def _summary(self, kind, resource):
-        if not resource:
-            return {}
-        if kind == "wikidata":
-            qid = resource.rstrip("/").split("/")[-1]
-            entity = self._fetch_json(f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json").get("entities", {}).get(qid, {})
-            title = (((entity.get("sitelinks") or {}).get("enwiki") or {}).get("title"))
-            if not title:
-                return {}
-        else:
-            title = urllib.parse.unquote(resource.rstrip("/").split("/")[-1])
-        obj = self._fetch_json("https://en.wikipedia.org/api/rest_v1/page/summary/" + urllib.parse.quote(title))
-        return {"title": obj.get("title", ""), "description": obj.get("extract", ""),
-                "url": ((obj.get("content_urls") or {}).get("desktop") or {}).get("page", ""),
-                "source": "wikipedia"}
-
-    def _album_info(self, chosen):
-        rgid = chosen.get("releaseGroupId", "")
-        info = {"title": chosen.get("album", ""), "artist": chosen.get("artist", ""),
-                "track": chosen.get("title", ""), "musicbrainzRecordingId": chosen.get("id", ""),
-                "musicbrainzReleaseGroupId": rgid, "sources": ["musicbrainz"]}
-        if not rgid:
-            return info
-        detail = self._fetch_json(f"https://musicbrainz.org/ws/2/release-group/{rgid}?fmt=json&inc=artists+url-rels")
-        info.update({"title": detail.get("title", info["title"]),
-                     "firstReleaseDate": detail.get("first-release-date", ""),
-                     "primaryType": detail.get("primary-type", ""),
-                     "secondaryTypes": detail.get("secondary-types", [])})
-        kind, page = self._linked_page(detail.get("relations"))
-        summary = self._summary(kind, page)
-        if summary:
-            info.update(summary)
-            info["sources"].append("wikipedia")
-        artist_id = chosen.get("artistId", "")
-        if artist_id:
-            artist = self._fetch_json(
-                f"https://musicbrainz.org/ws/2/artist/{artist_id}?fmt=json&inc=url-rels")
-            akind, apage = self._linked_page(artist.get("relations"))
-            artist_summary = self._summary(akind, apage)
-            info["artistInfo"] = {
-                "name": artist.get("name", chosen.get("artist", "")),
-                "type": artist.get("type", ""), "country": artist.get("country", ""),
-                **artist_summary,
-            }
-        return info
-
-    def _local_similar(self, con, row, remote=()):
-        keys = {}
-        for rank, item in enumerate(remote):
-            for key in trackmatch.keys(item.get("artist", {}).get("name", ""), item.get("name", "")):
-                keys[key] = (rank, item)
-        candidates = []
-        for got in con.execute("SELECT id,title,artist,album,year,genre,duration FROM tracks WHERE id<>?", (row["id"],)):
-            hit = min((keys[k][0] for k in trackmatch.keys(got["artist"], got["title"]) if k in keys), default=None)
-            if hit is not None:
-                score = 1000 - hit
-                why = "last.fm"
-            else:
-                score = (45 if trackmatch.artist_matches(row["artist"], got["artist"]) else 0)
-                if row["genre"] and got["genre"] and trackmatch.fold(row["genre"]) == trackmatch.fold(got["genre"]): score += 25
-                if row["year"] and got["year"]: score += max(0, 20 - abs(int(row["year"]) - int(got["year"])))
-                why = "local"
-            if score:
-                candidates.append({"trackId": got["id"], "title": got["title"] or "",
-                                   "artist": got["artist"] or "", "album": got["album"] or "",
-                                   "score": score, "reason": why})
-        candidates.sort(key=lambda x: (-x["score"], trackmatch.fold(x["artist"]), trackmatch.fold(x["title"])))
-        return candidates[:20]
-
-    def _resolve(self, tid, force=False):
-        con = open_db()
-        try:
-            row = con.execute("SELECT * FROM tracks WHERE id=?", (tid,)).fetchone()
-            if row is None:
-                return self._empty("error", tid) | {"error": "track not found"}
-            key = self._cache_key(row)
-            saved = con.execute("SELECT * FROM web_entity_matches WHERE cache_key=? AND entity_type='recording' AND provider='musicbrainz'", (key,)).fetchone()
-            try:
-                candidates = self._mb_candidates(row)
-            except Exception as e:
-                con.execute("INSERT OR REPLACE INTO web_entity_matches VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                            (key, "recording", "musicbrainz", None, "", 0,
-                             "error", "[]", 0, time.time(), str(e)))
-                con.commit()
-                return self._empty("error", tid) | {"error": str(e), "fetchedAt": time.time()}
-            chosen = None
-            if saved and saved["manual"]:
-                chosen = next((x for x in candidates if x["id"] == saved["entity_id"]), None)
-                if chosen is None:
-                    old = self._json(saved["candidates_json"], [])
-                    chosen = next((x for x in old if x.get("id") == saved["entity_id"]), None)
-            if chosen is None and candidates and candidates[0]["confidence"] >= .85 and (len(candidates) == 1 or candidates[0]["confidence"] - candidates[1]["confidence"] >= .12):
-                chosen = candidates[0]
-            status = "chosen" if chosen else "ambiguous" if candidates else "no_match"
-            con.execute("INSERT OR REPLACE INTO web_entity_matches VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                        (key, "recording", "musicbrainz", chosen.get("id") if chosen else None,
-                         chosen.get("label", "") if chosen else "", chosen.get("confidence", 0) if chosen else 0,
-                         status, json.dumps(candidates), int(bool(saved and saved["manual"] and chosen)), time.time(), None))
-            if not chosen:
-                con.commit()
-                return self._cached_state(tid)
-            album_error = ""
-            try:
-                album = self._album_info(chosen)
-            except Exception as e:
-                album_error = str(e)
-                album = {"title": chosen.get("album", ""),
-                         "artist": chosen.get("artist", ""),
-                         "track": chosen.get("title", ""),
-                         "musicbrainzRecordingId": chosen.get("id", ""),
-                         "sources": ["musicbrainz"]}
-            con.execute("INSERT OR REPLACE INTO web_metadata VALUES (?,?,?,?,?,?,?)",
-                        (key, "album", "+".join(album.get("sources", [])), json.dumps(album, ensure_ascii=False), time.time(), time.time()+self.CACHE_AGE, album_error or None))
-            remote, sim_error = [], ""
-            try:
-                got = self._lastfm_call("track.getSimilar", {"artist": row["artist"], "track": row["title"], "limit": 100})
-                remote = (((got or {}).get("similartracks") or {}).get("track") or [])
-                if isinstance(remote, dict): remote = [remote]
-            except Exception as e:
-                sim_error = str(e)
-            similar = self._local_similar(con, row, remote)
-            source = "last.fm+local" if remote else "local"
-            con.execute("INSERT OR REPLACE INTO web_metadata VALUES (?,?,?,?,?,?,?)",
-                        (key, "similar", source, json.dumps(similar, ensure_ascii=False), time.time(), time.time()+self.CACHE_AGE, sim_error or None))
-            con.commit()
-        finally:
-            con.close()
-        return self._cached_state(tid)
+        super().__init__(library, parent, db_path=DB_PATH, read_tags=read_tags,
+                         fetch_json=fetch_json, lastfm_call=lastfm_call)
 
 
 # ---------------------------------------------------------------------------
@@ -4118,6 +3748,19 @@ class Bridge(QObject):
     def revertNowInfo(self, kind):
         current = self._current_track()
         return self._now_info.revert(int(current.get("id") or 0), kind)
+
+    @Slot(str, result=bool)
+    def openInfoUrl(self, url):
+        parsed = QUrl(url)
+        if parsed.scheme() not in ("https", "http") or not parsed.host():
+            return False
+        return QDesktopServices.openUrl(parsed)
+
+    @Slot(str, str, str, result=bool)
+    def browseInfoConnection(self, kind, entity_id, name):
+        current = self._current_track()
+        return self._now_info.browse_connection(int(current.get("id") or 0),
+                                                 kind, entity_id, name)
 
     @Slot()
     def rescan(self):

@@ -1,138 +1,172 @@
 #!/usr/bin/env python3
-"""Headless, fixture-only regression test for now-playing web metadata."""
-
+"""Offline integration checks: shared releases, corrections, retries and locks."""
+import json
 import os
+import sqlite3
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
+from unittest.mock import patch
 
-os.environ["QT_QPA_PLATFORM"] = "offscreen"
-os.environ.pop("WAYLAND_DISPLAY", None)
-os.environ.pop("DISPLAY", None)
+os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+os.environ.pop('WAYLAND_DISPLAY', None)
+os.environ.pop('DISPLAY', None)
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-
-import main  # noqa: E402
-
-
-def check(ok, message):
-    if not ok:
-        raise AssertionError(message)
-
-
-def track(con, tid, title="Grey Geisha"):
-    con.execute("""INSERT INTO tracks
-      (id,path,mtime,size,title,artist,album,album_artist,date,year,orig_year,
-       genre,duration,added_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (tid, f"/fixture/{tid}.flac", 1, 1, title, "Tim Hecker",
-         "Instrumental Tourist", "Tim Hecker", "2012", 2012, 2012,
-         "Ambient", 258.0, time.time()))
-
-
-def fixtures(url):
-    if "/recording/" in url:
-        return {"recordings": [{
-            "id": "rec-1", "title": "Grey Geisha", "length": 258000,
-            "artist-credit": [{"name": "Tim Hecker", "joinphrase": ""}],
-            "releases": [{"title": "Instrumental Tourist",
-                          "release-group": {"id": "rg-1"}}],
-        }]}
-    if "/release-group/rg-1" in url:
-        return {"title": "Instrumental Tourist", "first-release-date": "2012-09-10",
-                "primary-type": "Album", "secondary-types": ["Collaboration"],
-                "relations": [{"type": "wikidata",
-                               "url": {"resource": "https://www.wikidata.org/wiki/Q1"}}]}
-    if "Special:EntityData/Q1" in url:
-        return {"entities": {"Q1": {"sitelinks": {"enwiki": {"title": "Instrumental Tourist"}}}}}
-    if "/page/summary/" in url:
-        return {"title": "Instrumental Tourist", "extract": "A collaborative studio album.",
-                "content_urls": {"desktop": {"page": "https://en.wikipedia.org/wiki/Instrumental_Tourist"}}}
-    raise AssertionError("unexpected network request: " + url)
-
-
-def lastfm(_method, _params):
-    return {"similartracks": {"track": [
-        {"name": "Virginal II", "artist": {"name": "Tim Hecker"}},
-    ]}}
 
 
 def run():
     with tempfile.TemporaryDirectory() as td:
-        main.DATA = Path(td) / "data"
-        main.DB_PATH = main.DATA / "library.db"
+        for key in ('DATA', 'STATE', 'CACHE', 'CONFIG', 'RUNTIME'):
+            os.environ['XDG_' + key + ('_DIR' if key == 'RUNTIME' else '_HOME')] = td + '/' + key
+        import main
+        import albuminfo
+        import infostore as store
+        from PySide6.QtCore import QCoreApplication
+        app = QCoreApplication.instance() or QCoreApplication([])
+        main.DATA = Path(td) / 'data'
+        main.DB_PATH = main.DATA / 'library.db'
         con = main.open_db()
-        track(con, 1)
-        track(con, 2, "Virginal II")
-        track(con, 3, "Other")
+        for tid, title in ((1, 'one'), (2, 'two'), (3, 'three')):
+            con.execute('''INSERT INTO tracks
+              (id,path,mtime,size,title,artist,album,album_artist,track,disc,duration,genre,identity_json,added_at)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+              (tid, f'/fixture/album/{tid}.flac', 1, 1, title, 'artist', 'album', 'artist', tid, 1, 180,
+               'ambient', json.dumps({'scanned': True, 'releaseId': 'release-1'}), time.time()))
         con.commit()
-        provider = main.NowPlayingMetadata(None, fetch_json=fixtures, lastfm_call=lastfm)
-        state = provider._resolve(1)
-        check(state["status"] == "ready", state)
-        check(state["match"]["id"] == "rec-1", state)
-        check(state["album"]["description"] == "A collaborative studio album.", state)
-        check(state["album"]["sources"] == ["musicbrainz", "wikipedia"], state)
-        check(state["similar"][0]["trackId"] == 2, state)
-        check(state["similar"][0]["reason"] == "last.fm", state)
-
-        check(provider.edit(1, "album", {"description": "my correction"}), "edit refused")
-        check(provider._cached_state(1)["album"]["description"] == "my correction", "override absent")
-        check(provider.revert(1, "album"), "revert refused")
-        check(provider._cached_state(1)["album"]["description"].startswith("A collaborative"), "revert absent")
-
-        # A Last.fm outage retains useful local recommendations and records the
-        # failure explicitly rather than presenting the fallback as web data.
-        provider._lastfm_call = lambda *_: (_ for _ in ()).throw(RuntimeError("offline"))
-        state = provider._resolve(1, True)
-        check(state["similarFallback"], state)
-        check("offline" in state["error"], state)
-
-        # Low-confidence MusicBrainz results are choices, never silent matches.
-        def ambiguous(url):
-            if "/recording/" in url:
-                return {"recordings": [
-                    {"id": "maybe-1", "title": "Grey Geisha", "length": 200000,
-                     "artist-credit": [{"name": "Someone Else"}], "releases": []},
-                    {"id": "maybe-2", "title": "Grey Geisha", "length": 201000,
-                     "artist-credit": [{"name": "Another Artist"}], "releases": []},
-                ]}
+        calls = []
+        partial = False
+        offline = False
+        def fetch(url):
+            nonlocal partial, offline
+            calls.append(url)
+            # A concurrent writer must succeed during every external fetch.
+            with sqlite3.connect(main.DB_PATH, timeout=.1) as writer:
+                writer.execute('UPDATE tracks SET size=size WHERE id=1')
+            if offline:
+                raise RuntimeError('offline')
+            if '/release-group/' in url:
+                if partial:
+                    raise RuntimeError('group unavailable')
+                return {'id': 'group-1', 'first-release-date': '1999-01-01'}
+            if '/release/release-1' in url:
+                return {'id': 'release-1', 'title': 'album', 'date': '2004-01-01',
+                        'release-group': {'id': 'group-1'},
+                        'artist-credit': [{'name': 'artist', 'artist': {'id': 'artist-1', 'name': 'artist'}}],
+                        'media': [{'position': 1, 'format': 'CD', 'track-count': 3, 'tracks': [
+                            {'position': i, 'title': title, 'recording': {'id': f'rec-{i}', 'title': title}}
+                            for i, title in ((1, 'one'), (2, 'two'), (3, 'three'))]}]}
             raise AssertionError(url)
-        con.execute("DELETE FROM web_entity_matches")
-        con.execute("DELETE FROM web_metadata")
-        con.commit()
-        provider._fetch_json_fn = ambiguous
+        def similar(*args):
+            with sqlite3.connect(main.DB_PATH, timeout=.1) as writer:
+                writer.execute('UPDATE tracks SET size=size WHERE id=1')
+            return {'similartracks': {'track': [{'name': 'two', 'artist': {'name': 'artist'}}]}}
+        # Suppress background workers for deterministic direct integration calls.
+        with patch.object(albuminfo.threading.Thread, 'start'):
+            provider = main.NowPlayingMetadata(None, fetch_json=fetch, lastfm_call=similar)
+        state = provider._resolve(1)
+        assert state['status'] == 'ready', state
+        assert state['album']['firstReleaseDate'] == '1999-01-01'
+        assert state['album']['releaseDate'] == '2004-01-01'
+        assert state['similar'][0]['trackId'] == 2, state
+        count = len(calls)
+        second = provider._resolve(2)
+        assert state["recordingId"] == "rec-1" and second["recordingId"] == "rec-2"
+        assert len(calls) == count, 'another song fetched the same album again'
+        row = dict(con.execute('SELECT * FROM tracks WHERE id=1').fetchone())
+        scope = store.scope_key(row)
+        provider._apply_command(1, 'choose', 'release-1')
+        provider._apply_command(1, 'edit', {'description': 'my correction'})
+        offline = True
         state = provider._resolve(1, True)
-        check(state["status"] == "ambiguous", state)
-        check(len(state["candidates"]) == 2, state)
-        check(provider.choose(1, "maybe-1"), "candidate choice refused")
-        chosen = con.execute("SELECT entity_id,manual FROM web_entity_matches").fetchone()
-        check(tuple(chosen) == ("maybe-1", 1), chosen)
+        assert state['match']['manual'] and state['match']['id'] == 'release-1'
+        assert state['album']['description'] == 'my correction'
+        assert state['albumError'] == 'offline' and state['similar'], state
+        cached = store.cache_get(con, scope, 'resolution')
+        assert cached['expires_at'] - time.time() <= 301
+        provider._apply_command(1, 'clear', None)
+        assert store.user_get(con, scope, 'match')['id'] == 'release-1'
+        assert provider._cached_state(1)['album']['description'] == 'my correction'
+        provider._apply_command(1, 'revert', 'album')
+        assert not store.user_get(con, scope, 'album')
+        assert con.execute("SELECT deleted FROM music_info_user WHERE kind='album'").fetchone()[0] == 1
+        offline, partial = False, True
+        state = provider._resolve(1, True)
+        assert state['status'] == 'ready' and 'group unavailable' in state['albumError'], state
+        assert store.cache_get(con, scope, 'resolution')['expires_at'] - time.time() <= 301
+        partial = False
+        provider._lastfm_call = lambda *_: (_ for _ in ()).throw(RuntimeError('lastfm offline'))
+        state = provider._resolve(1, True)
+        assert state['albumError'] == '' and state['similarError'] == 'lastfm offline', state
+        assert state['similar'], 'outage erased local recommendations'
+        # Recording-level legacy choices cannot bleed into another song.
+        oldkey = provider._cache_key(row)
+        con.execute('''INSERT INTO web_entity_matches VALUES
+          (?, 'recording','musicbrainz','old-rec','old recording',1,'ready','[]',1,1,'')''', (oldkey,))
+        con.commit()
+        provider._legacy(con, row, scope)
+        assert store.user_get(con, 'track:' + row['path'], 'legacy_match')['recordingId'] == 'old-rec'
+        assert not store.user_get(con, scope, 'legacy_match')
+        # An obsolete external response cannot mutate its cache or current UI.
+        provider._generation = 2
+        provider._active_generation = 2
+        def obsolete(*_):
+            provider._generation = 3
+            return {'similartracks': {'track': []}}
+        provider._lastfm_call = obsolete
+        before = con.execute("SELECT body_json,fetched_at FROM music_info_cache WHERE kind='similar' ORDER BY cache_key").fetchall()
+        try:
+            provider._resolve(1, True)
+            raise AssertionError('obsolete generation accepted')
+        except albuminfo.Superseded:
+            pass
+        after = con.execute("SELECT body_json,fetched_at FROM music_info_cache WHERE kind='similar' ORDER BY cache_key").fetchall()
+        assert [tuple(r) for r in before] == [tuple(r) for r in after]
+        provider._deliver(2, {'trackId': 99})
+        assert provider.state['trackId'] != 99
+        provider._active_generation = None
+        assert provider.edit(2, "album", {"description": "saved on close"})
+        provider.close()
+        assert store.user_get(con, scope, "album")["description"] == "saved on close"
+        assert not provider.refresh(2), "closed worker accepted another request"
+        entered, release = threading.Event(), threading.Event()
+        def slow_fetch(url):
+            entered.set()
+            assert release.wait(2), "fixture fetch was never released"
+            return fetch(url)
+        live_worker = main.NowPlayingMetadata(None, fetch_json=slow_fetch, lastfm_call=similar)
+        live_worker.refresh(1)
+        assert entered.wait(2), "worker never entered fixture fetch"
+        live_worker.edit(1, "album", {"description": "queued during download"})
+        started = time.monotonic()
+        live_worker.close()
+        assert time.monotonic() - started < .5, "shutdown waited on network"
+        assert store.user_get(con, scope, "album")["description"] == "queued during download"
+        release.set()
+        live_worker._worker.join(2)
+        assert not live_worker._worker.is_alive()
         con.close()
-
-        # Upgrade the short-lived development schema without losing the newest
-        # cached response for an entity.
-        main.DATA = Path(td) / "old-data"
-        main.DB_PATH = main.DATA / "library.db"
-        main.DATA.mkdir(parents=True)
-        old = __import__("sqlite3").connect(main.DB_PATH)
-        old.execute("""CREATE TABLE web_metadata (
-          cache_key TEXT NOT NULL, kind TEXT NOT NULL, source TEXT NOT NULL,
-          body_json TEXT NOT NULL DEFAULT '{}', fetched_at REAL, expires_at REAL,
-          error TEXT, PRIMARY KEY (cache_key,kind,source))""")
-        old.execute("INSERT INTO web_metadata VALUES (?,?,?,?,?,?,?)",
-                    ("album:key", "album", "old", '{"title":"old"}', 1, 2, None))
-        old.execute("INSERT INTO web_metadata VALUES (?,?,?,?,?,?,?)",
-                    ("album:key", "album", "new", '{"title":"new"}', 2, 3, None))
-        old.commit()
-        old.close()
+        # Retain the pre-existing upgrade regression for early cache schemas.
+        main.DATA = Path(td) / 'old-data'
+        main.DB_PATH = main.DATA / 'library.db'
+        main.DATA.mkdir()
+        with sqlite3.connect(main.DB_PATH) as old:
+            old.execute("""CREATE TABLE web_metadata (
+              cache_key TEXT, kind TEXT, source TEXT, body_json TEXT,
+              fetched_at REAL, expires_at REAL, error TEXT,
+              PRIMARY KEY(cache_key,kind,source))""")
+            for stamp, source in ((1, 'old'), (2, 'new')):
+                old.execute('INSERT INTO web_metadata VALUES (?,?,?,?,?,?,?)',
+                            ('album:key', 'album', source, json.dumps({'title': source}), stamp, 3, None))
         upgraded = main.open_db()
-        pk = [r["name"] for r in upgraded.execute("PRAGMA table_info(web_metadata)") if r["pk"]]
-        check(pk == ["cache_key", "kind"], pk)
-        row = upgraded.execute("SELECT source,body_json FROM web_metadata").fetchone()
-        check(tuple(row) == ("new", '{"title":"new"}'), row)
+        pk = [r['name'] for r in upgraded.execute('PRAGMA table_info(web_metadata)') if r['pk']]
+        assert pk == ['cache_key', 'kind']
+        assert upgraded.execute('SELECT source FROM web_metadata').fetchone()[0] == 'new'
         upgraded.close()
-    print("now-info-test: ok")
+    print('now-info-test: ok')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     run()
