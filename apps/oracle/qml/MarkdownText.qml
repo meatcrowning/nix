@@ -47,7 +47,7 @@ TextEdit {
     renderType: Text.NativeRendering
     color: Theme.text
     selectionColor: Theme.highlight
-    selectedTextColor: Theme.accent
+    selectedTextColor: Theme.selectionText
 
     // Links take the palette accent, not Qt's off-palette default blue. TextEdit
     // has no `linkColor` (that is Text-only); the link colour comes from the

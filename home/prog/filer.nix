@@ -47,7 +47,7 @@ let
         # the built-in viewer decodes beyond qtbase's png/jpg/gif — wrapQtAppsHook
         # puts them on QT_PLUGIN_PATH. (On `air` filer runs Fedora's system Qt,
         # which already ships these, so this only matters for `top`.)
-        buildInputs = [ pyEnv pkgs.qt6.qtdeclarative pkgs.qt6.qtimageformats pkgs.qt6.qtsvg ];
+        buildInputs = [ pyEnv pkgs.kdePackages.plasma-integration pkgs.kdePackages.qqc2-desktop-style pkgs.kdePackages.oxygen pkgs.qt6.qtdeclarative pkgs.qt6.qtimageformats pkgs.qt6.qtsvg ];
 
         # glib gives filer `gio`, which is what BOTH "trash" actions shell out
         # to — and it was on no PATH the app could ever see (not the session's,

@@ -350,13 +350,13 @@ Window {
         signal clicked()
         Layout.preferredWidth: Math.round(Theme.fontSize * (label.length + 2))
         Layout.preferredHeight: Math.round(Theme.fontSize * 2)
-        color: active ? Theme.accent : Theme.bgAlt
+        color: active ? Theme.highlight : Theme.buttonBg
         radius: Theme.rounding
         border { color: Theme.border; width: Theme.ctrlBorder }
         Text {
             anchors.centerIn: parent
             text: label
-            color: active ? Theme.bg : Theme.text
+            color: active ? Theme.selectionText : Theme.buttonText
             font { family: Theme.font; pixelSize: Theme.fontSize }
         }
         MouseArea { anchors.fill: parent; onClicked: clicked() }

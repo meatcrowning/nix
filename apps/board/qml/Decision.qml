@@ -330,7 +330,7 @@ Item {
                     renderType: Text.NativeRendering
                     color: card.fgText
                     selectionColor: Theme.highlight
-                    selectedTextColor: Theme.accent
+                    selectedTextColor: Theme.selectionText
                     selectByMouse: true
                     wrapMode: TextEdit.Wrap
                     text: card.draft !== "" ? card.draft

@@ -155,7 +155,7 @@ Item {
             renderType: Text.NativeRendering
             color: box.fgText
             selectionColor: Theme.highlight
-            selectedTextColor: Theme.accent
+            selectedTextColor: Theme.selectionText
             selectByMouse: true
             wrapMode: TextEdit.Wrap
             text: box.draft

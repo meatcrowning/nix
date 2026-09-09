@@ -136,7 +136,7 @@ Rectangle {
                     clip: true
                     selectByMouse: true
                     selectionColor: Theme.highlight
-                    selectedTextColor: Theme.accent
+                    selectedTextColor: Theme.selectionText
 
                     onTextChanged: root.requery()
 
@@ -246,7 +246,7 @@ Rectangle {
                     clip: true
                     selectByMouse: true
                     selectionColor: Theme.highlight
-                    selectedTextColor: Theme.accent
+                    selectedTextColor: Theme.selectionText
 
                     Keys.onPressed: (e) => {
                         if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) {

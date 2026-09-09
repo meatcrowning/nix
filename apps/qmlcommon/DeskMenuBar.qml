@@ -136,7 +136,7 @@ Item {
     Rectangle {
         anchors.fill: parent
         visible: root.shown
-        color: Theme.bg
+        color: Theme.windowBg
 
         // The seam under the bar, the one line that says the chrome ends here.
         Rectangle {
@@ -175,7 +175,7 @@ Item {
                         id: titleText
                         anchors.centerIn: parent
                         text: titleCell.modelData.name
-                        color: titleCell.open ? Theme.accent : Theme.text
+                        color: titleCell.open ? Theme.selectionText : Theme.windowText
                     }
 
                     MouseArea {

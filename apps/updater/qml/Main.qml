@@ -177,6 +177,7 @@ Window {
             anchors.centerIn: parent
             text: btn.label
             color: !btn.enabled ? Theme.inactive
+                 : ma.pressed ? Theme.selectionText
                  : btn.danger ? Theme.crit : win.fgText
         }
         MouseArea {

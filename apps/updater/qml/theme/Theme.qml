@@ -6,6 +6,17 @@ import QtQuick
 // context property and not a shadowing type. See reader/qml/theme/Theme.qml for
 // the full commentary; keep the copies in step (docs/DESIGN.md §2).
 QtObject {
+    // Forward native roles; the wallpaper aliases are Hyprland-only.
+    readonly property bool plasmaPalette: typeof WalPalette !== "undefined" && WalPalette.native === true
+    readonly property color windowBg: plasmaPalette ? WalPalette.window : bg
+    readonly property color windowText: plasmaPalette ? WalPalette.windowText : text
+    readonly property color buttonBg: plasmaPalette ? WalPalette.button : bgAlt
+    readonly property color buttonText: plasmaPalette ? WalPalette.buttonText : text
+    readonly property color selectionText: plasmaPalette ? WalPalette.highlightedText : accent
+    readonly property color disabledText: plasmaPalette ? WalPalette.disabledText : inactive
+    readonly property color link: plasmaPalette ? WalPalette.link : accent
+    readonly property color focusColor: plasmaPalette ? WalPalette.focus : accent
+
     readonly property string font: DeskStyle.fontFamily
 
     readonly property bool fontSmooth: (typeof DeskStyle !== "undefined" && DeskStyle)
@@ -65,10 +76,10 @@ QtObject {
     readonly property color crit:      WalPalette.crit
     readonly property color info:      WalPalette.info
 
-    readonly property color inactive: Qt.rgba(0x59 / 255, 0x59 / 255, 0x59 / 255, 0xaa / 255)
+    readonly property color inactive: plasmaPalette ? WalPalette.inactive : Qt.rgba(0x59 / 255, 0x59 / 255, 0x59 / 255, 0xaa / 255)
 
-    readonly property color windowBorder:         Qt.rgba(accent.r, accent.g, accent.b, 0xee / 255)
-    readonly property color windowBorderInactive: Qt.rgba(0x59 / 255, 0x59 / 255, 0x59 / 255, 0xaa / 255)
+    readonly property color windowBorder: plasmaPalette ? WalPalette.border : Qt.rgba(accent.r, accent.g, accent.b, 0xee / 255)
+    readonly property color windowBorderInactive: plasmaPalette ? WalPalette.border : Qt.rgba(0x59 / 255, 0x59 / 255, 0x59 / 255, 0xaa / 255)
     readonly property int   windowBorderWidth: {
         const w = (typeof DeskStyle !== "undefined" && DeskStyle)
                 ? Number(DeskStyle.borderWidth) : NaN;

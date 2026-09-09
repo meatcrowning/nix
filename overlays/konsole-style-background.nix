@@ -5,6 +5,9 @@
 # highlight.  The scheme itself is still regenerated live by konsole-theme.
 final: prev: {
   kdePackages = prev.kdePackages // {
+    oxygen = prev.kdePackages.oxygen.overrideAttrs (old: {
+      patches = (old.patches or []) ++ [ ../home/prog/oxygen-native-content.patch ];
+    });
     konsole = prev.kdePackages.konsole.overrideAttrs (old: {
       patches = (old.patches or []) ++ [ ../home/prog/konsole-style-background.patch ];
     });

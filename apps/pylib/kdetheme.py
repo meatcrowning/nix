@@ -1,58 +1,10 @@
-"""The apps' KDE-session half: under Plasma they follow the KDE global theme.
+"""KDE session detection and native role access for non-widget exports.
 
-The desktop these apps belong to is the Hyprland one — wallpaper-derived
-palette out of the panel's `Theme.qml`, pixel font out of the panel's
-`settings.json`, docs/DESIGN.md all the way down. But Plasma 6 is installed
-alongside it as a real alternative session (`sys/dsk/plasma.nix`), and in THAT
-session the desktop's look is not the panel's: it is whatever KDE global theme
-is picked in System Settings, which every other Qt app on the box already
-obeys through `kdeglobals`. An app that kept drawing the wal palette there is
-the one window that ignores the theme.
-
-So: **the session decides the source, and nothing else changes.**
-
-    Hyprland session   ->  panel Theme.qml  + panel settings.json   (as before)
-    Plasma session     ->  ~/.config/kdeglobals                     (this file)
-
-The mechanism is deliberately the *smallest* one that works: every app already
-has a `Palette` that parses `property color <name>: "#rrggbb"` literals out of
-a file and watches it. Under Plasma this module derives the same twelve tokens
-from the KDE colour scheme and writes them into a generated file of exactly
-that shape (`~/.cache/deskstyle/kde-Theme.qml`), regenerating it whenever
-`kdeglobals` changes. Every app's `Palette`, its watch, and every
-`Theme.*` binding downstream are untouched — the only per-app change is which
-path `Palette` is handed. Fonts and motion go the same way through
-`deskstyle.py`, which asks this module for its values in a Plasma session.
-
-Mapping the twelve tokens onto KDE's roles (docs/DESIGN.md §3 for what each
-one means here; `kdeglobals` groups for what each one means there):
-
-    bg        Colors:Window/BackgroundNormal      the window surface
-    bgAlt     Colors:View/BackgroundNormal        inset surfaces (lists, fields)
-    border    a blend of bg toward the text tone  KDE has no frame-colour key
-    accent    Colors:Window/DecorationFocus       the scheme's accent hue
-    dim       Colors:Window/ForegroundInactive
-    text      Colors:Window/ForegroundNormal
-    textDim   Colors:Window/ForegroundInactive
-    highlight Colors:Selection/BackgroundNormal
-    ok/warn/crit/info   Foreground Positive/Neutral/Negative/Link
-
-`kde_chrome()` goes one step further for the one caller that cannot hand the
-painting back to the style at all — surfer's 4chan re-skin, a web page — and
-returns the KStyle's gradient stops and relief tones so it can imitate one.
-It is None outside a Plasma session and under a flat KStyle, so nothing else
-on this desktop ever sees a gradient because of it.
-
-**The accent and the status four are contrast-guarded, and that guard is not
-optional.** §3 of the design language makes `accent` body text, and several
-apps draw label text in it — while KDE's `DecorationFocus` is designed to be
-seen as a *frame*, not read as a paragraph, and some schemes (Oxygen's
-`ForegroundPositive`, a 0,109,56 green) are unreadable on their own window
-background. A token that fails the ratio is lifted (on a dark background) or
-darkened (on a light one) until it clears it, and `accent` falls back to the
-plain text colour if it cannot get there at all. Both polarities are handled
-because a KDE scheme may be either — the same reason docs/DESIGN.md's own
-light mode fills the same twelve tokens.
+Qt applications use nativepalette.NativePalette, backed by the live native
+QApplication palette. No intermediate Theme.qml is generated for Plasma.
+Web pages and terminal escape sequences cannot host a Qt palette object;
+kde_palette forwards their native View and Selection role values verbatim.
+ANSI colours without native equivalents are the only synthesized colour set.
 """
 
 from __future__ import annotations
@@ -69,10 +21,6 @@ def kdeglobals_path() -> Path:
     return Path(os.environ.get("DESK_KDEGLOBALS")
                 or (Path.home() / ".config" / "kdeglobals"))
 
-
-def generated_path() -> Path:
-    return Path(os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")) \
-        / "deskstyle" / "kde-Theme.qml"
 
 
 # Contrast floors, in the terms docs/DESIGN.md §3.1 already states: body text
@@ -196,60 +144,29 @@ def _mix(a, b, t):
 
 
 def kde_palette(ini=None) -> dict | None:
-    """The twelve tokens from the live KDE colour scheme, or None if there is
-    no readable `kdeglobals` (then the caller keeps the wal palette — a Plasma
-    session with no scheme file is not a reason to draw nothing)."""
+    """Compatibility role names for consumers that cannot host native widgets.
+
+    Values are verbatim KColorScheme View/Selection roles. GUI applications use
+    nativepalette.NativePalette and QApplication.palette() instead. This path
+    serves exported terminal/web text, never a generated application palette.
+    """
     ini = read_ini() if ini is None else ini
-    win = ini.get("Colors:Window")
-    if not win:
+    view = ini.get("Colors:View", ini.get("Colors:Window"))
+    if not view:
         return None
-    view = ini.get("Colors:View", win)
-    sel = ini.get("Colors:Selection", win)
-
-    bg = _rgb(win.get("BackgroundNormal"), (0, 0, 0))
-    text = _rgb(win.get("ForegroundNormal"), (255, 255, 255))
-    inactive = _rgb(win.get("ForegroundInactive"), _mix(bg, text, 0.55))
-    view_bg = _rgb(view.get("BackgroundNormal"), bg)
-    if view_bg == bg:
-        view_bg = _rgb(win.get("BackgroundAlternate"), bg)
-
-    # Legacy twelve-token QML surfaces share WindowText across bg and bgAlt.
-    # A mixed KDE scheme has a separate ViewText role that these surfaces do
-    # not expose. Keep their inset readable; native Qt views use Base/Text
-    # directly and retain the scheme's white content background.
-    if _ratio(text, view_bg) < TEXT_RATIO:
-        view_bg = _rgb(win.get("BackgroundAlternate"), bg)
-        if _ratio(text, view_bg) < TEXT_RATIO:
-            view_bg = bg
-
-    # accent: the scheme's focus hue, but it is body text here (§3), so it has
-    # to be readable as text or it is not the accent — fall back to the plain
-    # foreground rather than ship a colour he cannot read a filename in.
-    accent = _rgb(win.get("DecorationFocus"),
-                  _rgb(sel.get("BackgroundNormal"), text))
-    accent = _readable(accent, bg, TEXT_RATIO)
-    if _ratio(accent, bg) < TEXT_RATIO:
-        accent = text
-
-    def status(key, fallback):
-        return _readable(_rgb(win.get(key), fallback), bg, STATUS_RATIO)
-
+    selection = ini.get("Colors:Selection", view)
+    bg = _rgb(view.get("BackgroundNormal"), (255, 255, 255))
+    text = _rgb(view.get("ForegroundNormal"), (0, 0, 0))
+    secondary = _rgb(view.get("ForegroundInactive"), text)
     return {
-        "bg": bg,
-        "bgAlt": view_bg,
-        # KDE has no frame-colour key at all (Breeze derives its frames from
-        # the window colours the same way): a quarter of the way from the
-        # surface toward the text tone reads as a hairline in both polarities.
-        "border": _mix(bg, text, 0.26),
-        "accent": accent,
-        "dim": inactive,
-        "text": text,
-        "textDim": inactive,
-        "highlight": _rgb(sel.get("BackgroundNormal"), _mix(bg, accent, 0.4)),
-        "ok": status("ForegroundPositive", (0, 170, 90)),
-        "warn": status("ForegroundNeutral", (200, 160, 60)),
-        "crit": status("ForegroundNegative", (220, 70, 60)),
-        "info": status("ForegroundLink", accent),
+        "bg": bg, "bgAlt": _rgb(view.get("BackgroundAlternate"), bg),
+        "border": secondary, "accent": text, "dim": secondary,
+        "text": text, "textDim": secondary,
+        "highlight": _rgb(selection.get("BackgroundNormal"), bg),
+        "ok": _rgb(view.get("ForegroundPositive"), text),
+        "warn": _rgb(view.get("ForegroundNeutral"), text),
+        "crit": _rgb(view.get("ForegroundNegative"), text),
+        "info": _rgb(view.get("ForegroundLink"), text),
     }
 
 
@@ -521,121 +438,18 @@ def kde_motion(ini=None):
 # --------------------------------------------------------------------------- #
 #  the generated Theme.qml every app's Palette already knows how to read
 # --------------------------------------------------------------------------- #
-def render_qml(colors: dict) -> str:
-    lines = [
-        "import QtQuick",
-        "",
-        "// GENERATED by apps/pylib/kdetheme.py from ~/.config/kdeglobals.",
-        "// The KDE global theme's colour scheme, in the shape every app's",
-        "// Palette already parses. Rewritten whenever kdeglobals changes;",
-        "// read only in a Plasma session. Do not edit.",
-        "QtObject {",
-    ]
-    for k in KEYS:
-        lines.append('    property color %s: "%s"' % (k, _hex(colors[k])))
-    lines.append("}")
-    return "\n".join(lines) + "\n"
-
-
-def write_generated(colors: dict, path=None) -> bool:
-    """Write the generated file ATOMICALLY, and only when it changed.
-
-    Atomic because the reader is a `QFileSystemWatcher` that also watches the
-    directory — a half-written file is a palette of defaults on screen for a
-    frame. Unchanged content is not rewritten so a `kdeglobals` touch that
-    moved no colour does not repaint every app."""
-    path = Path(path or generated_path())
-    text = render_qml(colors)
-    try:
-        if path.exists() and path.read_text(encoding="utf-8") == text:
-            return False
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, path)
-        return True
-    except OSError:
-        return False
-
-
-class _Bridge:
-    """Keeps the generated file level with `kdeglobals` for the process's life.
-
-    A `QFileSystemWatcher` on the file AND its directory, for the reason
-    deskstyle.py states: KDE writes `kdeglobals` by temp-file-and-rename, which
-    swaps the inode out from under a file-only watch.
-    """
-
-    def __init__(self):
-        from PySide6.QtCore import QFileSystemWatcher  # local: the client half
-        self._watcher = QFileSystemWatcher()           # of theme_source() may
-        self._watcher.fileChanged.connect(self._sync)  # run before any Qt app
-        self._watcher.directoryChanged.connect(self._sync)
-        self._rewatch()
-        self._sync()
-
-    def _rewatch(self):
-        have = set(self._watcher.files()) | set(self._watcher.directories())
-        kg = kdeglobals_path()
-        for p in (str(kg.parent), str(kg)):
-            if p not in have and os.path.exists(p):
-                self._watcher.addPath(p)
-
-    def _sync(self, *_):
-        self._rewatch()
-        colors = kde_palette()
-        if colors and write_generated(colors):
-            # The file watcher remains as a cross-process fallback.  These are
-            # the apps in THIS process, and they need not wait for that second
-            # filesystem event after KDE has already told us the scheme moved.
-            for callback in tuple(_palette_callbacks):
-                try:
-                    callback()
-                except Exception:
-                    pass
-
-
-_bridge = None
 _palette_callbacks = []
 
 
 def watch_palette(callback):
-    """Call ``callback`` as soon as Plasma has derived a new app palette.
-
-    Watching the generated file is still necessary for the Hyprland path, but
-    using it as the only Plasma notification adds a second inotify/event-loop
-    hop after ``kdeglobals`` changes.  Keep these callbacks process-local: the
-    bridge already observes the source KDE writes, so a live app can repaint in
-    that same turn rather than waiting for its watcher to notice our generated
-    replacement.
-    """
+    """Subscribe to NativePalette's native application palette notification."""
     if is_plasma() and callback not in _palette_callbacks:
         _palette_callbacks.append(callback)
 
 
 def theme_source(default):
-    """The file this app's `Palette` should read and watch.
+    """Legacy constructor argument; session_palette selects the implementation.
 
-    In the Hyprland session that is `default` — the panel's `Theme.qml`, exactly
-    as before. In a Plasma session it is the generated KDE palette, kept live
-    by a watcher this call installs (and whose reference this module keeps, or
-    Python would collect the watcher and the theme would stop following the
-    scheme). Falls back to `default` if `kdeglobals` cannot be read at all.
-
-    Call it in `main()` after the QApplication exists, in place of the constant:
-
-        palette = Palette(theme_source(PANEL_THEME))
+    Plasma never reads this path. Hyprland reads its wallpaper source directly.
     """
-    global _bridge
-    if not is_plasma():
-        return default
-    colors = kde_palette()
-    if not colors:
-        return default
-    write_generated(colors)
-    if _bridge is None:
-        try:
-            _bridge = _Bridge()
-        except Exception:      # no Qt yet / no watcher: the file is still right,
-            pass               # it just stops following a live scheme change
-    return generated_path()
+    return default

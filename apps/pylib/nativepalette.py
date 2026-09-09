@@ -39,16 +39,38 @@ class NativePalette(QObject):
         if app is None:
             raise RuntimeError("native palette requires a Qt application")
         self._semantic = {}
+        self._signature = None
         self._load()
         app.paletteChanged.connect(self._load)
 
     def _load(self, *_):
-        self._semantic = read_ini().get("Colors:View", {})
-        self.changed.emit()
-        # Existing browser/metadata consumers use this notification API.
-        from kdetheme import _palette_callbacks
-        for callback in tuple(_palette_callbacks):
-            callback()
+        ini = read_ini()
+        self._semantic = ini.get("Colors:View", {})
+        palette = QGuiApplication.palette()
+        signature = (palette.cacheKey(), tuple(sorted(self._semantic.items())))
+        if signature != self._signature:
+            self._signature = signature
+            self.changed.emit()
+            from kdetheme import _palette_callbacks
+            for callback in tuple(_palette_callbacks):
+                callback()
+        # Reading kdeglobals is not proof that the platform theme has adopted
+        # it. The apply participant waits for the native paletteChanged signal
+        # when Qt is still on the previous scheme.
+        for group, key, role in (
+            ("Colors:Window", "BackgroundNormal", QPalette.Window),
+            ("Colors:Window", "ForegroundNormal", QPalette.WindowText),
+            ("Colors:View", "BackgroundNormal", QPalette.Base),
+            ("Colors:View", "ForegroundNormal", QPalette.Text),
+        ):
+            raw = ini.get(group, {}).get(key)
+            if raw:
+                try:
+                    expected = QColor(*[int(part) for part in raw.split(",")])
+                except (ValueError, TypeError):
+                    return False
+                if palette.color(role) != expected:
+                    return False
         return True
 
     def _c(self, name):

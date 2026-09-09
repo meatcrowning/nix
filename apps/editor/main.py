@@ -83,6 +83,10 @@ PALETTE_DEFAULTS = {
 }
 
 
+from nativepalette import session_palette
+
+
+@session_palette
 class Palette(QObject):
     """The live wallpaper palette, parsed from the panel's Theme.qml and kept in
     sync via a filesystem watch (identical to reader's, filer's and viewer's).

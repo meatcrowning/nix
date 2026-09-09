@@ -351,7 +351,7 @@ Item {
             // syntax colours under a selection — so it takes the brightest one
             // that is still legible on `highlight`.
             selectionColor: Theme.border
-            selectedTextColor: root.winActive ? Theme.accent : Theme.inactive
+            selectedTextColor: root.winActive ? Theme.selectionText : Theme.inactive
             activeFocusOnPress: true
 
             cursorDelegate: Rectangle {

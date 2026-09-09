@@ -111,7 +111,8 @@ Item {
                 width: 2
                 height: parent.height
                 visible: row.isCurrent
-                color: side.winActive ? Theme.accent : Theme.inactive
+                color: row.isCurrent || ma.containsMouse ? Theme.selectionText
+                     : side.winActive ? Theme.accent : Theme.inactive
             }
 
             PixelText {
@@ -120,7 +121,8 @@ Item {
                 height: parent.height
                 elide: Text.ElideRight
                 text: row.modelData.label
-                color: !side.winActive ? Theme.inactive
+                color: row.isCurrent || ma.containsMouse ? Theme.selectionText
+                     : !side.winActive ? Theme.inactive
                      : row.isCurrent ? Theme.accent
                      : row.modelData.dim ? Theme.textDim : Theme.text
             }

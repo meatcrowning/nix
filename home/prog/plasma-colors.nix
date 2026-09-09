@@ -36,7 +36,8 @@
           OxygenMixed)
             $DRY_RUN_CMD ${pkgs.python3}/bin/python ${../srvs/wal-files/plasma-scheme.py} \
               --template ${./plasma-files/OxygenDarkFlat.colors} \
-              --name OxygenMixed --out "$live" --accent 5880ad --no-apply
+              --name OxygenMixed --out "$live" --accent 5880ad \
+              --light-template ${./plasma-files/OxygenLightFlat.colors} --no-apply
             continue
             ;;
           OxygenLightFlat) source=${./plasma-files/OxygenLightFlat.colors} ;;

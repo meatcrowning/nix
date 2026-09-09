@@ -156,8 +156,8 @@ Item {
                             }
                             elide: Text.ElideRight
                             text: rowItem.modelData.label || ""
-                            color: !rowItem.en ? Theme.inactive
-                                 : rowMa.containsMouse ? Theme.accent : Theme.text
+                            color: !rowItem.en ? Theme.disabledText
+                                 : rowMa.containsMouse ? Theme.selectionText : Theme.text
                         }
 
                         MouseArea {

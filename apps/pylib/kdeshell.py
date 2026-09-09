@@ -254,71 +254,12 @@ def make_app(argv, name: str):
 
 
 def apply_palette(app) -> None:
-    """Put the KDE colour scheme into the widget palette, if it is not there.
+    """Compatibility hook: the KDE platform theme owns QApplication.palette().
 
-    The two halves of this window take their colours from different places: the
-    QML content resolves ours through `kdetheme.py`, and QQC2 controls resolve
-    theirs through Kirigami — both of which read `kdeglobals` — while the
-    menubar, toolbar and statusbar are QWidgets taking `QApplication.palette()`,
-    which comes from the KDE platform theme. Where that plugin is missing the
-    widgets fall back to Qt's default light palette while everything else stays
-    on his dark scheme, and the result is not subtly wrong: it is white text on
-    white, a toolbar that looks empty. Caught by rendering it offscreen, which
-    is precisely the environment where no platform theme exists.
-
-    So: compare the live window colour with what `kdeglobals` says, and only if
-    they disagree build the palette ourselves. When the plugin IS loaded this
-    function measures one colour and returns.
+    Do not reconstruct its groups from kdeglobals or flatten its disabled
+    colours. Offscreen harnesses supply their own explicit native QPalette.
     """
-    from PySide6.QtGui import QPalette, QColor
-    ini = read_ini()
-
-    def col(group, key, fallback=None):
-        spec = (ini.get(group, {}) or {}).get(key)
-        if not isinstance(spec, str):
-            return QColor(fallback) if fallback else None
-        parts = [p.strip() for p in spec.split(",")]
-        try:
-            vals = [int(float(p)) for p in parts[:3]]
-        except ValueError:
-            return QColor(fallback) if fallback else None
-        if len(vals) < 3:
-            return QColor(fallback) if fallback else None
-        return QColor(*vals)
-
-    window = col("Colors:Window", "BackgroundNormal")
-    if window is None:
-        return
-    if app.palette().window().color() == window:
-        return   # the platform theme already did this properly
-
-    pal = QPalette(app.palette())
-    text = col("Colors:Window", "ForegroundNormal", "#000000")
-    view_bg = col("Colors:View", "BackgroundNormal", window.name())
-    view_fg = col("Colors:View", "ForegroundNormal", text.name())
-    btn_bg = col("Colors:Button", "BackgroundNormal", window.name())
-    btn_fg = col("Colors:Button", "ForegroundNormal", text.name())
-    sel_bg = col("Colors:Selection", "BackgroundNormal", "#3daee9")
-    sel_fg = col("Colors:Selection", "ForegroundNormal", "#ffffff")
-    tip_bg = col("Colors:Tooltip", "BackgroundNormal", view_bg.name())
-    tip_fg = col("Colors:Tooltip", "ForegroundNormal", view_fg.name())
-    dis_fg = col("Colors:Window", "ForegroundInactive", text.name())
-    link = col("Colors:View", "ForegroundLink", "#2980b9")
-
-    for role, colour in ((QPalette.Window, window), (QPalette.WindowText, text),
-                         (QPalette.Base, view_bg), (QPalette.Text, view_fg),
-                         (QPalette.AlternateBase, view_bg.darker(105)),
-                         (QPalette.Button, btn_bg), (QPalette.ButtonText, btn_fg),
-                         (QPalette.Highlight, sel_bg), (QPalette.HighlightedText, sel_fg),
-                         (QPalette.ToolTipBase, tip_bg), (QPalette.ToolTipText, tip_fg),
-                         (QPalette.Link, link),
-                         (QPalette.PlaceholderText, dis_fg)):
-        pal.setColor(QPalette.Active, role, colour)
-        pal.setColor(QPalette.Inactive, role, colour)
-        pal.setColor(QPalette.Disabled, role, colour)
-    for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
-        pal.setColor(QPalette.Disabled, role, dis_fg)
-    app.setPalette(pal)
+    return None
 
 
 def apply_widget_style(app) -> None:
@@ -372,6 +313,17 @@ _icon_shells = []
 _kwin_shells = []
 
 
+def content_palette():
+    """A native View context inside a Window, without changing any colours."""
+    from PySide6.QtGui import QPalette
+    from PySide6.QtWidgets import QApplication
+    palette = QPalette(QApplication.palette())
+    for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
+        palette.setBrush(group, QPalette.Window, palette.brush(group, QPalette.Base))
+        palette.setBrush(group, QPalette.WindowText, palette.brush(group, QPalette.Text))
+    return palette
+
+
 def _redress_palette_views():
     """Hand every registered QQuickWidget the app's current palette.
 
@@ -383,7 +335,7 @@ def _redress_palette_views():
     widgets around the view would restyle and the QML inside it would keep the
     old palette."""
     from PySide6.QtWidgets import QApplication
-    pal = QApplication.palette()
+    pal = content_palette()
     font = QApplication.font()
     for views in _palette_view_lists:
         for view in list(views):
@@ -487,8 +439,14 @@ def _build_background_classes():
             # it, blanking the whole QML surface.
             proxy = QWidget()
             proxy.setAttribute(Qt.WA_StyledBackground, True)
-            proxy.setPalette(_group_palette(QPalette.Active if active
-                                            else QPalette.Inactive))
+            palette = _group_palette(QPalette.Active if active else QPalette.Inactive)
+            # The QML view is content. Native shell menus/toolbars retain the
+            # application Window palette; the style paints this surface from
+            # Base/Text, including Oxygen's real light gradient in mixed mode.
+            for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
+                palette.setColor(group, QPalette.Window, palette.color(group, QPalette.Base))
+                palette.setColor(group, QPalette.WindowText, palette.color(group, QPalette.Text))
+            proxy.setPalette(palette)
             proxy.resize(win_w, win_h)
 
             img = QImage(int(win_w * dpr), int(win_h * dpr),
@@ -675,12 +633,12 @@ def _build_shell_class():
             # widgets around them were correct. Handing the view the app's
             # palette propagates it down the QML item tree.
             from PySide6.QtWidgets import QApplication
-            self.view.setPalette(QApplication.palette())
+            self.view.setPalette(content_palette())
             self.view.setFont(QApplication.font())
             # Not transparent (see above) — but not Qt's default WHITE either:
             # anything the styled background image does not cover for a frame
             # should read as the window, not as a flash.
-            self.view.setClearColor(QApplication.palette().window().color())
+            self.view.setClearColor(QApplication.palette().base().color())
             self.window.setCentralWidget(self.view)
 
             # The styled background, as an image provider plus the object QML
@@ -1916,8 +1874,8 @@ def _build_shell_class():
 
             view = QQuickWidget(self.view.engine(), None)
             view.setResizeMode(QQuickWidget.SizeRootObjectToView)
-            view.setPalette(QApplication.palette())
-            view.setClearColor(QApplication.palette().window().color())
+            view.setPalette(content_palette())
+            view.setClearColor(QApplication.palette().base().color())
             self._views.append(view)     # so a scheme change re-dresses it too
 
             ctx = QQmlContext(self.view.engine().rootContext(), view)
@@ -2111,8 +2069,8 @@ def _build_shell_class():
 
             view = QQuickWidget(self.view.engine(), dlg)
             view.setResizeMode(QQuickWidget.SizeRootObjectToView)
-            view.setPalette(QApplication.palette())
-            view.setClearColor(QApplication.palette().window().color())
+            view.setPalette(content_palette())
+            view.setClearColor(QApplication.palette().base().color())
             self._views.append(view)     # so a scheme change re-dresses it too
 
             ctx = QQmlContext(self.view.engine().rootContext(), view)
