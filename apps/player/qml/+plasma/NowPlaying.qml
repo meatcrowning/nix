@@ -73,7 +73,6 @@ Item {
                       top: identity.bottom; leftMargin: 8; rightMargin: 8; bottomMargin: 8 }
             trackId: root.cur.id === undefined ? -1 : root.cur.id
             track: root.cur
-            oxygenSectionBackground: true
             fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
         }
     }
@@ -99,28 +98,34 @@ Item {
         }
     }
 
-    Rectangle {
+    Item {
         id: queueWell
         anchors { left: parent.left; right: parent.right; top: artBox.bottom; bottom: parent.bottom }
         anchors.topMargin: 1
-        color: "transparent"
-        border.width: Theme.ctrlBorder; border.color: Theme.border
-        clip: true
-        StyledBackground {
-            anchors.fill: parent
-        }
+        Rectangle { anchors { left: parent.left; right: parent.right; top: parent.top }
+            height: Theme.ctrlBorder; color: Theme.border }
         PixelText { id: queueHead; x: 8; y: 5
             text: "queue  (" + Player.queueLength + ")"; color: root.fgDim }
-        TrackList {
+
+        Rectangle {
+            id: queueListWell
             anchors { left: parent.left; right: parent.right; bottom: parent.bottom
-                      top: queueHead.bottom; topMargin: 4; margins: Theme.ctrlBorder }
-            model: QueueModel
-            fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
-            showNumber: false; autoHideArtist: true; currentRow: Player.index
-            followCurrent: true; ratingsOnHover: true; isQueue: true
-            onPlayed: function(index) { Player.jumpTo(index) }
-            onOpenAlbumRequested: function(aid) { root.openAlbum(aid) }
-            onBrowseArtistRequested: function(artist) { root.browseArtist(artist) }
+                      top: queueHead.bottom; topMargin: 4; leftMargin: 8; rightMargin: 8
+                      bottomMargin: 8 }
+            color: Qt.darker(Theme.bgAlt, 1.08)
+            border.width: Theme.ctrlBorder; border.color: Theme.border
+            radius: Math.max(2, Theme.rounding)
+            clip: true
+            TrackList {
+                anchors.fill: parent; anchors.margins: Theme.ctrlBorder
+                model: QueueModel
+                fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
+                showNumber: false; autoHideArtist: true; currentRow: Player.index
+                followCurrent: true; ratingsOnHover: true; isQueue: true
+                onPlayed: function(index) { Player.jumpTo(index) }
+                onOpenAlbumRequested: function(aid) { root.openAlbum(aid) }
+                onBrowseArtistRequested: function(artist) { root.browseArtist(artist) }
+            }
         }
     }
 
