@@ -13,6 +13,17 @@ import QtQuick
 // watches the panel's Theme.qml — the file wal-set.sh rewrites on every
 // wallpaper change — so filer recolours live, in lock-step with the bar.
 QtObject {
+    // Forward native roles; the wallpaper aliases are Hyprland-only.
+    readonly property bool plasmaPalette: typeof WalPalette !== "undefined" && WalPalette.native === true
+    readonly property color windowBg: plasmaPalette ? WalPalette.window : bg
+    readonly property color windowText: plasmaPalette ? WalPalette.windowText : text
+    readonly property color buttonBg: plasmaPalette ? WalPalette.button : bgAlt
+    readonly property color buttonText: plasmaPalette ? WalPalette.buttonText : text
+    readonly property color selectionText: plasmaPalette ? WalPalette.highlightedText : accent
+    readonly property color disabledText: plasmaPalette ? WalPalette.disabledText : inactive
+    readonly property color link: plasmaPalette ? WalPalette.link : accent
+    readonly property color focusColor: plasmaPalette ? WalPalette.focus : accent
+
     // Everything uses the same pixel font kitty uses, at the size the Settings
     // window sets for the WHOLE desktop: DeskStyle (pylib/deskstyle.py, a
     // context property installed by main.py) reads the panel's own
@@ -145,12 +156,12 @@ QtObject {
     // window is unfocused (plugin inactiveColor 0xaa595959). Used across filer
     // so its own controls grey to the SAME tone as the titlebar when unfocused
     // — not the wallpaper-derived `dim`, which is a different colour.
-    readonly property color inactive: Qt.rgba(0x59 / 255, 0x59 / 255, 0x59 / 255, 0xaa / 255)
+    readonly property color inactive: plasmaPalette ? WalPalette.inactive : Qt.rgba(0x59 / 255, 0x59 / 255, 0x59 / 255, 0xaa / 255)
 
     // Frame matching the Hyprland active-window border, so overlay surfaces read
     // as windows. Derived from accent so it recolours alongside the palette.
-    readonly property color windowBorder:         Qt.rgba(accent.r, accent.g, accent.b, 0xee / 255)
-    readonly property color windowBorderInactive: Qt.rgba(0x59 / 255, 0x59 / 255, 0x59 / 255, 0xaa / 255)
+    readonly property color windowBorder: plasmaPalette ? WalPalette.border : Qt.rgba(accent.r, accent.g, accent.b, 0xee / 255)
+    readonly property color windowBorderInactive: plasmaPalette ? WalPalette.border : Qt.rgba(0x59 / 255, 0x59 / 255, 0x59 / 255, 0xaa / 255)
     readonly property int   windowBorderWidth: {
         // The desktop's GLOBAL border width (Settings > appearance > theme),
         // published live by DeskStyle. Guarded like lineHeight above —

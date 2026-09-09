@@ -44,7 +44,7 @@ let
         dontUnpack = true;
 
         nativeBuildInputs = [ pkgs.qt6.wrapQtAppsHook pkgs.makeWrapper ];
-        buildInputs = [ pyEnv pkgs.qt6.qtdeclarative ];
+        buildInputs = [ pyEnv pkgs.kdePackages.plasma-integration pkgs.kdePackages.qqc2-desktop-style pkgs.kdePackages.oxygen pkgs.qt6.qtdeclarative ];
 
         dontWrapQtApps = true; # we wrap the python launcher ourselves
         installPhase = ''

@@ -1111,7 +1111,8 @@ Rectangle {
                 anchors { left: parent.left; leftMargin: 6 + row.indent + 20; right: szText.left; rightMargin: 4; verticalCenter: parent.verticalCenter }
                 elide: Text.ElideRight
                 text: glyphs.px(row.modelData.name)
-                color: !view.winActive ? Theme.inactive : (row.modelData.isDir ? Theme.accent : Theme.text)
+                color: view.selection.indexOf(row.abs) >= 0 ? Theme.selectionText
+                     : !view.winActive ? Theme.inactive : (row.modelData.isDir ? Theme.accent : Theme.text)
             }
             // columns: size | modified | created. The timestamps are fixed
             // widths so they line up across rows; the SIZE is intrinsic, and

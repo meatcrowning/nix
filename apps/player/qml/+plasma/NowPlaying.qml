@@ -19,10 +19,6 @@ Item {
     readonly property int topH: Math.max(180, Math.min(height - 120, height * topFrac))
     readonly property int artW: Math.max(140, Math.min(width - 260, width * artFrac))
 
-    function lighter(c, amount) {
-        return Qt.rgba(c.r + (1 - c.r) * amount, c.g + (1 - c.g) * amount,
-                       c.b + (1 - c.b) * amount, c.a)
-    }
 
     Rectangle {
         id: artBox
@@ -113,7 +109,7 @@ Item {
             anchors { left: parent.left; right: parent.right; bottom: parent.bottom
                       top: queueHead.bottom; topMargin: 4; leftMargin: 8; rightMargin: 8
                       bottomMargin: 8 }
-            color: Qt.darker(Theme.bgAlt, 1.08)
+            color: Theme.bgAlt
             border.width: Theme.ctrlBorder; border.color: Theme.border
             radius: Math.max(2, Theme.rounding)
             clip: true

@@ -106,6 +106,9 @@ class StyleParticipant:
         self._watcher.directoryChanged.connect(self._changed)
         self._acknowledged: tuple[int, str] | None = None
         self._watch_paths()
+        owner = getattr(reload_palette, "__self__", None)
+        if owner is not None and getattr(owner, "native", False):
+            owner.changed.connect(self._schedule)
         send_record(encode_record("register", participant=self._participant, pid=os.getpid()))
         self._schedule()
 

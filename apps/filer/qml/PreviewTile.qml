@@ -162,7 +162,7 @@ Rectangle {
             text: glyphs.px(tile.entry.name)
             elide: Text.ElideMiddle
             horizontalAlignment: Text.AlignHCenter
-            color: !tile.winActive ? Theme.inactive : (tile.selected ? Theme.accent : Theme.text)
+            color: !tile.winActive ? Theme.inactive : (tile.selected ? Theme.selectionText : Theme.text)
         }
     }
 

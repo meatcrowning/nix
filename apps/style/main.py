@@ -108,6 +108,10 @@ def _picker_active_wallpaper(root: Path) -> str:
         return ""
 
 
+from nativepalette import session_palette
+
+
+@session_palette
 class Palette(QObject):
     """The app's live palette reader, matching the other Qt applications."""
 

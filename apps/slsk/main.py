@@ -60,6 +60,10 @@ PALETTE_DEFAULTS = {
 }
 
 
+from nativepalette import session_palette
+
+
+@session_palette
 class Palette(QObject):
     changed = Signal()
 

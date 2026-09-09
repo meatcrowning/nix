@@ -30,7 +30,7 @@ TextEdit {
                       : Theme.editorFontForScale(Screen.devicePixelRatio)
     renderType: Text.NativeRendering
     selectionColor: Theme.highlight
-    selectedTextColor: Theme.accent
+    selectedTextColor: Theme.selectionText
     // The default is Qt's off-palette blue; the caller sets a themed colour.
     color: Theme.text
 }

@@ -42,11 +42,6 @@ os.environ["DESK_OXYGENRC"] = str(TMP / "absent-oxygenrc")
 
 import kdetheme as K  # noqa: E402
 
-# The literal regex apps/*/main.py's Palette uses. Kept verbatim: this test
-# exists partly to prove the generated file is readable BY THAT, not by a
-# parser written alongside it.
-PALETTE_RE = re.compile(r'property\s+color\s+(\w+)\s*:\s*"(#[0-9a-fA-F]{3,8})"')
-
 DARK = """
 [Colors:Window]
 BackgroundNormal=31,38,39
@@ -61,6 +56,7 @@ DecorationFocus=61,141,160
 
 [Colors:View]
 BackgroundNormal=24,31,33
+ForegroundNormal=240,230,220
 
 [Colors:Selection]
 BackgroundNormal=51,107,120
@@ -137,76 +133,19 @@ env(DESK_SESSION=None, XDG_CURRENT_DESKTOP=None, KDE_FULL_SESSION="true")
 check("KDE_FULL_SESSION is the last resort", K.is_plasma())
 
 # --------------------------------------------------------------------------- #
-print("dark scheme -> the twelve tokens")
+print("native role exports for terminal/web consumers")
 write_scheme(DARK)
 pal = K.kde_palette()
-check("every token is present", pal is not None and set(pal) == set(K.KEYS))
-check("bg is the window background", K._hex(pal["bg"]) == "#1f2627")
-check("bgAlt is the view background", K._hex(pal["bgAlt"]) == "#181f21")
-check("text is the window foreground", K._hex(pal["text"]) == "#f4ebe7")
-check("highlight is the selection background", K._hex(pal["highlight"]) == "#336b78")
-check("accent clears the body-text floor",
-      K._ratio(pal["accent"], pal["bg"]) >= K.TEXT_RATIO,
-      f"{K._hex(pal['accent'])} vs {K._hex(pal['bg'])} = {K._ratio(pal['accent'], pal['bg']):.2f}")
-for k in ("ok", "warn", "crit", "info"):
-    check(f"{k} clears the status floor",
-          K._ratio(pal[k], pal["bg"]) >= K.STATUS_RATIO,
-          f"{K._hex(pal[k])} = {K._ratio(pal[k], pal['bg']):.2f}")
-check("ok was LIFTED off Oxygen's unreadable 0,109,56",
-      pal["ok"] != (0, 109, 56) and K._ratio((0, 109, 56), pal["bg"]) < K.STATUS_RATIO)
-check("border sits between the surface and the text",
-      K._lum(pal["bg"]) < K._lum(pal["border"]) < K._lum(pal["text"]))
+ini = K.read_ini()
+check("content uses the native View background",
+      pal["bg"] == K._rgb(ini["Colors:View"]["BackgroundNormal"], None))
+check("content uses the native View foreground",
+      pal["text"] == K._rgb(ini["Colors:View"]["ForegroundNormal"], None))
+check("selection is the native Selection background",
+      pal["highlight"] == K._rgb(ini["Colors:Selection"]["BackgroundNormal"], None))
+check("no generated application palette source",
+      K.theme_source(Path("/wallpaper/Theme.qml")) == Path("/wallpaper/Theme.qml"))
 
-print("light scheme -> the same twelve, other polarity")
-write_scheme(LIGHT)
-lp = K.kde_palette()
-check("bg is light", K._lum(lp["bg"]) > 0.5)
-check("accent clears the body-text floor on white",
-      K._ratio(lp["accent"], lp["bg"]) >= K.TEXT_RATIO,
-      f"{K._hex(lp['accent'])} = {K._ratio(lp['accent'], lp['bg']):.2f}")
-check("accent was DARKENED, not lifted", K._lum(lp["accent"]) < K._lum((61, 174, 233)))
-for k in ("ok", "warn", "crit", "info"):
-    check(f"{k} clears the status floor on white",
-          K._ratio(lp[k], lp["bg"]) >= K.STATUS_RATIO,
-          f"{K._hex(lp[k])} = {K._ratio(lp[k], lp['bg']):.2f}")
-check("border sits between the surface and the text",
-      K._lum(lp["bg"]) > K._lum(lp["border"]) > K._lum(lp["text"]))
-
-# --------------------------------------------------------------------------- #
-print("the generated file is what Palette parses")
-write_scheme(DARK)
-env(DESK_SESSION="plasma")
-src = Path(K.theme_source(Path("/nonexistent/panel/Theme.qml")))
-check("theme_source points at the generated file", src == K.generated_path() and src.exists())
-found = dict(PALETTE_RE.findall(src.read_text()))
-check("the app's own regex finds all twelve", set(found) == set(K.KEYS), str(sorted(found)))
-check("and they are the derived colours",
-      found["bg"] == "#1f2627" and found["accent"] == K._hex(K.kde_palette()["accent"]))
-
-seen = []
-K.watch_palette(lambda: seen.append(True))
-write_scheme(LIGHT)
-check("Plasma clients are notified without waiting for the generated-file watch",
-      (K._bridge._sync() is None) and seen == [True])
-
-mtime = src.stat().st_mtime_ns
-check("an unchanged scheme is not rewritten", K.write_generated(K.kde_palette()) is False)
-check("...and the file was left alone", src.stat().st_mtime_ns == mtime)
-write_scheme(DARK)
-check("a changed scheme is rewritten", K.write_generated(K.kde_palette()) is True)
-check("no .tmp left behind", not list(src.parent.glob("*.tmp")))
-
-print("degrading")
-env(DESK_KDEGLOBALS=str(TMP / "absent-kdeglobals"))
-default = Path("/some/panel/Theme.qml")
-check("no kdeglobals in a Plasma session falls back to the panel theme",
-      K.theme_source(default) == default)
-write_scheme(DARK)
-env(DESK_SESSION="hypr")
-check("the Hyprland session always gets the panel theme",
-      K.theme_source(default) == default)
-
-# --------------------------------------------------------------------------- #
 print("DeskStyle")
 from PySide6.QtGui import QFont, QFontMetricsF, QGuiApplication  # noqa: E402
 

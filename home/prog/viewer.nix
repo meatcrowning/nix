@@ -49,7 +49,7 @@ let
         # `QT_FFMPEG_DECODING_HW_DEVICE_TYPES= viewer x.webm` still bisects it by
         # hand. book is not NVIDIA and keeps Qt's default (the `air` branch above
         # has no wrapper to set it in).
-        buildInputs = [ pyEnv pkgs.qt6.qtdeclarative pkgs.qt6.qtimageformats pkgs.qt6.qtsvg pkgs.qt6.qtmultimedia ];
+        buildInputs = [ pyEnv pkgs.kdePackages.plasma-integration pkgs.kdePackages.qqc2-desktop-style pkgs.kdePackages.oxygen pkgs.qt6.qtdeclarative pkgs.qt6.qtimageformats pkgs.qt6.qtsvg pkgs.qt6.qtmultimedia ];
 
         dontWrapQtApps = true; # we wrap the python launcher ourselves
         installPhase = ''

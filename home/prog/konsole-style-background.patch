@@ -12,7 +12,7 @@ index 5d819327..ec602555 100644
 +#include <KColorScheme>
 +#include <KSharedConfig>
  #include <QtMath>
-@@ -620,5 +625,45 @@ void TerminalPainter::drawBackground(QPainter &painter, const QRect &rect, const QColor &backgroundColor, bool useOpacitySetting)
+@@ -620,5 +625,49 @@ void TerminalPainter::drawBackground(QPainter &painter, const QRect &rect, const QColor &backgroundColor, bool useOpacitySetting)
  void TerminalPainter::drawBackground(QPainter &painter, const QRect &rect, const QColor &backgroundColor, bool useOpacitySetting)
  {
 +    // A generated colour scheme can ask for the owning window's painted
@@ -36,6 +36,10 @@ index 5d819327..ec602555 100644
 +                for (const QPalette::ColorGroup target : {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
 +                    palette.setColor(target, static_cast<QPalette::ColorRole>(role), color);
 +                }
++            }
++            for (const QPalette::ColorGroup target : {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
++                palette.setColor(target, QPalette::Window, palette.color(target, QPalette::Base));
++                palette.setColor(target, QPalette::WindowText, palette.color(target, QPalette::Text));
 +            }
 +            if (surfaceSize != window->size() || paletteKey != palette.cacheKey() || surfaceActive != active) {
 +                QWidget proxy;
