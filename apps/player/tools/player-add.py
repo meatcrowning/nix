@@ -540,64 +540,15 @@ def main():
 
 
 def rescan(con):
-    """Incremental library rescan mirroring Scanner._run in main.py."""
-    root = P.LIBRARY_ROOT
-    seen = {}
-    stack = [str(root)]
-    while stack:
-        d = stack.pop()
-        try:
-            for e in os.scandir(d):
-                if e.is_dir(follow_symlinks=False):
-                    stack.append(e.path)
-                elif e.is_file() and os.path.splitext(e.name)[1].lower() in P.AUDIO_EXTS:
-                    st = e.stat()
-                    seen[e.path] = (st.st_mtime, st.st_size)
-        except OSError:
-            continue
-
-    known = {r["path"]: (r["mtime"], r["size"])
-             for r in con.execute("SELECT path, mtime, size FROM tracks")}
-    todo = [p for p, ms in seen.items()
-            if p not in known or abs(known[p][0] - ms[0]) > 1 or known[p][1] != ms[1]]
-    gone = [p for p in known if p not in seen]
-
-    now = time.time()
-    bad = 0
-    for p in todo:
-        t = P.read_tags(p)
-        if t is None:
-            bad += 1
-            continue
-        mtime, size = seen[p]
-        con.execute(
-            "INSERT INTO tracks (path, mtime, size, title, artist, album, album_artist,"
-            " track, disc, date, year, orig_year, genre, duration, codec, samplerate,"
-            " bitdepth, rating, favorite, play_count, added_at, has_art,"
-            " rg_track_gain, rg_track_peak, rg_album_gain, rg_album_peak)"
-            " VALUES (:path,:mtime,:size,:title,:artist,:album,:album_artist,"
-            " :track,:disc,:date,:year,:orig_year,:genre,:duration,"
-            " :codec,:samplerate,:bitdepth,:rating,:favorite,:play_count,:added_at,:has_art,"
-            " :rg_track_gain,:rg_track_peak,:rg_album_gain,:rg_album_peak)"
-            " ON CONFLICT(path) DO UPDATE SET"
-            " mtime=:mtime, size=:size, title=:title, artist=:artist, album=:album,"
-            " album_artist=:album_artist, track=:track, disc=:disc, date=:date,"
-            " year=:year, orig_year=:orig_year, genre=:genre, duration=:duration,"
-            " codec=:codec, samplerate=:samplerate, bitdepth=:bitdepth,"
-            " rating=:rating, favorite=:favorite, play_count=:play_count,"
-            " has_art=:has_art, rg_track_gain=:rg_track_gain, rg_track_peak=:rg_track_peak,"
-            " rg_album_gain=:rg_album_gain, rg_album_peak=:rg_album_peak",
-            {**t, "path": p, "mtime": mtime, "size": size, "added_at": now})
-    con.commit()
-
-    if gone and (len(gone) < len(known) or seen):
-        con.executemany("DELETE FROM tracks WHERE path=?", [(p,) for p in gone])
-        con.commit()
-
-    P.rebuild_albums(con)
-    if bad:
-        print(f"  (unreadable during rescan: {bad})")
-    return len(seen), len(todo)
+    """Use the app scanner's traversal safety and short write transactions."""
+    scanner = P.Scanner()
+    summaries = []
+    scanner.summary.connect(summaries.append)
+    scanner._run(con, time.time())
+    result = summaries[-1]
+    if result.get("incomplete"):
+        raise RuntimeError("scan incomplete: " + "; ".join(result["walk_errors"]))
+    return result.get("walked", 0), result.get("parsed", 0)
 
 
 if __name__ == "__main__":

@@ -186,6 +186,9 @@ def mk_player(lib):
     p._orig_queue = None
     p._index = -1
     p._mpv_base = 0
+    p._mpv_fill_token = 0
+    p._mpv_fill_pending = False
+    p._mpv_loaded_until = -1
     p._position = p._duration = p._listened = 0.0
     p._counted = False
     p._playing = True

@@ -49,19 +49,32 @@ Rectangle {
         id: head
         x: 8
         y: 8
+        width: parent.width - 16
         spacing: 12
         PixelText {
             anchors.verticalCenter: parent.verticalCenter
-            text: "results for \"" + root.query + "\"  (" + SearchModel.count + ")"
+            width: Math.max(0, head.width - resultCount.width - playAll.width
+                            - closeSearch.width - 3 * head.spacing)
+            elide: Text.ElideRight
+            text: "results for \"" + root.query + "\""
+            color: root.fgDim
+        }
+        PixelText {
+            id: resultCount
+            anchors.verticalCenter: parent.verticalCenter
+            text: "(" + Library.searchTotal + ")"
             color: root.fgDim
         }
         HeaderButton {
+            id: playAll
             label: "> play all"
             plainLabel: "play all"; iconName: "media-playback-start"
             fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
-            onClicked: Library.playFromModel(SearchModel, 0)
+            enabled: Library.searchTotal > 0
+            onClicked: Library.playSearchAll()
         }
         HeaderButton {
+            id: closeSearch
             label: "x close"
             plainLabel: "close"; iconName: "window-close"
             fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
@@ -69,8 +82,36 @@ Rectangle {
         }
     }
 
-    TrackList {
+    Row {
+        id: pages
         anchors.top: head.bottom
+        x: 8
+        spacing: 12
+        visible: Library.searchTotal > SearchModel.count
+        height: visible ? implicitHeight : 0
+        HeaderButton {
+            label: "< previous"; plainLabel: "previous"; iconName: "go-previous"
+            enabled: Library.searchOffset > 0
+            fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
+            onClicked: Library.searchPage(-1)
+        }
+        PixelText {
+            anchors.verticalCenter: parent.verticalCenter
+            text: (Library.searchOffset + 1) + "–"
+                  + (Library.searchOffset + SearchModel.count)
+                  + " of " + Library.searchTotal
+            color: root.fgDim
+        }
+        HeaderButton {
+            label: "next >"; plainLabel: "next"; iconName: "go-next"
+            enabled: Library.searchOffset + SearchModel.count < Library.searchTotal
+            fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
+            onClicked: Library.searchPage(1)
+        }
+    }
+
+    TrackList {
+        anchors.top: pages.bottom
         anchors.topMargin: 4
         anchors.left: parent.left
         anchors.right: parent.right
@@ -80,7 +121,7 @@ Rectangle {
         fgDim: root.fgDim
         fgAccent: root.fgAccent
         showNumber: false
-        onPlayed: function(index) { Library.playFromModel(SearchModel, index); }
+        onPlayed: function(index) { Library.playSearch(index); }
         onOpenAlbumRequested: function(aid) { root.openAlbumRequested(aid); }
         onBrowseArtistRequested: function(a) { root.browseArtistRequested(a); }
     }
