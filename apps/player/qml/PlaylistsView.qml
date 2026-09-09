@@ -100,13 +100,9 @@ Item {
             border.width: root.plasma ? Theme.ctrlBorder : 0
             border.color: Theme.border
             clip: true
-            StyledBackgroundSlice {
+            StyledBackground {
                 anchors.fill: parent
                 visible: root.plasma
-                sourceX: parent.x
-                sourceY: parent.y
-                sourceWidth: root.width
-                sourceHeight: root.height
             }
         }
 
@@ -245,13 +241,9 @@ Item {
             border.width: root.plasma ? Theme.ctrlBorder : 0
             border.color: Theme.border
             clip: true
-            StyledBackgroundSlice {
+            StyledBackground {
                 anchors.fill: parent
                 visible: root.plasma
-                sourceX: content.x + listHead.x
-                sourceY: listHead.y
-                sourceWidth: root.width
-                sourceHeight: root.height
             }
             Row {
                 id: headRow
