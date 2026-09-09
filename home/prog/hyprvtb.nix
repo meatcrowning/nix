@@ -1,4 +1,4 @@
-{ pkgs, host, inputs, ... }:
+{ pkgs, host, inputs, airOffload ? null, ... }:
 
 let
   # Compositor-side vertical titlebars — see ./hyprvtb/ for the C++ source
@@ -34,30 +34,14 @@ let
   # branches on VTB_HL_056 to compile against both. Keep this bridge until the
   # two hosts share one Hyprland pin.
   hyprlandPinned = inputs.hyprland.packages.${pkgs.stdenv.hostPlatform.system}.hyprland;
-  hyprlandAir = inputs.hyprland-air.packages.${pkgs.stdenv.hostPlatform.system}.hyprland;
-
-  hyprlandForVtb = if host == "air" then hyprlandAir.overrideAttrs (old: {
-    # Hyprland 0.56.2's CMake fallback tries FetchContent for glaze even
-    # though the flake already provides the packaged dependency. Keep the
-    # build hermetic (and offline) by making that dependency explicit.
-    buildInputs = (old.buildInputs or []) ++ [ pkgs.glaze ];
-    cmakeFlags = (old.cmakeFlags or []) ++ [
-      "-DCMAKE_INCLUDE_PATH=${pkgs.glaze}/include"
-    ];
-    env = (old.env or { }) // {
-      GIT_BRANCH = "unknown";
-      GIT_COMMIT_DATE = "unknown";
-      GIT_COMMIT_HASH = "unknown";
-      GIT_COMMIT_MESSAGE = "unknown";
-      GIT_TAG = "unknown";
-    };
-  }) else hyprlandPinned;
+  # airOffload uses headers-only generation and x86-to-ARM compilation on top.
+  hyprlandForVtb = hyprlandPinned;
 
   # nixpkgs' hyprlandPlugins set is itself callPackage'd with a `hyprland`
   # argument (mkHyprlandPlugin builds with *that* hyprland's stdenv), so the
   # pinned compositor has to be threaded through the set, not just handed to
   # ./hyprvtb — otherwise the plugin would compile against nixpkgs' headers.
-  hyprvtb = pkgs.callPackage ./hyprvtb {
+  hyprvtb = if host == "air" then airOffload.hyprvtb else pkgs.callPackage ./hyprvtb {
     hyprland = hyprlandForVtb;
     hyprlandPlugins = pkgs.hyprlandPlugins.override { hyprland = hyprlandForVtb; };
   };

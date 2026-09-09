@@ -192,6 +192,11 @@ private `docs/agents/` runbooks.
   `apps/pylib/` moves with the tree. `apps/board/` is presented as `goetia`,
   while its stores are `docs/board.top.md` and `docs/board.book.md`; board text
   addresses `you`.
+- Book’s custom Hyprvtb, Konsole, and Nix Qt6 Oxygen packages use native x86-to-ARM
+  builds on top via `lib/air-offload.nix`; Hyprland generates headers only.
+  `sys/book-builder.nix` restricts the dedicated SSH account to Nix operations.
+  Fedora daemon setup is `tools/book-builder-setup.sh` (see its header);
+  keep local ARM jobs capped in `rebuild-air`. Fedora Oxygen remains a native build.
 - `tools/` holds `preflight.sh`, `seed-drift.sh`, `seed-reconcile.sh`,
   `sandbox.sh`, `lib/session-guard.sh`, `leak-check.sh`, `heavy-gate.sh`,
   `boot-verify.sh`, and `prune-worktrees.sh`. Heavy remote rebuilds use
