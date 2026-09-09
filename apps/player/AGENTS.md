@@ -190,9 +190,10 @@ before touching any of it; only what is player-specific is here.
   at the VIEW origin (`x: -root.x`) and cut by the overlay's own clip: the
   provider crops the style's render to the view's rectangle and pads from the
   item's top-left, so an overlay inset from the top would otherwise restart the
-  gradient at its own edge. Player's deliberately distinct section wells do
-  the inverse: an unshifted `StyledBackground` restarts the exact KStyle window
-  treatment at each well's top instead of approximating it with local stops.
+  gradient at its own edge. In Now Playing the main canvas stays continuous;
+  only the notebook's tab strip restarts the exact KStyle background, above a
+  scheme-darkened recessed body. The queue label likewise stays on the canvas
+  while its track table is a bordered recessed well.
 - **The QML `Shortcut`s all stand down under Plasma** (`enabled: !win.plasma`),
   except Escape: the sequences are on the QActions there, and two owners of one
   sequence in one window is an ambiguous shortcut, which Qt answers by firing

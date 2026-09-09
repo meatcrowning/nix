@@ -12,7 +12,6 @@ Item {
     property color fgText: Theme.text
     property color fgDim: Theme.textDim
     property color fgAccent: Theme.accent
-    property bool oxygenSectionBackground: false
     property string tab: "lyrics"
     property bool editing: false
     readonly property var info: Library.nowInfo || ({})
@@ -26,20 +25,27 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: root.oxygenSectionBackground ? "transparent" : Theme.bgAlt
+        color: Qt.darker(Theme.bgAlt, 1.08)
         border.width: Theme.ctrlBorder
         border.color: Theme.border
         radius: Math.max(2, Theme.rounding)
         clip: true
-        StyledBackground {
-            anchors.fill: parent
-            visible: root.oxygenSectionBackground
-        }
+    }
+
+    Rectangle {
+        id: tabBar
+        anchors { left: parent.left; right: parent.right; top: parent.top }
+        height: 25
+        color: "transparent"
+        border.width: Theme.ctrlBorder
+        border.color: Theme.border
+        clip: true
+        StyledBackground { anchors.fill: parent }
     }
 
     Row {
         id: tabs
-        x: 4; y: 3
+        x: 4; anchors.verticalCenter: tabBar.verticalCenter
         spacing: 1
         Repeater {
             model: ["lyrics", "album", "similar"]
@@ -85,7 +91,7 @@ Item {
     Item {
         id: body
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom
-                  top: tabs.bottom; topMargin: 4 }
+                  top: tabBar.bottom; margins: Theme.ctrlBorder }
 
         LyricsView {
             anchors.fill: parent
@@ -199,7 +205,7 @@ Item {
         id: candidates
         visible: false
         z: 20
-        anchors { left: parent.left; right: parent.right; top: tabs.bottom; bottom: parent.bottom }
+        anchors { left: parent.left; right: parent.right; top: tabBar.bottom; bottom: parent.bottom }
         color: Theme.bgAlt
         border.width: Theme.ctrlBorder; border.color: Theme.border
         KineticListView {
