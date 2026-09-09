@@ -112,11 +112,8 @@ check("the active tab says what its ink is", bool(m))
 if m:
     check("and that ink is readable on the slab it sits on",
           vivaldichrome.hexcolor.contrast(m.group(1), CHROME["buttonTop"]) >= 4.5)
-check("Vivaldi's outer client frame uses the structural border",
-      "#browser{color:%s!important;" % PAL["text"] in oxy
-      and "border-color:%s!important}" % PAL["border"] in oxy)
-check("Vivaldi's 6px auto-hide client gutter is removed",
-      "#browser.auto-hide:not(.unified-ui){border:0!important;border-radius:0!important}" in oxy)
+check("Vivaldi's outer client gutter is removed in every layout",
+      "#browser{border:0!important;border-radius:0!important;padding:0!important;margin:0!important}" in oxy)
 
 # --- the whole sheet ---------------------------------------------------------
 css = vivaldichrome.css(PAL.__getitem__, CHROME, extra="::-webkit-scrollbar{width:9px}")
