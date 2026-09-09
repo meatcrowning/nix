@@ -12,6 +12,8 @@ Row {
     // dim/accent pair disappears against Theme.highlight.
     property color fgAccent: Theme.accent
     property color fgDim: Theme.dim
+    readonly property bool plasma: (typeof DeskStyle !== "undefined" && DeskStyle)
+                                   ? DeskStyle.plasma === true : false
     signal rated(real fmps)  // 0..1, or -1 to clear
 
     spacing: 0
@@ -19,10 +21,11 @@ Row {
     Repeater {
         model: 5
         Item {
-            width: 10
-            height: 15
+            width: root.plasma ? 13 : 10
+            height: root.plasma ? 20 : 15
             PixelText {
                 anchors.centerIn: parent
+                font.pixelSize: root.plasma ? Theme.fontSize + 3 : Theme.fontSize
                 text: root.rating >= (index + 0.5) / 5 ? "*" : "·"
                 color: root.rating >= (index + 0.5) / 5 ? root.fgAccent : root.fgDim
             }

@@ -55,9 +55,10 @@ Item {
                 elide: Text.ElideRight; text: root.cur.title || "nothing playing" }
             Row {
                 id: rating; anchors { right: parent.right; top: parent.top }
-                Stars { rating: root.cur.rating === undefined || root.cur.rating === null ? -1 : root.cur.rating
+                Stars { anchors.verticalCenter: parent.verticalCenter
+                    rating: root.cur.rating === undefined || root.cur.rating === null ? -1 : root.cur.rating
                     onRated: function(v) { Library.setRating(root.cur.id, v) } }
-                HeaderButton { label: "favourite"; iconName: "favorites"; iconOnly: true
+                HeaderButton { label: "favourite"; iconName: "heart"; iconOnly: true
                     lit: root.cur.favorite === true
                     onClicked: Library.setFavorite(root.cur.id, !root.cur.favorite) }
             }

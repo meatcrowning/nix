@@ -17,6 +17,7 @@ Item {
     readonly property var info: Library.nowInfo || ({})
     readonly property var albumTracks: (track.albumId || 0) > 0
                                        ? Library.albumTrackInfo(track.albumId) : []
+    readonly property bool actionsInline: tabs.width + actions.width + 12 <= width
 
     function lighter(c, amount) {
         return Qt.rgba(c.r + (1 - c.r) * amount, c.g + (1 - c.g) * amount,
@@ -53,6 +54,7 @@ Item {
                 required property string modelData
                 label: modelData
                 lit: root.tab === modelData
+                depressed: true
                 onClicked: root.tab = modelData
             }
         }
@@ -62,10 +64,9 @@ Item {
         id: actions
         anchors.right: parent.right
         anchors.rightMargin: 4
-        // Lives in the identity space immediately above this notebook. Keeping
-        // it out of the tab row prevents the icons covering "similar" at the
-        // narrow width while placing them beside the album facts they act on.
-        y: -28
+        // Share the tab strip while the three labels and relevant actions fit;
+        // narrow panes wrap the actions into the identity space above it.
+        y: root.actionsInline ? Math.round((tabBar.height - height) / 2) : -height - 3
         spacing: 1
         visible: root.tab !== "lyrics"
         HeaderButton {
@@ -142,8 +143,9 @@ Item {
                             + Math.round(Number(root.track.duration || 0) / 60) + " min · "
                             + Number(root.track.playCount || 0) + " plays" }
                     PixelText { width: parent.width; color: root.fgText; wrapMode: Text.Wrap
-                        text: (root.info.album || {}).description || "no description found" }
-                    PixelText { width: parent.width; color: root.fgDim; wrapMode: Text.Wrap
+                        visible: !!(root.info.album || {}).description
+                        text: (root.info.album || {}).description || "" }
+                    PixelText { width: parent.width; color: root.fgText; wrapMode: Text.Wrap
                         visible: !!((root.info.album || {}).artistInfo || {}).description
                         text: (((root.info.album || {}).artistInfo || {}).name || "") + "\n" +
                               (((root.info.album || {}).artistInfo || {}).description || "") }
