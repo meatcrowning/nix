@@ -401,6 +401,11 @@ in
       # old `| LFIX` layout. A future layout change belongs here so both hosts
       # move together.
       kwinrc."org.kde.kdecoration2" = {
+        # Oxygen's automatic "Normal" border is a wide frame, especially at
+        # book's Retina scale. Pin its 2px preset so native-decorated clients
+        # meet the same window outline as the rest of the desktop.
+        BorderSize = "Tiny";
+        BorderSizeAuto = false;
         ButtonsOnActiveWindowGlow = false;
         ButtonsOnLeft = "XIM";
         ButtonsOnRight = "F";
