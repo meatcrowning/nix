@@ -20,8 +20,12 @@ audio device), the roots are scratch dirs, and the platform is forced offscreen.
     QT_QPA_PLATFORM=offscreen /usr/bin/python3 apps/player/tools/watch-remote-test.py
 """
 import os
+import atexit
 import sys
 import tempfile
+import shutil
+import time
+from unittest.mock import patch
 from pathlib import Path
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"   # hard, never setdefault
@@ -29,6 +33,7 @@ os.environ.pop("WAYLAND_DISPLAY", None)
 os.environ.pop("DISPLAY", None)
 
 SCRATCH = tempfile.mkdtemp(prefix="player-watch-test-")
+atexit.register(shutil.rmtree, SCRATCH, ignore_errors=True)
 LIB = os.path.join(SCRATCH, "lib")
 DOWNLOADS = os.path.join(SCRATCH, "downloads")
 os.makedirs(LIB)
@@ -80,11 +85,27 @@ def watched(remote):
     """Directories the AutoScanner holds after a _watch_dirs pass, with the
     library-remoteness answer forced to `remote`."""
     P._REMOTE_LIBRARY = remote          # bypass the mountinfo probe entirely
-    scanner = P.AutoScanner(FakeLibrary())
-    # Stop the periodic re-arm so the object is inert after we read it.
-    scanner._rewatch_timer.stop()
-    dirs = set(scanner._watcher.directories())
-    return dirs
+    walked = []
+    walk = os.walk
+    def observe(root, *args, **kwargs):
+        walked.append(str(root))
+        return walk(root, *args, **kwargs)
+    with patch.object(P.os, "walk", observe):
+        scanner = P.AutoScanner(FakeLibrary())
+        scanner._import_timer.stop()  # never run the actual importer
+        try:
+            deadline = time.monotonic() + 2
+            while scanner._watch_worker is not None and time.monotonic() < deadline:
+                app.processEvents()
+                time.sleep(0.001)
+            assert scanner._watch_worker is None, "watch discovery timed out"
+            if remote:
+                assert LIB not in walked, "remote root was traversed"
+            return set(scanner._watcher.directories())
+        finally:
+            scanner._stop_watching()
+            scanner.deleteLater()
+            app.processEvents()
 
 
 remote = watched(True)
@@ -96,6 +117,7 @@ check("local: library root watched", str(LIB) in local, True)
 check("local: downloads dir watched", str(DOWNLOADS) in local, True)
 
 print()
+shutil.rmtree(SCRATCH)
 if fails:
     print("FAILED:", ", ".join(fails))
     sys.exit(1)
