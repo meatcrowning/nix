@@ -123,6 +123,7 @@ INDEX = """<!doctype html><html class="{cls}"><head><title>t</title>
 html,body{{color:#000000 !important}}
 body{{background:#ffffff !important}}
 .reply{{background:#eeeeee !important}}
+button{{background:#303134 !important}}
 a{{color:#0000ee !important}}
 .quotelink{{color:#dd0000 !important}}
 </style>
@@ -132,6 +133,8 @@ a{{color:#0000ee !important}}
 </div>
 <a id="lnk" href="#">a link</a>
 <p class="postMessage" id="pm">post text</p>
+<button id="mark-add" data-ldg-mark="1" aria-pressed="false">collage +</button>
+<button id="mark-remove" data-ldg-mark="1" aria-pressed="true">collage -</button>
 <script src="/app.js"></script>
 </body></html>"""
 
@@ -147,6 +150,8 @@ setTimeout(function(){
       replyBg:   cc('#r','backgroundColor'),
       aColor:    cc('#lnk','color'),
       qlColor:   cc('.quotelink','color'),
+      markAddBg: cc('#mark-add','backgroundColor'),
+      markRemoveBg: cc('#mark-remove','backgroundColor'),
       hasRefresh: typeof window.__surferOneeThemeRefresh === 'function'
   });
 }, 700);
@@ -405,12 +410,13 @@ def main():
     try:
         os.environ["DESK_KDEGLOBALS"] = scheme("oxygen")
         ox = onee_css(dark_pal)
-        check("plasma + oxygen: the page follows the window gradient",
-              "background-image:linear-gradient(to bottom" in ox)
+        check("plasma + oxygen: the page follows the window surface",
+              "html,html body{background-color:" in ox
+              and "background-image:url(http://127.0.0.1:8791/oxygen-window.png)" in ox)
         check("plasma + oxygen: posts get the panel gradient and a bevel",
               "box-shadow:inset 0 1px 0 rgba(255,255,255" in ox)
         check("plasma + oxygen: real buttons get the button gradient",
-              "button,input[type=submit]" in ox)
+              "button:not([data-ldg-mark]),input[type=submit]" in ox)
         check("plasma + oxygen: the gradient rule comes AFTER the flat one "
               "(same selector, source order decides)",
               ox.rindex(".dd-menu ul{background:linear-gradient")
@@ -451,6 +457,10 @@ def main():
               == rgb(chantheme._legible_link(PAL_A["dim"], PAL_A["bg"], PAL_A["accent"])))
         check("quotelink takes the palette accent (beats ch4SS #dd0000)",
               out.get("qlColor") == rgb(PAL_A["accent"]))
+        check("collage + keeps its yellow state over themed button rules",
+              out.get("markAddBg") == "rgb(255, 255, 0)")
+        check("collage - keeps its green state over themed button rules",
+              out.get("markRemoveBg") == "rgb(144, 238, 144)")
         check("live refresh hook installed", out.get("hasRefresh") is True)
         # phase 2: LIVE palette change -> watcher fires -> refresh re-skins
         write_theme(theme, PAL_B)
