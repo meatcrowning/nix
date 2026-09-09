@@ -50,7 +50,7 @@ ForegroundLink=181,193,248
 ForegroundNegative=174,49,57
 ForegroundNeutral=163,132,75
 ForegroundNormal=255,255,255
-ForegroundPositive=0,108,69
+ForegroundPositive=0,180,115
 ForegroundVisited=93,76,160
 
 # [Colors:Complementary] IS THE PANEL. Plasma resolves a panel's Plasma-style
@@ -76,7 +76,7 @@ ForegroundLink=181,193,248
 ForegroundNegative=174,49,57
 ForegroundNeutral=163,132,75
 ForegroundNormal=255,255,255
-ForegroundPositive=0,108,69
+ForegroundPositive=0,180,115
 ForegroundVisited=93,76,160
 [Colors:Selection]
 BackgroundAlternate=0,70,154
@@ -103,7 +103,7 @@ ForegroundLink=181,193,248
 ForegroundNegative=174,49,57
 ForegroundNeutral=163,132,75
 ForegroundNormal=255,255,255
-ForegroundPositive=0,108,69
+ForegroundPositive=0,180,115
 ForegroundVisited=142,115,233
 
 [Colors:View]
@@ -117,7 +117,7 @@ ForegroundLink=181,193,248
 ForegroundNegative=174,49,57
 ForegroundNeutral=163,132,75
 ForegroundNormal=255,255,255
-ForegroundPositive=0,108,69
+ForegroundPositive=0,180,115
 ForegroundVisited=93,76,160
 
 [Colors:Window]
@@ -131,7 +131,7 @@ ForegroundLink=181,193,248
 ForegroundNegative=174,49,57
 ForegroundNeutral=163,132,75
 ForegroundNormal=255,255,255
-ForegroundPositive=0,108,69
+ForegroundPositive=0,180,115
 ForegroundVisited=93,76,160
 
 [WM]

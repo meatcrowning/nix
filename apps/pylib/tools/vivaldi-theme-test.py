@@ -22,6 +22,7 @@ sys.path.insert(0, str(HERE.parent))
 
 TMP = Path(tempfile.mkdtemp(prefix="vivaldi-theme-"))
 os.environ["DESK_SESSION"] = "hypr"          # nothing here may read his session
+os.environ["XDG_STATE_HOME"] = str(TMP / "state")
 
 import vivaldichrome                                                # noqa: E402
 
@@ -137,6 +138,8 @@ def fresh(schedule_enabled=0, current="Vivaldi1"):
 
 
 (TMP / "vivaldi-ui").mkdir(exist_ok=True)
+(TMP / "state").mkdir(exist_ok=True)
+(TMP / "state" / "plasma-panel-surface.png").write_bytes(b"surface generation one")
 fresh()
 path, changed = gen.write_prefs("hypr", prefs=prefs, force=True, ui_dir=TMP / "vivaldi-ui")
 data = json.loads(prefs.read_text())
@@ -148,6 +151,14 @@ check("exactly one of ours, never a pile",
 ours = next(t for t in themes["user"] if t["id"] == gen.THEME_ID)
 check("Vivaldi does not dim or recolour its chrome when blurred",
       ours["dimBlurred"] is False)
+first_background = ours["backgroundImage"]
+check("the Start Page receives a content-addressed Oxygen surface",
+      first_background.startswith(
+          "chrome://vivaldi-data/local-image/desktop-oxygen-window-")
+      and first_background.endswith(".png"))
+mapping = json.loads((prefs.parent / "file_mapping.json").read_text())["mappings"]
+check("the content-addressed Start Page surface is mapped to a real file",
+      first_background.rsplit("/", 1)[1] in mapping)
 # THE thing that makes it apply at all: themes.current alone is ignored at
 # startup (measured, Vivaldi 8.1) — the engine resolves through the schedule.
 sched = data["vivaldi"]["theme"]["schedule"]
@@ -163,6 +174,12 @@ check("as an ABSOLUTE path — a tilde is never expanded",
       mods.startswith("/") and "~" not in mods)
 check("a second run changes nothing",
       gen.write_prefs("hypr", prefs=prefs, force=True, ui_dir=TMP / "vivaldi-ui")[1] is False)
+(TMP / "state" / "plasma-panel-surface.png").write_bytes(b"surface generation two")
+gen.write_prefs("hypr", prefs=prefs, force=True, ui_dir=TMP / "vivaldi-ui")
+new_ours = next(t for t in json.loads(prefs.read_text())["vivaldi"]["themes"]["user"]
+                if t.get("id") == gen.THEME_ID)
+check("a changed surface gets a new URL instead of Vivaldi's stale image cache",
+      new_ours["backgroundImage"] != first_background)
 
 fresh(schedule_enabled=1)
 try:

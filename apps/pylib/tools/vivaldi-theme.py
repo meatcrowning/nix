@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import shutil
@@ -80,7 +81,7 @@ FLATPAK_PREFS = (Path.home() / ".var" / "app" / "com.vivaldi.Vivaldi"
                  / "config" / "vivaldi" / "Default" / "Preferences")
 FLATPAK_UI_DIR = Path.home() / ".config" / "vivaldi-mods" / "chrome"
 THEME_ID = "desktop-live"
-OXYGEN_IMAGE_NAME = "desktop-oxygen-window.png"
+OXYGEN_IMAGE_PREFIX = "desktop-oxygen-window-"
 
 
 def _doc_origins():
@@ -243,13 +244,16 @@ def write_prefs(source=None, prefs=PREFS, force=False, ui_dir=UI_DIR):
 
     # Start Page is an internal Vivaldi document, outside custom.css's DOM.
     # Its supported image route is the theme entry plus file_mapping.json.
-    # Keep a stable local-image name while replacing the pixels in place when
-    # the live KStyle surface regenerates.
+    # Vivaldi caches a local theme image by URL across launches. Give each
+    # rendered surface a content-addressed URL; replacing one stable file made
+    # a new gradient silently reuse the old (or missing) cached image.
     surface = Path(os.environ.get("XDG_STATE_HOME") or (Path.home() / ".local" / "state")) / "plasma-panel-surface.png"
     background = ""
     if surface.exists():
         ui_dir.mkdir(parents=True, exist_ok=True)
-        target = ui_dir / OXYGEN_IMAGE_NAME
+        payload = surface.read_bytes()
+        image_name = OXYGEN_IMAGE_PREFIX + hashlib.sha256(payload).hexdigest()[:16] + ".png"
+        target = ui_dir / image_name
         shutil.copy2(surface, target)
         mapping_path = prefs.parent / "file_mapping.json"
         try:
@@ -258,10 +262,10 @@ def write_prefs(source=None, prefs=PREFS, force=False, ui_dir=UI_DIR):
             mapping_data = {}
         mappings = mapping_data.setdefault("mappings", {})
         wanted = {"local_path": str(target.resolve())}
-        if mappings.get(OXYGEN_IMAGE_NAME) != wanted:
-            mappings[OXYGEN_IMAGE_NAME] = wanted
+        if mappings.get(image_name) != wanted:
+            mappings[image_name] = wanted
             mapping_path.write_text(json.dumps(mapping_data, indent=3) + "\n", encoding="utf-8")
-        background = "chrome://vivaldi-data/local-image/%s" % OXYGEN_IMAGE_NAME
+        background = "chrome://vivaldi-data/local-image/%s" % image_name
 
     entry = vivaldichrome.theme(pal.__getitem__)
     entry["backgroundImage"] = background
