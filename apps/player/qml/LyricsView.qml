@@ -127,11 +127,12 @@ Item {
         // grabbing it stands the follow down the same way. Press only — the scrollbar's `position`
         // also moves when the FOLLOW scrolls, which would self-suppress forever.
         ScrollBar.vertical: VScroll {
+            id: syncedScroll
             onPressedChanged: if (pressed) root.lastUserScrollMs = Date.now()
         }
 
         delegate: Item {
-            width: lyricsList.width
+            width: Math.max(0, lyricsList.width - syncedScroll.barW)
             height: Math.max(18, lineText.implicitHeight + 3)
             PixelText {
                 id: lineText

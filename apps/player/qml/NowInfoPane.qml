@@ -55,7 +55,10 @@ Item {
         id: actions
         anchors.right: parent.right
         anchors.rightMargin: 4
-        y: tabs.y
+        // Lives in the identity space immediately above this notebook. Keeping
+        // it out of the tab row prevents the icons covering "similar" at the
+        // narrow width while placing them beside the album facts they act on.
+        y: -28
         spacing: 1
         visible: root.tab !== "lyrics"
         HeaderButton {
@@ -109,15 +112,16 @@ Item {
                 elide: Text.ElideRight
             }
             KineticFlickable {
+                id: albumFlick
                 anchors { left: parent.left; right: parent.right; bottom: parent.bottom
                           top: albumState.bottom; margins: 8; topMargin: 6 }
                 contentWidth: width
                 contentHeight: albumColumn.height
                 clip: true
-                ScrollBar.vertical: VScroll {}
+                ScrollBar.vertical: VScroll { id: albumScroll }
                 Column {
                     id: albumColumn
-                    width: parent.width
+                    width: Math.max(0, albumFlick.width - albumScroll.barW)
                     spacing: 5
                     PixelText { width: parent.width; color: root.fgText; wrapMode: Text.Wrap
                         text: (root.info.album || {}).title || root.track.album || "" }
@@ -158,14 +162,15 @@ Item {
         }
 
         KineticListView {
+            id: similarList
             anchors.fill: parent
             anchors.margins: 6
             visible: root.tab === "similar"
             clip: true
             model: root.info.similar || []
-            ScrollBar.vertical: VScroll {}
+            ScrollBar.vertical: VScroll { id: similarScroll }
             header: PixelText {
-                width: parent ? parent.width : 0
+                width: Math.max(0, similarList.width - similarScroll.barW)
                 height: Theme.lineHeight + 6
                 color: root.info.error ? Theme.crit : root.fgDim
                 text: root.info.status === "loading" ? "loading similar tracks from last.fm..."
@@ -174,7 +179,7 @@ Item {
             }
             delegate: Rectangle {
                 required property var modelData
-                width: ListView.view.width
+                width: Math.max(0, similarList.width - similarScroll.barW)
                 height: Theme.lineHeight + 8
                 color: hit.containsMouse ? Theme.highlight : "transparent"
                 PixelText { anchors { left: parent.left; right: reason.left; verticalCenter: parent.verticalCenter }
@@ -197,12 +202,13 @@ Item {
         color: Theme.bgAlt
         border.width: Theme.ctrlBorder; border.color: Theme.border
         KineticListView {
+            id: candidateList
             anchors.fill: parent; anchors.margins: 5; clip: true
             model: root.info.candidates || []
-            ScrollBar.vertical: VScroll {}
+            ScrollBar.vertical: VScroll { id: candidateScroll }
             delegate: HeaderButton {
                 required property var modelData
-                width: ListView.view.width
+                width: Math.max(0, candidateList.width - candidateScroll.barW)
                 label: modelData.label + "  (" + Math.round(modelData.confidence * 100) + "%)"
                 onClicked: { Library.chooseNowInfoMatch(modelData.id); candidates.visible = false }
             }

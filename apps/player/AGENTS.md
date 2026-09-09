@@ -272,7 +272,20 @@ uses the Oxygen decoration's same solid-bar treatment and reads its runtime
 snapshot only while Now Playing is visible. `main.py` writes the short-lived
 `player-view.json` lease; both the Oxygen titlebar visualizer and panel plasmoid
 stand down while that lease says `now`, and restore themselves after three
-seconds if player dies. Do not start a second analyzer.
+seconds if player dies. The producer also publishes an ungated
+`player-visualizer-player.json` for the transport copy while blanking the legacy
+feed during that lease; this makes an already-loaded decoration obey the move
+without restarting KWin. Do not start a second analyzer.
+
+Player has no permanent Plasma status bar: queue position was redundant with
+the selected queue row and count. Scan/mount messages draw only while nonempty
+in the client corner instead.
+
+`tools/library-ipc.py` is Chatter's read-only view of this database. Its `info`
+operation exposes the effective cached metadata (including overrides and
+ambiguity/error provenance) beside local tags, so agents reuse what player
+already learned before reaching for the web. Keep its cache-key construction on
+the shared `pylib/trackmatch.py`; a second normalizer would miss the same track.
 
 On Plasma, album sort is no longer a top-toolbar action. `AlbumIndex.qml`
 reserves its right edge for the six-choice sort combo and a separate direction

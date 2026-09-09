@@ -748,19 +748,25 @@ MUSIC_TOOL = {
             "albums, ratings, favourites and play counts. `search` matches free "
             "text against title, artist and album at once (how a person names "
             "music), `albums` lists albums, `album_tracks` gives one album in "
-            "play order, `stats` sizes the library. Every track comes back with "
+            "play order, `info` returns local tags plus any cached MusicBrainz, "
+            "Wikipedia and similar-track facts (including manual corrections), "
+            "and `stats` sizes the library. Use `info` before searching the web "
+            "for a track, artist or album. Every track comes back with "
             "its `path`, which is what control_media's play_these / "
             "queue_these take — so 'put on X' is this tool and then that one. "
             "Read-only: it never changes a rating, a tag or a play count."),
         "parameters": {"type": "object", "properties": {
             "action": {"type": "string",
-                       "enum": ["search", "albums", "album_tracks", "stats"],
+                       "enum": ["search", "albums", "album_tracks", "info", "stats"],
                        "description": "What to ask for. Default `search`."},
             "query": {"type": "string",
                       "description": "Free text: part of a title, artist or album."},
             "artist": {"type": "string", "description": "Narrow to an artist."},
             "album": {"type": "string",
                       "description": "The album — required for `album_tracks`."},
+            "track": {"type": "string", "description": "Track title for `info`."},
+            "track_id": {"type": "integer",
+                         "description": "Exact library track id for `info`; safest after search."},
             "genre": {"type": "string", "description": "Narrow to a genre."},
             "favorites_only": {"type": "boolean",
                                "description": "Only tracks he has hearted."},
@@ -2336,6 +2342,7 @@ TOOL_COMPANIONS = {
 #: is never in any set — subagents are one level deep, on purpose.
 AGENT_TOOLS_DEFAULT = (AGENT_TOOL_GROUPS["read"] + AGENT_TOOL_GROUPS["write"]
                        + AGENT_TOOL_GROUPS["exec"] + AGENT_TOOL_GROUPS["web"]
+                       + ["music_library"]
                        + AGENT_TOOL_GROUPS["history"]
                        + AGENT_TOOL_GROUPS["skills"] + AGENT_TOOL_GROUPS["author"]
                        + AGENT_TOOL_GROUPS["time"])
@@ -8826,6 +8833,8 @@ class Ollama(QObject):
                "q": str(a.get("query") or ""),
                "artist": str(a.get("artist") or ""),
                "album": str(a.get("album") or ""),
+               "track": str(a.get("track") or ""),
+               "track_id": a.get("track_id") or 0,
                "genre": str(a.get("genre") or ""),
                "sort": str(a.get("sort") or ""),
                "favorites_only": bool(a.get("favorites_only")),

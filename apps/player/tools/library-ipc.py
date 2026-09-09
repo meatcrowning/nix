@@ -30,6 +30,10 @@ import socket
 import sqlite3
 import sys
 import urllib.parse
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pylib"))
+import trackmatch
 
 DB = os.path.expanduser(
     os.environ.get("PLAYER_DB", "~/.local/share/player/library.db"))
@@ -210,6 +214,82 @@ def op_stats(_req):
     return {"ok": True, "library": dict(row), "database": DB}
 
 
+def _cache_key(row):
+    parts = (row["album_artist"] or row["artist"] or "", row["album"] or "",
+             row["artist"] or "", row["title"] or "")
+    return "|".join(trackmatch.fold(x) for x in parts)
+
+
+def _decode(raw, fallback):
+    try:
+        value = json.loads(raw or "")
+        return value if isinstance(value, type(fallback)) else fallback
+    except (TypeError, ValueError):
+        return fallback
+
+
+def op_info(req):
+    """Return local tags plus player's cached and corrected web knowledge."""
+    con = db()
+    where, args = [], []
+    try:
+        track_id = int(req.get("track_id") or 0)
+    except (TypeError, ValueError):
+        track_id = 0
+    if track_id:
+        where.append("id = ?")
+        args.append(track_id)
+    for field in ("title", "artist", "album"):
+        value = str(req.get("track" if field == "title" else field) or "").strip()
+        if value:
+            if field == "artist":
+                where.append("(artist LIKE ? OR album_artist LIKE ?)")
+                args.extend(["%" + value + "%"] * 2)
+            else:
+                where.append(field + " LIKE ?")
+                args.append("%" + value + "%")
+    query = str(req.get("q") or "").strip()
+    if query:
+        where.append("(title LIKE ? OR artist LIKE ? OR album LIKE ? OR album_artist LIKE ?)")
+        args.extend(["%" + query + "%"] * 4)
+    if not where:
+        fail("info needs track_id, query, track, artist or album")
+    found = con.execute("SELECT * FROM tracks WHERE " + " AND ".join(where)
+                        + " ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE, disc, track LIMIT 12",
+                        args).fetchall()
+    if not found:
+        return {"ok": True, "status": "not_found", "matches": []}
+    identities = {(r["title"], r["artist"], r["album"]) for r in found}
+    if len(identities) > 1 and not track_id:
+        return {"ok": True, "status": "ambiguous",
+                "matches": [{c: r[c] for c in TRACK_COLS} for r in found]}
+    row = found[0]
+    key = _cache_key(row)
+    metadata = {r["kind"]: r for r in con.execute(
+        "SELECT * FROM web_metadata WHERE cache_key=?", (key,))}
+    overrides = {r["kind"]: _decode(r["body_json"], {}) for r in con.execute(
+        "SELECT * FROM web_metadata_overrides WHERE cache_key=?", (key,))}
+    match = con.execute(
+        "SELECT * FROM web_entity_matches WHERE cache_key=?", (key,)).fetchone()
+    album = _decode(metadata.get("album")["body_json"], {}) if metadata.get("album") else {}
+    album.update(overrides.get("album", {}))
+    similar = _decode(metadata.get("similar")["body_json"], []) if metadata.get("similar") else []
+    if "similar" in overrides:
+        similar = overrides["similar"].get("items", similar)
+    return {"ok": True, "status": (match["status"] if match else "uncached"),
+            "local": {c: row[c] for c in TRACK_COLS},
+            "match": ({"provider": match["provider"], "entity_id": match["entity_id"],
+                       "label": match["label"], "confidence": match["confidence"],
+                       "manual": bool(match["manual"]),
+                       "candidates": _decode(match["candidates_json"], [])}
+                      if match else None),
+            "album": album, "similar": similar,
+            "cache": {kind: {"source": r["source"], "fetched_at": r["fetched_at"],
+                              "expires_at": r["expires_at"], "error": r["error"]}
+                      for kind, r in metadata.items()},
+            "corrected": sorted(overrides)}
+
+
 def _send(verb, paths):
     """One line to player's queue socket, and its answer.
 
@@ -259,6 +339,7 @@ def op_queue(req):
 
 
 OPS = {"search": op_search, "albums": op_albums, "album_tracks": op_album_tracks,
+       "info": op_info,
        "stats": op_stats, "play": op_play, "queue": op_queue}
 
 

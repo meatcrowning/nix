@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Harness for player's Plasma face — the menubar, the two toolbars, the status bar.
+"""Harness for player's Plasma face — the menubar and two toolbars.
 
     player-qtenv python3 apps/player/tools/plasma-chrome-test.py
 
@@ -228,8 +228,9 @@ check("playing turns Play into Pause on the bar",
       str(busy_transport))
 check("...and in the Playback menu, off the same QAction",
       any(r.startswith("Pause") for r in busy_playback), str(busy_playback))
-check("the status bar's right slot carries the queue position",
-      "'1 / 3'" in busy, [ln for ln in busy.splitlines() if ln.startswith("statusbar")])
+check("the redundant status bar stays disabled",
+      "Show Status&bar" not in section(plasma, "Se&ttings"),
+      str(section(plasma, "Se&ttings")))
 check("kdeshell did not have to fall back to polling the chrome",
       "publishes no buttonsChanged" not in plasma, "see stderr")
 
@@ -237,7 +238,7 @@ check("kdeshell did not have to fall back to polling the chrome",
 settings = section(plasma, "Se&ttings")
 check("Configure player… is in Settings",
       any(r.startswith("Configure player") for r in settings), str(settings))
-for row in ("Show &Toolbar", "Show Transport Bar", "Show Status&bar"):
+for row in ("Show &Toolbar", "Show Transport Bar"):
     check(f"Settings can hide {row!r}",
           any(row in r for r in settings), str(settings))
 

@@ -715,6 +715,7 @@ def _build_shell_class():
 
             self._toolbar = None
             self._status = None
+            self._status_allowed = True
             self._status_label = None
             self._status_right = None
             self._status_stack = None
@@ -1041,6 +1042,8 @@ def _build_shell_class():
             # toggle.
             self._ensure_toolbar()
             self._ensure_status()
+            if not self._status_allowed:
+                self._status.hide()
 
             bar = self.window.menuBar()
             bar.clear()
@@ -1116,7 +1119,8 @@ def _build_shell_class():
                     lead = [self._toggle_action("menubar"),
                             self._toggle_action("toolbar")]
                     lead += [self._toggle_action("tb:" + i) for i in self._toolbars]
-                    lead.append(self._toggle_action("statusbar"))
+                    if self._status_allowed:
+                        lead.append(self._toggle_action("statusbar"))
                     # A DOCK'S TOGGLE LANDS HERE when the app declares no `view`
                     # group — which chatter does not. Without this the panel is
                     # reachable only by its own titlebar [x], i.e. closable and
@@ -1613,7 +1617,8 @@ def _build_shell_class():
             return act
 
         def _sync_toggles(self):
-            for which in (["menubar", "toolbar", "statusbar"]
+            base = ["menubar", "toolbar"] + (["statusbar"] if self._status_allowed else [])
+            for which in (base
                           + ["tb:" + i for i in self._toolbars]):
                 act = self._actions.get("__show_" + which)
                 widget = self._bar_widget(which)
@@ -2229,6 +2234,12 @@ def _build_shell_class():
             return "    <%s%s>" % (name, (" " + repr(str(text))) if text else "")
 
         # --------------------------------------------------------- statusbar
+        def allow_statusbar(self, allowed=True):
+            """Opt out when an app has no standing fact worth a permanent bar."""
+            self._status_allowed = bool(allowed)
+            if self._status is not None and not self._status_allowed:
+                self._status.hide()
+
         def bind_status(self, line_prop="statusLine", progress_prop="statusProgress",
                         right_prop="statusRight", progress_text_prop="statusProgressText"):
             """Drive the status bar from two properties on the QML root.
