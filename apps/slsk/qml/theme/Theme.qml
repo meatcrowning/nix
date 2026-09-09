@@ -6,6 +6,17 @@ import QtQuick
 // components, so it does not register as a type named `Theme` and shadow the
 // context property.
 QtObject {
+    // Forward native roles; the wallpaper aliases are Hyprland-only.
+    readonly property bool plasmaPalette: typeof WalPalette !== "undefined" && WalPalette.native === true
+    readonly property color windowBg: plasmaPalette ? WalPalette.window : bg
+    readonly property color windowText: plasmaPalette ? WalPalette.windowText : text
+    readonly property color buttonBg: plasmaPalette ? WalPalette.button : bgAlt
+    readonly property color buttonText: plasmaPalette ? WalPalette.buttonText : text
+    readonly property color selectionText: plasmaPalette ? WalPalette.highlightedText : accent
+    readonly property color disabledText: plasmaPalette ? WalPalette.disabledText : inactive
+    readonly property color link: plasmaPalette ? WalPalette.link : accent
+    readonly property color focusColor: plasmaPalette ? WalPalette.focus : accent
+
     // The desktop's pixel font, at the size Settings sets for everything.
     readonly property string font: DeskStyle.fontFamily
 
@@ -105,7 +116,7 @@ QtObject {
     readonly property color info:      WalPalette.info
 
     // The exact grey the hyprvtb titlebar fades to when the window is unfocused.
-    readonly property color inactive: Qt.rgba(0x59 / 255, 0x59 / 255, 0x59 / 255, 0xaa / 255)
+    readonly property color inactive: plasmaPalette ? WalPalette.inactive : Qt.rgba(0x59 / 255, 0x59 / 255, 0x59 / 255, 0xaa / 255)
 
     // The desktop's GLOBAL corner rounding (DeskStyle.rounding, the radius the
     // compositor clips every window to) — bind it on every corner drawn here.

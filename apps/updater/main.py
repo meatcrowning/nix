@@ -98,6 +98,10 @@ PALETTE_DEFAULTS = {
 }
 
 
+from nativepalette import session_palette
+
+
+@session_palette
 class Palette(QObject):
     """Live wallpaper palette, parsed from the panel's Theme.qml and watched."""
 

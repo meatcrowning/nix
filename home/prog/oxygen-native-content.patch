@@ -1,0 +1,43 @@
+--- a/kstyle/oxygenstyle.cpp
++++ b/kstyle/oxygenstyle.cpp
+@@ -69,0 +70 @@
++#include <QPaintEvent>
+@@ -298,0 +300,6 @@
++    // Native View surfaces may have the opposite polarity from Window.
++    // Paint their Base through Oxygen's own background renderer.
++    if (auto *area = qobject_cast<QAbstractScrollArea *>(widget)) {
++        area->viewport()->installEventFilter(this);
++    }
++
+@@ -301,0 +309 @@
++        if (itemView->inherits("KFilePlacesView")) itemView->installEventFilter(this);
+@@ -1251,0 +1260,29 @@
++    if (auto *view = qobject_cast<QAbstractItemView *>(object);
++        view && view->inherits("KFilePlacesView")
++        && (event->type() == QEvent::Paint || event->type() == QEvent::PaletteChange)) {
++        // Places is transparent chrome, but its delegate explicitly asks for
++        // Text. Pair that role with its actual Window background.
++        QPalette palette(view->palette());
++        bool changed = false;
++        for (auto group : {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
++            if (palette.color(group, QPalette::Text) != palette.color(group, QPalette::WindowText)) {
++                palette.setBrush(group, QPalette::Text, palette.brush(group, QPalette::WindowText));
++                changed = true;
++            }
++        }
++        if (changed) view->setPalette(palette);
++    }
++    if (event->type() == QEvent::Paint) {
++        auto *viewport = qobject_cast<QWidget *>(object);
++        auto *area = viewport ? qobject_cast<QAbstractScrollArea *>(viewport->parentWidget()) : nullptr;
++        if (area && area->viewport() == viewport && !area->inherits("KFilePlacesView")) {
++            const QPalette palette(viewport->palette());
++            const QColor base = palette.color(QPalette::Base);
++            if (base.alpha() == 255 && base.lightnessF() > 0.5
++                && palette.color(QPalette::Window).lightnessF() < 0.5) {
++                QPainter painter(viewport);
++                _helper->renderWindowBackground(&painter,
++                    static_cast<QPaintEvent *>(event)->rect(), viewport, base);
++            }
++        }
++    }

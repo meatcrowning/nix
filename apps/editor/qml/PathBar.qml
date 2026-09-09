@@ -149,7 +149,7 @@ Rectangle {
                 clip: true
                 selectByMouse: true
                 selectionColor: Theme.highlight
-                selectedTextColor: Theme.accent
+                selectedTextColor: Theme.selectionText
 
                 onTextChanged: root.refresh()
 
@@ -206,7 +206,8 @@ Rectangle {
                 text: modelData.name
                 // A directory is the brighter tier because it is the thing you
                 // are about to descend into (§3.2).
-                color: modelData.dir ? (root.winActive ? Theme.accent : Theme.inactive)
+                color: index === root.hi || ma.containsMouse ? Theme.selectionText
+                     : modelData.dir ? (root.winActive ? Theme.accent : Theme.inactive)
                                      : (root.winActive ? Theme.text : Theme.inactive)
             }
 

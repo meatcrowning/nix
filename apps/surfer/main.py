@@ -86,6 +86,10 @@ PALETTE_DEFAULTS = {
 }
 
 
+from nativepalette import session_palette
+
+
+@session_palette
 class Palette(QObject):
     """Live wallpaper palette — same parser/watcher as filer's (see
     ~/nix/apps/filer/main.py for the full commentary)."""

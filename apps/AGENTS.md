@@ -109,19 +109,25 @@ one owner and one implementation; do not fork their algorithms into an app.
   ~/.config/quickshell/settings.json (or $DESK_SETTINGS in an offscreen
   harness), install DeskStyle before loading Theme.qml, and keep a Python
   reference. animSpeed accepts any finite value > 0, otherwise 1.0.
-- kdetheme.py selects the theme source: wallpaper palette under Hyprland and
-  generated ~/.cache/deskstyle/kde-Theme.qml from kdeglobals under Plasma.
-  Style offers dark, light, and mixed KDE schemes; mixed shares dark chrome
-  with white native Base/Text content. The twelve-token QML adapter retains
-  a dark inset when WindowText cannot contrast against the View background.
-  Use Palette(theme_source(PANEL_THEME)); do not branch in Theme.qml or
-  components. DESK_SESSION=plasma|hypr and DESK_KDEGLOBALS let harnesses select
-  a session/scheme. kde_chrome() is only for surfer's web re-skin;
+- nativepalette.py forwards the native QApplication palette in Plasma. Every
+  app's wallpaper Palette class must use @session_palette: the wallpaper
+  reader is constructed only under Hyprland. Native Window/WindowText,
+  Base/Text, Button/ButtonText, Highlight/HighlightedText, Tooltip, inactive,
+  and disabled roles stay distinct. Never generate a shared application
+  palette, adjust native colours for contrast, or invent an inset/disabled
+  colour. Shared adapters may forward roles, not replace them.
+  kdetheme.py owns session detection and verbatim KDE View/Selection exports
+  for terminal/web consumers that cannot host Qt objects. Only ANSI slots
+  without native equivalents are synthesized. Use native-palette-test.py and
+  native-surface-test.py; the latter takes an Oxygen Qt plugin directory.
+  Style's mixed scheme uses dark Window roles and light-theme Window roles
+  as its View. Native content gradients are painted by Oxygen, not QML maths.
+  kdeshell.py installs a View context on QQuickWidget content while its real
+  window/menu/toolbar keeps the native Window context. Theme aliases are
+  compatibility names for these native roles, never a second palette.
   chantheme.py, twittertheme.py, scrollcss.py, userscript.py, and
   vivaldichrome.py generate browser sheets/userscripts and share the loopback
-  courier. Keep the courier loopback-only and parameterless. Use
-  kdetheme-test.py, chan-userscript-test.py, scrollcss-test.py, and
-  vivaldi-theme-test.py; the Vivaldi probe uses its own Xvfb/profile.
+  courier. Keep the courier loopback-only and parameterless.
 - oxygenstyle.py exposes Oxygen metrics only when the session is Plasma and the
   active style is Oxygen; add a setting by updating _KEYS and the deskstyle.py
   property. DESK_OXYGENRC selects a test rc; use oxygen-test.py and
