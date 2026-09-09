@@ -12,11 +12,7 @@ Item {
     property color fgText: Theme.text
     property color fgDim: Theme.textDim
     property color fgAccent: Theme.accent
-    property bool continuousBackground: false
-    property real backgroundX: 0
-    property real backgroundY: 0
-    property real backgroundWidth: width
-    property real backgroundHeight: height
+    property bool oxygenSectionBackground: false
     property string tab: "lyrics"
     property bool editing: false
     readonly property var info: Library.nowInfo || ({})
@@ -30,18 +26,14 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: root.continuousBackground ? "transparent" : Theme.bgAlt
+        color: root.oxygenSectionBackground ? "transparent" : Theme.bgAlt
         border.width: Theme.ctrlBorder
         border.color: Theme.border
         radius: Math.max(2, Theme.rounding)
         clip: true
-        StyledBackgroundSlice {
+        StyledBackground {
             anchors.fill: parent
-            visible: root.continuousBackground
-            sourceX: root.backgroundX
-            sourceY: root.backgroundY
-            sourceWidth: root.backgroundWidth
-            sourceHeight: root.backgroundHeight
+            visible: root.oxygenSectionBackground
         }
     }
 

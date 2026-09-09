@@ -73,11 +73,7 @@ Item {
                       top: identity.bottom; leftMargin: 8; rightMargin: 8; bottomMargin: 8 }
             trackId: root.cur.id === undefined ? -1 : root.cur.id
             track: root.cur
-            continuousBackground: true
-            backgroundX: upperRight.x + 8
-            backgroundY: identity.y + identity.height
-            backgroundWidth: root.width
-            backgroundHeight: root.height
+            oxygenSectionBackground: true
             fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
         }
     }
@@ -110,11 +106,8 @@ Item {
         color: "transparent"
         border.width: Theme.ctrlBorder; border.color: Theme.border
         clip: true
-        StyledBackgroundSlice {
+        StyledBackground {
             anchors.fill: parent
-            sourceY: queueWell.y
-            sourceWidth: root.width
-            sourceHeight: root.height
         }
         PixelText { id: queueHead; x: 8; y: 5
             text: "queue  (" + Player.queueLength + ")"; color: root.fgDim }
