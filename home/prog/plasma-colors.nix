@@ -16,9 +16,9 @@
   # Seed the live schemes once, so plasma-manager's login
   # `plasma-apply-colorscheme` has a file to read before the first wallpaper
   # apply. OxygenDarkNeutral is the live-dynamic dark alternative whose surface
-  # backgrounds stay neutral; wal-set.sh owns all three copies from then on.
+  # backgrounds stay neutral; wal-set.sh owns all four copies from then on.
   home.activation.seedPlasmaScheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-    for scheme in OxygenDarkFlat OxygenDarkNeutral OxygenLightFlat; do
+    for scheme in OxygenDarkFlat OxygenDarkNeutral OxygenLightFlat OxygenMixed; do
       live="$HOME/.local/share/color-schemes/$scheme.colors"
       if [ -L "$live" ]; then rm -f "$live"; fi   # retire old store symlinks
       if [ ! -e "$live" ]; then
@@ -31,6 +31,12 @@
               --template ${./plasma-files/OxygenDarkFlat.colors} \
               --name OxygenDarkNeutral --out "$live" --accent 808080 \
               --surface-color 120f06 --no-apply
+            continue
+            ;;
+          OxygenMixed)
+            $DRY_RUN_CMD ${pkgs.python3}/bin/python ${../srvs/wal-files/plasma-scheme.py} \
+              --template ${./plasma-files/OxygenDarkFlat.colors} \
+              --name OxygenMixed --out "$live" --accent 5880ad --no-apply
             continue
             ;;
           OxygenLightFlat) source=${./plasma-files/OxygenLightFlat.colors} ;;
