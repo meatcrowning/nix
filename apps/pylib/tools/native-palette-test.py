@@ -85,7 +85,8 @@ with tempfile.TemporaryDirectory(prefix="native-palette-test-") as temporary:
     for theme in themes:
         assert theme.property("text").name() == "#102030"
         assert theme.property("windowText").name() == "#ffffff"
-    from kdeshell import content_palette
+    from kdeshell import content_palette, _group_palette
+    assert _group_palette(QPalette.Inactive).color(QPalette.Disabled, QPalette.Text) == palette.color(QPalette.Disabled, QPalette.Text)
     content = content_palette()
     assert content.window().color() == palette.base().color()
     assert content.windowText().color() == palette.text().color()
