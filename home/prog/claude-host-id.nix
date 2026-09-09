@@ -1,6 +1,6 @@
 { host, ... }:
 
-# Tell every Claude Code session which of the two machines it is running on.
+# Tell every Claude Code session which host and desktop session it is running on.
 #
 # The problem this fixes: an agent's environment block carries the working
 # directory, `Platform: linux` and a kernel version string — and no hostname.
@@ -49,6 +49,21 @@ in
       # Emitted into every Claude Code session as SessionStart context.
       set -u
 
+      # Claude normally inherits these from the terminal. Fall back to the
+      # user manager because a launcher or resumed session may have stripped
+      # them. Process names are deliberately not used: a stale compositor is
+      # weaker evidence than the environment belonging to this session.
+      desktops="''${XDG_CURRENT_DESKTOP:-''${XDG_SESSION_DESKTOP:-}}"
+      if [ -z "$desktops" ] && command -v systemctl >/dev/null 2>&1; then
+        desktops=$(systemctl --user show-environment 2>/dev/null \
+          | sed -n 's/^XDG_CURRENT_DESKTOP=//p' | head -n 1)
+      fi
+      case ":''${desktops^^}:" in
+        *:KDE:*|*:PLASMA:*) desktop='Plasma (KDE)' ;;
+        *:HYPRLAND:*)      desktop='Hyprland' ;;
+        *)                 desktop="unknown (XDG_CURRENT_DESKTOP=''${desktops:-unset})" ;;
+      esac
+
       # SINGLE-quoted args, deliberately: the text is full of backticks
       # (`air`, `sys/`) and inside double quotes the shell runs each of them as
       # a command substitution — which is what the first version of this script
@@ -56,6 +71,7 @@ in
       # literal below free of apostrophes for the same reason.
       printf '%s\n' \
         'HOST ${osName} | flake attr `${host}` | ${arch}' \
+        "ACTIVE DESKTOP: $desktop. Design and test the matching app face; do not infer Hyprland from repository defaults." \
         'Rebuild: ${rebuild}' \
         '${scope}' \
         'You are NOT on the other machine. Never write "this machine" or' \

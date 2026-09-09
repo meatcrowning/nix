@@ -124,8 +124,10 @@ Repair with `~/.config/scripts/hypr-session-env.sh --restore` and
 ## Which machine
 
 The start hook runs `~/.config/scripts/claude-host-id.sh` and supplies the host,
-flake attribute, and rebuild command. Do not infer it from kernel details; if
-the hook is absent, run `hostname`. The hosts are `top` (NixOS) and `book`
+active desktop session, flake attribute, and rebuild command. Trust its measured
+Plasma/Hyprland session instead of inferring one from repository defaults. Do
+not infer the host from kernel details; if the hook is absent, run `hostname`.
+The hosts are `top` (NixOS) and `book`
 (Fedora Asahi, flake attribute `air`). Do not write `this machine`, `here`, or
 similar host deixis into synced files; name `top` or `book`. Dispatch prompts
 must name the host for rebuilds, `sys/`, compositor pins, or hardware work.
