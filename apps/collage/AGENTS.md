@@ -34,9 +34,10 @@ image-only pass separately when a browser build lacks usable video encoders.
 Install `collage.user.js` in a userscript manager, disable older collage copies,
 then reload the thread. Selection is per-thread; the first run reads the old
 `highlightedImages_<thread>` list without modifying it. No browser profile writes
-or automatic installation. Its `@updateURL` and `@downloadURL` point at the
-public raw `main` artifact; bump `package.json`'s version whenever rebuilding a
-changed artifact so an installed copy updates through the userscript manager.
+or automatic installation. The portable artifact contains no personal source
+URL or updater. On this desktop only, `chan-theme-server.py` injects loopback
+`@updateURL`/`@downloadURL` metadata into its served copy; bump `package.json`'s
+version whenever rebuilding a changed artifact so that copy updates.
 
 Limits: WebM (VP8, then VP9 if supported) or explicit MP4 (AVC/H.264), silent SDR video, up to 300 seconds,
 15/24/30/60 fps; 64 inputs,
