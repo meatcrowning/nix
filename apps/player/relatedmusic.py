@@ -297,66 +297,21 @@ def _album_id(album, kind):
     return _first_id(album, *names)
 
 
-def _album_matches_track(album, track):
-    album = _mapping(album)
-    if not album:
-        return False
-    release = _ids(track, "release")
-    group = _ids(track, "group")
-    if release and release == _album_id(album, "release"):
-        return True
-    if group and group == _album_id(album, "group"):
-        return True
-    title, artist = _album(track), _artist(track)
-    at, aa = _text(_value(album, "title", "album")), _text(_value(album, "artist", "albumArtist"))
-    return bool(title and at and _fold_title(title) == _fold_title(at) and
-                (not aa or not artist or trackmatch.artist_matches(artist, aa)))
-
-
 def _album_index(albums):
-    """Index concrete editions once; group-only matches remain conservative."""
-    release, group, title = {}, {}, {}
-    ordered = tuple(albums)
-    for album in ordered:
+    """Only a concrete release can supply edition-specific credits."""
+    release = {}
+    for album in albums:
         release_id = _album_id(album, "release")
-        group_id = _album_id(album, "group")
         if release_id:
             release.setdefault(release_id, album)
-        title_key = _fold_title(_text(_value(album, "title", "album")))
-        if title_key:
-            title.setdefault(title_key, []).append(album)
-        if group_id:
-            # A repeated cache view of the same release is harmless.  Multiple
-            # concrete releases in one group are genuinely ambiguous.
-            entries = group.setdefault(group_id, [])
-            if not any(release_id and release_id == _album_id(entry, "release")
-                       for entry in entries):
-                entries.append(album)
-    return {"ordered": ordered, "release": release, "group": group, "title": title}
+    return release
 
 
 def _album_for_track(track, index):
-    release, group = _ids(track, "release"), _ids(track, "group")
-    if release:
-        found = index["release"].get(release)
-        if found:
-            return found
-        # An explicit edition identity must never borrow another edition's
-        # credits merely because the album title happens to be the same.
-        return {}
-    if group:
-        found = index["group"].get(group, [])
-        if len(found) == 1:
-            return found[0]
-        # A group identifies a release family.  Several cached editions cannot
-        # prove which edition's track-scoped credits participate.
-        return {}
-    # This is the old conservative fallback (title equality plus artist
-    # agreement), narrowed by its exact folded-title prerequisite.
-    for album in index["title"].get(_fold_title(_album(track)), ()):
-        if _album_matches_track(album, track):
-            return album
-    return {}
+    # The coordinator overlays resolved directory links before ranking. A
+    # group tag or matching album title alone cannot establish the edition,
+    # even if only one edition happens to have been downloaded so far.
+    return index.get(_ids(track, "release"), {})
 
 
 def _credit_role(value):
