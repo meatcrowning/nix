@@ -295,7 +295,7 @@ Item {
             // shuffle sits RIGHT of repeat now; this slot is where it used to be.
             { id: "favorite",  label: "♥",  state: favState, tip: "favourite",
               menu: "playback", menuSep: true, menuText: "Favourite",
-              icon: "favorites", bar: "transport", shortcut: "L" },
+              icon: "heart", bar: "transport", shortcut: "L" },
             // The MODE is in the icon, not only in the lit state: off and
             // repeat-all differ by the check, repeat-track by the glyph
             // (breeze/oxygen both carry the -song face). One dim icon for all

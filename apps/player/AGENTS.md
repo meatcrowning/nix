@@ -268,7 +268,11 @@ style-owned window gradient remains continuous. `NowInfoPane.qml` owns the `lyri
 `NowPlayingMetadata`: MusicBrainz gates identity, linked Wikipedia/Wikidata
 supplies prose, and Last.fm results are intersected with local tracks. Preserve
 the explicit loading/error/stale/ambiguous states, candidate chooser, and
-manual override/revert path; never write these facts into audio tags.
+manual override/revert path; never write these facts into audio tags. Empty web
+prose consumes no row, album and artist prose use the normal text tone, and the
+metadata action icons share the tab strip whenever its measured contents fit,
+wrapping into the identity area only at narrower widths. Plasma notebook tabs
+are checked/pressed controls, not highlighted actions.
 
 The Plasma visualizer still has one Cava producer. `transport.SpectrumWidget`
 uses the Oxygen decoration's same solid-bar treatment and reads its runtime

@@ -21,6 +21,7 @@ Item {
     // the row says so rather than the twin guessing from an empty `plainLabel`.
     property bool iconOnly: false
     property bool lit: false
+    property bool depressed: false
     // The three foreground tones, handed in already faded by whatever pane owns
     // this button (docs/DESIGN.md §3.1.1). A button must not know whether the
     // window is focused; the defaults are the lit tones so a standalone/harness

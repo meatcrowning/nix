@@ -27,6 +27,7 @@ Item {
     property string iconName: ""
     property bool iconOnly: false
     property bool lit: false
+    property bool depressed: false
     property color fgText: Theme.text
     property color fgDim: Theme.textDim
     property color fgAccent: Theme.accent
@@ -52,7 +53,9 @@ Item {
         enabled: root.enabled
         // A LIT button IS its state (§12.1) — `highlighted` is the KStyle's own
         // way of saying so, the same one a checked toolbar row gets.
-        highlighted: root.lit
+        checkable: root.depressed
+        checked: root.depressed && root.lit
+        highlighted: root.lit && !root.depressed
         onClicked: root.clicked()
     }
 }
