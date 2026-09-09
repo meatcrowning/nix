@@ -27,6 +27,7 @@ import "../../qmlcommon"
 // panes cannot fight over it and there is nothing to retarget. A pane is focused
 // by clicking it, by zooming over it, by dropping on it, or with Tab / Ctrl+1..9.
 Window {
+    NativeContentContext {}
     id: win
 
     property var images: startImages    // [{ name, path }] — shared by all panes

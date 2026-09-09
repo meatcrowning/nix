@@ -202,7 +202,7 @@ def controls_style() -> str:
 def pin_controls_style() -> None:
     """Set `QT_QUICK_CONTROLS_STYLE` before the app object exists, which is the
     only point at which Qt reads it."""
-    os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", controls_style())
+    os.environ["QT_QUICK_CONTROLS_STYLE"] = controls_style()
 
 
 def make_app(argv, name: str):

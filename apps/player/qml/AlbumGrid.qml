@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls.Basic
+import QtQuick.Controls
 import "../../qmlcommon"
 
 // The album gallery: edge-to-edge cover tiles with ZERO gap — the cell size

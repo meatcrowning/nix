@@ -13,6 +13,7 @@ import "../../qmlcommon"
 // it there — this repo's documents refer to each other constantly, and reading
 // `docs/DESIGN.md` beside the `AGENTS.md` it governs is the whole point.
 Window {
+    NativeContentContext {}
     id: win
 
     property string startDoc: startPath

@@ -12,6 +12,7 @@ import "../../qmlcommon"
 //     click the active one to close), and a new-tab button at the bottom.
 // The window itself is pure page — no in-window toolbar or tab strip.
 Window {
+    NativeContentContext {}
     id: win
 
     // display-site px() for foreign text (docs/DESIGN.md 2.3)

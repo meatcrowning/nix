@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Window
-import QtQuick.Controls.Basic
+import QtQuick.Controls
 import QtQuick.Dialogs
 import "../../qmlcommon"
 
@@ -21,6 +21,7 @@ import "../../qmlcommon"
 // — the three dropdowns, the prompt editor — still resolves, and so one file
 // still serves both faces.
 Item {
+    NativeContentContext {}
     id: win
 
     // Which roof this tree is under. Everything gated on it is chrome the

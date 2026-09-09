@@ -18,6 +18,7 @@ import "../../qmlcommon"
 // That is the whole reason tabs are a Repeater over a `ListModel` and not one
 // view with text swapped into it.
 Window {
+    NativeContentContext {}
     id: win
 
     // ---- documents ----------------------------------------------------

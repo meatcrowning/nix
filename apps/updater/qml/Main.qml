@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Window
-import QtQuick.Controls.Basic
+import QtQuick.Controls
 import "../../qmlcommon"
 
 // updater's window: the flake's inputs on the left, a live command log on the
@@ -11,6 +11,7 @@ import "../../qmlcommon"
 // then runs this host's rebuild wrapper; the confirm overlay says so first
 // (docs/DESIGN.md §10 — never offer an action that silently costs something).
 Window {
+    NativeContentContext {}
     id: win
 
     // §3.1.1's app-side fade is RETIRED — his board call, 2026-08-09: with

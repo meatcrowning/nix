@@ -4480,7 +4480,9 @@ def main():
     # Chromium must be initialized before the QGuiApplication exists.
     QtWebEngineQuick.initialize()
 
-    app = QGuiApplication(sys.argv)
+    import kdeshell
+    kdeshell.pin_controls_style()
+    app = kdeshell.make_app(sys.argv, "surfer")
     app.setApplicationName("surfer")
     app.setOrganizationName("surfer")  # keys the QtWebEngine profile dirs
     app.setDesktopFileName("surfer")
@@ -4496,6 +4498,8 @@ def main():
     instance = SingleInstance(app)
 
     engine = QQmlApplicationEngine()
+    if kdeshell.is_plasma():
+        kdeshell.select_plasma_files(engine)
     ctx = engine.rootContext()
 
     palette = Palette(theme_source(PANEL_THEME))

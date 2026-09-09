@@ -300,7 +300,9 @@ class Sudo(QObject):
 
 
 def main():
-    app = QGuiApplication(sys.argv)
+    import kdeshell
+    kdeshell.pin_controls_style()
+    app = kdeshell.make_app(sys.argv, "vista-askpass")
     # Both are set: Qt derives the Wayland app_id from desktopFileName, falling
     # back to applicationName. The hyprland window rule and the panel's
     # Askpass.qml both match this exact string.
@@ -332,6 +334,8 @@ def main():
     command = sanitize(sudo_command(), ascii_only=True)
 
     engine = QQmlApplicationEngine()
+    if kdeshell.is_plasma():
+        kdeshell.select_plasma_files(engine)
     ctx = engine.rootContext()
 
     palette = Palette(theme_source(PANEL_THEME))
