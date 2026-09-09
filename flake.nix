@@ -142,10 +142,25 @@
     # Air skips Breeze's local patch because it has no aarch64 cache, but the
     # small Konsole renderer patch carries its real window field under terminal
     # text instead of letting terminal transparency reach the desktop.
-    pkgsAir = mkPkgs "aarch64-linux" [ vcv-rack-overlay konsole-style-background-overlay ];
+    pkgsAirBase = mkPkgs "aarch64-linux" [ vcv-rack-overlay konsole-style-background-overlay ];
+    airOffload = import ./lib/air-offload.nix {
+      inherit inputs;
+      arm = pkgsAirBase;
+      native = mkPkgs "x86_64-linux" [];
+    };
+    pkgsAir = pkgsAirBase.extend (final: prev: {
+      kdePackages = prev.kdePackages // {
+        inherit (airOffload) konsole oxygen;
+      };
+    });
 
   in
   {
+    packages.x86_64-linux = {
+      air-hyprvtb = airOffload.hyprvtb;
+      air-konsole = airOffload.konsole;
+      air-oxygen = airOffload.oxygen;
+    };
     nixosConfigurations = {
       top = nixpkgs.lib.nixosSystem {
         specialArgs = {
@@ -193,6 +208,7 @@
         pkgs = pkgsAir;
         extraSpecialArgs = {
           inherit inputs user;
+          inherit airOffload;
           host = "air";
           hostProfile = import ./lib/host-profile.nix { host = "air"; };
         };

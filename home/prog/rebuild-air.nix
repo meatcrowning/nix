@@ -99,7 +99,7 @@ lib.mkIf (host == "air") {
       }
       trap stop_sampler EXIT INT TERM
 
-      echo "rebuild-air: one derivation, four build cores; telemetry: $RUN" >&2
+      echo "rebuild-air: ARM work uses one job/four cores; custom cross-builds use top; telemetry: $RUN" >&2
       # The client retains fd 9 (and therefore the lock) for the whole switch.
       set -o pipefail
       home-manager switch --max-jobs "$BUILD_JOBS" --cores "$BUILD_CORES" \

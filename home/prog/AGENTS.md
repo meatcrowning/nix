@@ -147,6 +147,9 @@ weak decoration reference must be `CDecoRef`, never raw `WP<CVtbDeco>`.
 `book` uses Fedora Asahi's compositor (`hyprland-air` v0.56.2; Nix Hyprland
 crashes there because of GBM), while `top` uses the main pin. The plugin seam is
 dual-version via `#if VTB_HL_056`; compile seam changes against both pins.
+Book’s plugin packaging is in `lib/air-offload.nix`: generate headers without
+building Hyprland, then cross-compile on top against the pinned ARM libraries.
+Do not replace those target libraries with x86 dependencies.
 Remove the bridge only when Fedora ships 0.56, following
 `docs/book-hyprvtb-version-bridge.md`. Because `hyprvtb/` is the derivation's
 `src = ./.`, any file change there rebuilds the plugin.
