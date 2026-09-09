@@ -101,7 +101,9 @@ workspace, notifications, OSDs, audio/MPRIS, gamma, brightness, cursor theme,
 screen, or systemd user-manager environment. Do not launch a packaged app on
 the real monitor, take screenshots, synthesize input, or script hyprvtb actions
 (`rollup`, `minimize_active`, etc.). The user performs visual and interaction
-checks; evidence is IPC, logs, and traces.
+checks; evidence is IPC, logs, and traces. If those cannot resolve a visual
+bug, ask the user for explicit one-off permission to test the live window;
+permission applies only to the named test and turn.
 
 Use `tools/sandbox.sh` or `QT_QPA_PLATFORM=offscreen`. Source
 `tools/lib/session-guard.sh` and use the matching guard immediately:

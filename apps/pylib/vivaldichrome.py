@@ -230,10 +230,9 @@ def relief_css(pal, chrome=None) -> str:
         # Vivaldi's auto-hide/non-unified layout adds a 6px border around the
         # whole client: dead space below the native titlebar and along every
         # window edge. The compositor already owns the frame, so remove it.
-        "#browser.auto-hide:not(.unified-ui){border:0!important;border-radius:0!important}",
+        "#browser{border:0!important;border-radius:0!important;padding:0!important;margin:0!important}",
         # Keep Vivaldi's remaining 1px client seams in structural colours.
-        "#browser{color:%s!important;%s;border-color:%s!important}"
-        % (fg, window_slab(), border),
+        "#browser{color:%s!important;%s}" % (fg, window_slab()),
     ])
 
 
