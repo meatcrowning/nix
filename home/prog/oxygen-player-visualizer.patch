@@ -37,7 +37,7 @@
      return true;
  }
  
-@@ -598,7 +609,13 @@
+@@ -598,7 +609,22 @@
      painter->setFont(settings()->font());
  
      // caption rect
@@ -61,7 +61,7 @@
  
      // copy caption
      const QString caption = painter->fontMetrics().elidedText(window()->caption(), Qt::ElideMiddle, cR.first.width());
-@@ -614,6 +625,23 @@
+@@ -614,6 +634,23 @@
      const auto color(fontColor(palette));
      painter->setPen(color);
      painter->drawText(cR.first, cR.second | Qt::TextSingleLine, caption);
