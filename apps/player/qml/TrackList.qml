@@ -173,7 +173,10 @@ Item {
 
         delegate: Rectangle {
             id: row
-            width: list.width
+            // The scrollbar owns a real lane beside the rows. Letting the
+            // highlight continue underneath a native transparent groove made
+            // it appear again on the groove's far side.
+            width: Math.max(0, list.width - (root.scrollable ? vscroll.barW : 0))
             height: Theme.lineHeight + 2   // descender room: one cell + 1px each side
             readonly property bool isCurrent: root.currentRow >= 0
                                               ? index === root.currentRow
@@ -287,7 +290,7 @@ Item {
                 // under it. The delegate is the view's full width on purpose
                 // (the row highlight runs edge to edge), so the gutter is the
                 // trailing column's margin rather than the list's.
-                anchors.rightMargin: root.scrollable ? vscroll.barW + 4 : 8
+                anchors.rightMargin: 8
                 y: 1
                 height: 15
                 spacing: 8

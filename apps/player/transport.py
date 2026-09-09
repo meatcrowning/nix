@@ -54,7 +54,10 @@ class SpectrumWidget(QWidget):
         self._timer.setInterval(34)
         self._timer.timeout.connect(self._pull)
         runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
-        self._path = Path(runtime) / "player-visualizer.json"
+        # The producer keeps an ungated copy for this in-window owner. Its
+        # legacy path is blanked while Now Playing is open so an already-loaded
+        # Oxygen decoration also stands down without a KWin restart.
+        self._path = Path(runtime) / "player-visualizer-player.json"
         self._timer.start()
 
     def _pull(self):
@@ -201,10 +204,10 @@ class TransportSeek(QWidget):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(6, 0, 6, 0)
         lay.setSpacing(8)
-        lay.addWidget(self._spectrum)
         lay.addWidget(self._elapsed)
         lay.addWidget(self._slider, 1)
         lay.addWidget(self._total)
+        lay.addWidget(self._spectrum)
 
         self._echo = QTimer(self)
         self._echo.setSingleShot(True)

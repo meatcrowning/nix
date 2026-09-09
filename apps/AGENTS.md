@@ -212,6 +212,9 @@ rebuilds only when action ids change. Keep persistent widget actions when
 clearing bars (_clear_bar, not QToolBar.clear()), re-assert overlay toolbars
 after restoreState(), preserve toolbar search and dock widgets, and use a
 QStackedWidget for status text/progress. Escape literal % in progress text.
+An app with no standing status fact calls `allow_statusbar(False)` before
+binding chrome; this also removes the meaningless Show Statusbar action rather
+than merely hiding an empty bar.
 Do not connect footerChanged to set_status; the footer is the hyprvtb badge.
 Use barText/bar_labels() for labeled toolbars, setIconText for mnemonic
 underlines, and guard_typing() to suspend bare-key actions while editing.

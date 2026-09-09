@@ -2713,6 +2713,7 @@ class Player(QObject):
         return {"id": t["id"], "title": t.get("title") or "", "artist": t.get("artist") or "",
                 "album": t.get("album") or "", "rating": t.get("rating"),
                 "favorite": t.get("favorite", 0), "duration": t.get("duration") or 0.0,
+                "playCount": t.get("play_count") or 0,
                 "artPath": art, "albumId": t.get("album_id") or 0, "year": year,
                 # the gallery's filter matches album_artist, so the cover's
                 # context menu needs THAT name, not the per-track one.
@@ -5272,12 +5273,12 @@ def main():
         # QMainWindow.menuBar() on the committed baseline too. This narrow
         # selftest escape still loads and lays out the complete Plasma QML face
         # without weakening the real-session chrome path.
+        shell.allow_statusbar(False)
         if not (selftest and os.environ.get("PLAYER_SKIP_NATIVE_CHROME")):
             shell.bind_chrome(titlebar)
         # Konsole's toolbar names its buttons; so does this one [his,
         # 2026-08-24]. The sort row keeps its own `barText` words.
         shell.bar_labels()
-        shell.bind_status()      # statusLine / statusProgress / statusRight
         shell.bind_title("windowTitle")   # "artist — title", as under Hyprland
 
         # ---- the finder, where KDE keeps it -----------------------------
