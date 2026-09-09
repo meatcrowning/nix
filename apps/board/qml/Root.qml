@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Window
-import QtQuick.Controls.Basic
+import QtQuick.Controls
 import "../../qmlcommon"
 
 // board's window: one page, four sections — what needs him, who is running,
@@ -23,6 +23,7 @@ import "../../qmlcommon"
 // pressured to act quickly when really i dont need to"), and it is as
 // load-bearing as the parse.
 Item {
+    NativeContentContext {}
     id: win
     anchors.fill: parent
 

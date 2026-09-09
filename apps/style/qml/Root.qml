@@ -1,4 +1,5 @@
 import QtQuick
+import org.kde.kirigami as Kirigami
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
@@ -8,6 +9,7 @@ import "../../qmlcommon"
 // QMainWindow; StyledBackground carries Oxygen's titlebar gradient through the
 // window body. Under Hyprland Main.qml supplies the ordinary QML window roof.
 Item {
+    NativeContentContext {}
     id: root
     focus: true
     property var selectedPaths: []
@@ -80,6 +82,8 @@ Item {
         spacing: 0
 
         ToolBar {
+            Kirigami.Theme.colorSet: Kirigami.Theme.Window
+            Kirigami.Theme.inherit: false
             Layout.fillWidth: true
             RowLayout {
                 anchors.fill: parent

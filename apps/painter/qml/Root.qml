@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Window
-import QtQuick.Controls.Basic
+import QtQuick.Controls
 import QtQuick.Dialogs
 import "../../qmlcommon"
 
@@ -18,6 +18,7 @@ import "../../qmlcommon"
 //
 // Two panes: the controls on the left, results on the right.
 Item {
+    NativeContentContext {}
     id: root
 
     // The desktop's one slide duration + curve (docs/DESIGN.md 6.2).

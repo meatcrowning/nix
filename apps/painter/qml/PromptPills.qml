@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls.Basic
+import QtQuick.Controls
 import "../../qmlcommon"
 
 // A lossless view over a comma-separated prompt. Tags are movable; the bytes

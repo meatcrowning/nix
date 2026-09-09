@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls.Basic
+import QtQuick.Controls
 import "../../qmlcommon"
 
 // Smart playlists: the user's own lists down the left, the selected list's

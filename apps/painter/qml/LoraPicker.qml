@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls.Basic
+import QtQuick.Controls
 import "../../qmlcommon"
 
 // Compatible LoRAs first and one click away.  Incompatible ones are hidden

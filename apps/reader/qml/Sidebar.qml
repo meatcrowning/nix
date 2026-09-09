@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls.Basic
+import QtQuick.Controls
 import "../../qmlcommon"
 
 // The browse pane: the same strip of window showing one of three things, picked

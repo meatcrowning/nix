@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Window
 import QtQuick.Layouts
-import QtQuick.Controls.Basic
+import QtQuick.Controls
 import "../../qmlcommon"
 
 // slsk's window: a search mode and a downloads mode, one window, no chrome
@@ -9,6 +9,7 @@ import "../../qmlcommon"
 // content, docs/DESIGN.md 12, 7.4). Every pixel here follows the design
 // language -- Theme palette + pixel font, Motion, KineticListView + VScroll.
 Window {
+    NativeContentContext {}
     id: win
 
     // Focus-aware foreground, in lock-step with the titlebar (filer's idiom,

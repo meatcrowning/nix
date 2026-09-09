@@ -23,6 +23,7 @@ import "../../qmlcommon"
 // Everything flows through the context properties main.py installs: Library
 // (the Bridge), Player, the *Model list models, Prefs, Titlebar.
 Item {
+    NativeContentContext {}
     id: win
 
     // Which roof this tree is under. Everything gated on it is chrome the

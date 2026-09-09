@@ -474,11 +474,15 @@ class Host(QObject):
 
 
 def main():
-    app = QGuiApplication(sys.argv)
+    import kdeshell
+    kdeshell.pin_controls_style()
+    app = kdeshell.make_app(sys.argv, "updater")
     app.setApplicationName("updater")
     app.setDesktopFileName("updater")
 
     engine = QQmlApplicationEngine()
+    if kdeshell.is_plasma():
+        kdeshell.select_plasma_files(engine)
     ctx = engine.rootContext()
 
     palette = Palette(theme_source(PANEL_THEME))

@@ -1212,7 +1212,9 @@ def _unlink(path):
 
 
 def main():
-    app = QGuiApplication(sys.argv)
+    import kdeshell
+    kdeshell.pin_controls_style()
+    app = kdeshell.make_app(sys.argv, "filer")
     app.setApplicationName("filer")
     app.setDesktopFileName("filer")
 
@@ -1254,6 +1256,8 @@ def main():
         start_dir = saved if saved and os.path.isdir(saved) else str(Path.home())
 
     engine = QQmlApplicationEngine()
+    if kdeshell.is_plasma():
+        kdeshell.select_plasma_files(engine)
     ctx = engine.rootContext()
 
     # thumbnails via the shared freedesktop cache (see make_thumb / ThumbProvider).

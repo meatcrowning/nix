@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls.Basic   // ScrollBar (attached), for VScroll
+import QtQuick.Controls   // ScrollBar (attached), for VScroll
 import "../../qmlcommon"
 
 // THE one dropdown list, over everything — the same shape as `CtxMenu` and for
