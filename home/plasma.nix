@@ -401,6 +401,8 @@ in
       # old `| LFIX` layout. A future layout change belongs here so both hosts
       # move together.
       kwinrc."org.kde.kdecoration2" = {
+        BorderSize = "Normal";
+        BorderSizeAuto = true;
         ButtonsOnActiveWindowGlow = false;
         ButtonsOnLeft = "XIM";
         ButtonsOnRight = "F";
