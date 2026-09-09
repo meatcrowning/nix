@@ -53,7 +53,7 @@ with tempfile.TemporaryDirectory() as directory:
         profile_dir = home / ".cache" / "wal" / "profiles" / key
         profile_dir.mkdir(parents=True)
         schemes = {}
-        for name in ("dark", "darkNeutral", "light"):
+        for name in ("dark", "darkNeutral", "light", "mixed"):
             scheme = profile_dir / f"{name}.colors"
             scheme.write_text(f"[{name}]\n", encoding="utf-8")
             schemes[name] = str(scheme)
@@ -69,6 +69,8 @@ with tempfile.TemporaryDirectory() as directory:
         selected = service.prepared_profile(wallpaper, "OxygenDarkFlat")
         check(selected["schemes"]["ready"] and selected["selectedSchemePath"] == schemes["dark"],
               "accepts a complete prepared scheme set without a live writer")
+        check(service.prepared_profile(wallpaper, "OxygenMixed")["selectedSchemePath"] == schemes["mixed"],
+              "selects the prepared mixed scheme")
         check(service.prepared_profile(wallpaper, "Aero")["selectedSchemePath"] == schemes["aero"],
               "uses a host-provided Aero body when the selected scheme is prepared")
         check(service.authorized_wallpaper(str(wallpaper)) == wallpaper.resolve(),

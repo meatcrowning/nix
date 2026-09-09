@@ -6,7 +6,7 @@
 #   - the tile-vs-scale mode decision + source dimensions
 #   - the tiled PNG per current monitor resolution (tile mode only)
 #   - the extracted colour palette (wal-extract.py)
-#   - a versioned profile manifest and the three writable Oxygen schemes
+#   - a versioned profile manifest and the four writable Oxygen schemes
 #
 # Idempotent and safe to call repeatedly — each step is skipped if its cache
 # is already newer than the source image. wal-set.sh calls this itself as its
@@ -148,7 +148,7 @@ fi
 # palette inputs that produced it.  It is NOT the active theme state: writing it
 # must never repaint Plasma, notify applications, or replace a live scheme.
 #
-# Keep the three scheme bodies beside the palette rather than in their live
+# Keep the four scheme bodies beside the palette rather than in their live
 # ~/.local/share/color-schemes destination.  plasma-scheme.py's --no-apply
 # mode only mints files; it deliberately avoids KConfig, D-Bus, and KWin.  The
 # appearance controller can later copy the selected already-minted body into
@@ -211,12 +211,14 @@ if [ -f "$DARK_TEMPLATE" ] && [ -f "$LIGHT_TEMPLATE" ] \
    && [ -x "$SCRIPTS/plasma-scheme.py" ]; then
     if [ "$BG" = "464540" ]; then
         prepare_scheme OxygenDarkFlat "$DARK_TEMPLATE" --background "$BG" || SCHEMES_READY=false
+        prepare_scheme OxygenMixed "$DARK_TEMPLATE" --background "$BG" || SCHEMES_READY=false
     else
         prepare_scheme OxygenDarkFlat "$DARK_TEMPLATE" || SCHEMES_READY=false
+        prepare_scheme OxygenMixed "$DARK_TEMPLATE" || SCHEMES_READY=false
     fi
     prepare_scheme OxygenDarkNeutral "$DARK_TEMPLATE" --surface-color "$BGALT" || SCHEMES_READY=false
     prepare_scheme OxygenLightFlat "$LIGHT_TEMPLATE" || SCHEMES_READY=false
-    for scheme in OxygenDarkFlat OxygenDarkNeutral OxygenLightFlat; do
+    for scheme in OxygenDarkFlat OxygenDarkNeutral OxygenLightFlat OxygenMixed; do
         [ -s "$PROFILE_DIR/$scheme.colors" ] || SCHEMES_READY=false
     done
 else
@@ -224,7 +226,7 @@ else
 fi
 
 # Aero is installed only where the matching Plasma theme is present.  It is an
-# owned candidate in plasma-scheme.py, but unlike the three shared Oxygen
+# owned candidate in plasma-scheme.py, but unlike the four shared Oxygen
 # shapes it has no portable template.  Pre-mint it when the host supplies its
 # own source; an absent Aero body remains an explicit unsupported selected
 # scheme rather than falling back to minting during Apply.
@@ -261,6 +263,7 @@ if ! jq -n \
                 dark: ($profileDir + "/OxygenDarkFlat.colors"),
                 darkNeutral: ($profileDir + "/OxygenDarkNeutral.colors"),
                 light: ($profileDir + "/OxygenLightFlat.colors"),
+                mixed: ($profileDir + "/OxygenMixed.colors"),
                 aero: ($profileDir + "/Aero.colors")},
       profileHash: $profileHash}' > "$tmp_manifest"; then
     rm -f "$tmp_manifest"

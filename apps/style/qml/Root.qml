@@ -101,6 +101,13 @@ Item {
                     enabled: !Appearance.applying
                     onClicked: Appearance.selectScheme("OxygenLightFlat")
                 }
+                ToolButton {
+                    text: "mixed"
+                    checkable: true
+                    checked: Appearance.activeScheme === "OxygenMixed"
+                    enabled: !Appearance.applying
+                    onClicked: Appearance.selectScheme("OxygenMixed")
+                }
                 Item { Layout.fillWidth: true }
                 ToolButton {
                     text: "add"

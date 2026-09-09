@@ -213,6 +213,15 @@ def kde_palette(ini=None) -> dict | None:
     if view_bg == bg:
         view_bg = _rgb(win.get("BackgroundAlternate"), bg)
 
+    # Legacy twelve-token QML surfaces share WindowText across bg and bgAlt.
+    # A mixed KDE scheme has a separate ViewText role that these surfaces do
+    # not expose. Keep their inset readable; native Qt views use Base/Text
+    # directly and retain the scheme's white content background.
+    if _ratio(text, view_bg) < TEXT_RATIO:
+        view_bg = _rgb(win.get("BackgroundAlternate"), bg)
+        if _ratio(text, view_bg) < TEXT_RATIO:
+            view_bg = bg
+
     # accent: the scheme's focus hue, but it is body text here (§3), so it has
     # to be readable as text or it is not the accent — fall back to the plain
     # foreground rather than ship a colour he cannot read a filename in.

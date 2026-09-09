@@ -62,7 +62,7 @@ if [ "$(cat "$panel_scheme_cache" 2>/dev/null || true)" != "$scheme" ]; then
 fi
 
 case "$scheme" in
-    OxygenDarkFlat|OxygenDarkNeutral|OxygenLightFlat) ;;
+    OxygenDarkFlat|OxygenDarkNeutral|OxygenLightFlat|OxygenMixed) ;;
     *) exit 0 ;;
 esac
 
