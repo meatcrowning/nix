@@ -53,6 +53,7 @@ import atomicsave  # noqa: E402  (sibling module; also used by lyrics.py)
 from metadatawrites import MetadataWrites  # noqa: E402
 from albuminfo import AlbumInformation  # noqa: E402
 from releaseinfo import read_identity  # noqa: E402
+import perftrace  # noqa: E402
 import infostore  # noqa: E402
 import lyrics as lyricslib  # noqa: E402  (sibling module; also used by tools/)
 from scrobble import Scrobbler  # noqa: E402  (sibling module; Last.fm, off the GUI thread)
@@ -2610,6 +2611,7 @@ class Player(QObject):
 
     # ---- queue plumbing ----
 
+    @perftrace.timed("_set_index")
     def _set_index(self, idx):
         self._index = idx
         self._listened = 0.0
@@ -2704,6 +2706,7 @@ class Player(QObject):
         self._apply_rg(self._rg_effective(max(0, self._index)))
         self.replayGainChanged.emit()
 
+    @perftrace.timed("_sync_mpv")
     def _sync_mpv(self, start_idx, paused=False, defer_rest=False):
         """Point mpv at queue[start_idx:] — replace starts playback, appends
         prefetch the rest for gapless auto-advance. _set_index runs first so a
@@ -2756,6 +2759,7 @@ class Player(QObject):
             # SMB/mpv refusal break the visible player's event loop.
             pass
 
+    @perftrace.timed("_append_restored_tail")
     def _append_restored_tail(self, token, next_idx):
         """Append one bounded queue batch without monopolising the UI thread."""
         if token != self._mpv_fill_token:
@@ -2871,6 +2875,7 @@ class Player(QObject):
     # ---- slots (QML / titlebar / MPRIS) ----
 
     @Slot("QVariantList", int)
+    @perftrace.timed("playTracks")
     def playTracks(self, ids, start=0):
         """`start` is the queue row to play first. -1 means "no chosen track"
         (a play-all): under shuffle it pins NOTHING, so a shuffled playlist or
@@ -3173,6 +3178,7 @@ class Player(QObject):
         random.shuffle(q)
         return first + q
 
+    @perftrace.timed("_resync_tail")
     def _resync_tail(self):
         """Queue order changed under a playing track: rebuild mpv's upcoming
         entries without restarting the current file."""
@@ -3712,6 +3718,7 @@ class Bridge(QObject):
         else:
             self.scanStatus.emit("")
 
+    @perftrace.timed("_on_now_info")
     def _on_now_info(self, state):
         # Ignore a worker result for a track the user has already skipped.
         current = self._current_track()
@@ -3720,6 +3727,7 @@ class Bridge(QObject):
         self._now_info_state = dict(state)
         self.nowInfoChanged.emit()
 
+    @perftrace.timed("_request_now_info")
     def _request_now_info(self):
         current = self._current_track()
         self._now_info.request(int(current.get("id") or 0))
@@ -4254,6 +4262,7 @@ class Bridge(QObject):
 
     # ---- refresh plumbing ----
 
+    @perftrace.timed("_refresh_current")
     def _refresh_current(self):
         if self._search_text:
             self._search_ids = self._library.search_ids(self._search_text)
@@ -4268,9 +4277,11 @@ class Bridge(QObject):
         if self._current_smart:
             self.openSmart(self._current_smart, merge=True)
 
+    @perftrace.timed("_refresh_queue")
     def _refresh_queue(self):
         self.queueModel.set_rows([track_row(t) for t in self._player.queue_dicts()])
 
+    @perftrace.timed("_on_track_changed")
     def _on_track_changed(self, track_id):
         # A rating/favourite/count changed: refresh any model showing the row.
         rows = self._library.tracks_by_ids([track_id])
@@ -5070,12 +5081,17 @@ def main():
     app.setApplicationName("player")
     app.setDesktopFileName("player")
 
+    perf = perftrace.install(app, STATE) if not (selftest or resource_fixture) else None
     prefs = Prefs()
     tagwriter = TagWriter(prefs)
     library = Library(tagwriter)
     startup_mark("library-created")
     player = Player(library, prefs)
     startup_mark("player-created")
+    if perf is not None:
+        perf.context_fn = lambda: {"queue_length": len(player._queue),
+                                   "index": player._index, "playing": player._playing,
+                                   "queue_fill_pending": player._mpv_fill_pending}
     # Last.fm. Wired in rather than constructed into either, so both still
     # build with no account and every harness in tools/ is unaffected. A
     # scrobble is decided by Player._maybe_count (one listen, one play count,

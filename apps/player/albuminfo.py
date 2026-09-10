@@ -16,9 +16,11 @@ import urllib.request
 
 from PySide6.QtCore import QCoreApplication, QObject, Signal, Slot
 
+import perftrace
 import infostore as store
 from releaseinfo import ReleaseInfo
 from relatedmusic import related_tracks
+related_tracks = perftrace.timed("albuminfo.related_tracks")(related_tracks)
 import trackmatch
 import lastfm
 
@@ -83,6 +85,7 @@ class AlbumInformation(QObject):
         self._index_generation += 1
 
     @Slot(int, object)
+    @perftrace.timed("albuminfo._deliver")
     def _deliver(self, generation, state):
         if generation == self._generation:
             self._state = dict(state)
@@ -319,6 +322,7 @@ class AlbumInformation(QObject):
                 state["match"] = {**manual, "manual": True}
             return state
 
+    @perftrace.timed("albuminfo._fetch_json")
     def _fetch_json(self, url):
         self._check_current()
         key = "url:" + hashlib.sha256(url.encode()).hexdigest()
@@ -344,6 +348,7 @@ class AlbumInformation(QObject):
             store.cache_put(con, key, "http", result, self.CACHE_AGE)
         return result
 
+    @perftrace.timed("albuminfo._load_identity")
     def _load_identity(self, con, row):
         if store.identity(row).get("scanned") or self._read_tags is None:
             return row
@@ -358,6 +363,7 @@ class AlbumInformation(QObject):
             self._index_generation += 1
         return row
 
+    @perftrace.timed("albuminfo._library_tracks")
     def _library_tracks(self, con):
         if self._indexed_generation != self._index_generation:
             self._tracks = [dict(r) for r in con.execute("SELECT * FROM tracks")]
@@ -384,6 +390,7 @@ class AlbumInformation(QObject):
         return [store.decode(r[0], {}) for r in con.execute(
             "SELECT body_json FROM music_info_cache WHERE kind='album'")]
 
+    @perftrace.timed("albuminfo._resolve")
     def _resolve(self, tid, force=False):
         self._force_fetch = force
         with self._connect() as con:

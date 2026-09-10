@@ -221,6 +221,18 @@ and artwork tones are derived at the root and passed down; app-side inactive
 fading is retired because the compositor owns dimming. Do not resurrect one
 half or reinterpret menu disabled colors as focus state.
 
+## Temporary performance logging
+
+`perftrace.py` starts only in normal app launches and writes
+`$XDG_STATE_HOME/player/performance.jsonl` (default `~/.local/state/player/`).
+It retains a 2 MiB log and three rotated copies. `PLAYER_PERF_LOG=0` disables it.
+A 50 ms GUI heartbeat records gaps over 250 ms; a background watchdog captures
+Python stacks during stalls at most once a second. Timed queue/metadata work
+logs durations over 25 ms, with queue size/index and 10-second CPU samples.
+No file writes happen on the GUI thread. Stack records omit locals and source
+text. Python stacks can identify a blocking native call but cannot unwind its
+C++/QML internals; a GIL-holding call may delay the watchdog too.
+
 ## Focused verification
 
 Use the safety protocol in the parent/root guides: guarded offscreen or nested
