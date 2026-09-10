@@ -126,6 +126,9 @@ in
   '';
   systemd.user.services.plasma-panel-surface = {
     Unit.Description = "render and apply the shared Plasma panel surface";
+    # A scheme writes several watched files; the last render must not be
+    # dropped by systemd's default five-start burst limit.
+    Unit.StartLimitIntervalSec = 0;
     Service = {
       Type = "oneshot";
       # Path activation coalesces a scheme's burst of writes.  The panel is
