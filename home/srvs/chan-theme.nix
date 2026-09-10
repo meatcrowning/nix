@@ -113,6 +113,9 @@
       PathChanged = [
         "%h/.config/quickshell/Theme.qml"      # the Hyprland face
         "%h/.config/kdeglobals"                # the Plasma one
+        # The renderer finishes after kdeglobals changes. Embed its completed
+        # raster, rather than leaving the previous palette baked into the UI.
+        "%h/.local/state/plasma-panel-surface.png"
         "/home/lam/nix/apps/pylib/scrollcss.py"       # scrollbar geometry
         "/home/lam/nix/apps/pylib/vivaldichrome.py"   # Vivaldi chrome
         "/home/lam/nix/apps/pylib/tools/vivaldi-theme.py" # its writer

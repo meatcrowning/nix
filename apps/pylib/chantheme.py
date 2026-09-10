@@ -267,10 +267,10 @@ def _chrome_css(ch, i):
         # otherwise the Oxygen raster ends at body's right edge and exposes
         # html's flat fallback behind those panes.
         "html,html body{background-color:%s%s;background-image:url(http://127.0.0.1:8791/oxygen-window.png)%s;"
-        # Keep the copied KStyle canvas in viewport coordinates.  `100%` is
-        # the document height here, which turns a long thread into a
-        # nearly-flat stretch; the desktop surface is a window-sized paint.
-        "background-size:100vw 100vh;background-position:0 0;"
+        # Preserve Oxygen's logical-pixel falloff and centered highlight.
+        # Resizing the screen raster to the page changes both against the
+        # native titlebar whenever the browser is smaller than the screen.
+        "background-size:auto!important;background-position:center top!important;"
         "background-repeat:no-repeat%s;background-attachment:fixed%s}"
         % (ch["windowBottom"], i, i, i, i),
         # Dialogs, catalog cells, previews and menus as the style's slabs:
