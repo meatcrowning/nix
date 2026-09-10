@@ -194,6 +194,10 @@ def relief_css(pal, chrome=None) -> str:
         ".toolbar-mainbar{%s;border-bottom:1px solid %s!important}" % (window_slab(), border),
         "#footer,.toolbar-statusbar{%s;border-top:1px solid %s!important}" % (window_slab(), border),
         "#panels-container{%s;border-right:1px solid %s!important}" % (window_slab(), border),
+        # Hidden address bars retain their DOM nodes at height zero. A border
+        # gives those nodes a visible one-pixel height even while collapsed.
+        ".address-top-off .toolbar-mainbar,.address-bottom-off .toolbar-mainbar{border:0!important}",
+        ".auto-hide-wrapper #panels-container{border:0!important}",
         # A tab is a slab: raised and lit when active, recessed and quiet when not.
         ".tab{border-radius:%s!important}" % r,
         ".tab.active,.tab-position.active .tab{%s;border:1px solid %s!important;"
