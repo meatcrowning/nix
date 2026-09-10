@@ -122,6 +122,8 @@ one owner and one implementation; do not fork their algorithms into an app.
   native-surface-test.py; the latter takes an Oxygen Qt plugin directory.
   Style's mixed scheme uses dark Window roles and light-theme Window roles
   as its View. Native content gradients are painted by Oxygen, not QML maths.
+  Konsole's StyleBackground is a continuous Window surface: its renderer and
+  exported terminal text both use Window roles so the body joins the titlebar.
   kdeshell.py installs a View context on QQuickWidget content while its real
   window/menu/toolbar keeps the native Window context. Native QML roots must
   also install NativeContentContext to select Kirigami View roles; native

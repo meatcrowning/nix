@@ -16,7 +16,7 @@ import sys
 import time
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QGuiApplication, QImage, QPalette, QRegion
+from PySide6.QtGui import QImage, QPalette, QRegion
 from PySide6.QtWidgets import QApplication, QWidget
 
 
@@ -81,15 +81,16 @@ def publish_generation(state: Path, target: Path) -> None:
 
 def main() -> int:
     live_size = plasma_screen_size()
+    if live_size is None:
+        # Activation can run without a desktop connection. Never replace the
+        # shared browser/panel canvas with Qt offscreen's synthetic 800x800.
+        print("no live Plasma output; retaining the previous surface", file=sys.stderr)
+        return 1
     app = QApplication.instance() or QApplication(sys.argv[:1])
     if app.style().objectName().lower() != "oxygen":
         print(f"refusing non-Oxygen style: {app.style().objectName()}", file=sys.stderr)
         return 1
-    screen = QGuiApplication.primaryScreen()
-    if screen is None:
-        return 1
-    rect = screen.geometry()
-    width, height = live_size or (max(1, rect.width()), max(1, rect.height()))
+    width, height = live_size
 
     # Oxygen only draws this primitive for a real top-level QWidget.  It also
     # treats an unseen window as inactive unless every colour group is pinned;
