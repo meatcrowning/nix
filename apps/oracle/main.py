@@ -3335,17 +3335,11 @@ SUGGESTED_PATH = CONFIG_DIR / "suggested.json"
 # stable leading group in the selector: an agent adding recommendations must
 # never make the models he already reaches for disappear below a long list.
 MODEL_LABELS = {
-    "qwen3.6:35b-a3b": "generalist · agentic — qwen3.6:35b-a3b",
-    "gemma4-qat:12b": (
-        "generalist · roleplay · sex · agentic · coding · multimodal · OCR · "
-        "subagent — gemma4-qat:12b"),
-    "gemma4:e4b": "generalist · roleplay · retarded sex · multimodal · OCR — gemma4:e4b",
-    "hf.co/bartowski/gemma-4-12B-it-GGUF:Q4_K_M": (
-        "generalist · roleplay · sex · agentic · coding · multimodal · OCR · "
-        "subagent — gemma4-12b q4"),
-    "hf.co/bartowski/Qwen_Qwen3.5-9B-GGUF:Q5_K_M": (
-        "generalist · roleplay · agentic · coding · multimodal · OCR · "
-        "subagent — qwen3.5-9b q5"),
+    "qwen3.6:35b-a3b": "qwen3.6:35b-a3b",
+    "gemma4-qat:12b": "gemma4-qat:12b",
+    "gemma4:e4b": "gemma4:e4b",
+    "hf.co/bartowski/gemma-4-12B-it-GGUF:Q4_K_M": "gemma4-12b q4",
+    "hf.co/bartowski/Qwen_Qwen3.5-9B-GGUF:Q5_K_M": "qwen3.5-9b q5",
 }
 CURATED_MODELS = tuple(MODEL_LABELS)
 
