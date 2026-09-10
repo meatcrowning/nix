@@ -102,6 +102,11 @@ for sel in ("#header", ".toolbar-mainbar", ".UrlBar-AddressField", ".ToolbarButt
     check("the relief reaches %s" % sel, sel in oxy)
 check("the address field is a HOLE (inset shadow), not a raised pill",
       "inset 0 1px 2px" in oxy)
+check("the header has no bright seam below the native titlebar",
+      "#header,.tabbar-wrapper,#tabs-tabbar-container{" in oxy
+      and "box-shadow:none!important" in oxy)
+check("tab hover observers have no outline seam",
+      ".observer{border:0!important}" in oxy)
 
 # The active tab's INK. Vivaldi inks it with the contrast tone it computed for
 # an ACCENT-coloured tab; our slab is not the accent, so inheriting that put
