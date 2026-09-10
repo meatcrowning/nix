@@ -1,0 +1,4 @@
+from above
+from side
+from behind
+from below
