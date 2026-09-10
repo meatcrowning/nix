@@ -283,6 +283,31 @@ Item {
                                         }
             }
 
+            // PINCH IS THE TRACKPAD'S ZOOM. KWin hands a two-finger pinch to
+            // Qt as a native gesture, which never reaches a MouseArea, so this
+            // sits beside `viewMa` without fighting it for the grab. `target`
+            // is null because the zoom is `pane.zoom`, not a scale on this
+            // item: one place a zoom lives (see the transform on `canvas`).
+            // It zooms about the FINGERS for the same reason the wheel zooms
+            // about the pointer, and rotation is off — a picture that tilts
+            // because a thumb moved is not a control anyone asked for.
+            PinchHandler {
+                id: viewPinch
+                target: null
+                xAxis.enabled: false
+                yAxis.enabled: false
+                rotationAxis.enabled: false
+                property real lastScale: 1.0
+                onActiveChanged: viewPinch.lastScale = 1.0
+                onActiveScaleChanged: {
+                    if (!viewPinch.active) return
+                    if (viewPinch.activeScale <= 0 || viewPinch.lastScale <= 0) return
+                    var c = viewPinch.centroid.position
+                    pane.zoomAt(viewPinch.activeScale / viewPinch.lastScale, c.x, c.y)
+                    viewPinch.lastScale = viewPinch.activeScale
+                }
+            }
+
             // ONE MOUSE AREA FOR THE WHOLE PICTURE. Wheel zooms, the wheel BUTTON
             // drags it around, left-click stops a looping clip and a double-click
             // opens the output properly — one item, because two overlapping ones
@@ -308,15 +333,34 @@ Item {
                 // same hardware: viewer's `ImageViewer` and reader's `PdfView`
                 // both use this, and the comments there are the argument for
                 // it. `exp(ln(1.2)/120 · d)` makes one classic detent exactly
-                // x1.2 whatever the device, a touchpad's pixelDelta is worth
-                // three of it, and a sub-pixel event carries the same motion in
-                // angleDelta at 12x scale, so that one is divided rather than
-                // zooming four times faster when moving slowly.
+                // x1.2 whatever the device.
+                //
+                // A TRACKPAD IS NOT A WHEEL [his, 2026-09-09, for book]. Two
+                // fingers on a touchpad mean PAN in every other program that
+                // shows a picture, and pinch means zoom; only a mouse wheel
+                // means zoom on its own. libinput/KWin says which is which:
+                // a finger scroll carries a pixelDelta (or a sub-detent
+                // angleDelta), a real wheel carries whole 120-unit detents and
+                // no pixelDelta. So the finger stream pans in both axes and the
+                // wheel keeps the zoom it always had; Ctrl+scroll zooms either
+                // way, which is the escape hatch every viewer has.
                 onWheel: function (w) {
+                    var px = w.pixelDelta.x, py = w.pixelDelta.y
                     var ad = w.angleDelta.y
-                    var d = w.pixelDelta.y !== 0 ? w.pixelDelta.y * 3
-                          : Math.abs(ad) >= 120  ? ad          // a real wheel detent
-                          :                        ad / 4      // touchpad sub-pixel
+                    var finger = (px !== 0 || py !== 0)
+                               || (ad !== 0 && Math.abs(ad) < 120)
+                    if (finger && !(w.modifiers & Qt.ControlModifier)) {
+                        // Direct manipulation: the picture follows the fingers,
+                        // one pixel per pixel, and stops at its own edges.
+                        var dx = px !== 0 ? px : 0
+                        var dy = py !== 0 ? py : ad
+                        pane.panX += dx
+                        pane.panY += dy
+                        pane.clampPan()
+                        w.accepted = true
+                        return
+                    }
+                    var d = (px !== 0 || py !== 0) ? py * 3 : ad
                     if (d !== 0) pane.zoomAt(Math.exp(Math.log(1.2) / 120 * d), w.x, w.y)
                     w.accepted = true
                 }
