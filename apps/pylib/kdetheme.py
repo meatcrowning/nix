@@ -3,7 +3,7 @@
 Qt applications use nativepalette.NativePalette, backed by the live native
 QApplication palette. No intermediate Theme.qml is generated for Plasma.
 Web pages and terminal escape sequences cannot host a Qt palette object;
-kde_palette forwards their native View and Selection role values verbatim.
+kde_palette forwards their selected native surface and Selection roles verbatim.
 ANSI colours without native equivalents are the only synthesized colour set.
 """
 
@@ -143,15 +143,19 @@ def _mix(a, b, t):
     return tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
 
-def kde_palette(ini=None) -> dict | None:
+def kde_palette(ini=None, *, surface="View") -> dict | None:
     """Compatibility role names for consumers that cannot host native widgets.
 
-    Values are verbatim KColorScheme View/Selection roles. GUI applications use
+    Values are verbatim KColorScheme surface/Selection roles. GUI applications use
     nativepalette.NativePalette and QApplication.palette() instead. This path
     serves exported terminal/web text, never a generated application palette.
+    Window-backed browser canvases and terminals must request Window explicitly;
+    their native Oxygen raster is not painted from the View colour group.
     """
     ini = read_ini() if ini is None else ini
-    view = ini.get("Colors:View", ini.get("Colors:Window"))
+    if surface not in ("View", "Window"):
+        raise ValueError("unsupported KDE surface: " + surface)
+    view = ini.get("Colors:" + surface, ini.get("Colors:Window"))
     if not view:
         return None
     selection = ini.get("Colors:Selection", view)

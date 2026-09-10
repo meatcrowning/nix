@@ -226,7 +226,7 @@ def write_prefs(source=None, prefs=PREFS, force=False, ui_dir=UI_DIR):
     import chansource
     import kdetheme
     plasma = kdetheme.is_plasma() if source is None else (source == "plasma")
-    colors = kdetheme.kde_palette() if plasma else None
+    colors = kdetheme.kde_palette(surface="Window") if plasma else None
     pal = ({k: kdetheme._hex(v) for k, v in colors.items()} if colors
            else chansource.panel_palette())
     if not pal:

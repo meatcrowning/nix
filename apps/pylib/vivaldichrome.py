@@ -73,8 +73,8 @@ def variables(pal, chrome=None) -> dict:
         "colorBgDark": dark,
         "colorBgDarker": darker,
         "colorBgFaded": darker,
-        # "intense" is Vivaldi's elevated surface (white, in its light theme):
-        # the scheme's View colour is exactly that role on a KDE palette.
+        # "intense" is Vivaldi's elevated surface. Keep it in the same
+        # Window role set as the browser chrome, including in mixed mode.
         "colorBgIntense": view,
         "colorBgIntenser": hexcolor.scale_l(view, 1.08),
         "colorBgInverse": hexcolor.scale_l(bg, 0.97),
@@ -297,7 +297,7 @@ def build(source=None, extra=""):
 
     plasma = kdetheme.is_plasma() if source is None else (source == "plasma")
     if plasma:
-        colors = kdetheme.kde_palette()
+        colors = kdetheme.kde_palette(surface="Window")
         if colors:
             pal = {k: kdetheme._hex(v) for k, v in colors.items()}
             chrome = kdetheme.kde_chrome()
