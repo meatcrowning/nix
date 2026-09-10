@@ -1,0 +1,16 @@
+--- a/src/backends/drm/drm_output.cpp
++++ b/src/backends/drm/drm_output.cpp
+@@ -521,8 +521,11 @@
+         transferFunction,
+         effectiveReferenceLuminance,
+         minLuminance,
+-        maxAverageLuminance * next.maxPossibleArtificialHdrHeadroom,
+-        maxLuminance * next.maxPossibleArtificialHdrHeadroom,
++        // Software dimming must not opt an SDR output into HDR rendering.
++        // Keep its encoding and reference white (and therefore brightness)
++        // unchanged, but restrict content to the SDR luminance range.
++        effectiveHdr ? maxAverageLuminance * next.maxPossibleArtificialHdrHeadroom : effectiveReferenceLuminance,
++        effectiveHdr ? maxLuminance * next.maxPossibleArtificialHdrHeadroom : effectiveReferenceLuminance,
+         nativeColorimetry,
+         sdrColorimetry,
+     });
