@@ -202,6 +202,11 @@ through overlays. The visualizer consumes the existing producer: the short
 `player-view.json` lease suppresses duplicate titlebar/panel display and expires
 if player dies. Never start a second analyzer.
 
+Favourite hearts are compact flat silhouettes: theme accent fill only when
+favourited, otherwise an outline. `HeartIcon.qml` owns QML geometry;
+`kdeshell_icons.py` renders the matching player-heart icons for native actions.
+Keep click targets unchanged when changing the drawing size.
+
 Release facts in `NowInfoPane.qml` are detached from QVariant maps once per
 album change; status/related updates must preserve credit delegates. Instantiate
 credit rows only for the selected album tab and matching scope. Metadata-only
