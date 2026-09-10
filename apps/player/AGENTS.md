@@ -22,6 +22,7 @@ SMB setup and recovery live in `docs/agents/air-library-share.md`.
 | Safe audio-file replacement | `atomicsave.py` |
 | Lyrics lookup/cache/writeback | `lyrics.py`, `LyricsProvider` in `main.py` |
 | Release identity, details and credits | `releaseinfo.py`, `albuminfo.py`, `infostore.py`, `qml/NowInfoPane.qml` |
+| Album write-up parsing | `albumprose.py` (Last.fm and linked Bandcamp album pages) |
 | Related music and contributor connections | `relatedmusic.py`; `albuminfo.py` owns queries and requests |
 | Last.fm integration | `scrobble.py`, shared `pylib/lastfm.py` |
 | Acquisition, repair, migration tools | `tools/`; private maintenance runbook |
@@ -187,8 +188,14 @@ using recording/artist identity, scoped credits, labels, and genre; a shared
 year alone is insufficient. Track credits require matching disc/position/title;
 credits from another edition must not leak through a release-group match.
 Keep owned tracks playable and outside Last.fm discoveries as source links.
-Fetch linked Wikipedia/Wikidata prose only after publishing release details
-and recommendations. `tools/library-ipc.py info` exposes effective cached
+Publish cached facts before tag reads, indexing, and network requests. Fetch
+linked Wikipedia/Wikidata prose after publishing release details and
+recommendations, then fall back to identity-checked Last.fm album wikis and
+MusicBrainz-linked Bandcamp album descriptions. Keep source URLs and plain
+text; artist biographies and shop-only links are not album descriptions.
+Empty prose retries daily, failures after five minutes; version the prose
+cache when expanding providers so old misses do not suppress new lookups.
+`tools/library-ipc.py info` exposes effective cached
 facts, choices and provenance without triggering downloads.
 
 ## QML and desktop integration
@@ -261,7 +268,7 @@ not a CI suite:
 | Smart lists/search/Last.fm | `smartlist-test.py`, `smartlist-ui-test.py`, `lastfm-test.py`, `search-page-test.py`, `search-ui-test.py` |
 | Queue/path/socket | `queue-ops-test.py`, `album-playnext-test.py`, `open-path-test.py`, `queue-lyrics-test.py` |
 | Preference/metadata persistence | `state-write-test.py`, `metadata-worker-test.py` |
-| Metadata/sync | `now-info-test.py`, `release-info-test.py`, `related-music-test.py`, `info-sync-test.py`, `info-connection-test.py`, `library-ipc-test.py`, `test-dbsync.py` |
+| Metadata/sync | `now-info-test.py`, `album-prose-test.py`, `release-info-test.py`, `related-music-test.py`, `info-sync-test.py`, `info-connection-test.py`, `library-ipc-test.py`, `test-dbsync.py` |
 | Album information UI | `album-info-ui-test.py` |
 | Native/QML presentation | `plasma-chrome-test.py`, `transport-test.py`, `focus-fade-test.py`, `view-preserve-test.py`, `favourite-surfaces-test.py`, `trash-track-test.py` |
 

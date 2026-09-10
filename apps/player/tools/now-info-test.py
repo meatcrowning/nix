@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Offline integration checks: shared releases, corrections, retries and locks."""
 import json
+import io
 import os
 import sqlite3
 import sys
 import tempfile
 import threading
 import time
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
@@ -75,6 +77,73 @@ def run():
         second = provider._resolve(2)
         assert state["recordingId"] == "rec-1" and second["recordingId"] == "rec-2"
         assert len(calls) == count, 'another song fetched the same album again'
+        # Cached facts must arrive before tags/indexing/Last.fm can block.
+        published = []
+        with patch.object(provider, '_publish', side_effect=lambda s: published.append(s)), \
+             patch.object(provider, '_load_identity', side_effect=lambda _c, r: (
+                 published and published[0]['album']['title'] == 'album' and r)):
+            provider._resolve(2)
+        assert published[0]['album']['title'] == 'album'
+        # Old empty Wikipedia-only misses do not block the expanded policy.
+        con.execute("DELETE FROM music_info_cache WHERE kind='prose-v2'")
+        store.cache_put(con, 'release:release-1', 'prose', {}, 30 * 86400)
+        wiki = {'album': {'name': 'album', 'artist': 'artist',
+                         'url': 'https://www.last.fm/music/artist/album',
+                         'wiki': {'content': 'A sourced album write-up.'}}}
+        prose_calls = []
+        def with_prose(method, params):
+            prose_calls.append(method)
+            return wiki if method == 'album.getInfo' else similar(method, params)
+        with patch.object(provider, '_lastfm_call', side_effect=with_prose):
+            enriched = provider._resolve(1)
+            assert enriched['album']['description'] == 'A sourced album write-up.'
+            assert enriched['album']['sources'][-1] == 'last.fm'
+            provider._resolve(2)
+        assert prose_calls.count('album.getInfo') == 1, 'album prose was fetched per song'
+        with patch.object(provider, '_prose', side_effect=RuntimeError('wiki offline')), \
+             patch.object(provider, '_lastfm_call', return_value=wiki):
+            assert provider._album_prose({'title': 'album', 'artist': 'artist'})['descriptionSource'] == 'last.fm'
+        import html
+        bandcamp_url = 'https://artist.bandcamp.com/album/album'
+        bandcamp_page = '<script data-tralbum="' + html.escape(json.dumps({
+            'current': {'title': 'album', 'about': 'A detailed album description supplied directly by its own artist.'}
+        }), quote=True) + '"></script>'
+        with patch.object(provider, '_lastfm_call', side_effect=RuntimeError('lastfm offline')), \
+             patch.object(provider, '_fetch_page', return_value=bandcamp_page) as page:
+            result = provider._album_prose({'title': 'album', 'artist': 'artist', 'links': [
+                {'url': bandcamp_url}, {'url': bandcamp_url}]})
+            assert result['descriptionSource'] == 'bandcamp'
+            assert page.call_count == 1
+        with patch.object(provider, '_fetch_json', side_effect=[RuntimeError('article gone'), {
+                'extract': 'Another linked article.', 'content_urls': {'desktop': {'page': 'https://en.wikipedia.org/wiki/Good'}}}]) as fetch_wiki:
+            result = provider._prose([
+                {'type': 'wikipedia', 'url': 'https://en.wikipedia.org/wiki/Bad'},
+                {'type': 'wikipedia', 'url': 'https://en.wikipedia.org/wiki/Good'}])
+            assert result['description'] == 'Another linked article.'
+            assert fetch_wiki.call_count == 2
+        with patch.object(provider, '_lastfm_call', side_effect=RuntimeError('lastfm offline')):
+            retained = provider._resolve(1, True)
+        assert retained['album']['description'] == 'A sourced album write-up.'
+        # Real transport branch: a 503 gets one retry, a 400 does not.
+        url = 'https://musicbrainz.org/ws/2/release/transport-fixture?fmt=json'
+        transient = urllib.error.HTTPError(url, 503, 'busy', {'Retry-After': '2'}, None)
+        with patch.object(provider, '_fetch_json_fn', None), \
+             patch.object(provider, '_network_wait') as wait, \
+             patch.object(albuminfo.urllib.request, 'urlopen', side_effect=[transient, io.BytesIO(b'{"id":"ok"}')]) as request:
+            assert provider._fetch_json(url) == {'id': 'ok'}
+            assert request.call_count == 2
+            assert any(call.args[0] == 2 for call in wait.call_args_list)
+        permanent = urllib.error.HTTPError(url, 400, 'bad request', {}, None)
+        with patch.object(provider, '_fetch_json_fn', None), \
+             patch.object(provider, '_network_wait'), \
+             patch.object(albuminfo.urllib.request, 'urlopen', side_effect=permanent) as request:
+            try:
+                provider._fetch_json(url)
+                raise AssertionError('permanent failure swallowed')
+            except urllib.error.HTTPError:
+                assert request.call_count == 1
+        # Restore the fixture's initial downloads for the correction probes.
+        provider._resolve(1, True)
         row = dict(con.execute('SELECT * FROM tracks WHERE id=1').fetchone())
         scope = store.scope_key(row)
         provider._apply_command(1, 'choose', 'release-1')
