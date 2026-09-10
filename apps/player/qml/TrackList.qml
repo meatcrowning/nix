@@ -315,11 +315,11 @@ Item {
                         width: 12
                         height: 15
                         anchors.verticalCenter: parent.verticalCenter
-                        PixelText {
+                        HeartIcon {
                             anchors.centerIn: parent
-                            text: "♥"
+                            filled: !!favorite
                             color: row.isCurrent ? row.selectedFg
-                                  : (favorite ? Theme.crit : Theme.dim)
+                                  : (favorite ? Theme.accent : Theme.dim)
                         }
                         MouseArea {
                             cursorShape: Qt.PointingHandCursor
