@@ -401,14 +401,13 @@ def _labels(album):
     return result
 
 
-def _credit_reasons(target_album, target, candidate_album, candidate):
+def _credit_reasons(target_credits, target_labels, candidate_album, candidate):
     reasons = []
-    target_credits = _active_credits(target_album, target)
     candidate_credits = _active_credits(candidate_album, candidate)
     for role in ("producer", "remixer", "composer", "performer"):
         if any(r == role and (r, key) in candidate_credits for r, key in target_credits):
             reasons.append("same " + role)
-    if target_album and candidate_album and _labels(target_album) & _labels(candidate_album):
+    if target_labels and candidate_album and target_labels & _labels(candidate_album):
         reasons.append("same label")
     return reasons
 
@@ -473,6 +472,10 @@ def related_tracks(row, tracks, remote=(), album_info=None, known_albums=(), lim
     # The supplied current album may be an effective view not present in the
     # entity cache yet.  Index it once, rather than appending it per candidate.
     album_index = _album_index(albums + ([target_album] if target_album else []))
+    # These facts are identical for every candidate. Recomputing a 200-credit
+    # release for every track turns a 20k library into millions of normalizations.
+    target_credits = _active_credits(target_album, row)
+    target_labels = _labels(target_album)
     target_rec = _ids(row, "recording")
     target_id = _track_id(row)
     target_release = _ids(row, "release") or _album_id(target_album, "release")
@@ -605,7 +608,7 @@ def related_tracks(row, tracks, remote=(), album_info=None, known_albums=(), lim
             reasons.append("same genre")
             score += 18
 
-        for reason in _credit_reasons(target_album, row, candidate_album, candidate):
+        for reason in _credit_reasons(target_credits, target_labels, candidate_album, candidate):
             if reason not in reasons:
                 reasons.append(reason)
                 score += 48 if reason != "same label" else 13
