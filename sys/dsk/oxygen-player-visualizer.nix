@@ -5,6 +5,7 @@ let
     patches = (old.patches or []) ++ [
       ../../home/prog/oxygen-player-visualizer.patch
       ../../home/prog/oxygen-themed-vivaldi.patch
+      ../../home/prog/oxygen-titlebar-seam.patch
     ];
   });
 in {

@@ -59,6 +59,7 @@
       SOURCE=${pkgs.kdePackages.oxygen.src}
       PATCH=${./oxygen-themed-vivaldi.patch}
       CONTENT_PATCH=${./oxygen-native-content.patch}
+      SEAM_PATCH=${./oxygen-titlebar-seam.patch}
       DEST="$HOME/.local/lib64/qt6/plugins/org.kde.kdecoration3/org.kde.oxygen.so"
       FEDORA_VERSION=$(/usr/bin/rpm -q --qf '%{VERSION}' plasma-oxygen)
       SOURCE_VERSION=${pkgs.kdePackages.oxygen.version}
@@ -81,6 +82,7 @@
       /usr/bin/chmod -R u+w "$WORK/source"
       /usr/bin/git apply --unsafe-paths --directory="$WORK/source" "$PATCH"
       /usr/bin/patch -d "$WORK/source" -p1 < "$CONTENT_PATCH"
+      /usr/bin/patch -d "$WORK/source" -p1 < "$SEAM_PATCH"
 
       env -u CMAKE_PREFIX_PATH -u LIBRARY_PATH -u CPATH -u C_INCLUDE_PATH \
           -u CPLUS_INCLUDE_PATH -u PKG_CONFIG_PATH -u NIX_CFLAGS_COMPILE \
