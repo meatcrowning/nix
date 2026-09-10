@@ -2710,14 +2710,10 @@ class Player(QObject):
         playlist-pos event from the replace resolves to the same index (no-op)
         instead of racing us.
 
-        A session restore is different: air may have a long queue over SMB, and
-        one synchronous `loadfile append` per future track blocks startup. Its
-        current track loads before the window is usable; the paused tail fills
-        in small event-loop batches afterwards. Any ordinary sync invalidates
-        that fill, so an intentional jump or queue edit still has one coherent
-        mpv playlist immediately."""
-        paths = [t["path"] for t in self._queue[start_idx:]]
-        if not paths:
+        Long local tails fill in bounded event-loop batches on every sync,
+        including manual skips. Remote queues retain their one-track lookahead.
+        A new sync invalidates any callbacks for the old queue."""
+        if not 0 <= start_idx < len(self._queue):
             return
         self._mpv_fill_token += 1
         token = self._mpv_fill_token
@@ -2729,19 +2725,20 @@ class Player(QObject):
         # starts decoding each file.
         self._apply_rg(self._rg_effective(start_idx))
         self.replayGainChanged.emit()
-        self._mpv.command("loadfile", paths[0], "replace")
+        self._mpv.command("loadfile", self._queue[start_idx]["path"], "replace")
         self._mpv.pause = paused
-        if library_is_remote_cached() and len(paths) > 1:
+        if library_is_remote_cached() and start_idx + 1 < len(self._queue):
             # One next item is enough for gapless playback.  Do this on the
             # next turn so the restored current track is the only SMB work in
             # startup's synchronous path.
             QTimer.singleShot(0, lambda: self._ensure_mpv_lookahead(token))
-        elif defer_rest and len(paths) > 1:
+        elif start_idx + 1 < len(self._queue) and (
+                defer_rest or len(self._queue) - start_idx - 1 > self.RESTORE_APPEND_BATCH):
             self._mpv_fill_pending = True
             QTimer.singleShot(0, lambda: self._append_restored_tail(token, start_idx + 1))
         else:
-            for p in paths[1:]:
-                self._mpv.command("loadfile", p, "append")
+            for row in self._queue[start_idx + 1:]:
+                self._mpv.command("loadfile", row["path"], "append")
             self._mpv_loaded_until = len(self._queue) - 1
 
     def _ensure_mpv_lookahead(self, token=None):
@@ -2760,7 +2757,7 @@ class Player(QObject):
             pass
 
     def _append_restored_tail(self, token, next_idx):
-        """Append one bounded restore batch without monopolising the UI thread."""
+        """Append one bounded queue batch without monopolising the UI thread."""
         if token != self._mpv_fill_token:
             return
         end = min(len(self._queue), next_idx + self.RESTORE_APPEND_BATCH)
@@ -2978,10 +2975,9 @@ class Player(QObject):
         if self._orig_queue is not None:
             self._orig_queue.extend(fresh)
         if self._mpv_fill_pending:
-            # The restore tail is only a snapshot. Replacing it atomically here
-            # avoids duplicate appends if a user queues something before its
-            # background fill reaches the end.
-            self._sync_mpv(self._index, paused=self._mpv_paused)
+            # The fill reads the live queue length and will reach these rows.
+            # Restarting the current file would interrupt an ordinary append.
+            pass
         else:
             for r in fresh:
                 self._mpv.command("loadfile", r["path"], "append")
@@ -3039,6 +3035,8 @@ class Player(QObject):
                 except ValueError:
                     pass
         if not self._queue:
+            self._mpv_fill_token += 1
+            self._mpv_fill_pending = False
             self._orig_queue = None
             self._set_index(-1)
             try:
@@ -3178,6 +3176,8 @@ class Player(QObject):
     def _resync_tail(self):
         """Queue order changed under a playing track: rebuild mpv's upcoming
         entries without restarting the current file."""
+        self._mpv_fill_token += 1
+        self._mpv_fill_pending = False
         if self._index < 0:
             return
         try:
@@ -3186,9 +3186,18 @@ class Player(QObject):
             pos = int(self._mpv.playlist_pos or 0)
             for i in range(count - 1, pos, -1):
                 self._mpv.command("playlist-remove", i)
-            for t in self._queue[self._index + 1:]:
-                self._mpv.command("loadfile", t["path"], "append")
             self._mpv_base = self._index - pos
+            self._mpv_loaded_until = self._index
+            if library_is_remote_cached():
+                self._ensure_mpv_lookahead(self._mpv_fill_token)
+            elif len(self._queue) - self._index - 1 > self.RESTORE_APPEND_BATCH:
+                token, next_idx = self._mpv_fill_token, self._index + 1
+                self._mpv_fill_pending = True
+                QTimer.singleShot(0, lambda: self._append_restored_tail(token, next_idx))
+            else:
+                for t in self._queue[self._index + 1:]:
+                    self._mpv.command("loadfile", t["path"], "append")
+                self._mpv_loaded_until = len(self._queue) - 1
         except Exception:
             pass
 
