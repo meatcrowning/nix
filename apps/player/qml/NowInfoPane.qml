@@ -21,8 +21,23 @@ Item {
     }
 
     readonly property var info: Library.nowInfo || ({})
-    readonly property var album: info.album || ({})
-    readonly property var albumTracks: album.tracks && album.tracks.length
+    // Status/recommendation deliveries must not recreate the release delegates.
+    property var album: ({})
+    property string albumJson: ""
+    function syncAlbum() {
+        var value = info.album || ({});
+        var encoded = JSON.stringify(value);
+        if (encoded !== albumJson) {
+            albumJson = encoded;
+            album = JSON.parse(encoded);
+        }
+    }
+    onInfoChanged: syncAlbum()
+    Component.onCompleted: syncAlbum()
+    readonly property var albumCredits: album.credits || []
+    readonly property var releaseCredits: albumCredits.filter(function(c) { return c.scope === "album"; })
+    readonly property var trackCredits: albumCredits.filter(function(c) { return c.scope === "track"; })
+    readonly property var albumTracks: tab !== "album" ? [] : album.tracks && album.tracks.length
                                        ? album.tracks
                                        : ((track.albumId || 0) > 0
                                           ? Library.albumTrackInfo(track.albumId) : [])
@@ -230,7 +245,7 @@ Item {
                         text: [root.text(root.album.country), root.album.barcode ? "barcode " + root.album.barcode : ""]
                               .filter(function(v) { return v !== ""; }).join(" · ") }
                     Repeater {
-                        model: root.album.labels || []
+                        model: root.tab === "album" ? (root.album.labels || []) : []
                         delegate: Row {
                             required property var modelData; spacing: 4
                             PixelText { color: root.fgDim; text: "label" }
@@ -252,7 +267,7 @@ Item {
                     PixelText { width: parent.width; color: root.fgDim; wrapMode: Text.Wrap
                         visible: root.mediaSummary() !== ""; text: root.mediaSummary() }
                     Repeater {
-                        model: root.album.media || []
+                        model: root.tab === "album" ? (root.album.media || []) : []
                         delegate: PixelText {
                             required property var modelData; width: albumColumn.width; color: root.fgDim
                             text: "format " + root.mediaText(modelData)
@@ -266,9 +281,10 @@ Item {
                     PixelText { width: parent.width; color: root.fgDim; wrapMode: Text.Wrap
                         visible: root.creditSummary("album") !== ""; text: root.creditSummary("album") }
                     Repeater {
-                        model: root.album.credits || []
+                        model: root.tab === "album" ? root.releaseCredits : []
                         delegate: Item {
                             required property var modelData
+                            objectName: "releaseCreditRow"
                             readonly property bool albumScope: modelData.scope === "album"
                             width: albumColumn.width; height: albumScope ? Theme.lineHeight + 2 : 0; visible: albumScope
                             PixelText {
@@ -302,9 +318,10 @@ Item {
                     PixelText { width: parent.width; color: root.fgDim; wrapMode: Text.Wrap
                         visible: root.creditSummary("track") !== ""; text: root.creditSummary("track") }
                     Repeater {
-                        model: root.album.credits || []
+                        model: root.tab === "album" ? root.trackCredits : []
                         delegate: Item {
                             required property var modelData
+                            objectName: "trackCreditRow"
                             readonly property bool trackScope: modelData.scope === "track"
                             width: albumColumn.width; height: trackScope ? Theme.lineHeight + 2 : 0; visible: trackScope
                             PixelText {

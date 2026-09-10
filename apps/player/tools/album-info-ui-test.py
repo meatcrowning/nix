@@ -122,6 +122,14 @@ def qml_object(engine, body):
     return c, obj
 
 
+def visual_items(item):
+    result = []
+    for child in item.childItems():
+        result.append(child)
+        result.extend(visual_items(child))
+    return result
+
+
 def text_items(item):
     return [str(x.property("text")) for x in item.findChildren(QQuickItem)
             if x.property("text") is not None]
@@ -173,6 +181,25 @@ def main():
             raise AssertionError("album UI missing " + required)
     if "A short description." not in joined:
         raise AssertionError("album prose missing")
+
+    credit_rows = [x for x in visual_items(pane)
+                   if x.objectName() in ("releaseCreditRow", "trackCreditRow")]
+    assert len(credit_rows) == 2, "credits instantiated for the wrong scope"
+    lib.state["status"] = "loading"
+    lib.nowInfoChanged.emit()
+    app.processEvents()
+    assert all(x in visual_items(pane) for x in credit_rows), "status rebuilt credits"
+    lib.state["status"] = "ready"
+    lib.nowInfoChanged.emit()
+
+    pane.setProperty("tab", "lyrics")
+    lib.state["album"]["credits"] = [
+        {"id": str(i), "name": "Person " + str(i), "role": "producer",
+         "scope": "track", "trackTitle": "Opening"} for i in range(200)]
+    lib.nowInfoChanged.emit()
+    app.processEvents()
+    assert not any(x.objectName() in ("releaseCreditRow", "trackCreditRow")
+                   for x in visual_items(pane)), "hidden tab built 200 credits"
 
     pane.setProperty("tab", "similar")
     app.processEvents()
