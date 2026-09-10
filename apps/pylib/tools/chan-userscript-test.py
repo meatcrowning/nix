@@ -104,7 +104,7 @@ baked = json.loads(css_line.group(1)) if css_line else ""
 
 # THE seam: what Vivaldi gets and what surfer serves must be the same bytes for
 # the same palette + chrome. If this fails, one browser has drifted.
-kpal = {k: kdetheme._hex(v) for k, v in kdetheme.kde_palette().items()}
+kpal = {k: kdetheme._hex(v) for k, v in kdetheme.kde_palette(surface="Window").items()}
 check("the 4chan fallback includes the sheet surfer serves plus Twitter/X",
       baked == chantheme.css(kpal.__getitem__, kdetheme.kde_chrome())
       + "\n" + twittertheme.css(kpal.__getitem__))
@@ -278,7 +278,7 @@ try:
     with urllib.request.urlopen(base + "/twitter.css", timeout=5) as r:
         twitter_served = r.read().decode("utf-8")
     check("the courier serves Twitter/X from the live palette",
-          "--desk-bg:#201b24" in twitter_served and '[data-testid="tweet"]' in twitter_served)
+          "--desk-bg:#28222a" in twitter_served and '[data-testid="tweet"]' in twitter_served)
     check("the HTTPS-consumed page sheet embeds its Oxygen raster",
           "url(data:image/png;base64," in twitter_served
           and "http://127.0.0.1:8791/oxygen-window.png" not in twitter_served)

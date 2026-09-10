@@ -8,18 +8,8 @@ let
   # though their meta.platforms wrongly claims aarch64. Ship them only on
   # x86_64. `air` gets no nix vivaldi at all — see the note below.
   isx86 = pkgs.stdenv.hostPlatform.isx86_64;
-  # Chromium's Wayland colour-management path interprets SDR sRGB differently
-  # from KWin's native decorations, lifting dark tones even for identical RGB
-  # values. Use the compositor's default SDR path until Chromium fixes it:
-  # https://issues.chromium.org/issues/511734558
-  # This also opts the browser out of explicit HDR/wide-gamut surfaces.
-  vivaldiColorFlags = "--disable-features=WaylandWpColorManagerV1";
 in
 {
-  # Cobalt, the Flatpak launcher used on book, reads one flag per line here.
-  home.file.".var/app/com.vivaldi.Vivaldi/config/vivaldi-flags.conf" =
-    lib.mkIf (host == "air") { text = vivaldiColorFlags + "\n"; };
-
   home.packages = with pkgs; [
 	# lynx is a pure-CLI text browser — let nix own it on both hosts.
 	lynx
@@ -60,7 +50,7 @@ in
           # kwallet key. Verified by test-decryption
           # (`apps/pylib/tools/chromium-key-recover.py`): the real key is the
           # kwallet one, so name that backend and the session stops mattering.
-          commandLineArgs = "--password-store=kwallet6 ${vivaldiColorFlags}";
+          commandLineArgs = "--password-store=kwallet6";
         })
   ];
 }

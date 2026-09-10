@@ -49,7 +49,7 @@ def palette(source=None):
     """
     plasma = kdetheme.is_plasma() if source is None else (source == "plasma")
     if plasma:
-        colors = kdetheme.kde_palette()
+        colors = kdetheme.kde_palette(surface="Window")
         if colors:
             pal = {k: kdetheme._hex(v) for k, v in colors.items()}
             chrome = kdetheme.kde_chrome()

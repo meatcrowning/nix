@@ -116,7 +116,7 @@ one owner and one implementation; do not fork their algorithms into an app.
   and disabled roles stay distinct. Never generate a shared application
   palette, adjust native colours for contrast, or invent an inset/disabled
   colour. Shared adapters may forward roles, not replace them.
-  kdetheme.py owns session detection and verbatim KDE View/Selection exports
+  kdetheme.py owns session detection and verbatim KDE surface/Selection exports
   for terminal/web consumers that cannot host Qt objects. Only ANSI slots
   without native equivalents are synthesized. Use native-palette-test.py and
   native-surface-test.py; the latter takes an Oxygen Qt plugin directory.
@@ -124,6 +124,9 @@ one owner and one implementation; do not fork their algorithms into an app.
   as its View. Native content gradients are painted by Oxygen, not QML maths.
   Konsole's StyleBackground is a continuous Window surface: its renderer and
   exported terminal text both use Window roles so the body joins the titlebar.
+  Vivaldi's chrome, saved theme and the shared site themes also explicitly
+  request Window roles, matching their Oxygen raster. The default View export
+  remains for content consumers; mixed mode must not rebase window canvases.
   kdeshell.py installs a View context on QQuickWidget content while its real
   window/menu/toolbar keeps the native Window context. Native QML roots must
   also install NativeContentContext to select Kirigami View roles; native
@@ -139,9 +142,6 @@ one owner and one implementation; do not fork their algorithms into an app.
   Their Oxygen window raster retains its logical pixel size, centered at the
   viewport top; never stretch it per strip or page. Vivaldi's CSS watcher
   follows the finished raster as well as kdeglobals so it embeds the new paint.
-  Vivaldi's SDR colour-management workaround lives in home/pkgs/desktop/net.nix
-  for both launchers. Do not compensate for Chromium's gamma shift by changing
-  the shared palette or recolouring the Oxygen raster.
 - oxygenstyle.py exposes Oxygen metrics only when the session is Plasma and the
   active style is Oxygen; add a setting by updating _KEYS and the deskstyle.py
   property. DESK_OXYGENRC selects a test rc; use oxygen-test.py and
