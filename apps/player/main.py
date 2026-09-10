@@ -3834,7 +3834,10 @@ class Bridge(QObject):
 
     @Slot(int, result="QVariantList")
     def albumTrackInfo(self, album_id):
-        return self._track_rows(self._library.album_tracks(album_id))
+        # Release facts need cached tags only. Availability checks can block on
+        # storage and prune rows; neither belongs in a metadata QML binding.
+        return [track_row(row, check_exists=False)
+                for row in self._library.album_tracks(album_id)]
 
     # ---- systheme ("create systheme" on an album's right-click menu) ----
 

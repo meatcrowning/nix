@@ -202,6 +202,11 @@ through overlays. The visualizer consumes the existing producer: the short
 `player-view.json` lease suppresses duplicate titlebar/panel display and expires
 if player dies. Never start a second analyzer.
 
+Release facts in `NowInfoPane.qml` are detached from QVariant maps once per
+album change; status/related updates must preserve credit delegates. Instantiate
+credit rows only for the selected album tab and matching scope. Metadata-only
+album track listings must never stat files or prune the library.
+
 Use shared Kinetic views, Motion, and VScroll per the parent guide. Foreground
 and artwork tones are derived at the root and passed down; app-side inactive
 fading is retired because the compositor owns dimming. Do not resurrect one
