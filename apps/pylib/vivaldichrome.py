@@ -181,9 +181,13 @@ def relief_css(pal, chrome=None) -> str:
                 else "background:linear-gradient(to bottom,%s,%s)!important" % (a, b))
 
     def window_slab():
+        # Keep Oxygen's logical pixels and viewport origin. Stretching the
+        # whole screen raster into each strip compresses its 277px falloff
+        # into a few pixels and restarts the highlight at every strip.
         return ("background:%s!important" % win_top if win_top == win_bottom
                 else "background-color:%s!important;background-image:url(oxygen-window.png)!important;"
-                "background-size:100%% 100%%!important;background-repeat:no-repeat!important"
+                "background-size:auto!important;background-position:center top!important;"
+                "background-attachment:fixed!important;background-repeat:no-repeat!important"
                 % win_bottom)
 
     r = "%dpx" % RADIUS

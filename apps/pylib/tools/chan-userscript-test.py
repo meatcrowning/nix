@@ -138,7 +138,7 @@ twitter_sheet = twittertheme.css(PAL.__getitem__)
 check("the Twitter/X sheet carries the base palette", "--desk-bg:#102030" in twitter_sheet)
 check("the Twitter/X canvas uses the shared fixed Oxygen surface",
       "--desk-window-surface:url(http://127.0.0.1:8791/oxygen-window.png)" in twitter_sheet
-      and "background-size:100vw 100vh!important" in twitter_sheet)
+      and "background-size:auto!important" in twitter_sheet)
 oxygen_chan = chantheme.css(PAL.__getitem__, {
     "windowBottom": "#102030", "panelTop": "#203040", "panelBottom": "#182838",
     "headerTop": "#304050", "headerBottom": "#203040", "buttonTop": "#405060",
@@ -278,7 +278,7 @@ try:
     with urllib.request.urlopen(base + "/twitter.css", timeout=5) as r:
         twitter_served = r.read().decode("utf-8")
     check("the courier serves Twitter/X from the live palette",
-          "--desk-bg:#28222a" in twitter_served and '[data-testid="tweet"]' in twitter_served)
+          "--desk-bg:#201b24" in twitter_served and '[data-testid="tweet"]' in twitter_served)
     check("the HTTPS-consumed page sheet embeds its Oxygen raster",
           "url(data:image/png;base64," in twitter_served
           and "http://127.0.0.1:8791/oxygen-window.png" not in twitter_served)
