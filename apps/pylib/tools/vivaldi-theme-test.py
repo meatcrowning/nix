@@ -12,6 +12,8 @@ reads them off an isolated instance, and the list below is what it last saw.
 """
 import importlib.util
 import json
+import struct
+import zlib
 import os
 import sys
 import tempfile
@@ -141,9 +143,16 @@ def fresh(schedule_enabled=0, current="Vivaldi1"):
         }}), encoding="utf-8")
 
 
+def surface_png(rgb):
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"\0" + bytes(rgb))) + chunk(b"IEND", b""))
+
+
 (TMP / "vivaldi-ui").mkdir(exist_ok=True)
 (TMP / "state").mkdir(exist_ok=True)
-(TMP / "state" / "plasma-panel-surface.png").write_bytes(b"surface generation one")
+(TMP / "state" / "plasma-panel-surface.png").write_bytes(surface_png((51, 26, 23)))
 fresh()
 path, changed = gen.write_prefs("hypr", prefs=prefs, force=True, ui_dir=TMP / "vivaldi-ui")
 data = json.loads(prefs.read_text())
@@ -178,7 +187,7 @@ check("as an ABSOLUTE path — a tilde is never expanded",
       mods.startswith("/") and "~" not in mods)
 check("a second run changes nothing",
       gen.write_prefs("hypr", prefs=prefs, force=True, ui_dir=TMP / "vivaldi-ui")[1] is False)
-(TMP / "state" / "plasma-panel-surface.png").write_bytes(b"surface generation two")
+(TMP / "state" / "plasma-panel-surface.png").write_bytes(surface_png((45, 17, 14)))
 gen.write_prefs("hypr", prefs=prefs, force=True, ui_dir=TMP / "vivaldi-ui")
 new_ours = next(t for t in json.loads(prefs.read_text())["vivaldi"]["themes"]["user"]
                 if t.get("id") == gen.THEME_ID)

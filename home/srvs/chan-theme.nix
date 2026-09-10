@@ -117,6 +117,7 @@
         # raster, rather than leaving the previous palette baked into the UI.
         "%h/.local/state/plasma-panel-surface.png"
         "/home/lam/nix/apps/pylib/scrollcss.py"       # scrollbar geometry
+        "/home/lam/nix/apps/pylib/browsersurface.py"  # browser color profile
         "/home/lam/nix/apps/pylib/vivaldichrome.py"   # Vivaldi chrome
         "/home/lam/nix/apps/pylib/tools/vivaldi-theme.py" # its writer
       ];
@@ -125,8 +126,8 @@
     Install.WantedBy = [ "paths.target" ];
   };
 
-  # An internal Start Page is not inside custom.css at all: Vivaldi reads its
-  # background from the selected theme's Preferences entry.  It owns that file
+  # Start Page reads its image from the selected theme's Preferences entry;
+  # custom.css controls image geometry. Vivaldi owns Preferences
   # while running, so writing it then would be lost at shutdown.  Watch its
   # parent profile directory instead: Chromium creates and removes a dangling
   # SingletonLock symlink, which neither `PathExists` nor `PathExistsGlob`

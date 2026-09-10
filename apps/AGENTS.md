@@ -140,7 +140,9 @@ one owner and one implementation; do not fork their algorithms into an app.
   vivaldichrome.py generate browser sheets/userscripts and share the loopback
   courier. Keep the courier loopback-only and parameterless.
   Their Oxygen window raster retains its logical pixel size, centered at the
-  viewport top; never stretch it per strip or page. Vivaldi's CSS watcher
+  viewport top, including Start Page; never stretch it per strip or page.
+  browsersurface.py tags browser exports with the native gamma-2.2 profile
+  without converting pixels. Keep the shared Qt/panel source raster unchanged. Vivaldi's CSS watcher
   follows the finished raster as well as kdeglobals so it embeds the new paint.
 - oxygenstyle.py exposes Oxygen metrics only when the session is Plasma and the
   active style is Oxygen; add a setting by updating _KEYS and the deskstyle.py
