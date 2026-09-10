@@ -57,7 +57,6 @@ class Monitor:
         self.timer.setInterval(50)
         self.timer.timeout.connect(self.beat)
         self.timer.start()
-        app.aboutToQuit.connect(self.close)
         self.worker = threading.Thread(target=self.run, name="player-perf-log", daemon=True)
         self.worker.start()
 

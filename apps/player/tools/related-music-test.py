@@ -171,6 +171,14 @@ def run():
     check(related_tracks({}, None, remote=[None, {}]) == {"owned": [], "discoveries": []}, "empty input")
     check(related_tracks(target, [], remote=[{"name": "No URL", "artist": "A"}], limit="bad")["discoveries"],
           "malformed limit")
+    # Target credits are invariant across a full-library candidate walk.
+    import relatedmusic
+    from unittest.mock import patch
+    active = relatedmusic._active_credits
+    with patch.object(relatedmusic, "_active_credits", wraps=active) as calls:
+        related_tracks(target, local, album_info=edition, known_albums=[edition])
+        target_calls = [c for c in calls.call_args_list if c.args[1].get("id") == 1]
+        check(len(target_calls) == 1, "target credits reparsed per candidate")
     print("related-music-test: ok")
 
 
