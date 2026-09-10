@@ -68,12 +68,7 @@ def palette(source=None):
     """(tokens, provenance) — the twelve `#rrggbb` tokens for this session."""
     plasma = kdetheme.is_plasma() if source is None else (source == "plasma")
     if plasma:
-        ini = kdetheme.read_ini()
-        # StyleBackground continues the Window surface through the terminal.
-        # Its ink must use that same native role set, including in mixed mode.
-        if "Colors:Window" in ini:
-            ini["Colors:View"] = ini["Colors:Window"]
-        kde = kdetheme.kde_palette(ini)
+        kde = kdetheme.kde_palette(surface="Window")
         if kde:
             return ({k: kdetheme._hex(v) for k, v in kde.items()},
                     "KDE colour scheme (%s)" % (kdetheme.kde_widget_style() or "unknown style"))
