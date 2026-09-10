@@ -29,7 +29,7 @@ def css(pal):
    feed, composer, and sidebar. */
 html, body, #react-root {{
   background-color:var(--desk-bg)!important; background-image:var(--desk-window-surface)!important;
-  background-size:100vw 100vh!important; background-position:0 0!important;
+  background-size:auto!important; background-position:center top!important;
   background-repeat:no-repeat!important; background-attachment:fixed!important;
   color:var(--desk-text)!important; }}
 [data-testid="primaryColumn"], [data-testid="sidebarColumn"], [role="main"],
@@ -110,7 +110,7 @@ aside[role="complementary"] {{ background-color:transparent!important; backgroun
 [role="dialog"] [data-testid="primaryColumn"],
 [data-testid="tweetDetail"] {{
   background-color:var(--desk-bg)!important; background-image:var(--desk-window-surface)!important;
-  background-size:100vw 100vh!important; background-position:0 0!important;
+  background-size:auto!important; background-position:center top!important;
   background-repeat:no-repeat!important; background-attachment:fixed!important; }}
 /* X's photo viewer does not use tweetDetail: its white reply column is the
    Timeline scroller beside photoViewer's canvas.  Paint that pane and its
@@ -118,7 +118,7 @@ aside[role="complementary"] {{ background-color:transparent!important; backgroun
 [data-testid="photoViewer"] [aria-label^="Timeline:"],
 [data-testid="photoViewer"] div:has(> [aria-label^="Timeline:"]) {{
   background-color:var(--desk-bg)!important; background-image:var(--desk-window-surface)!important;
-  background-size:100vw 100vh!important; background-position:0 0!important;
+  background-size:auto!important; background-position:center top!important;
   background-repeat:no-repeat!important; background-attachment:fixed!important; }}
 [data-testid="photoViewer"] [aria-label^="Timeline:"] :not(img):not(svg):not(video):not(canvas):not(path) {{
   background-color:transparent!important; border-color:transparent!important; }}
@@ -128,7 +128,7 @@ aside[role="complementary"] {{ background-color:transparent!important; backgroun
    reaches the otherwise un-themed reply pane. */
 [aria-label^="Timeline:"] {{
   background-color:var(--desk-bg)!important; background-image:var(--desk-window-surface)!important;
-  background-size:100vw 100vh!important; background-position:0 0!important;
+  background-size:auto!important; background-position:center top!important;
   background-repeat:no-repeat!important; background-attachment:fixed!important; }}
 [aria-label^="Timeline:"] :not(img):not(svg):not(video):not(canvas):not(path) {{
   background-color:transparent!important; border-color:transparent!important; }}
