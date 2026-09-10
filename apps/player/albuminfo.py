@@ -13,12 +13,14 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import urllib.error
 
 from PySide6.QtCore import QCoreApplication, QObject, Signal, Slot
 
 import perftrace
 import infostore as store
 from releaseinfo import ReleaseInfo
+from albumprose import lastfm_description, bandcamp_description
 from relatedmusic import related_tracks
 related_tracks = perftrace.timed("albuminfo.related_tracks")(related_tracks)
 import trackmatch
@@ -157,6 +159,16 @@ class AlbumInformation(QObject):
     def _check_current(self):
         if self._active_generation is not None and self._active_generation != self._generation:
             raise Superseded()
+
+    def _network_wait(self, delay):
+        deadline = time.monotonic() + delay
+        with self._cv:
+            while True:
+                self._check_current()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return
+                self._cv.wait(remaining)
 
     def _publish(self, state):
         if self._active_generation is not None:
@@ -326,26 +338,45 @@ class AlbumInformation(QObject):
     def _fetch_json(self, url):
         self._check_current()
         key = "url:" + hashlib.sha256(url.encode()).hexdigest()
+        search = "query" in urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+        ttl = self.NO_MATCH_AGE if search else self.CACHE_AGE
         with self._connect() as con:
             cached = store.cache_get(con, key, "http")
-        if cached and not cached["stale"] and not self._force_fetch:
+        if (cached and not cached["stale"] and not self._force_fetch
+                and time.time() - cached["fetched_at"] < ttl):
             return cached["body"]
         if self._fetch_json_fn:
             result = self._fetch_json_fn(url)
         else:
-            if urllib.parse.urlsplit(url).hostname == "musicbrainz.org":
-                delay = 1.05 - (time.monotonic() - self._last_mb_request)
-                if delay > 0:
-                    time.sleep(delay)
-                self._check_current()
-                self._last_mb_request = time.monotonic()
             request = urllib.request.Request(url, headers={"User-Agent": self.USER_AGENT,
                                                            "Accept": "application/json"})
-            with urllib.request.urlopen(request, timeout=15) as response:
-                result = json.loads(response.read(4 * 1024 * 1024))
+            for attempt in range(2):
+                if urllib.parse.urlsplit(url).hostname == "musicbrainz.org":
+                    delay = 1.05 - (time.monotonic() - self._last_mb_request)
+                    if delay > 0:
+                        self._network_wait(delay)
+                    self._check_current()
+                    self._last_mb_request = time.monotonic()
+                try:
+                    with urllib.request.urlopen(request, timeout=15) as response:
+                        result = json.loads(response.read(4 * 1024 * 1024))
+                    break
+                except urllib.error.HTTPError as exc:
+                    if attempt or exc.code not in (502, 503, 504):
+                        raise
+                    # One bounded retry for temporary service failures. Keep
+                    # cancellation responsive and respect server backoff.
+                    try:
+                        delay = max(1.05, float(exc.headers.get("Retry-After", "1.05")))
+                    except (ValueError, TypeError):
+                        raise exc
+                    if delay > 5:
+                        raise
+                    self._network_wait(delay)
+                    self._check_current()
         self._check_current()
         with self._connect() as con:
-            store.cache_put(con, key, "http", result, self.CACHE_AGE)
+            store.cache_put(con, key, "http", result, ttl)
         return result
 
     @perftrace.timed("albuminfo._load_identity")
@@ -393,6 +424,11 @@ class AlbumInformation(QObject):
     @perftrace.timed("albuminfo._resolve")
     def _resolve(self, tid, force=False):
         self._force_fetch = force
+        # Show saved facts before tag reads (possibly over SMB), library
+        # indexing, or unrelated Last.fm requests can delay this album.
+        state = self._cached_state(tid)
+        if state is not None:
+            self._publish(state)
         with self._connect() as con:
             got = con.execute("SELECT * FROM tracks WHERE id=?", (tid,)).fetchone()
             if got is None:
@@ -408,6 +444,7 @@ class AlbumInformation(QObject):
             manual = store.user_get(con, scope, "match")
             legacy = store.user_get(con, "track:" + row["path"], "legacy_match")
         state = self._cached_state(tid)
+        self._publish(state)
         missing_entity = cached and cached["body"].get("status") == "ready" and not state["album"].get("musicbrainzReleaseId")
         if force or cached is None or cached["stale"] or missing_entity:
             self._publish({**state, "status": "loading"})
@@ -430,6 +467,12 @@ class AlbumInformation(QObject):
                               "match": match, "recordingId": result.get("recordingId", "")}
                 with self._connect() as con:
                     if rid:
+                        previous = store.cache_get(con, "release:" + rid, "album")
+                        if previous and previous["body"].get("description"):
+                            for field in ("description", "descriptionSource", "descriptionUrl"):
+                                album[field] = previous["body"].get(field, "")
+                            album["sources"] = list(dict.fromkeys([
+                                *album.get("sources", []), album["descriptionSource"]]))
                         store.cache_put(con, "release:" + rid, "album", album, ttl, error=partial_error)
                         con.execute("INSERT OR REPLACE INTO music_info_links VALUES (?,?,?,?)",
                                     (scope, rid, album.get("musicbrainzReleaseGroupId", ""), time.time()))
@@ -480,29 +523,31 @@ class AlbumInformation(QObject):
         # Prose is optional and runs only after details and recommendations are
         # already delivered. A missing article does not invalidate either.
         album = state["album"]
-        if not album.get("description") and album.get("musicbrainzReleaseId"):
+        if (force or not album.get("description")) and album.get("musicbrainzReleaseId"):
             try:
                 with self._connect() as con:
                     raw = store.cache_get(con, "release:" + album["musicbrainzReleaseId"], "album")
-                    prose_attempt = store.cache_get(con, "release:" + album["musicbrainzReleaseId"], "prose")
+                    # Version the lookup policy: old empty Wikipedia-only
+                    # results must not suppress the new fallbacks for a month.
+                    prose_attempt = store.cache_get(con, "release:" + album["musicbrainzReleaseId"], "prose-v2")
                 album = dict(raw["body"]) if raw else album
                 if prose_attempt and not prose_attempt["stale"] and not force:
                     return state
                 try:
-                    summary = self._prose(album.get("links", []))
+                    summary = self._album_prose(album)
                 except Superseded:
                     raise
                 except Exception as exc:
                     with self._connect() as con:
                         store.cache_put(con, "release:" + album["musicbrainzReleaseId"],
-                                        "prose", {}, self.RETRY_AGE, error=str(exc))
+                                        "prose-v2", {}, self.RETRY_AGE, error=str(exc))
                     return state
                 with self._connect() as con:
                     store.cache_put(con, "release:" + album["musicbrainzReleaseId"],
-                                    "prose", summary, self.CACHE_AGE)
+                                    "prose-v2", summary, self.CACHE_AGE if summary else self.NO_MATCH_AGE)
                 if summary:
                     album = {**album, **summary}
-                    album["sources"] = list(dict.fromkeys([*album.get("sources", []), "wikipedia"]))
+                    album["sources"] = list(dict.fromkeys([*album.get("sources", []), summary["descriptionSource"]]))
                     with self._connect() as con:
                         store.cache_put(con, "release:" + album["musicbrainzReleaseId"],
                                         "album", album, max(0, raw["expires_at"] - time.time()) if raw else self.CACHE_AGE,
@@ -514,24 +559,104 @@ class AlbumInformation(QObject):
                 pass
         return state
 
+    def _album_prose(self, album):
+        errors = []
+        try:
+            summary = self._prose(album.get("links", []))
+            if summary:
+                return summary
+        except Superseded:
+            raise
+        except Exception as exc:
+            errors.append(exc)
+        self._check_current()
+        try:
+            answer = self._lastfm_call("album.getInfo", {
+                "artist": album.get("artist", ""), "album": album.get("title", ""),
+                "autocorrect": 0, "lang": "en"})
+            self._check_current()
+            summary = lastfm_description(answer, album)
+            if summary:
+                return summary
+        except Superseded:
+            raise
+        except Exception as exc:
+            errors.append(exc)
+        # Only album pages explicitly linked by the resolved MusicBrainz
+        # entity; never guess a Bandcamp subdomain or scrape search results.
+        urls = list(dict.fromkeys(link.get("url", "") for link in album.get("links", [])))
+        for url in [u for u in urls if urllib.parse.urlsplit(u).scheme == "https"
+                    and (urllib.parse.urlsplit(u).hostname or "").endswith(".bandcamp.com")
+                    and urllib.parse.urlsplit(u).path.startswith("/album/")][:2]:
+            self._check_current()
+            try:
+                summary = bandcamp_description(self._fetch_page(url), album, url)
+                if summary:
+                    return summary
+            except Superseded:
+                raise
+            except Exception as exc:
+                errors.append(exc)
+        if errors:
+            raise errors[0]
+        return {}
+
+    def _fetch_page(self, url):
+        key = "page:" + hashlib.sha256(url.encode()).hexdigest()
+        with self._connect() as con:
+            cached = store.cache_get(con, key, "http")
+        if cached and not cached["stale"] and not self._force_fetch:
+            return cached["body"].get("text", "")
+        self._check_current()
+        request = urllib.request.Request(url, headers={"User-Agent": self.USER_AGENT})
+        with urllib.request.urlopen(request, timeout=8) as response:
+            page = response.read(2 * 1024 * 1024 + 1)
+            if len(page) > 2 * 1024 * 1024:
+                raise ValueError("album page too large")
+            page = page.decode("utf-8", "replace")
+        self._check_current()
+        with self._connect() as con:
+            store.cache_put(con, key, "http", {"text": page}, self.NO_MATCH_AGE)
+        return page
+
     def _prose(self, links):
-        for link in links:
-            kind, url = link.get("type"), link.get("url", "")
-            if kind == "wikidata":
-                qid = url.rstrip("/").split("/")[-1]
-                entity = self._fetch_json(f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json")
-                title = entity.get("entities", {}).get(qid, {}).get("sitelinks", {}).get("enwiki", {}).get("title")
-            elif kind == "wikipedia" and urllib.parse.urlsplit(url).hostname == "en.wikipedia.org":
-                title = urllib.parse.unquote(url.rsplit("/", 1)[-1])
-            else:
+        errors, seen = [], set()
+        # A direct article link saves the Wikidata round trip. One broken
+        # relationship must not hide another usable article on the album.
+        for link in sorted(links, key=lambda item: item.get("type") != "wikipedia"):
+            key = (link.get("type"), link.get("url"))
+            if key in seen:
                 continue
-            if not title:
-                continue
-            page = self._fetch_json("https://en.wikipedia.org/api/rest_v1/page/summary/" +
-                                    urllib.parse.quote(title, safe=""))
-            if page.get("extract"):
-                return {"description": page["extract"], "descriptionSource": "wikipedia",
-                        "descriptionUrl": page.get("content_urls", {}).get("desktop", {}).get("page", "")}
+            seen.add(key)
+            try:
+                summary = self._wiki_prose(link)
+                if summary:
+                    return summary
+            except Superseded:
+                raise
+            except Exception as exc:
+                errors.append(exc)
+        if errors:
+            raise errors[0]
+        return {}
+
+    def _wiki_prose(self, link):
+        kind, url = link.get("type"), link.get("url", "")
+        if kind == "wikidata":
+            qid = url.rstrip("/").split("/")[-1]
+            entity = self._fetch_json(f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json")
+            title = entity.get("entities", {}).get(qid, {}).get("sitelinks", {}).get("enwiki", {}).get("title")
+        elif kind == "wikipedia" and urllib.parse.urlsplit(url).hostname == "en.wikipedia.org":
+            title = urllib.parse.unquote(urllib.parse.urlsplit(url).path.rsplit("/", 1)[-1])
+        else:
+            return {}
+        if not title:
+            return {}
+        page = self._fetch_json("https://en.wikipedia.org/api/rest_v1/page/summary/" +
+                                urllib.parse.quote(title, safe=""))
+        if page.get("extract") and page.get("type") != "disambiguation":
+            return {"description": page["extract"], "descriptionSource": "wikipedia",
+                    "descriptionUrl": page.get("content_urls", {}).get("desktop", {}).get("page", "")}
         return {}
 
     def _connection(self, tid, kind, entity_id, name):
