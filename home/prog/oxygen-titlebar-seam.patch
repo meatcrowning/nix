@@ -1,0 +1,14 @@
+--- a/kdecoration/oxygendecoration.cpp
++++ b/kdecoration/oxygendecoration.cpp
+@@ -573,6 +573,12 @@ void Decoration::renderWindowBackground(QPainter *painter, const QRectF &clipRect, const QPalette &palette) const
+ 
+     SettingsProvider::self()->helper()->renderWindowBackground(painter, clipRect, innerClientRect, titleBarColor(palette), borderTop() - 24);
++
++    // The helper leaves a bright one-pixel highlight at the decoration/client
++    // boundary.  It reads as a stray horizontal rule below the titlebar, so
++    // finish the titlebar with the same bottom tone as its background.
++    painter->fillRect(QRectF(innerClientRect.left(), borderTop() - 1,
++                             innerClientRect.width(), 1), SettingsProvider::self()->helper()->backgroundBottomColor(titleBarColor(palette)));
+ }
+ 
+ //_________________________________________________________
