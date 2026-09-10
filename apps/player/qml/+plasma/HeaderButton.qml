@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import ".."
 
 // HeaderButton, in a Plasma session: a real flat Button, drawn by the desktop's
 // KStyle through qqc2-desktop-style — Oxygen's own hover glow, pressed state
@@ -33,8 +34,8 @@ Item {
     property color fgAccent: Theme.accent
     signal clicked()
 
-    implicitWidth: btn.implicitWidth
-    implicitHeight: btn.implicitHeight
+    implicitWidth: root.iconName === "heart" ? Math.max(28, btn.implicitWidth) : btn.implicitWidth
+    implicitHeight: root.iconName === "heart" ? Math.max(28, btn.implicitHeight) : btn.implicitHeight
     width: implicitWidth
     height: implicitHeight
 
@@ -47,7 +48,7 @@ Item {
         // text — an empty `plainLabel` is a call site that had nothing to
         // restate, not one asking for a wordless button.
         text: root.iconOnly ? "" : (root.plainLabel !== "" ? root.plainLabel : root.label)
-        icon.name: root.iconName
+        icon.name: root.iconName === "heart" ? "" : root.iconName
         display: root.iconOnly ? Button.IconOnly
                : (root.iconName === "" ? Button.TextOnly : Button.TextBesideIcon)
         enabled: root.enabled
@@ -56,6 +57,14 @@ Item {
         checkable: root.depressed
         checked: root.depressed && root.lit
         highlighted: root.lit && !root.depressed
+        HeartIcon {
+            anchors.centerIn: parent
+            width: 16; height: 16
+            visible: root.iconName === "heart"
+            filled: root.lit
+            color: !root.enabled ? Theme.inactive
+                 : filled ? btn.palette.highlight : btn.palette.buttonText
+        }
         onClicked: root.clicked()
     }
 }

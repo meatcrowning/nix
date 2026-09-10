@@ -6,8 +6,8 @@ import hashlib
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QSize
-from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPalette, QPixmap
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPalette, QPixmap, QPainter, QPainterPath, QPen
 
 from kdetheme import read_ini
 
@@ -90,6 +90,38 @@ def _disk_cached_icon(key) -> QIcon | None:
     return out
 
 
+def _favourite_icon(filled: bool, palette: QPalette) -> QIcon:
+    """Player's compact, flat heart; preserve its state in every icon mode."""
+    path = QPainterPath()
+    path.moveTo(12, 20)
+    path.cubicTo(9, 17, 3, 13, 3, 8)
+    path.cubicTo(3, 3, 9, 2, 12, 7)
+    path.cubicTo(15, 2, 21, 3, 21, 8)
+    path.cubicTo(21, 13, 15, 17, 12, 20)
+    path.closeSubpath()
+    icon = QIcon()
+    for size in _ICON_SIZES:
+        for mode, group in ((QIcon.Normal, QPalette.Active),
+                            (QIcon.Active, QPalette.Active),
+                            (QIcon.Selected, QPalette.Active),
+                            (QIcon.Disabled, QPalette.Disabled)):
+            role = QPalette.Highlight if filled else QPalette.ButtonText
+            if mode == QIcon.Selected:
+                role = QPalette.HighlightedText
+            colour = palette.color(group, role)
+            pixmap = QPixmap(size, size)
+            pixmap.fill(Qt.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.scale(size / 24, size / 24)
+            painter.setPen(QPen(colour, 1.5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            painter.setBrush(colour if filled else Qt.NoBrush)
+            painter.drawPath(path)
+            painter.end()
+            icon.addPixmap(pixmap, mode)
+    return icon
+
+
 def themed_icon(name: str, palette: QPalette | None = None) -> QIcon:
     """Return a selectively palette-coloured freedesktop action icon.
 
@@ -97,6 +129,8 @@ def themed_icon(name: str, palette: QPalette | None = None) -> QIcon:
     stays null so the caller keeps Qt's ordinary missing-icon behaviour.
     """
     palette = palette or QGuiApplication.palette()
+    if name in ("player-heart-filled", "player-heart-outline"):
+        return _favourite_icon(name.endswith("filled"), palette)
     groups_roles = (
         (QPalette.Active, QPalette.ButtonText),
         (QPalette.Active, QPalette.HighlightedText),
