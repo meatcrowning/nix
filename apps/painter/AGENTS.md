@@ -14,6 +14,15 @@ per-family reason string rather than a silent failure). Chrome is hyprvtb
 titlebar buttons (generate/cancel/view switch + bottom-anchored settings
 drawer).
 
+Prompt boxes expand app-local `wildcards/*.txt` through `__name__` tokens in
+`main.py`, after each queued job receives its concrete global seed. A wildcard
+name is selected deterministically from `"<seed>:<name>"`, matching old CTE;
+the same name therefore agrees across both boxes, fixed/reused seeds reproduce,
+and batch items follow Painter's normal per-job seed progression. Missing or
+empty wildcard files leave the token literal. Output parameters retain the
+expanded conditioning while `prompt_boxes` retains the literal text for
+injection. `tools/wildcards-test.py` is the focused headless harness.
+
 For retained resource sampling, `tools/resource-fixture.py` fills a scratch
 gallery with synthetic PNGs. Its normal/stress/clear protocol is offscreen-only
 and never acquires the warden, backend, network, clipboard, or notification

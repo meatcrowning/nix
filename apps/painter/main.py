@@ -77,6 +77,7 @@ from gallery import (CACHE, OUT_DIR, PEER_OUTS, Gallery, LIVE_PATH, MUTED_TAG,
                      THUMB_PX, VIDEO_SUFFIXES, is_muted_copy)  # noqa: E402
 import registry as R  # noqa: E402
 import boorutags  # noqa: E402  (pylib; Danbooru's vocabulary, for the completer)
+import wildcards as Wildcards  # noqa: E402  (__name__ prompt expansion)
 
 STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "painter"
 PREFS = STATE / "prefs.json"
@@ -1813,6 +1814,18 @@ class Painter(QObject):
             if n == 0 and p["seed"] != self._last_seed:
                 self._last_seed = p["seed"]
                 self.lastSeedChanged.emit()
+            # Resolve prompt tokens only after this job has its concrete seed.
+            # Keep the literal boxes separately so injecting the output restores
+            # what he typed rather than baking one resolved variation into them.
+            raw_boxes = {
+                "positive": p.get("positive", ""),
+                "negative": p.get("negative", ""),
+            }
+            positive, negative = Wildcards.expand_prompts(
+                raw_boxes["positive"], raw_boxes["negative"], p["seed"])
+            p["positive"] = positive
+            if "negative" in p:
+                p["negative"] = negative
             try:
                 built = self.reg.build(entry, p, object_info=self._object_info)
             except G.ValidationError as exc:
@@ -1823,6 +1836,7 @@ class Painter(QObject):
                 self._set_status("ready")
                 self.toast.emit(str(exc), True)
                 return
+            built["params"]["prompt_boxes"] = raw_boxes
             job = self.client.submit(built["prompt"], built["params"])
             job.meta = {"params": built["params"], "pairing": built["pairing"]}
             self._jobs += 1
