@@ -282,5 +282,46 @@ for _ in range(10):
 check("idle wrap: back at 0", p._index, 0)
 check("idle wrap: fresh orders", len(orders) > 1, True)
 
+print("full-library queue responsiveness")
+p = mk(list(range(20000)), 0)
+p._sync_mpv(0)
+check("20k queue loads one file synchronously", len(p._mpv.pl), 1)
+ticks = []
+P.QTimer.singleShot(0, lambda: ticks.append(len(p._mpv.pl)))
+app.processEvents()
+check("event loop runs before the full queue is loaded", bool(ticks) and ticks[0] < 20000, True)
+# Skipping while the fill is pending must invalidate the old tail.
+p.jumpTo(19990)
+for _ in range(10):
+    app.processEvents()
+check("skip cancels obsolete appends", p._mpv.pl, [f"/t/{i}.flac" for i in range(19990, 20000)])
+
+p = mk(list(range(30)), 0)
+p._sync_mpv(0)
+p._position = 42.0
+p.queueTracks([40, 41])
+check("append during fill keeps playback position", p._position, 42.0)
+p.playNext([99])
+for _ in range(30):
+    app.processEvents()
+check("edit during fill preserves the exact queue", p._mpv.pl, [t["path"] for t in p._queue])
+check("edit does not restart playback", p._position, 42.0)
+p._sync_mpv(0)
+p.removeFromQueue(list(range(len(p._queue))))
+for _ in range(4):
+    app.processEvents()
+check("clearing cancels pending appends", p._mpv.pl, [])
+
+remote_before = P._REMOTE_LIBRARY
+P._REMOTE_LIBRARY = True
+p = mk(list(range(30)), 0)
+p._sync_mpv(0)
+for _ in range(5):
+    app.processEvents()
+check("remote queue keeps one next track", p._mpv.pl, ["/t/0.flac", "/t/1.flac"])
+p.playNext([99])
+check("remote edit refreshes only the next track", p._mpv.pl, ["/t/0.flac", "/t/99.flac"])
+P._REMOTE_LIBRARY = remote_before
+
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

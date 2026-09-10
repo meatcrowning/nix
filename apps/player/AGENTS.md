@@ -107,6 +107,10 @@ menus to the window content so narrow lists cannot clip them. Lists emit
 navigation requests; the root owns navigation. Queue actions operate on ids or
 indices, and mutate `_orig_queue` with `_queue` so unshuffle preserves edits.
 Removing another row must adjust `_index` without restarting the current track.
+Long local mpv queues fill in bounded event-loop batches, including manual
+skips and tail edits. Queue mutations cancel obsolete batches; appending during
+a fill extends that fill without restarting playback. Remote libraries retain
+their one-track lookahead.
 Play-all uses `start=-1`; a clicked track pins its chosen opener. Loop-all
 reshuffles through `_wrap_to_start` without overwriting the original order.
 
