@@ -16,7 +16,12 @@
 final: prev: {
   kdePackages = prev.kdePackages // {
     kwin = prev.kdePackages.kwin.overrideAttrs (old: {
-      patches = (old.patches or []) ++ [ ../sys/dsk/kwin-roll-up-button.patch ];
+      patches = (old.patches or []) ++ [
+        ../sys/dsk/kwin-roll-up-button.patch
+        # SDR outputs retain software brightness control without advertising
+        # spare luminance as HDR headroom to colour-managed applications.
+        ../home/prog/kwin-sdr-headroom.patch
+      ];
     });
   };
 }
