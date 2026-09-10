@@ -18,6 +18,7 @@ from PySide6.QtCore import QObject, QProcess, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 app = QGuiApplication([])
 assert app.platformName() == 'offscreen'
+art_pass = P.Scanner._art_pass
 track = runpy.run_path(str(Path(__file__).with_name('scanner-lock-test.py')))['track']
 with tempfile.TemporaryDirectory(prefix='player-scan-safe-') as td:
     root = Path(td)
@@ -129,4 +130,33 @@ with tempfile.TemporaryDirectory(prefix='player-scan-safe-') as td:
         library._scanner.running = False
         library._scanner.finished.emit()
     assert states == [True, True, False]
+    refreshes = []
+    library.changed.connect(lambda: refreshes.append(True))
+    for _ in range(1000):
+        library._on_batch()
+    assert not refreshes and library._scan_refresh_timer.isActive()
+    library._on_scan_finished()
+    assert len(refreshes) == 1 and not library._scan_refresh_timer.isActive()
+    library._closed = True
+    library._on_batch()
+    library._flush_scan_refresh()
+    assert len(refreshes) == 1
+
+    # Missing art is not a mutation and must not flood the GUI at n == 0.
+    con = P.open_db()
+    con.executemany("INSERT INTO albums(album,album_artist) VALUES (?,?)",
+                    [(f"No Art {i}", "Fixture") for i in range(100)])
+    con.commit()
+    scanner = P.Scanner()
+    batches = []
+    scanner.batch.connect(lambda: batches.append(True))
+    art_pass(scanner, con)
+    assert batches == [], batches
+    # Clearing stale art is a mutation, published once per actual batch.
+    con.execute("UPDATE albums SET thumb='stale', art_src='file:/fixture/missing'")
+    con.commit()
+    art_pass(scanner, con)
+    count = con.execute("SELECT COUNT(*) FROM albums").fetchone()[0]
+    assert len(batches) == (count + 24) // 25, batches
+    con.close()
 print('scanner safety test: ok')

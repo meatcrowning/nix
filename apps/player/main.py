@@ -1074,11 +1074,13 @@ class Scanner(QThread):
                     "UPDATE albums SET art_src=NULL, thumb=NULL, full_art=NULL WHERE id=?",
                     (aid,))
                 n += 1
-            if n % 25 == 0:
+            if n >= 25:
                 con.commit()
                 self.batch.emit()
+                n = 0
         con.commit()
-        self.batch.emit()
+        if n:
+            self.batch.emit()
 
 
 # ---------------------------------------------------------------------------
@@ -1644,12 +1646,29 @@ class Library(QObject):
     def _on_scan_finished(self):
         if self._closed:
             return
+        timer = getattr(self, "_scan_refresh_timer", None)
+        if timer is not None and timer.isActive():
+            timer.stop()
+            self.changed.emit()
         if self._scan_pending:
             self.rescan()
         else:
             self.scanRunning.emit(False)
 
     def _on_batch(self):
+        if self._closed:
+            return
+        # A scanner burst is one pending refresh, not one full-library query
+        # per queued signal. Never restart this timer and starve its delivery.
+        if not hasattr(self, "_scan_refresh_timer"):
+            self._scan_refresh_timer = QTimer(self)
+            self._scan_refresh_timer.setSingleShot(True)
+            self._scan_refresh_timer.setInterval(1000)
+            self._scan_refresh_timer.timeout.connect(self._flush_scan_refresh)
+        if not self._scan_refresh_timer.isActive():
+            self._scan_refresh_timer.start()
+
+    def _flush_scan_refresh(self):
         if not self._closed:
             self.changed.emit()
 
@@ -2221,6 +2240,7 @@ class Library(QObject):
 
     # ---- lyrics cache (used by LyricsProvider from its worker via own conn) ----
 
+    @perftrace.timed("library.close")
     def close(self):
         if self._closed:
             return
@@ -3230,6 +3250,15 @@ class Player(QObject):
 
     # ---- session restore ----
 
+    @perftrace.timed("stop_audio")
+    def stop_audio(self):
+        # Run before metadata/scanner shutdown, which can wait on storage.
+        # Preserve the queue and position for save_state, but silence mpv now.
+        self._mpv_fill_token += 1
+        self._mpv_fill_pending = False
+        self._mpv.pause = True
+
+    @perftrace.timed("save_state")
     def save_state(self):
         self._prefs.set("queue", {
             "ids": [t["id"] for t in self._queue],
@@ -5087,6 +5116,7 @@ def main():
     library = Library(tagwriter)
     startup_mark("library-created")
     player = Player(library, prefs)
+    app.aboutToQuit.connect(player.stop_audio)
     startup_mark("player-created")
     if perf is not None:
         perf.context_fn = lambda: {"queue_length": len(player._queue),
@@ -5409,7 +5439,12 @@ def main():
 
     app.aboutToQuit.connect(player.save_state)
     app.aboutToQuit.connect(library.close)
-    sys.exit(app.exec())
+    try:
+        exit_code = app.exec()
+    finally:
+        if perf is not None:
+            perf.close()
+    sys.exit(exit_code)
 
 
 def _selftest(app, shell, win, plasma, warnings, player=None, library=None,

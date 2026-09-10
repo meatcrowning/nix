@@ -45,6 +45,9 @@ in `$XDG_STATE_HOME/player/`. Respect each tool's path overrides in harnesses.
 - `tools/tagtool.py` defaults to dry run, refuses rating/favourite/play-count
   keys, and records undo manifests for apply. Reserved metadata has no
   interchangeable upstream copy. Preserve the guard in both set and remove.
+- Scan batch signals coalesce into at most one pending GUI refresh per second,
+  flushed on completion. Artwork batches count actual mutations; absent art
+  must never publish a change just because the mutation counter is zero.
 - The scanner parses files before acquiring a SQLite write transaction, then
   commits a local batch. Never hold the writer lock across tag reads or SMB I/O.
 - Absence and unreadability are different. Prune only confirmed missing local
@@ -143,6 +146,9 @@ reshuffles through `_wrap_to_start` without overwriting the original order.
   to the most-played local copy, not every duplicate. Do not bulk-push local
   favourites as an implicit part of pulling stats.
 
+Shutdown pauses mpv and cancels pending playlist fills before any scanner,
+metadata, or preference cleanup. Preserve queue/index/position for resume.
+
 ## Lyrics, gain, and web metadata
 
 Lyrics resolve timestamped-first: embedded synced, sidecar LRC, then strict
@@ -175,7 +181,8 @@ lookups retry after a short backoff while retaining usable cached details.
 Legacy web tables remain readable during migration; old recording choices stay
 track-scoped. No web correction writes an audio tag.
 
-Related music remains available when release lookup fails. Rank local tracks
+Related ranking computes the current track's active credits and labels once,
+not once per library candidate. Related music remains available when release lookup fails. Rank local tracks
 using recording/artist identity, scoped credits, labels, and genre; a shared
 year alone is insufficient. Track credits require matching disc/position/title;
 credits from another edition must not leak through a release-group match.
@@ -229,7 +236,8 @@ It retains a 2 MiB log and three rotated copies. `PLAYER_PERF_LOG=0` disables it
 A 50 ms GUI heartbeat records gaps over 250 ms; a background watchdog captures
 Python stacks during stalls at most once a second. Timed queue/metadata work
 logs durations over 25 ms, with queue size/index and 10-second CPU samples.
-No file writes happen on the GUI thread. Stack records omit locals and source
+The monitor stays running through shutdown cleanup and closes after the event
+loop returns. No file writes happen on the GUI thread. Stack records omit locals and source
 text. Python stacks can identify a blocking native call but cannot unwind its
 C++/QML internals; a GIL-holding call may delay the watchdog too.
 

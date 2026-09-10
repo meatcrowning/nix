@@ -323,5 +323,15 @@ p.playNext([99])
 check("remote edit refreshes only the next track", p._mpv.pl, ["/t/0.flac", "/t/99.flac"])
 P._REMOTE_LIBRARY = remote_before
 
+p = mk(list(range(30)), 0)
+p._sync_mpv(0)
+p._position = 42.0
+p.stop_audio()
+for _ in range(5):
+    app.processEvents()
+check("shutdown silences mpv before cleanup", p._mpv.pause, True)
+check("shutdown cancels queue filling", p._mpv.pl, ["/t/0.flac"])
+check("shutdown preserves resume position", p._position, 42.0)
+
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)
