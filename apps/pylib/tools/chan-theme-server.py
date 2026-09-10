@@ -57,6 +57,7 @@ import chansource                                               # noqa: E402
 import scrollcss                                                # noqa: E402
 import userscript                                               # noqa: E402
 import twittertheme                                             # noqa: E402
+from browsersurface import browser_png
 
 
 def _generator(filename):
@@ -100,7 +101,7 @@ def _inline_oxygen_surface(css):
     """
     image = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "plasma-panel-surface.png"
     try:
-        payload = base64.b64encode(image.read_bytes()).decode("ascii")
+        payload = base64.b64encode(browser_png(image.read_bytes())).decode("ascii")
     except OSError:
         return css
     return css.replace("url(http://127.0.0.1:8791/oxygen-window.png)",
@@ -259,7 +260,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/oxygen-window.png":
             image = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "plasma-panel-surface.png"
             try:
-                body = image.read_bytes()
+                body = browser_png(image.read_bytes())
             except OSError:
                 self._send(404, b"Oxygen window surface is not generated yet\n", head=head)
                 return

@@ -202,6 +202,10 @@ def relief_css(pal, chrome=None) -> str:
         # gives those nodes a visible one-pixel height even while collapsed.
         ".address-top-off .toolbar-mainbar,.address-bottom-off .toolbar-mainbar{border:0!important}",
         ".auto-hide-wrapper #panels-container{border:0!important}",
+        # Start Page otherwise scales the theme image with cover, narrowing
+        # its highlight independently of the native decoration and UI strips.
+        ".startpage{background-size:auto!important;background-position:center top!important;"
+        "background-attachment:fixed!important;background-repeat:no-repeat!important}",
         # A tab is a slab: raised and lit when active, recessed and quiet when not.
         ".tab{border-radius:%s!important}" % r,
         ".tab.active,.tab-position.active .tab{%s;border:1px solid %s!important;"

@@ -64,6 +64,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
+from browsersurface import browser_png
+
 import scrollcss                                                # noqa: E402
 import vivaldichrome                                            # noqa: E402
 
@@ -164,7 +166,7 @@ def write_ui(source=None, style=None, directory=UI_DIR):
     path = directory / "custom.css"
     surface = Path(os.environ.get("XDG_STATE_HOME") or (Path.home() / ".local" / "state")) / "plasma-panel-surface.png"
     if surface.exists():
-        shutil.copy2(surface, directory / "oxygen-window.png")
+        (directory / "oxygen-window.png").write_bytes(browser_png(surface.read_bytes()))
     text = HEADER % prov + css + "\n"
     # Vivaldi's custom.css is loaded by its UI document, where a relative PNG
     # is not reliably resolved from the modifications directory.  Keep the
@@ -172,7 +174,7 @@ def write_ui(source=None, style=None, directory=UI_DIR):
     if surface.exists():
         text = text.replace("url(oxygen-window.png)",
                             "url(data:image/png;base64,%s)" %
-                            base64.b64encode(surface.read_bytes()).decode("ascii"))
+                            base64.b64encode(browser_png(surface.read_bytes())).decode("ascii"))
     # Unchanged content is not rewritten: the path unit calls this on every
     # palette write, and a quiet rewrite would only churn the file's mtime.
     try:
@@ -242,7 +244,7 @@ def write_prefs(source=None, prefs=PREFS, force=False, ui_dir=UI_DIR):
     if not (was_dir and host_path(Path(was_dir)) == ui_dir.resolve()):
         appearance["css_ui_mods_directory"] = str(ui_dir.resolve())
 
-    # Start Page is an internal Vivaldi document, outside custom.css's DOM.
+    # Start Page reads its image from the theme and its geometry from CSS.
     # Its supported image route is the theme entry plus file_mapping.json.
     # Vivaldi caches a local theme image by URL across launches. Give each
     # rendered surface a content-addressed URL; replacing one stable file made
@@ -251,10 +253,10 @@ def write_prefs(source=None, prefs=PREFS, force=False, ui_dir=UI_DIR):
     background = ""
     if surface.exists():
         ui_dir.mkdir(parents=True, exist_ok=True)
-        payload = surface.read_bytes()
+        payload = browser_png(surface.read_bytes())
         image_name = OXYGEN_IMAGE_PREFIX + hashlib.sha256(payload).hexdigest()[:16] + ".png"
         target = ui_dir / image_name
-        shutil.copy2(surface, target)
+        target.write_bytes(payload)
         mapping_path = prefs.parent / "file_mapping.json"
         try:
             mapping_data = json.loads(mapping_path.read_text(encoding="utf-8"))
