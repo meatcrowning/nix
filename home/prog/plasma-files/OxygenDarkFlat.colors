@@ -15,8 +15,10 @@
 # not want; body text stays the active near-white, and [WM] *Foreground is a
 # flat white on both states so the titlebar title matches it.
 #
-# Regenerate: home/prog/plasma-colors.nix names the maths; the source values are
-# kdePackages.oxygen's OxygenDark.colors.
+# Window, panel and titlebar backgrounds use the richer View surface so dark
+# content and its surrounding chrome form one continuous Oxygen gradient.
+# The wallpaper mint still derives their hue dynamically. Other roles retain
+# the flattened OxygenDark values described above.
 [ColorEffects:Disabled]
 ChangeSelectionColor=
 Color=56,56,56
@@ -67,7 +69,7 @@ ForegroundVisited=93,76,160
 # this group and [WM] drift apart, the panel stops matching the titlebars.
 [Colors:Complementary]
 BackgroundAlternate=15,31,53
-BackgroundNormal=25,36,56
+BackgroundNormal=15,29,49
 DecorationFocus=0,88,203
 DecorationHover=0,88,203
 ForegroundActive=38,89,193
@@ -122,7 +124,7 @@ ForegroundVisited=93,76,160
 
 [Colors:Window]
 BackgroundAlternate=15,31,53
-BackgroundNormal=25,36,56
+BackgroundNormal=15,29,49
 DecorationFocus=0,88,203
 DecorationHover=0,88,203
 ForegroundActive=38,89,193
@@ -135,10 +137,10 @@ ForegroundPositive=0,180,115
 ForegroundVisited=93,76,160
 
 [WM]
-activeBackground=25,36,56
+activeBackground=15,29,49
 activeBlend=0,0,0
 activeForeground=255,255,255
-inactiveBackground=25,36,56
+inactiveBackground=15,29,49
 inactiveBlend=0,0,0
 inactiveForeground=255,255,255
 

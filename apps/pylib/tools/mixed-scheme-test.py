@@ -23,6 +23,12 @@ for accent in ("ff0000", "00ff00", "0000ff", "808080", "d1a8a7"):
     for background in (None, "464540"):
         options = dict(background_hex=background, ui_accent_hex=accent)
         dark = parse(scheme.mint(template, accent, **options))
+        # Dark backplanes join across native chrome and QML View content.
+        base = dark["Colors:View"]["BackgroundNormal"]
+        assert dark["Colors:Window"]["BackgroundNormal"] == base
+        assert dark["Colors:Complementary"]["BackgroundNormal"] == base
+        assert dark["WM"]["activeBackground"] == base
+        assert dark["WM"]["inactiveBackground"] == base
         light_template = (ROOT / "home/prog/plasma-files/OxygenLightFlat.colors").read_text()
         light = parse(scheme.mint(light_template, accent, ui_accent_hex=accent))
         mixed = parse(scheme.mint(template, accent, force_name="OxygenMixed", light_template=light_template, **options))
