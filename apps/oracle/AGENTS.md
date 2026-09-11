@@ -721,6 +721,54 @@ that swap is worth it; nothing else does it.
   `read_file` never lands in the turn's own tool list. Plus the definition rules (fallbacks, group resolution,
   a file replacing a built-in).
 
+## A decision, as buttons (`ask_choice`)
+
+**Some of the work is his taste, and an agent that just picks is doing the
+wrong job** [his, 2026-09-11: *"instead of just doing it and reporting back
+when its finished, what if they present the top available options to me? with
+format, track number, size, speed, etc displayed for each choice … at the
+bottom of that bubble itll show a row of buttons"*]. The motivating case is a
+record: five Soulseek copies differing in format, size, queue and speed. It is
+built **generic** (his call) — the same card asks which edition to keep, which
+duplicate dies, which model to pull.
+
+- **It is a tool call that does not return.** `_ask_choice` leaves its sink slot
+  empty, so the round stays open and the agent is still inside it when the
+  answer lands — it carries on with everything it knew rather than ending the
+  turn with a question and having to reconstruct the job when he replies. His
+  click (`Ollama.answerChoice`, from `ChoiceCard.qml`) is what calls
+  `_tool_done`.
+- **`_settle_choice` settles a card ONCE.** A settled card is gone from
+  `_choices`, so a second click, the late timeout and a cancelled turn all
+  arrive and do nothing [his: *"once the user makes a selection they shouldnt
+  even be able to click another button in that bubble later"*]. The QML
+  removes the buttons when it locks, but the rule lives in main.py where it
+  cannot be got around.
+- **A SUBAGENT may ask too, and the card lands in the conversation he is
+  reading** [his: *"spawn a subagent to grab a record and itll still show me the
+  options for selecting which one like normal"*] — `ask_choice` is in
+  `AGENT_TOOLS_DEFAULT` and in the `decide` group, and both agents reach it
+  through the one `_dispatch_tool`. `AGENT_SYSTEM_PREFIX` names it as the ONE
+  exception to "you cannot come back for a decision".
+- **CORE, on the wire every turn**, for the same reason `wikipedia` is: a door
+  the model has to be holding to walk through.
+- **Every ending is drawn.** `none of these`, `timeout` (`ASK_CHOICE_MS`, 10
+  minutes, with a desktop notification when chatter is not the active window),
+  `cancelled` (Stop), and `expired` — a card read back out of a saved session,
+  locked on the way in by `Root.expiredChoices`, because that turn's round died
+  with the process. Each state tells the agent what to do next (`what_now`) and
+  tells him what happened on the card.
+- **The details are whatever the agent gave.** `_choice_details` accepts an
+  object, a list of `{name, value}`, `"key: value"` strings or one prose line —
+  four spellings of one intent, and rejecting three would make the card a coin
+  flip on phrasing. `ASK_CHOICE_MAX_OPTIONS` (8) and `ASK_CHOICE_MAX_DETAILS`
+  (8) keep it a decision rather than a listing.
+- Harness: `tools/choice-test.py`, which drives real turns against a stub
+  ollama and reads both halves — the request bodies the model gets back, and
+  the buttons actually drawn on the card (present while waiting, gone once
+  answered). `ORACLE_CHOICE=0|none|ignore` is the selftest hook it presses
+  with.
+
 ## Sessions
 
 Every conversation is a **session**: a named transcript that persists and can be
