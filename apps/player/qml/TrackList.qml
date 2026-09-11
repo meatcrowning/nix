@@ -133,6 +133,7 @@ Item {
     property bool isQueue: false     // rows are queue rows -> "remove from queue"
     signal openAlbumRequested(int albumId)
     signal browseArtistRequested(string artist)
+    signal editAliasesRequested(string artist)
 
     // Parented to the WINDOW, not to this list. The queue column is ~240px
     // wide and every listing here clips, so a menu living inside one would be
@@ -378,7 +379,8 @@ Item {
                         queueIndex: root.isQueue ? index : -1,
                         inAlbum: root.inAlbum,
                         openAlbum: function (aid) { root.openAlbumRequested(aid); },
-                        browseArtist: function (a) { root.browseArtistRequested(a); }
+                        browseArtist: function (a) { root.browseArtistRequested(a); },
+                        editAliases: function (a) { root.editAliasesRequested(a); }
                     });
                 }
             }

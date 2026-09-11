@@ -9,6 +9,7 @@ Item {
     property string face: "plasma"
     signal openAlbum(int albumId)
     signal browseArtist(string artist)
+    signal editAliases(string artist)
     property color fgText: Theme.text
     property color fgDim: Theme.textDim
     property color fgAccent: Theme.accent
@@ -122,6 +123,7 @@ Item {
                 onPlayed: function(index) { Player.jumpTo(index) }
                 onOpenAlbumRequested: function(aid) { root.openAlbum(aid) }
                 onBrowseArtistRequested: function(artist) { root.browseArtist(artist) }
+                onEditAliasesRequested: function(artist) { root.editAliases(artist) }
             }
         }
     }

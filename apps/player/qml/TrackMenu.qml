@@ -32,6 +32,7 @@ import QtQuick
 //   inAlbum      album id this listing already shows -> "go to album" dropped
 //   openAlbum    function(albumId)      -> "go to album"
 //   browseArtist function(artistName)   -> "search for artist"
+//   editAliases  function(artistName)   -> "same person as..."
 CtxMenu {
     id: root
 
@@ -69,6 +70,12 @@ CtxMenu {
         if (c.browseArtist)
             items.push({ label: "search for artist", enabled: artist !== "",
                          trigger: function () { c.browseArtist(artist); } });
+        // One person, many names (AliasEditor.qml). It widens what a search
+        // for this artist finds; it retags and merges nothing, so it sits with
+        // the navigation entries rather than behind the destructive separator.
+        if (c.editAliases)
+            items.push({ label: "same person as...", enabled: artist !== "",
+                         trigger: function () { c.editAliases(artist); } });
         items.push({ label: "open folder in filer",
                      enabled: have && Library.canReveal,
                      trigger: function () { Library.revealTrack(id); } });

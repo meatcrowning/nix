@@ -105,6 +105,17 @@ class StubStyle(QObject):
     def fontFamily(self): return "monospace"
     @Property(int, notify=changed)
     def fontSize(self): return 15
+    # PixelText branches its render path on these three; a stub without them
+    # makes every `Theme.fontSmooth` binding undefined and floods the warning
+    # counter this harness fails on.
+    @Property(bool, notify=changed)
+    def smooth(self): return False
+    @Property(bool, notify=changed)
+    def terminalCell(self): return False
+    @Property(bool, notify=changed)
+    def topFontTreatment(self): return False
+    @Property(bool, notify=changed)
+    def airFontTreatment(self): return False
     @Property(bool, notify=changed)
     def reduceMotion(self): return True
     @Property(float, notify=changed)
