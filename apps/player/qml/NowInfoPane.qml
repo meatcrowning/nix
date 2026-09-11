@@ -244,6 +244,13 @@ Item {
                         visible: root.album.country || root.album.barcode
                         text: [root.text(root.album.country), root.album.barcode ? "barcode " + root.album.barcode : ""]
                               .filter(function(v) { return v !== ""; }).join(" · ") }
+                    PixelText { width: parent.width; color: root.fgText; wrapMode: Text.Wrap
+                        visible: !!root.album.description; text: root.text(root.album.description) }
+                    HeaderButton {
+                        visible: root.validUrl(root.album.descriptionUrl)
+                        label: "open description source"; plainLabel: "open description source"; iconName: "external-link"
+                        onClicked: root.openUrl(root.album.descriptionUrl)
+                    }
                     Repeater {
                         model: root.tab === "album" ? (root.album.labels || []) : []
                         delegate: Row {
@@ -353,13 +360,6 @@ Item {
                         visible: root.validUrl(root.album.url)
                         label: "open source"; plainLabel: "open source"; iconName: "external-link"
                         onClicked: root.openUrl(root.album.url)
-                    }
-                    PixelText { width: parent.width; color: root.fgText; wrapMode: Text.Wrap
-                        visible: !!root.album.description; text: root.text(root.album.description) }
-                    HeaderButton {
-                        visible: root.validUrl(root.album.descriptionUrl)
-                        label: "open description source"; plainLabel: "open description source"; iconName: "external-link"
-                        onClicked: root.openUrl(root.album.descriptionUrl)
                     }
                     PixelText { width: parent.width; color: root.fgText; wrapMode: Text.Wrap
                         visible: !!(root.album.artistInfo || {}).description
