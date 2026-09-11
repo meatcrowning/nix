@@ -129,17 +129,22 @@ from PySide6.QtQuickWidgets import QQuickWidget                      # noqa: E40
 qv = QQuickWidget()
 qv.setPalette(QApplication.palette())
 kdeshell._palette_view_lists.append([qv])
+# The view is CONTENT: `content_palette()` hands it the scheme's View colours
+# in the Window role, so the QML inside reads Base/Text. Move Base and expect
+# the view's Window to follow it — that is the role the content actually gets.
 NEW = QColor(10, 200, 90)
 pal2 = QPalette(app.palette())
-pal2.setColor(QPalette.Active, QPalette.Window, NEW)
-pal2.setColor(QPalette.Inactive, QPalette.Window, NEW)
+for _g in (QPalette.Active, QPalette.Inactive):
+    pal2.setColor(_g, QPalette.Base, NEW)
 app.setPalette(pal2)
 app.processEvents()
 got = qv.palette().color(QPalette.Active, QPalette.Window).getRgb()[:3]
 check("a scheme change re-dresses the QML view", got == NEW.getRgb()[:3],
       str(got))
 # `clearColor` has no getter in PySide6, so the assertion is that setting it
-# was ATTEMPTED with the new colour: a stub records the call.
+# was ATTEMPTED with the new colour: a stub records the call. It is the WINDOW
+# colour, not Base: whatever the styled background image has not covered for a
+# frame must read as the window, whose gradient runs unbroken behind the view.
 calls = []
 qv.setClearColor = lambda c: calls.append(c.getRgb()[:3])
 pal3 = QPalette(app.palette())
