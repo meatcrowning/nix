@@ -37,6 +37,13 @@ Rectangle {
     PixelText {
         id: verbText
         anchors.centerIn: parent
+        // A verb given a WIDTH (a decision card divides its row between the
+        // candidates) shrinks its own name to fit; one sized by its text —
+        // the jobs tray's `log` / `stop` — is unaffected, since implicitWidth
+        // is the natural width and never reads this back.
+        width: Math.max(0, root.width - 12)
+        horizontalAlignment: Text.AlignHCenter
+        elide: Text.ElideRight
         // The unlit-and-dead verb drops a step rather than vanishing: it is
         // still being read, just not offered (§3.2, §10.1).
         color: root.hot ? Theme.accent

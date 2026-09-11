@@ -23,9 +23,12 @@ import QtQuick
 //     here (§10.1 forbids a control that looks live and does nothing — this one
 //     does not look live). main.py's `_settle_choice` enforces the same thing
 //     underneath, where a stray click cannot get around it.
-//   * IT NEVER DEAD-ENDS. `none of these` is always there, because an agent
-//     that offered five wrong candidates must not be answerable only by waiting
-//     out the timeout.
+//   * IT NEVER DEAD-ENDS. There is no `none of these` button [his,
+//     2026-09-11]: the way out is the compose box he already has. While a card
+//     is up, typing a reply settles it — his words go back as that tool call's
+//     result (Root.send -> Ollama.answerChoiceText), so an agent that offered
+//     five wrong copies can be told so in a sentence instead of being answered
+//     with a shrug.
 //
 // API: `entry` (one `choiceAsked` object, with `state`/`index` kept current by
 // `choiceSettled`), `picked(index)`, `declined()`.
@@ -35,12 +38,20 @@ Rectangle {
     property var entry: null
 
     signal picked(int index)
-    signal declined()
 
     readonly property var options: (entry && entry.options) ? entry.options : []
     readonly property string state_: (entry && entry.state) ? entry.state : "pending"
     readonly property bool pending: state_ === "pending"
     readonly property int chosen: (entry && entry.index !== undefined) ? entry.index : -1
+
+    // A button is a button, not a paragraph: a candidate whose name runs long
+    // (a folder path, a release with an edition in brackets) is cut here and
+    // nowhere else — the numbered row above it says the whole thing.
+    readonly property int labelMax: 28
+    function buttonLabel(text) {
+        var s = String(text || "");
+        return s.length > labelMax ? s.slice(0, labelMax - 1) + "…" : s;
+    }
 
     // What the card says once it has stopped waiting. Every branch names
     // itself: a card that simply went quiet would read as a broken control.
@@ -48,6 +59,7 @@ Rectangle {
         if (pending) return "";
         if (chosen >= 0 && chosen < options.length)
             return "you picked " + (chosen + 1) + " · " + options[chosen].label;
+        if (state_ === "replied") return "you answered in the box below";
         if (state_ === "declined") return "you picked none of these";
         if (state_ === "timeout") return "no answer — it went ahead without one";
         if (state_ === "cancelled") return "the turn was stopped before you answered";
@@ -143,28 +155,36 @@ Rectangle {
             }
         }
 
-        // The buttons. `pick 1` rather than a bare `1`: a control says what it
-        // does (§10.1), and the number is the row above it. They outlive the
-        // answer — held down for the one he took, dead for the rest.
-        Flow {
+        // The buttons ARE the candidates [his, 2026-09-11]: each one wears the
+        // option's own name, so pressing it is picking that thing rather than
+        // picking a number and trusting the list above to still mean what it
+        // did (§10.1 — the control's label is its effect). A long name is
+        // clipped for the button only; the row above carries it in full.
+        // They outlive the answer — held down for the one he took, dead for
+        // the rest.
+        // ONE LINE, WHATEVER THE COUNT [his, 2026-09-11]: the row divides the
+        // card's width between the candidates rather than wrapping into a
+        // block of buttons. Each button then elides its own name — the
+        // numbered row above it carries the full one.
+        Row {
+            id: verbRow
             width: parent.width
             spacing: 6
+            readonly property int cells: Math.max(1, root.options.length)
+            readonly property int cellW:
+                Math.max(40, Math.floor((width - spacing * (cells - 1)) / cells))
 
             Repeater {
                 model: root.options
                 delegate: JobVerb {
                     required property int index
-                    label: "pick " + (index + 1)
+                    required property var modelData
+                    width: verbRow.cellW
+                    label: root.buttonLabel(modelData.label)
                     enabled: root.pending
                     lit: root.chosen === index
                     onClicked: root.picked(index)
                 }
-            }
-            JobVerb {
-                label: "none of these"
-                enabled: root.pending
-                lit: root.state_ === "declined"
-                onClicked: root.declined()
             }
         }
 
@@ -175,8 +195,11 @@ Rectangle {
             width: parent.width
             wrapMode: Text.WordWrap
             visible: text !== ""
-            text: root.pending ? "waiting for you…"
-                : (root.chosen >= 0 || root.state_ === "declined") ? ""
+            // While it waits, the line says BOTH ways out — press one, or say
+            // something. A pressed button is its own answer afterwards (§3.5),
+            // so only an ending no button can show is spelled out.
+            text: root.pending ? "waiting for you… or answer in the box below"
+                : (root.chosen >= 0) ? ""
                 : root.outcome
             color: Theme.textDim
         }

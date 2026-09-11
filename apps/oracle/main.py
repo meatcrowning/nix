@@ -4635,6 +4635,7 @@ class Ollama(QObject):
     # subagent, since both reach the tool through `_dispatch_tool`.
     choiceAsked = Signal(str)               # {id, question, note, options[]}
     choiceSettled = Signal(str)             # {id, state, index}
+    awaitingChoiceChanged = Signal()        # a card is up / no longer up
 
     # A run_bash/run_python program's output AS IT RUNS (tools/sandbox-exec.py
     # `stream: true`). One chunk per signal, already decoded; QML keeps a
@@ -7513,18 +7514,43 @@ class Ollama(QObject):
         self._choices[cid] = {"idx": idx, "remaining": remaining,
                               "calls": calls, "entry": entry}
         self.choiceAsked.emit(json.dumps(entry))
+        self.awaitingChoiceChanged.emit()
         self._choice_notify(question)
         QTimer.singleShot(ASK_CHOICE_MS,
                           lambda: self._settle_choice(cid, -1, "timeout"))
 
+    @Property(bool, notify=awaitingChoiceChanged)
+    def awaitingChoice(self):
+        """Is a card waiting on him? The compose box reads this: while one is
+        up he may answer IN WORDS instead of pressing anything, and the window
+        has to let him type into a turn that is technically still busy."""
+        return bool(self._choices)
+
     @Slot(str, int)
     def answerChoice(self, cid, index):
-        """He clicked. `index` below zero is the card's own "none of these"."""
+        """He pressed one of the candidates."""
         index = int(index)
         self._settle_choice(str(cid), index,
                             "answered" if index >= 0 else "declined")
 
-    def _settle_choice(self, cid, index, state):
+    @Slot(str, result=bool)
+    def answerChoiceText(self, text):
+        """He typed instead of pressing [his, 2026-09-11: *"remove the 'none of
+        these' button and allow the user to instead just send a normal reply
+        via the prompt box"*].
+
+        His words settle the OLDEST open card and go back as that tool call's
+        result, so the agent reads them inside the job it is already doing
+        rather than losing the round to a new turn. A card nobody is waiting
+        on returns False and the caller sends normally."""
+        text = " ".join(str(text or "").split())
+        if not text or not self._choices:
+            return False
+        cid = next(iter(self._choices))
+        self._settle_choice(cid, -1, "replied", reply=text)
+        return True
+
+    def _settle_choice(self, cid, index, state, reply=""):
         """Fill the waiting sink slot ONCE, and only once.
 
         A settled card is gone from `_choices`, so a second click, a late
@@ -7546,6 +7572,9 @@ class Ollama(QObject):
         entry["index"] = index if picked is not None else -1
         payload = {"answered": picked is not None, "state": state,
                    "question": entry["question"]}
+        if reply:
+            entry["reply"] = reply
+            payload["reply"] = reply
         if picked is not None:
             payload["chosen"] = picked["label"]
             payload["chosen_index"] = index
@@ -7557,6 +7586,11 @@ class Ollama(QObject):
                                    "options back to him.")
         else:
             payload["what_now"] = {
+                "replied": ("He answered in words instead of picking one — his "
+                            "reply is in `reply` above and is also the next "
+                            "thing in the conversation. Do what it says: it "
+                            "may name a different copy, change the criteria, "
+                            "or call the whole thing off."),
                 "declined": ("He picked NONE of these. Do not put the same "
                              "options up again: find different candidates, or "
                              "say what you would need in order to narrow it."),
@@ -7568,7 +7602,9 @@ class Ollama(QObject):
                 "cancelled": "The turn was stopped before he answered.",
             }.get(state, "No answer came back.")
         self.choiceSettled.emit(json.dumps(
-            {"id": cid, "state": state, "index": entry["index"]}))
+            {"id": cid, "state": state, "index": entry["index"],
+             "reply": reply}))
+        self.awaitingChoiceChanged.emit()
         slot["remaining"]["sink"][slot["idx"]] = {
             "role": "tool", "tool_name": "ask_choice",
             "content": json.dumps(payload)}
@@ -12579,8 +12615,9 @@ def run_selftest(app, shell, win, plasma, warnings, fleet_pane=None):
                                                 Q_RETURN_ARG("QVariant"))
 
             # ORACLE_CHOICE: answer the `ask_choice` card this turn puts up —
-            # `0`/`1`/… presses that button, `none` presses "none of these",
-            # `ignore` leaves it alone (which is how the timeout and the
+            # `0`/`1`/… presses that button, `say:<words>` answers in the
+            # compose box instead (the way out now that there is no "none of
+            # these" button), `ignore` leaves it alone (which is how the timeout and the
             # reload-locks-it paths are reached). The verbs actually DRAWN on
             # the card are printed either side of the press, because "the
             # buttons are gone once he has chosen" is the rule that has to be
@@ -12676,11 +12713,18 @@ def run_selftest(app, shell, win, plasma, warnings, fleet_pane=None):
                             app.processEvents()
                             time.sleep(0.01)
                         _report_cards("before")
-                        idx = -1 if _click == "none" else int(_click)
-                        QMetaObject.invokeMethod(
-                            target, "answerChoice",
-                            Q_ARG("QVariant", entry.get("id")),
-                            Q_ARG("QVariant", idx))
+                        if _click.startswith("say:"):
+                            # Through the REAL compose path: the box, then
+                            # `Root.send`, which is what decides that a typed
+                            # line answers the card rather than starting a turn.
+                            box.setProperty("text", _click[4:])
+                            app.processEvents()
+                            QMetaObject.invokeMethod(target, "send")
+                        else:
+                            QMetaObject.invokeMethod(
+                                target, "answerChoice",
+                                Q_ARG("QVariant", entry.get("id")),
+                                Q_ARG("QVariant", int(_click)))
                         _t = time.monotonic()
                         while time.monotonic() - _t < 0.3:
                             app.processEvents()
