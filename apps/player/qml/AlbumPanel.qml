@@ -188,7 +188,11 @@ Item {
         fgText: root.fgText
         fgDim: root.fgDim
         fgAccent: root.fgAccent
-        showArtist: false
+        // Guests only: a track credited to somebody besides the album's own
+        // artist says something, and eighteen repetitions of her own name say
+        // nothing (TrackList.artistLabel keeps just the "feat. …" tail).
+        showArtist: true
+        hideArtist: root.info.artist || ""
         scrollable: false      // the panel is sized to hold every row
         inAlbum: root.albumId  // "go to album" would land where we already are
         onPlayed: function(index) { Player.playAlbum(root.albumId, index); }

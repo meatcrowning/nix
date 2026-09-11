@@ -250,6 +250,13 @@ favourited, otherwise an outline. `HeartIcon.qml` owns QML geometry;
 `kdeshell_icons.py` renders the matching player-heart icons for native actions.
 Keep click targets unchanged when changing the drawing size.
 
+A track row names only the artists a listing does not already say: the open
+album section suppresses the album's own credit (`TrackList.hideArtist`) and a
+mixed listing suppresses its majority one (`autoHideArtist`), so what survives
+beside a title is the guest. That credit is a different datum from the title,
+not a quieter one, and takes `fgGuest` — a wash of the accent over the dim
+tone, never the accent itself.
+
 Release facts in `NowInfoPane.qml` are detached from QVariant maps once per
 album change; status/related updates must preserve credit delegates. Instantiate
 credit rows only for the selected album tab and matching scope. Metadata-only
@@ -294,7 +301,7 @@ not a CI suite:
 | Queue/path/socket | `queue-ops-test.py`, `album-playnext-test.py`, `open-path-test.py`, `queue-lyrics-test.py` |
 | Preference/metadata persistence | `state-write-test.py`, `metadata-worker-test.py` |
 | Metadata/sync | `now-info-test.py`, `artist-info-test.py`, `album-prose-test.py`, `release-info-test.py`, `related-music-test.py`, `info-sync-test.py`, `info-connection-test.py`, `library-ipc-test.py`, `test-dbsync.py` |
-| Album information UI | `album-info-ui-test.py` |
+| Album information UI | `album-info-ui-test.py`, `album-guest-ui-test.py` |
 | Native/QML presentation | `plasma-chrome-test.py`, `transport-test.py`, `focus-fade-test.py`, `view-preserve-test.py`, `favourite-surfaces-test.py`, `trash-track-test.py` |
 
 Atomic-write probes operate on copies and hash decoded audio only
