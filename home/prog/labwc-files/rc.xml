@@ -1,0 +1,63 @@
+<?xml version="1.0"?>
+<!--
+  labwc seed configuration. labwc-tweaks REWRITES this file wholesale, so
+  home-manager seeds it once (only when absent) and never reconciles it — see
+  home/prog/labwc.nix. Edit the copy in ~/.config/labwc for a live change; edit
+  this one to change what a fresh machine starts from.
+
+  Reference: labwc-config(5), labwc-actions(5), labwc-theme(5).
+-->
+<labwc_config>
+
+  <core>
+    <!-- Zero-gap, edge-to-edge: DESIGN.md §5.1. -->
+    <gap>0</gap>
+    <adaptiveSync>no</adaptiveSync>
+    <reuseOutputMode>no</reuseOutputMode>
+  </core>
+
+  <theme>
+    <!-- Empty = labwc's built-in theme. `labwc-gtktheme` can generate an
+         Openbox-format theme from the GTK theme, and labwc-tweaks can pick
+         one; neither is wired to the wallpaper palette that owns every other
+         surface's colours (DESIGN.md §3.1), so nothing is asserted here
+         rather than hand-picking colours this desktop does not choose. -->
+    <name></name>
+    <!-- Square corners and no drop shadows: the titlebar the desktop actually
+         uses (hyprvtb) has neither. -->
+    <cornerRadius>0</cornerRadius>
+    <dropShadows>no</dropShadows>
+    <!-- DESIGN.md §2.1: More Perfect DOS VGA, and labwc's font size is in
+         PIXELS (not points), so 15 is the kitty-matching cell directly. -->
+    <font place="">
+      <name>More Perfect DOS VGA</name>
+      <size>15</size>
+      <slant>normal</slant>
+      <weight>normal</weight>
+    </font>
+  </theme>
+
+  <keyboard>
+    <!-- labwc's stock keybinds, plus this desktop's terminal. Without
+         <default /> a single custom keybind would replace the whole set. -->
+    <default />
+    <keybind key="W-Return">
+      <action name="Execute" command="kitty" />
+    </keybind>
+    <keybind key="W-q">
+      <action name="Close" />
+    </keybind>
+  </keyboard>
+
+  <mouse>
+    <default />
+  </mouse>
+
+  <libinput>
+    <device category="touchpad">
+      <naturalScroll>yes</naturalScroll>
+      <tap>yes</tap>
+    </device>
+  </libinput>
+
+</labwc_config>

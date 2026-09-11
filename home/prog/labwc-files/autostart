@@ -1,0 +1,10 @@
+#!/bin/sh
+# labwc autostart — run as a shell script after labwc reads its config.
+# Seeded once by home-manager.
+#
+# Nothing is started by default. The desktop's panel (Quickshell) talks to
+# hyprvtb over Hyprland's IPC and has no meaning in a labwc session, so it is
+# not launched here; add whatever panel/wallpaper client you want to try.
+#
+# Example:
+#   waybar &
