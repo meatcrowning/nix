@@ -16,9 +16,13 @@ import QtQuick
 //     drawn) and says what happened once it stops waiting.
 //   * ONCE ANSWERED IT IS OVER [his]: "once the user makes a selection they
 //     shouldnt even be able to click another button in that bubble later". The
-//     buttons are not disabled, they are GONE, replaced by the line saying what
-//     he picked — a dead control is not drawn at all (§10.1), and main.py's
-//     `_settle_choice` enforces the same thing where it cannot be got around.
+//     buttons STAY [his, 2026-09-11] — the one he took holds itself down and
+//     the rest go dead beside it, so the card reads as the record of a decision
+//     rather than losing the thing he was looking at. They are a READOUT then,
+//     not an offer, which is why disabling rather than removing them is right
+//     here (§10.1 forbids a control that looks live and does nothing — this one
+//     does not look live). main.py's `_settle_choice` enforces the same thing
+//     underneath, where a stray click cannot get around it.
 //   * IT NEVER DEAD-ENDS. `none of these` is always there, because an agent
 //     that offered five wrong candidates must not be answerable only by waiting
 //     out the timeout.
@@ -55,7 +59,11 @@ Rectangle {
     implicitHeight: body.implicitHeight + 20
     height: implicitHeight
     radius: Theme.rounding
-    color: Theme.bgAlt
+    // NO FILL [his, 2026-09-11]. The card already sits inside the reply's own
+    // frame — under Plasma that is the KStyle's surface — and a second solid
+    // slab on top of it was one panel too many (§5.1: the surface runs
+    // unbroken; §4: a frame, not a stack of boxes).
+    color: "transparent"
     border.width: Theme.ctrlBorder
     // Waiting on HIM is a state worth seeing from across the room (§3.5): the
     // frame carries the accent while it is open and goes quiet once it is not.
@@ -135,35 +143,42 @@ Rectangle {
             }
         }
 
-        // The buttons, while there is something to press. `pick 1` rather than
-        // a bare `1`: a control says what it does (§10.1), and the number is
-        // the row above it.
+        // The buttons. `pick 1` rather than a bare `1`: a control says what it
+        // does (§10.1), and the number is the row above it. They outlive the
+        // answer — held down for the one he took, dead for the rest.
         Flow {
             width: parent.width
             spacing: 6
-            visible: root.pending
 
             Repeater {
                 model: root.options
                 delegate: JobVerb {
                     required property int index
                     label: "pick " + (index + 1)
+                    enabled: root.pending
+                    lit: root.chosen === index
                     onClicked: root.picked(index)
                 }
             }
             JobVerb {
                 label: "none of these"
+                enabled: root.pending
+                lit: root.state_ === "declined"
                 onClicked: root.declined()
             }
         }
 
-        // The wait, and then what came of it — never a card that just stops.
+        // The wait — and, for an ending no button can show, what came of it.
+        // A pressed button IS the answer, so it is not narrated twice (§3.5
+        // says a state twice only where the first reading can be missed).
         PixelText {
             width: parent.width
             wrapMode: Text.WordWrap
-            text: root.pending ? "waiting for you…" : root.outcome
-            color: root.pending ? Theme.textDim
-                 : (root.chosen >= 0 ? Theme.text : Theme.textDim)
+            visible: text !== ""
+            text: root.pending ? "waiting for you…"
+                : (root.chosen >= 0 || root.state_ === "declined") ? ""
+                : root.outcome
+            color: Theme.textDim
         }
     }
 }

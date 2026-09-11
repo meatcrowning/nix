@@ -218,9 +218,22 @@ check("the buttons are really drawn while it waits",
       bool(before) and "'pick 1'" in before.group(1)
       and "'none of these'" in before.group(1),
       before.group(1) if before else "no card")
-check("and GONE once he has chosen — not merely greyed [his]",
-      bool(after) and after.group(1) == "[]",
+check("and STILL THERE once he has chosen [his] — the card is the record",
+      bool(after) and "'pick 1'" in after.group(1)
+      and "'none of these'" in after.group(1),
       after.group(1) if after else "no card")
+held = re.search(r"^choice after: .*lit=(\[.*?\]) dead=(\[.*?\])$", txt, re.M)
+check("with the one he took held DOWN",
+      bool(held) and held.group(1) == "['pick 1']",
+      held.group(1) if held else "no card")
+check("and every button dead, his included — a record, not an offer",
+      bool(held)
+      and held.group(2) == "['pick 1', 'pick 2', 'pick 3', 'none of these']",
+      held.group(2) if held else "no card")
+live = re.search(r"^choice before: .*lit=(\[.*?\]) dead=(\[.*?\])$", txt, re.M)
+check("…and nothing was dead or held down while it waited",
+      bool(live) and live.group(1) == "[]" and live.group(2) == "[]",
+      (live.group(1) + " / " + live.group(2)) if live else "no card")
 
 answers = tool_results(bodies, "ask_choice")
 check("his click comes back as the tool's result", len(answers) == 1, len(answers))
