@@ -2268,6 +2268,86 @@ SPAWN_TOOL_NAMES = {"spawn_agent"}
 
 #: The tools a definition may hand a subagent, by group, so a definition can
 #: say `tools: read, exec` instead of naming ten. `all` is every one of them.
+#: ---- ask_choice: a DECISION, put to him as buttons ------------------------
+#:
+#: [his, 2026-09-11] — *"instead of just doing it and reporting back when its
+#: finished, what if they present the top available options to me? … at the
+#: bottom of that bubble itll show a row of buttons"*. The motivating case is a
+#: record: five Soulseek copies differing in format, size, queue and speed, and
+#: which one to take is HIS taste, not a fact an agent can establish. Built
+#: generic on purpose (his call) — the same card answers "which edition do I
+#: keep", "which of these duplicates dies", "which model do I pull".
+#:
+#: The mechanics are the whole point. It is a TOOL CALL THAT DOES NOT RETURN
+#: until he clicks: the dispatcher leaves its sink slot empty, the round stays
+#: open, and the click fills it in — so the agent keeps its context and finishes
+#: the job in the same turn, instead of ending the turn with a question and
+#: having to reconstruct what it was doing when he answers.
+#:
+#: A SUBAGENT may call it too, and its card lands in the conversation he is
+#: reading, because `_dispatch_tool` is one branch for both (`ask_choice` is in
+#: `AGENT_TOOLS_DEFAULT`). That is the case he asked for: "spawn a subagent to
+#: grab a record and itll still show me the options like normal".
+ASK_CHOICE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "ask_choice",
+        "description": (
+            "Put a DECISION to him as a row of buttons and WAIT for his click. "
+            "Use it when the work has several real candidates and choosing "
+            "between them is his taste, not a fact you could look up: which "
+            "copy of a record to download, which edition to keep, which of two "
+            "fixes to apply. Each option carries its own details — format, "
+            "size, speed, source, whatever distinguishes them — and his answer "
+            "comes back as this tool's result in this same turn, so carry on "
+            "and DO the thing he picked. He can also answer 'none of these'. "
+            "Do not use it for something another tool could establish, do not "
+            "ask twice about one decision, and do not ask when he already told "
+            "you which one he wants."),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "What he is deciding, in one line."},
+                "options": {
+                    "type": "array",
+                    "description": ("Two to eight candidates, best first. Give "
+                                    "the details that actually differ between "
+                                    "them."),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {
+                                "type": "string",
+                                "description": "The option's name — short."},
+                            "details": {
+                                "type": "object",
+                                "description": (
+                                    "Facts about this option, drawn under the "
+                                    "label: {\"format\": \"FLAC 16/44\", "
+                                    "\"size\": \"310 MB\", \"speed\": "
+                                    "\"2.1 MB/s\", \"queue\": \"none\"}.")},
+                            "note": {
+                                "type": "string",
+                                "description": "One short line of context (optional)."}},
+                        "required": ["label"]}},
+                "note": {
+                    "type": "string",
+                    "description": "One line under the question (optional)."}},
+            "required": ["question", "options"]}},
+}
+ASK_CHOICE_TOOL_NAMES = {"ask_choice"}
+#: How long a card waits for a click before it says nobody answered. Long,
+#: because the window may be behind three others (a notification goes up when
+#: it is); the turn is idle meanwhile and Stop still ends it.
+ASK_CHOICE_MS = 10 * 60 * 1000
+#: More than this many candidates is a list, not a decision — and a row of
+#: twelve buttons is unreadable at book's width.
+ASK_CHOICE_MAX_OPTIONS = 8
+#: Per option: enough for "format, size, bitrate, speed, queue, source".
+ASK_CHOICE_MAX_DETAILS = 8
+
 AGENT_TOOL_GROUPS = {
     "read": ["list_dir", "read_file", "find_files", "search_text", "show_tree"],
     "write": ["write_file", "edit_file", "move_path", "delete_path", "make_dir"],
@@ -2280,6 +2360,10 @@ AGENT_TOOL_GROUPS = {
     "author": ["make_tool", "make_skill", "make_agent"],
     "time": ["get_current_time"],
     "jobs": ["run_job", "job_status", "job_log", "job_stop"],
+    # The one thing a subagent may come back for: a DECISION, as buttons.
+    # Prose questions are still pointless down there — nobody reads a
+    # subagent's transcript — but this one renders in HIS window.
+    "decide": ["ask_choice"],
 }
 #: THE TOOLS EVERY TURN CARRIES. The other two dozen are named in a one-line
 #: index in the system prompt (`tools_note`) and attached on demand
@@ -2301,6 +2385,10 @@ CORE_TOOL_NAMES = [
     "use_skill", "spawn_agent",
     "save_memory", "list_memories",
     "get_tools", "run_job",
+    # CORE, for the same reason `wikipedia` is: a door it has to be holding to
+    # walk through. He asked for options instead of a fait accompli, and a tool
+    # attached only on request is one the model reasons its way around.
+    "ask_choice",
 ]
 
 #: Tool groups for `get_tools`, over and above `AGENT_TOOL_GROUPS`: the ones a
@@ -2345,7 +2433,8 @@ AGENT_TOOLS_DEFAULT = (AGENT_TOOL_GROUPS["read"] + AGENT_TOOL_GROUPS["write"]
                        + ["music_library"]
                        + AGENT_TOOL_GROUPS["history"]
                        + AGENT_TOOL_GROUPS["skills"] + AGENT_TOOL_GROUPS["author"]
-                       + AGENT_TOOL_GROUPS["time"])
+                       + AGENT_TOOL_GROUPS["time"]
+                       + AGENT_TOOL_GROUPS["decide"])
 
 #: Always present, whether or not anything is installed on disk — a spawn that
 #: names nothing still has to work, and an empty agents directory should not
@@ -2402,10 +2491,16 @@ BUILTIN_AGENTS = [
 AGENT_SYSTEM_PREFIX = (
     "You are a SUBAGENT. Another model — the one talking to the user — spawned "
     "you to do one job and is waiting on the result; the user cannot see this "
-    "conversation and cannot answer you. So: do not ask questions, do not "
-    "offer to proceed, and do not describe a plan. Do the job with the tools "
-    "you have, in this turn, and then write your FINAL ANSWER as your whole "
-    "reply. That answer is the only thing that comes back, so make it "
+    "conversation and cannot read a question you write here. So: do not ask "
+    "questions, do not offer to proceed, and do not describe a plan. Do the "
+    "job with the tools you have, in this turn. The ONE exception is "
+    "`ask_choice` when you have it: a decision that is his TASTE rather than a "
+    "fact — which copy of a record, which edition, which of two fixes — goes "
+    "to him as buttons in his own window and his click comes back to you here, "
+    "so ask with it rather than guessing or handing the choice back in your "
+    "answer. Everything you can settle yourself, settle. Then write your FINAL "
+    "ANSWER as your whole reply. That answer is the only thing that comes "
+    "back, so make it "
     "self-contained: the finding itself, the paths, numbers or commands that "
     "establish it, and anything that went wrong. Be complete but compact — you "
     "exist so the model that spawned you does not have to read everything you "
@@ -2479,6 +2574,7 @@ def _tool_registry():
              CALL_API_TOOL, EXEC_TOOL, BASH_TOOL, SHOW_IMAGE_TOOL,
              MUSIC_TOOL, LASTFM_TOOL, PLAYER_TOOL] + list(JOB_TOOLS)
              + list(SESSION_TOOLS) + [PROMPT_HISTORY_TOOL] + list(AUTHOR_TOOLS)
+             + [ASK_CHOICE_TOOL]
              + [t for t in [skill_tool()] if t]
              + custom_tool_defs())
     return {t["function"]["name"]: t for t in tools
@@ -2855,6 +2951,10 @@ TOOL_ONCE_NAMES = {
     "write_file", "edit_file", "move_path", "delete_path", "make_dir",
     "make_image", "make_video", "run_job", "job_stop",
     "save_memory", "delete_memory", "make_tool", "make_skill", "make_agent",
+    # Asking the same decision twice in one turn puts a second identical card
+    # under the one he already answered. The repeat comes back with "use what
+    # you have" instead.
+    "ask_choice",
 }
 
 #: The recall guidance, on the system prompt of EVERY turn. Without it the model
@@ -4529,6 +4629,12 @@ class Ollama(QObject):
     # streams; nothing is on disk but the poster frame.
     videoStarted = Signal(str)              # url — resolving
     videoResult = Signal(str)               # one JSON entry (the contract above)
+    # A DECISION, waiting on him: one card JSON out, and one settlement back
+    # (answered, declined, timed out, or the turn was stopped). The card is
+    # drawn in the turn that asked — whether the asker was the main agent or a
+    # subagent, since both reach the tool through `_dispatch_tool`.
+    choiceAsked = Signal(str)               # {id, question, note, options[]}
+    choiceSettled = Signal(str)             # {id, state, index}
 
     # A run_bash/run_python program's output AS IT RUNS (tools/sandbox-exec.py
     # `stream: true`). One chunk per signal, already decoded; QML keeps a
@@ -4595,6 +4701,8 @@ class Ollama(QObject):
         self._messages = []      # the growing message list across a tool loop
         self._acc_content = ""   # assistant content accumulated in this sub-turn
         self._done_reason = ""   # ollama's reason the last frame was the last
+        self._choices = {}       # id -> the open ask_choice card's sink slot
+        self._choice_seq = 0
         self._pending_vision = []  # local images view_image is handing the model
         self._pending_audio = []   # …and the excerpts listen_audio is handing it
         self._images_shown = set()
@@ -6455,7 +6563,7 @@ class Ollama(QObject):
                 CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
                 + list(SESSION_TOOLS) + [PROMPT_HISTORY_TOOL]
                 + list(MEMORY_TOOLS) + list(AUTHOR_TOOLS)
-                + [GET_TOOLS_TOOL] + list(JOB_TOOLS)
+                + [GET_TOOLS_TOOL, ASK_CHOICE_TOOL] + list(JOB_TOOLS)
                 + [t for t in [skill_tool(), spawn_agent_tool()] if t])
 
     @staticmethod
@@ -6620,6 +6728,10 @@ class Ollama(QObject):
         self._flush_stream()
         self._metrics.finish("cancelled")
         self._set_busy(False)
+        # A card whose turn is gone can never be answered: settle it now so it
+        # locks with a reason on it, rather than sitting there offering buttons
+        # that would do nothing (docs/DESIGN.md §10.2).
+        self._cancel_choices()
         self._stop_generating()
         if self._reply is not None:
             r, self._reply = self._reply, None
@@ -7299,6 +7411,8 @@ class Ollama(QObject):
             self._run_job_tool(name, args, i, remaining, calls)
         elif name in GET_TOOLS_TOOL_NAMES:
             self._run_get_tools(args, i, remaining, calls)
+        elif name in ASK_CHOICE_TOOL_NAMES:
+            self._ask_choice(args, i, remaining, calls)
         elif name in SPAWN_TOOL_NAMES:
             self._spawn_agent(args, i, remaining, calls)
         elif name in custom_tools():
@@ -7309,6 +7423,178 @@ class Ollama(QObject):
                 "content": json.dumps({"error": "unknown tool: " + name})}
             self._tool_done(remaining, calls)
 
+
+    # ---- ask_choice (a decision, as buttons) -------------------------------
+
+    @staticmethod
+    def _choice_details(raw):
+        """A model's `details` -> `[[name, value], …]`, however it sent them.
+
+        Models send this object as an object, as a list of `{name, value}`, as
+        a list of `"key: value"` strings, or as one prose line. All four are
+        the same intent — the facts that distinguish this candidate — and
+        refusing three of them would make the card a coin flip on phrasing.
+        """
+        items = []
+        if isinstance(raw, dict):
+            items = list(raw.items())
+        elif isinstance(raw, list):
+            for it in raw:
+                if isinstance(it, dict):
+                    if "name" in it or "value" in it:
+                        items.append((it.get("name"), it.get("value")))
+                    else:
+                        items += list(it.items())
+                elif isinstance(it, str) and it.strip():
+                    name, sep, value = it.partition(":")
+                    items.append((name, value) if sep else ("", name))
+        elif isinstance(raw, str) and raw.strip():
+            items = [("", raw)]
+        out = []
+        for name, value in items:
+            text = " ".join(str(value if value is not None else "").split())
+            label = " ".join(str(name if name is not None else "").split())
+            if not text and not label:
+                continue
+            out.append([label[:24], text[:120]])
+            if len(out) >= ASK_CHOICE_MAX_DETAILS:
+                break
+        return out
+
+    @classmethod
+    def _choice_options(cls, raw):
+        """The `options` argument -> the card's rows. A bare string is a label
+        with no details, which is a perfectly good option."""
+        out = []
+        if not isinstance(raw, list):
+            return out
+        for item in raw:
+            if isinstance(item, str):
+                item = {"label": item}
+            if not isinstance(item, dict):
+                continue
+            label = " ".join(str(item.get("label") or item.get("name")
+                                 or "").split())
+            if not label:
+                continue
+            note = " ".join(str(item.get("note") or item.get("description")
+                                or "").split())
+            out.append({"label": label[:120], "note": note[:200],
+                        "details": cls._choice_details(item.get("details"))})
+            if len(out) >= ASK_CHOICE_MAX_OPTIONS:
+                break
+        return out
+
+    def _ask_choice(self, args, idx, remaining, calls):
+        """Draw a decision card and LEAVE THE ROUND OPEN until he answers.
+
+        The sink slot stays empty on purpose: `_tool_done` is called from
+        `_settle_choice`, i.e. from his click, the timeout or a stopped turn.
+        That is what keeps the asking agent's context alive across the wait —
+        it is still inside its tool round, so when the answer lands it carries
+        on with everything it already knows rather than starting a new turn
+        from a question in the transcript."""
+        question = " ".join(str(args.get("question") or "").split())
+        options = self._choice_options(args.get("options"))
+        if not question or len(options) < 2:
+            remaining["sink"][idx] = {
+                "role": "tool", "tool_name": "ask_choice",
+                "content": json.dumps({"error": (
+                    "ask_choice needs a one-line question and at least TWO "
+                    "options, each with a label. One candidate is not a "
+                    "decision — just do it and say what you did.")})}
+            self._tool_done(remaining, calls)
+            return
+        self._choice_seq += 1
+        cid = "choice-%d" % self._choice_seq
+        entry = {"id": cid, "question": question[:400],
+                 "note": " ".join(str(args.get("note") or "").split())[:400],
+                 "options": options, "state": "pending", "index": -1}
+        self._choices[cid] = {"idx": idx, "remaining": remaining,
+                              "calls": calls, "entry": entry}
+        self.choiceAsked.emit(json.dumps(entry))
+        self._choice_notify(question)
+        QTimer.singleShot(ASK_CHOICE_MS,
+                          lambda: self._settle_choice(cid, -1, "timeout"))
+
+    @Slot(str, int)
+    def answerChoice(self, cid, index):
+        """He clicked. `index` below zero is the card's own "none of these"."""
+        index = int(index)
+        self._settle_choice(str(cid), index,
+                            "answered" if index >= 0 else "declined")
+
+    def _settle_choice(self, cid, index, state):
+        """Fill the waiting sink slot ONCE, and only once.
+
+        A settled card is gone from `_choices`, so a second click, a late
+        timeout and a cancelled turn all arrive here and do nothing. That is
+        the whole locking rule and it lives HERE rather than in the QML,
+        because the button being drawn as dead is a courtesy and this is the
+        part that cannot be got around [his, 2026-09-11: *"once the user makes
+        a selection they shouldnt even be able to click another button in that
+        bubble later to attempt to change it"*]."""
+        slot = self._choices.pop(cid, None)
+        if slot is None:
+            return
+        entry = slot["entry"]
+        options = entry["options"]
+        picked = options[index] if 0 <= index < len(options) else None
+        if picked is None and state == "answered":
+            state = "declined"
+        entry["state"] = state
+        entry["index"] = index if picked is not None else -1
+        payload = {"answered": picked is not None, "state": state,
+                   "question": entry["question"]}
+        if picked is not None:
+            payload["chosen"] = picked["label"]
+            payload["chosen_index"] = index
+            if picked["details"]:
+                payload["chosen_details"] = {d[0] or str(i): d[1]
+                                             for i, d in enumerate(picked["details"])}
+            payload["what_now"] = ("He picked this one. Carry on and DO it now "
+                                   "— do not ask again, and do not list the "
+                                   "options back to him.")
+        else:
+            payload["what_now"] = {
+                "declined": ("He picked NONE of these. Do not put the same "
+                             "options up again: find different candidates, or "
+                             "say what you would need in order to narrow it."),
+                "timeout": ("Nobody answered within %d minutes. Do not ask "
+                            "again. Either go ahead on your own judgement and "
+                            "SAY which one you took and why, or stop and "
+                            "report that the decision is still open."
+                            % (ASK_CHOICE_MS // 60000)),
+                "cancelled": "The turn was stopped before he answered.",
+            }.get(state, "No answer came back.")
+        self.choiceSettled.emit(json.dumps(
+            {"id": cid, "state": state, "index": entry["index"]}))
+        slot["remaining"]["sink"][slot["idx"]] = {
+            "role": "tool", "tool_name": "ask_choice",
+            "content": json.dumps(payload)}
+        self._tool_done(slot["remaining"], slot["calls"])
+
+    def _cancel_choices(self):
+        """Every open card, settled as cancelled — the turn that asked is gone."""
+        for cid in list(self._choices):
+            self._settle_choice(cid, -1, "cancelled")
+
+    def _choice_notify(self, question):
+        """A decision is waiting and he is in another window (§10.4, and the
+        same reasoning as `Jobs.notify`): the card is only visible to someone
+        looking at it, and this one is holding an agent mid-job."""
+        if SELFTEST or os.environ.get("ORACLE_NO_NOTIFY"):
+            return
+        if QGuiApplication.applicationState() == Qt.ApplicationState.ApplicationActive:
+            return
+        if not shutil.which("notify-send"):
+            return
+        proc = QProcess(self)
+        proc.startDetached("notify-send",
+                           ["-a", "chatter", "-u", "normal",
+                            "-i", "dialog-question", "--",
+                            "chatter is waiting on you", question[:160]])
+        proc.deleteLater()
 
     # ---- subagents (spawn_agent) -------------------------------------------
 
@@ -12292,6 +12578,92 @@ def run_selftest(app, shell, win, plasma, warnings, fleet_pane=None):
                 return QMetaObject.invokeMethod(target, "rowsJson",
                                                 Q_RETURN_ARG("QVariant"))
 
+            # ORACLE_CHOICE: answer the `ask_choice` card this turn puts up —
+            # `0`/`1`/… presses that button, `none` presses "none of these",
+            # `ignore` leaves it alone (which is how the timeout and the
+            # reload-locks-it paths are reached). The verbs actually DRAWN on
+            # the card are printed either side of the press, because "the
+            # buttons are gone once he has chosen" is the rule that has to be
+            # checked by reading the item tree rather than the model
+            # (tools/choice-test.py).
+            _click = os.environ.get("ORACLE_CHOICE", "")
+
+            def _cards(it, depth=0):
+                out = []
+                if it is None or depth > 30:      # a bubble nests deeply
+                    return out
+                kids = (it.childItems() if hasattr(it, "childItems")
+                        else it.children())
+                for ch in kids:
+                    if ch.objectName() == "choiceCard":
+                        out.append(ch)
+                    else:
+                        out += _cards(ch, depth + 1)
+                return out
+
+            def _card_verbs(item, depth=0):
+                out = []
+                if item is None or depth > 8:
+                    return out
+                kids = (item.childItems() if hasattr(item, "childItems")
+                        else item.children())
+                for ch in kids:
+                    lab = ch.property("label")
+                    if lab is not None and ch.property("face") is not None:
+                        if bool(ch.property("visible")):
+                            out.append(str(lab))
+                    else:
+                        out += _card_verbs(ch, depth + 1)
+                return out
+
+            def _report_cards(when):
+                for card in _cards(target):
+                    entry = card.property("entry") or {}
+                    if hasattr(entry, "toVariant"):
+                        entry = entry.toVariant()
+                    print("choice %s: id=%s state=%s index=%s verbs=%s"
+                          % (when, entry.get("id"), entry.get("state"),
+                             entry.get("index"), _card_verbs(card)))
+
+            def _answer_pending():
+                """Press a button on any card still waiting, the same way the
+                card does — `Ollama.answerChoice`, not a private back door."""
+                if not _click or _click == "ignore":
+                    return False
+                try:
+                    rows_now = json.loads(_rows() or "[]")
+                except ValueError:
+                    return False
+                for row in rows_now:
+                    try:
+                        cards = json.loads(row.get("choices") or "[]")
+                    except ValueError:
+                        continue
+                    for entry in cards:
+                        if entry.get("state") != "pending":
+                            continue
+                        # A Repeater builds its delegates on a POLISH pass:
+                        # without this catch-up the card is found and its
+                        # buttons are not there yet (the same wait the jobs
+                        # tray needs below).
+                        _t = time.monotonic()
+                        while time.monotonic() - _t < 0.4:
+                            app.processEvents()
+                            time.sleep(0.01)
+                        _report_cards("before")
+                        idx = -1 if _click == "none" else int(_click)
+                        QMetaObject.invokeMethod(
+                            target, "answerChoice",
+                            Q_ARG("QVariant", entry.get("id")),
+                            Q_ARG("QVariant", idx))
+                        _t = time.monotonic()
+                        while time.monotonic() - _t < 0.3:
+                            app.processEvents()
+                            time.sleep(0.01)
+                        _report_cards("after")
+                        return True
+                return False
+
             for _prompt in os.environ["ORACLE_SEND"].split(";;"):
                 box.setProperty("text", _prompt)
                 app.processEvents()
@@ -12302,6 +12674,7 @@ def run_selftest(app, shell, win, plasma, warnings, fleet_pane=None):
                     time.sleep(0.01)
                     if time.monotonic() - _t0 < 1.0:
                         continue
+                    _answer_pending()
                     try:
                         rows = json.loads(_rows() or "[]")
                     except ValueError:

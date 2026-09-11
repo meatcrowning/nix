@@ -233,8 +233,56 @@ Item {
     function roundIsSilent(r) {
         return !r.isError && (r.body || "") === ""
                && (r.images || "[]") === "[]" && !r.imagesActive
-               && (r.videos || "[]") === "[]" && !r.videosActive;
+               && (r.videos || "[]") === "[]" && !r.videosActive
+               && (r.choices || "[]") === "[]";
     }
+
+    // Cards read back out of a SAVED session. The turn that asked is over —
+    // its tool round died with the process — so anything still pending comes
+    // back LOCKED as `expired` and says so. Offering him buttons that could
+    // only fail is the affordance dishonesty §10.2 forbids.
+    function expiredChoices(js) {
+        var arr;
+        try { arr = JSON.parse(js || "[]"); } catch (e) { return "[]"; }
+        if (!Array.isArray(arr) || arr.length === 0) return "[]";
+        for (var i = 0; i < arr.length; i++)
+            if (arr[i] && (!arr[i].state || arr[i].state === "pending"))
+                arr[i].state = "expired";
+        return JSON.stringify(arr);
+    }
+
+    // One settled card, written back into whichever row is holding it. The
+    // asking row is normally the active one, but a settlement can arrive after
+    // the turn has moved on to another row (or, for a SUBAGENT's card, while
+    // the agents block is what is streaming), so this looks it up by id.
+    function settleChoice(id, state, index) {
+        for (var i = chatLog.count - 1; i >= 0; i--) {
+            var arr;
+            try { arr = JSON.parse(chatLog.get(i).choices || "[]"); }
+            catch (e) { continue; }
+            var live = false, hit = false;
+            for (var j = 0; j < arr.length; j++) {
+                if (arr[j] && arr[j].id === id) {
+                    arr[j].state = state;
+                    arr[j].index = index;
+                    hit = true;
+                }
+                if (arr[j] && arr[j].state === "pending") live = true;
+            }
+            if (hit) {
+                chatLog.setProperty(i, "choices", JSON.stringify(arr));
+                chatLog.setProperty(i, "choicesActive", live);
+                win.chatRev++;
+                return;
+            }
+        }
+    }
+
+    // The way a HARNESS presses a card's button (tools/choice-test.py, through
+    // the selftest's ORACLE_CHOICE): the very call `ChoiceCard.onPicked` makes,
+    // so the test drives the real seam instead of a back door of its own. The
+    // window never calls this itself.
+    function answerChoice(id, index) { Ollama.answerChoice(id, index); }
 
     // `metaRev` is what re-evaluates the block. A ListModel notifies no binding
     // when setProperty writes a role, and rebuilding the aggregate per token
@@ -510,7 +558,11 @@ Item {
             // picture floating above a separate text bubble. Once a row HAS
             // words, the rounds split again (one bubble per round) as before.
             var hasMedia = (cur.images !== "[]" && cur.images !== "") || cur.imagesActive
-                || (cur.videos !== "[]" && cur.videos !== "") || cur.videosActive;
+                || (cur.videos !== "[]" && cur.videos !== "") || cur.videosActive
+                // A decision card is the same case: what the agent says once he
+                // has answered belongs WITH the card he answered, not in a
+                // second bubble under it.
+                || (cur.choices !== "[]" && cur.choices !== "");
             // A SHORT LINE IN FRONT OF THE PICTURE IS A PREAMBLE, not an
             // answer [his, 2026-08-24: "here is the image" + the image, then a
             // second bubble saying "here you go…" with no image]. The row that
@@ -607,6 +659,30 @@ Item {
             chatLog.setProperty(win.activeIndex, "videosPending", pending);
             chatLog.setProperty(win.activeIndex, "videosActive", pending > 0);
         }
+        // A DECISION the agent put to him (main.py `_ask_choice`). The card
+        // rides the row the turn is writing into, so it sits with the words
+        // that introduced it; the tool call behind it stays OPEN until one of
+        // the buttons is pressed, which is what lets the agent carry straight
+        // on with everything it already knows.
+        function onChoiceAsked(entryJson) {
+            if (win.activeIndex < 0) return;
+            var cur = chatLog.get(win.activeIndex);
+            var arr;
+            try { arr = JSON.parse(cur.choices || "[]"); } catch (e) { arr = []; }
+            var entry;
+            try { entry = JSON.parse(entryJson); } catch (e2) { entry = null; }
+            if (!entry) return;
+            arr.push(entry);
+            chatLog.setProperty(win.activeIndex, "choices", JSON.stringify(arr));
+            chatLog.setProperty(win.activeIndex, "choicesActive", true);
+            win.chatRev++;
+        }
+        function onChoiceSettled(settledJson) {
+            var m;
+            try { m = JSON.parse(settledJson); } catch (e) { return; }
+            if (m && m.id) win.settleChoice(m.id, m.state || "", m.index);
+        }
+
         // A run_bash / run_python program, AS IT RUNS [his, 2026-08-23]. The
         // tail is bounded (execTailMax) — this is a window on the work, not a
         // second transcript — and it lives under the files disclosure with the
@@ -767,6 +843,7 @@ Item {
                          agents: t.agents, agentCount: t.agentCount,
                          agentsBad: t.agentsBad,
                          images: t.images, videos: t.videos,
+                         choices: t.choices,
                          tools: t.tools, toolCount: t.toolCount,
                          isError: t.isError,
                          contextUsed: j === lastAssistant ? sampledCtx : 0,
@@ -1030,6 +1107,7 @@ Item {
                          agentsPending: 0, agentHead: "", agentsBad: false,
                          images: "[]", imagesActive: false, imagesPending: 0,
                          videos: "[]", videosActive: false, videosPending: 0,
+                         choices: "[]", choicesActive: false,
                          execTail: "", execRunning: false,
                          genLabel: "", genFrac: 0, genRunning: false, genDone: false,
                          tools: "", toolCount: 0, toolsActive: false,
@@ -1058,6 +1136,7 @@ Item {
                      agents: r.agents, agentCount: r.agentCount,
                      images: r.images, imagesActive: r.imagesActive,
                      videos: r.videos, videosActive: r.videosActive,
+                     choices: r.choices, choicesActive: r.choicesActive,
                      streaming: r.streaming, isError: r.isError });
         }
         return JSON.stringify(a);
@@ -1124,6 +1203,11 @@ Item {
                              agentsBad: !!t.agentsBad,
                              images: t.images || "[]", imagesActive: false, imagesPending: 0,
                              videos: t.videos || "[]", videosActive: false, videosPending: 0,
+                             // A card whose turn is over can never be answered:
+                             // it comes back LOCKED and says so (§10.2), never
+                             // as buttons that would now do nothing.
+                             choices: win.expiredChoices(t.choices),
+                             choicesActive: false,
                              execTail: "", execRunning: false,
                              genLabel: "", genFrac: 0, genRunning: false, genDone: false,
                              tools: t.tools || "", toolCount: t.toolCount || 0, toolsActive: false,
@@ -1259,6 +1343,7 @@ Item {
                          agentsPending: 0, agentHead: "", agentsBad: false,
                          images: "[]", imagesActive: false, imagesPending: 0,
                          videos: "[]", videosActive: false, videosPending: 0,
+                         choices: "[]", choicesActive: false,
                          execTail: "", execRunning: false,
                          genLabel: "", genFrac: 0, genRunning: false, genDone: false,
                          tools: "", toolCount: 0, toolsActive: false,
@@ -2776,7 +2861,15 @@ Item {
                         readonly property bool hasMedia:
                             !isUser && (images !== "[]" || imagesActive
                                         || videos !== "[]" || videosActive)
-                        readonly property bool wide: hasMedia
+                        // A DECISION CARD is content too, and a round can carry
+                        // one with no words at all — the same latch the picture
+                        // fell into (see the bubble's `visible` below), so it is
+                        // read off the ROW's role here and never off the card.
+                        // It takes the full width: the details are what he is
+                        // choosing between and they must not wrap to ribbons.
+                        readonly property bool hasCard:
+                            !isUser && choices !== "[]" && choices !== ""
+                        readonly property bool wide: hasMedia || hasCard
 
                         Column {
                             id: rowStack
@@ -3500,7 +3593,7 @@ Item {
                                     // good. Reloading the session drew it, because
                                     // then the row was born with the picture on it:
                                     // the latch only catches a picture that ARRIVES.
-                                    visible: body !== "" || turn.hasMedia
+                                    visible: body !== "" || turn.hasMedia || turn.hasCard
                                     user: isUser
                                     isError: model.isError
                                     x: isUser ? turnStack.width - width : 0
@@ -3687,6 +3780,37 @@ Item {
                                                     visible: videosActive
                                                     text: "finding the video…"
                                                     color: Theme.text
+                                                }
+                                            }
+
+                                            // The decisions this turn put to him
+                                            // (ChoiceCard.qml). Drawn in the reply
+                                            // itself rather than in a disclosure:
+                                            // this one is not subordinate detail,
+                                            // it is the turn WAITING on him.
+                                            Column {
+                                                id: choiceCol
+                                                width: parent.width
+                                                spacing: 6
+                                                visible: choices !== "[]" && choices !== ""
+
+                                                Repeater {
+                                                    model: {
+                                                        try { return JSON.parse(choices); }
+                                                        catch (e) { return []; }
+                                                    }
+                                                    delegate: ChoiceCard {
+                                                        required property var modelData
+                                                        objectName: "choiceCard"
+                                                        width: choiceCol.width
+                                                        entry: modelData
+                                                        // main.py settles it once and
+                                                        // only once; a second press
+                                                        // reaches a card that is no
+                                                        // longer there to press.
+                                                        onPicked: (i) => Ollama.answerChoice(modelData.id, i)
+                                                        onDeclined: Ollama.answerChoice(modelData.id, -1)
+                                                    }
                                                 }
                                             }
                                         }
