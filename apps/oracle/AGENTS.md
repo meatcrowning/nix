@@ -741,9 +741,12 @@ duplicate dies, which model to pull.
 - **`_settle_choice` settles a card ONCE.** A settled card is gone from
   `_choices`, so a second click, the late timeout and a cancelled turn all
   arrive and do nothing [his: *"once the user makes a selection they shouldnt
-  even be able to click another button in that bubble later"*]. The QML
-  removes the buttons when it locks, but the rule lives in main.py where it
-  cannot be got around.
+  even be able to click another button in that bubble later"*]. The rule lives
+  in main.py where it cannot be got around; the QML keeps the BUTTONS and
+  turns them into the record of the decision — the one he took held down
+  (`JobVerb.lit`, the KStyle's checked button under Plasma), the rest dead
+  [his, 2026-09-11]. The card itself paints no fill: it sits inside the
+  reply's own frame and a second solid slab was one panel too many.
 - **A SUBAGENT may ask too, and the card lands in the conversation he is
   reading** [his: *"spawn a subagent to grab a record and itll still show me the
   options for selecting which one like normal"*] — `ask_choice` is in
