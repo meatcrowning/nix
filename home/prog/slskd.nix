@@ -1,6 +1,18 @@
 { config, pkgs, lib, host, ... }:
 
+let
+  # top only. The Soulseek credentials and the music library are both on top,
+  # so a daemon on book has nothing to log in with and nothing to share: it
+  # came up, reported "username and/or password invalid" and misled agents
+  # into driving a dead daemon. Book reaches top's slskd through slskd-remote
+  # (an SSH forward of top's loopback 5030, the painter/ComfyUI pattern).
+  isTop = host == "top";
+in
 {
+  home.packages = lib.optional (!isTop)
+    (pkgs.writeShellScriptBin "slskd-remote"
+      (builtins.readFile ./slskd-files/slskd-remote.sh));
+
   # Generate the config at activation so secrets never enter git or the Nix
   # store. Keep these untracked, one line, and mode 600:
   #
@@ -23,7 +35,7 @@
   # list. A home-directory cwd exhausted top's 524288 inotify-watch budget.
   # Keep WorkingDirectory empty and pass --app-dir explicitly; changing HOME
   # does not prevent the walk.
-  home.activation.slskdConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+  home.activation.slskdConfig = lib.mkIf isTop (lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     keyFile="$HOME/.secrets/slskd-api-key"
     if [ -f "$keyFile" ]; then
       run mkdir -p "$HOME/.local/share/slskd"
@@ -45,7 +57,7 @@
       fi
       run chmod 600 "$HOME/.local/share/slskd/slskd.yml"
     fi
-  '';
+  '');
 
   # Run slskd as a systemd user service so the downloader has a live loopback
   # API. Deliberately NOT enabled since 2026-08-03: the download pipeline is
@@ -56,7 +68,7 @@
   # config file by default and re-applies options on change; after adding the
   # two ~/.secrets files, a rebuild regenerates slskd.yml and a
   # `systemctl --user restart slskd` picks it up cleanly.
-  systemd.user.services.slskd = {
+  systemd.user.services.slskd = lib.mkIf isTop {
     Unit = {
       Description = "slskd - Soulseek client for missing-track downloads";
       After = [ "network-online.target" ];
