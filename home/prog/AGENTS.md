@@ -38,6 +38,10 @@ Drift before a switch is expected. `seed-drift.sh --pre-switch` describes the
 reconciliation; preflight must fail only when the reconciler cannot run (exit
 2), not for ordinary drift. `tools/seed-gate-test.sh` covers this distinction.
 
+`home/prog/labwc.nix` is the opposite case and must stay out of `PAIRS`:
+labwc-tweaks serialises the whole of `rc.xml` on every save, so the live copies
+are **seeded once when absent and never reconciled**. Drift there is intended.
+
 ## Hyprland integration
 
 ### Monitor reclaim

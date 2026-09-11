@@ -1,0 +1,7 @@
+# labwc environment file — KEY=value pairs, sourced before autostart.
+# Seeded once by home-manager; labwc reloads it on reconfigure.
+#
+# Deliberately near-empty: the cursor theme is a runtime-generated
+# GoogleDot-<accent> name owned by cursor-recolor.sh, and pinning a stale one
+# here would outrank it.
+XDG_CURRENT_DESKTOP=labwc:wlroots
