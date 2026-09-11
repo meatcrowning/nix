@@ -39,6 +39,21 @@ DEFAULT_GROUPS = [
 ]
 
 
+#: Below this many characters, a half-typed query is not treated as a name:
+#: two letters prefix half the library and would widen a search nobody aimed.
+MIN_PARTIAL = 3
+
+
+def _typed_towards(words, name_words):
+    """Is `words` the beginning of a run of `name_words`? Each typed word must
+    prefix the name word at the same place, so "point never" and "lopatin" both
+    reach their name and "never point" reaches nothing."""
+    if not words or len(words) > len(name_words):
+        return False
+    return any(all(name_words[i + j].startswith(w) for j, w in enumerate(words))
+               for i in range(len(name_words) - len(words) + 1))
+
+
 def _clean(names):
     """Trimmed, de-duplicated, order preserved. Folded comparison, so the same
     name typed with different case or punctuation is not added twice."""
@@ -68,8 +83,25 @@ class Aliases:
                 self._by_name.setdefault(trackmatch.fold(n), g)
 
     def group_for(self, name):
-        """Every name for whoever `name` is, or [] when nobody claims it."""
-        return list(self._by_name.get(trackmatch.fold(name), []))
+        """Every name for whoever `name` is, or [] when nobody claims it.
+
+        A whole name is matched first. Then the HALF-TYPED one, because that is
+        what a search box gets: "oneohtrix" and "lopatin" are the person as
+        surely as their full credit is, and an identity that only answers to
+        the complete string reads as not working at all. One group only — text
+        that could be two different people widens to neither, since guessing
+        which one he meant is worse than the plain search he already had."""
+        folded = trackmatch.fold(name)
+        exact = self._by_name.get(folded)
+        if exact is not None:
+            return list(exact)
+        if len(folded) < MIN_PARTIAL:
+            return []
+        words = folded.split()
+        hits = [g for g in self.groups
+                if any(_typed_towards(words, trackmatch.fold(n).split())
+                       for n in g)]
+        return list(hits[0]) if len(hits) == 1 else []
 
     def others(self, name):
         """The group minus the name asked about — what a caller SHOWS."""

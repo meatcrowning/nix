@@ -96,7 +96,9 @@ Keep `tools/library-ipc.py` consistent with the app's matching.
 `artistalias.py` owns artist identities: one person, many names. A group is a
 list of names stored as one portable row in infostore's user table (scope
 `artists`, kind `aliases`), seeded once from `DEFAULT_GROUPS` and his
-thereafter; membership is folded equality, never `artist_matches`. Everything
+thereafter; membership is folded equality on the whole name, then a half-typed prefix run
+(`MIN_PARTIAL`, one group only) because that is what a search box gets; never
+`artist_matches`. Everything
 matches through two seams — `Library.query_parts` (search and the gallery
 filter) and `Library.artist_tracks` (shuffle artist, browse artist). An alias
 widens the ARTIST columns only; folding it into the free-text haystack would
