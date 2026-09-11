@@ -189,6 +189,10 @@ private `docs/agents/` runbooks.
   Treat mutable KConfig on top as a
   measured input, not the durable source: capture non-hardware visual changes
   in those shared declarations so book receives them without copying output ids.
+- `sys/dsk/labwc.nix` adds labwc as a third greeter session on `top` (Hyprland
+  stays `defaultSession`); `home/prog/labwc.nix` supplies labwc-tweaks and
+  labwc-menu-generator and seeds `~/.config/labwc` once. Both are top-only, and
+  the seed is deliberately never reconciled — those tools own the live files.
 - `apps/` is inert vendored source outside those imports. Sources run from
   `/home/lam/nix/apps/<name>/main.py`, with packages in `home/prog/<name>.nix`;
   `apps/pylib/` moves with the tree. `apps/board/` is presented as `goetia`,
