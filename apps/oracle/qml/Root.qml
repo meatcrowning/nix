@@ -558,11 +558,12 @@ Item {
             // picture floating above a separate text bubble. Once a row HAS
             // words, the rounds split again (one bubble per round) as before.
             var hasMedia = (cur.images !== "[]" && cur.images !== "") || cur.imagesActive
-                || (cur.videos !== "[]" && cur.videos !== "") || cur.videosActive
-                // A decision card is the same case: what the agent says once he
-                // has answered belongs WITH the card he answered, not in a
-                // second bubble under it.
-                || (cur.choices !== "[]" && cur.choices !== "");
+                || (cur.videos !== "[]" && cur.videos !== "") || cur.videosActive;
+            // A DECISION CARD IS NOT MEDIA HERE [his, 2026-09-11]. What the
+            // agent says after he answers — what it downloaded, where it put
+            // it — is a new message and belongs in its OWN bubble BELOW the
+            // card, not folded in above it. So the card's row is left to end
+            // with the card, and the next round opens a row of its own.
             // A SHORT LINE IN FRONT OF THE PICTURE IS A PREAMBLE, not an
             // answer [his, 2026-08-24: "here is the image" + the image, then a
             // second bubble saying "here you go…" with no image]. The row that
@@ -1297,6 +1298,39 @@ Item {
 
     function send() {
         var p = promptBox.text.trim();
+        // ANSWERING A DECISION IN WORDS [his, 2026-09-11]. While a card is up
+        // the turn is still busy — its tool round is open, waiting — so this
+        // is not a new message to the model: his words settle that call and
+        // the agent reads them inside the job it is already doing. The line
+        // still goes into the log as his, because he said it.
+        if (Ollama.awaitingChoice && p !== "") {
+            chatLog.append({ isUser: true, who: "you", body: p,
+                             ts: Math.floor(Date.now() / 1000),
+                             thinking: "", thinkingActive: false, thinkTokens: 0,
+                             thinkStart: 0, thinkMs: 0, awaiting: false,
+                             cutOff: false,
+                             sources: "", searchCount: 0, searching: false,
+                             files: "", fileCount: 0, filesActive: false,
+                             filesPending: 0,
+                             agents: "", agentCount: 0, agentsActive: false,
+                             agentsPending: 0, agentHead: "", agentsBad: false,
+                             images: "[]", imagesActive: false, imagesPending: 0,
+                             videos: "[]", videosActive: false, videosPending: 0,
+                             choices: "[]", choicesActive: false,
+                             execTail: "", execRunning: false,
+                             genLabel: "", genFrac: 0, genRunning: false,
+                             genDone: false,
+                             tools: "", toolCount: 0, toolsActive: false,
+                             streaming: false, isError: false, step: 0 });
+            Ollama.answerChoiceText(p);
+            promptBox.clear();
+            win.chatRev++;
+            // The reply carries on into the row that was already streaming, so
+            // put him back at the bottom to watch it (the same courtesy an
+            // ordinary send does).
+            replyFlick.toBottom();
+            return;
+        }
         // A message may be text, files, or both — but never empty of both.
         if ((p === "" && attachments.count === 0) || win.model === "" || Ollama.busy)
             return;
@@ -1521,7 +1555,11 @@ Item {
     readonly property var menuOrder: ["chat"]
 
     readonly property bool canSend:
-        win.model !== "" && !Ollama.busy
+        win.model !== ""
+        // A waiting decision is the one time a turn that is BUSY still takes
+        // input: the words are the answer (see `send`).
+        && (!Ollama.busy || (Ollama.awaitingChoice
+                             && promptBox.text.trim() !== ""))
         && (promptBox.text.trim() !== "" || attachments.count > 0)
 
     // Is there a finished reply at the bottom to carry on? The compose box's
@@ -1584,7 +1622,8 @@ Item {
             break;
         case "new-session":    win.newSession();                break;
         case "delete-session": win.deleteCurrentSession();      break;
-        case "send":           if (Ollama.busy) win.stopReply();
+        case "send":           if (Ollama.busy && win.canSend) win.send();
+                               else if (Ollama.busy) win.stopReply();
                                else if (win.canSend || !win.canContinue) win.send();
                                else win.continueReply();
                                break;
@@ -3814,7 +3853,6 @@ Item {
                                                         // reaches a card that is no
                                                         // longer there to press.
                                                         onPicked: (i) => Ollama.answerChoice(modelData.id, i)
-                                                        onDeclined: Ollama.answerChoice(modelData.id, -1)
                                                     }
                                                 }
                                             }
