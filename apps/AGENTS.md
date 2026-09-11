@@ -128,7 +128,12 @@ one owner and one implementation; do not fork their algorithms into an app.
   request Window roles, matching their Oxygen raster. The default View export
   remains for content consumers; mixed mode must not rebase window canvases.
   kdeshell.py installs a View context on QQuickWidget content while its real
-  window/menu/toolbar keeps the native Window context. Native QML roots must
+  window/menu/toolbar keeps the native Window context. That is the content
+  palette only: the styled background image and the view's clear colour are
+  rendered from WINDOW, because they are the window's own surface and have to
+  continue the gradient the chrome above them paints. Base there seams the
+  window across the view's top edge on any light scheme; kdebg-seam-test.py
+  holds that line. Native QML roots must
   also install NativeContentContext to select Kirigami View roles; native
   toolbars explicitly select Window. Never import QtQuick.Controls.Basic in
   shared QML: make_app/pin_controls_style choose the native Plasma style or

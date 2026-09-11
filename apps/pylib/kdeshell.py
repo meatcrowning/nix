@@ -342,7 +342,10 @@ def _redress_palette_views():
             try:
                 view.setPalette(pal)
                 view.setFont(font)
-                view.setClearColor(pal.window().color())
+                # `pal` is the CONTENT palette (Window carries View's colour);
+                # the clear colour is the real window's, so an uncovered frame
+                # continues the styled background rather than stepping off it.
+                view.setClearColor(QApplication.palette().window().color())
             except RuntimeError:      # the view is gone; forget it
                 views.remove(view)
     for shell in list(_kwin_shells):
@@ -439,14 +442,16 @@ def _build_background_classes():
             # it, blanking the whole QML surface.
             proxy = QWidget()
             proxy.setAttribute(Qt.WA_StyledBackground, True)
-            palette = _group_palette(QPalette.Active if active else QPalette.Inactive)
-            # The QML view is content. Native shell menus/toolbars retain the
-            # application Window palette; the style paints this surface from
-            # Base/Text, including Oxygen's real light gradient in mixed mode.
-            for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
-                palette.setColor(group, QPalette.Window, palette.color(group, QPalette.Base))
-                palette.setColor(group, QPalette.WindowText, palette.color(group, QPalette.Text))
-            proxy.setPalette(palette)
+            # The WINDOW role, never Base: this image is the window's own
+            # background, and the crop under the view has to continue the one
+            # the native toolbar above it is painting. Dressing the proxy in
+            # Base instead drew a second, darker gradient that started again at
+            # the view's top edge — a hard seam straight across the window
+            # wherever the scheme's View and Window backgrounds differ (his
+            # light scheme: 184,212,216 against 198,221,224). Content roles are
+            # a separate matter and stay with `content_palette()` on the view.
+            proxy.setPalette(_group_palette(QPalette.Active if active
+                                            else QPalette.Inactive))
             proxy.resize(win_w, win_h)
 
             img = QImage(int(win_w * dpr), int(win_h * dpr),
@@ -638,7 +643,7 @@ def _build_shell_class():
             # Not transparent (see above) — but not Qt's default WHITE either:
             # anything the styled background image does not cover for a frame
             # should read as the window, not as a flash.
-            self.view.setClearColor(QApplication.palette().base().color())
+            self.view.setClearColor(QApplication.palette().window().color())
             self.window.setCentralWidget(self.view)
 
             # The styled background, as an image provider plus the object QML
@@ -1875,7 +1880,7 @@ def _build_shell_class():
             view = QQuickWidget(self.view.engine(), None)
             view.setResizeMode(QQuickWidget.SizeRootObjectToView)
             view.setPalette(content_palette())
-            view.setClearColor(QApplication.palette().base().color())
+            view.setClearColor(QApplication.palette().window().color())
             self._views.append(view)     # so a scheme change re-dresses it too
 
             ctx = QQmlContext(self.view.engine().rootContext(), view)
@@ -2070,7 +2075,7 @@ def _build_shell_class():
             view = QQuickWidget(self.view.engine(), dlg)
             view.setResizeMode(QQuickWidget.SizeRootObjectToView)
             view.setPalette(content_palette())
-            view.setClearColor(QApplication.palette().base().color())
+            view.setClearColor(QApplication.palette().window().color())
             self._views.append(view)     # so a scheme change re-dresses it too
 
             ctx = QQmlContext(self.view.engine().rootContext(), view)
