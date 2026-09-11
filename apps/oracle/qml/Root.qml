@@ -2808,8 +2808,13 @@ Item {
                         readonly property bool isHead: head === index
                         readonly property var agg: win.turnAgg(turn.isHead ? index : -1)
                         // Did this row leave anything on screen of its own?
+                        // A DECISION CARD counts: it is the one thing here that
+                        // is WAITING on him, and a round that only asked (the
+                        // normal case — the tool rounds before it said nothing)
+                        // is not the turn's head row, so leaving it out hid the
+                        // card completely while its notification still fired.
                         readonly property bool speaks:
-                            isError || body !== "" || turn.hasMedia
+                            isError || body !== "" || turn.hasMedia || turn.hasCard
 
                         // The disclosure's open/closed is VIEW state, per row, and
                         // it defaults CLOSED: reasoning is collapsed until he opens

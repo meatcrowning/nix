@@ -752,6 +752,13 @@ duplicate dies, which model to pull.
   exception to "you cannot come back for a decision".
 - **CORE, on the wire every turn**, for the same reason `wikipedia` is: a door
   the model has to be holding to walk through.
+- **A card makes its row SPEAK.** The log draws no row for a round that said
+  nothing (`turn.speaks`) and no bubble for a row with no words
+  (`bubble.visible`) — and the card normally lands on a late round, after the
+  skill load, the tool attach and the search, i.e. never the turn's head row.
+  Both predicates read `hasCard` off the ROW's own role for the same reason the
+  picture latch does. Missing the first one put a notification on his screen
+  and nothing in the window [2026-09-11].
 - **Every ending is drawn.** `none of these`, `timeout` (`ASK_CHOICE_MS`, 10
   minutes, with a desktop notification when chatter is not the active window),
   `cancelled` (Stop), and `expired` — a card read back out of a saved session,
