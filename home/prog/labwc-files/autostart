@@ -1,10 +1,19 @@
 #!/bin/sh
 # labwc autostart — run as a shell script after labwc reads its config.
-# Seeded once by home-manager.
+# Seeded once by home-manager; the live copy in ~/.config/labwc is yours.
 #
-# Nothing is started by default. The desktop's panel (Quickshell) talks to
-# hyprvtb over Hyprland's IPC and has no meaning in a labwc session, so it is
-# not launched here; add whatever panel/wallpaper client you want to try.
-#
-# Example:
-#   waybar &
+# The desktop's panel (Quickshell) talks to hyprvtb over Hyprland's IPC and has
+# no meaning in a labwc session, so it is not launched here. Quickshell also
+# draws the wallpaper there, which is why labwc needs its own client for it.
+
+# Wallpaper, from the state files wal-set.sh publishes (~/.config/scripts):
+#   current       absolute path to the image
+#   current.mode  `tile` or `scale`
+# Falling back to labwc's grey is better than asserting a colour this desktop
+# did not choose, so a missing/unreadable path just skips this.
+wal="$HOME/.cache/wal/current"
+if [ -r "$wal" ] && wall=$(cat "$wal") && [ -r "$wall" ]; then
+    mode=fill
+    [ "$(cat "$HOME/.cache/wal/current.mode" 2>/dev/null)" = tile ] && mode=tile
+    swaybg -i "$wall" -m "$mode" &
+fi
