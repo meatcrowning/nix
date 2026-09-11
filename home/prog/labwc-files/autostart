@@ -6,6 +6,21 @@
 # no meaning in a labwc session, so it is not launched here. Quickshell also
 # draws the wallpaper there, which is why labwc needs its own client for it.
 
+# FIRST, before anything is started: hand the systemd user manager and the
+# D-Bus activation store this session's environment, exactly as hyprland.lua
+# does at its own start. A bare labwc has no session manager, so without this
+# every user service the session pulls in runs with NO XDG_CURRENT_DESKTOP —
+# and the ones that branch on the session (deskstyle, the browser-theme server)
+# then mistake a KDE login for a non-Plasma one. That cost a real session: on
+# 2026-09-10 deskstyle started here with an empty environment, survived into
+# the next Plasma login, and answered every wallpaper change by taking the
+# Hyprland branch — skipping plasmashell entirely and resetting kdeglobals'
+# widgetStyle to Breeze.
+systemctl --user import-environment \
+    WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_CURRENT_DESKTOP XDG_SESSION_TYPE PATH
+dbus-update-activation-environment --systemd \
+    WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
+
 # Wallpaper, from the state files wal-set.sh publishes (~/.config/scripts):
 #   current       absolute path to the image
 #   current.mode  `tile` or `scale`

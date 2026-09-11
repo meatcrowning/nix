@@ -71,6 +71,17 @@ fi
 # Validate the scheme snapshot before publishing the wallpaper.  A controller
 # request that loses a race with the Colours KCM must leave the old wallpaper
 # and the old complete desktop theme in place, rather than changing only one.
+# "Not Plasma" has to be a POSITIVE statement. The else-branch below rewrites
+# every kdeglobals colour role and forces widgetStyle=Breeze, so reading it out
+# of an EMPTY XDG_CURRENT_DESKTOP means a caller with no session environment
+# silently repaints a Plasma desktop as the Hyprland one. That is exactly what
+# happened on 2026-09-10, from a deskstyle.service that had been started by a
+# bare labwc session and outlived it. Refuse instead of guessing.
+if [ -z "${XDG_CURRENT_DESKTOP:-}" ]; then
+    echo "wal-set: XDG_CURRENT_DESKTOP is unset — refusing to guess the session" >&2
+    echo "wal-set: (a user service needs the session environment imported)" >&2
+    exit 1
+fi
 PLASMA_SESSION=0
 case ":$(printf '%s' "${XDG_CURRENT_DESKTOP:-}" | tr '[:lower:]' '[:upper:]'):" in
     *:KDE:*) PLASMA_SESSION=1 ;;
