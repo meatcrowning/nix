@@ -201,6 +201,25 @@ def main():
     assert not any(x.objectName() in ("releaseCreditRow", "trackCreditRow")
                    for x in visual_items(pane)), "hidden tab built 200 credits"
 
+    # A release nobody can identify still shows who made it.
+    pane.setProperty("tab", "album")
+    lib.state["status"] = "error"
+    lib.state["albumError"] = "HTTP Error 503: Service Temporarily Unavailable"
+    lib.state["album"] = {"title": "Quiet Shapes", "artist": "A Band", "artistInfo": {
+        "id": "artist-7", "name": "A Band", "disambiguation": "the Dutch one",
+        "type": "Group", "area": "Netherlands", "years": "1994-2003",
+        "description": "A short biography.", "url": "https://music.example/artist",
+        "descriptionUrl": "https://en.wikipedia.org/wiki/A_Band"}}
+    lib.nowInfoChanged.emit()
+    for _ in range(4):
+        app.processEvents()
+    joined = "\n".join(text_items(pane))
+    for required in ("release fetch failed", "A Band  (the Dutch one)",
+                     "Group · Netherlands · 1994-2003", "A short biography.",
+                     "open biography source"):
+        if required not in joined:
+            raise AssertionError("failed release lost the artist: " + required)
+
     pane.setProperty("tab", "similar")
     app.processEvents()
     if not any("owned tracks and discoveries" == s for s in text_items(pane)):

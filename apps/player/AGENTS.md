@@ -23,6 +23,7 @@ SMB setup and recovery live in `docs/agents/air-library-share.md`.
 | Lyrics lookup/cache/writeback | `lyrics.py`, `LyricsProvider` in `main.py` |
 | Artist identities (one person, many names) | `artistalias.py`, `qml/AliasEditor.qml` |
 | Release identity, details and credits | `releaseinfo.py`, `albuminfo.py`, `infostore.py`, `qml/NowInfoPane.qml` |
+| Artist facts and biography | `artistinfo.py`; `albuminfo.py` owns its stage and cache |
 | Album write-up parsing | `albumprose.py` (Last.fm and linked Bandcamp album pages) |
 | Related music and contributor connections | `relatedmusic.py`; `albuminfo.py` owns queries and requests |
 | Last.fm integration | `scrobble.py`, shared `pylib/lastfm.py` |
@@ -197,6 +198,15 @@ lookups retry after a short backoff while retaining usable cached details.
 Legacy web tables remain readable during migration; old recording choices stay
 track-scoped. No web correction writes an audio tag.
 
+The artist resolves independently of the release, so an unidentified,
+unofficial or 503'd release still shows who made it. Prefer tagged artist IDs;
+a name search must come back as that same name at full score, because a
+biography under the wrong person reads exactly like the right one. A
+compilation credit is not a person (`NOT_A_PERSON`). Artist entities are cached
+by MBID and shared by every album that credits them, with the biography in its
+own cache entry — a linked Wikipedia article first, an identity-checked Last.fm
+biography second. Clearing an album's cache clears its artist too.
+
 Related ranking computes the current track's active credits and labels once,
 not once per library candidate. Related music remains available when release lookup fails. Rank local tracks
 using recording/artist identity, scoped credits, labels, and genre; a shared
@@ -283,7 +293,7 @@ not a CI suite:
 | Smart lists/search/Last.fm | `smartlist-test.py`, `smartlist-ui-test.py`, `lastfm-test.py`, `search-page-test.py`, `search-ui-test.py` |
 | Queue/path/socket | `queue-ops-test.py`, `album-playnext-test.py`, `open-path-test.py`, `queue-lyrics-test.py` |
 | Preference/metadata persistence | `state-write-test.py`, `metadata-worker-test.py` |
-| Metadata/sync | `now-info-test.py`, `album-prose-test.py`, `release-info-test.py`, `related-music-test.py`, `info-sync-test.py`, `info-connection-test.py`, `library-ipc-test.py`, `test-dbsync.py` |
+| Metadata/sync | `now-info-test.py`, `artist-info-test.py`, `album-prose-test.py`, `release-info-test.py`, `related-music-test.py`, `info-sync-test.py`, `info-connection-test.py`, `library-ipc-test.py`, `test-dbsync.py` |
 | Album information UI | `album-info-ui-test.py` |
 | Native/QML presentation | `plasma-chrome-test.py`, `transport-test.py`, `focus-fade-test.py`, `view-preserve-test.py`, `favourite-surfaces-test.py`, `trash-track-test.py` |
 
