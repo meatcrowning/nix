@@ -23,6 +23,7 @@ Item {
     // "show me this artist": the window lands on the gallery with the search
     // bar carrying that name, exactly as if it had been typed.
     signal browseArtist(string artist)
+    signal editAliases(string artist)
 
     // Foreground tones, handed in already faded by Main (docs/DESIGN.md §3.1.1)
     // and passed straight on to the queue, the lyrics pane and the stars.
@@ -436,7 +437,8 @@ Item {
                         albumId: root.cur.albumId || 0,
                         favorite: root.cur.favorite === true,
                         openAlbum: function(aid) { root.openAlbum(aid); },
-                        browseArtist: function(a) { root.browseArtist(a); }
+                        browseArtist: function(a) { root.browseArtist(a); },
+                        editAliases: function(a) { root.editAliases(a); }
                     });
                 }
             }
@@ -476,6 +478,7 @@ Item {
                 onPlayed: function(index) { Player.jumpTo(index); }
                 onOpenAlbumRequested: function(aid) { root.openAlbum(aid); }
                 onBrowseArtistRequested: function(a) { root.browseArtist(a); }
+                onEditAliasesRequested: function(a) { root.editAliases(a); }
             }
         }
     }

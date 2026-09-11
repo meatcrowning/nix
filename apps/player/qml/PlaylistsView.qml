@@ -32,6 +32,7 @@ Item {
     // From the track list's right-click menu; the window owns navigation.
     signal openAlbumRequested(int albumId)
     signal browseArtistRequested(string artist)
+    signal editAliasesRequested(string artist)
 
     // The rule editor is a modal with text fields in it, so the window's global
     // Space (play/pause) and Escape must stand down while it is up — otherwise
@@ -301,6 +302,7 @@ Item {
             onPlayed: function(index) { Library.playFromModel(PlaylistModel, index); }
             onOpenAlbumRequested: function(aid) { root.openAlbumRequested(aid); }
             onBrowseArtistRequested: function(a) { root.browseArtistRequested(a); }
+            onEditAliasesRequested: function(a) { root.editAliasesRequested(a); }
         }
 
         PixelText {

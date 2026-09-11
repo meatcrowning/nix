@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pylib"))
 import trackmatch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import infostore
+import artistalias
 
 DB = os.path.expanduser(
     os.environ.get("PLAYER_DB", "~/.local/share/player/library.db"))
@@ -81,6 +82,36 @@ def db():
     return con
 
 
+def alias_others(name):
+    """The OTHER names of whoever `name` is, from the player's identity groups
+    (`artistalias`) — so asking for Chuck Person here returns the Oneohtrix
+    Point Never records too, exactly as the app's own search does. Read-only,
+    and an empty list whenever nothing has been grouped.
+
+    Like the app, these widen the ARTIST columns and never the title: an alias
+    as ordinary as "Games" would otherwise answer a search for the person with
+    every record that has a track called Games on it."""
+    name = str(name or "").strip()
+    if not name:
+        return []
+    try:
+        return artistalias.load(db()).others(name)
+    except sqlite3.Error:
+        return []
+
+
+def artist_or(names, cols=("artist", "album_artist")):
+    """(sql, args) matching any of `names` in any of `cols`, or ("", [])."""
+    if not names:
+        return "", []
+    parts, args = [], []
+    for n in names:
+        for col in cols:
+            parts.append("%s LIKE ? ESCAPE '\\'" % col)
+            args.append("%" + n.replace("%", r"\%") + "%")
+    return " OR ".join(parts), args
+
+
 def rows_of(cur, cols=TRACK_COLS):
     out = []
     for r in cur.fetchall():
@@ -112,18 +143,26 @@ def op_search(req):
     q = str(req.get("q") or "").strip()
     if q:
         like = "%" + q.replace("%", r"\%") + "%"
-        where.append("(title LIKE ? ESCAPE '\\' OR artist LIKE ? ESCAPE '\\' "
-                     "OR album LIKE ? ESCAPE '\\' OR album_artist LIKE ? ESCAPE '\\')")
-        args += [like] * 4
+        clause = ("title LIKE ? ESCAPE '\\' OR artist LIKE ? ESCAPE '\\' "
+                  "OR album LIKE ? ESCAPE '\\' OR album_artist LIKE ? ESCAPE '\\'")
+        alias_sql, alias_args = artist_or(alias_others(q))
+        if alias_sql:
+            clause += " OR " + alias_sql
+        where.append("(" + clause + ")")
+        args += [like] * 4 + alias_args
     for field in ("artist", "album", "genre"):
         val = str(req.get(field) or "").strip()
         if val:
-            where.append("(%s LIKE ? ESCAPE '\\' %s)"
-                         % (field, "OR album_artist LIKE ? ESCAPE '\\'"
-                            if field == "artist" else ""))
+            clause = "%s LIKE ? ESCAPE '\\'" % field
             args.append("%" + val + "%")
             if field == "artist":
+                clause += " OR album_artist LIKE ? ESCAPE '\\'"
                 args.append("%" + val + "%")
+                alias_sql, alias_args = artist_or(alias_others(val))
+                if alias_sql:
+                    clause += " OR " + alias_sql
+                    args += alias_args
+            where.append("(" + clause + ")")
     if req.get("favorites_only"):
         where.append("favorite = 1")
     try:
@@ -165,8 +204,13 @@ def op_albums(req):
         args += [like] * 3
     artist = str(req.get("artist") or "").strip()
     if artist:
-        where.append("(album_artist LIKE ? OR artist LIKE ?)")
+        clause = "album_artist LIKE ? OR artist LIKE ?"
         args += ["%" + artist + "%"] * 2
+        alias_sql, alias_args = artist_or(alias_others(artist))
+        if alias_sql:
+            clause += " OR " + alias_sql
+            args += alias_args
+        where.append("(" + clause + ")")
     n = limit_of(req)
     # Select candidate albums first, then aggregate every track in each one.
     # Filtering the aggregate itself reports only a guest's matching tracks.

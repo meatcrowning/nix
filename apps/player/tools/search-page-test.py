@@ -3,7 +3,11 @@
 import ast
 from pathlib import Path
 import sqlite3
+import sys
 from types import SimpleNamespace
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import artistalias          # pure stdlib + pylib/trackmatch; no Qt, no database
 
 source = ast.parse((Path(__file__).resolve().parents[1] / 'main.py').read_text())
 namespace = {"re": __import__("re")}
@@ -12,11 +16,11 @@ namespace = {"re": __import__("re")}
 for node in source.body:
     if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id in ('_QUERY_TERM', '_YEAR_RANGE') for t in node.targets):
         exec(compile(ast.Module(body=[node], type_ignores=[]), '<query>', 'exec'), namespace)
-    if isinstance(node, ast.FunctionDef) and node.name in ('parse_query', 'year_in', 'track_row'):
+    if isinstance(node, ast.FunctionDef) and node.name in ('parse_query', 'year_in', 'track_row', 'query_free_text'):
         exec(compile(ast.Module(body=[node], type_ignores=[]), '<query>', 'exec'), namespace)
 namespace.update(re=__import__('re'))
 for name, methods in {
-    'Library': ('search', 'search_ids'),
+    'Library': ('search', 'search_ids', 'query_parts'),
     'Bridge': ('search', '_show_search_page', 'searchPage', 'playSearch', 'playSearchAll', 'playFromModel'),
 }.items():
     cls = next(n for n in source.body if isinstance(n, ast.ClassDef) and n.name == name)
@@ -34,10 +38,28 @@ con.executemany('INSERT INTO tracks VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
 lib = namespace['Library']()
 lib._con = con
 lib._search_rows = None
+lib.aliases = artistalias.Aliases([])      # no identities: the ordinary library
 lib.tracks_by_ids = lambda ids: [dict(con.execute('SELECT * FROM tracks WHERE id=?', (i,)).fetchone()) for i in ids]
 assert len(lib.search('BJÖRK genre:rock year:1997')) == 901
 assert lib.search('genre:jazz') == []
 assert lib.search('') == []
+
+# One person, many names: an identity widens the ARTIST match and nothing else.
+con.execute("INSERT INTO tracks VALUES (902, 'Angel', 'Chuck Person', 'eccojams',"
+            " 'Chuck Person', 'rock', 1997, NULL)")
+con.execute("INSERT INTO tracks VALUES (903, 'Chuck Person', 'Death Grips',"
+            " 'the money store', 'Death Grips', 'rock', 1997, NULL)")
+lib._search_rows = None
+lib.aliases = artistalias.Aliases([["Björk", "Chuck Person"]])
+ids = {r['id'] for r in lib.search('BJÖRK')}
+assert 902 in ids, 'the other name\'s records must come back'
+assert 903 not in ids, 'an alias must not match a TRACK TITLE'
+other = {r['id'] for r in lib.search('chuck person')}
+assert ids <= other, 'either name finds the whole body of work'
+assert 903 in other, "…and the typed name keeps its ordinary title match"
+assert len(lib.search('BJÖRK genre:jazz')) == 0, 'a field filter still narrows'
+lib.aliases = artistalias.Aliases([])
+lib._search_rows = None
 
 class Model:
     def set_rows(self, rows):

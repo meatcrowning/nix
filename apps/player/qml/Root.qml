@@ -187,6 +187,13 @@ Item {
         Library.setAlbumFilter(artist);   // explicit: an unchanged text won't fire
     }
 
+    // "same person as…": open the identity editor for an artist. It is parented
+    // to the window, not to the view the menu was opened in, so the sheet is
+    // centred on the window and the scrim covers everything (§7.5).
+    function editArtistAliases(artist) {
+        aliasEditor.edit(artist);
+    }
+
     function setView(v) {
         _navigate({ view: v, albumId: openAlbumId });
         Prefs.set("view", v);
@@ -457,6 +464,7 @@ Item {
                     fgArt: win.fgArt
                     onOpened: function(albumId) { win.openAlbum(albumId); }
                     onSearchArtist: function(artist) { win.browseArtist(artist); }
+                    onEditAliases: function(artist) { win.editArtistAliases(artist); }
                     onSortRequested: function(mode) { win.chooseSort(mode); }
                     onSortDirectionRequested: function(descending) {
                         win.chooseSortDirection(descending);
@@ -473,6 +481,7 @@ Item {
             fgAccent: win.fgAccent
             onOpenAlbumRequested: function(albumId) { win.openAlbum(albumId); }
             onBrowseArtistRequested: function(artist) { win.browseArtist(artist); }
+            onEditAliasesRequested: function(artist) { win.editArtistAliases(artist); }
         }
         NowPlaying {
             anchors.fill: parent
@@ -483,6 +492,7 @@ Item {
             fgArt: win.fgArt
             onOpenAlbum: function(albumId) { win.openAlbum(albumId); }
             onBrowseArtist: function(artist) { win.browseArtist(artist); }
+            onEditAliases: function(artist) { win.editArtistAliases(artist); }
         }
     }
 
@@ -507,6 +517,20 @@ Item {
             win.openAlbum(albumId);
         }
         onBrowseArtistRequested: function(artist) { win.browseArtist(artist); }
+        onEditAliasesRequested: function(artist) { win.editArtistAliases(artist); }
+    }
+
+    // The artist identity sheet — over every view AND over the settings drawer
+    // (z:70), because it is a modal: nothing behind it may be clicked while it
+    // is up (§7.5).
+    AliasEditor {
+        id: aliasEditor
+        objectName: "aliasEditor"
+        anchors.fill: parent
+        z: 90
+        fgText: win.fgText
+        fgDim: win.fgDim
+        fgAccent: win.fgAccent
     }
 
     // The desktop's motion, from the plugin's published key (qmlcommon/Motion.qml).
