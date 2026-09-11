@@ -24,6 +24,12 @@ Item {
     property color fgText: Theme.text
     property color fgDim: Theme.textDim
     property color fgAccent: Theme.accent
+    // The credit beside a title is a DIFFERENT DATUM from the track's own
+    // name, not merely a quieter one, so it takes a wash of the wallpaper's
+    // accent over the dim tone rather than a second grey — theme-derived, and
+    // never the accent itself, which marks state (docs/DESIGN.md §3.2).
+    property color fgGuest: Qt.tint(fgDim, Qt.rgba(Theme.accent.r, Theme.accent.g,
+                                                   Theme.accent.b, 0.32))
     property bool showArtist: true
     // Artist name to LEAVE OFF every row, set explicitly. Normally you want
     // autoHideArtist instead.
@@ -255,6 +261,7 @@ Item {
                 }
                 PixelText {
                     id: artistText
+                    objectName: "trackArtist"
                     // A guest tail is all-or-nothing: half of one ("feat.
                     // Dwel") is worse than none, because it reads as part of
                     // the title and there is no ellipsis available to disown
@@ -280,7 +287,7 @@ Item {
                     height: parent.height
                     text: glyphs.px(nameCell.artistText)
                     color: !available ? Theme.inactive
-                           : (row.isCurrent ? row.selectedFg : root.fgDim)
+                           : (row.isCurrent ? row.selectedFg : root.fgGuest)
                 }
             }
             Row {
