@@ -38,7 +38,10 @@ in {
   # and buildEnv correctly rejects two providers for the same plugin path.
   xdg.dataFile."plasma/plasmoids/${pkgId}".source = package;
   systemd.user.services.plasma-player-visualizer = {
-    Unit = { Description = "Cava state for the Plasma player visualizer"; After = [ "easyeffects.service" "graphical-session.target" ]; };
+    # PartOf as well as WantedBy: this feeds a Plasma widget, so it has no work
+    # to do in another session, and a long-running instance left over from one
+    # would keep writing state for a desktop that is no longer on screen.
+    Unit = { Description = "Cava state for the Plasma player visualizer"; After = [ "easyeffects.service" "graphical-session.target" ]; PartOf = [ "graphical-session.target" ]; };
     Service = { ExecStart = "${state}/bin/plasma-player-visualizer-state"; Restart = "on-failure"; RestartSec = 2; };
     Install.WantedBy = [ "graphical-session.target" ];
   };
