@@ -385,6 +385,19 @@ def main():
           len(library.artist_tracks("Games")) == 5,
           len(library.artist_tracks("Games")))
 
+    # --------------------------------------------------------- half-typed
+    # What a search box actually gets, one keystroke at a time.
+    check("a half-typed name reaches the person",
+          titles("oneohtrix") == titles("chuck person"), str(titles("oneohtrix")))
+    check("…and so does a name from the middle of one",
+          titles("lopatin") == titles("chuck person"), str(titles("lopatin")))
+    check("words out of order do not — that is the plain search, unwidened",
+          titles("never point") == ["Nil Admirari", "Zones Without People"],
+          str(titles("never point")))
+    check("two letters never widen anything (MIN_PARTIAL)",
+          library.aliases.group_for("on") == [],
+          str(library.aliases.group_for("on")))
+
     # ------------------------------------------------------------ dissolving
     editor.edit("Games")
     spin(app)
