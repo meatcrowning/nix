@@ -13,6 +13,8 @@ os.environ.pop("WAYLAND_DISPLAY", None)
 os.environ.pop("DISPLAY", None)
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+# albuminfo reaches trackmatch through pylib; main.py is not imported here.
+sys.path.insert(0, str(ROOT.parent / "pylib"))
 
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 import infostore  # noqa: E402
