@@ -20,16 +20,18 @@ in
   ];
 
   # SEED ONCE, never reconcile. labwc-tweaks serialises the whole of rc.xml on
-  # every save and labwc-menu-generator owns menu.xml outright, so the runtime
-  # copies are authored by those tools, not by this repo — the hyprland.lua /
-  # Theme.qml reconcile path (tools/seed-reconcile.sh) would discard their work
-  # on the next switch. These files are therefore installed only when missing,
-  # which is also why they are not in tools/seed-drift.sh's PAIRS: drift here
-  # is the intended state, not the fault.
+  # every save, so the runtime copies are authored by that tool and by hand,
+  # not by this repo — the hyprland.lua / Theme.qml reconcile path
+  # (tools/seed-reconcile.sh) would discard the work on the next switch. These
+  # files are therefore installed only when missing, which is also why they are
+  # not in tools/seed-drift.sh's PAIRS: drift here is the intended state, not
+  # the fault.
   #
-  # menu.xml is deliberately NOT seeded: with no menu.xml labwc uses its
-  # built-in root menu, and `labwc-menu-generator` is the thing meant to write
-  # one.
+  # menu.xml IS seeded, and has to be: labwc 0.20 has no built-in fallback
+  # menu, so without the file a right-click on the desktop opens nothing at all
+  # and Reconfigure/Exit are unreachable. The seed reaches the application list
+  # through a pipe menu that runs labwc-menu-generator on open, so the list
+  # stays current without any file being regenerated.
   home.activation.seedLabwcConfig = lib.mkIf onTop
     (lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       seed_labwc() {
@@ -38,6 +40,7 @@ in
         run install -D -m"$mode" "$src" "$dst"
       }
       seed_labwc ${./labwc-files/rc.xml}       rc.xml      644
+      seed_labwc ${./labwc-files/menu.xml}     menu.xml    644
       seed_labwc ${./labwc-files/environment}  environment 644
       seed_labwc ${./labwc-files/autostart}    autostart   755
     '');
