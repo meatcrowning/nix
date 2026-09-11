@@ -35,6 +35,7 @@ Item {
     // on to the window, which owns navigation).
     signal openAlbumRequested(int albumId)
     signal browseArtistRequested(string artist)
+    signal editAliasesRequested(string artist)
 
     readonly property int rowH: Theme.lineHeight + 2
     readonly property int pad: 10
@@ -193,6 +194,7 @@ Item {
         onPlayed: function(index) { Player.playAlbum(root.albumId, index); }
         onOpenAlbumRequested: function(aid) { root.openAlbumRequested(aid); }
         onBrowseArtistRequested: function(a) { root.browseArtistRequested(a); }
+        onEditAliasesRequested: function(a) { root.editAliasesRequested(a); }
     }
     PixelText {
         x: tracks.x

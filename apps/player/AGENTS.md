@@ -21,6 +21,7 @@ SMB setup and recovery live in `docs/agents/air-library-share.md`.
 | Plasma composition and controls | `qml/+plasma/`, `transport.py`, shared `pylib/kdeshell.py` |
 | Safe audio-file replacement | `atomicsave.py` |
 | Lyrics lookup/cache/writeback | `lyrics.py`, `LyricsProvider` in `main.py` |
+| Artist identities (one person, many names) | `artistalias.py`, `qml/AliasEditor.qml` |
 | Release identity, details and credits | `releaseinfo.py`, `albuminfo.py`, `infostore.py`, `qml/NowInfoPane.qml` |
 | Album write-up parsing | `albumprose.py` (Last.fm and linked Bandcamp album pages) |
 | Related music and contributor connections | `relatedmusic.py`; `albuminfo.py` owns queries and requests |
@@ -91,6 +92,18 @@ Years use `COALESCE(orig_year, year)`; unknown years do not satisfy bounded
 queries. An unfinished field term contributes no filter. Album artist lookup
 includes contained track artists, and genre metadata derives from tracks.
 Keep `tools/library-ipc.py` consistent with the app's matching.
+
+`artistalias.py` owns artist identities: one person, many names. A group is a
+list of names stored as one portable row in infostore's user table (scope
+`artists`, kind `aliases`), seeded once from `DEFAULT_GROUPS` and his
+thereafter; membership is folded equality, never `artist_matches`. Everything
+matches through two seams — `Library.query_parts` (search and the gallery
+filter) and `Library.artist_tracks` (shuffle artist, browse artist). An alias
+widens the ARTIST columns only; folding it into the free-text haystack would
+answer a search for the person with every record carrying a track of that name.
+Nothing is retagged or merged: albums stay filed under the name they were
+released as. `AliasEditor.qml` writes the group, `tools/library-ipc.py` expands
+the same way, and `tools/alias-ui-test.py` covers both.
 
 Search retains the complete matching id set and pages its display in 400-row
 chunks with an exact total. Play-all uses every match; clicking a page row

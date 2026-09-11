@@ -55,6 +55,7 @@ from albuminfo import AlbumInformation  # noqa: E402
 from releaseinfo import read_identity  # noqa: E402
 import perftrace  # noqa: E402
 import infostore  # noqa: E402
+import artistalias  # noqa: E402  (sibling module; one person, many names)
 import lyrics as lyricslib  # noqa: E402  (sibling module; also used by tools/)
 from scrobble import Scrobbler  # noqa: E402  (sibling module; Last.fm, off the GUI thread)
 import lastfm as lastfmlib  # noqa: E402  (pylib; credentials stay in its owner)
@@ -1265,6 +1266,12 @@ def parse_query(text):
     return rest.casefold().split(), genres, lo, hi
 
 
+def query_free_text(text):
+    """The part of a query that is not a field term — what an artist identity
+    is looked up by, since `genre:` and `year:` are never somebody's name."""
+    return " ".join(_QUERY_TERM.sub(" ", text or "").split())
+
+
 def query_has_filter(text):
     """Does this query carry a field filter at all? What the results header
     uses to say why nothing matched."""
@@ -1280,6 +1287,13 @@ def year_in(value, lo, hi):
     if not value:
         return False
     return (lo is None or value >= lo) and (hi is None or value <= hi)
+
+
+def _artist_hit(value, want):
+    """Is this artist tag one of `want` (a folded name set)? Every variant of
+    the tag is tried, so "X feat. Y" answers to X."""
+    return any(trackmatch.fold(v) in want
+               for v in trackmatch.artist_variants(value or ""))
 
 
 def _cfold(s):
@@ -1608,6 +1622,7 @@ class Library(QObject):
         self._scanner = None
         self._scan_pending = False
         self._closed = False
+        self.aliases = artistalias.load(self._con)
         self._search_rows = None  # lazy [(haystack, id, genre, year)]
         self._album_meta = None   # lazy {album_id: (genre blob, year)}
         # Album artist is a release-level credit, not a full contributor list.
@@ -1745,6 +1760,20 @@ class Library(QObject):
             "SELECT * FROM tracks WHERE album_id=? ORDER BY COALESCE(disc, 1), track, title",
             (album_id,))
 
+    def artist_track_count(self, names):
+        """How many tracks a set of names covers TOGETHER — the identity
+        editor's honest readout, over the same matching `artist_tracks` uses
+        (folded equality against each name's variants)."""
+        want = {trackmatch.fold(v) for n in names
+                for v in trackmatch.artist_variants(n)}
+        want.discard("")
+        if not want:
+            return 0
+        return sum(1 for r in self._con.execute(
+                       "SELECT artist, album_artist FROM tracks")
+                   if _artist_hit(r["artist"], want)
+                   or _artist_hit(r["album_artist"], want))
+
     def artist_tracks(self, artist):
         """Everything by an artist, matched on EITHER tag — an album of theirs
         carries the name in album_artist, a one-off on a compilation only in
@@ -1756,18 +1785,16 @@ class Library(QObject):
         nothing, since they are not primary anywhere. That's the deliberate
         trade: `artist_matches`' token-subset test would catch them and would
         also call "Air" a match for "Air France"."""
-        want = {trackmatch.fold(v) for v in trackmatch.artist_variants(artist)}
+        want = {trackmatch.fold(v)
+                for name in self.aliases.expand(artist)
+                for v in trackmatch.artist_variants(name)}
         want.discard("")
         if not want:
             return []
-
-        def hit(s):
-            return any(trackmatch.fold(v) in want
-                       for v in trackmatch.artist_variants(s or ""))
-
         return [r for r in self._rows(
                     "SELECT * FROM tracks ORDER BY album_id, COALESCE(disc, 1), track, title")
-                if hit(r["artist"]) or hit(r["album_artist"])]
+                if _artist_hit(r["artist"], want)
+                or _artist_hit(r["album_artist"], want)]
 
     def smart_names(self):
         return self.smart.names()
@@ -1960,22 +1987,45 @@ class Library(QObject):
         folded into the same string, `year:1997` would also match a track
         called "1997" and `genre:rock` an album called Rock, which is the one
         thing a field filter exists to stop."""
-        words, genres, lo, hi = parse_query(text)
+        words, aliases, genres, lo, hi = self.query_parts(text)
         if not words and not genres and lo is None and hi is None:
             return []
         if self._search_rows is None:
             self._search_rows = [
                 ((f'{r["title"] or ""}\n{r["artist"] or ""}\n{r["album"] or ""}'
                   f'\n{r["album_artist"] or ""}').casefold(), r["id"],
-                 (r["genre"] or "").casefold(), r["orig_year"] or r["year"])
+                 (r["genre"] or "").casefold(), r["orig_year"] or r["year"],
+                 (f'{r["artist"] or ""}\n{r["album_artist"] or ""}').casefold())
                 for r in self._con.execute(
                     "SELECT id, title, artist, album, album_artist, genre,"
                     " year, orig_year FROM tracks")]
-        ids = [tid for hay, tid, gen, yr in self._search_rows
-               if all(w in hay for w in words)
+        ids = [tid for hay, tid, gen, yr, art in self._search_rows
+               if (all(w in hay for w in words)
+                   or any(all(w in art for w in alt) for alt in aliases))
                and all(g in gen for g in genres)
                and year_in(yr, lo, hi)]
         return ids
+
+    def query_parts(self, text):
+        """`text` -> (words, alias word lists, genres, lo, hi) — `parse_query`
+        plus the OTHER names of whoever its free text names (`artistalias`).
+
+        The alias alternatives are kept apart from `words` because they are
+        matched against the ARTIST fields alone. Folded into the same haystack,
+        an alias as ordinary as "Games" would answer a search for Oneohtrix
+        Point Never with every record that has a track called Games on it."""
+        words, genres, lo, hi = parse_query(text)
+        aliases = [n.casefold().split()
+                   for n in self.aliases.others(query_free_text(text))]
+        return words, [a for a in aliases if a], genres, lo, hi
+
+    def set_artist_aliases(self, name, names):
+        """Rewrite the identity group `name` belongs to, and persist it. The
+        cached haystacks are untouched on purpose: an alias changes which
+        queries match a row, never what the row says."""
+        self.aliases.set_for(name, names)
+        artistalias.save(self._con, self.aliases)
+        return self.aliases.group_for(name)
 
     def album_meta(self):
         """{album_id: (folded genre blob, year)} — every genre any of an
@@ -3679,6 +3729,7 @@ class Bridge(QObject):
     scanStatus = Signal(str)
     scanRunning = Signal(bool)
     smartListsChanged = Signal()
+    artistAliasesChanged = Signal()
     nowInfoChanged = Signal()
     # systheme creation surfaces as a TOAST with a progress bar (SysthemeToast.qml),
     # not as in-window status text. The map carries {active, fraction, label,
@@ -3812,6 +3863,41 @@ class Bridge(QObject):
     def rescan(self):
         self._library.rescan()
 
+    # ---- artist identities ----
+
+    @Slot(str, result="QVariantList")
+    def artistAliases(self, name):
+        """Every name this person releases under, the one asked about first —
+        what the editor loads. An artist nobody has grouped is just themselves,
+        so the editor opens on their own name rather than on nothing."""
+        name = " ".join(str(name or "").split())
+        group = self._library.aliases.group_for(name)
+        if not group:
+            return [name] if name else []
+        return [name] + self._library.aliases.others(name)
+
+    @Slot(str, result="QVariantList")
+    def artistOtherNames(self, name):
+        """Only the OTHER names — what a header line says out loud."""
+        return self._library.aliases.others(name)
+
+    @Slot("QVariantList", result=int)
+    def artistAliasCount(self, names):
+        """Tracks the names in the editor cover between them — the one readout
+        that says the identity does something (docs/DESIGN.md 10.1)."""
+        return self._library.artist_track_count([str(n) for n in names])
+
+    @Slot(str, "QVariantList")
+    def setArtistAliases(self, name, names):
+        self._library.set_artist_aliases(str(name), [str(n) for n in names])
+        self.artistAliasesChanged.emit()
+        # The grid filter and any open results are answers to a query whose
+        # MEANING just changed; leaving them would show the old answer under
+        # the new identity.
+        self._apply_album_filter()
+        if self._search_text:
+            self.search(self._search_text)
+
     # ---- albums grid ----
 
     @Slot()
@@ -3821,16 +3907,25 @@ class Bridge(QObject):
 
     def _apply_album_filter(self, merge=False):
         rows = self._album_rows
-        words, genres, lo, hi = parse_query(self._filter)
+        words, aliases, genres, lo, hi = self._library.query_parts(self._filter)
         if words or genres or lo is not None or hi is not None:
             # An album's genre and contributors are whatever its tracks carry;
             # its year is the album row's own, which is already COALESCEd.
             meta = self._library.album_meta() if genres else {}
-            contributors = self._library.album_contributors() if words else {}
+            contributors = (self._library.album_contributors()
+                            if words or aliases else {})
+
+            def hit(r):
+                artists = (f'{(r["album_artist"] or "").casefold()}\n'
+                           f'{contributors.get(r["id"], "")}')
+                if all(w in f'{(r["album"] or "").casefold()}\n{artists}'
+                       for w in words):
+                    return True
+                # An alias names a PERSON: it widens the artist match only.
+                return any(all(w in artists for w in alt) for alt in aliases)
+
             rows = [r for r in rows
-                    if all(w in f'{(r["album"] or "").casefold()}\n'
-                                f'{(r["album_artist"] or "").casefold()}\n'
-                                f'{contributors.get(r["id"], "")}' for w in words)
+                    if hit(r)
                     and all(g in meta.get(r["id"], ("", None))[0] for g in genres)
                     and year_in(r["orig_year"] or r["year"], lo, hi)]
         out = [album_row(r) for r in rows]

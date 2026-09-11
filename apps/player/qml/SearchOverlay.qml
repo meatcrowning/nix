@@ -16,6 +16,18 @@ Rectangle {
     // dismisses this overlay on the way, since it covers the view it lands on).
     signal openAlbumRequested(int albumId)
     signal browseArtistRequested(string artist)
+    signal editAliasesRequested(string artist)
+
+    // The other names of whoever `query` names, "" for ordinary text. Refreshed
+    // rather than bound: it comes from a slot, which no binding can watch.
+    property var alsoAs: []
+    function refreshAlsoAs() { alsoAs = Library.artistOtherNames(root.query); }
+    onQueryChanged: refreshAlsoAs()
+    Component.onCompleted: refreshAlsoAs()
+    Connections {
+        target: Library
+        function onArtistAliasesChanged() { root.refreshAlsoAs(); }
+    }
 
     // THE WINDOW'S OWN SURFACE, not a flat fill of it (docs/DESIGN.md §7.6).
     // This overlay covers the whole content area, so under Plasma a `Theme.bg`
@@ -82,9 +94,27 @@ Rectangle {
         }
     }
 
+    // ONE PERSON, MANY NAMES: when the query names an artist identity
+    // (main.py's `artistalias`), these results already include the other names'
+    // records — so the line says so. Silent widening would read as the search
+    // returning records it should not have (docs/DESIGN.md §10.6: a claim and
+    // an observation are two readouts).
+    PixelText {
+        id: alsoLine
+        anchors.top: head.bottom
+        anchors.topMargin: visible ? 4 : 0
+        x: 8
+        width: parent.width - 16
+        elide: Text.ElideRight
+        visible: root.alsoAs.length > 0
+        height: visible ? implicitHeight : 0
+        text: "also as " + root.alsoAs.join(", ")
+        color: root.fgDim
+    }
+
     Row {
         id: pages
-        anchors.top: head.bottom
+        anchors.top: alsoLine.bottom
         x: 8
         spacing: 12
         visible: Library.searchTotal > SearchModel.count
@@ -124,6 +154,7 @@ Rectangle {
         onPlayed: function(index) { Library.playSearch(index); }
         onOpenAlbumRequested: function(aid) { root.openAlbumRequested(aid); }
         onBrowseArtistRequested: function(a) { root.browseArtistRequested(a); }
+        onEditAliasesRequested: function(a) { root.editAliasesRequested(a); }
     }
 
     // The empty state is also the only place the field filters are named. A

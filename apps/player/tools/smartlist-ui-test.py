@@ -166,6 +166,22 @@ class StubStyle(QObject):
         return 15
 
     @Property(bool, notify=changed)
+    def topFontTreatment(self):
+        return False         # PixelText's Oxygen outline pass reads both
+
+    @Property(bool, notify=changed)
+    def airFontTreatment(self):
+        return False
+
+    @Property(bool, notify=changed)
+    def smooth(self):
+        return False         # the pixel face; Theme.fontSmooth branches on it
+
+    @Property(bool, notify=changed)
+    def terminalCell(self):
+        return False
+
+    @Property(bool, notify=changed)
     def reduceMotion(self):
         return True          # no animation to wait out in a headless run
 

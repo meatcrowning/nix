@@ -42,6 +42,7 @@ Item {
     property int expandedAlbumId: 0
     signal opened(int albumId)      // 0 == collapse
     signal searchArtist(string artist)
+    signal editAliases(string artist)
 
     // True while a search filter narrows the grid: the browse position is only
     // remembered for the UNFILTERED grid, so clearing the search puts the user
@@ -411,6 +412,8 @@ Item {
                                           trigger: function() { root.opened(aid === root.expandedAlbumId ? 0 : aid); } },
                                         { label: "search artist", enabled: art !== "",
                                           trigger: function() { root.searchArtist(art); } },
+                                        { label: "same person as...", enabled: art !== "",
+                                          trigger: function() { root.editAliases(art); } },
                                         { separator: true },
                                         // Applies the theme desktop-wide, so it
                                         // sits behind a separator like any other
@@ -476,6 +479,7 @@ Item {
                             onClosed: root.opened(0)
                             onOpenAlbumRequested: function(aid) { root.opened(aid); }
                             onBrowseArtistRequested: function(a) { root.searchArtist(a); }
+                            onEditAliasesRequested: function(a) { root.editAliases(a); }
                         }
                     }
                 }
