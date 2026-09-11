@@ -476,7 +476,9 @@ elif command -v kwriteconfig6 >/dev/null 2>&1; then
     # colour/style/icon rates too.)
     if command -v dbus-send >/dev/null 2>&1; then
         for change in 0 2 4; do
-            dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.notifyChange int32 "$change" int32 0 >/dev/null 2>&1 || true
+            # `int32:N`, not `int32 N` — dbus-send rejects the spaced form, and
+            # the `|| true` hid it, so this reload never fired either.
+            dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.notifyChange "int32:$change" int32:0 >/dev/null 2>&1 || true
         done
     fi
 fi

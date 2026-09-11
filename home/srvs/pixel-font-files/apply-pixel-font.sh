@@ -137,7 +137,22 @@ hyprctl eval "hl.plugin.hyprvtb.refresh_fonts()" >/dev/null 2>&1 || true
 # ---- 3. KDE/Qt system font (kdeglobals) ------------------------------------
 # Same writer wal-set.sh uses for the colour groups; only the font role lines
 # are touched here so groups owned elsewhere are left alone.
-if command -v kwriteconfig6 >/dev/null 2>&1; then
+#
+# NOT IN PLASMA. The pixel-font pick is the Hyprland/labwc session's system
+# font; under Plasma the font roles are a personal System Settings choice that
+# home/plasma.nix deliberately leaves undeclared so it survives every apply
+# ("Plasma owns and preserves them"). Writing them here erases that choice just
+# as surely as plasma-manager would. It happened on 2026-09-10, from a
+# session-blind wal-set.sh run that took the non-Plasma branch inside a KDE
+# login and reset every font role to the pick. The caller is not trusted to
+# know where it is; this checks for itself.
+case ":$(printf '%s' "${XDG_CURRENT_DESKTOP:-}" | tr '[:lower:]' '[:upper:]'):" in
+    *:KDE:*)
+        echo "apply-pixel-font: Plasma session — leaving the KDE font roles to System Settings"
+        KDE_FONTS=0 ;;
+    *) KDE_FONTS=1 ;;
+esac
+if [ "$KDE_FONTS" = 1 ] && command -v kwriteconfig6 >/dev/null 2>&1; then
     FSPEC="$FAMILY,$PT,-1,5,400,0,0,0,0,0,0,0,0,0,0,1"
     for k in font menuFont toolBarFont smallestReadableFont fixed; do
         kwriteconfig6 --file "$CONFIG/kdeglobals" --group General --key "$k" "$FSPEC"
@@ -145,7 +160,10 @@ if command -v kwriteconfig6 >/dev/null 2>&1; then
     kwriteconfig6 --file "$CONFIG/kdeglobals" --group WM --key activeFont "$FSPEC"
     # Reload fonts (1) in running KDE/Qt apps without a relogin.
     if command -v dbus-send >/dev/null 2>&1; then
-        dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.notifyChange int32 1 int32 0 >/dev/null 2>&1 || true
+        # `int32:1`, not `int32 1` — dbus-send rejects the spaced form with
+        # "Data item \"int32\" is badly formed", and the `|| true` swallowed it,
+        # so this reload has never actually fired.
+        dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.notifyChange int32:1 int32:0 >/dev/null 2>&1 || true
     fi
 fi
 
