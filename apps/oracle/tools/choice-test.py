@@ -99,13 +99,31 @@ class Stub(http.server.BaseHTTPRequestHandler):
                 self._json({"message": {"content": "", "tool_calls": [ask]},
                             "done": True})
             return
-        if Stub.who == "agent" and len([b for b in Stub.bodies
-                                        if b.get("stream")]) == 1:
+        rounds = len([b for b in Stub.bodies if b.get("stream")])
+        if Stub.who == "main" and rounds == 1:
+            # ASK ON A LATER ROUND. A real acquisition turn loads a skill,
+            # attaches a tool and searches before it has anything to ask about,
+            # so the card lands on a row that is NOT the turn's head — which is
+            # exactly the row the log used to draw as nothing at all.
+            frames = [{"message": {"content": "", "tool_calls": [
+                {"function": {"name": "get_current_time",
+                              "arguments": {"timezone": "UTC"}}}]},
+                "done": False}, {"done": True, "done_reason": "stop"}]
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson")
+            self.end_headers()
+            for f in frames:
+                self.wfile.write(json.dumps(f).encode() + b"\n")
+                self.wfile.flush()
+            return
+        if Stub.who == "agent" and rounds == 1:
             frames = [{"message": {"content": "", "tool_calls": [
                 {"function": {"name": "spawn_agent", "arguments": {
                     "agent": "general", "task": "get Returnal"}}}]},
                 "done": False}, {"done": True, "done_reason": "stop"}]
-        elif Stub.who == "main" and not answered:
+        elif Stub.who == "main" and not any(
+                m.get("tool_name") == "ask_choice"
+                for m in body.get("messages", []) if m.get("role") == "tool"):
             frames = [{"message": {"content": "", "tool_calls": [ask]},
                        "done": False}, {"done": True, "done_reason": "stop"}]
         else:
@@ -192,6 +210,10 @@ if drawn:
 
 before = re.search(r"^choice before: .*verbs=(\[.*\])$", txt, re.M)
 after = re.search(r"^choice after: .*verbs=(\[.*\])$", txt, re.M)
+shown = re.search(r"^choice before: .*row_visible=(\S+)", txt, re.M)
+check("the row holding the card is DRAWN, even though it said nothing else",
+      bool(shown) and shown.group(1) == "True",
+      shown.group(1) if shown else "no card")
 check("the buttons are really drawn while it waits",
       bool(before) and "'pick 1'" in before.group(1)
       and "'none of these'" in before.group(1),

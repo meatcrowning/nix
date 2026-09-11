@@ -12616,14 +12616,27 @@ def run_selftest(app, shell, win, plasma, warnings, fleet_pane=None):
                         out += _card_verbs(ch, depth + 1)
                 return out
 
+            def _row_visible(item, depth=0):
+                """Is the card actually ON SCREEN? A card can exist in the item
+                tree inside a row the log decided not to draw — which is how a
+                decision once put up a notification and nothing else."""
+                node, seen = item, 0
+                while node is not None and seen < 40:
+                    if bool(node.property("visible")) is False:
+                        return False
+                    node = node.parentItem() if hasattr(node, "parentItem") else None
+                    seen += 1
+                return True
+
             def _report_cards(when):
                 for card in _cards(target):
                     entry = card.property("entry") or {}
                     if hasattr(entry, "toVariant"):
                         entry = entry.toVariant()
-                    print("choice %s: id=%s state=%s index=%s verbs=%s"
+                    print("choice %s: id=%s state=%s index=%s row_visible=%s verbs=%s"
                           % (when, entry.get("id"), entry.get("state"),
-                             entry.get("index"), _card_verbs(card)))
+                             entry.get("index"), _row_visible(card),
+                             _card_verbs(card)))
 
             def _answer_pending():
                 """Press a button on any card still waiting, the same way the
