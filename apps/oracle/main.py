@@ -12602,9 +12602,12 @@ def run_selftest(app, shell, win, plasma, warnings, fleet_pane=None):
                 return out
 
             def _card_verbs(item, depth=0):
-                out = []
+                """(drawn, held-down, dead) verbs on a card. An answered card
+                KEEPS its buttons — the one he took held down, the rest dead —
+                so all three lists are what the harness reads."""
+                out, lit, dead = [], [], []
                 if item is None or depth > 8:
-                    return out
+                    return out, lit, dead
                 kids = (item.childItems() if hasattr(item, "childItems")
                         else item.children())
                 for ch in kids:
@@ -12612,9 +12615,16 @@ def run_selftest(app, shell, win, plasma, warnings, fleet_pane=None):
                     if lab is not None and ch.property("face") is not None:
                         if bool(ch.property("visible")):
                             out.append(str(lab))
+                            if bool(ch.property("lit")):
+                                lit.append(str(lab))
+                            if not bool(ch.property("enabled")):
+                                dead.append(str(lab))
                     else:
-                        out += _card_verbs(ch, depth + 1)
-                return out
+                        a, b, c = _card_verbs(ch, depth + 1)
+                        out += a
+                        lit += b
+                        dead += c
+                return out, lit, dead
 
             def _row_visible(item, depth=0):
                 """Is the card actually ON SCREEN? A card can exist in the item
@@ -12633,10 +12643,12 @@ def run_selftest(app, shell, win, plasma, warnings, fleet_pane=None):
                     entry = card.property("entry") or {}
                     if hasattr(entry, "toVariant"):
                         entry = entry.toVariant()
-                    print("choice %s: id=%s state=%s index=%s row_visible=%s verbs=%s"
+                    verbs, lit, dead = _card_verbs(card)
+                    print("choice %s: id=%s state=%s index=%s row_visible=%s "
+                          "verbs=%s lit=%s dead=%s"
                           % (when, entry.get("id"), entry.get("state"),
                              entry.get("index"), _row_visible(card),
-                             _card_verbs(card)))
+                             verbs, lit, dead))
 
             def _answer_pending():
                 """Press a button on any card still waiting, the same way the
