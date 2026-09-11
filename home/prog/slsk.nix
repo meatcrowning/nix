@@ -19,6 +19,9 @@ let
   slsk =
     if hostProfile.isBook then
       pkgs.writeShellScriptBin "slsk" ''
+        # No slskd on book: bring up the forward to top's daemon first, the
+        # way painter's comfy-tunnel.sh does for ComfyUI (home/prog/slskd.nix).
+        slskd-remote ensure || exit 1
         exec /usr/bin/python3 /home/lam/nix/apps/slsk/main.py "$@"
       ''
     else
