@@ -745,7 +745,17 @@ duplicate dies, which model to pull.
   in main.py where it cannot be got around; the QML keeps the BUTTONS and
   turns them into the record of the decision — the one he took held down
   (`JobVerb.lit`, the KStyle's checked button under Plasma), the rest dead
-  [his, 2026-09-11]. The card itself paints no fill: it sits inside the
+  [his, 2026-09-11]. Each button wears its CANDIDATE'S OWN NAME (clipped at
+  `labelMax`), never `pick 3`: the label is the effect. The row divides the
+  card's width between them so they stay on ONE line whatever the count. What
+  the agent says after the answer opens its OWN bubble BELOW the card, so a
+  card is never something an answer is folded in above.
+- **The way out is the compose box, not a button** [his, 2026-09-11]. There is
+  no `none of these`: while a card is up, `Ollama.awaitingChoice` lets the
+  window send into a turn that is still busy, and `Root.send` routes that line
+  to `answerChoiceText` — his words settle the oldest open card and come back
+  as that tool call's `reply`, inside the round the agent is already in. The
+  line is appended to the log as his, because he said it. The card itself paints no fill: it sits inside the
   reply's own frame and a second solid slab was one panel too many.
 - **A SUBAGENT may ask too, and the card lands in the conversation he is
   reading** [his: *"spawn a subagent to grab a record and itll still show me the

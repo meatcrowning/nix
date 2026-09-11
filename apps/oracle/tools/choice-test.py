@@ -215,20 +215,25 @@ check("the row holding the card is DRAWN, even though it said nothing else",
       bool(shown) and shown.group(1) == "True",
       shown.group(1) if shown else "no card")
 check("the buttons are really drawn while it waits",
-      bool(before) and "'pick 1'" in before.group(1)
-      and "'none of these'" in before.group(1),
+      bool(before) and OPTIONS[0]["label"] in before.group(1),
+      before.group(1) if before else "no card")
+check("and there is no escape BUTTON — the compose box is the way out [his]",
+      bool(before) and "none of these" not in before.group(1),
+      before.group(1) if before else "no card")
+check("…wearing the candidates' OWN names [his], the long one clipped",
+      bool(before) and "pick 1" not in before.group(1)
+      and "Returnal (2017 reissue) [FL…" in before.group(1),
       before.group(1) if before else "no card")
 check("and STILL THERE once he has chosen [his] — the card is the record",
-      bool(after) and "'pick 1'" in after.group(1)
-      and "'none of these'" in after.group(1),
+      bool(after) and OPTIONS[0]["label"] in after.group(1),
       after.group(1) if after else "no card")
 held = re.search(r"^choice after: .*lit=(\[.*?\]) dead=(\[.*?\])$", txt, re.M)
 check("with the one he took held DOWN",
-      bool(held) and held.group(1) == "['pick 1']",
+      bool(held) and held.group(1) == "[%r]" % OPTIONS[0]["label"],
       held.group(1) if held else "no card")
 check("and every button dead, his included — a record, not an offer",
-      bool(held)
-      and held.group(2) == "['pick 1', 'pick 2', 'pick 3', 'none of these']",
+      bool(held) and held.group(2).count(",") == 2
+      and OPTIONS[0]["label"] in held.group(2),
       held.group(2) if held else "no card")
 live = re.search(r"^choice before: .*lit=(\[.*?\]) dead=(\[.*?\])$", txt, re.M)
 check("…and nothing was dead or held down while it waited",
@@ -246,21 +251,36 @@ if answers:
           a.get("chosen_details"))
     check("and tells the agent to get on with it",
           "do it now" in (a.get("what_now") or "").lower(), a.get("what_now"))
+bodies = [r.get("body") or "" for r in rows]
 check("the turn carried on and answered",
-      any("queued it." in (r.get("body") or "") for r in rows),
-      [r.get("body") for r in rows])
+      any("queued it." in b for b in bodies), bodies)
+# ...in a bubble of its OWN, under the card [his, 2026-09-11].
+card_row = next((i for i, r in enumerate(rows)
+                 if (r.get("choices") or "[]") != "[]"), -1)
+answer_row = next((i for i, b in enumerate(bodies) if "queued it." in b), -1)
+check("and said it in a NEW bubble below the card, not folded in above it",
+      card_row >= 0 and answer_row > card_row
+      and (rows[card_row].get("body") or "") == "",
+      "card row %d, answer row %d" % (card_row, answer_row))
 
-# ---- 2. none of these -----------------------------------------------------
-txt, rows, bodies = run("none")
+# ---- 2. answering in words instead of pressing ----------------------------
+SAID = "none of those — find me a FLAC"
+txt, rows, bodies = run("say:" + SAID)
 drawn = cards(rows)
-check("'none of these' settles the card too",
-      bool(drawn) and drawn[0].get("state") == "declined",
+check("typing a reply settles the card [his]",
+      bool(drawn) and drawn[0].get("state") == "replied",
       drawn[0].get("state") if drawn else "no card")
+check("…and his line is in the log as his, where he said it",
+      any(r.get("isUser") and SAID in (r.get("body") or "") for r in rows),
+      [r.get("body") for r in rows])
 answers = tool_results(bodies, "ask_choice")
-check("and says so to the agent, unambiguously",
+check("his words come back as the tool's result, not as a new turn",
       bool(answers) and answers[0].get("answered") is False
-      and "none" in (answers[0].get("what_now") or "").lower(),
+      and answers[0].get("reply") == SAID,
       answers[0] if answers else "no result")
+check("and the agent is told to do what he said",
+      bool(answers) and "in words" in (answers[0].get("what_now") or ""),
+      answers[0].get("what_now") if answers else "no result")
 
 # ---- 3. a SUBAGENT asks ---------------------------------------------------
 txt, rows, bodies = run("1", who="agent")
