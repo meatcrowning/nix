@@ -34,6 +34,7 @@ Item {
     }
     onInfoChanged: syncAlbum()
     Component.onCompleted: syncAlbum()
+    readonly property var artist: album.artistInfo || ({})
     readonly property var albumCredits: album.credits || []
     readonly property var releaseCredits: albumCredits.filter(function(c) { return c.scope === "album"; })
     readonly property var trackCredits: albumCredits.filter(function(c) { return c.scope === "track"; })
@@ -89,6 +90,14 @@ Item {
             out.push(place + text(credit.role) + "  " + text(credit.name));
         });
         return out.join("\n");
+    }
+    function artistHeading() {
+        var name = text(artist.name), note = text(artist.disambiguation);
+        return name + (note !== "" ? "  (" + note + ")" : "");
+    }
+    function artistFacts() {
+        return [text(artist.type), text(artist.area), text(artist.years)]
+               .filter(function(v) { return v !== ""; }).join(" · ");
     }
     function validUrl(url) { return /^(https?):\/\/[^\s]+$/i.test(text(url)); }
     function isOwned(item) { return item && item.owned !== false; }
@@ -361,9 +370,31 @@ Item {
                         label: "open source"; plainLabel: "open source"; iconName: "external-link"
                         onClicked: root.openUrl(root.album.url)
                     }
+                    // The artist stands on its own: this section is filled
+                    // even when the release above could not be identified.
+                    PixelText { width: parent.width; color: root.fgDim
+                        visible: !!root.artist.id; text: "artist" }
                     PixelText { width: parent.width; color: root.fgText; wrapMode: Text.Wrap
-                        visible: !!(root.album.artistInfo || {}).description
-                        text: root.text((root.album.artistInfo || {}).name) + "\n" + root.text((root.album.artistInfo || {}).description) }
+                        visible: !!root.artist.id; text: root.artistHeading() }
+                    PixelText { width: parent.width; color: root.fgDim; wrapMode: Text.Wrap
+                        visible: root.artistFacts() !== ""; text: root.artistFacts() }
+                    PixelText { width: parent.width; color: root.fgText; wrapMode: Text.Wrap
+                        visible: !!root.artist.description; text: root.text(root.artist.description) }
+                    Row {
+                        spacing: 2
+                        visible: root.validUrl(root.artist.url) || root.validUrl(root.artist.descriptionUrl)
+                        HeaderButton {
+                            visible: root.validUrl(root.artist.url)
+                            label: "open artist"; plainLabel: "open artist"; iconName: "external-link"
+                            onClicked: root.openUrl(root.artist.url)
+                        }
+                        HeaderButton {
+                            visible: root.validUrl(root.artist.descriptionUrl)
+                            label: "open biography source"; plainLabel: "open biography source"
+                            iconName: "external-link"
+                            onClicked: root.openUrl(root.artist.descriptionUrl)
+                        }
+                    }
                     PixelText { width: parent.width; color: root.fgDim; wrapMode: Text.Wrap
                         visible: root.track.title !== undefined
                         text: "track: " + root.text(root.track.title) + " · " + Math.round(Number(root.track.duration || 0) / 60) + " min · " + Number(root.track.playCount || 0) + " plays" }

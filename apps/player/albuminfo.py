@@ -20,7 +20,9 @@ from PySide6.QtCore import QCoreApplication, QObject, Signal, Slot
 import perftrace
 import infostore as store
 from releaseinfo import ReleaseInfo
-from albumprose import lastfm_description, bandcamp_description
+from albumprose import (lastfm_description, lastfm_artist_description,
+                        bandcamp_description)
+import artistinfo
 from relatedmusic import related_tracks
 related_tracks = perftrace.timed("albuminfo.related_tracks")(related_tracks)
 import trackmatch
@@ -38,6 +40,10 @@ class AlbumInformation(QObject):
     RETRY_AGE = 300
     NO_MATCH_AGE = 86400
     USER_AGENT = "player/2.0 (+https://github.com/meatcrowning/nix)"
+    # A compilation's credit is not a person, and a biography fetched for one
+    # would be filed against every unrelated album sharing the tag.
+    NOT_A_PERSON = {"various artists", "various", "va", "unknown", "unknown artist",
+                    "no artist", "soundtrack", "compilation"}
 
     def __init__(self, library, parent=None, *, db_path, read_tags=None,
                  fetch_json=None, lastfm_call=None):
@@ -295,6 +301,14 @@ class AlbumInformation(QObject):
                 con.execute("DELETE FROM music_info_cache WHERE cache_key=?", (scope,))
                 related_key = "track:" + hashlib.sha256(row["path"].encode()).hexdigest()
                 con.execute("DELETE FROM music_info_cache WHERE cache_key=?", (related_key,))
+                artist_key = self._artist_key(self._artist_name(row))
+                if artist_key:
+                    match = store.cache_get(con, artist_key, "artist-match")
+                    artist_id = (match or {}).get("body", {}).get("id", "")
+                    con.execute("DELETE FROM music_info_cache WHERE cache_key=?", (artist_key,))
+                    if artist_id:
+                        con.execute("DELETE FROM music_info_cache WHERE cache_key=?",
+                                    ("artist:" + artist_id,))
                 if link:
                     con.execute("DELETE FROM music_info_cache WHERE cache_key=?",
                                 ("release:" + link[0],))
@@ -329,10 +343,36 @@ class AlbumInformation(QObject):
                              match=body.get("match", {}), fetchedAt=resolution["fetched_at"],
                              stale=resolution["stale"] or bool(resolution["error"]), albumError=resolution["error"],
                              error=resolution["error"])
+            artist = self._cached_artist(con, self._artist_name(row))
+            if artist:
+                state["album"]["artistInfo"] = artist
             manual = store.user_get(con, scope, "match")
             if manual:
                 state["match"] = {**manual, "manual": True}
             return state
+
+    @staticmethod
+    def _artist_name(row):
+        """The album's credited artist as tagged — the key stays the same
+        whether or not the release itself could be identified."""
+        return str((row["album_artist"] or row["artist"] or "")).strip()
+
+    @classmethod
+    def _artist_key(cls, name):
+        folded = trackmatch.fold(name)
+        if not folded or folded in cls.NOT_A_PERSON:
+            return ""
+        return "artist-name:" + hashlib.sha256(folded.encode()).hexdigest()
+
+    @staticmethod
+    def _cached_artist(con, name):
+        """Facts for a name from the shared artist entity, or an empty mapping.
+        Every album by one artist reads the same download."""
+        key = AlbumInformation._artist_key(name)
+        match = store.cache_get(con, key, "artist-match") if key else None
+        artist_id = (match or {}).get("body", {}).get("id", "")
+        entity = store.cache_get(con, "artist:" + artist_id, "artist") if artist_id else None
+        return dict(entity["body"]) if entity and entity["body"] else {}
 
     @perftrace.timed("albuminfo._fetch_json")
     def _fetch_json(self, url):
@@ -487,6 +527,12 @@ class AlbumInformation(QObject):
                                     self.RETRY_AGE, error=str(exc), preserve=True)
             state = self._cached_state(tid)
             self._publish(state)
+        # The artist is not the release. A bootleg, a rip, a private edition or
+        # a MusicBrainz outage can leave the album unidentified while the person
+        # who made it is perfectly well known, so this stage never depends on
+        # the resolution above and publishes on its own.
+        self._check_current()
+        state = self._artist_stage(row, state)
         # Similarity is independent of MusicBrainz success and never shares its
         # error label. Re-rank against the local library on every visit.
         self._check_current()
@@ -552,12 +598,104 @@ class AlbumInformation(QObject):
                         store.cache_put(con, "release:" + album["musicbrainzReleaseId"],
                                         "album", album, max(0, raw["expires_at"] - time.time()) if raw else self.CACHE_AGE,
                                         error=raw["error"] if raw else "")
-                        state["album"] = store.effective_album(con, scope)
+                        merged = store.effective_album(con, scope)
+                        # Keep the artist facts this run already published:
+                        # they are not part of the release's cache entry.
+                        if state["album"].get("artistInfo"):
+                            merged["artistInfo"] = state["album"]["artistInfo"]
+                        state["album"] = merged
             except Superseded:
                 raise
             except Exception:
                 pass
         return state
+
+    @perftrace.timed("albuminfo._artist_stage")
+    def _artist_stage(self, row, state):
+        name = self._artist_name(row)
+        key = self._artist_key(name)
+        if not key:
+            return state
+        with self._connect() as con:
+            match = store.cache_get(con, key, "artist-match")
+        if self._force_fetch or match is None or match["stale"]:
+            identity = store.identity(row)
+            # Tagged IDs first: they name the exact person even when two
+            # artists share a name, and cost no search.
+            ids = [*(identity.get("albumArtistIds") or []),
+                   *(state["album"].get("artistIds") or []),
+                   *(identity.get("artistIds") or [])]
+            try:
+                facts = artistinfo.ArtistInfo(self._fetch_json).resolve(name, ids)
+                self._check_current()
+                with self._connect() as con:
+                    if facts.get("id"):
+                        store.cache_put(con, "artist:" + facts["id"], "artist", facts, self.CACHE_AGE)
+                    store.cache_put(con, key, "artist-match", {"id": facts.get("id", "")},
+                                    self.CACHE_AGE if facts.get("id") else self.NO_MATCH_AGE)
+            except Superseded:
+                raise
+            except Exception as exc:
+                with self._connect() as con:
+                    store.cache_put(con, key, "artist-match", {}, self.RETRY_AGE,
+                                    error=str(exc), preserve=True)
+        with self._connect() as con:
+            artist = self._cached_artist(con, name)
+        if not artist.get("id"):
+            return state
+        state["album"] = {**state["album"], "artistInfo": artist}
+        self._publish(state)
+        # The biography is optional and separately cached, exactly like the
+        # album write-up: a linked Wikipedia article first, Last.fm second.
+        with self._connect() as con:
+            attempt = store.cache_get(con, "artist:" + artist["id"], "artist-prose")
+        if attempt and not attempt["stale"] and not self._force_fetch:
+            return state
+        try:
+            summary = self._artist_prose(artist)
+        except Superseded:
+            raise
+        except Exception as exc:
+            with self._connect() as con:
+                store.cache_put(con, "artist:" + artist["id"], "artist-prose", {},
+                                self.RETRY_AGE, error=str(exc))
+            return state
+        with self._connect() as con:
+            store.cache_put(con, "artist:" + artist["id"], "artist-prose", summary,
+                            self.CACHE_AGE if summary else self.NO_MATCH_AGE)
+            if summary:
+                artist = {**artist, **summary}
+                artist["sources"] = list(dict.fromkeys([*artist.get("sources", []),
+                                                        summary["descriptionSource"]]))
+                store.cache_put(con, "artist:" + artist["id"], "artist", artist, self.CACHE_AGE)
+                state["album"] = {**state["album"], "artistInfo": artist}
+        return state
+
+    def _artist_prose(self, artist):
+        errors = []
+        try:
+            summary = self._prose(artist.get("links", []))
+            if summary:
+                return summary
+        except Superseded:
+            raise
+        except Exception as exc:
+            errors.append(exc)
+        self._check_current()
+        try:
+            answer = self._lastfm_call("artist.getInfo", {
+                "artist": artist.get("name", ""), "autocorrect": 0, "lang": "en"})
+            self._check_current()
+            summary = lastfm_artist_description(answer, artist.get("name", ""))
+            if summary:
+                return summary
+        except Superseded:
+            raise
+        except Exception as exc:
+            errors.append(exc)
+        if errors:
+            raise errors[0]
+        return {}
 
     def _album_prose(self, album):
         errors = []
