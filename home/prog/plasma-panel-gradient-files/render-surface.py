@@ -5,6 +5,15 @@ The panels crop this image at their global coordinates.  Rendering a real,
 never-shown QWidget is the same mechanism apps/pylib/kdeshell.py uses for the
 pixel-exact background behind our Plasma QML apps; it does not map a window or
 interact with the desktop.
+
+The field is rendered at the size of a MAXIMISED window, not of the screen,
+and placed at the work area's origin.  Oxygen's background is a vertical
+falloff plus a radial splash anchored to the window's own top-left, so a
+maximised window restarts it 22px below a screen-anchored panel crop: measured
+here, (67,25,21) under the panel against (71,26,22) at the window's first row,
+which is exactly the seam along a maximised window's edge.  Painting the panel
+strips with the field's edge row and column instead makes the panel the
+clamped continuation of that window, and the two meet with equal pixels.
 """
 
 from pathlib import Path
@@ -15,8 +24,8 @@ import subprocess
 import sys
 import time
 
-from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QImage, QPalette, QRegion
+from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtGui import QImage, QPainter, QPalette, QRegion
 from PySide6.QtWidgets import QApplication, QWidget
 
 
@@ -50,6 +59,78 @@ def plasma_screen_size() -> tuple[int, int] | None:
         return None
     _, width, height = min(outputs)
     return width, height
+
+def panel_struts() -> dict[str, int]:
+    """Measure what the panels reserve, from their own declarative config.
+
+    Qt cannot answer this: an offscreen platform plugin has no outputs, and
+    Wayland does not report another client's exclusive zone.  Plasma's own two
+    files do — the containment carries the edge, its view carries the
+    thickness — and they are the same files the panel layout is generated from.
+    """
+    edges = {3: "top", 4: "bottom", 5: "left", 6: "right"}
+    config = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+
+    panels: dict[str, str] = {}
+    group = None
+    try:
+        applets = (config / "plasma-org.kde.plasma.desktop-appletsrc").read_text()
+    except OSError:
+        return {}
+    for line in applets.splitlines():
+        if line.startswith("["):
+            group = line
+            continue
+        containment = re.fullmatch(r"\[Containments\]\[(\d+)\]", group or "")
+        if containment is None:
+            continue
+        if line.startswith("location="):
+            panels.setdefault(containment.group(1), "")
+            panels[containment.group(1)] = edges.get(int(line[9:]), "")
+        elif line == "plugin=org.kde.panel":
+            panels.setdefault(containment.group(1), "")
+
+    struts: dict[str, int] = {}
+    try:
+        views = (config / "plasmashellrc").read_text()
+    except OSError:
+        return {}
+    group = None
+    for line in views.splitlines():
+        if line.startswith("["):
+            group = line
+            continue
+        view = re.fullmatch(r"\[PlasmaViews\]\[Panel (\d+)\]\[Defaults\]", group or "")
+        if view is None or not line.startswith("thickness="):
+            continue
+        edge = panels.get(view.group(1))
+        if edge:
+            struts[edge] = max(struts.get(edge, 0), int(line[10:]))
+    return struts
+
+
+def clamp_into_screen(field: QImage, width: int, height: int,
+                      struts: dict[str, int]) -> QImage:
+    """Place the maximised-window field, extending its edges under the panels."""
+    left, top = struts.get("left", 0), struts.get("top", 0)
+    canvas = QImage(width, height, QImage.Format_ARGB32_Premultiplied)
+    canvas.fill(0)
+    painter = QPainter(canvas)
+    fw, fh = field.width(), field.height()
+    # Corners first; each strip then overwrites the part it owns.
+    for x, sx in ((0, 0), (left + fw, fw - 1)):
+        for y, sy in ((0, 0), (top + fh, fh - 1)):
+            painter.drawImage(QRect(x, y, width, height), field, QRect(sx, sy, 1, 1))
+    painter.drawImage(QRect(left, 0, fw, top), field, QRect(0, 0, fw, 1))
+    painter.drawImage(QRect(left, top + fh, fw, height), field,
+                      QRect(0, fh - 1, fw, 1))
+    painter.drawImage(QRect(0, top, left, fh), field, QRect(0, 0, 1, fh))
+    painter.drawImage(QRect(left + fw, top, width, fh), field,
+                      QRect(fw - 1, 0, 1, fh))
+    painter.drawImage(QPoint(left, top), field)
+    painter.end()
+    return canvas
+
 
 def render_surface(width: int, height: int, palette: QPalette) -> QImage:
     """Render an actual Oxygen styled top-level widget, never mapping it."""
@@ -103,7 +184,12 @@ def main() -> int:
         colour = app.palette().color(QPalette.Active, role)
         for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
             palette.setColor(group, role, colour)
-    image = render_surface(width, height, palette)
+    struts = panel_struts()
+    field = render_surface(
+        max(1, width - struts.get("left", 0) - struts.get("right", 0)),
+        max(1, height - struts.get("top", 0) - struts.get("bottom", 0)),
+        palette)
+    image = clamp_into_screen(field, width, height, struts)
 
     state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
     state.mkdir(parents=True, exist_ok=True)
