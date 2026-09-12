@@ -60,37 +60,6 @@ Item {
     readonly property int tabBaseHeight: Math.max(25, Theme.lineHeight + 8)
 
     function text(v) { return v === undefined || v === null ? "" : String(v); }
-    function mediaSummary() {
-        var values = album.media || [], out = [], count = 0;
-        values.forEach(function(media) {
-            count += Number(media.trackCount || 0);
-            if (text(media.format) !== "") out.push(text(media.format));
-        });
-        if (!out.length) return "";
-        return "format " + out.join(" + ") + (values.length > 1 ? " · " + values.length + " discs" : "")
-               + (count > 0 ? " · " + count + " tracks" : "");
-    }
-    function labelSummary() {
-        var values = album.labels || [], out = [];
-        values.forEach(function(label) {
-            var name = text(label.name), cat = text(label.catalogNumber);
-            if (name !== "") out.push(name + (cat !== "" ? "  " + cat : ""));
-        });
-        return out.join("\n");
-    }
-    function creditSummary(scope) {
-        var values = album.credits || [], out = [];
-        values.forEach(function(credit) {
-            if (credit.scope !== scope) return;
-            var disc = text(credit.disc);
-            var place = scope === "track"
-                        ? (disc !== "" ? "disc " + disc + " · " : "")
-                          + text(credit.trackTitle || (credit.trackPosition ? "track " + credit.trackPosition : "track")) + "  "
-                        : "";
-            out.push(place + text(credit.role) + "  " + text(credit.name));
-        });
-        return out.join("\n");
-    }
     function artistHeading() {
         var name = text(artist.name), note = text(artist.disambiguation);
         return name + (note !== "" ? "  (" + note + ")" : "");
@@ -247,19 +216,6 @@ Item {
                         text: root.text(root.album.title || root.track.album) }
                     PixelText { width: parent.width; color: root.fgDim; wrapMode: Text.Wrap
                         text: root.text(root.album.artist || root.track.artist) }
-                    PixelText { width: parent.width; color: root.fgDim; wrapMode: Text.Wrap
-                        visible: root.releaseDateText() !== ""; text: root.releaseDateText() }
-                    PixelText { width: parent.width; color: root.fgDim; wrapMode: Text.Wrap
-                        visible: root.album.country || root.album.barcode
-                        text: [root.text(root.album.country), root.album.barcode ? "barcode " + root.album.barcode : ""]
-                              .filter(function(v) { return v !== ""; }).join(" · ") }
-                    PixelText { width: parent.width; color: root.fgText; wrapMode: Text.Wrap
-                        visible: !!root.album.description; text: root.text(root.album.description) }
-                    HeaderButton {
-                        visible: root.validUrl(root.album.descriptionUrl)
-                        label: "open description source"; plainLabel: "open description source"; iconName: "external-link"
-                        onClicked: root.openUrl(root.album.descriptionUrl)
-                    }
                     Repeater {
                         model: root.tab === "album" ? (root.album.labels || []) : []
                         delegate: Row {
@@ -279,9 +235,18 @@ Item {
                         }
                     }
                     PixelText { width: parent.width; color: root.fgDim; wrapMode: Text.Wrap
-                        visible: root.labelSummary() !== ""; text: "label  " + root.labelSummary() }
+                        visible: root.album.country || root.album.barcode
+                        text: [root.text(root.album.country), root.album.barcode ? "barcode " + root.album.barcode : ""]
+                              .filter(function(v) { return v !== ""; }).join(" · ") }
+                    PixelText { width: parent.width; color: root.fgText; wrapMode: Text.Wrap
+                        visible: !!root.album.description; text: root.text(root.album.description) }
+                    HeaderButton {
+                        visible: root.validUrl(root.album.descriptionUrl)
+                        label: "open description source"; plainLabel: "open description source"; iconName: "external-link"
+                        onClicked: root.openUrl(root.album.descriptionUrl)
+                    }
                     PixelText { width: parent.width; color: root.fgDim; wrapMode: Text.Wrap
-                        visible: root.mediaSummary() !== ""; text: root.mediaSummary() }
+                        visible: root.releaseDateText() !== ""; text: root.releaseDateText() }
                     Repeater {
                         model: root.tab === "album" ? (root.album.media || []) : []
                         delegate: PixelText {
@@ -294,8 +259,6 @@ Item {
                         visible: (root.album.credits || []).some(function(c) { return c.scope === "album"; })
                         text: "album credits"
                     }
-                    PixelText { width: parent.width; color: root.fgDim; wrapMode: Text.Wrap
-                        visible: root.creditSummary("album") !== ""; text: root.creditSummary("album") }
                     Repeater {
                         model: root.tab === "album" ? root.releaseCredits : []
                         delegate: Item {
@@ -331,8 +294,6 @@ Item {
                         visible: (root.album.credits || []).some(function(c) { return c.scope === "track"; })
                         text: "track credits"
                     }
-                    PixelText { width: parent.width; color: root.fgDim; wrapMode: Text.Wrap
-                        visible: root.creditSummary("track") !== ""; text: root.creditSummary("track") }
                     Repeater {
                         model: root.tab === "album" ? root.trackCredits : []
                         delegate: Item {
