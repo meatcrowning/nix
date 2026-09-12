@@ -11,7 +11,13 @@ Item {
     property color fgText: Theme.text
     property color fgDim: Theme.textDim
     property color fgAccent: Theme.accent
-    property string tab: "lyrics"
+    // The all-in-one page draws lyrics as its own section and takes the tab
+    // away rather than offering the same words in two places.
+    property bool showLyrics: true
+    onShowLyricsChanged: if (!showLyrics && tab === "lyrics") tab = "album"
+    readonly property var tabs: showLyrics ? ["lyrics", "album", "similar"]
+                                           : ["album", "similar"]
+    property string tab: showLyrics ? "lyrics" : "album"
     property bool editing: false
     property string actionError: ""
     onTrackIdChanged: {
@@ -144,7 +150,7 @@ Item {
         x: 4; y: root.actionsInline || root.tab === "lyrics"
               ? Math.round((tabBar.height - height) / 2) : 2; spacing: 1
         Repeater {
-            model: ["lyrics", "album", "similar"]
+            model: root.tabs
             HeaderButton {
                 required property string modelData
                 label: modelData; lit: root.tab === modelData; depressed: true
@@ -235,7 +241,7 @@ Item {
                         }
                     }
                     PixelText { width: parent.width; color: root.fgDim; wrapMode: Text.Wrap
-                        visible: root.album.country || root.album.barcode
+                        visible: !!(root.album.country || root.album.barcode)
                         text: [root.text(root.album.country), root.album.barcode ? "barcode " + root.album.barcode : ""]
                               .filter(function(v) { return v !== ""; }).join(" · ") }
                     PixelText { width: parent.width; color: root.fgText; wrapMode: Text.Wrap

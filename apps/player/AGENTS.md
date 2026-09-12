@@ -18,6 +18,7 @@ SMB setup and recovery live in `docs/agents/air-library-share.md`.
 | Smart-playlist vocabulary and SQL | `SMART_FIELDS`, `SMART_OPS`, `SMART_SORTS`, `SmartLists` in `main.py` |
 | Root composition and action table | `qml/Root.qml`; Hyprland window wrapper `qml/Main.qml` |
 | Album browsing, track rows, shared row menu | `qml/AlbumGrid.qml`, `AlbumPanel.qml`, `TrackList.qml`, `TrackMenu.qml` |
+| Now-playing album browser | `qml/AlbumBrowser.qml`; `browseModel`/`browseTracksModel` in `main.py` |
 | Plasma composition and controls | `qml/+plasma/`, `transport.py`, shared `pylib/kdeshell.py` |
 | Safe audio-file replacement | `atomicsave.py` |
 | Lyrics lookup/cache/writeback | `lyrics.py`, `LyricsProvider` in `main.py` |
@@ -258,6 +259,22 @@ favourited, otherwise an outline. `HeartIcon.qml` owns QML geometry;
 `kdeshell_icons.py` renders the matching player-heart icons for native actions.
 Keep click targets unchanged when changing the drawing size.
 
+`+plasma/NowPlaying.qml` becomes the ALL-IN-ONE page once the window is wide
+and tall enough (`expanded`, read from geometry — QML inside a QQuickWidget has
+no window state to ask, and a window one pixel short of maximized deserves the
+same page). Expanded, `NowInfoPane.showLyrics` is false, so the lyrics TAB is
+gone and lyrics own the lower half of the right-hand column; an `AlbumBrowser`
+loads beside the queue. Both new splits are draggable and persisted
+(`npPlasmaInfoFrac`, `npPlasmaBrowseFrac`). Below the floors the page is exactly
+the compact one, tab included — never both at once (docs/DESIGN.md §5.2).
+
+The browser is a SECOND, INDEPENDENT reader of the library: `BrowseAlbumsModel`,
+`BrowseTracksModel`, `setBrowseFilter`, `openBrowseAlbum`. It must not borrow
+the gallery's `AlbumsModel`/`setAlbumFilter`/`openAlbum` — typing in one page
+would re-filter the other, and one track model cannot serve two open album
+sections. Its rows are mapped only after something asks for them
+(`_browse_live`), and it is behind a `Loader`, so the compact page pays nothing.
+
 A track row names only the artists a listing does not already say: the open
 album section suppresses the album's own credit (`TrackList.hideArtist`) and a
 mixed listing suppresses its majority one (`autoHideArtist`), so what survives
@@ -293,7 +310,11 @@ C++/QML internals; a GIL-holding call may delay the watchdog too.
 Use the safety protocol in the parent/root guides: guarded offscreen or nested
 execution, isolated XDG state/runtime paths, fake mpv, no live player socket,
 MPRIS, scans, tag writes, audio, or preference saves. Read a harness before
-running it; never source the player wrapper to obtain its interpreter.
+running it; never source the player wrapper to obtain its interpreter. On
+`book` PySide6 is Fedora's while the session exports a nix `QT_PLUGIN_PATH`:
+loading that platform plugin into Fedora's Qt aborts the process with no
+message at all, so a harness run there needs the variable dropped (the newer
+ones drop it themselves).
 `main.py --selftest` is the app-construction probe, not permission to use live
 state. `tools/resource-fixture.py` supplies scratch metadata and a no-audio stub
 for resource sampling. The user performs real visual/interaction checks.
@@ -310,6 +331,7 @@ not a CI suite:
 | Preference/metadata persistence | `state-write-test.py`, `metadata-worker-test.py` |
 | Metadata/sync | `now-info-test.py`, `artist-info-test.py`, `album-prose-test.py`, `release-info-test.py`, `related-music-test.py`, `info-sync-test.py`, `info-connection-test.py`, `library-ipc-test.py`, `test-dbsync.py` |
 | Album information UI | `album-info-ui-test.py`, `album-guest-ui-test.py` |
+| Now-playing composition | `now-allinone-test.py` |
 | Native/QML presentation | `plasma-chrome-test.py`, `transport-test.py`, `focus-fade-test.py`, `view-preserve-test.py`, `favourite-surfaces-test.py`, `trash-track-test.py` |
 
 Atomic-write probes operate on copies and hash decoded audio only
