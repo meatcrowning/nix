@@ -311,6 +311,32 @@ def _num(v):
     return v if v is not None else -1.0
 
 
+def _rebuild_albums(con):
+    """Re-derive the albums table the way main.py's rebuild_albums() does.
+
+    NEW_TRACK_COLS deliberately drops album_id (rowids are per-database), so a
+    merged-in track lands with album_id NULL and its album has no row at all.
+    On top that heals at the next library scan; book never scans — it only ever
+    pulls — so without this the album is simply absent from the grid while its
+    tracks still play from search. Kept in sync with main.py by hand; the
+    grouping key must stay (COALESCE(album_artist, artist, ''), album)."""
+    con.execute("""
+        INSERT INTO albums (album, album_artist, year, orig_year)
+        SELECT album, COALESCE(album_artist, artist, ''), MIN(year), MIN(orig_year)
+          FROM tracks WHERE album IS NOT NULL
+         GROUP BY album, COALESCE(album_artist, artist, '')
+        ON CONFLICT(album, album_artist) DO UPDATE SET
+          year=excluded.year, orig_year=excluded.orig_year
+    """)
+    con.execute("""
+        UPDATE tracks SET album_id = (
+          SELECT a.id FROM albums a
+           WHERE a.album = tracks.album
+             AND a.album_artist = COALESCE(tracks.album_artist, tracks.artist, ''))
+         WHERE album_id IS NULL AND album IS NOT NULL
+    """)
+
+
 def merge(src_path, dst_path, dry_run=False, quiet=False):
     """Merge src INTO dst. Returns a stats dict. Never deletes."""
     con = sqlite3.connect(dst_path, timeout=60)
@@ -443,6 +469,9 @@ def merge(src_path, dst_path, dry_run=False, quiet=False):
                 con.execute("UPDATE lyrics SET attempts=? WHERE track_id=?", (sa, tid))
 
     _merge_info_tables(con, src, dry_run, st)
+
+    if st["tracks_new"] and not dry_run:
+        _rebuild_albums(con)
 
     if dry_run:
         con.rollback()
