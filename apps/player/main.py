@@ -3785,6 +3785,16 @@ class Bridge(QObject):
 
         self.albumsModel = DictListModel(ALBUM_ROLES, self)
         self.albumTracksModel = DictListModel(TRACK_ROLES, self)
+        # The now-playing page's album browser is a SECOND, independent reader
+        # of the same library: its own filter, its own open album, its own
+        # rows. Sharing the gallery's would mean typing in one search box
+        # re-filtering the other page, and two open album sections fighting
+        # over one track model.
+        self._browse_filter = ""
+        self._browse_album = 0
+        self._browse_live = False
+        self.browseModel = DictListModel(ALBUM_ROLES, self)
+        self.browseTracksModel = DictListModel(TRACK_ROLES, self)
         self.playlistModel = DictListModel(TRACK_ROLES, self)
         self._search_ids = []
         self._search_text = ""
@@ -3926,6 +3936,7 @@ class Bridge(QObject):
         # MEANING just changed; leaving them would show the old answer under
         # the new identity.
         self._apply_album_filter()
+        self._apply_browse_filter()
         if self._search_text:
             self.search(self._search_text)
 
@@ -3935,10 +3946,18 @@ class Bridge(QObject):
     def refreshAlbums(self, merge=False):
         self._album_rows = self._library.albums(self._sort, self._sort_descending)
         self._apply_album_filter(merge=merge)
+        self._apply_browse_filter(merge=merge)
 
     def _apply_album_filter(self, merge=False):
+        out = [album_row(r) for r in self._filtered_album_rows(self._filter)]
+        if merge:
+            self.albumsModel.merge(out)
+        else:
+            self.albumsModel.set_rows(out)
+
+    def _filtered_album_rows(self, text):
         rows = self._album_rows
-        words, aliases, genres, lo, hi = self._library.query_parts(self._filter)
+        words, aliases, genres, lo, hi = self._library.query_parts(text)
         if words or genres or lo is not None or hi is not None:
             # An album's genre and contributors are whatever its tracks carry;
             # its year is the album row's own, which is already COALESCEd.
@@ -3959,11 +3978,19 @@ class Bridge(QObject):
                     if hit(r)
                     and all(g in meta.get(r["id"], ("", None))[0] for g in genres)
                     and year_in(r["orig_year"] or r["year"], lo, hi)]
-        out = [album_row(r) for r in rows]
+        return rows
+
+    def _apply_browse_filter(self, merge=False):
+        # Nothing has asked for these rows until the browser is built, and
+        # mapping every album a second time on each gallery keystroke is pure
+        # waste on a library this size.
+        if not self._browse_live:
+            return
+        out = [album_row(r) for r in self._filtered_album_rows(self._browse_filter)]
         if merge:
-            self.albumsModel.merge(out)
+            self.browseModel.merge(out)
         else:
-            self.albumsModel.set_rows(out)
+            self.browseModel.set_rows(out)
 
     @Slot(str)
     def setSort(self, sort):
@@ -3982,6 +4009,28 @@ class Bridge(QObject):
     def setAlbumFilter(self, text):
         self._filter = text or ""
         self._apply_album_filter()
+
+    # ---- the now-playing page's album browser ----
+
+    @Slot(str)
+    def setBrowseFilter(self, text):
+        self._browse_filter = text or ""
+        self._browse_live = True
+        self._apply_browse_filter()
+
+    @Slot(int)
+    def openBrowseAlbum(self, album_id, merge=False):
+        """Fill the browser's own track rows. 0 closes the open album."""
+        album_id = int(album_id or 0)
+        self._browse_album = album_id
+        if album_id <= 0:
+            self.browseTracksModel.set_rows([])
+            return
+        out = self._track_rows(self._library.album_tracks(album_id))
+        if merge:
+            self.browseTracksModel.merge(out)
+        else:
+            self.browseTracksModel.set_rows(out)
 
     # ---- album detail ----
 
@@ -4429,6 +4478,8 @@ class Bridge(QObject):
         # their scroll (merge), unlike a user navigating to a new one.
         if self._current_album:
             self.openAlbum(self._current_album, merge=True)
+        if self._browse_album:
+            self.openBrowseAlbum(self._browse_album, merge=True)
         if self._current_smart:
             self.openSmart(self._current_smart, merge=True)
 
@@ -4443,8 +4494,8 @@ class Bridge(QObject):
         if not rows:
             return
         new = track_row(rows[0])
-        for model in (self.albumTracksModel, self.playlistModel,
-                      self.searchModel, self.queueModel):
+        for model in (self.albumTracksModel, self.browseTracksModel,
+                      self.playlistModel, self.searchModel, self.queueModel):
             for i in range(model.count):
                 if model.get(i).get("trackId") == track_id:
                     model.update_row(i, {**model.get(i), **new})
@@ -5311,6 +5362,8 @@ def main():
     ctx.setContextProperty("Lastfm", scrobbler)
     ctx.setContextProperty("AlbumsModel", bridge.albumsModel)
     ctx.setContextProperty("AlbumTracksModel", bridge.albumTracksModel)
+    ctx.setContextProperty("BrowseAlbumsModel", bridge.browseModel)
+    ctx.setContextProperty("BrowseTracksModel", bridge.browseTracksModel)
     ctx.setContextProperty("PlaylistModel", bridge.playlistModel)
     ctx.setContextProperty("SearchModel", bridge.searchModel)
     ctx.setContextProperty("QueueModel", bridge.queueModel)
