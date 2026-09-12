@@ -130,18 +130,15 @@
      renderWindowBackground(p, clipRect, r, color, yShift);
 --- a/kdecoration/oxygendecoration.cpp
 +++ b/kdecoration/oxygendecoration.cpp
-@@ -22,7 +22,11 @@
+@@ -22,4 +22,8 @@
  #include <KPluginFactory>
  #include <KSharedConfig>
  
 +#include <QDir>
 +#include <QFile>
 +#include <QGuiApplication>
- #include <QPainter>
 +#include <QScreen>
- #include <QTextStream>
- #include <QTimer>
- 
+ #include <QPainter>
 @@ -32,6 +36,57 @@
  
  K_PLUGIN_FACTORY_WITH_JSON(OxygenDecoFactory, "oxygen.json", registerPlugin<Oxygen::Decoration>(); registerPlugin<Oxygen::Button>();)
