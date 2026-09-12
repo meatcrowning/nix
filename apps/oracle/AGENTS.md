@@ -721,14 +721,17 @@ that swap is worth it; nothing else does it.
   `read_file` never lands in the turn's own tool list. Plus the definition rules (fallbacks, group resolution,
   a file replacing a built-in).
 
-## A decision, as buttons (`ask_choice`)
+## A decision, as a pressable list (`ask_choice`)
 
 **Some of the work is his taste, and an agent that just picks is doing the
 wrong job** [his, 2026-09-11: *"instead of just doing it and reporting back
 when its finished, what if they present the top available options to me? with
 format, track number, size, speed, etc displayed for each choice … at the
-bottom of that bubble itll show a row of buttons"*]. The motivating case is a
-record: five Soulseek copies differing in format, size, queue and speed. It is
+bottom of that bubble itll show a row of buttons"*]. The row of buttons lasted
+a day: **the candidate's whole block is the button now** [his, 2026-09-12:
+*"i want each entire block of the details of the selections to serve as its own
+selection bubble"*] — the thing he is reading is the thing he presses. The
+motivating case is a record: five Soulseek copies differing in format, size, queue and speed. It is
 built **generic** (his call) — the same card asks which edition to keep, which
 duplicate dies, which model to pull.
 
@@ -742,12 +745,15 @@ duplicate dies, which model to pull.
   `_choices`, so a second click, the late timeout and a cancelled turn all
   arrive and do nothing [his: *"once the user makes a selection they shouldnt
   even be able to click another button in that bubble later"*]. The rule lives
-  in main.py where it cannot be got around; the QML keeps the BUTTONS and
-  turns them into the record of the decision — the one he took held down
-  (`JobVerb.lit`, the KStyle's checked button under Plasma), the rest dead
-  [his, 2026-09-11]. Each button wears its CANDIDATE'S OWN NAME (clipped at
-  `labelMax`), never `pick 3`: the label is the effect. The row divides the
-  card's width between them so they stay on ONE line whatever the count. What
+  in main.py where it cannot be got around; the QML keeps the CANDIDATES and
+  turns them into the record of the decision — the one he took keeps its
+  `highlight` fill and 2px accent gutter (§9.1), the rest go quiet and every
+  block stops hovering and stops showing the hand cursor [his, 2026-09-11].
+  There is no separate label to write: the block is its own name, its details
+  and its note, so the control's label is literally the candidate (§10.1) and
+  nothing is clipped to fit a button. Each block still answers a button's
+  questions — `label`, `face`, `lit`, `enabled` — because that is what the
+  selftest reads off the item tree (`_card_verbs`). What
   the agent says after the answer opens its OWN bubble BELOW the card, so a
   card is never something an answer is folded in above.
 - **The way out is the compose box, not a button** [his, 2026-09-11]. There is
@@ -785,8 +791,8 @@ duplicate dies, which model to pull.
   (8) keep it a decision rather than a listing.
 - Harness: `tools/choice-test.py`, which drives real turns against a stub
   ollama and reads both halves — the request bodies the model gets back, and
-  the buttons actually drawn on the card (present while waiting, gone once
-  answered). `ORACLE_CHOICE=0|none|ignore` is the selftest hook it presses
+  the candidate blocks actually drawn on the card (live while waiting, dead
+  once answered, the one he took held). `ORACLE_CHOICE=0|none|ignore` is the selftest hook it presses
   with.
 
 ## Sessions

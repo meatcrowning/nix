@@ -1,13 +1,15 @@
 import QtQuick
 
-// A DECISION, put to him as buttons — the `ask_choice` tool's card.
+// A DECISION, put to him as a list he can press — the `ask_choice` tool's card.
 //
 // [his, 2026-09-11] — "instead of just doing it and reporting back when its
 // finished, what if they present the top available options to me? with format,
 // track number, size, speed, etc displayed for each choice … at the bottom of
-// that bubble itll show a row of buttons". The motivating job is a record with
-// five Soulseek copies, but the card is generic: whatever the agent put in
-// `details` is what the rows say.
+// that bubble itll show a row of buttons". The row of buttons is gone [his,
+// 2026-09-12] — "i want each entire block of the details of the selections to
+// serve as its own selection bubble" — so the candidate block IS the control.
+// The motivating job is a record with five Soulseek copies, but the card is
+// generic: whatever the agent put in `details` is what the rows say.
 //
 // Three rules it exists to keep:
 //
@@ -16,13 +18,14 @@ import QtQuick
 //     drawn) and says what happened once it stops waiting.
 //   * ONCE ANSWERED IT IS OVER [his]: "once the user makes a selection they
 //     shouldnt even be able to click another button in that bubble later". The
-//     buttons STAY [his, 2026-09-11] — the one he took holds itself down and
-//     the rest go dead beside it, so the card reads as the record of a decision
-//     rather than losing the thing he was looking at. They are a READOUT then,
-//     not an offer, which is why disabling rather than removing them is right
-//     here (§10.1 forbids a control that looks live and does nothing — this one
-//     does not look live). main.py's `_settle_choice` enforces the same thing
-//     underneath, where a stray click cannot get around it.
+//     candidates STAY [his, 2026-09-11] — the one he took keeps its highlight
+//     and accent gutter and the rest go quiet beside it, so the card reads as
+//     the record of a decision rather than losing the thing he was looking at.
+//     They are a READOUT then, not an offer, which is why they stop hovering
+//     and stop showing the hand cursor (§10.1 forbids a control that looks live
+//     and does nothing — this one does not look live). main.py's
+//     `_settle_choice` enforces the same thing underneath, where a stray click
+//     cannot get around it.
 //   * IT NEVER DEAD-ENDS. There is no `none of these` button [his,
 //     2026-09-11]: the way out is the compose box he already has. While a card
 //     is up, typing a reply settles it — his words go back as that tool call's
@@ -43,15 +46,6 @@ Rectangle {
     readonly property string state_: (entry && entry.state) ? entry.state : "pending"
     readonly property bool pending: state_ === "pending"
     readonly property int chosen: (entry && entry.index !== undefined) ? entry.index : -1
-
-    // A button is a button, not a paragraph: a candidate whose name runs long
-    // (a folder path, a release with an edition in brackets) is cut here and
-    // nowhere else — the numbered row above it says the whole thing.
-    readonly property int labelMax: 28
-    function buttonLabel(text) {
-        var s = String(text || "");
-        return s.length > labelMax ? s.slice(0, labelMax - 1) + "…" : s;
-    }
 
     // What the card says once it has stopped waiting. Every branch names
     // itself: a card that simply went quiet would read as a broken control.
@@ -105,15 +99,48 @@ Rectangle {
         Repeater {
             model: root.options
 
-            delegate: Column {
+            // THE WHOLE BLOCK IS THE BUTTON [his, 2026-09-12] — "i want each
+            // entire block of the details of the selections to serve as its own
+            // selection bubble". So there is no row of buttons under the card
+            // any more: the thing he is reading IS the thing he presses, which
+            // is §10.1 taken to its end (the control's label is its effect, and
+            // here the label is the whole candidate — format, size, speed and
+            // all). It also spends the width he already gave the card instead
+            // of squeezing five truncated names into one line.
+            delegate: Rectangle {
                 id: optionRow
                 required property int index
                 required property var modelData
 
+                // The block IS the button, so it answers a button's questions:
+                // `label`, `face`, `lit` and `enabled` are what the selftest
+                // reads off the item tree to prove what is drawn and what is
+                // still live (main.py's `_card_verbs`, tools/choice-test.py).
+                readonly property string label: String(modelData.label || "")
+                readonly property string face: root.face
+                readonly property bool lit: isChosen
+                enabled: root.pending
+
                 width: body.width
-                spacing: 1
+                implicitHeight: optionBody.implicitHeight + 10
+                height: implicitHeight
+                radius: 3
 
                 readonly property bool isChosen: root.chosen === optionRow.index
+                readonly property bool hot: root.pending && optionMouse.containsMouse
+
+                // A row highlight is a fill plus a 2px accent gutter (§9.1) —
+                // the one he took keeps both once the card is closed, so the
+                // answer is still findable in the transcript later.
+                color: (hot || isChosen) ? Theme.highlight : "transparent"
+
+                Rectangle {
+                    width: 2
+                    height: parent.height
+                    color: Theme.accent
+                    visible: optionRow.isChosen
+                }
+
                 // Every `[name, value]` the agent gave, on one line. The names
                 // are the agent's own words (format, size, speed, queue…) —
                 // this draws them, it does not know them.
@@ -128,76 +155,63 @@ Rectangle {
                     return parts.join("  ·  ");
                 }
 
-                PixelText {
-                    width: parent.width
-                    elide: Text.ElideRight
-                    text: (optionRow.index + 1) + ".  " + optionRow.modelData.label
-                    // The one he took is the one worth finding again later.
-                    color: optionRow.isChosen ? Theme.accent
-                         : root.pending ? Theme.text : Theme.textDim
-                }
-                PixelText {
-                    x: 18
-                    width: parent.width - 18
-                    wrapMode: Text.WordWrap
-                    visible: text !== ""
-                    text: optionRow.detailLine
-                    color: Theme.textDim
-                }
-                PixelText {
-                    x: 18
-                    width: parent.width - 18
-                    wrapMode: Text.WordWrap
-                    visible: text !== ""
-                    text: optionRow.modelData.note || ""
-                    color: Theme.dim
-                }
-            }
-        }
+                Column {
+                    id: optionBody
+                    x: 6
+                    y: 5
+                    width: parent.width - 12
+                    spacing: 1
 
-        // The buttons ARE the candidates [his, 2026-09-11]: each one wears the
-        // option's own name, so pressing it is picking that thing rather than
-        // picking a number and trusting the list above to still mean what it
-        // did (§10.1 — the control's label is its effect). A long name is
-        // clipped for the button only; the row above carries it in full.
-        // They outlive the answer — held down for the one he took, dead for
-        // the rest.
-        // ONE LINE, WHATEVER THE COUNT [his, 2026-09-11]: the row divides the
-        // card's width between the candidates rather than wrapping into a
-        // block of buttons. Each button then elides its own name — the
-        // numbered row above it carries the full one.
-        Row {
-            id: verbRow
-            width: parent.width
-            spacing: 6
-            readonly property int cells: Math.max(1, root.options.length)
-            readonly property int cellW:
-                Math.max(40, Math.floor((width - spacing * (cells - 1)) / cells))
+                    PixelText {
+                        width: parent.width
+                        elide: Text.ElideRight
+                        text: (optionRow.index + 1) + ".  " + optionRow.modelData.label
+                        // The one he took is the one worth finding again later.
+                        color: optionRow.isChosen ? Theme.accent
+                             : root.pending ? Theme.text : Theme.textDim
+                    }
+                    PixelText {
+                        x: 18
+                        width: parent.width - 18
+                        wrapMode: Text.WordWrap
+                        visible: text !== ""
+                        text: optionRow.detailLine
+                        color: root.pending ? Theme.textDim : Theme.dim
+                    }
+                    PixelText {
+                        x: 18
+                        width: parent.width - 18
+                        wrapMode: Text.WordWrap
+                        visible: text !== ""
+                        text: optionRow.modelData.note || ""
+                        color: Theme.dim
+                    }
+                }
 
-            Repeater {
-                model: root.options
-                delegate: JobVerb {
-                    required property int index
-                    required property var modelData
-                    width: verbRow.cellW
-                    label: root.buttonLabel(modelData.label)
+                // Dead once answered, and it does not look live either: no
+                // hover, no hand cursor, the fill gone (§10.1 — a control that
+                // looks live and does nothing is the thing this must not be).
+                MouseArea {
+                    id: optionMouse
+                    anchors.fill: parent
+                    hoverEnabled: root.pending
                     enabled: root.pending
-                    lit: root.chosen === index
-                    onClicked: root.picked(index)
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.picked(optionRow.index)
                 }
             }
         }
 
-        // The wait — and, for an ending no button can show, what came of it.
-        // A pressed button IS the answer, so it is not narrated twice (§3.5
+        // The wait — and, for an ending the list cannot show, what came of it.
+        // The held candidate IS the answer, so it is not narrated twice (§3.5
         // says a state twice only where the first reading can be missed).
         PixelText {
             width: parent.width
             wrapMode: Text.WordWrap
             visible: text !== ""
             // While it waits, the line says BOTH ways out — press one, or say
-            // something. A pressed button is its own answer afterwards (§3.5),
-            // so only an ending no button can show is spelled out.
+            // something. The held candidate is its own answer afterwards
+            // (§3.5), so only an ending the list cannot show is spelled out.
             text: root.pending ? "waiting for you… or answer in the box below"
                 : (root.chosen >= 0) ? ""
                 : root.outcome

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A DECISION, put to him as buttons — and what the agent does with the answer.
+"""A DECISION, put to him as a pressable list — and what the agent does with it.
 
 `ask_choice` (main.py) is a tool call that DOES NOT RETURN until he clicks: the
 round stays open, so the agent that asked is still holding everything it knew
@@ -9,16 +9,16 @@ the model gets back, and the rendered card in the transcript.
 
 What it pins down:
 
-  * the card is drawn, with the details the agent gave, and the buttons are
-    REALLY there (read off the item tree, not off the model);
+  * the card is drawn, with the details the agent gave, and every candidate
+    block is REALLY there and live (read off the item tree, not off the model);
   * his click comes back as that tool call's result, in the same turn;
-  * once answered the buttons are GONE and a second press changes nothing —
+  * once answered every block is dead and a second press changes nothing —
     the rule main.py enforces in `_settle_choice` [his, 2026-09-11];
   * "none of these" is always offered and says so honestly to the agent;
   * a SUBAGENT's card lands in the conversation he is reading [his: "spawn a
     subagent to grab a record and itll still show me the options like normal"];
   * a card reloaded from a saved session comes back locked, never as live
-    buttons for a turn that is over.
+    live candidates for a turn that is over.
 
 His daemon is never touched, no model is loaded, nothing reaches his screen.
 """
@@ -220,9 +220,10 @@ check("the buttons are really drawn while it waits",
 check("and there is no escape BUTTON — the compose box is the way out [his]",
       bool(before) and "none of these" not in before.group(1),
       before.group(1) if before else "no card")
-check("…wearing the candidates' OWN names [his], the long one clipped",
+check("…wearing the candidates' OWN names [his], in FULL — the block is the "
+      "button now [his, 2026-09-12], so nothing is clipped to fit one",
       bool(before) and "pick 1" not in before.group(1)
-      and "Returnal (2017 reissue) [FL…" in before.group(1),
+      and OPTIONS[2]["label"] in before.group(1),
       before.group(1) if before else "no card")
 check("and STILL THERE once he has chosen [his] — the card is the record",
       bool(after) and OPTIONS[0]["label"] in after.group(1),
