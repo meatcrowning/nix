@@ -1,0 +1,162 @@
+--- a/liboxygen/oxygenhelper.h
++++ b/liboxygen/oxygenhelper.h
+@@ -27,6 +27,7 @@
+ #include <QPixmap>
+ #include <QQueue>
+ #include <QScopedPointer>
++#include <QScreen>
+ #include <QWidget>
+ 
+ #if OXYGEN_HAVE_X11
+@@ -277,6 +278,28 @@
+ 
+     virtual void renderWindowBackground(QPainter *p, const QRectF &clipRect, const QRectF &windowRect, const QColor &color, int y_shift);
+ 
++    /**
++    The work area, in logical pixels, published by the panel surface renderer.
++    An invalid rect when it has not been published.  Wayland tells a window
++    its size but never its position, and reports no panel struts to a client
++    or to a decoration either, so this is the one fact needed to know where a
++    MAXIMISED window starts: it covers the work area exactly.
++    */
++    static QRect panelWorkArea();
++
++    /**
++    The screen-sized field a maximised window's background is a crop of, in
++    the coordinates of something whose own origin sits `inset` from the work
++    area's top-left.  Invalid when there is no published work area.  Both the
++    decoration and the style draw from it, so the panel edge, the titlebar and
++    the client below it are three crops of one gradient rather than three
++    gradients that restart at each other's edges.
++    */
++    static QRectF desktopFieldRect(const QScreen *screen, const QPoint &inset);
++
++    //* the client's own offset below the work area: Oxygen's titlebar convention
++    static const int titleBarConvention = 23;
++
+     //@}
+ 
+     //* dots
+--- a/liboxygen/oxygenhelper.cpp
++++ b/liboxygen/oxygenhelper.cpp
+@@ -15,7 +15,10 @@
+ #include <KWindowSystem>
+ 
+ #include <QApplication>
++#include <QDir>
++#include <QFile>
+ #include <QPainter>
++#include <QScreen>
+ #include <QTextStream>
+ #include <math.h>
+ 
+@@ -121,6 +124,54 @@
+ }
+ 
+ //____________________________________________________________________
++QRect Helper::panelWorkArea()
++{
++    // Read once. A panel that changes thickness is a new render for the
++    // panels and a restart for the applications.
++    static const QRect area = [] {
++        QString state = qEnvironmentVariable("XDG_STATE_HOME");
++        if (state.isEmpty()) {
++            state = QDir::homePath() + QStringLiteral("/.local/state");
++        }
++
++        QFile file(state + QStringLiteral("/plasma-panel-workarea"));
++        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
++            return QRect();
++        }
++
++        const QList<QByteArray> fields = file.readLine(64).simplified().split(' ');
++        if (fields.size() != 4) {
++            return QRect();
++        }
++
++        int value[4];
++        for (int i = 0; i < 4; ++i) {
++            bool ok = false;
++            value[i] = fields[i].toInt(&ok);
++            if (!ok) {
++                return QRect();
++            }
++        }
++
++        const QRect published(value[0], value[1], value[2], value[3]);
++        return published.isValid() ? published : QRect();
++    }();
++
++    return area;
++}
++
++//____________________________________________________________________
++QRectF Helper::desktopFieldRect(const QScreen *screen, const QPoint &inset)
++{
++    const QRect area = panelWorkArea();
++    if (!screen || !area.isValid()) {
++        return QRectF();
++    }
++
++    return QRectF(screen->geometry().translated(-area.topLeft() - inset));
++}
++
++//____________________________________________________________________
+ void Helper::renderWindowBackground(QPainter *p, const QRectF &clipRect, const QWidget *widget, const QWidget *window, const QColor &color, int yShift)
+ {
+     // get coordinates relative to the client area
+@@ -136,6 +187,22 @@
+         w = w->parentWidget();
+     }
+ 
++    // A maximised or fullscreen window covers a rect this process knows the
++    // position of, so its background can be a crop of the one screen-sized
++    // field the panels and the titlebar are painted from.  The phase is that
++    // field's own, not this window's and not a caller's local restart.
++    const Qt::WindowStates state = window->windowState();
++    if (state & (Qt::WindowMaximized | Qt::WindowFullScreen)) {
++        const QPoint inset = (state & Qt::WindowFullScreen)
++            ? -panelWorkArea().topLeft()
++            : QPoint(0, titleBarConvention);
++        const QRectF field = desktopFieldRect(window->screen(), inset);
++        if (field.isValid()) {
++            renderWindowBackground(p, clipRect, field.translated(-x, -y), color, -titleBarConvention);
++            return;
++        }
++    }
++
+     // translate and call the base method
+     const QRect r = window->rect().translated(-x, -y);
+     renderWindowBackground(p, clipRect, r, color, yShift);
+--- a/kdecoration/oxygendecoration.cpp
++++ b/kdecoration/oxygendecoration.cpp
+@@ -22,7 +22,9 @@
+ #include <KPluginFactory>
+ #include <KSharedConfig>
+ 
++#include <QGuiApplication>
+ #include <QPainter>
++#include <QScreen>
+ #include <QTextStream>
+ #include <QTimer>
+ 
+@@ -570,6 +572,19 @@
+         innerClientRect.adjust(1, 1, -1, -1);
+     }
+ 
++    // A maximised window's frame IS the work area, so its titlebar can be the
++    // crop of the desktop field that sits there — continuous with the panel
++    // above it and with the client below it.  KWin does not tell a decoration
++    // where its window is either; the work area is the one position both ends
++    // can know.
++    if (isMaximized() && !c->isShaded()) {
++        const QRectF field = Helper::desktopFieldRect(QGuiApplication::primaryScreen(), QPoint(0, 0));
++        if (field.isValid()) {
++            SettingsProvider::self()->helper()->renderWindowBackground(painter, clipRect, field, titleBarColor(palette), -Helper::titleBarConvention);
++            return;
++        }
++    }
++
+     SettingsProvider::self()->helper()->renderWindowBackground(painter, clipRect, innerClientRect, titleBarColor(palette), borderTop() - 24);
+ }
+ 

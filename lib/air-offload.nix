@@ -98,6 +98,9 @@ let
     paths = [ hostTools native.kdePackages.kcmutils.dev native.kdePackages.kpackage.dev ];
   };
   crossOxygen = (crossQt "oxygen").overrideAttrs (old: {
+    # Book's nix applications load THIS style, so the maximised-window field
+    # has to be in it as well as in the Fedora build KWin's decoration uses.
+    patches = (old.patches or []) ++ [ ../home/prog/oxygen-desktop-field.patch ];
     outputs = builtins.filter (o: o != "qt5" && o != "debug") old.outputs;
     cmakeFlags = old.cmakeFlags ++ [ "-DBUILD_QT5=OFF" "-DBUILD_QT6=ON" "-DKF6_HOST_TOOLING=${oxygenHostTools}/lib/cmake" ];
     postInstall = "";
