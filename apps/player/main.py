@@ -2539,10 +2539,18 @@ class Player(QObject):
         # audible pop, ~22 a minute on mpv's PipeWire node. Forcing the cache
         # on puts 30s of decoded-ahead audio between the network and the sink,
         # so a stalled read is invisible.
+        #
+        # NOT stream_buffer_size: it sizes the STREAM layer's individual reads,
+        # and a 4MiB one has to come off the wire in full before the demuxer
+        # sees a single byte — the whole of it is on the path to first audio.
+        # Measured on book 2026-09-12, 30 cold tracks per arm: time to first
+        # audio is 2.16s median with it and 0.62s without, while the demuxer
+        # cache (the thing that actually absorbs a stalled read) still sits at
+        # 29.99s minimum over a 65s play. The underrun protection is the
+        # demuxer cache; this option only bought the lag.
         if library_is_remote():
             opts.update(cache="yes", cache_secs=30, demuxer_max_bytes="64MiB",
-                        demuxer_readahead_secs=20, stream_buffer_size="4MiB",
-                        audio_buffer=0.4)
+                        demuxer_readahead_secs=20, audio_buffer=0.4)
         self._mpv = libmpv.MPV(**opts)
         vol = self._prefs.get("volume", 100)
         try:
