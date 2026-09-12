@@ -108,6 +108,14 @@ Nothing is retagged or merged: albums stay filed under the name they were
 released as. `AliasEditor.qml` writes the group, `tools/library-ipc.py` expands
 the same way, and `tools/alias-ui-test.py` covers both.
 
+The gallery's multi-selection lives in `AlbumGrid.qml` (`selectedIds`, ctrl
+toggles, shift takes the run from `_anchorId`) and is spent through
+`Player.playAlbums/queueAlbums/playAlbumsNext`, which concatenate whole albums
+in the order handed over. A model reset clears it: the covers picked are not
+the ones a new filter or sort shows. `tools/album-multiselect-test.py` drives
+the real gestures against `album-playnext-test.py`'s stubs; add fake Bridge
+slots there rather than starting a second stub set.
+
 Search retains the complete matching id set and pages its display in 400-row
 chunks with an exact total. Play-all uses every match; clicking a page row
 starts at its global result offset. Search display must not stat remote files

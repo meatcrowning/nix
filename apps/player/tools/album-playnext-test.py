@@ -301,6 +301,13 @@ class FakePlayer(QObject):
     def queueAlbum(self, _a): self.calls.append(("queueAlbum", _a))
     @Slot(int)
     def playAlbumNext(self, _a): self.calls.append(("playAlbumNext", _a))
+    # The gallery's multi-selection (album-multiselect-test.py drives these).
+    @Slot("QVariantList", int)
+    def playAlbums(self, _a, _i): self.calls.append(("playAlbums", list(_a), _i))
+    @Slot("QVariantList")
+    def queueAlbums(self, _a): self.calls.append(("queueAlbums", list(_a)))
+    @Slot("QVariantList")
+    def playAlbumsNext(self, _a): self.calls.append(("playAlbumsNext", list(_a)))
     @Slot("QVariant")
     def queueTracks(self, _t): pass
     @Slot("QVariant")
