@@ -101,13 +101,16 @@ Rectangle {
 
             // THE WHOLE BLOCK IS THE BUTTON [his, 2026-09-12] — "i want each
             // entire block of the details of the selections to serve as its own
-            // selection bubble". So there is no row of buttons under the card
-            // any more: the thing he is reading IS the thing he presses, which
-            // is §10.1 taken to its end (the control's label is its effect, and
-            // here the label is the whole candidate — format, size, speed and
-            // all). It also spends the width he already gave the card instead
-            // of squeezing five truncated names into one line.
-            delegate: Rectangle {
+            // selection bubble", and it LOOKS like one [his, same day: "can you
+            // make them look like actual buttons just larger than normal"], so
+            // it is a real relief cell grown to hold the candidate rather than
+            // a hover highlight on a paragraph (ChoiceBlock.qml, with its
+            // KStyle twin under Plasma). There is no row of buttons under the
+            // card any more: the thing he is reading IS the thing he presses,
+            // which is §10.1 taken to its end — the control's label is the
+            // whole candidate, format, size, speed and all, so nothing is
+            // clipped to fit a button.
+            delegate: ChoiceBlock {
                 id: optionRow
                 required property int index
                 required property var modelData
@@ -117,29 +120,12 @@ Rectangle {
                 // reads off the item tree to prove what is drawn and what is
                 // still live (main.py's `_card_verbs`, tools/choice-test.py).
                 readonly property string label: String(modelData.label || "")
-                readonly property string face: root.face
-                readonly property bool lit: isChosen
-                enabled: root.pending
-
-                width: body.width
-                implicitHeight: optionBody.implicitHeight + 10
-                height: implicitHeight
-                radius: 3
-
                 readonly property bool isChosen: root.chosen === optionRow.index
-                readonly property bool hot: root.pending && optionMouse.containsMouse
+                lit: isChosen
+                enabled: root.pending
+                width: body.width
 
-                // A row highlight is a fill plus a 2px accent gutter (§9.1) —
-                // the one he took keeps both once the card is closed, so the
-                // answer is still findable in the transcript later.
-                color: (hot || isChosen) ? Theme.highlight : "transparent"
-
-                Rectangle {
-                    width: 2
-                    height: parent.height
-                    color: Theme.accent
-                    visible: optionRow.isChosen
-                }
+                onClicked: root.picked(optionRow.index)
 
                 // Every `[name, value]` the agent gave, on one line. The names
                 // are the agent's own words (format, size, speed, queue…) —
@@ -156,10 +142,7 @@ Rectangle {
                 }
 
                 Column {
-                    id: optionBody
-                    x: 6
-                    y: 5
-                    width: parent.width - 12
+                    width: parent.width
                     spacing: 1
 
                     PixelText {
@@ -167,8 +150,7 @@ Rectangle {
                         elide: Text.ElideRight
                         text: (optionRow.index + 1) + ".  " + optionRow.modelData.label
                         // The one he took is the one worth finding again later.
-                        color: optionRow.isChosen ? Theme.accent
-                             : root.pending ? Theme.text : Theme.textDim
+                        color: optionRow.isChosen ? Theme.accent : optionRow.fg
                     }
                     PixelText {
                         x: 18
@@ -176,7 +158,7 @@ Rectangle {
                         wrapMode: Text.WordWrap
                         visible: text !== ""
                         text: optionRow.detailLine
-                        color: root.pending ? Theme.textDim : Theme.dim
+                        color: optionRow.fgDim
                     }
                     PixelText {
                         x: 18
@@ -184,20 +166,8 @@ Rectangle {
                         wrapMode: Text.WordWrap
                         visible: text !== ""
                         text: optionRow.modelData.note || ""
-                        color: Theme.dim
+                        color: optionRow.fgFaint
                     }
-                }
-
-                // Dead once answered, and it does not look live either: no
-                // hover, no hand cursor, the fill gone (§10.1 — a control that
-                // looks live and does nothing is the thing this must not be).
-                MouseArea {
-                    id: optionMouse
-                    anchors.fill: parent
-                    hoverEnabled: root.pending
-                    enabled: root.pending
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.picked(optionRow.index)
                 }
             }
         }
