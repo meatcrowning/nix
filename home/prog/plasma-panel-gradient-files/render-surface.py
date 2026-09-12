@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Render the KDE style's window background as one screen-sized PNG.
 
-The panels crop this image at their global coordinates.  Rendering a real,
+The panels crop this image at their global coordinates, and a maximised
+window's Oxygen background is the same field (see
+`home/prog/oxygen-desktop-field.patch`).  That patch needs one fact a Wayland
+client cannot obtain — where the work area starts — so this also publishes it
+as `plasma-panel-workarea`.  Rendering a real,
 never-shown QWidget is the same mechanism apps/pylib/kdeshell.py uses for the
 pixel-exact background behind our Plasma QML apps; it does not map a window or
 interact with the desktop.
@@ -50,6 +54,61 @@ def plasma_screen_size() -> tuple[int, int] | None:
         return None
     _, width, height = min(outputs)
     return width, height
+
+def panel_struts() -> dict[str, int]:
+    """Measure what the panels reserve, from their own declarative config.
+
+    Qt cannot answer this: `QScreen.availableGeometry` on Wayland is the whole
+    output, measured here, and no protocol reports another client's exclusive
+    zone.  Plasma's own two files do — the containment carries the edge, its
+    view carries the thickness — and they are what the panel layout is
+    generated from.
+    """
+    edges = {3: "top", 4: "bottom", 5: "left", 6: "right"}
+    config = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+
+    panels: dict[str, str] = {}
+    group = None
+    try:
+        applets = (config / "plasma-org.kde.plasma.desktop-appletsrc").read_text()
+        views = (config / "plasmashellrc").read_text()
+    except OSError:
+        return {}
+    for line in applets.splitlines():
+        if line.startswith("["):
+            group = line
+            continue
+        containment = re.fullmatch(r"\[Containments\]\[(\d+)\]", group or "")
+        if containment is not None and line.startswith("location="):
+            panels[containment.group(1)] = edges.get(int(line[9:]), "")
+
+    struts: dict[str, int] = {}
+    group = None
+    for line in views.splitlines():
+        if line.startswith("["):
+            group = line
+            continue
+        view = re.fullmatch(r"\[PlasmaViews\]\[Panel (\d+)\]\[Defaults\]", group or "")
+        if view is None or not line.startswith("thickness="):
+            continue
+        edge = panels.get(view.group(1))
+        if edge:
+            struts[edge] = max(struts.get(edge, 0), int(line[10:]))
+    return struts
+
+
+def publish_work_area(state: Path, width: int, height: int) -> None:
+    """Write the work area for the style's maximised-window field."""
+    struts = panel_struts()
+    left, top = struts.get("left", 0), struts.get("top", 0)
+    area = (left, top,
+            max(1, width - left - struts.get("right", 0)),
+            max(1, height - top - struts.get("bottom", 0)))
+    target = state / "plasma-panel-workarea"
+    line = "%d %d %d %d\n" % area
+    if not target.exists() or target.read_text() != line:
+        target.write_text(line)
+
 
 def render_surface(width: int, height: int, palette: QPalette) -> QImage:
     """Render an actual Oxygen styled top-level widget, never mapping it."""
@@ -107,6 +166,7 @@ def main() -> int:
 
     state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
     state.mkdir(parents=True, exist_ok=True)
+    publish_work_area(state, width, height)
     target = state / "plasma-panel-surface.png"
     temporary = target.with_suffix(".new.png")
     if not image.save(str(temporary), "PNG"):
