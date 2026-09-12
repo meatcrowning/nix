@@ -64,10 +64,17 @@
       FEDORA_VERSION=$(/usr/bin/rpm -q --qf '%{VERSION}' plasma-oxygen)
       SOURCE_VERSION=${pkgs.kdePackages.oxygen.version}
 
-      [ "$FEDORA_VERSION" = "$SOURCE_VERSION" ] || {
+      # KDecoration3 and KStyle are stable across a Plasma point release, and
+      # Fedora moves ahead of nixpkgs' source between them. Refuse a different
+      # FEATURE release, which is where those interfaces do move.
+      FEDORA_SERIES=''${FEDORA_VERSION%.*}
+      SOURCE_SERIES=''${SOURCE_VERSION%.*}
+      [ "$FEDORA_SERIES" = "$SOURCE_SERIES" ] || {
         echo "oxygen-vivaldi-build: Fedora Oxygen $FEDORA_VERSION != source $SOURCE_VERSION" >&2
         exit 1
       }
+      [ "$FEDORA_VERSION" = "$SOURCE_VERSION" ] || \
+        echo "oxygen-vivaldi-build: building $SOURCE_VERSION source against Fedora $FEDORA_VERSION"
       for tool in /usr/bin/cmake /usr/bin/gcc /usr/bin/g++ /usr/bin/git; do
         [ -x "$tool" ] || {
           echo "oxygen-vivaldi-build: $tool is missing" >&2
