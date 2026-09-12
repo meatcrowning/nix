@@ -44,11 +44,22 @@ def _relaunch_under_player_python():
         except OSError:
             pass
     found = re.search(r"/nix/store/[^\" ]+-env/bin/python3[0-9.]*", text)
-    if not found:
-        sys.exit("no PySide6, and no `player` wrapper to resolve its python from")
+    # On book the wrapper is air-launch.sh and PySide6 is Fedora's, exactly as
+    # the launcher's own PLAYER_PYTHON default says.
+    python = found.group(0) if found else "/usr/bin/python3"
+    if not os.access(python, os.X_OK):
+        sys.exit("no PySide6, and no python with it to relaunch under")
     os.environ["GUEST_TEST_RELAUNCHED"] = "1"
-    os.execv(found.group(0), [found.group(0), str(Path(__file__).resolve())] + sys.argv[1:])
+    os.execv(python, [python, str(Path(__file__).resolve())] + sys.argv[1:])
 
+
+# BOOK: the session exports a nix `QT_PLUGIN_PATH`, and Fedora's PySide6 links
+# Fedora's Qt — loading the nix platform plugin into it aborts the process
+# before a single message is printed. An offscreen harness wants the
+# interpreter's own plugins, whichever host this is.
+if "/nix/store" in os.environ.get("QT_PLUGIN_PATH", "") and not sys.executable.startswith("/nix/store"):
+    os.environ.pop("QT_PLUGIN_PATH", None)
+    os.environ.pop("QT_STYLE_OVERRIDE", None)
 
 try:
     import PySide6  # noqa: F401
