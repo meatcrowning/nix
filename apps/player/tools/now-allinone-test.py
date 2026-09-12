@@ -382,6 +382,12 @@ def main():
               browser[0].property("openId") == first
               and bridge.browseTracksModel.count == 2,
               (browser[0].property("openId"), bridge.browseTracksModel.count))
+        art = named(page, "openArt")
+        rows = 3 * (theme.property("lineHeight") + 2) + 2 * 2
+        check("…the cover no taller than the three lines beside it",
+              art and abs(art[0].property("height") - rows) <= 1
+              and abs(art[0].property("width") - art[0].property("height")) < 0.6,
+              art and (art[0].property("height"), art[0].property("width"), rows))
         drilled = "\n".join(texts(page))
         check("…with the album's identity and a way back",
               "back" in drilled and "play" in drilled, drilled)
