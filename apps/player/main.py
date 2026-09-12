@@ -3022,6 +3022,29 @@ class Player(QObject):
         rows = self._library.album_tracks(album_id)
         self.playNext([r["id"] for r in rows])
 
+    def _albums_track_ids(self, album_ids):
+        """Every track of several albums, each album whole and in its own
+        order, the albums in the order they were handed over — the gallery's
+        multi-selection, which is already in gallery order."""
+        ids = []
+        for album_id in album_ids:
+            ids.extend(r["id"] for r in self._library.album_tracks(int(album_id)))
+        return ids
+
+    @Slot("QVariantList", int)
+    def playAlbums(self, album_ids, start=-1):
+        """The multi-selected covers' "play". `start` is a QUEUE row, not an
+        album: -1 is the play-all that pins nothing under shuffle."""
+        self.playTracks(self._albums_track_ids(album_ids), start)
+
+    @Slot("QVariantList")
+    def queueAlbums(self, album_ids):
+        self.queueTracks(self._albums_track_ids(album_ids))
+
+    @Slot("QVariantList")
+    def playAlbumsNext(self, album_ids):
+        self.playNext(self._albums_track_ids(album_ids))
+
     def _fresh_rows(self, ids):
         """Library rows for `ids`, in the order given, minus anything whose file
         is gone (the library drive can be unplugged under a listing)."""
