@@ -72,8 +72,11 @@ let
   # but cannot represent one gradient shared by a horizontal panel.  Overlay
   # both panels with a real screen-space surface. It stays fully opaque rather
   # than following Plasma's adaptive panel transition, so the fullscreen
-  # Oxygen gradient is the stable face at all times. Retain the FrameSvg
-  # because PanelView reads its mask and margins in C++.
+  # Oxygen gradient is the stable face at all times. Nothing else may key off
+  # panelOpacity either: a bevel or shadow that appears only once a window
+  # touches the panel makes the panel change face on maximise and draws a seam
+  # against the maximised window. Retain the FrameSvg because PanelView reads
+  # its mask and margins in C++.
   panel-gradient-view = pkgs.runCommand "plasma-panel-gradient-view"
     { nativeBuildInputs = [ pkgs.perl ]; }
     ''
@@ -83,12 +86,10 @@ let
       panel_qml=$out/contents/views/Panel.qml
       perl -0pi -e 's/(id: opaqueItem.*?opacity:) root\.panelOpacity/$1 0/s' $panel_qml
       perl -0pi -e 's|(import QtQml\n)|$1import Qt.labs.folderlistmodel\n|' $panel_qml
-      awk -v surface=${./plasma-panel-gradient-files/Surface.qmlfrag} -v shadow=${./plasma-panel-gradient-files/Shadow.qmlfrag} '
+      awk -v surface=${./plasma-panel-gradient-files/Surface.qmlfrag} '
         /^    Keys.onEscapePressed: \{$/ {
           while ((getline line < surface) > 0) print line
           close(surface)
-          while ((getline line < shadow) > 0) print line
-          close(shadow)
           print
           next
         }
