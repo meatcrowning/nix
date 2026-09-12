@@ -130,17 +130,77 @@
      renderWindowBackground(p, clipRect, r, color, yShift);
 --- a/kdecoration/oxygendecoration.cpp
 +++ b/kdecoration/oxygendecoration.cpp
-@@ -22,7 +22,9 @@
+@@ -22,7 +22,11 @@
  #include <KPluginFactory>
  #include <KSharedConfig>
  
++#include <QDir>
++#include <QFile>
 +#include <QGuiApplication>
  #include <QPainter>
 +#include <QScreen>
  #include <QTextStream>
  #include <QTimer>
  
-@@ -570,6 +572,19 @@
+@@ -32,6 +36,57 @@
+ 
+ K_PLUGIN_FACTORY_WITH_JSON(OxygenDecoFactory, "oxygen.json", registerPlugin<Oxygen::Decoration>(); registerPlugin<Oxygen::Button>();)
+ 
++namespace
++{
++//* Oxygen's own assumption about where a client sits below its titlebar
++const int titleBarConvention = 23;
++
++/**
++The screen-sized field a maximised window is painted from, in the decoration's
++own coordinates, or an invalid rect when the panels have not published a work
++area.  A maximised window's frame covers the work area exactly, which is the
++only position either end of this — a decoration or a client — can know.
++*/
++QRectF desktopFieldRect()
++{
++    static const QRect area = [] {
++        QString state = qEnvironmentVariable("XDG_STATE_HOME");
++        if (state.isEmpty()) {
++            state = QDir::homePath() + QStringLiteral("/.local/state");
++        }
++
++        QFile file(state + QStringLiteral("/plasma-panel-workarea"));
++        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
++            return QRect();
++        }
++
++        const QList<QByteArray> fields = file.readLine(64).simplified().split(' ');
++        if (fields.size() != 4) {
++            return QRect();
++        }
++
++        int value[4];
++        for (int i = 0; i < 4; ++i) {
++            bool ok = false;
++            value[i] = fields[i].toInt(&ok);
++            if (!ok) {
++                return QRect();
++            }
++        }
++
++        const QRect published(value[0], value[1], value[2], value[3]);
++        return published.isValid() ? published : QRect();
++    }();
++
++    const QScreen *screen = QGuiApplication::primaryScreen();
++    if (!screen || !area.isValid()) {
++        return QRectF();
++    }
++
++    return QRectF(screen->geometry().translated(-area.topLeft()));
++}
++}
++
+ namespace Oxygen
+ {
+ using KDecoration3::ColorGroup;
+@@ -570,6 +625,23 @@
          innerClientRect.adjust(1, 1, -1, -1);
      }
  
@@ -149,10 +209,14 @@
 +    // above it and with the client below it.  KWin does not tell a decoration
 +    // where its window is either; the work area is the one position both ends
 +    // can know.
++    //
++    // This repeats liboxygen's reader on purpose. Fedora's KWin loads this
++    // decoration against Fedora's own liboxygen, so a new symbol there is an
++    // unresolved symbol here and the decoration does not load at all.
 +    if (isMaximized() && !c->isShaded()) {
-+        const QRectF field = Helper::desktopFieldRect(QGuiApplication::primaryScreen(), QPoint(0, 0));
++        const QRectF field = desktopFieldRect();
 +        if (field.isValid()) {
-+            SettingsProvider::self()->helper()->renderWindowBackground(painter, clipRect, field, titleBarColor(palette), -Helper::titleBarConvention);
++            SettingsProvider::self()->helper()->renderWindowBackground(painter, clipRect, field, titleBarColor(palette), -titleBarConvention);
 +            return;
 +        }
 +    }
