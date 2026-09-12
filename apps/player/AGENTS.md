@@ -17,7 +17,7 @@ SMB setup and recovery live in `docs/agents/air-library-share.md`.
 | SQLite schema, scan, library queries, playback, models, IPC | `main.py` |
 | Smart-playlist vocabulary and SQL | `SMART_FIELDS`, `SMART_OPS`, `SMART_SORTS`, `SmartLists` in `main.py` |
 | Root composition and action table | `qml/Root.qml`; Hyprland window wrapper `qml/Main.qml` |
-| Album browsing, track rows, shared row menu | `qml/AlbumGrid.qml`, `AlbumPanel.qml`, `TrackList.qml`, `TrackMenu.qml` |
+| Album browsing, track rows, shared menus | `qml/AlbumGrid.qml`, `AlbumPanel.qml`, `TrackList.qml`, `TrackMenu.qml`, `AlbumMenu.qml` |
 | Now-playing album browser | `qml/AlbumBrowser.qml`; `browseModel`/`browseTracksModel` in `main.py` |
 | Plasma composition and controls | `qml/+plasma/`, `transport.py`, shared `pylib/kdeshell.py` |
 | Safe audio-file replacement | `atomicsave.py` |
@@ -267,6 +267,13 @@ gone and lyrics own the lower half of the right-hand column; an `AlbumBrowser`
 loads beside the queue. Both new splits are draggable and persisted
 (`npPlasmaInfoFrac`, `npPlasmaBrowseFrac`). Below the floors the page is exactly
 the compact one, tab included — never both at once (docs/DESIGN.md §5.2).
+
+Covers carry ONE menu and one selection gesture wherever they are drawn:
+`AlbumMenu.qml` (the album twin of `TrackMenu.qml`) is opened by both the
+gallery and the browser, and both implement ctrl/shift picking with the same
+words — a right-click inside a pick acts on the whole set, outside it on the
+one album, and never collapses the pick silently. A new grid of covers uses
+those, never a second hand-written menu.
 
 The browser is a SECOND, INDEPENDENT reader of the library: `BrowseAlbumsModel`,
 `BrowseTracksModel`, `setBrowseFilter`, `openBrowseAlbum`. It must not borrow

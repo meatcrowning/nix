@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Window
 import "../../qmlcommon"
 
 // The album browser that sits beside the queue on the all-in-one now-playing
@@ -47,6 +48,40 @@ Item {
     readonly property int cols: Math.max(1, Math.round(gridW / idealCell))
     readonly property int cellW: Math.max(1, Math.floor(gridW / cols))
 
+    // Ctrl-click picks covers one at a time, Shift-click takes the run from the
+    // last one clicked — the gallery's gesture, in the gallery's words
+    // (AlbumGrid.qml owns the reasoning). Selecting stays an EXPLICIT mode: a
+    // plain click still just opens a record and drops whatever was picked.
+    property var selectedIds: []
+    property int _anchorId: 0
+
+    function isSelected(albumId) { return selectedIds.indexOf(albumId) >= 0; }
+    function clearSelection() { if (selectedIds.length) selectedIds = []; }
+    function indexOfAlbum(albumId) {
+        for (var i = 0; i < BrowseAlbumsModel.count; ++i)
+            if (BrowseAlbumsModel.get(i).albumId === albumId)
+                return i;
+        return -1;
+    }
+    function selectToggle(albumId) {
+        var s = selectedIds.slice(), i = s.indexOf(albumId);
+        if (i >= 0) s.splice(i, 1); else s.push(albumId);
+        selectedIds = s;
+        _anchorId = albumId;
+    }
+    // The anchor stays put, so a second Shift-click re-aims the same run
+    // instead of growing it one cover at a time.
+    function selectRange(albumId) {
+        var from = indexOfAlbum(_anchorId), to = indexOfAlbum(albumId);
+        if (from < 0 || to < 0) { selectToggle(albumId); return; }
+        var lo = Math.min(from, to), hi = Math.max(from, to), s = [];
+        for (var i = lo; i <= hi; ++i) {
+            var a = albumAt(i);
+            if (a) s.push(a.albumId);
+        }
+        selectedIds = s;
+    }
+
     function albumAt(i) {
         return (i >= 0 && i < BrowseAlbumsModel.count) ? BrowseAlbumsModel.get(i) : null;
     }
@@ -57,6 +92,8 @@ Item {
     }
     function applyFilter(text) {
         Library.setBrowseFilter(text);
+        // A pick is a set of rows in the listing that was on screen.
+        clearSelection();
         // A new query is a new listing: the album that was open is not
         // necessarily in it any more.
         if (openId > 0)
@@ -273,9 +310,20 @@ Item {
                                 }
                             }
                         }
+                        // Picked: a wash of the accent over the art, so a
+                        // selected cover reads as selected from across the
+                        // column and not only under the pointer.
+                        readonly property bool picked: tile.a !== null
+                                                       && root.isSelected(tile.a.albumId)
                         Rectangle {
                             anchors.fill: parent
-                            visible: tileMouse.containsMouse
+                            visible: tile.picked
+                            color: Qt.rgba(root.fgAccent.r, root.fgAccent.g,
+                                           root.fgAccent.b, 0.28)
+                        }
+                        Rectangle {
+                            anchors.fill: parent
+                            visible: tileMouse.containsMouse || tile.picked
                             color: "transparent"
                             border.color: root.fgAccent
                             border.width: Math.max(1, Theme.ctrlBorder)
@@ -286,20 +334,60 @@ Item {
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             enabled: tile.a !== null
-                            acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+                            acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
                             onClicked: function(m) {
-                                if (m.button === Qt.MiddleButton)
-                                    Player.queueAlbum(tile.a.albumId);
-                                else
-                                    root.openAlbum(tile.a.albumId);
+                                var aid = tile.a.albumId, art = tile.a.artist;
+                                if (m.button === Qt.MiddleButton) {
+                                    Player.queueAlbum(aid);
+                                } else if (m.button === Qt.RightButton) {
+                                    var p = tileMouse.mapToItem(albumMenu, m.x, m.y);
+                                    // Inside the selection the menu acts on the
+                                    // whole set; outside it, it is the one-album
+                                    // menu, and the selection is left alone.
+                                    if (root.isSelected(aid) && root.selectedIds.length > 1) {
+                                        albumMenu.openForSelection(p.x, p.y, {
+                                            ids: root.selectedIds,
+                                            clearSelection: function() { root.clearSelection(); },
+                                        });
+                                        return;
+                                    }
+                                    albumMenu.openForAlbum(p.x, p.y, {
+                                        albumId: aid, artist: art,
+                                        isOpen: aid === root.openId,
+                                        open: function(id) { root.openAlbum(id); },
+                                        searchArtist: function(a) { root.browseArtistRequested(a); },
+                                        editAliases: function(a) { root.editAliasesRequested(a); },
+                                    });
+                                } else if (m.modifiers & Qt.ShiftModifier) {
+                                    root.selectRange(aid);
+                                } else if (m.modifiers & Qt.ControlModifier) {
+                                    root.selectToggle(aid);
+                                } else {
+                                    root.clearSelection();
+                                    root._anchorId = aid;
+                                    root.openAlbum(aid);
+                                }
                             }
-                            onDoubleClicked: Player.playAlbum(tile.a.albumId, -1)
+                            onDoubleClicked: function(m) {
+                                if (m.button === Qt.LeftButton)
+                                    Player.playAlbum(tile.a.albumId, -1);
+                            }
                         }
                     }
                 }
             }
         }
     }
+    // Parented to the WINDOW, not to this column: CtxMenu clamps against its
+    // own bounds, and this pane is a third of the page wide — the same reason
+    // TrackList parents its row menu there.
+    AlbumMenu {
+        id: albumMenu
+        objectName: "browseAlbumMenu"
+        parent: root.Window.contentItem ? root.Window.contentItem : root
+        anchors.fill: parent
+    }
+
     PixelText {
         anchors.centerIn: list
         visible: root.openId <= 0 && BrowseAlbumsModel.count === 0

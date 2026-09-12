@@ -70,7 +70,9 @@ except ModuleNotFoundError:
 
 from PySide6.QtCore import (Property, QMetaObject, QObject, Q_ARG, QUrl, QtMsgType,
                             Signal, Slot, qInstallMessageHandler)
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QGuiApplication
+from PySide6.QtTest import QTest
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlFileSelector
 from PySide6.QtQuick import QQuickItem
 
@@ -87,6 +89,9 @@ FAILS = []
 # XDG_DATA_HOME, and Qt registers one type per file of the implicitly imported
 # qml/ and qmlcommon/ directories when the root component comes from setData.
 NOISE = ("Icon theme ", "qmlRegisterType requires absolute URLs")
+# A Controls Menu is its own window. Popping one up in an offscreen harness
+# says so once per row and means nothing about the menu the app builds.
+NOISE_IN = ("Created graphical object was not placed in the graphics scene",)
 
 
 def check(name, cond, detail=""):
@@ -98,7 +103,8 @@ def check(name, cond, detail=""):
 
 def on_qml_message(mtype, ctx, msg):
     if (mtype in (QtMsgType.QtWarningMsg, QtMsgType.QtCriticalMsg, QtMsgType.QtFatalMsg)
-            and not str(msg).startswith(NOISE)):
+            and not str(msg).startswith(NOISE)
+            and not any(x in str(msg) for x in NOISE_IN)):
         QML_MSGS.append(msg)
 
 
@@ -255,6 +261,22 @@ def visual_items(item):
     return out
 
 
+def click(win, item, button, modifiers=Qt.NoModifier):
+    """A real press/release on the centre of `item`, so the handler under test
+    is the one the pointer would reach."""
+    centre = item.mapToItem(win.contentItem(),
+                            item.property("width") / 2, item.property("height") / 2)
+    QTest.mouseClick(win, button, modifiers, centre.toPoint())
+
+
+def menu_labels(menu):
+    """The menu's own `items` array. The Plasma face builds real MenuItems in a
+    native popup window, so nothing it draws is in this item tree."""
+    value = menu.property("items")
+    rows = list(value.toVariant() if hasattr(value, "toVariant") else value)
+    return [str(r.get("label", "")) for r in rows if isinstance(r, dict)]
+
+
 def tabs_of(pane):
     value = pane.property("tabs")
     return list(value.toVariant() if hasattr(value, "toVariant") else value)
@@ -396,6 +418,48 @@ def main():
         check("…and back returns to the covers",
               browser[0].property("openId") == 0 and bridge.browseTracksModel.count == 0,
               (browser[0].property("openId"), bridge.browseTracksModel.count))
+
+    # Right-click and multi-selection, driven as real clicks on the covers so
+    # the ctx the pane builds is the one under test — not one the harness made
+    # up. The browser's covers get the same menu the gallery's do.
+    menu = [x for x in visual_items(win.contentItem()) if x.objectName() == "browseAlbumMenu"]
+    check("the browser has an album menu", len(menu) == 1, len(menu))
+    tiles = [x for x in named(page, "browseTile") if x.property("visible")]
+    if browser and menu and len(tiles) == 2:
+        click(win, tiles[0], Qt.RightButton)
+        spin(app, 150)
+        labels = menu_labels(menu[0])
+        for wanted in ("play", "play shuffled", "play next", "add to queue",
+                       "open album", "search artist", "same person as...",
+                       "create systheme", "move album to trash"):
+            check("…the one-album menu offers " + wanted, wanted in labels, labels)
+        QMetaObject.invokeMethod(menu[0], "close")
+        spin(app, 100)
+
+        # ctrl-click then shift-click picks a run, exactly like the gallery.
+        click(win, tiles[0], Qt.LeftButton, Qt.ControlModifier)
+        click(win, tiles[1], Qt.LeftButton, Qt.ShiftModifier)
+        spin(app, 150)
+        picked = browser[0].property("selectedIds")
+        picked = list(picked.toVariant() if hasattr(picked, "toVariant") else picked)
+        check("…ctrl and shift pick the run between two covers", len(picked) == 2, picked)
+        click(win, tiles[1], Qt.RightButton)
+        spin(app, 150)
+        labels = menu_labels(menu[0])
+        check("…and the set gets the mass menu",
+              "play 2 albums" in labels and "play 2 albums shuffled" in labels
+              and "add 2 albums to queue" in labels and "clear selection" in labels,
+              labels)
+        QMetaObject.invokeMethod(menu[0], "close")
+        spin(app, 100)
+        # A plain click is still a plain click: it drops the pick and opens.
+        click(win, tiles[0], Qt.LeftButton)
+        spin(app, 150)
+        picked = browser[0].property("selectedIds")
+        picked = list(picked.toVariant() if hasattr(picked, "toVariant") else picked)
+        check("…a plain click drops the selection", picked == [], picked)
+        QMetaObject.invokeMethod(browser[0], "openAlbum", Q_ARG("QVariant", 0))
+        spin(app, 100)
 
     # The browser reads its own rows: opening an album here must not move the
     # gallery's open section.

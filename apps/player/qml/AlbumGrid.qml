@@ -451,70 +451,26 @@ Item {
                                 if (m.button === Qt.MiddleButton) {
                                     Player.queueAlbum(aid);
                                 } else if (m.button === Qt.RightButton) {
-                                    var p = tileMouse.mapToItem(root, m.x, m.y);
+                                    var p = tileMouse.mapToItem(ctxMenu, m.x, m.y);
                                     // A right-click INSIDE the selection acts on
                                     // the whole set; outside it, the menu is the
                                     // one-album menu it has always been — and the
                                     // selection is left alone rather than silently
                                     // collapsed by a press that only wanted a menu.
                                     if (root.isSelected(aid) && root.selectedIds.length > 1) {
-                                        var sel = root.selectedIds.slice(), n = sel.length;
-                                        ctxMenu.open(p.x, p.y, [
-                                            { label: "play " + n + " albums",
-                                              trigger: function() { Player.playAlbums(sel, -1); } },
-                                            { label: "play " + n + " albums shuffled",
-                                              trigger: function() { Player.setShuffle(true); Player.playAlbums(sel, -1); } },
-                                            { label: "play " + n + " albums next", enabled: Player.queueLength > 0,
-                                              trigger: function() { Player.playAlbumsNext(sel); } },
-                                            { label: "add " + n + " albums to queue",
-                                              trigger: function() { Player.queueAlbums(sel); } },
-                                            { separator: true },
-                                            { label: "clear selection",
-                                              trigger: function() { root.clearSelection(); } },
-                                        ]);
+                                        ctxMenu.openForSelection(p.x, p.y, {
+                                            ids: root.selectedIds,
+                                            clearSelection: function() { root.clearSelection(); },
+                                        });
                                         return;
                                     }
-                                    ctxMenu.open(p.x, p.y, [
-                                        // start=-1: no chosen track, so shuffle
-                                        // (if on) pins nothing — see playTracks.
-                                        { label: "play",          trigger: function() { Player.playAlbum(aid, -1); } },
-                                        { label: "play shuffled", trigger: function() { Player.setShuffle(true); Player.playAlbum(aid, -1); } },
-                                        // The track menu's "play next" is the
-                                        // whole-album twin of this — both insert
-                                        // after the playing row, and both grey
-                                        // with an empty queue, because with
-                                        // nothing playing it is a second "play".
-                                        { label: "play next", enabled: Player.queueLength > 0,
-                                          trigger: function() { Player.playAlbumNext(aid); } },
-                                        { label: "add to queue",  trigger: function() { Player.queueAlbum(aid); } },
-                                        { separator: true },
-                                        { label: aid === root.expandedAlbumId ? "close album" : "open album",
-                                          trigger: function() { root.opened(aid === root.expandedAlbumId ? 0 : aid); } },
-                                        { label: "search artist", enabled: art !== "",
-                                          trigger: function() { root.searchArtist(art); } },
-                                        { label: "same person as...", enabled: art !== "",
-                                          trigger: function() { root.editAliases(art); } },
-                                        { separator: true },
-                                        // Applies the theme desktop-wide, so it
-                                        // sits behind a separator like any other
-                                        // action with a wide blast radius (§7.2
-                                        // orders destructive/high-impact last).
-                                        { label: "create systheme",
-                                          // `=== true`, not a bare truth test:
-                                          // `canSystheme` missing makes the
-                                          // whole expression `undefined`, and
-                                          // CtxMenu reads "not false" as
-                                          // enabled — so the row was OFFERED,
-                                          // and would have done nothing
-                                          // (docs/DESIGN.md §10, never offer an
-                                          // action that can silently fail).
-                                          enabled: Library.canSystheme === true
-                                                   && !!Library.albumInfo(aid).fullArt,
-                                          trigger: function() { Library.createSysthemeFromAlbum(aid); } },
-                                        { separator: true },
-                                        { label: "move album to trash",
-                                          trigger: function() { Library.trashAlbum(aid); } },
-                                    ]);
+                                    ctxMenu.openForAlbum(p.x, p.y, {
+                                        albumId: aid, artist: art,
+                                        isOpen: aid === root.expandedAlbumId,
+                                        open: function(id) { root.opened(id); },
+                                        searchArtist: function(a) { root.searchArtist(a); },
+                                        editAliases: function(a) { root.editAliases(a); },
+                                    });
                                 } else if (m.modifiers & Qt.ShiftModifier) {
                                     root.selectRange(aid);
                                 } else if (m.modifiers & Qt.ControlModifier) {
@@ -596,7 +552,7 @@ Item {
         color: root.fgDim
     }
 
-    CtxMenu {
+    AlbumMenu {
         id: ctxMenu
         objectName: "albumCtxMenu"   // handle for headless harnesses
         anchors.fill: parent
