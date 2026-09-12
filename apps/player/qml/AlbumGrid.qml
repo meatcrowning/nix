@@ -128,7 +128,10 @@ Item {
 
     Connections {
         target: AlbumsModel
-        function onModelReset() { root.revision++; }
+        // A reset is a new filter or a re-sort: the covers under the pointer
+        // are no longer the ones that were picked, and acting on a set he can
+        // no longer see is the one thing this must not do.
+        function onModelReset() { root.revision++; root.clearSelection(); }
         function onRowsAboutToBeRemoved() { root.captureViewport(); }
         function onRowsRemoved() {
             root.revision++;
@@ -141,6 +144,48 @@ Item {
 
     function albumAt(i) {
         return (i >= 0 && i < AlbumsModel.count) ? AlbumsModel.get(i) : null;
+    }
+
+    // ---- multi-selection ------------------------------------------------
+    // Ctrl-click picks covers one at a time, Shift-click takes the run from
+    // the last one clicked: a whole discography (search the artist, shift-click
+    // the last cover) or a filtered set goes to the queue in one action.
+    //
+    // Selecting is an EXPLICIT mode. A plain click still just opens a cover and
+    // drops whatever was picked, so nothing about browsing changes until he
+    // asks for more than one record — which is also why a lone cover is never
+    // "selected": the menu it already had is the one for one album.
+    property var selectedIds: []
+    property int _anchorId: 0
+
+    function isSelected(albumId) { return selectedIds.indexOf(albumId) >= 0; }
+    function clearSelection() { if (selectedIds.length) selectedIds = []; }
+
+    function indexOfAlbum(albumId) {
+        for (var i = 0; i < AlbumsModel.count; ++i)
+            if (AlbumsModel.get(i).albumId === albumId)
+                return i;
+        return -1;
+    }
+
+    function selectToggle(albumId) {
+        var s = selectedIds.slice(), i = s.indexOf(albumId);
+        if (i >= 0) s.splice(i, 1); else s.push(albumId);
+        selectedIds = s;
+        _anchorId = albumId;
+    }
+
+    // The anchor stays put, so a second Shift-click re-aims the same run
+    // instead of growing it one cover at a time.
+    function selectRange(albumId) {
+        var from = indexOfAlbum(_anchorId), to = indexOfAlbum(albumId);
+        if (from < 0 || to < 0) { selectToggle(albumId); return; }
+        var lo = Math.min(from, to), hi = Math.max(from, to), s = [];
+        for (var i = lo; i <= hi; ++i) {
+            var a = albumAt(i);
+            if (a) s.push(a.albumId);
+        }
+        selectedIds = s;
     }
 
     // Where the expanded album sits now — re-scanned whenever the model is
@@ -327,6 +372,19 @@ Item {
                             }
                         }
 
+                        // Picked: a wash of the accent over the art, so a
+                        // selected cover reads as selected from across the
+                        // gallery and not only under the pointer. It sits under
+                        // the hover label and the frame, which both still draw
+                        // on top of it.
+                        readonly property bool picked: tile.a !== null
+                                                       && root.isSelected(tile.a.albumId)
+                        Rectangle {
+                            anchors.fill: parent
+                            visible: tile.picked
+                            color: Qt.rgba(root.fgAccent.r, root.fgAccent.g, root.fgAccent.b, 0.28)
+                        }
+
                         // Hover: the metadata, inside the cover's lower edge.
                         Rectangle {
                             anchors.left: parent.left
@@ -365,7 +423,7 @@ Item {
                         // the section below belongs to.
                         Rectangle {
                             anchors.fill: parent
-                            visible: tileMouse.containsMouse
+                            visible: tileMouse.containsMouse || tile.picked
                                      || (tile.a && tile.a.albumId === root.expandedAlbumId)
                             color: "transparent"
                             // An accent frame drawn OVER the art, so it is a
@@ -394,6 +452,28 @@ Item {
                                     Player.queueAlbum(aid);
                                 } else if (m.button === Qt.RightButton) {
                                     var p = tileMouse.mapToItem(root, m.x, m.y);
+                                    // A right-click INSIDE the selection acts on
+                                    // the whole set; outside it, the menu is the
+                                    // one-album menu it has always been — and the
+                                    // selection is left alone rather than silently
+                                    // collapsed by a press that only wanted a menu.
+                                    if (root.isSelected(aid) && root.selectedIds.length > 1) {
+                                        var sel = root.selectedIds.slice(), n = sel.length;
+                                        ctxMenu.open(p.x, p.y, [
+                                            { label: "play " + n + " albums",
+                                              trigger: function() { Player.playAlbums(sel, -1); } },
+                                            { label: "play " + n + " albums shuffled",
+                                              trigger: function() { Player.setShuffle(true); Player.playAlbums(sel, -1); } },
+                                            { label: "play " + n + " albums next", enabled: Player.queueLength > 0,
+                                              trigger: function() { Player.playAlbumsNext(sel); } },
+                                            { label: "add " + n + " albums to queue",
+                                              trigger: function() { Player.queueAlbums(sel); } },
+                                            { separator: true },
+                                            { label: "clear selection",
+                                              trigger: function() { root.clearSelection(); } },
+                                        ]);
+                                        return;
+                                    }
                                     ctxMenu.open(p.x, p.y, [
                                         // start=-1: no chosen track, so shuffle
                                         // (if on) pins nothing — see playTracks.
@@ -435,8 +515,14 @@ Item {
                                         { label: "move album to trash",
                                           trigger: function() { Library.trashAlbum(aid); } },
                                     ]);
+                                } else if (m.modifiers & Qt.ShiftModifier) {
+                                    root.selectRange(aid);
+                                } else if (m.modifiers & Qt.ControlModifier) {
+                                    root.selectToggle(aid);
                                 } else {
                                     // A second click on the open cover closes it.
+                                    root.clearSelection();
+                                    root._anchorId = aid;
                                     root.opened(aid === root.expandedAlbumId ? 0 : aid);
                                 }
                             }
