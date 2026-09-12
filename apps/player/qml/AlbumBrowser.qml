@@ -132,7 +132,12 @@ Item {
 
         Rectangle {
             id: openArt
-            width: Math.min(96, parent.width / 3); height: width
+            objectName: "openArt"
+            // As tall as the three lines beside it and no taller: every pixel
+            // above that is one the track list does not get (his call). The
+            // three rows are single-line and fixed-height, so this height does
+            // not depend on the width the cover leaves them.
+            width: height; height: meta.height
             color: Theme.bgAlt
             border.width: Theme.ctrlBorder; border.color: Theme.border
             Image {
@@ -150,14 +155,19 @@ Item {
             }
         }
         Column {
+            id: meta
+            readonly property int rowH: Theme.lineHeight + 2  // descender room
             anchors { left: openArt.right; leftMargin: 8; right: parent.right
                       top: parent.top }
             spacing: 2
-            PixelText { width: parent.width; color: root.fgText; wrapMode: Text.Wrap
-                maximumLineCount: 2; text: glyphs.px(root.openInfo.album || "") }
-            PixelText { width: parent.width; color: root.fgDim; elide: Text.ElideRight
+            PixelText { width: parent.width; height: meta.rowH; clip: true
+                color: root.fgText; elide: Text.ElideRight
+                text: glyphs.px(root.openInfo.album || "") }
+            PixelText { width: parent.width; height: meta.rowH; clip: true
+                color: root.fgDim; elide: Text.ElideRight
                 text: glyphs.px(root.openInfo.artist || "") }
-            PixelText { width: parent.width; color: root.fgDim
+            PixelText { width: parent.width; height: meta.rowH; clip: true
+                color: root.fgDim
                 text: (root.openInfo.year > 0 ? root.openInfo.year + "  ·  " : "")
                       + (root.openInfo.trackCount || 0) + " tracks" }
         }
