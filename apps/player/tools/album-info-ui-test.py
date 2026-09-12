@@ -131,7 +131,10 @@ def visual_items(item):
 
 
 def text_items(item):
-    return [str(x.property("text")) for x in item.findChildren(QQuickItem)
+    # Walk the VISUAL tree: a Repeater's delegates are parented into the column
+    # that lays them out, not into the QObject tree findChildren() sees, so the
+    # label/format/credit rows only exist here.
+    return [str(x.property("text")) for x in visual_items(item)
             if x.property("text") is not None]
 
 
