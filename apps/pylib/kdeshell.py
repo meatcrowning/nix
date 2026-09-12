@@ -421,8 +421,9 @@ def _build_background_classes():
 
         def requestImage(self, path, size, requested):
             trace_started = time.perf_counter()
-            # "winW,winH,offX,offY,viewW,viewH,dpr,a|i#serial" — the last field
-            # is the window's activation state (see `_group_palette`).
+            # "winW,winH,offX,offY,viewW,viewH,dpr,a|i,m|n#serial" — the last
+            # two are the window's activation state (see `_group_palette`) and
+            # whether it is maximised.
             try:
                 head = str(path).split("#")[0]
                 fields = head.split(",")
@@ -431,6 +432,7 @@ def _build_background_classes():
             except (ValueError, IndexError):
                 return QImage()
             active = (fields[7] if len(fields) > 7 else "a") != "i"
+            maximized = (fields[8] if len(fields) > 8 else "n") == "m"
             win_w, win_h = max(1, int(win_w)), max(1, int(win_h))
             vw, vh = max(1, int(vw)), max(1, int(vh))
             dpr = dpr if dpr > 0 else 1.0
@@ -453,6 +455,12 @@ def _build_background_classes():
             proxy.setPalette(_group_palette(QPalette.Active if active
                                             else QPalette.Inactive))
             proxy.resize(win_w, win_h)
+            # Oxygen paints a maximised window from the screen-sized field the
+            # panels are painted from (home/prog/oxygen-desktop-field.patch),
+            # so this proxy has to be maximised too or the crop under the view
+            # would step against the native menubar above it.
+            if maximized:
+                proxy.setWindowState(Qt.WindowMaximized)
 
             img = QImage(int(win_w * dpr), int(win_h * dpr),
                          QImage.Format_ARGB32_Premultiplied)
@@ -506,6 +514,7 @@ def _build_background_classes():
 
         def eventFilter(self, obj, ev):
             if ev.type() in (QEvent.Resize, QEvent.Move, QEvent.Show,
+                             QEvent.WindowStateChange,
                              QEvent.LayoutRequest, QEvent.PaletteChange,
                              QEvent.ApplicationPaletteChange, QEvent.StyleChange,
                              QEvent.ActivationChange, QEvent.WindowActivate,
@@ -525,7 +534,8 @@ def _build_background_classes():
             style = QApplication.style()
             return (win.width(), win.height(), off.x(), off.y(),
                     view.width(), view.height(), view.devicePixelRatioF() or 1.0,
-                    _window_active(win), int(view.palette().cacheKey()),
+                    _window_active(win), win.isMaximized(),
+                    int(view.palette().cacheKey()),
                     style.objectName() if style is not None else "")
 
         def refresh(self, force=True):
@@ -553,7 +563,8 @@ def _build_background_classes():
             dpr = view.devicePixelRatioF() or 1.0
             return (f"image://kdebg/{win.width()},{win.height()},"
                     f"{off.x()},{off.y()},{view.width()},{view.height()},{dpr},"
-                    f"{'a' if _window_active(win) else 'i'}"
+                    f"{'a' if _window_active(win) else 'i'},"
+                    f"{'m' if win.isMaximized() else 'n'}"
                     f"#{self._serial}")
 
     return _BgProvider, _StyledBackground

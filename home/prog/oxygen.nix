@@ -59,6 +59,7 @@
       SOURCE=${pkgs.kdePackages.oxygen.src}
       PATCH=${./oxygen-themed-vivaldi.patch}
       CONTENT_PATCH=${./oxygen-native-content.patch}
+      FIELD_PATCH=${./oxygen-desktop-field.patch}
       DEST="$HOME/.local/lib64/qt6/plugins/org.kde.kdecoration3/org.kde.oxygen.so"
       FEDORA_VERSION=$(/usr/bin/rpm -q --qf '%{VERSION}' plasma-oxygen)
       SOURCE_VERSION=${pkgs.kdePackages.oxygen.version}
@@ -80,7 +81,10 @@
       /usr/bin/mv "$WORK/oxygen-$SOURCE_VERSION" "$WORK/source"
       /usr/bin/chmod -R u+w "$WORK/source"
       /usr/bin/git apply --unsafe-paths --directory="$WORK/source" "$PATCH"
-      /usr/bin/patch -d "$WORK/source" -p1 < "$CONTENT_PATCH"
+      # Fedora ships no patch(1) here; git apply is the tool that exists, and
+      # the content patch is a zero-context diff, which it refuses by default.
+      /usr/bin/git apply --unidiff-zero --unsafe-paths --directory="$WORK/source" "$CONTENT_PATCH"
+      /usr/bin/git apply --unsafe-paths --directory="$WORK/source" "$FIELD_PATCH"
 
       env -u CMAKE_PREFIX_PATH -u LIBRARY_PATH -u CPATH -u C_INCLUDE_PATH \
           -u CPLUS_INCLUDE_PATH -u PKG_CONFIG_PATH -u NIX_CFLAGS_COMPILE \
