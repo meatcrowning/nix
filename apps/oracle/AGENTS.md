@@ -730,7 +730,13 @@ format, track number, size, speed, etc displayed for each choice … at the
 bottom of that bubble itll show a row of buttons"*]. The row of buttons lasted
 a day: **the candidate's whole block is the button now** [his, 2026-09-12:
 *"i want each entire block of the details of the selections to serve as its own
-selection bubble"*] — the thing he is reading is the thing he presses. The
+selection bubble"*] — the thing he is reading is the thing he presses, and it
+is a real button at that [his, same day: *"can you make them look like actual
+buttons just larger than normal"*], `ChoiceBlock.qml` with a KStyle twin in
+`+plasma/`. In the Plasma twin the content is laid OVER the button instead of
+being its `contentItem`: a contentItem is measured by the style before the
+button has a width, and wrapping text settles one line short and never
+recovers (measured, 51px against the Hyprland face's 67px). The
 motivating case is a record: five Soulseek copies differing in format, size, queue and speed. It is
 built **generic** (his call) — the same card asks which edition to keep, which
 duplicate dies, which model to pull.
