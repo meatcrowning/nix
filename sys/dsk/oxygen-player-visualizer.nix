@@ -5,7 +5,13 @@ let
     patches = (old.patches or []) ++ [
       ../../home/prog/oxygen-player-visualizer.patch
       ../../home/prog/oxygen-themed-vivaldi.patch
-      ../../home/prog/oxygen-desktop-field.patch
+      # oxygen-desktop-field.patch is deliberately NOT here. It is book-only
+      # for now, built natively by `oxygen-vivaldi-build`: the first top
+      # generation carrying it dropped the boot into an emergency shell, and
+      # the cause is not yet understood — the generation's kernel, initrd,
+      # fstab, kernel-params and unit set were byte-identical to the known-good
+      # one, and its closure verified clean. Restore it here only once that is
+      # explained.
     ];
   });
 in {
