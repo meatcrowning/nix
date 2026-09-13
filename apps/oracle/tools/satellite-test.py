@@ -18,7 +18,9 @@ url, layer = satellite.gibs_url(box, "natural", "2026-09-12", 9000, 20)
 q = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
 assert layer == "MODIS_Terra_CorrectedReflectance_TrueColor"
 assert q["time"] == ["2026-09-12"] and q["srs"] == ["EPSG:4326"]
-assert q["width"] == ["1600"] and q["height"] == ["256"]
+# The requested dimensions are maxima; the returned map keeps the area's
+# ground aspect instead of forcing every bbox into that rectangle.
+assert q["width"] == ["256"] and q["height"] == ["256"]
 
 body = satellite.stac_body(box, "optical", "2026-09-12", 14, 12, 5)
 assert body["collections"] == ["sentinel-2-l2a"]

@@ -17,7 +17,7 @@ FIRMS_AREA = os.environ.get(
 GOES_BUCKET = os.environ.get(
     "ORACLE_GOES_BUCKET", "https://noaa-goes19.s3.amazonaws.com")
 GEOCODE = os.environ.get(
-    "ORACLE_GEOCODE", "https://geocoding-api.open-meteo.com/v1/search")
+    "ORACLE_GEOCODE", "https://nominatim.openstreetmap.org/search")
 
 GIBS_LAYERS = {
     "natural": "MODIS_Terra_CorrectedReflectance_TrueColor",
@@ -74,10 +74,21 @@ def bbox_label(box):
                                coord(south, "N", "S"), coord(north, "N", "S"))
 
 
+def fit_dimensions(box, width=1024, height=768):
+    """Fit pixels to the bbox's approximate ground aspect, never stretching it."""
+    west, south, east, north = (float(v) for v in box)
+    max_w = min(1600, max(256, int(width)))
+    max_h = min(1600, max(256, int(height)))
+    mid = (south + north) / 2.0
+    ratio = (east - west) * max(0.05, math.cos(math.radians(mid))) / (north - south)
+    if max_w / max_h > ratio:
+        return max(64, round(max_h * ratio)), max_h
+    return max_w, max(64, round(max_w / ratio))
+
+
 def gibs_url(box, product="natural", date="", width=1024, height=768):
     layer = GIBS_LAYERS.get(product, product)
-    width = min(1600, max(256, int(width)))
-    height = min(1600, max(256, int(height)))
+    width, height = fit_dimensions(box, width, height)
     q = urllib.parse.urlencode({
         "service": "WMS", "request": "GetMap", "version": "1.1.1",
         "layers": layer, "styles": "", "format": "image/png",
