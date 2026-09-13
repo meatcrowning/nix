@@ -126,6 +126,9 @@ check("...and forbids an invented source outright",
       "Never invent a citation" in oracle.GROUNDING_NOTE)
 check("...and covers his machine, where guessing is never necessary",
       "look, with the tools you have" in oracle.GROUNDING_NOTE)
+check("...and forbids reading what he HAS off a web page",
+      "WHAT HE HAS COMES FROM HIS MACHINE, NEVER FROM A PAGE" in system
+      and "point at in a tool result from this turn" in system)
 
 # ---- the sampler is on the wire too -------------------------------------
 opts = chat.get("options", {})

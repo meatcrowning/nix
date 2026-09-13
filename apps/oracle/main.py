@@ -747,7 +747,11 @@ MUSIC_TOOL = {
             "Search his music library — 19,000-odd tracks, with their artists, "
             "albums, ratings, favourites and play counts. `search` matches free "
             "text against title, artist and album at once (how a person names "
-            "music), `albums` lists albums, `album_tracks` gives one album in "
+            "music) and every result names the RELEASES it matched — `albums` "
+            "and `album_count`, the whole match rather than the page of tracks, "
+            "so 'what have I got by X' is answered by the first call and that "
+            "list is the complete answer. `albums` lists albums, "
+            "`album_tracks` gives one album in "
             "play order, `info` returns local tags plus any cached MusicBrainz, "
             "Wikipedia and similar-track facts (including manual corrections), "
             "and `stats` sizes the library. Use `info` before searching the web "
@@ -3065,6 +3069,16 @@ PERSISTENCE_NOTE = (
 #: so the fix is not "be careful" — it is a rule about WHEN to answer from
 #: memory at all, next to tools that can actually go and look (`wikipedia` is
 #: core for this reason).
+#:
+#: The last paragraph is a SECOND failure, and checking did not prevent it
+#: [2026-09-12]: asked how much James Ferraro he was missing, qwen3.6 searched
+#: the library correctly, fetched the Wikipedia discography, and then answered
+#: with nine records he owned — five of which were simply a contiguous run of
+#: the Wikipedia table. Nothing was invented; the model read "what he has" off
+#: the wrong source, which the "check it first" rule above has no opinion
+#: about. Replaying that turn against the same model reproduces it about half
+#: the time; with this paragraph and the album rollup `music_library` now
+#: returns (`apps/player/tools/library-ipc.py`), it did not recur.
 GROUNDING_NOTE = (
     "DO NOT INVENT FACTS. Before you state a specific — a date, a number, "
     "a name, a version, a price, a quote, a URL, a filename, a command, a "
@@ -3086,7 +3100,13 @@ GROUNDING_NOTE = (
     "mutable state — library contents or counts, files, installed software, "
     "running services and hardware state — MUST be checked live with the "
     "relevant tool even when a durable memory mentions them; a memory is not "
-    "evidence that mutable state is still true.")
+    "evidence that mutable state is still true.\n"
+    "WHAT HE HAS COMES FROM HIS MACHINE, NEVER FROM A PAGE. A discography, a "
+    "release list, a changelog or a package index tells you what EXISTS — "
+    "never what he owns, has installed or has running. When you say what he "
+    "has, every entry must be one you can point at in a tool result from this "
+    "turn; anything you cannot point at, he does not have. Reading a list off "
+    "the web and calling it his is the same lie as inventing it.")
 
 #: The app's own notes inside the conversation, and the rule that they are not
 #: his words. A turn that made a picture or a clip carries a
