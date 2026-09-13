@@ -3455,6 +3455,10 @@ else:
 CONFIG_DIR = Path(os.path.expanduser(
     os.environ.get("ORACLE_CONFIG", "~/.config/oracle")))
 LAST_MODEL_PATH = CONFIG_DIR / "last-model"
+#: Whether assistant captions use the selected model's literal name.  The
+#: default is Nyx, the name of the person he is talking to; the model remains
+#: available on demand for debugging or comparison.
+SHOW_MODEL_NAME_PATH = CONFIG_DIR / "show-model-name"
 #: HOW LOUD A CLIP PLAYS, for every clip [his, 2026-08-24: "if the user sets
 #: the volume of one clip it sets the same volume for every other past and
 #: future clip"]. One number, 0..1, in its own file beside the others — the
@@ -4582,6 +4586,7 @@ class Ollama(QObject):
 
     modelsChanged = Signal()
     lastModelChanged = Signal()
+    showModelNameChanged = Signal()
     promptChanged = Signal()      # the chosen base prompt or its custom text
     busyChanged = Signal()
     modelsError = Signal(str)
@@ -4783,6 +4788,7 @@ class Ollama(QObject):
         self._gen_procs = []     # the generator ones among them — Stop kills these
         self._memories = []      # oracle's own durable memories, injected each turn
         self._prompt_choice, self._custom_prompt = self._load_prompt_config()
+        self._show_model_name = self._load_show_model_name()
         self._ctx_max = 0        # the window actually in force (0 = unknown)
         self._ctx_train = 0      # …and the model's own trained ceiling
         self._ctx_model = ""     # which model those two were read for
@@ -5103,6 +5109,34 @@ class Ollama(QObject):
         except OSError:
             pass
         self.lastModelChanged.emit()
+
+    # ---- assistant caption -------------------------------------------------
+
+    @staticmethod
+    def _load_show_model_name():
+        """Whether captions name the selected model; absent or malformed means
+        the conversational name, Nyx."""
+        try:
+            return SHOW_MODEL_NAME_PATH.read_text(encoding="utf-8").strip() == "1"
+        except OSError:
+            return False
+
+    @Property(bool, notify=showModelNameChanged)
+    def showModelName(self):
+        return self._show_model_name
+
+    @Slot(bool)
+    def setShowModelName(self, show):
+        show = bool(show)
+        if show == self._show_model_name:
+            return
+        self._show_model_name = show
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            SHOW_MODEL_NAME_PATH.write_text("1\n" if show else "0\n", encoding="utf-8")
+        except OSError:
+            pass
+        self.showModelNameChanged.emit()
 
     # ---- the base system prompt (a preset, or his own custom text) ----
 
