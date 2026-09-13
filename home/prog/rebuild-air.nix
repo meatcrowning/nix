@@ -23,6 +23,11 @@ lib.mkIf (host == "air") {
       BUILD_JOBS=1
 
       REPO=/home/lam/nix
+      PRIVATE="$REPO/docs/private-config"
+      if [ ! -f "$PRIVATE/default.nix" ]; then
+        echo "rebuild-air: private configuration missing; restore docs/private-config first" >&2
+        exit 1
+      fi
       REV=$(${pkgs.git}/bin/git -C "$REPO" rev-parse HEAD)
       FLAKE="git+file://$REPO?rev=$REV"
       if ! ${pkgs.git}/bin/git -C "$REPO" diff --quiet HEAD -- \
@@ -103,7 +108,8 @@ lib.mkIf (host == "air") {
       # The client retains fd 9 (and therefore the lock) for the whole switch.
       set -o pipefail
       home-manager switch --max-jobs "$BUILD_JOBS" --cores "$BUILD_CORES" \
-        --print-build-logs --flake "$FLAKE#air" "$@" 2>&1 | ${pkgs.coreutils}/bin/tee "$RUN/build.log"
+        --print-build-logs --flake "$FLAKE#air" "$@" \
+        --override-input private-config "path:$PRIVATE" --no-write-lock-file 2>&1 | ${pkgs.coreutils}/bin/tee "$RUN/build.log"
       result=''${PIPESTATUS[0]}
       sampled_peak=$(${pkgs.gawk}/bin/awk 'NR > 1 && $2 ~ /^[0-9]+$/ && $2 > peak { peak = $2 } END { print peak + 0 }' "$METRICS")
       printf 'sampled_memory_peak_bytes=%s\nexit=%s\nfinished=%s\n' \
