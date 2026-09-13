@@ -94,7 +94,7 @@ threading.Thread(target=srv.serve_forever, daemon=True).start()
 os.environ["OLLAMA_HOST"] = "http://127.0.0.1:%d" % srv.server_address[1]
 SLOW_URL[0] = "http://127.0.0.1:%d/slow" % srv.server_address[1]
 
-from PySide6.QtCore import QTimer, QUrl, QObject, Q_ARG, QMetaObject   # noqa: E402
+from PySide6.QtCore import QTimer, QUrl, QObject, QPointF, Q_ARG, QMetaObject   # noqa: E402
 from PySide6.QtGui import QGuiApplication                              # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent         # noqa: E402
 
@@ -207,8 +207,8 @@ QMetaObject.invokeMethod(root, "loadTurns", Q_ARG("QVariant", "clocktest"),
                               "body": "let me check", "cutOff": True}])))
 spin(300)
 root.setProperty("model", "stub:latest")
-check("assistant bubbles use Nyx alone by default",
-      "Nyx" in captions() and not any("token" in x for x in captions()),
+check("assistant bubbles use Sable alone by default",
+      "Sable" in captions() and not any("token" in x for x in captions()),
       repr(captions()))
 QMetaObject.invokeMethod(root, "tbAction", Q_ARG("QVariant", "show-model-name"))
 spin(50)
@@ -216,7 +216,7 @@ check("Settings can reveal the selected model name",
       "stub:latest" in captions(), repr(captions()))
 QMetaObject.invokeMethod(root, "tbAction", Q_ARG("QVariant", "show-model-name"))
 spin(50)
-check("Settings can return captions to Nyx", "Nyx" in captions(), repr(captions()))
+check("Settings can return captions to Sable", "Sable" in captions(), repr(captions()))
 # THE ARGUMENT IS NOT OPTIONAL FROM HERE. `continueReply(forced)` grew that
 # parameter with the resume/extend split (2026-08-23), and `invokeMethod` with
 # no args does not match a QML function that declares one — it returns False and
@@ -272,7 +272,7 @@ spin(100)
 h = headings()
 check("once it settles it reads `thought for …`",
       any(x.startswith("thought for") for x in h), repr(h))
-# Tokens and duration are one sentence on the thinking line; the Nyx caption
+# Tokens and duration are one sentence on the thinking line; the speaker caption
 # above it stays only the speaker's name [his, 2026-09-13].
 check("the thinking line carries tokens and time together",
       any(x.startswith("thought for") and " token" in x and " in " in x
@@ -368,6 +368,22 @@ check("every activity family is hidden under folded reasoning",
           for name in activity_names))
 thinking = next((it for it in items_named("thinkingDisclosure")
                  if bool(it.property("visible"))), None)
+candidate_bubbles = [it for it in items_named("messageBubble")
+                     if bool(it.property("visible")) and not bool(it.property("user"))]
+if thinking is not None:
+    think_bottom = thinking.mapToItem(root, QPointF(0, thinking.height())).y()
+    bubble = min(candidate_bubbles,
+                 key=lambda it: abs(it.mapToItem(root, QPointF(0, 0)).y() - think_bottom),
+                 default=None)
+else:
+    bubble = None
+if thinking is not None and bubble is not None:
+    bubble_top = bubble.mapToItem(root, QPointF(0, 0)).y()
+else:
+    think_bottom = bubble_top = -100
+check("the folded thinking line sits directly against its bubble",
+      0 <= bubble_top - think_bottom <= 1,
+      "gap=%r" % (bubble_top - think_bottom))
 turn = thinking
 while turn is not None and turn.property("userSet") is None:
     turn = turn.parentItem()

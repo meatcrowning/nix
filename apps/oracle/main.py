@@ -1835,6 +1835,16 @@ MEMORY_TOOLS = [
 ]
 MEMORY_TOOL_NAMES = {"save_memory", "list_memories", "delete_memory"}
 
+SET_NAME_TOOL = {"type": "function", "function": {
+    "name": "set_name",
+    "description": ("Set your own conversational name. This changes the name "
+                    "shown above your chat bubbles now and in future sessions. "
+                    "Use it when the user chooses or changes your name."),
+    "parameters": {"type": "object", "properties": {
+        "name": {"type": "string", "description": "Your new name, 1-24 characters."}},
+        "required": ["name"]}}}
+SET_NAME_TOOL_NAMES = {"set_name"}
+
 #: The CODE-RUNNER tool, offered every turn beside the file tools. It lets the
 #: model actually RUN Python instead of only reasoning about it — the gap
 #: gemma4:e4b named honestly ("no code-execution env"). Running model-written
@@ -2437,7 +2447,7 @@ CORE_TOOL_NAMES = [
     "get_current_time",
     "use_skill", "spawn_agent",
     "save_memory", "list_memories",
-    "get_tools", "run_job", "describe_self",
+    "get_tools", "run_job", "describe_self", "set_name",
     # CORE, for the same reason `wikipedia` is: a door it has to be holding to
     # walk through. He asked for options instead of a fait accompli, and a tool
     # attached only on request is one the model reasons its way around.
@@ -3527,9 +3537,10 @@ CONFIG_DIR = Path(os.path.expanduser(
     os.environ.get("ORACLE_CONFIG", "~/.config/oracle")))
 LAST_MODEL_PATH = CONFIG_DIR / "last-model"
 #: Whether assistant captions use the selected model's literal name.  The
-#: default is Nyx, the name of the person he is talking to; the model remains
+#: The conversational name is separate from the selected model, which remains
 #: available on demand for debugging or comparison.
 SHOW_MODEL_NAME_PATH = CONFIG_DIR / "show-model-name"
+ASSISTANT_NAME_PATH = CONFIG_DIR / "assistant-name"
 #: HOW LOUD A CLIP PLAYS, for every clip [his, 2026-08-24: "if the user sets
 #: the volume of one clip it sets the same volume for every other past and
 #: future clip"]. One number, 0..1, in its own file beside the others — the
@@ -4658,6 +4669,7 @@ class Ollama(QObject):
     modelsChanged = Signal()
     lastModelChanged = Signal()
     showModelNameChanged = Signal()
+    assistantNameChanged = Signal()
     promptChanged = Signal()      # the chosen base prompt or its custom text
     busyChanged = Signal()
     modelsError = Signal(str)
@@ -4861,6 +4873,7 @@ class Ollama(QObject):
         self._memories = []      # oracle's own durable memories, injected each turn
         self._prompt_choice, self._custom_prompt = self._load_prompt_config()
         self._show_model_name = self._load_show_model_name()
+        self._assistant_name = self._load_assistant_name()
         self._ctx_max = 0        # the window actually in force (0 = unknown)
         self._ctx_train = 0      # …and the model's own trained ceiling
         self._ctx_model = ""     # which model those two were read for
@@ -5187,7 +5200,7 @@ class Ollama(QObject):
     @staticmethod
     def _load_show_model_name():
         """Whether captions name the selected model; absent or malformed means
-        the conversational name, Nyx."""
+        the conversational name."""
         try:
             return SHOW_MODEL_NAME_PATH.read_text(encoding="utf-8").strip() == "1"
         except OSError:
@@ -5209,6 +5222,34 @@ class Ollama(QObject):
         except OSError:
             pass
         self.showModelNameChanged.emit()
+
+    @staticmethod
+    def _load_assistant_name():
+        try:
+            name = ASSISTANT_NAME_PATH.read_text(encoding="utf-8").strip()
+            return name[:24] if name else "Sable"
+        except OSError:
+            return "Sable"
+
+    @Property(str, notify=assistantNameChanged)
+    def assistantName(self):
+        return self._assistant_name
+
+    def _set_assistant_name(self, name):
+        name = " ".join(str(name or "").split()).strip()
+        if not name or len(name) > 24:
+            return {"error": "name must be 1-24 characters"}
+        if name == self._assistant_name:
+            return {"ok": True, "name": name, "unchanged": True}
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            ASSISTANT_NAME_PATH.write_text(name + "\n", encoding="utf-8")
+        except OSError as e:
+            return {"error": "could not save name: " + str(e)}
+        self._assistant_name = name
+        self.assistantNameChanged.emit()
+        return {"ok": True, "name": name,
+                "note": "The chat bubble name changed immediately and persists."}
 
     # ---- the base system prompt (a preset, or his own custom text) ----
 
@@ -6503,6 +6544,8 @@ class Ollama(QObject):
         lead = self._base_prompt()
         if lead:
             blocks.append(lead)
+        blocks.append("Your conversational name is %s. You can change it with "
+                      "set_name when the user chooses another name." % self._assistant_name)
         blocks += [HOST_CONTEXT_NOTE, PERSISTENCE_NOTE, TURN_BOUNDARY_NOTE,
                    GROUNDING_NOTE, CAPABILITY_NOTE, SELF_KNOWLEDGE_NOTE,
                    RECALL_GUIDANCE, SAVE_GUIDANCE, MARKER_NOTE]
@@ -6716,7 +6759,7 @@ class Ollama(QObject):
         """Every tool the APP itself defines. Split out from `_all_tools` so a
         custom tool of his can never shadow one of these: the collision is
         decided against this list, not against a hand-kept copy of it."""
-        return (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, SELF_TOOL,
+        return (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, SELF_TOOL, SET_NAME_TOOL,
                 IMAGE_TOOL, SEARCH_IMAGE_TOOL, VIEW_IMAGE_TOOL, SHOW_IMAGE_TOOL,
                 SCREENSHOT_TOOL, MAKE_IMAGE_TOOL, MAKE_VIDEO_TOOL, BOORU_TOOL,
                 VIDEO_TOOL, PLAYER_TOOL, LISTEN_TOOL,
@@ -7515,6 +7558,11 @@ class Ollama(QObject):
             self._time_now(str(args.get("timezone", "")), i, remaining, calls)
         elif name == "describe_self":
             self._describe_self(i, remaining, calls)
+        elif name in SET_NAME_TOOL_NAMES:
+            result = self._set_assistant_name(args.get("name", ""))
+            remaining["sink"][i] = {"role": "tool", "tool_name": name,
+                                      "content": json.dumps(result)}
+            self._tool_done(remaining, calls)
         elif name in IMAGE_TOOL_NAMES:
             self._fetch_image(str(args.get("url", "")).strip(),
                               str(args.get("alt", "")).strip(),
