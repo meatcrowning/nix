@@ -2003,6 +2003,14 @@ place/layer above, then source, acquisition date and WGS84 coverage. Those
 facts remain in the tool result for the model but its note tells it not to
 repeat the provenance in prose; the picture labels itself in both desktop
 faces and after session reload.
+`night`/`night_lights` deliberately selects `VIIRS_CityLights_2012`, the
+cloud-free city-light composite people usually mean by “night imagery”; its
+overlay says `2012 composite` rather than laundering the requested date.
+`night_daily` selects the ongoing NOAA-20 VIIRS Day/Night Band for an actual
+dated orbital swath. A decoded satellite map whose 32×32 luminance probe has no
+range is rejected as empty before it is saved or shown, with those two choices
+named in the tool result. This prevents a valid black PNG from becoming pixels
+the model can hallucinate a description over. Harness: `tools/satellite-tool-test.py`.
 
 **Failure is surfaced, never swallowed** (docs/DESIGN.md §10): a non-http(s) URL
 is refused before the network, a body that does not decode as an image (a web

@@ -93,7 +93,15 @@ assert Path(images[-1]["path"]).is_file()
 assert images[-1]["satellite"] is True
 assert images[-1]["meta"].startswith("NASA GIBS  ·  2026-09-12  ·  ")
 assert "_image_meta" not in gibs
+assert "_reject_blank" not in gibs
 assert main.satellite.bbox_label([-10, 38, -8, 40]) == "10°W–8°W  38°N–40°N"
+assert main.satellite.GIBS_LAYERS["night"] == "VIIRS_CityLights_2012"
+assert main.satellite.GIBS_LAYERS["night_daily"] == "VIIRS_NOAA20_DayNightBand"
+blank = main.QImage(1024, 768, main.QImage.Format.Format_RGB32); blank.fill(0)
+assert o._blank_satellite_image(blank) is True
+blank.setPixelColor(0, 0, main.QColor("white"))
+# One anomalous source pixel disappears in the downsample and remains empty.
+assert o._blank_satellite_image(blank) is True
 # The observed failure copied the downloaded GIBS PNG to /tmp and called
 # show_image. Path-only deduplication treated that byte-identical copy as a
 # second picture. It is now one image by content too.

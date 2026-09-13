@@ -1271,7 +1271,10 @@ SATELLITE_TOOL = {
             "lists NOAA GOES full-disk weather data over the Americas. Give a "
             "place name, coordinates plus radius, or a WGS84 bbox. Acquisition "
             "times are returned explicitly: satellite data is not a live "
-            "camera. FIRMS needs a free keyring entry named `firms`; the other "
+            "camera. For an easy view of city lights use GIBS product `night` "
+            "or `night_lights` (the cloud-free 2012 composite); use `night_daily` "
+            "only when a dated raw orbital swath matters. FIRMS needs a free "
+            "keyring entry named `firms`; the other "
             "catalogue/image paths need no key."),
         "parameters": {"type": "object", "properties": {
             "source": {"type": "string",
@@ -1285,7 +1288,7 @@ SATELLITE_TOOL = {
                      "description": "[west,south,east,north] in WGS84."},
             "date": {"type": "string", "description": "YYYY-MM-DD; default is the newest reliably complete date."},
             "product": {"type": "string",
-                        "description": ("GIBS: natural, natural_aqua, night, clouds, fires, snow, sea_ice; "
+                        "description": ("GIBS: natural, natural_aqua, night/night_lights (easy city-light composite), night_daily (dated raw swath), clouds, fires, snow, sea_ice; "
                                         "Copernicus: optical or radar; GOES: an AWS product prefix.")},
             "days": {"type": "integer", "description": "Copernicus search window or FIRMS range."},
             "cloud_max": {"type": "number", "description": "Sentinel-2 cloud-cover ceiling, default 30%."},
@@ -8500,10 +8503,12 @@ class Ollama(QObject):
             except (ValueError, TypeError) as e:
                 self._satellite_fail(source, str(e), idx, remaining, calls)
                 return
-            observed = satellite.default_date(date)
+            night_composite = product in ("night", "night_lights")
+            observed = "2012 composite" if night_composite else satellite.default_date(date)
             meta = {"source": "NASA GIBS", "layer": layer,
                     "acquisition_date": observed, "bbox": box,
                     "resolved_place": place,
+                    "_reject_blank": True,
                     "_image_meta": "NASA GIBS  ·  " + observed
                                    + "  ·  " + satellite.bbox_label(box),
                     "note": ("Satellite image is ALREADY shown inline. Do not "
@@ -8935,6 +8940,14 @@ class Ollama(QObject):
                     if ctype:
                         reason += " (content-type: %s)" % ctype
                     entry, result = self._image_error(url, reason)
+                elif (isinstance(result_extra, dict)
+                      and result_extra.get("_reject_blank")
+                      and self._blank_satellite_image(img)):
+                    entry, result = self._image_error(
+                        url, "satellite layer returned an empty image for this area/date")
+                    result["note"] = ("Try another date or product. For visible city "
+                                      "lights use `night` or `night_lights`; for a "
+                                      "dated orbital swath use `night_daily`.")
                 else:
                     path = self._save_image(data, url, ctype)
                     if not path:
@@ -8950,6 +8963,7 @@ class Ollama(QObject):
                         if isinstance(result_extra, dict):
                             result.update(result_extra)
                             image_meta = str(result.pop("_image_meta", "") or "")
+                            result.pop("_reject_blank", None)
                             if image_meta:
                                 entry["meta"] = image_meta
                                 entry["satellite"] = True
@@ -8964,6 +8978,20 @@ class Ollama(QObject):
         remaining["sink"][idx] = {"role": "tool", "tool_name": tool_name,
                                    "content": json.dumps(result)}
         self._tool_done(remaining, calls)
+
+    @staticmethod
+    def _blank_satellite_image(img):
+        """True when a decoded map is only fill, not an observation."""
+        if img.width() * img.height() < 256:
+            return False                 # tiny fixtures/icons are not map products
+        probe = img.scaled(32, 32)
+        values = []
+        for y in range(probe.height()):
+            for x in range(probe.width()):
+                c = probe.pixelColor(x, y)
+                values.append((c.red() * 299 + c.green() * 587
+                               + c.blue() * 114) // 1000)
+        return not values or max(values) - min(values) <= 2
 
     @staticmethod
     def _save_image(data, url, ctype):
