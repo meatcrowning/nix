@@ -49,6 +49,16 @@ in `$XDG_STATE_HOME/player/`. Respect each tool's path overrides in harnesses.
 - `tools/tagtool.py` defaults to dry run, refuses rating/favourite/play-count
   keys, and records undo manifests for apply. Reserved metadata has no
   interchangeable upstream copy. Preserve the guard in both set and remove.
+- **A cover write must carry the ALBUM row with it** (`db_refresh_album_art`,
+  beside `db_update`). `_art_pass` re-resolves an album only when its thumb is
+  missing or the donor PATH is dead, so a cover swapped in place is invisible to
+  it: the picture in the file changed, `tracks.has_art` was set, and the player
+  went on drawing a cache entry rendered from the old bytes [2026-09-12].
+  tagtool renders the new cover into the player's cache under the player's own
+  key — `sha1(sha1(data).hexdigest())[:16]`, which must stay in step with
+  `cache_art` — and points the row at it, so the change shows without a scan.
+  When it cannot render (no Qt) or there is no new cover, it CLEARS the row
+  instead; never leave one naming art that is no longer there.
 - Scan batch signals coalesce into at most one pending GUI refresh per second,
   flushed on completion. Artwork batches count actual mutations; absent art
   must never publish a change just because the mutation counter is zero.

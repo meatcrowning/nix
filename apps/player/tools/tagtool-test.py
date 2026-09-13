@@ -12,9 +12,11 @@ Covers the four containers the library actually holds (mp3/flac/m4a/ogg), the
 set/remove round trip on a mapped key and an arbitrary one, the reserved-key
 refusal, cover embed + cover.jpg, and undo for both a tag change and art.
 """
+import hashlib
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -24,6 +26,9 @@ TMP = Path(tempfile.mkdtemp(prefix="tagtool-test-"))
 os.environ["AUD_ROOT"] = str(TMP / "aud")
 os.environ["PLAYER_DB"] = str(TMP / "library.db")
 os.environ["TAGTOOL_STATE"] = str(TMP / "state")
+# The player's ART CACHE is derived from this at import: point it at the temp
+# tree too, or a cover test would rewrite entries his running player is drawing.
+os.environ["XDG_CACHE_HOME"] = str(TMP / "cache")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import tagtool                                              # noqa: E402
@@ -56,6 +61,37 @@ def make_files():
     return paths
 
 
+def make_db(paths):
+    """A minimal library.db in the player's shape, so the DB half of a write is
+    exercised instead of silently skipped (tagtool no-ops when there is none)."""
+    con = sqlite3.connect(os.environ["PLAYER_DB"])
+    con.execute("CREATE TABLE tracks (id INTEGER PRIMARY KEY, path TEXT, "
+                "title TEXT, artist TEXT, album TEXT, album_artist TEXT, "
+                "track INT, disc INT, year INT, size INT, mtime REAL, "
+                "has_art INT DEFAULT 0, album_id INT)")
+    con.execute("CREATE TABLE albums (id INTEGER PRIMARY KEY, album TEXT, "
+                "album_artist TEXT, art_src TEXT, thumb TEXT, full_art TEXT)")
+    for i, p in enumerate(paths, 1):
+        con.execute("INSERT INTO tracks (id, path, title, artist, album, "
+                    "album_artist, album_id) VALUES (?,?,?,?,?,?,1)",
+                    (i, p, "Track %d" % i, "Test Artist", "Test Album",
+                     "Test Artist"))
+    # Pre-loaded with art the player resolved EARLIER — the state that made the
+    # stale-cover bug invisible.
+    con.execute("INSERT INTO albums VALUES (1,'Test Album','Test Artist',"
+                "'embedded:" + paths[0].replace("'", "''") + "','old-t.jpg','old-f.jpg')")
+    con.commit()
+    con.close()
+
+
+def album_row():
+    con = sqlite3.connect(os.environ["PLAYER_DB"])
+    row = con.execute("SELECT art_src, thumb, full_art FROM albums "
+                      "WHERE id=1").fetchone()
+    con.close()
+    return row
+
+
 def png():
     p = TMP / "cover.png"
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi",
@@ -67,6 +103,7 @@ def png():
 def main():
     print("temp tree:", TMP)
     paths = make_files()
+    make_db(paths)
 
     r = tagtool.run({"op": "show", "paths": paths})
     check("show reads every container", r["ok"] and r["shown"] == 4)
@@ -132,6 +169,28 @@ def main():
     data, mime = tagtool.read_art(paths[0])
     check("the embedded bytes are the image we gave it",
           data and len(data) > 100 and mime in ("image/png", "image/jpeg"), mime)
+
+    # --- the PLAYER's album row has to follow the cover -----------------
+    # Without this the file changes and the player keeps drawing the old art:
+    # its own art pass re-resolves only a missing thumb or a dead donor path,
+    # and a cover swapped in place is neither.
+    row = album_row()
+    key = hashlib.sha1(hashlib.sha1(data).hexdigest().encode()).hexdigest()[:16]
+    check("the album row points at the NEW cover, under the player's own key",
+          row and row[1] == key + "-t.jpg" and row[2] == key + "-f.jpg", row)
+    check("...with art_src naming a file that carries it",
+          row and row[0] == "embedded:" + paths[0], row)
+    check("...and both cache files were actually rendered",
+          (tagtool.ART_CACHE / (key + "-t.jpg")).exists()
+          and (tagtool.ART_CACHE / (key + "-f.jpg")).exists(),
+          sorted(p.name for p in tagtool.ART_CACHE.glob("*")))
+
+    r = tagtool.run({"op": "art_remove", "paths": paths, "apply": True})
+    check("art_remove clears the album row rather than leaving it wrong",
+          r["ok"] and album_row() == (None, None, None), (r, album_row()))
+    r = tagtool.run({"op": "undo", "token": r.get("undo_token"), "apply": True})
+    check("...and undoing it puts the row back on the restored cover",
+          r["ok"] and album_row()[1] == key + "-t.jpg", album_row())
 
     # --- undo ----------------------------------------------------------
     r = tagtool.run({"op": "undo", "token": tok_art, "apply": True})
