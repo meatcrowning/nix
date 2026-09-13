@@ -76,6 +76,10 @@ DB_PATH = Path(os.environ.get("PLAYER_DB")
                or Path.home() / ".local/share/player/library.db")
 STATE = Path(os.environ.get("TAGTOOL_STATE")
              or Path.home() / ".cache" / "player-tagtool")
+#: The player's own art cache (main.py `ART`), which a cover change here has to
+#: keep honest — see `db_refresh_album_art`.
+ART_CACHE = Path(os.environ.get("XDG_CACHE_HOME")
+                 or Path.home() / ".cache") / "player" / "art"
 UA = "lam-tagtool/1.0 ( 63303022+meatcrowning@users.noreply.github.com )"
 
 AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".dsf", ".ogg", ".opus", ".wv",
@@ -861,6 +865,86 @@ def db_update(path, fields, has_art=None):
         pass
 
 
+def _art_cache_write(data):
+    """Render `data` into the player's art cache under the player's OWN key,
+    and return (thumb_name, full_name) — or (None, None) if it cannot.
+
+    The key scheme is main.py `cache_art(data=…, src_id=sha1(data).hexdigest())`
+    exactly: sha1 of that hex string, first 16 chars. It has to match, because
+    the player will reuse these files for the same bytes and must not render a
+    second copy under a different name."""
+    try:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QImage
+    except Exception:                              # noqa: BLE001 — no Qt here
+        return None, None
+    img = QImage()
+    if not img.loadFromData(data):
+        return None, None
+    key = hashlib.sha1(hashlib.sha1(data).hexdigest().encode()).hexdigest()[:16]
+    thumb_name, full_name = key + "-t.jpg", key + "-f.jpg"
+    try:
+        ART_CACHE.mkdir(parents=True, exist_ok=True)
+        tp, fp = ART_CACHE / thumb_name, ART_CACHE / full_name
+        if not tp.exists():
+            img.scaled(256, 256, Qt.KeepAspectRatio,
+                       Qt.SmoothTransformation).save(str(tp), "JPEG", 85)
+        if not fp.exists():
+            big = img
+            if max(img.width(), img.height()) > 1024:
+                big = img.scaled(1024, 1024, Qt.KeepAspectRatio,
+                                 Qt.SmoothTransformation)
+            big.save(str(fp), "JPEG", 90)
+    except OSError:
+        return None, None
+    return thumb_name, full_name
+
+
+def db_refresh_album_art(paths, data=None):
+    """Point the player's ALBUM rows at the cover these files now carry.
+
+    `db_update` keeps a track row honest; this is the other half, and its
+    absence made a cover change invisible [2026-09-12]: the picture inside the
+    file was replaced, `tracks.has_art` was set, and the player went on drawing
+    the OLD art because `albums.thumb` still named a cache entry rendered from
+    the old bytes. The player's own art pass could not save it — it re-resolves
+    an album only when the thumb is missing or the donor PATH is gone, and a
+    cover swapped in place is neither.
+
+    With `data`, the new cover is rendered into the cache and the row points at
+    it, so the change shows without waiting for a scan — the contract the rest
+    of this tool already keeps. Without it (a removal), or if rendering is not
+    possible here, the row's art is CLEARED instead: the player's own
+    "stale art and nothing to replace it with" path, which re-resolves on the
+    next scan. Never leave a row pointing at a cover that is no longer there."""
+    if not DB_PATH.exists() or not paths:
+        return
+    thumb = full = None
+    if data:
+        thumb, full = _art_cache_write(data)
+    try:
+        con = sqlite3.connect(DB_PATH, timeout=15)
+        marks = ",".join("?" * len(paths))
+        ids = [r[0] for r in con.execute(
+            "SELECT DISTINCT album_id FROM tracks WHERE path IN (%s) "
+            "AND album_id IS NOT NULL" % marks, [str(p) for p in paths])]
+        if ids:
+            marks = ",".join("?" * len(ids))
+            if thumb:
+                con.execute(
+                    "UPDATE albums SET art_src=?, thumb=?, full_art=? "
+                    "WHERE id IN (%s)" % marks,
+                    ["embedded:" + str(paths[0]), thumb, full] + ids)
+            else:
+                con.execute("UPDATE albums SET art_src=NULL, thumb=NULL, "
+                            "full_art=NULL WHERE id IN (%s)" % marks, ids)
+        con.commit()
+        con.close()
+    except sqlite3.Error:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # the operations
 # ---------------------------------------------------------------------------
@@ -995,6 +1079,8 @@ def op_art(req):
                 blobs[oh] = old
             entries.append({"path": p, "art_old": oh, "art_mime": old_mime})
             db_update(p, {}, has_art=True)
+        if wrote:
+            db_refresh_album_art(paths, data)
     covers = []
     if folder:
         for d in dirs:
@@ -1046,6 +1132,10 @@ def op_art_remove(req):
             blobs[oh] = old
         entries.append({"path": p, "art_old": oh, "art_mime": old_mime})
         db_update(p, {}, has_art=False)
+    if done:
+        # No new cover to point at: clear the rows and let the next scan
+        # re-resolve (it may still find folder art).
+        db_refresh_album_art(paths)
     out = {"ok": True, "op": "art_remove", "applied": True,
            "files_changed": done, "tracks": len(paths)}
     if entries:
@@ -1084,6 +1174,10 @@ def op_undo(req):
                     p, lambda a, d=data, m=e.get("art_mime") or "image/jpeg":
                     embed_art(a, d, m))
                 db_update(p, {}, has_art=bool(data))
+                # Putting a cover back is a cover change too: the album row
+                # must follow it, or undo restores the file and leaves the
+                # player drawing what it was undone from.
+                db_refresh_album_art([p], data)
             else:
                 old = e["old"]
                 atomicsave.atomic_save(
