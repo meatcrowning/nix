@@ -24,7 +24,7 @@ APP = HERE.parent
 sys.path.insert(0, str(APP))
 sys.path.insert(0, str(APP.parent / "pylib"))
 
-HOLD = {"tool": True}          # keep the "tool round" outstanding until cleared
+HOLD = {"tool": True, "thinking": True}  # control the stub's first tool round
 
 
 class Stub(http.server.BaseHTTPRequestHandler):
@@ -67,7 +67,8 @@ class Stub(http.server.BaseHTTPRequestHandler):
             HOLD["tool"] = False        # only the FIRST round calls the tool
             # Reason for a moment, then call a tool and stop the stream: the
             # turn is now WAITING, exactly as it is against the real daemon.
-            frames = [{"message": {"thinking": REASONING}},
+            frames = ([{"message": {"thinking": REASONING}}]
+                      if HOLD["thinking"] else []) + [
                       {"message": {"tool_calls": [
                           {"function": {"name": "fetch_url",
                                         "arguments": {"url": SLOW_URL[0]}}}]}},
@@ -154,7 +155,12 @@ def headings():
             return
         for ch in (it.childItems() if hasattr(it, "childItems") else it.children()):
             t = ch.property("text")
-            if ch.property("visible") is False:
+            # A collapsed disclosure leaves its children with local
+            # `visible: true`, but they are not actually drawn.  Inspect the
+            # effective QQuickItem visibility so an old, hidden row cannot be
+            # mistaken for a second live state.
+            if (hasattr(ch, "isVisible") and not ch.isVisible()) \
+                    or ch.property("visible") is False:
                 continue
             if isinstance(t, str) and (t.startswith("waiting")
                                        or t.startswith("thinking")
@@ -255,6 +261,7 @@ check("no state text is left running",
 # 2026-08-22]. `loading` owns a bubble with nothing in it; the clock takes over
 # once there is something to show.
 HOLD["tool"] = True
+HOLD["thinking"] = False
 QMetaObject.invokeMethod(root, "loadTurns", Q_ARG("QVariant", "clocktest2"),
                          Q_ARG("QVariant", "clock test 2"),
                          Q_ARG("QVariant", json.dumps([
@@ -285,6 +292,34 @@ if not QMetaObject.invokeMethod(root, "continueReply", Q_ARG("QVariant", "")):
 sample_pairs(2500)
 check("an empty bubble never shows `loading` and `waiting` at once",
       not both, repr(both[:2]))
+
+# ---- A FRESH ROUND DOES NOT FOLD THE PREVIOUS REASONING -------------------
+# The next tool round begins as `loading…`: it has no text of its own yet, but
+# the turn above it already has reasoning. That state used to hide the entire
+# disclosure, despite it being explicitly open.
+QMetaObject.invokeMethod(root, "loadTurns", Q_ARG("QVariant", "loadingtest"),
+                         Q_ARG("QVariant", "loading test"), Q_ARG("QVariant", json.dumps([
+                             {"isUser": True, "who": "you", "body": "go on"},
+                             {"isUser": False, "who": "stub:latest",
+                              "thinking": "the first round's reasoning", "thinkMs": 1000}])) )
+QMetaObject.invokeMethod(root, "appendReplyRow", Q_ARG("QVariant", 2))
+spin(100)
+thinking = next((it for it in items_named("thinkingDisclosure")
+                 if bool(it.property("visible"))), None)
+turn = thinking
+while turn is not None and turn.property("userSet") is None:
+    turn = turn.parentItem()
+if turn is not None:
+    turn.setProperty("userSet", True)
+    turn.setProperty("userOpen", True)
+spin(100)
+check("an open reasoning disclosure remains visible through `loading…`",
+      thinking is not None and bool(thinking.property("visible"))
+      and bool(thinking.property("expanded"))
+      and any(x.startswith("loading") for x in headings()),
+      "visible=%r expanded=%r headings=%r" %
+      (None if thinking is None else thinking.property("visible"),
+       None if thinking is None else thinking.property("expanded"), headings()))
 
 srv.shutdown()
 print("FAILED: " + ", ".join(fails) if fails else "OK")
