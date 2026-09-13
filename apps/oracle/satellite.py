@@ -22,7 +22,11 @@ GEOCODE = os.environ.get(
 GIBS_LAYERS = {
     "natural": "MODIS_Terra_CorrectedReflectance_TrueColor",
     "natural_aqua": "MODIS_Aqua_CorrectedReflectance_TrueColor",
-    "night": "VIIRS_SNPP_DayNightBand_ENCC",
+    # `night` is the easy, cloud-free city-lights view people usually mean.
+    # The dated orbital swath remains explicit as `night_daily`.
+    "night": "VIIRS_CityLights_2012",
+    "night_lights": "VIIRS_CityLights_2012",
+    "night_daily": "VIIRS_NOAA20_DayNightBand",
     "clouds": "MODIS_Terra_Cloud_Top_Temp_Day",
     "fires": "VIIRS_SNPP_Thermal_Anomalies_375m_Night",
     "snow": "MODIS_Terra_NDSI_Snow_Cover",
