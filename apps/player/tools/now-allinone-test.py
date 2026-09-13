@@ -361,7 +361,7 @@ def main():
     check("the page is expanded at 1406x1006", page.property("expanded") is True)
     pane = named(page, "nowInfoPane")
     check("the release pane is there", len(pane) == 1, len(pane))
-    check("…with no lyrics tab", pane and tabs_of(pane[0]) == ["album", "similar"],
+    check("…with no lyrics tab", pane and tabs_of(pane[0]) == ["album"],
           pane and tabs_of(pane[0]))
     check("…and it is not showing lyrics", pane and pane[0].property("tab") != "lyrics",
           pane and pane[0].property("tab"))
@@ -494,7 +494,7 @@ def main():
     check("the compact page is not expanded", page.property("expanded") is False)
     pane = named(page, "nowInfoPane")
     check("…and the lyrics tab is back",
-          pane and tabs_of(pane[0]) == ["lyrics", "album", "similar"],
+          pane and tabs_of(pane[0]) == ["lyrics", "album"],
           pane and tabs_of(pane[0]))
     section = named(page, "lyricsSection")
     check("…with no separate lyrics section",

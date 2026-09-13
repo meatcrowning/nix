@@ -61,18 +61,13 @@ def run():
                             {'position': i, 'title': title, 'recording': {'id': f'rec-{i}', 'title': title}}
                             for i, title in ((1, 'one'), (2, 'two'), (3, 'three'))]}]}
             raise AssertionError(url)
-        def similar(*args):
-            with sqlite3.connect(main.DB_PATH, timeout=.1) as writer:
-                writer.execute('UPDATE tracks SET size=size WHERE id=1')
-            return {'similartracks': {'track': [{'name': 'two', 'artist': {'name': 'artist'}}]}}
         # Suppress background workers for deterministic direct integration calls.
         with patch.object(albuminfo.threading.Thread, 'start'):
-            provider = main.NowPlayingMetadata(None, fetch_json=fetch, lastfm_call=similar)
+            provider = main.NowPlayingMetadata(None, fetch_json=fetch)
         state = provider._resolve(1)
         assert state['status'] == 'ready', state
         assert state['album']['firstReleaseDate'] == '1999-01-01'
         assert state['album']['releaseDate'] == '2004-01-01'
-        assert state['similar'][0]['trackId'] == 2, state
         count = len(calls)
         second = provider._resolve(2)
         assert state["recordingId"] == "rec-1" and second["recordingId"] == "rec-2"
@@ -93,13 +88,14 @@ def run():
         prose_calls = []
         def with_prose(method, params):
             prose_calls.append(method)
-            return wiki if method == 'album.getInfo' else similar(method, params)
+            return wiki
         with patch.object(provider, '_lastfm_call', side_effect=with_prose):
             enriched = provider._resolve(1)
             assert enriched['album']['description'] == 'A sourced album write-up.'
             assert enriched['album']['sources'][-1] == 'last.fm'
             provider._resolve(2)
         assert prose_calls.count('album.getInfo') == 1, 'album prose was fetched per song'
+        assert 'track.getSimilar' not in prose_calls, 'removed recommendations still fetched'
         with patch.object(provider, '_prose', side_effect=RuntimeError('wiki offline')), \
              patch.object(provider, '_lastfm_call', return_value=wiki):
             assert provider._album_prose({'title': 'album', 'artist': 'artist'})['descriptionSource'] == 'last.fm'
@@ -152,7 +148,7 @@ def run():
         state = provider._resolve(1, True)
         assert state['match']['manual'] and state['match']['id'] == 'release-1'
         assert state['album']['description'] == 'my correction'
-        assert state['albumError'] == 'offline' and state['similar'], state
+        assert state['albumError'] == 'offline', state
         cached = store.cache_get(con, scope, 'resolution')
         assert cached['expires_at'] - time.time() <= 301
         provider._apply_command(1, 'clear', None)
@@ -166,10 +162,6 @@ def run():
         assert state['status'] == 'ready' and 'group unavailable' in state['albumError'], state
         assert store.cache_get(con, scope, 'resolution')['expires_at'] - time.time() <= 301
         partial = False
-        provider._lastfm_call = lambda *_: (_ for _ in ()).throw(RuntimeError('lastfm offline'))
-        state = provider._resolve(1, True)
-        assert state['albumError'] == '' and state['similarError'] == 'lastfm offline', state
-        assert state['similar'], 'outage erased local recommendations'
         # Recording-level legacy choices cannot bleed into another song.
         oldkey = provider._cache_key(row)
         con.execute('''INSERT INTO web_entity_matches VALUES
@@ -178,21 +170,6 @@ def run():
         provider._legacy(con, row, scope)
         assert store.user_get(con, 'track:' + row['path'], 'legacy_match')['recordingId'] == 'old-rec'
         assert not store.user_get(con, scope, 'legacy_match')
-        # An obsolete external response cannot mutate its cache or current UI.
-        provider._generation = 2
-        provider._active_generation = 2
-        def obsolete(*_):
-            provider._generation = 3
-            return {'similartracks': {'track': []}}
-        provider._lastfm_call = obsolete
-        before = con.execute("SELECT body_json,fetched_at FROM music_info_cache WHERE kind='similar' ORDER BY cache_key").fetchall()
-        try:
-            provider._resolve(1, True)
-            raise AssertionError('obsolete generation accepted')
-        except albuminfo.Superseded:
-            pass
-        after = con.execute("SELECT body_json,fetched_at FROM music_info_cache WHERE kind='similar' ORDER BY cache_key").fetchall()
-        assert [tuple(r) for r in before] == [tuple(r) for r in after]
         provider._deliver(2, {'trackId': 99})
         assert provider.state['trackId'] != 99
         provider._active_generation = None
@@ -205,7 +182,7 @@ def run():
             entered.set()
             assert release.wait(2), "fixture fetch was never released"
             return fetch(url)
-        live_worker = main.NowPlayingMetadata(None, fetch_json=slow_fetch, lastfm_call=similar)
+        live_worker = main.NowPlayingMetadata(None, fetch_json=slow_fetch)
         live_worker.refresh(1)
         assert entered.wait(2), "worker never entered fixture fetch"
         live_worker.edit(1, "album", {"description": "queued during download"})

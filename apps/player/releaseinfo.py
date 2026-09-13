@@ -279,7 +279,7 @@ def _relation_credits(relations, scope, track_title="", track_position=0, disc=0
             attributes = [attributes]
         # The MusicBrainz instrument relationship is commonly type
         # ``instrument`` with concrete instruments in attributes.  Retain
-        # both pieces so the UI is truthful and relatedmusic can classify the
+        # both pieces so the UI can identify the exact credited recording and
         # explicitly supplied performer role without guessing from names.
         values = relation.get("attribute-values") or {}
         if isinstance(values, dict):

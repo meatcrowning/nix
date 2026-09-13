@@ -3894,12 +3894,6 @@ class Bridge(QObject):
             return False
         return QDesktopServices.openUrl(parsed)
 
-    @Slot(str, str, str, result=bool)
-    def browseInfoConnection(self, kind, entity_id, name):
-        current = self._current_track()
-        return self._now_info.browse_connection(int(current.get("id") or 0),
-                                                 kind, entity_id, name)
-
     @Slot()
     def rescan(self):
         self._library.rescan()

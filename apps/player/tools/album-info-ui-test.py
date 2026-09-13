@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offscreen release/related metadata UI probe with scratch fake services.
+"""Offscreen release metadata UI probe with scratch fake services.
 
 This deliberately loads only NowInfoPane.qml. It never starts the player,
 opens a window, touches the library, or sends audio/input to the desktop.
@@ -36,7 +36,6 @@ class FakeLibrary(QObject):
             "status": "ready",
             "stale": False,
             "albumError": "",
-            "similarError": "",
             "album": {
                 "title": "Quiet Shapes", "artist": "A Band",
                 "firstReleaseDate": "1999-02-01", "releaseDate": "2000-03-02",
@@ -50,8 +49,6 @@ class FakeLibrary(QObject):
                 "url": "https://music.example/release", "description": "A short description.",
                 "descriptionUrl": "https://en.wikipedia.org/wiki/Quiet_Shapes",
             },
-            "similar": [{"trackId": 8, "title": "Near", "artist": "A Band", "album": "Elsewhere", "reason": "shared artist", "owned": True}],
-            "discoveries": [{"trackId": 0, "title": "Far", "artist": "Other", "album": "Away", "reason": "last.fm", "url": "https://music.example/track", "owned": False}],
             "candidates": [{"id": "r1", "title": "Quiet Shapes", "artist": "A Band", "date": "2000-03-02", "country": "US", "format": "CD"}],
         }
 
@@ -93,11 +90,6 @@ class FakeLibrary(QObject):
     def openInfoUrl(self, value):
         self.calls.append(("url", value))
         return value.startswith("https://")
-
-    @Slot(str, str, str, result=bool)
-    def browseInfoConnection(self, kind, entity_id, name):
-        self.calls.append(("browse", kind, entity_id, name))
-        return kind in ("artist", "label") and bool(entity_id or name)
 
 
 class FakePlayer(QObject):
@@ -223,20 +215,12 @@ def main():
         if required not in joined:
             raise AssertionError("failed release lost the artist: " + required)
 
-    pane.setProperty("tab", "similar")
-    app.processEvents()
-    if not any("owned tracks and discoveries" == s for s in text_items(pane)):
-        raise AssertionError("related sections missing")
-    if any("%" in s for s in text_items(pane)):
-        raise AssertionError("confidence percentage leaked into UI")
     source = (APP / "qml/NowInfoPane.qml").read_text()
-    for required in ("Player.playTracks", "root.openUrl(modelData.url)", "candidateLabel", 'root.browse("artist", modelData)', "enabled: !!modelData.id", "descriptionUrl"):
+    for required in ("root.openUrl(modelData.url)", "candidateLabel", "descriptionUrl"):
         if required not in source:
-            raise AssertionError("related action wiring missing " + required)
-    if lib.browseInfoConnection("person", "artist-1", "A Producer"):
-        raise AssertionError("fake accepted the wrong browse kind")
-    if not lib.browseInfoConnection("artist", "artist-1", "A Producer"):
-        raise AssertionError("fake rejected artist browse kind")
+            raise AssertionError("release action wiring missing " + required)
+    if '"similar"' in source or "browseInfoConnection" in source:
+        raise AssertionError("removed Similar surface is still present")
 
     theme.setProperty("lineHeight", 24)
     app.processEvents()
@@ -248,7 +232,7 @@ def main():
     actions = pane.findChild(QQuickItem, "actions")
     if actions is None or actions.y() < 0 or actions.y() + actions.height() > tab_bar.height():
         raise AssertionError("narrow wrapped actions escape the tab bar")
-    print("album-info-ui-test: offscreen release, credits, candidates, and related rows loaded")
+    print("album-info-ui-test: offscreen release, credits, and candidates loaded")
 
 
 if __name__ == "__main__":
