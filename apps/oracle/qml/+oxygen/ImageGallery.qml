@@ -88,6 +88,14 @@ Column {
                         asynchronous: true
                         source: e ? "file://" + e.path : ""
                     }
+                    CaptionStrip {
+                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                        visible: solo.e && solo.e.satellite === true
+                        over: true
+                        caption: solo.e ? (solo.e.alt || "") : ""
+                        meta: solo.e ? (solo.e.meta || "") : ""
+                        wash: 0.72
+                    }
                 }
 
                 MouseArea {
@@ -109,9 +117,11 @@ Column {
 
         CaptionStrip {
             width: gal.width
-            caption: (gal.oks.length === 1 && gal.oks[0].alt) ? gal.oks[0].alt : ""
+            caption: (gal.oks.length === 1 && !gal.oks[0].satellite && gal.oks[0].alt)
+                     ? gal.oks[0].alt : ""
             meta: gal.oks.length !== 1 ? ""
-                  : (gal.oks[0].meta || gal.hostOf(gal.oks[0].url))
+                  : (gal.oks[0].satellite ? ""
+                     : (gal.oks[0].meta || gal.hostOf(gal.oks[0].url)))
         }
         QQC.Label {
             visible: solo.status === Image.Error

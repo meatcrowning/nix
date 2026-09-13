@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The thinking clock counts tool waits, and says `waiting…` while it does.
+"""The thinking clock counts tool waits, and says `loading…` while it does.
 
 End-to-end and offscreen: the real `Root.qml` under a STUB ollama on 127.0.0.1,
 driven through the two functions the window itself uses (`loadTurns`,
@@ -248,9 +248,9 @@ spin(100)
 check("opening reasoning reveals its tool activity",
       any(bool(it.property("visible")) for it in items_named("toolActivity")),
       repr([it.property("visible") for it in items_named("toolActivity")]))
-check("an open reasoning disclosure stays open while `waiting…`",
+check("an open reasoning disclosure stays open while `loading…`",
       thinking is not None and bool(thinking.property("expanded"))
-      and any(x.startswith("waiting") for x in headings()),
+      and any(x.startswith("loading") for x in headings()),
       "expanded=%r headings=%r" %
       (None if thinking is None else thinking.property("expanded"), headings()))
 check("expanded reasoning is a bounded auto-following scroll box",
@@ -263,8 +263,9 @@ check("expanded reasoning is a bounded auto-following scroll box",
                          thinking_scroll.property("contentHeight"),
                          thinking_scroll.property("height"))),))
 spin(2050)
-check("a tool round in flight reads `waiting…`",
-      any(x.startswith("waiting") for x in SEEN), repr(SEEN))
+check("a tool round in flight reads `loading…`",
+      any(x.startswith("loading") for x in SEEN)
+      and not any(x.startswith("waiting") for x in SEEN), repr(SEEN))
 
 spin(100)
 
@@ -281,10 +282,8 @@ check("no state text is left running",
       repr(h))
 
 # ---- ONE STATE AT A TIME -------------------------------------------------
-# An empty bubble out on its first tool satisfied both the `loading` line and
-# the clock's `waiting…`, and drew them stacked on top of each other [his,
-# 2026-08-22]. `loading` owns a bubble with nothing in it; the clock takes over
-# once there is something to show.
+# Loading and tool waits are one disclosure state. There is no second waiting
+# line, and the loading line is already clickable before any detail arrives.
 HOLD["tool"] = True
 HOLD["thinking"] = False
 QMetaObject.invokeMethod(root, "loadTurns", Q_ARG("QVariant", "clocktest2"),
@@ -317,6 +316,9 @@ if not QMetaObject.invokeMethod(root, "continueReply", Q_ARG("QVariant", "")):
 sample_pairs(2500)
 check("an empty bubble never shows `loading` and `waiting` at once",
       not both, repr(both[:2]))
+check("the loading line is the enabled reasoning toggle",
+      any(bool(it.property("enabled"))
+          for it in items_named("thinkingToggleMouse")))
 
 # ---- A FRESH ROUND DOES NOT FOLD THE PREVIOUS REASONING -------------------
 # The next tool round begins as `loading…`: it has no text of its own yet, but

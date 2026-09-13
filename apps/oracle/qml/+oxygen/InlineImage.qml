@@ -62,6 +62,14 @@ Item {
                 asynchronous: true
                 source: inl.e ? "file://" + inl.e.path : ""
             }
+            CaptionStrip {
+                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                visible: inl.e && inl.e.satellite === true
+                over: true
+                caption: inl.e ? (inl.e.alt || "") : ""
+                meta: inl.e ? (inl.e.meta || "") : ""
+                wash: 0.72
+            }
         }
 
         MouseArea {
@@ -85,8 +93,8 @@ Item {
         id: capStrip
         y: inl.dispH + inl.vinset + 4
         width: inl.width
-        caption: inl.e ? (inl.e.alt || "") : ""
-        meta: inl.e ? (inl.e.meta || "") : ""
+        caption: inl.e && !inl.e.satellite ? (inl.e.alt || "") : ""
+        meta: inl.e && !inl.e.satellite ? (inl.e.meta || "") : ""
     }
 
     // A file that saved but will not decode — say so, never a blank.
