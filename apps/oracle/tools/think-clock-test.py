@@ -11,6 +11,7 @@ import http.server
 import json
 import os
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -18,6 +19,8 @@ from pathlib import Path
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 os.environ.pop("WAYLAND_DISPLAY", None)
 os.environ.pop("DISPLAY", None)
+_config = tempfile.TemporaryDirectory(prefix="chatter-thinking-")
+os.environ["ORACLE_CONFIG"] = _config.name
 
 HERE = Path(__file__).resolve().parent
 APP = HERE.parent
@@ -188,6 +191,12 @@ def items_named(name, root_item=win):
     return found
 
 
+def captions():
+    """The effective speaker captions, in transcript order."""
+    return [item.property("text") for item in items_named("speakerCaption")
+            if item.isVisible()]
+
+
 # A one-row transcript whose last turn is a cut-off model answer — the state
 # `continueReply` acts on, and the only public way in without a prompt box.
 QMetaObject.invokeMethod(root, "loadTurns", Q_ARG("QVariant", "clocktest"),
@@ -198,6 +207,14 @@ QMetaObject.invokeMethod(root, "loadTurns", Q_ARG("QVariant", "clocktest"),
                               "body": "let me check", "cutOff": True}])))
 spin(300)
 root.setProperty("model", "stub:latest")
+check("assistant bubbles use Nyx by default", "Nyx" in captions(), repr(captions()))
+QMetaObject.invokeMethod(root, "tbAction", Q_ARG("QVariant", "show-model-name"))
+spin(50)
+check("Settings can reveal the selected model name",
+      "stub:latest" in captions(), repr(captions()))
+QMetaObject.invokeMethod(root, "tbAction", Q_ARG("QVariant", "show-model-name"))
+spin(50)
+check("Settings can return captions to Nyx", "Nyx" in captions(), repr(captions()))
 # THE ARGUMENT IS NOT OPTIONAL FROM HERE. `continueReply(forced)` grew that
 # parameter with the resume/extend split (2026-08-23), and `invokeMethod` with
 # no args does not match a QML function that declares one — it returns False and

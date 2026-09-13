@@ -1491,6 +1491,10 @@ Item {
                    state: Ollama.promptChoice === "custom" ? 1 : 0 });
         out.push({ id: "edit-prompt", menu: "settings",
                    menuText: "Edit Custom Prompt…", icon: "document-edit" });
+        out.push("-");
+        out.push({ id: "show-model-name", menu: "settings",
+                   menuText: "Show Model Name",
+                   state: Ollama.showModelName ? 1 : 0 });
         return out;
     }
 
@@ -1637,6 +1641,7 @@ Item {
                                }
                                break;
         case "edit-prompt":    win.openPromptEditor();          break;
+        case "show-model-name": Ollama.setShowModelName(!Ollama.showModelName); break;
         // The Edit menu, through the SAME code the transcript's right-click
         // menu runs (win.textMenu) — one implementation of copy, two ways in,
         // so a reply is copied as MARKDOWN from either.
@@ -2956,6 +2961,7 @@ Item {
                                     height: whoText.visible ? whoText.height : 0
                                     PixelText {
                                         id: whoText
+                                        objectName: "speakerCaption"
                                         x: isUser ? parent.width - width : 0
                                         // Just the speaker, ONCE per turn. The caption
                                         // used to name the round from 2 on ("model ·
@@ -2965,7 +2971,7 @@ Item {
                                         // anything else between their bubbles [his,
                                         // 2026-08-23].
                                         visible: isUser || turn.isHead
-                                        text: who
+                                        text: isUser || Ollama.showModelName ? who : "Nyx"
                                         color: Theme.textDim
                                     }
                                     // Ticks live while the model reasons and PERSISTS
