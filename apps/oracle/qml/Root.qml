@@ -3056,16 +3056,15 @@ Item {
                                         // Shown whenever the clock ran at all: a turn
                                         // that only WAITED on tools reported nothing at
                                         // all before [his, 2026-08-22].
-                                        // ...and NOT while the `loading` line above is
-                                        // up. An empty bubble waiting on its first tool
-                                        // satisfied both, so "loading…" and "waiting…"
-                                        // stacked on top of each other [his,
-                                        // 2026-08-22]. One state at a time: `loading`
-                                        // owns a bubble with nothing in it yet, the
-                                        // clock takes over once there is something.
-                                        visible: !waiting.visible
-                                                 && (hasBody || turn.agg.thinkMs > 0
-                                                     || turn.agg.thinkStart > 0 || turn.agg.awaiting)
+                                        // `loading…` belongs to the fresh reply row, but
+                                        // this disclosure can already hold reasoning from an
+                                        // earlier round of the same turn. Keep an open log on
+                                        // screen through that handoff; its state is not erased
+                                        // merely because the next round has not spoken yet.
+                                        visible: hasBody || (!turn.agg.loading
+                                                 && (turn.agg.thinkMs > 0
+                                                     || turn.agg.thinkStart > 0
+                                                     || turn.agg.awaiting))
                                         height: visible ? thinkToggle.height + thinkReveal.height : 0
 
                                         readonly property bool hasBody: turn.agg.thinking !== ""
