@@ -505,6 +505,29 @@ facts and i know its a small model"*]. The `wikipedia` tool below is the third.
 Harness: `tools/grounding-test.py`, which asserts on the real POST body against
 a stub ollama.
 
+### One real turn, and knowing what Chatter provides
+
+**The message list is the turn boundary.** Qwen 3.6 was observed completing its
+reasoning for a real question, inventing a likely next user instruction, then
+reasoning about that instruction before producing the visible answer. The
+invented turn stayed inside the folded reasoning, but it spent context and could
+steer the answer. `TURN_BOUNDARY_NOTE`, on every system prompt, says to answer
+only the latest actual user message and stop rather than simulate what he might
+say next. This is an instruction boundary, not output filtering: legitimate
+reasoning and answer text remain untouched.
+
+**Self-knowledge is measured.** The app already provides past-session recall,
+durable memory, skills and verification, but a model asked what it would improve
+about itself denied those facilities from its generic training-time idea of a
+chatbot. `SELF_KNOWLEDGE_NOTE` requires `describe_self` before a claim about its
+own abilities or limits, and `request_tools()` attaches that schema on the first
+request for an obvious self/capability question. It must distinguish a model
+limit from an app facility and describe the facility's real limits rather than
+inventing a replacement for something already present.
+
+Harnesses: `tools/grounding-test.py` asserts that both contracts reach the real
+POST body; `tools/request-routing-test.py` covers the narrow first-request route.
+
 ### `wikipedia` — the source a small model can cite
 
 **A model that does not know a fact should be able to fetch one, not compose
