@@ -349,9 +349,9 @@ Item {
                 a.genFrac = r.genFrac || 0;
             }
             // Nothing said and nothing thought while a row still streams: the
-            // turn is waiting on its first anything, and that is a line of its
-            // own — never at the same time as the clock (`waiting…`), which is
-            // why the reasoning heading below stands down for it.
+            // turn's one disclosure reads `loading…`. It is still the regular
+            // clickable disclosure, so opening it early keeps the machinery
+            // revealed as it arrives.
             if (r.streaming && (r.body || "") === "" && (r.thinking || "") === "")
                 a.loading = true;
         }
@@ -3009,27 +3009,6 @@ Item {
                                     // otherwise empty bubble, which read as a message
                                     // rather than as a wait (§10 — the state is shown,
                                     // and it is honest about being a state).
-                                    Item {
-                                        id: waiting
-                                        width: parent.width
-                                        visible: turn.agg.loading
-                                        height: visible ? Theme.lineHeight : 0
-
-                                        property int dotPhase: 0
-                                        Timer {
-                                            interval: motion.ms(motion.slideMs)
-                                            running: waiting.visible && !motion.reduceMotion
-                                            repeat: true
-                                            onTriggered: waiting.dotPhase = (waiting.dotPhase + 1) % 4
-                                        }
-                                        PixelText {
-                                            anchors { left: parent.left; verticalCenter: parent.verticalCenter }
-                                            text: "loading" + (motion.reduceMotion ? "…"
-                                                  : "...".substring(0, waiting.dotPhase))
-                                            color: Theme.text
-                                        }
-                                    }
-
                                     // The reasoning, a COLLAPSIBLE disclosure that starts
                                     // folded. Its heading reports progress: "thinking…"
                                     // (one step brighter) while the reasoning streams, and
@@ -3050,10 +3029,9 @@ Item {
                                         // earlier round of the same turn. Keep an open log on
                                         // screen through that handoff; its state is not erased
                                         // merely because the next round has not spoken yet.
-                                        visible: hasBody || (!turn.agg.loading
-                                                 && (hasDetails || turn.agg.thinkMs > 0
-                                                     || turn.agg.thinkStart > 0
-                                                     || turn.agg.awaiting))
+                                        visible: turn.agg.loading || turn.agg.awaiting
+                                                 || hasDetails || turn.agg.thinkMs > 0
+                                                 || turn.agg.thinkStart > 0
                                         height: visible ? thinkToggle.height + thinkReveal.height : 0
 
                                         // One disclosure owns ALL of the turn's hidden
@@ -3112,7 +3090,8 @@ Item {
                                                 // clock waiting on tools (§10.2: never a
                                                 // control that opens nothing).
                                                 PixelText {
-                                                    visible: think.hasDetails
+                                                    visible: think.hasDetails || turn.agg.loading
+                                                             || turn.agg.awaiting
                                                     text: think.expanded ? "-" : "+"
                                                     color: Theme.textDim
                                                 }
@@ -3124,8 +3103,8 @@ Item {
                                                 // the reasoning, never beside Nyx.
                                                 PixelText {
                                                     text: {
-                                                        if (turn.agg.awaiting)
-                                                            return "waiting" + thinkToggle.dots;
+                                                        if (turn.agg.loading || turn.agg.awaiting)
+                                                            return "loading" + thinkToggle.dots;
                                                         var live = turn.agg.thinkMs + (turn.agg.thinkStart > 0
                                                                               ? think.elapsed : 0);
                                                         var d = win.fmtDur(turn.agg.thinkingActive ? live
@@ -3147,8 +3126,10 @@ Item {
                                                 }
                                             }
                                             MouseArea {
+                                                objectName: "thinkingToggleMouse"
                                                 anchors.fill: parent
-                                                enabled: think.hasDetails
+                                                enabled: think.hasDetails || turn.agg.loading
+                                                         || turn.agg.awaiting
                                                 cursorShape: Qt.PointingHandCursor
                                                 onClicked: { turn.userOpen = !think.expanded; turn.userSet = true; }
                                             }

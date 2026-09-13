@@ -247,7 +247,8 @@ exactly what it always was.
   The bubble carries only the answer itself. The disclosure heading reports
   progress: while the reasoning streams it reads **`thinking for 240 tokens in
   12s…`** (one brightness step up, the ellipsis animated),
-  **`waiting…`** while a tool call is out, and settles to **`thought for 12s`**
+  **`loading…`** before the first token and while a tool call is out, and
+  settles to **`thought for 12s`**
   (or **`thought for 240 tokens in 12s`** when reasoning tokens exist)
   [his, 2026-09-13]. **The clock counts reasoning AND tool waits** — it accrues
   while `thinkingActive || awaiting` and pauses while the answer itself streams,
@@ -258,8 +259,9 @@ exactly what it always was.
   transcript still says how long each answer was worked on. The heading's
   **token count** is `240 tokens`, `1.2k tokens` past a thousand
   (`win.fmtCount`); the animated ellipsis rides the state, never the count
-  (dim, §9.1). A tool-only turn still gets a working toggle because its activity
-  rows are content to unfold. Harness:
+  (dim, §9.1). `loading…` is that same working toggle, not a separate status
+  row, so opening it early reveals activity as it arrives. A tool-only turn
+  still gets a working toggle because its activity rows are content to unfold. Harness:
   `tools/think-clock-test.py`, which drives the real `Root.qml` against a stub
   ollama and asserts the heading text the delegate actually renders — the count is the running frame
   count `Ollama` emits on `replyThinkTokens` (ollama streams one token per NDJSON
@@ -1996,6 +1998,11 @@ me X" resolves to a URL that actually loads. No Tavily key → the same honest
 wherever the window is and saves under `IMAGES_ROOT`
 (`~/.local/share/oracle/images`, override `$ORACLE_IMAGES`), content-addressed by
 URL so a re-fetch reuses the file. `IMAGE_MAX_BYTES` (20 MB) caps one download.
+NASA GIBS entries carry a compact, two-line overlay inside the image frame:
+place/layer above, then source, acquisition date and WGS84 coverage. Those
+facts remain in the tool result for the model but its note tells it not to
+repeat the provenance in prose; the picture labels itself in both desktop
+faces and after session reload.
 
 **Failure is surfaced, never swallowed** (docs/DESIGN.md §10): a non-http(s) URL
 is refused before the network, a body that does not decode as an image (a web

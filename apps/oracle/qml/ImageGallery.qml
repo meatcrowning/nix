@@ -117,6 +117,15 @@ Column {
                     asynchronous: true
                     source: e ? "file://" + e.path : ""
                 }
+                CaptionStrip {
+                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom
+                              leftMargin: 1; rightMargin: 1; bottomMargin: 1 }
+                    visible: solo.e && solo.e.satellite === true
+                    over: true
+                    caption: solo.e ? (solo.e.alt || "") : ""
+                    meta: solo.e ? (solo.e.meta || "") : ""
+                    wash: 0.72
+                }
                 MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
@@ -137,9 +146,11 @@ Column {
         // click away in the Lightbox (CaptionStrip.qml).
         CaptionStrip {
             width: gal.width
-            caption: (gal.oks.length === 1 && gal.oks[0].alt) ? gal.oks[0].alt : ""
+            caption: (gal.oks.length === 1 && !gal.oks[0].satellite && gal.oks[0].alt)
+                     ? gal.oks[0].alt : ""
             meta: gal.oks.length !== 1 ? ""
-                  : (gal.oks[0].meta || gal.hostOf(gal.oks[0].url))
+                  : (gal.oks[0].satellite ? ""
+                     : (gal.oks[0].meta || gal.hostOf(gal.oks[0].url)))
         }
         // A file that saved but will not decode (§10 — say so, never a blank).
         PixelText {

@@ -90,6 +90,10 @@ def run(args):
 gibs = run({"source": "gibs", "place": "Lisbon", "date": "2026-09-12"})
 assert gibs["ok"] and gibs["source"] == "NASA GIBS" and images[-1]["ok"]
 assert Path(images[-1]["path"]).is_file()
+assert images[-1]["satellite"] is True
+assert images[-1]["meta"].startswith("NASA GIBS  ·  2026-09-12  ·  ")
+assert "_image_meta" not in gibs
+assert main.satellite.bbox_label([-10, 38, -8, 40]) == "10°W–8°W  38°N–40°N"
 # The observed failure copied the downloaded GIBS PNG to /tmp and called
 # show_image. Path-only deduplication treated that byte-identical copy as a
 # second picture. It is now one image by content too.

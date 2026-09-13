@@ -60,6 +60,16 @@ def default_date(value=""):
     return (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
 
 
+def bbox_label(box):
+    """Compact human-facing coverage label for a WGS84 bounding box."""
+    west, south, east, north = (float(v) for v in box)
+    def coord(value, pos, neg):
+        number = ("%.2f" % abs(value)).rstrip("0").rstrip(".")
+        return number + "°" + (pos if value >= 0 else neg)
+    return "%s–%s  %s–%s" % (coord(west, "E", "W"), coord(east, "E", "W"),
+                               coord(south, "N", "S"), coord(north, "N", "S"))
+
+
 def gibs_url(box, product="natural", date="", width=1024, height=768):
     layer = GIBS_LAYERS.get(product, product)
     width = min(1600, max(256, int(width)))

@@ -8504,10 +8504,13 @@ class Ollama(QObject):
             meta = {"source": "NASA GIBS", "layer": layer,
                     "acquisition_date": observed, "bbox": box,
                     "resolved_place": place,
+                    "_image_meta": "NASA GIBS  ·  " + observed
+                                   + "  ·  " + satellite.bbox_label(box),
                     "note": ("Satellite image is ALREADY shown inline. Do not "
                              "download, copy, fetch_image or show_image it again. "
-                             "The acquisition date is explicit; this is not a "
-                             "live camera.")}
+                             "Its source, acquisition date and coverage are drawn "
+                             "on the image. Answer with what matters; do not repeat "
+                             "that provenance in prose. This is not a live camera.")}
             self._fetch_image(url, place or layer, idx, remaining, calls,
                               "satellite_observe", meta)
             return
@@ -8946,6 +8949,10 @@ class Ollama(QObject):
                                            "in the chat for the user to see.")}
                         if isinstance(result_extra, dict):
                             result.update(result_extra)
+                            image_meta = str(result.pop("_image_meta", "") or "")
+                            if image_meta:
+                                entry["meta"] = image_meta
+                                entry["satellite"] = True
         except (ValueError, TypeError, OSError) as e:
             entry, result = self._image_error(url, str(e))
         finally:
