@@ -1,4 +1,4 @@
-{ config, pkgs, lib, host, ... }:
+{ config, pkgs, lib, host, privateConfig, ... }:
 
 let
   plasmaManagerLogin = pkgs.writeShellScript "plasma-manager-login" ''
@@ -131,9 +131,9 @@ in
           {
             name = "org.kde.plasma.weather";
             config.WeatherStation = {
-              placeDisplayName = "redacted-city";
-              placeInfo = "redacted-city";
-              provider = "noaa";
+              placeDisplayName = privateConfig.location.plasmaPlace;
+              placeInfo = privateConfig.location.plasmaPlace;
+              provider = privateConfig.location.plasmaSource;
             };
           }
           "org.kde.plasma.mediacontroller"

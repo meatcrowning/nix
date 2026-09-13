@@ -2,6 +2,12 @@
   description = "NixOS configuration";
 
   inputs = {
+    # Personal settings are supplied locally by the rebuild wrappers.
+    private-config = {
+      url = "path:./lib/private-defaults";
+      flake = false;
+    };
+
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     home-manager = {
       url = "github:nix-community/home-manager/release-25.11";
@@ -49,6 +55,7 @@
   outputs = { nixpkgs, home-manager, plasma-manager, aerothemeplasma-nix, ... }@inputs:
   let
     user = "lam";
+    privateConfig = import inputs.private-config;
     system = "x86_64-linux";
     vcv-rack-overlay = import ./overlays/vcv-rack.nix;
 
@@ -90,7 +97,7 @@
     nixosConfigurations = {
       top = nixpkgs.lib.nixosSystem {
         specialArgs = {
-          inherit inputs user;
+          inherit inputs user privateConfig;
           host = "top";
           hostProfile = import ./lib/host-profile.nix { host = "top"; };
         };
@@ -107,7 +114,7 @@
           {
             home-manager = {
               extraSpecialArgs = {
-                inherit inputs user;
+                inherit inputs user privateConfig;
                 host = "top";
                 hostProfile = import ./lib/host-profile.nix { host = "top"; };
               };
@@ -127,7 +134,7 @@
       air = home-manager.lib.homeManagerConfiguration {
         pkgs = pkgsAir;
         extraSpecialArgs = {
-          inherit inputs user;
+          inherit inputs user privateConfig;
           inherit airOffload;
           host = "air";
           hostProfile = import ./lib/host-profile.nix { host = "air"; };

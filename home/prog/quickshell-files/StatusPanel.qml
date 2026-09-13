@@ -374,7 +374,7 @@ Grid {
         onWheelDown: () => SysInfo.adjustVolume(-5)
     }
 
-    // ---------- Weather (redacted-city) ----------
+    // ---------- Weather ----------
     // Text-only like everything else: the CONDITION word is the dim label
     // ("rain", "snow", "clr"...) and the value is the temperature — the
     // word itself does the icon's job. Hover slides out the 7-day forecast.

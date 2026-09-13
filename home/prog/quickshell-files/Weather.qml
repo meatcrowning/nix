@@ -3,7 +3,7 @@ import Quickshell
 import Quickshell.Io
 import QtQuick
 
-// Weather for redacted-city, AK via open-meteo (free, no key). Polled every 20
+// Weather via open-meteo (free, no key). Polled every 20
 // minutes with curl. The panel shows it text-only, matching the bar's
 // no-icons ethos: the CONDITION is the dim label ("rain", "snow", "clr"...)
 // and the value is the temperature — the word itself is the icon.

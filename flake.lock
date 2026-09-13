@@ -1101,6 +1101,18 @@
         "type": "github"
       }
     },
+    "private-config": {
+      "flake": false,
+      "locked": {
+        "path": "./lib/private-defaults",
+        "type": "path"
+      },
+      "original": {
+        "path": "./lib/private-defaults",
+        "type": "path"
+      },
+      "parent": []
+    },
     "root": {
       "inputs": {
         "aerothemeplasma-nix": "aerothemeplasma-nix",
@@ -1112,6 +1124,7 @@
         "nixpkgs": "nixpkgs_4",
         "nixpkgs-quickshell": "nixpkgs-quickshell",
         "plasma-manager": "plasma-manager",
+        "private-config": "private-config",
         "tuxmanager": "tuxmanager"
       }
     },

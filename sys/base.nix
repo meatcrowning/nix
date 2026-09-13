@@ -1,4 +1,4 @@
-{ config, pkgs, ... }:
+{ config, pkgs, privateConfig, ... }:
 
 {
   nix = {
@@ -97,7 +97,7 @@
   zramSwap.enable = true;                                   # RAM-compressed swap
                                                             # ahead of the on-disk swapfile
 
-  time.timeZone = "Etc/UTC";
+  time.timeZone = privateConfig.location.timeZone;
   i18n.defaultLocale = "en_US.UTF-8";
 
   networking = {

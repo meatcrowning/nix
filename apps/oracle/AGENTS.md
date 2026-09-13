@@ -561,7 +561,7 @@ no code change at all.
   The old default (`~/.claude/skills`) and its claude-state sync are gone.
   **Since 2026-08-23 the runtime dir syncs BOTH WAYS between `top` and `book`
   on its own** (`home/srvs/oracle-skills.nix`, 5-minute timer, private remote
-  `private/repository`): a skill or agent written on either machine
+  the private skills remote): a skill or agent written on either machine
   reaches the other with nothing to run by hand. The repo root is the whole
   runtime dir, so its `.gitignore` is an ALLOWLIST — only `skills/` and
   `agents/` are tracked, and `sessions/`, `memory/`, `jobs/`, `sandbox/` and

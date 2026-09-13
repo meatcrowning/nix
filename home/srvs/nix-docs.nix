@@ -1,8 +1,8 @@
-{ pkgs, lib, ... }:
+{ pkgs, lib, privateConfig, ... }:
 
 # Cross-machine sync for ~/nix/docs.
 #
-# `meatcrowning/nix` is public, but docs/ is not: the working notes there need
+# The public checkout is separate from docs/: the working notes there need
 # to be on both machines and stay private, so docs/ is its own git repo against
 # a private remote inside the public checkout. It is deliberately not a
 # submodule — `git pull` would leave the other machine stale. See
@@ -60,7 +60,7 @@
           pkgs.inetutils
         ]}"
         "CM_SYNC_REPO=%h/nix/docs"
-        "CM_SYNC_REMOTE=https://example.invalid/private-repository.git"
+        "CM_SYNC_REMOTE=${privateConfig.repositories.docs}"
         "CM_SYNC_LOG=%h/.cache/nix-docs-sync.log"
         "CM_SYNC_SEED=%h/.config/scripts/nix-docs-seed"
         "CM_SYNC_LABEL=doc"

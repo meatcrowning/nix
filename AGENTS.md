@@ -19,7 +19,7 @@ cd ~/nix
 ./tools/preflight.sh
 sudo rebuild-top                         # nixos-rebuild switch --flake /home/lam/nix#top
 sudo rebuild-top --upgrade               # update inputs, then switch
-nixos-rebuild build --flake /home/lam/nix#top
+./tools/nix-private.sh build .#nixosConfigurations.top.config.system.build.toplevel
 rebuild-air                              # home-manager switch --flake /home/lam/nix#air
 ```
 
@@ -75,6 +75,24 @@ nix-pull apply
 qmllint -I <import paths> qml/Main.qml
 ./tools/sandbox.sh start|exec CMD|shot|clients|stop
 ```
+
+## Private configuration
+
+Personal settings live in the separate private docs repository under
+`docs/private-config/`. The `private-config` flake input has a public fallback
+that refuses evaluation; rebuild wrappers and `tools/nix-private.sh` supply the
+local private directory with `--override-input` and `--no-write-lock-file`.
+Restore that directory on both hosts before applying a public update. Never
+write its resolved input or personal values into the public lock, source, or
+commit messages. Non-secret settings still enter the local Nix store; actual
+credentials remain encrypted or runtime-only.
+
+Use `tools/nix-private.sh eval|build ...` for manual flake evaluation/builds.
+Run plain `nix flake update` for input updates so the public fallback stays in
+the lock. `tools/privacy-check.py` checks tracked source and the effective Git
+identity against private identifiers during preflight. The public checkout's
+noreply author identity is applied locally by `home/git-privacy.nix` on both
+hosts. History cleanup is separate and requires approval before force-pushing.
 
 ## Rebuild and reload policy
 
@@ -220,7 +238,7 @@ private `docs/agents/` runbooks.
 - `sounds/` is the private `vista-sounds` submodule. Clone with
   `--recurse-submodules` or run `git submodule update --init`; never commit its
   Microsoft `.wav` files here.
-- `docs/` is a separate private repo (`github.com/private/repository`) inside
+- `docs/` is a separate private repo (with a private remote) inside
   this public checkout and ignored by its Git. `docs/` root is user-facing;
   `docs/agents/` is agent-only; `docs/README.md` indexes both. Its sync is
   `home/srvs/nix-docs.nix`; inspect `~/.cache/nix-docs-sync.log` or run

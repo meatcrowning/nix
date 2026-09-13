@@ -578,9 +578,9 @@ check("a custom tool cannot shadow a built-in", "read_file" not in names,
       str(names))
 check("...and it IS offered to the model",
       "weather" in [t["function"]["name"] for t in oracle.Ollama._all_tools()])
-r = run_tool("weather", {"city": "redacted-city"})
+r = run_tool("weather", {"city": "Seattle"})
 check("running one feeds it the args and takes back its JSON",
-      bool(r) and r.get("ok") and (r.get("said") or {}).get("city") == "redacted-city",
+      bool(r) and r.get("ok") and (r.get("said") or {}).get("city") == "Seattle",
       json.dumps(r)[:160])
 script(_TMP / "tools" / "cranky", 'echo "it broke" >&2; exit 2')
 (_TMP / "tools" / "cranky.json").write_text(json.dumps(

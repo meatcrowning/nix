@@ -71,6 +71,9 @@ def isolated_step(step):
 #: ask-first list, so they are never part of "update everything" and a
 #: single-input bump of one asks a second time.
 PINNED = {"hyprland", "hyprland-air", "nixpkgs-quickshell"}
+# This local path input supplies private settings to evaluation.  It is not a
+# package source and must never be offered to `nix flake update`.
+NON_UPDATEABLE = {"private-config"}
 
 STATE_PATH = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) \
     / "updater" / "state.json"
@@ -252,7 +255,8 @@ class Inputs(QObject):
             age = int((now - lm) / 86400) if lm else -1
             items.append({"name": name, "rev": rev[:10], "date": date,
                           "age": age, "follows": "",
-                          "pinned": name in PINNED, "updatable": bool(rev)})
+                          "pinned": name in PINNED,
+                          "updatable": bool(rev) and name not in NON_UPDATEABLE})
         self._items = items
         self.changed.emit()
 

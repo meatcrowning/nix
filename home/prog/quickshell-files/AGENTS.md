@@ -2590,3 +2590,11 @@ qmllint -I <import paths> Foo.qml
 - **Never run bare `qs`** — it launches a second panel.
 - **Never open a test window on the user's screen** — `~/nix/tools/sandbox.sh`
   puts it on an off-screen virtual monitor. See `../AGENTS.md`.
+
+## Private weather defaults
+
+`home/prog/quickshell.nix` generates `Location.qml` from the private flake
+input. `SettingsStore.qml` uses it only for first-run/reset defaults; persisted
+settings stay authoritative. Keep locations and coordinates out of public QML
+and comments. The generated singleton must be present in offscreen fixtures
+that load `SettingsStore.qml`, just like `Host.qml`.

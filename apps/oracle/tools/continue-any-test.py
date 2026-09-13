@@ -217,7 +217,7 @@ ANNOUNCES = [
 FINISHES = [
     "Done — I edited main.py and re-read it to check the change landed.",
     "Yes, I do. I have access to a real bash shell via the run_bash tool.",
-    "The trip from redacted-city takes about 15-20 minutes by floatplane.",
+    "The trip from Seattle takes about 15-20 minutes by floatplane.",
     "Which of the two directories do you want me to use?",
     "Shall I proceed with inspecting `AGENTS.md`?",
     "Would you like me to play one of these tracks, or help with something else?",

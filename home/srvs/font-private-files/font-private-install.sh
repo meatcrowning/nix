@@ -16,9 +16,17 @@
 # hook so the current switch installs it immediately on both machines.
 
 set -eu
-REMOTE="${FONT_REMOTE:-https://example.invalid/private-repository.git}"
+REMOTE="${FONT_REMOTE:-}"
 CHECKOUT="${FONT_CHECKOUT:-$HOME/.local/share/nix-fonts}"
 FONTS_DIR="${FONTS_DIR:-$HOME/.local/share/fonts}"
+
+if [ -z "$REMOTE" ] && [ -d "$CHECKOUT/.git" ]; then
+  REMOTE="$(git -C "$CHECKOUT" remote get-url origin 2>/dev/null || true)"
+fi
+if [ -z "$REMOTE" ]; then
+  echo "font-private: FONT_REMOTE is unset and $CHECKOUT has no origin remote" >&2
+  exit 1
+fi
 
 mkdir -p "$FONTS_DIR"
 
@@ -34,7 +42,7 @@ else
   # Refresh. Fetch then fast-forward the mirror to origin/main; ignore a fetch
   # failure (offline) and keep the last good copy.
   if git -C "$CHECKOUT" fetch -q --depth 1 origin main 2>/dev/null; then
-    git -C "$CHECKOUT" reset -q --hard FETCH_HEAD
+    git -C "$CHECKOUT" merge -q --ff-only FETCH_HEAD
   fi
 fi
 
