@@ -243,7 +243,13 @@ exactly what it always was.
   subordinated) that sits **OUTSIDE the bubble** [his, 2026-08-22]. Since
   2026-09-13 it owns the whole turn's machinery: tool, agent, web-search and
   file rows are hidden with it until he opens the reasoning disclosure. The
-  speaker caption above says only **`Nyx`**; tokens no longer trail the name.
+  speaker caption above says only the persisted conversational name (initially
+  **`Sable`**); tokens no longer trail the name. `set_name` is a core tool, so
+  the model can change its own name when he chooses one. It writes
+  `~/.config/oracle/assistant-name`, changes the live caption through
+  `assistantNameChanged`, and the system prompt tells every later turn the same
+  name. The literal model-name debug setting still overrides it without
+  changing it.
   The bubble carries only the answer itself. The disclosure heading reports
   progress: while the reasoning streams it reads **`thinking for 240 tokens in
   12s…`** (one brightness step up, the ellipsis animated),
@@ -261,7 +267,9 @@ exactly what it always was.
   (`win.fmtCount`); the animated ellipsis rides the state, never the count
   (dim, §9.1). `loading…` is that same working toggle, not a separate status
   row, so opening it early reveals activity as it arrives. A tool-only turn
-  still gets a working toggle because its activity rows are content to unfold. Harness:
+  still gets a working toggle because its activity rows are content to unfold.
+  The outer turn stack has zero spacing: the folded heading's line box meets
+  the answer bubble directly instead of adding a second gutter below it. Harness:
   `tools/think-clock-test.py`, which drives the real `Root.qml` against a stub
   ollama and asserts the heading text the delegate actually renders — the count is the running frame
   count `Ollama` emits on `replyThinkTokens` (ollama streams one token per NDJSON

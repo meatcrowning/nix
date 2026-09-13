@@ -2928,7 +2928,7 @@ Item {
                             Column {
                                 id: turnStack
                                 width: parent.width
-                                spacing: 2
+                                spacing: 0
 
                                 // The date, once, on the first turn of a day that
                                 // is not the previous turn's. A session held in one
@@ -2968,7 +2968,7 @@ Item {
                                         // anything else between their bubbles [his,
                                         // 2026-08-23].
                                         visible: isUser || turn.isHead
-                                        text: isUser || Ollama.showModelName ? who : "Nyx"
+                                        text: isUser || Ollama.showModelName ? who : Ollama.assistantName
                                         color: Theme.textDim
                                     }
                                 }
@@ -3100,7 +3100,7 @@ Item {
                                                 // "waiting…" while a tool is out, then
                                                 // "thought for 240 tokens in 12s" once
                                                 // the turn settles. Tokens live here with
-                                                // the reasoning, never beside Nyx.
+                                                // the reasoning, never beside the speaker name.
                                                 PixelText {
                                                     text: {
                                                         if (turn.agg.loading || turn.agg.awaiting)
@@ -3647,6 +3647,7 @@ Item {
                                 // Plasma) [his, 2026-08-22].
                                 Bubble {
                                     id: bubble
+                                    objectName: "messageBubble"
                                     // Nothing to box when the turn has no text yet —
                                     // the `loading…` line and the reasoning above
                                     // carry the wait, so an empty slab under them
