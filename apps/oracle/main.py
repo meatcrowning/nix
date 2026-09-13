@@ -42,7 +42,7 @@ from html.parser import HTMLParser
 
 from PySide6.QtCore import (QObject, Slot, Signal, Property, QUrl, QUrlQuery,
                             QBuffer, QFileSystemWatcher, QProcess,
-                            QProcessEnvironment, QSaveFile, QIODevice, Qt, QTimer)
+                            QProcessEnvironment, Qt, QTimer)
 from PySide6.QtGui import QGuiApplication, QColor, QImage
 from PySide6.QtNetwork import (QNetworkAccessManager, QNetworkRequest,
                                QNetworkReply)
@@ -3228,17 +3228,18 @@ QWEN_PUBLISHED_SAMPLER = {
 }
 
 
-def sampler_for(model, preset="default", qwen_published=False):
+def sampler_for(model, preset="default"):
     """The sampling options to send with `model`.
 
-    The family default is the floor's starting point, not its competitor: a
+    Qwen 3.6 always uses its published general-task thinking profile. For other
+    models the family default is the floor's starting point: a
     model whose author published `top_k`/`min_p` keeps them, and only the two
     knobs that decide how far off the distribution's nose it will wander are
     pulled in. `custom` counts as factual — his own base prompt says what he
     wants, and a custom persona is not evidence that he wants invented dates.
     """
     name = (model or "").lower()
-    if qwen_published and re.search(r"qwen3[._-]6(?:\D|$)", name):
+    if re.search(r"qwen3[._-]6(?:\D|$)", name):
         return dict(QWEN_PUBLISHED_SAMPLER)
     opts = {}
     for key in sorted(SAMPLER_DEFAULTS, key=len, reverse=True):
@@ -3454,7 +3455,6 @@ else:
 CONFIG_DIR = Path(os.path.expanduser(
     os.environ.get("ORACLE_CONFIG", "~/.config/oracle")))
 LAST_MODEL_PATH = CONFIG_DIR / "last-model"
-SAMPLING_PATH = CONFIG_DIR / "sampling.json"
 #: HOW LOUD A CLIP PLAYS, for every clip [his, 2026-08-24: "if the user sets
 #: the volume of one clip it sets the same volume for every other past and
 #: future clip"]. One number, 0..1, in its own file beside the others — the
@@ -4583,8 +4583,6 @@ class Ollama(QObject):
     modelsChanged = Signal()
     lastModelChanged = Signal()
     promptChanged = Signal()      # the chosen base prompt or its custom text
-    samplingChanged = Signal()
-    settingsError = Signal(str)
     busyChanged = Signal()
     modelsError = Signal(str)
 
@@ -4785,7 +4783,6 @@ class Ollama(QObject):
         self._gen_procs = []     # the generator ones among them — Stop kills these
         self._memories = []      # oracle's own durable memories, injected each turn
         self._prompt_choice, self._custom_prompt = self._load_prompt_config()
-        self._qwen_sampling = self._load_qwen_sampling()
         self._ctx_max = 0        # the window actually in force (0 = unknown)
         self._ctx_train = 0      # …and the model's own trained ceiling
         self._ctx_model = ""     # which model those two were read for
@@ -5106,41 +5103,6 @@ class Ollama(QObject):
         except OSError:
             pass
         self.lastModelChanged.emit()
-
-    @staticmethod
-    def _load_qwen_sampling():
-        try:
-            data = json.loads(SAMPLING_PATH.read_text(encoding="utf-8"))
-            return isinstance(data, dict) and data.get("qwen_published") is True
-        except (OSError, ValueError):
-            return False
-
-    @Property(bool, notify=samplingChanged)
-    def qwenSampling(self):
-        return self._qwen_sampling
-
-    @Slot(bool)
-    def setQwenSampling(self, enabled):
-        enabled = bool(enabled)
-        if enabled == self._qwen_sampling:
-            return
-        try:
-            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            saved = QSaveFile(str(SAMPLING_PATH))
-            body = json.dumps({"qwen_published": enabled}).encode("utf-8")
-            if not saved.open(QIODevice.WriteOnly):
-                raise OSError(saved.errorString())
-            if saved.write(body) != len(body):
-                saved.cancelWriting()
-                raise OSError(saved.errorString())
-            if not saved.commit():
-                raise OSError(saved.errorString())
-        except OSError as exc:
-            self.settingsError.emit("could not save sampling: " + str(exc))
-            self.samplingChanged.emit()  # restore the menu's check on failure
-            return
-        self._qwen_sampling = enabled
-        self.samplingChanged.emit()
 
     # ---- the base system prompt (a preset, or his own custom text) ----
 
@@ -6620,8 +6582,7 @@ class Ollama(QObject):
             # READ OFF THE SAME CALL THE PAYLOAD MAKES, never a remembered
             # sentence (docs/DESIGN.md §10) — it said "model default (chatter
             # does not override)" for a day after chatter started overriding.
-            "sampling": dict(sampler_for(self._model, self._prompt_choice,
-                                         self._qwen_sampling),
+            "sampling": dict(sampler_for(self._model, self._prompt_choice),
                              num_ctx=self._num_ctx),
         }
         remaining["sink"][idx] = {"role": "tool", "tool_name": "describe_self",
@@ -6761,8 +6722,7 @@ class Ollama(QObject):
             "model": self._model,
             "messages": self._messages,
             "stream": True,
-            "options": dict(sampler_for(self._model, self._prompt_choice,
-                                        self._qwen_sampling),
+            "options": dict(sampler_for(self._model, self._prompt_choice),
                             num_ctx=self._num_ctx),
         }
         # The WRAP-UP round carries no tools at all: `_on_finished` sets
@@ -7768,11 +7728,10 @@ class Ollama(QObject):
         carries no tools — the same lesson the main loop learned: a model still
         calling tools when it is out of rounds, offered them again, answers
         with nothing at all."""
-        # Subagents use the factual preset unless the published sampler is on.
+        # Subagents use the same model defaults as the main agent.
         payload = {"model": run["model"], "messages": run["messages"],
                    "stream": False,
-                   "options": dict(sampler_for(run["model"],
-                                               qwen_published=self._qwen_sampling),
+                   "options": dict(sampler_for(run["model"]),
                                    num_ctx=self._num_ctx)}
         if run["tools"] and not run["wrap"]:
             payload["tools"] = run["tools"]
