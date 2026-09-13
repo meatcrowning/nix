@@ -40,7 +40,7 @@ class Stub(http.server.BaseHTTPRequestHandler):
         if self.path.startswith("/slow"):
             # The tool the stub asks for: a page that takes its time, so the
             # WAITING window is long enough to observe.
-            time.sleep(0.6)
+            time.sleep(1.2)
             body = b"the answer is 42"
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
@@ -67,7 +67,7 @@ class Stub(http.server.BaseHTTPRequestHandler):
             HOLD["tool"] = False        # only the FIRST round calls the tool
             # Reason for a moment, then call a tool and stop the stream: the
             # turn is now WAITING, exactly as it is against the real daemon.
-            frames = [{"message": {"thinking": "let me look that up"}},
+            frames = [{"message": {"thinking": REASONING}},
                       {"message": {"tool_calls": [
                           {"function": {"name": "fetch_url",
                                         "arguments": {"url": SLOW_URL[0]}}}]}},
@@ -84,6 +84,7 @@ class Stub(http.server.BaseHTTPRequestHandler):
 
 
 SLOW_URL = [""]
+REASONING = "\n".join("line %d: let me look that up" % n for n in range(32))
 srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Stub)
 threading.Thread(target=srv.serve_forever, daemon=True).start()
 os.environ["OLLAMA_HOST"] = "http://127.0.0.1:%d" % srv.server_address[1]
@@ -167,6 +168,20 @@ def headings():
     return out
 
 
+def items_named(name, root_item=win):
+    """QQuickItem's visual tree is not always its QObject child tree."""
+    found = []
+    def walk(it, d=0):
+        if d > 18 or it is None:
+            return
+        if it.property("objectName") == name:
+            found.append(it)
+        for ch in (it.childItems() if hasattr(it, "childItems") else it.children()):
+            walk(ch, d + 1)
+    walk(root_item)
+    return found
+
+
 # A one-row transcript whose last turn is a cut-off model answer — the state
 # `continueReply` acts on, and the only public way in without a prompt box.
 QMetaObject.invokeMethod(root, "loadTurns", Q_ARG("QVariant", "clocktest"),
@@ -186,7 +201,37 @@ root.setProperty("model", "stub:latest")
 if not QMetaObject.invokeMethod(root, "continueReply", Q_ARG("QVariant", "")):
     print("FAILED: continueReply did not accept the call")
     sys.exit(1)
-spin(2500)
+# Open the real disclosure while its tool call is outstanding. Its text is
+# deliberately longer than the ten-line viewport, so this also proves that the
+# reasoning is a bounded scrolling log and opens at its live end.
+spin(350)
+thinking = next((it for it in items_named("thinkingDisclosure")
+                 if bool(it.property("visible"))), None)
+thinking_scroll = (items_named("thinkingScroll", thinking)[0]
+                   if thinking is not None else None)
+check("the live reasoning disclosure exists", thinking is not None)
+turn = thinking
+while turn is not None and turn.property("userSet") is None:
+    turn = turn.parentItem()
+if turn is not None:
+    turn.setProperty("userSet", True)
+    turn.setProperty("userOpen", True)
+spin(100)
+check("an open reasoning disclosure stays open while `waiting…`",
+      thinking is not None and bool(thinking.property("expanded"))
+      and any(x.startswith("waiting") for x in headings()),
+      "expanded=%r headings=%r" %
+      (None if thinking is None else thinking.property("expanded"), headings()))
+check("expanded reasoning is a bounded auto-following scroll box",
+      thinking_scroll is not None
+      and thinking_scroll.property("contentHeight") > thinking_scroll.property("height")
+      and thinking_scroll.property("contentY") >=
+          thinking_scroll.property("contentHeight") - thinking_scroll.property("height") - 2,
+      "scroll=%r" % ((None if thinking_scroll is None else
+                        (thinking_scroll.property("contentY"),
+                         thinking_scroll.property("contentHeight"),
+                         thinking_scroll.property("height"))),))
+spin(2050)
 check("a tool round in flight reads `waiting…`",
       any(x.startswith("waiting") for x in SEEN), repr(SEEN))
 

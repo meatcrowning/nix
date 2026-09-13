@@ -3051,6 +3051,7 @@ Item {
                                     // growth from under the toggle.
                                     Item {
                                         id: think
+                                        objectName: "thinkingDisclosure"
                                         width: parent.width
                                         // Shown whenever the clock ran at all: a turn
                                         // that only WAITED on tools reported nothing at
@@ -3068,8 +3069,12 @@ Item {
                                         height: visible ? thinkToggle.height + thinkReveal.height : 0
 
                                         readonly property bool hasBody: turn.agg.thinking !== ""
-                                        readonly property bool expanded: hasBody && turn.userSet
-                                                                         ? turn.userOpen : false
+                                        // Opening is a view decision, not a property of the
+                                        // current stream state.  In particular, a tool call
+                                        // changes the heading to "waiting…" after reasoning
+                                        // has arrived; that must not fold an open transcript
+                                        // out from under him.
+                                        readonly property bool expanded: turn.userSet ? turn.userOpen : false
 
                                         // The live count for the heading, ticked half a
                                         // second at a time while the clock runs (a
@@ -3151,24 +3156,59 @@ Item {
                                             id: thinkReveal
                                             anchors { top: thinkToggle.bottom; left: parent.left; right: parent.right }
                                             clip: true
-                                            height: think.expanded ? thinkBody.height : 0
+                                            // Reasoning can run to many pages.  Keep its live
+                                            // transcript in its own bounded box, rather than
+                                            // making the turn expand without limit.  This is the
+                                            // intentional exception to the usual no-nested-scroll
+                                            // rule: the user explicitly asked for a live reasoning
+                                            // log here.
+                                            height: think.expanded ? thinkFlick.height : 0
                                             Behavior on height {
                                                 NumberAnimation { duration: motion.ms(motion.slideMs)
                                                                   easing.type: motion.slideEasing }
                                             }
                                             Rectangle {
-                                                anchors { left: parent.left; leftMargin: 3
-                                                          top: parent.top; bottom: parent.bottom }
-                                                width: Theme.ctrlBorder
-                                                color: Theme.border
+                                                anchors { left: parent.left; leftMargin: 12
+                                                          right: parent.right; top: parent.top }
+                                                height: parent.height
+                                                color: Theme.bgAlt
+                                                border.width: Theme.ctrlBorder
+                                                border.color: Theme.border
                                             }
-                                            PixelText {
+                                            KineticFlickable {
+                                                id: thinkFlick
+                                                objectName: "thinkingScroll"
+                                                anchors { left: parent.left; leftMargin: 12
+                                                          right: parent.right; top: parent.top }
+                                                // A short thought keeps its natural height; a
+                                                // long one becomes a scroll box rather than
+                                                // pushing the answer away.
+                                                height: Math.min(Theme.lineHeight * 10, thinkBody.height)
+                                                contentWidth: width
+                                                contentHeight: thinkBody.height
+                                                clip: true
+
+                                                // This is live output, so follow every new
+                                                // reasoning chunk to its newest line.
+                                                function toBottom() {
+                                                    contentY = Math.max(0, contentHeight - height);
+                                                }
+                                                onContentHeightChanged: toBottom()
+                                                // Opening after several chunks have already
+                                                // arrived is also an auto-follow: the live end,
+                                                // not the stale first line, is what he asked to
+                                                // see.
+                                                onHeightChanged: toBottom()
+
+                                                PixelText {
                                                 id: thinkBody
-                                                anchors { top: parent.top; left: parent.left; right: parent.right
-                                                          leftMargin: 12 }
+                                                width: thinkFlick.width - thinkScroll.barW
                                                 wrapMode: Text.Wrap
                                                 text: turn.agg.thinking
                                                 color: Theme.textDim
+                                            }
+
+                                                ScrollBar.vertical: VScroll { id: thinkScroll }
                                             }
                                         }
                                     }
