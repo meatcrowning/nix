@@ -104,11 +104,11 @@ def pump(until, ms=8000):
     app.exec(); poll.stop(); t.stop()
 
 
-def turn(model="stub:latest", preset="default"):
+def turn(model="stub:latest", preset="default", prompt="who was ada lovelace"):
     o._prior, o._prior_users = [], []
     o._prompt_choice = preset
     CHATS.clear(); done.clear()
-    o.send(model, "who was ada lovelace", "[]")
+    o.send(model, prompt, "[]")
     pump(lambda: bool(done))
     return CHATS[0]
 
@@ -133,6 +133,25 @@ check("...and covers his machine, where guessing is never necessary",
 check("...and forbids reading what he HAS off a web page",
       "WHAT HE HAS COMES FROM HIS MACHINE, NEVER FROM A PAGE" in system
       and "point at in a tool result from this turn" in system)
+
+# ---- one actual user turn, and measured self-knowledge ------------------
+check("the turn boundary rides the real system prompt",
+      oracle.TURN_BOUNDARY_NOTE in system)
+check("it rejects an imagined next user message",
+      "possible next message" in oracle.TURN_BOUNDARY_NOTE
+      and "not input" in oracle.TURN_BOUNDARY_NOTE)
+check("self-knowledge is measured before it is claimed",
+      oracle.SELF_KNOWLEDGE_NOTE in system
+      and "call describe_self" in oracle.SELF_KNOWLEDGE_NOTE)
+check("existing continuity and verification are named as real capabilities",
+      all(word in oracle.SELF_KNOWLEDGE_NOTE
+          for word in ("Past-session recall", "durable memory", "reusable skills",
+                       "verification tools")))
+self_chat = turn(prompt=("if you could add one feature or improve one thing "
+                         "about yourself, what would it be?"))
+check("an obvious self-question carries describe_self on its first request",
+      "describe_self" in [t.get("function", {}).get("name")
+                          for t in self_chat.get("tools", [])])
 
 # ---- the sampler is on the wire too -------------------------------------
 opts = chat.get("options", {})

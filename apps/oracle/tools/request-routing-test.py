@@ -27,10 +27,15 @@ has("what albums are in my music library?", "music_library")
 has("pause the music player", "control_media")
 has("what did I tell you in our previous conversation?",
     "list_sessions", "read_session")
+has("if you could add one feature or improve one thing about yourself, what would it be?",
+    "describe_self")
+has("what can you do in this app?", "describe_self")
+has("what are your memory limitations?", "describe_self")
 has("pull a new ollama model", "manage_models")
 has("run this fingerprint pass in the background",
     "run_job", "job_status", "job_log", "job_stop")
 has("rename this file", "move_path", "delete_path", "make_dir")
 lean("explain why the sky looks blue")
 lean("help me think through this layout")
+lean("can you improve this paragraph?")
 print("OK")

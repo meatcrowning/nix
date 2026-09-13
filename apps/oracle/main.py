@@ -3052,6 +3052,33 @@ CAPABILITY_NOTE = (
     "this conversation, verify changes, and say what changed. Never claim a "
     "capability absent from describe_self or deny one it lists.")
 
+#: A question about Nyx itself is where training-time guesses about a generic
+#: chatbot most often override the live app around it.  `request_tools` puts
+#: describe_self on the first request for an obvious self/capability question;
+#: this rule says to use that measured inventory before answering.  Sessions,
+#: memory, skills and verification already exist, so a proposed replacement
+#: starts with their real limits rather than denying them wholesale.
+SELF_KNOWLEDGE_NOTE = (
+    "When he asks about YOU — your abilities, limits, memory, tools, or what "
+    "you would improve about yourself — call describe_self before claiming "
+    "that a capability exists or is absent. Distinguish a limitation of the "
+    "model from a capability Chatter gives you. Past-session recall, durable "
+    "memory, reusable skills and verification tools already exist: describe "
+    "their real limits, but never deny them or propose replacing them until "
+    "you have checked what is live.")
+
+#: Qwen 3.6 has been observed finishing the current answer in its reasoning,
+#: inventing a likely next user instruction, and then reasoning about that
+#: imaginary turn before it writes the visible answer.  It did not leak the
+#: invented text into the bubble, but it spent context on a request nobody made
+#: and could let the imaginary request steer the real answer.  The message list
+#: is the only authority for who actually spoke.
+TURN_BOUNDARY_NOTE = (
+    "Answer only the latest ACTUAL user message in the message list. Never "
+    "invent, predict, role-play or continue from a possible next message from "
+    "him. Text you imagine he might say is not input and must not change your "
+    "reasoning or answer. Once the current request is answered, stop.")
+
 #: FINISH THE JOB. A model that treats one tool round as one turn stops after a
 #: look-around and describes what it would do next, which left him pressing
 #: `continue` to get a single task done [his, 2026-08-23]. It has MAX_TOOL_ROUNDS
@@ -6429,7 +6456,8 @@ class Ollama(QObject):
         lead = self._base_prompt()
         if lead:
             blocks.append(lead)
-        blocks += [HOST_CONTEXT_NOTE, PERSISTENCE_NOTE, GROUNDING_NOTE, CAPABILITY_NOTE,
+        blocks += [HOST_CONTEXT_NOTE, PERSISTENCE_NOTE, TURN_BOUNDARY_NOTE,
+                   GROUNDING_NOTE, CAPABILITY_NOTE, SELF_KNOWLEDGE_NOTE,
                    RECALL_GUIDANCE, SAVE_GUIDANCE, MARKER_NOTE]
         tools = tools_note()
         if tools:
