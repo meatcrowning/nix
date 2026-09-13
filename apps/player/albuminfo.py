@@ -23,8 +23,6 @@ from releaseinfo import ReleaseInfo
 from albumprose import (lastfm_description, lastfm_artist_description,
                         bandcamp_description)
 import artistinfo
-from relatedmusic import related_tracks
-related_tracks = perftrace.timed("albuminfo.related_tracks")(related_tracks)
 import trackmatch
 import lastfm
 
@@ -79,10 +77,8 @@ class AlbumInformation(QObject):
     @staticmethod
     def _empty(status="idle", track_id=0):
         return {"trackId": int(track_id), "status": status, "error": "",
-                "albumError": "", "similarError": "", "album": {},
-                "similar": [], "discoveries": [], "candidates": [], "match": {},
-                "fetchedAt": 0.0, "stale": False, "similarFallback": True,
-                "connection": "", "connectionEmpty": False, "recordingId": ""}
+                "albumError": "", "album": {}, "candidates": [], "match": {},
+                "fetchedAt": 0.0, "stale": False, "recordingId": ""}
 
     @property
     def state(self):
@@ -111,8 +107,7 @@ class AlbumInformation(QObject):
         state = self.state if self._state["trackId"] == tid else self._empty(track_id=tid)
         if command == "clear":
             state = self._empty(track_id=tid)
-        state.update(status="loading", error="", albumError="", similarError="",
-                     connection="", connectionEmpty=False)
+        state.update(status="loading", error="", albumError="")
         self._deliver(generation, state)
         with self._cv:
             # Keep explicit corrections, discard obsolete browsing requests.
@@ -147,11 +142,6 @@ class AlbumInformation(QObject):
         if kind not in ("album", "match"):
             return False
         return self._submit(track_id, "revert", kind)
-
-    def browse_connection(self, track_id, kind, entity_id, name):
-        if kind not in ("artist", "label") or not entity_id:
-            return False
-        return self._submit(track_id, "connection", (kind, entity_id, name))
 
     @contextmanager
     def _connect(self):
@@ -188,7 +178,7 @@ class AlbumInformation(QObject):
                 if self._closed:
                     return
                 generation, tid, command, payload = self._jobs.popleft()
-                mutating = command not in ("request", "connection")
+                mutating = command != "request"
                 if mutating:
                     self._pending_command = (tid, command, payload)
             command_error = None
@@ -208,8 +198,6 @@ class AlbumInformation(QObject):
                 self._check_current()
                 if command == "clear":
                     state = self._cached_state(tid) or self._empty(track_id=tid)
-                elif command == "connection":
-                    state = self._connection(tid, *payload)
                 else:
                     state = self._resolve(tid, bool(payload) if command == "request"
                                           else command in ("choose", "revert"))
@@ -238,7 +226,7 @@ class AlbumInformation(QObject):
                 self._generation += 1
                 pending = [self._pending_command] if self._pending_command else []
                 pending.extend((tid, command, payload) for _, tid, command, payload in self._jobs
-                               if command not in ("request", "connection"))
+                               if command != "request")
                 self._pending_command = None
                 self._jobs.clear()
                 self._cv.notify_all()
@@ -299,8 +287,6 @@ class AlbumInformation(QObject):
                 link = con.execute("SELECT release_id FROM music_info_links WHERE scope_key=?",
                                    (scope,)).fetchone()
                 con.execute("DELETE FROM music_info_cache WHERE cache_key=?", (scope,))
-                related_key = "track:" + hashlib.sha256(row["path"].encode()).hexdigest()
-                con.execute("DELETE FROM music_info_cache WHERE cache_key=?", (related_key,))
                 artist_key = self._artist_key(self._artist_name(row))
                 if artist_key:
                     match = store.cache_get(con, artist_key, "artist-match")
@@ -322,9 +308,6 @@ class AlbumInformation(QObject):
             row = dict(got)
             scope = store.scope_key(row)
             state = self._empty(track_id=tid)
-            if self._state.get("trackId") == tid:
-                for key in ("similar", "discoveries", "similarFallback"):
-                    state[key] = self._state.get(key, state[key])
             resolution = store.cache_get(con, scope, "resolution")
             state["album"] = {"title": row["album"] or "", "artist": row["album_artist"] or row["artist"] or ""}
             state["album"].update(store.effective_album(con, scope))
@@ -445,22 +428,6 @@ class AlbumInformation(QObject):
             self._indexed_generation = self._index_generation
         return self._tracks
 
-    def _related_rows(self, con, tracks):
-        links = {r["scope_key"]: r for r in con.execute("SELECT * FROM music_info_links")}
-        result = []
-        for row in tracks:
-            link = links.get(row.get("_info_scope") or store.scope_key(row))
-            if link:
-                ids = dict(store.identity(row))
-                ids.update(releaseId=link["release_id"], releaseGroupId=link["release_group_id"])
-                row = {**row, "identity_json": ids}
-            result.append(row)
-        return result
-
-    def _known_albums(self, con):
-        return [store.decode(r[0], {}) for r in con.execute(
-            "SELECT body_json FROM music_info_cache WHERE kind='album'")]
-
     @perftrace.timed("albuminfo._resolve")
     def _resolve(self, tid, force=False):
         self._force_fetch = force
@@ -533,40 +500,7 @@ class AlbumInformation(QObject):
         # the resolution above and publishes on its own.
         self._check_current()
         state = self._artist_stage(row, state)
-        # Similarity is independent of MusicBrainz success and never shares its
-        # error label. Re-rank against the local library on every visit.
-        self._check_current()
-        related_key = "track:" + hashlib.sha256(row["path"].encode()).hexdigest()
-        with self._connect() as con:
-            remote = store.cache_get(con, related_key, "similar")
-        if force or remote is None or remote["stale"]:
-            try:
-                answer = self._lastfm_call("track.getSimilar", {
-                    "artist": row["artist"], "track": row["title"], "limit": 100})
-                self._check_current()
-                items = ((answer or {}).get("similartracks") or {}).get("track") or []
-                if isinstance(items, dict):
-                    items = [items]
-                with self._connect() as con:
-                    store.cache_put(con, related_key, "similar", {"items": items}, 7 * 86400)
-            except Superseded:
-                raise
-            except Exception as exc:
-                with self._connect() as con:
-                    store.cache_put(con, related_key, "similar", {"items": []},
-                                    self.RETRY_AGE, error=str(exc), preserve=True)
-            with self._connect() as con:
-                remote = store.cache_get(con, related_key, "similar")
-        self._check_current()
-        with self._connect() as con:
-            rank_tracks = self._related_rows(con, tracks)
-            rank_row = next((r for r in rank_tracks if r["id"] == tid), row)
-            related = related_tracks(rank_row, rank_tracks, remote["body"].get("items", []),
-                                     state["album"], self._known_albums(con))
-        state.update(similar=related["owned"], discoveries=related["discoveries"],
-                     similarError=remote["error"], similarFallback=not remote["body"].get("items"))
-        self._publish(state)
-        # Prose is optional and runs only after details and recommendations are
+        # Prose is optional and runs only after release and artist facts are
         # already delivered. A missing article does not invalidate either.
         album = state["album"]
         if (force or not album.get("description")) and album.get("musicbrainzReleaseId"):
@@ -796,47 +730,3 @@ class AlbumInformation(QObject):
             return {"description": page["extract"], "descriptionSource": "wikipedia",
                     "descriptionUrl": page.get("content_urls", {}).get("desktop", {}).get("page", "")}
         return {}
-
-    def _connection(self, tid, kind, entity_id, name):
-        state = self._cached_state(tid) or self._empty(track_id=tid)
-        with self._connect() as con:
-            albums = self._known_albums(con)
-            tracks = self._related_rows(con, self._library_tracks(con))
-        matches = {}
-        for album in albums:
-            entries = album.get("labels", []) if kind == "label" else album.get("credits", [])
-            entries = [e for e in entries if e.get("id") == entity_id]
-            if entries and album.get("musicbrainzReleaseId"):
-                matches[album["musicbrainzReleaseId"]] = entries
-        selected = []
-        for row in tracks:
-            # Group identity alone cannot establish an edition's credits.
-            for credit in matches.get(store.identity(row).get("releaseId"), []):
-                active = kind == "label" or credit.get("scope") == "album"
-                if kind != "label" and credit.get("scope") == "track":
-                    active = False
-                    wanted_title = str(credit.get("trackTitle") or "").strip()
-                    wanted_pos = credit.get("trackPosition")
-                    wanted_disc = credit.get("disc")
-                    if wanted_title or wanted_pos:
-                        active = True
-                        for expected, actual in ((wanted_disc, row.get("disc")),
-                                                 (wanted_pos, row.get("track"))):
-                            if expected not in (None, ""):
-                                try:
-                                    active = active and int(str(expected).split("/", 1)[0]) == int(actual or 0)
-                                except (TypeError, ValueError):
-                                    active = False
-                        if wanted_title:
-                            active = active and trackmatch.fold(wanted_title) == trackmatch.fold(row.get("title") or "")
-                if active:
-                    selected.append({"trackId": row["id"], "title": row["title"] or "",
-                                     "artist": row["artist"] or "", "album": row["album"] or "",
-                                     "reason": name, "owned": True, "score": 1})
-                    break
-            if len(selected) >= 60:
-                break
-        state.update(similar=selected, discoveries=[], connection=name,
-                     status="ready", similarError="", similarFallback=True,
-                     connectionEmpty=not selected)
-        return state

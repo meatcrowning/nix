@@ -26,7 +26,6 @@ SMB setup and recovery live in `docs/agents/air-library-share.md`.
 | Release identity, details and credits | `releaseinfo.py`, `albuminfo.py`, `infostore.py`, `qml/NowInfoPane.qml` |
 | Artist facts and biography | `artistinfo.py`; `albuminfo.py` owns its stage and cache |
 | Album write-up parsing | `albumprose.py` (Last.fm and linked Bandcamp album pages) |
-| Related music and contributor connections | `relatedmusic.py`; `albuminfo.py` owns queries and requests |
 | Last.fm integration | `scrobble.py`, shared `pylib/lastfm.py` |
 | Acquisition, repair, migration tools | `tools/`; private maintenance runbook |
 
@@ -199,7 +198,7 @@ use the library median. `tools/replaygain.py` computes with rsgain then writes
 through atomicsave; retain unsupported-format handling and automatic-failure
 memory to avoid retry loops.
 
-Release details and credits precede related music and optional prose. Embedded
+Release details and credits precede optional prose. Embedded
 MusicBrainz release/recording identifiers are read during scans and lazily on
 the metadata worker for existing tracks; never force a full rescan to add them.
 Release search must corroborate album tracks and preserve ambiguous candidates.
@@ -226,15 +225,9 @@ by MBID and shared by every album that credits them, with the biography in its
 own cache entry — a linked Wikipedia article first, an identity-checked Last.fm
 biography second. Clearing an album's cache clears its artist too.
 
-Related ranking computes the current track's active credits and labels once,
-not once per library candidate. Related music remains available when release lookup fails. Rank local tracks
-using recording/artist identity, scoped credits, labels, and genre; a shared
-year alone is insufficient. Track credits require matching disc/position/title;
-credits from another edition must not leak through a release-group match.
-Keep owned tracks playable and outside Last.fm discoveries as source links.
 Publish cached facts before tag reads, indexing, and network requests. Fetch
-linked Wikipedia/Wikidata prose after publishing release details and
-recommendations, then fall back to identity-checked Last.fm album wikis and
+linked Wikipedia/Wikidata prose after publishing release details, then fall
+back to identity-checked Last.fm album wikis and
 MusicBrainz-linked Bandcamp album descriptions. Keep source URLs and plain
 text; artist biographies and shop-only links are not album descriptions.
 Empty prose retries daily, failures after five minutes; version the prose
@@ -346,7 +339,7 @@ not a CI suite:
 | Smart lists/search/Last.fm | `smartlist-test.py`, `smartlist-ui-test.py`, `lastfm-test.py`, `search-page-test.py`, `search-ui-test.py` |
 | Queue/path/socket | `queue-ops-test.py`, `album-playnext-test.py`, `open-path-test.py`, `queue-lyrics-test.py` |
 | Preference/metadata persistence | `state-write-test.py`, `metadata-worker-test.py` |
-| Metadata/sync | `now-info-test.py`, `artist-info-test.py`, `album-prose-test.py`, `release-info-test.py`, `related-music-test.py`, `info-sync-test.py`, `info-connection-test.py`, `library-ipc-test.py`, `test-dbsync.py` |
+| Metadata/sync | `now-info-test.py`, `artist-info-test.py`, `album-prose-test.py`, `release-info-test.py`, `info-sync-test.py`, `library-ipc-test.py`, `test-dbsync.py` |
 | Album information UI | `album-info-ui-test.py`, `album-guest-ui-test.py` |
 | Now-playing composition | `now-allinone-test.py` |
 | Native/QML presentation | `plasma-chrome-test.py`, `transport-test.py`, `focus-fade-test.py`, `view-preserve-test.py`, `favourite-surfaces-test.py`, `trash-track-test.py` |

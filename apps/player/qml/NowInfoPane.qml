@@ -2,8 +2,8 @@ import QtQuick
 import QtQuick.Controls
 import "../../qmlcommon"
 
-// The now-playing notebook: lyrics, release facts, then related music. The
-// release view keeps identity and credits ahead of optional prose.
+// The now-playing notebook: lyrics and release facts. The release view keeps
+// identity and credits ahead of optional prose.
 Item {
     id: root
     property int trackId: -1
@@ -15,8 +15,7 @@ Item {
     // away rather than offering the same words in two places.
     property bool showLyrics: true
     onShowLyricsChanged: if (!showLyrics && tab === "lyrics") tab = "album"
-    readonly property var tabs: showLyrics ? ["lyrics", "album", "similar"]
-                                           : ["album", "similar"]
+    readonly property var tabs: showLyrics ? ["lyrics", "album"] : ["album"]
     property string tab: showLyrics ? "lyrics" : "album"
     property bool editing: false
     property string actionError: ""
@@ -27,7 +26,7 @@ Item {
     }
 
     readonly property var info: Library.nowInfo || ({})
-    // Status/recommendation deliveries must not recreate the release delegates.
+    // Status deliveries must not recreate the release delegates.
     property var album: ({})
     property string albumJson: ""
     function syncAlbum() {
@@ -48,20 +47,6 @@ Item {
                                        ? album.tracks
                                        : ((track.albumId || 0) > 0
                                           ? Library.albumTrackInfo(track.albumId) : [])
-    readonly property var relatedRows: {
-        var out = [];
-        var owned = info.similar || [];
-        var discoveries = info.discoveries || [];
-        if (owned.length) {
-            out.push({ section: true, title: "in your library" });
-            for (var i = 0; i < owned.length; ++i) out.push(owned[i]);
-        }
-        if (discoveries.length) {
-            out.push({ section: true, title: "discoveries" });
-            for (var j = 0; j < discoveries.length; ++j) out.push(discoveries[j]);
-        }
-        return out;
-    }
     readonly property bool actionsInline: tabs.width + actions.width + 12 <= width
     readonly property int tabBaseHeight: Math.max(25, Theme.lineHeight + 8)
 
@@ -75,23 +60,10 @@ Item {
                .filter(function(v) { return v !== ""; }).join(" · ");
     }
     function validUrl(url) { return /^(https?):\/\/[^\s]+$/i.test(text(url)); }
-    function isOwned(item) { return item && item.owned !== false; }
     function openUrl(url) {
         if (!validUrl(url)) { actionError = "no source link"; return; }
         var accepted = Library.openInfoUrl(text(url));
         actionError = accepted === false ? "source link failed" : "";
-    }
-    function browse(kind, entity) {
-        entity = entity || ({});
-        var entityId = text(entity.id), entityName = text(entity.name);
-        if (entityId === "" && entityName === "") return;
-        var accepted = Library.browseInfoConnection(kind, entityId, entityName);
-        if (accepted === false) {
-            actionError = "connection unavailable";
-        } else {
-            actionError = "";
-            tab = "similar";
-        }
     }
     function candidateLabel(candidate) {
         var bits = [], title = text(candidate.title || candidate.label);
@@ -227,11 +199,9 @@ Item {
                         delegate: Row {
                             required property var modelData; spacing: 4
                             PixelText { color: root.fgDim; text: "label" }
-                            HeaderButton {
-                                label: root.text(modelData.name) + (modelData.catalogNumber ? "  " + modelData.catalogNumber : "")
-                                plainLabel: label; iconName: "go-next"
-                                enabled: !!modelData.id
-                                onClicked: root.browse("label", modelData)
+                            PixelText {
+                                text: root.text(modelData.name) + (modelData.catalogNumber ? "  " + modelData.catalogNumber : "")
+                                color: root.fgText
                             }
                             HeaderButton {
                                 visible: root.validUrl(modelData.url)
@@ -298,17 +268,10 @@ Item {
                             readonly property bool albumScope: modelData.scope === "album"
                             width: albumColumn.width; height: albumScope ? Theme.lineHeight + 2 : 0; visible: albumScope
                             PixelText {
-                                anchors { left: parent.left; right: creditAction.left; verticalCenter: parent.verticalCenter }
+                                anchors { left: parent.left; right: creditSource.visible ? creditSource.left : parent.right
+                                          verticalCenter: parent.verticalCenter }
                                 color: root.fgDim; elide: Text.ElideRight
                                 text: root.text(modelData.role) + "  " + root.text(modelData.name)
-                            }
-                            HeaderButton {
-                                id: creditAction
-                                anchors.right: creditSource.left; anchors.rightMargin: 2
-                                anchors.verticalCenter: parent.verticalCenter
-                                label: "open"; plainLabel: "open"; iconName: "go-next"
-                                visible: !!modelData.id
-                                onClicked: root.browse("artist", modelData)
                             }
                             HeaderButton {
                                 id: creditSource
@@ -333,19 +296,12 @@ Item {
                             readonly property bool trackScope: modelData.scope === "track"
                             width: albumColumn.width; height: trackScope ? Theme.lineHeight + 2 : 0; visible: trackScope
                             PixelText {
-                                anchors { left: parent.left; right: trackCreditAction.left; verticalCenter: parent.verticalCenter }
+                                anchors { left: parent.left; right: trackCreditSource.visible ? trackCreditSource.left : parent.right
+                                          verticalCenter: parent.verticalCenter }
                                 color: root.fgDim; elide: Text.ElideRight
                                 text: (modelData.disc ? "disc " + root.text(modelData.disc) + " · " : "")
                                       + root.text(modelData.trackTitle || (modelData.trackPosition ? "track " + modelData.trackPosition : "track"))
                                       + "  " + root.text(modelData.role) + "  " + root.text(modelData.name)
-                            }
-                            HeaderButton {
-                                id: trackCreditAction
-                                anchors.right: trackCreditSource.left; anchors.rightMargin: 2
-                                anchors.verticalCenter: parent.verticalCenter
-                                label: "open"; plainLabel: "open"; iconName: "go-next"
-                                visible: !!modelData.id
-                                onClicked: root.browse("artist", modelData)
                             }
                             HeaderButton {
                                 id: trackCreditSource
@@ -394,60 +350,6 @@ Item {
             }
         }
 
-        KineticListView {
-            id: relatedList
-            anchors.fill: parent; anchors.margins: 6; visible: root.tab === "similar"; clip: true
-            model: root.relatedRows
-            ScrollBar.vertical: VScroll { id: relatedScroll }
-            header: PixelText {
-                width: Math.max(0, relatedList.width - relatedScroll.barW); height: Theme.lineHeight + 6
-                color: root.actionError !== "" || (root.info.similarError && !root.info.connectionEmpty)
-                       ? Theme.crit : root.fgDim
-                text: root.actionError !== "" ? root.actionError
-                    : root.info.status === "loading" ? "loading related music..."
-                    : root.info.connectionEmpty ? "no related music in your library"
-                    : root.info.similarError ? "related music failed"
-                    : root.relatedRows.length ? "owned tracks and discoveries" : "no related music"
-            }
-            delegate: Item {
-                required property var modelData
-                width: Math.max(0, relatedList.width - relatedScroll.barW)
-                height: modelData.section ? Theme.lineHeight + 6 : Theme.lineHeight + 10
-                PixelText {
-                    visible: modelData.section; anchors.verticalCenter: parent.verticalCenter
-                    color: root.fgDim; text: modelData.section ? modelData.title : ""
-                }
-                PixelText {
-                    visible: !modelData.section
-                    anchors { left: parent.left; right: relatedAction.left; verticalCenter: parent.verticalCenter }
-                    anchors.leftMargin: 5; color: root.fgText; elide: Text.ElideRight
-                    text: root.text(modelData.title) + "  " + root.text(modelData.artist) + (modelData.album ? "  ·  " + root.text(modelData.album) : "")
-                }
-                HeaderButton {
-                    id: relatedAction
-                    anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-                    label: root.isOwned(modelData) ? "play" : "open"; plainLabel: label
-                    iconName: root.isOwned(modelData) ? "media-playback-start" : "external-link"
-                    enabled: root.isOwned(modelData) ? Number(modelData.trackId || 0) > 0 : root.validUrl(modelData.url)
-                    visible: !modelData.section
-                    onClicked: {
-                        if (root.isOwned(modelData)) Player.playTracks([Number(modelData.trackId)], 0);
-                        else root.openUrl(modelData.url);
-                    }
-                }
-                PixelText {
-                    visible: !modelData.section && !!modelData.reason
-                    anchors { left: parent.left; right: relatedAction.left; bottom: parent.bottom }
-                    anchors.leftMargin: 5; color: root.fgDim; text: root.text(modelData.reason); elide: Text.ElideRight
-                }
-                MouseArea {
-                    anchors.fill: parent
-                    enabled: !modelData.section && root.isOwned(modelData) && Number(modelData.trackId || 0) > 0
-                    cursorShape: Qt.PointingHandCursor
-                    onDoubleClicked: Player.playTracks([Number(modelData.trackId)], 0)
-                }
-            }
-        }
     }
 
     Rectangle {
