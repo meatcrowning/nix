@@ -623,9 +623,28 @@ Custom-tool manifests may declare `"host": "top"` or `"host": "book"`.
 route when that is not the window's host; absent/invalid means local. This is
 what keeps `soulseek_album` on `top`, beside slskd and the canonical library,
 even when chatter is open on `book`.
-`soulseek_status` uses the same host route for a read-only live queue summary;
-status prompts must use it rather than guessing sockets, database schemas, or
-filesystem state.
+`soulseek_status` uses the same host route for a read-only live queue summary —
+downloads and, since 2026-09-12, uploads: Soulseek is a trade, his share is why
+peers grant him a slot, and the download queue could never answer "is anything
+going out". Status prompts must use it rather than guessing sockets, database
+schemas, or filesystem state.
+
+`soulseek_queue` is the third verb — the one that WRITES [his, 2026-09-12:
+*"give chatter agents the ability to manipulate the queue"*]. `cancel`,
+`remove`, `retry`, `clear_finished`, against ids/`match`/`peer`; before it,
+dropping an album from the queue was a hand-rolled curl loop over ids dug out of
+the raw transfers JSON, which is the reverse-engineering these tools exist to
+prevent. Three guards, because it is the only one of the three that can lose
+something he wanted: no selector is refused rather than read as "everything", a
+selection past `max_affected` is refused and reported, and every destructive
+call previews by default. So it must NOT carry `"once": true` — that caches an
+identical repeat, and preview-then-act is two calls with different arguments
+only by luck. For the same reason `soulseek_status` dropped its `once` on the
+same day: a read is verification (main.py's own `TOOL_ONCE_NAMES` rule), and a
+cached pre-change snapshot replayed after a queue change is a wrong answer.
+Uploads stay read-only there — they are other people's transfers off his share.
+Harnesses: `soulseek_status_test.py`, `soulseek_queue_test.py`, both against a
+loopback stub so his real queue is never touched.
 
 **So the default model is the parent's, deliberately.** Spawning
 `qwen3-coder:30b` from a `qwen3.6:35b-a3b` turn means ollama unloading 22.3 GiB
