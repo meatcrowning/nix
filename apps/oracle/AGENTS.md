@@ -493,8 +493,13 @@ dated NetCDF object keys for the Americas. Every result names its acquisition
 date/time or says it is catalogue data — none is presented as a live camera.
 
 The caller supplies a WGS84 bounding box, a coordinate/radius pair, or a place.
-Place names resolve through Open-Meteo's keyless GeoNames endpoint before the
-provider request. GIBS defaults to yesterday, the newest date reliably complete
+Place names resolve through Nominatim's keyless OpenStreetMap endpoint before
+the provider request. Administrative results use their returned bounding box,
+so `Indiana` is the state rather than the identically named Pennsylvania town;
+other places retain the coordinate/radius path. GIBS fits the output dimensions
+inside the requested maximum while preserving the bounding box's approximate
+ground aspect, rather than stretching every map into 4:3. GIBS defaults to
+yesterday, the newest date reliably complete
 across an arbitrary box; an explicit date is preserved. FIRMS alone needs a
 credential: `firms.params.map_key` in the existing private
 `~/.config/oracle/api-keys.json` keyring. Keys never enter a result or source

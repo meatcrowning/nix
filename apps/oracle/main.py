@@ -8450,8 +8450,8 @@ class Ollama(QObject):
                                      idx, remaining, calls)
                 return
             u = QUrl(satellite.GEOCODE)
-            q = QUrlQuery(); q.addQueryItem("name", place); q.addQueryItem("count", "1")
-            q.addQueryItem("language", "en"); q.addQueryItem("format", "json")
+            q = QUrlQuery(); q.addQueryItem("q", place); q.addQueryItem("limit", "1")
+            q.addQueryItem("accept-language", "en"); q.addQueryItem("format", "jsonv2")
             u.setQuery(q)
             req = QNetworkRequest(u); req.setRawHeader(b"User-Agent", API_USER_AGENT)
             self.webSearchStarted.emit("satellite: locating " + place)
@@ -8467,17 +8467,28 @@ class Ollama(QObject):
                 self._satellite_fail(source, "place lookup failed: " + reply.errorString(),
                                      idx, remaining, calls)
                 return
-            doc = json.loads(bytes(reply.readAll().data()) or b"{}")
-            rows = doc.get("results") or []
+            doc = json.loads(bytes(reply.readAll().data()) or b"[]")
+            rows = doc if isinstance(doc, list) else (doc.get("results") or [])
             if not rows:
                 self._satellite_fail(source, "place was not found", idx,
                                      remaining, calls)
                 return
             hit = rows[0]
-            args["latitude"], args["longitude"] = hit["latitude"], hit["longitude"]
-            args["resolved_place"] = ", ".join(x for x in
-                (str(hit.get("name") or ""), str(hit.get("admin1") or ""),
-                 str(hit.get("country") or "")) if x)
+            args["latitude"] = hit.get("lat", hit.get("latitude"))
+            args["longitude"] = hit.get("lon", hit.get("longitude"))
+            args["resolved_place"] = str(hit.get("display_name") or ", ".join(
+                x for x in (str(hit.get("name") or ""),
+                            str(hit.get("admin1") or ""),
+                            str(hit.get("country") or "")) if x))
+            bb = hit.get("boundingbox")
+            if (hit.get("category") == "boundary" and hit.get("type") == "administrative"
+                    and isinstance(bb, list) and len(bb) == 4):
+                # Nominatim orders this south,north,west,east; the imagery API
+                # takes west,south,east,north. An administrative place should
+                # use its real boundary extent, not a generic radius around a
+                # similarly named town.
+                args["bbox"] = [float(bb[2]), float(bb[0]),
+                                float(bb[3]), float(bb[1])]
             self._satellite_fetch(args, source, idx, remaining, calls)
         except (ValueError, TypeError, KeyError) as e:
             self._satellite_fail(source, "bad place response: " + str(e), idx,

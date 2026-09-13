@@ -25,9 +25,10 @@ PNG = base64.b64decode(
 class Stub(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/geocode"):
-            body, ctype = json.dumps({"results": [{"name": "Lisbon",
-                "admin1": "Lisbon", "country": "Portugal",
-                "latitude": 38.7223, "longitude": -9.1393}]}).encode(), "application/json"
+            body, ctype = json.dumps([{"display_name": "Lisbon, Portugal",
+                "category": "boundary", "type": "administrative",
+                "boundingbox": ["38.691", "38.796", "-9.229", "-9.086"],
+                "lat": "38.7223", "lon": "-9.1393"}]).encode(), "application/json"
         elif self.path.startswith("/gibs"):
             body, ctype = PNG, "image/png"
         elif self.path.startswith("/firms/"):
@@ -95,6 +96,7 @@ assert images[-1]["meta"].startswith("NASA GIBS  ·  2026-09-12  ·  ")
 assert "_image_meta" not in gibs
 assert "_reject_blank" not in gibs
 assert main.satellite.bbox_label([-10, 38, -8, 40]) == "10°W–8°W  38°N–40°N"
+assert main.satellite.fit_dimensions([-87.6, 37.8, -84.8, 41.8]) == (413, 768)
 assert main.satellite.GIBS_LAYERS["night"] == "VIIRS_CityLights_2012"
 assert main.satellite.GIBS_LAYERS["night_daily"] == "VIIRS_NOAA20_DayNightBand"
 blank = main.QImage(1024, 768, main.QImage.Format.Format_RGB32); blank.fill(0)
