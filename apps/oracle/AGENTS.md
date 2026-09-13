@@ -240,22 +240,26 @@ exactly what it always was.
   2026-08-22], not a tinted slab; it draws no hover or pressed state in either
   face, since the log is selectable text and nothing in it is clickable. A model's
   reasoning is a **collapsible disclosure, folded by default** (§9.1
-  subordinated) that sits **OUTSIDE the bubble** [his, 2026-08-22] — as do the
-  tool, web-search and file disclosures, all four between the speaker caption
-  and the bubble, full width, so the bubble carries only the answer itself, whose heading reports progress: while the reasoning streams it
-  reads **`thinking for 12s…`** (one brightness step up, the ellipsis animated),
+  subordinated) that sits **OUTSIDE the bubble** [his, 2026-08-22]. Since
+  2026-09-13 it owns the whole turn's machinery: tool, agent, web-search and
+  file rows are hidden with it until he opens the reasoning disclosure. The
+  speaker caption above says only **`Nyx`**; tokens no longer trail the name.
+  The bubble carries only the answer itself. The disclosure heading reports
+  progress: while the reasoning streams it reads **`thinking for 240 tokens in
+  12s…`** (one brightness step up, the ellipsis animated),
   **`waiting…`** while a tool call is out, and settles to **`thought for 12s`**
-  [his, 2026-08-22]. **The clock counts reasoning AND tool waits** — it accrues
+  (or **`thought for 240 tokens in 12s`** when reasoning tokens exist)
+  [his, 2026-09-13]. **The clock counts reasoning AND tool waits** — it accrues
   while `thinkingActive || awaiting` and pauses while the answer itself streams,
   so a turn that thought, searched and thought again reports the sum of the
   three rather than the wall clock of the whole turn (`win.accrueThink`, called
   after every flag change; `awaiting` is set by `toolCallStarted` and cleared by
   the next delta of any kind). Only the total `thinkMs` is saved, so a reloaded
-  transcript still says how long each answer was worked on. To its LEFT, still
-  and named, is the **token count** — `240 tokens`, `1.2k tokens` past a
-  thousand (`win.fmtCount`); the animated ellipsis rides the STATE, never the
-  count (dim, §9.1). A turn that only waited on tools still gets the heading,
-  with no toggle on it — there is nothing to unfold. Harness:
+  transcript still says how long each answer was worked on. The heading's
+  **token count** is `240 tokens`, `1.2k tokens` past a thousand
+  (`win.fmtCount`); the animated ellipsis rides the state, never the count
+  (dim, §9.1). A tool-only turn still gets a working toggle because its activity
+  rows are content to unfold. Harness:
   `tools/think-clock-test.py`, which drives the real `Root.qml` against a stub
   ollama and asserts the heading text the delegate actually renders — the count is the running frame
   count `Ollama` emits on `replyThinkTokens` (ollama streams one token per NDJSON
@@ -2199,7 +2203,10 @@ with no vision can still draw something and show it. The fast path is the honest
 one: a QML `Image` loads a local file, so the entry points straight at it — no
 copy, no re-encode. `_display_image` is the shared half; a file on the OTHER
 machine comes back through the same jailed executor and is saved locally,
-because QML cannot load a path that is not here.
+because QML cannot load a path that is not here. `_display_image` suppresses
+both a path already drawn this turn and a byte-identical copy under another
+path (SHA-256 identity); this closes the common fetch/copy/`show_image` loop
+without conflating different pictures that happen to share a filename.
 
 **A LOCAL PATH in the prose is a picture, and the path itself is not shown**
 [his, 2026-08-27: *"unable to properly attach images to chat bubbles ... they

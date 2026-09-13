@@ -4820,6 +4820,7 @@ class Ollama(QObject):
         self._pending_audio = []   # …and the excerpts listen_audio is handing it
         self._images_shown = set()
         self._paths_shown = set()  # …and every LOCAL file already drawn, by path
+        self._image_digests = set()  # copies under another path still draw once
         self._made_this_turn = {}  # kind -> the path it already generated
         # …and every path the GENERATOR wrote, which on book is a path on top.
         # Kept across turns (he says "animate that one" a turn later) and
@@ -5626,6 +5627,7 @@ class Ollama(QObject):
         self._rounds = 0
         self._images_shown = set()   # every image URL already fetched this turn
         self._paths_shown = set()    # …and every LOCAL file already drawn, by path
+        self._image_digests = set()
         self._made_this_turn = {}    # what this turn has already GENERATED, by kind
         self._image_entries = {}     # …and the entry each one produced, to redraw
         self._row_urls = set()       # what is already on the bubble being written
@@ -5792,6 +5794,7 @@ class Ollama(QObject):
         self._rounds = 0
         self._images_shown = set()
         self._paths_shown = set()
+        self._image_digests = set()
         self._made_this_turn = {}
         self._image_entries = {}
         self._row_urls = set()
@@ -8501,8 +8504,10 @@ class Ollama(QObject):
             meta = {"source": "NASA GIBS", "layer": layer,
                     "acquisition_date": observed, "bbox": box,
                     "resolved_place": place,
-                    "note": ("Satellite image shown inline. The acquisition date "
-                             "is explicit; this is not a live camera.")}
+                    "note": ("Satellite image is ALREADY shown inline. Do not "
+                             "download, copy, fetch_image or show_image it again. "
+                             "The acquisition date is explicit; this is not a "
+                             "live camera.")}
             self._fetch_image(url, place or layer, idx, remaining, calls,
                               "satellite_observe", meta)
             return
@@ -8808,6 +8813,18 @@ class Ollama(QObject):
                    "" if re.fullmatch(r"[0-9a-f]+", tok, re.I)
                    else " and not hexadecimal"))
 
+    @staticmethod
+    def _image_digest(path):
+        """Content identity for one local image, or "" when unreadable."""
+        try:
+            h = hashlib.sha256()
+            with open(path, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                    h.update(chunk)
+            return h.hexdigest()
+        except OSError:
+            return ""
+
     def _emit_image(self, entry):
         """Hand ONE picture to QML, and remember it.
 
@@ -8819,6 +8836,12 @@ class Ollama(QObject):
         """
         if isinstance(entry, dict):
             url = str(entry.get("url") or "")
+            path = str(entry.get("path") or "")
+            if entry.get("ok") and path:
+                self._paths_shown.add(os.path.abspath(path))
+                digest = self._image_digest(path)
+                if digest:
+                    self._image_digests.add(digest)
             if url:
                 self._row_urls.add(url)
                 if entry.get("ok"):
@@ -10580,6 +10603,13 @@ class Ollama(QObject):
         if target_host in (None, local_host):
             probe = QImage()
             if probe.load(here) and not probe.isNull():
+                digest = self._image_digest(here)
+                if digest and digest in getattr(self, "_image_digests", set()):
+                    answer({"ok": True, "path": here, "already_shown": True,
+                            "note": ("These image bytes are ALREADY in the chat "
+                                     "under another path, so they were not drawn "
+                                     "again. Do not copy or show them again.")})
+                    return
                 self._paths_shown.add(here)
                 self.imageFetchStarted.emit(here)
                 self._emit_image({"ok": True, "url": "", "path": here,
