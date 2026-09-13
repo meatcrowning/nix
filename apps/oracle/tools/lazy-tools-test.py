@@ -9,7 +9,7 @@ characters, ~13k tokens, sent on every round of every turn. Against the 32k
 window that was most of the room, and it is what put a music-library turn into
 its wrap-up round with an answer that broke off mid-table.
 
-  * `_offered_tools` carries `CORE_TOOL_NAMES` and nothing else — ~4.6k tokens
+  * `_offered_tools` carries `CORE_TOOL_NAMES` and nothing else — ~4.8k tokens
   * `tools_note` names every other tool in one line each — ~0.8k tokens
   * `get_tools` attaches by name or group and RETURNS THE SCHEMAS, so the model
     can call correctly on the very next round

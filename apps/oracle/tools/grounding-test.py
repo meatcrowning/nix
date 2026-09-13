@@ -149,7 +149,10 @@ check("existing continuity and verification are named as real capabilities",
                        "verification tools")))
 self_chat = turn(prompt=("if you could add one feature or improve one thing "
                          "about yourself, what would it be?"))
-check("an obvious self-question carries describe_self on its first request",
+check("every task carries describe_self on its first request",
+      "describe_self" in [t.get("function", {}).get("name")
+                          for t in chat.get("tools", [])])
+check("the same inventory is present for an explicit self-question",
       "describe_self" in [t.get("function", {}).get("name")
                           for t in self_chat.get("tools", [])])
 

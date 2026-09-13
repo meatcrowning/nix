@@ -430,7 +430,7 @@ be read before it is chosen, not picked blind from a label.
 
 ## What is on the wire — the core tools, and the index
 
-**A turn carries 16 tool schemas, not 39** [his, 2026-08-23, after an agent in
+**A turn carries 20 core tool schemas, not the whole registry** [his, 2026-08-23, after an agent in
 chatter told him the schemas were context bloat: *"go for it"*]. Measured the
 same day: the full set is **39,948 characters, ~13k tokens**, sent on every
 round — against the 32k window that was most of the room, and it is why a
@@ -439,9 +439,9 @@ music-library turn had nothing left to answer with.
 | | tokens |
 |---|---|
 | every schema, as it was | ~13,100 |
-| `CORE_TOOL_NAMES`, on the wire now | ~4,630 |
+| `CORE_TOOL_NAMES`, on the wire now | ~4,800 |
 | `tools_note()`, the one-line index | ~815 |
-| **saved, every round** | **~7,650** |
+| **saved, every round** | **~7,480** |
 
 `make_image` and `make_video` are now attached before round one only when
 shorthand or plain generation wording asks for them; they remain in the index.
@@ -449,8 +449,8 @@ Ordinary chat saves their ~1.9k schema tokens.
 
 - **`CORE_TOOL_NAMES` is what a turn reaches for unprompted**: the file six,
   the two runners, `web_search`/`fetch_url`/`wikipedia`, the clock, memory's
-  two, and the three doors to everything else — `use_skill`, `spawn_agent`,
-  `get_tools`.
+  two, `run_job`, `ask_choice`, `describe_self`, and the three doors to
+  everything else — `use_skill`, `spawn_agent`, `get_tools`.
 - **`tools_note()` names every other tool in one line each** — name plus first
   sentence, capped at 90 characters. Same shape and the same reason as
   `skills_note()`: a model does not reach for a door it was never told about.
@@ -516,17 +516,19 @@ only the latest actual user message and stop rather than simulate what he might
 say next. This is an instruction boundary, not output filtering: legitimate
 reasoning and answer text remain untouched.
 
-**Self-knowledge is measured.** The app already provides past-session recall,
-durable memory, skills and verification, but a model asked what it would improve
-about itself denied those facilities from its generic training-time idea of a
-chatbot. `SELF_KNOWLEDGE_NOTE` requires `describe_self` before a claim about its
-own abilities or limits, and `request_tools()` attaches that schema on the first
-request for an obvious self/capability question. It must distinguish a model
-limit from an app facility and describe the facility's real limits rather than
-inventing a replacement for something already present.
+**Self-knowledge is measured in every task.** The app already provides
+past-session recall, durable memory, skills and verification, but a model asked
+what it would improve about itself denied those facilities from its generic
+training-time idea of a chatbot. `describe_self` is core, so every first request
+carries its schema. `SELF_KNOWLEDGE_NOTE` requires that live check before Nyx
+says it cannot do something, claims a capability is missing, or proposes a
+workaround/replacement for a supposed limit — not only when the prompt is about
+Nyx itself. It must distinguish a model limit from an app facility and describe
+the facility's real limits rather than inventing a replacement for something
+already present.
 
-Harnesses: `tools/grounding-test.py` asserts that both contracts reach the real
-POST body; `tools/request-routing-test.py` covers the narrow first-request route.
+Harnesses: `tools/grounding-test.py` asserts that both contracts and the live
+inventory schema reach the real POST body for ordinary and self-directed turns.
 
 ### `wikipedia` — the source a small model can cite
 
