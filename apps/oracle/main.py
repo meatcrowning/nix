@@ -6462,11 +6462,24 @@ class Ollama(QObject):
         next round rather than guessing argument names — that is the half of
         this that makes one extra step enough."""
         raw = args.get("names", "") or args.get("name", "") or ""
+
+        # Tool-capable models sometimes preserve their own JSON-string quotes
+        # around each comma-delimited name: `"lastfm", "music_library"`.
+        # Those quotes are syntax, not part of a registry key.  Accept that
+        # common shape alongside the schema's proper list and plain-string
+        # forms, so a harmless formatting quirk does not strand the model at
+        # the tool index.
+        def name_part(value):
+            part = str(value).strip()
+            while len(part) >= 2 and part[0] == part[-1] and part[0] in "\"'":
+                part = part[1:-1].strip()
+            return part
+
         if isinstance(raw, list):
-            parts = [str(p).strip() for p in raw if str(p).strip()]
+            parts = [name_part(p) for p in raw if name_part(p)]
         else:
-            parts = [p.strip() for p in re.split(r"[,\s]+", str(raw))
-                     if p.strip()]
+            parts = [name_part(p) for p in re.split(r"[,\s]+", str(raw))
+                     if name_part(p)]
         reg = self._main_registry()
         wanted, unknown = [], []
         for p in parts:
@@ -6477,8 +6490,8 @@ class Ollama(QObject):
                 wanted += AGENT_TOOL_GROUPS[low]
             elif low == "all":
                 wanted += list(reg)
-            elif p in reg:
-                wanted.append(p)
+            elif low in reg:
+                wanted.append(low)
             else:
                 unknown.append(p)
         attached, schemas = [], []
