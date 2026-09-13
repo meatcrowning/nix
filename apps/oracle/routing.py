@@ -45,15 +45,6 @@ def request_tools(prompt, generated_tool=""):
                  r"\b(chat|conversation|session)\b|"
                  r"\b(what|do) (i|you) (said|tell|remember)\b", text):
         out.update(("list_sessions", "read_session"))
-    # Self-knowledge must come from the app's live inventory, not from what the
-    # base model remembers about generic chatbots.  Keep this intent-shaped so
-    # an ordinary second-person request does not pay for another schema.
-    if re.search(r"\bwhat (?:can|could) you do\b|"
-                 r"\b(?:your|you have).{0,18}"
-                 r"\b(?:tools|capabilities|abilities|limits|limitations|memory)\b|"
-                 r"\b(?:add|change|improve).{0,90}"
-                 r"\b(?:about|to) yourself\b", text):
-        out.add("describe_self")
     if re.search(r"\b(list|show|pull|download|remove|delete|manage|inspect)\b"
                  r".{0,25}\b(models?|ollama)\b|\bunload (the )?model\b", text):
         out.add("manage_models")

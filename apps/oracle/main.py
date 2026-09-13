@@ -2395,7 +2395,7 @@ CORE_TOOL_NAMES = [
     "get_current_time",
     "use_skill", "spawn_agent",
     "save_memory", "list_memories",
-    "get_tools", "run_job",
+    "get_tools", "run_job", "describe_self",
     # CORE, for the same reason `wikipedia` is: a door it has to be holding to
     # walk through. He asked for options instead of a fait accompli, and a tool
     # attached only on request is one the model reasons its way around.
@@ -3052,20 +3052,21 @@ CAPABILITY_NOTE = (
     "this conversation, verify changes, and say what changed. Never claim a "
     "capability absent from describe_self or deny one it lists.")
 
-#: A question about Nyx itself is where training-time guesses about a generic
-#: chatbot most often override the live app around it.  `request_tools` puts
-#: describe_self on the first request for an obvious self/capability question;
-#: this rule says to use that measured inventory before answering.  Sessions,
-#: memory, skills and verification already exist, so a proposed replacement
-#: starts with their real limits rather than denying them wholesale.
+#: Training-time guesses about a generic chatbot must never override the live
+#: app around Nyx, whether he asks about Nyx directly or a normal task exposes
+#: a supposed limit.  describe_self is core so the measured inventory is in
+#: reach on the first request.  Sessions, memory, skills and verification
+#: already exist, so a proposed workaround starts with their real limits rather
+#: than denying them wholesale.
 SELF_KNOWLEDGE_NOTE = (
-    "When he asks about YOU — your abilities, limits, memory, tools, or what "
-    "you would improve about yourself — call describe_self before claiming "
-    "that a capability exists or is absent. Distinguish a limitation of the "
-    "model from a capability Chatter gives you. Past-session recall, durable "
-    "memory, reusable skills and verification tools already exist: describe "
-    "their real limits, but never deny them or propose replacing them until "
-    "you have checked what is live.")
+    "IN EVERY TASK, before you say you cannot do something, claim a capability "
+    "is missing, or propose a workaround or replacement for a supposed limit, "
+    "call describe_self and check the live inventory. Do the same when he asks "
+    "about you — your abilities, limits, memory, tools, or what you would "
+    "improve about yourself. Distinguish a limitation of the model from a "
+    "capability Chatter gives you. Past-session recall, durable memory, "
+    "reusable skills and verification tools already exist: describe their real "
+    "limits, but never deny or replace them without checking what is live.")
 
 #: Qwen 3.6 has been observed finishing the current answer in its reasoning,
 #: inventing a likely next user instruction, and then reasoning about that
