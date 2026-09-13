@@ -29,6 +29,12 @@ let
     fi
 
     REPO=/home/lam/nix
+    PRIVATE="$REPO/docs/private-config"
+    if [ ! -f "$PRIVATE/default.nix" ]; then
+      echo "rebuild-top: private configuration missing; restore docs/private-config first" >&2
+      exit 1
+    fi
+    private_args=(--override-input private-config "path:$PRIVATE" --no-write-lock-file)
     if [ "$upgrade" = 0 ]; then
       # Every agent shares REPO's working tree. Building that path lets one
       # agent's half-written module enter another agent's switch. A rev-pinned
@@ -97,7 +103,7 @@ let
     trap cleanup EXIT INT TERM
 
     if [ "''${REBUILD_IGNORE_GPU:-0}" != 1 ] && [ -x "$GATE" ] && "$GATE" loaded; then
-      heavy=$(${pkgs.nixos-rebuild}/bin/nixos-rebuild dry-build --flake "$FLAKE#top" 2>&1 \
+      heavy=$(${pkgs.nixos-rebuild}/bin/nixos-rebuild dry-build --flake "$FLAKE#top" "''${private_args[@]}" 2>&1 \
         | ${pkgs.gnugrep}/bin/grep -oE '/nix/store/[^ ]*\.drv' \
         | ${pkgs.gnugrep}/bin/grep -Ei 'cuda|cudnn|torch|llama|ollama|hyprland|qtwebengine|chromium|llvm|linux-[0-9]|mesa|blender|rustc|gcc-[0-9]' \
         | head -5 || true)
@@ -131,9 +137,9 @@ let
     # way.
     scope="${pkgs.systemd}/bin/systemd-run --scope --quiet --slice=nix-build.slice --collect ''${throttle:-}"
     if [ "$upgrade" = 1 ]; then
-      $scope ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --upgrade --flake "$FLAKE#top"
+      $scope ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --upgrade --flake "$FLAKE#top" "''${private_args[@]}"
     else
-      $scope ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake "$FLAKE#top"
+      $scope ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake "$FLAKE#top" "''${private_args[@]}"
     fi
     rc=$?
     cleanup; resume_needed=0
