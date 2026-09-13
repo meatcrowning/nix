@@ -177,7 +177,13 @@ def albums_of(con, where, args, cap=ROLLUP_ALBUMS):
 
     Track counts are the album's own, not the match's, for the same reason
     `op_albums` uses this shape: a guest appearance matching one track does not
-    mean he has one track of the record."""
+    mean he has one track of the record.
+
+    A track with NO album is not a release and never becomes a row here. It
+    used to: grouping on a NULL album pooled every unrelated album-less track in
+    the library into one phantom record — "album: null, 28 tracks" — which is
+    an answer about nothing. They are counted as `loose_tracks` instead, which
+    is the honest shape: files the player cannot file under any record."""
     sql = ("WITH matched AS ("
            " SELECT DISTINCT album, COALESCE(NULLIF(album_artist,''), artist) AS group_artist"
            " FROM tracks%s"
@@ -189,6 +195,7 @@ def albums_of(con, where, args, cap=ROLLUP_ALBUMS):
            "ON m.album IS t.album "
            "AND m.group_artist IS COALESCE(NULLIF(t.album_artist,''), t.artist) "
            "LEFT JOIN albums a ON a.id = t.album_id "
+           "WHERE t.album IS NOT NULL AND t.album != '' "
            "GROUP BY t.album, COALESCE(NULLIF(t.album_artist,''), t.artist) "
            "ORDER BY artist COLLATE NOCASE, year, t.album COLLATE NOCASE LIMIT ?"
            % ((" WHERE " + " AND ".join(where)) if where else ""))
@@ -255,14 +262,24 @@ def op_search(req):
                         % ((" WHERE " + " AND ".join(where)) if where else ""),
                         args).fetchone()[0]
     rollup = albums_of(con, where, args)
+    counted = list(where) + ["album IS NOT NULL", "album != ''"]
     albums_total = con.execute(
         "SELECT COUNT(*) FROM (SELECT DISTINCT album, "
-        "COALESCE(NULLIF(album_artist,''), artist) FROM tracks%s)"
-        % ((" WHERE " + " AND ".join(where)) if where else ""),
+        "COALESCE(NULLIF(album_artist,''), artist) FROM tracks WHERE %s)"
+        % " AND ".join(counted), args).fetchone()[0]
+    loose = con.execute(
+        "SELECT COUNT(*) FROM tracks WHERE %s"
+        % " AND ".join(list(where) + ["(album IS NULL OR album = '')"]),
         args).fetchone()[0]
-    return {"ok": True, "count": len(tracks), "total": total,
-            "offset": offset, "tracks": tracks,
-            "album_count": albums_total, "albums": rollup}
+    out = {"ok": True, "count": len(tracks), "total": total,
+           "offset": offset, "tracks": tracks,
+           "album_count": albums_total, "albums": rollup}
+    if loose:
+        out["loose_tracks"] = loose
+        out["loose_note"] = ("%d matching track(s) carry no album tag, so they "
+                             "are on no record in the player — they are not in "
+                             "`albums` above." % loose)
+    return out
 
 
 def op_albums(req):
@@ -300,6 +317,8 @@ def op_albums(req):
            "ON m.album IS t.album "
            "AND m.group_artist IS COALESCE(NULLIF(t.album_artist,''), t.artist) "
            "LEFT JOIN albums a ON a.id = t.album_id "
+           # A track with no album is not a release — see `albums_of`.
+           "WHERE t.album IS NOT NULL AND t.album != '' "
            "GROUP BY t.album, COALESCE(NULLIF(t.album_artist,''), t.artist) "
            "ORDER BY artist COLLATE NOCASE, year, t.album COLLATE NOCASE LIMIT ?"
            % ((" WHERE " + " AND ".join(where)) if where else ""))

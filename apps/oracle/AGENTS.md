@@ -2688,6 +2688,13 @@ album whose `albums` row player has not indexed yet still reads as art rather
 than `none`. The `soulseek-acquisition` skill's cover section is still
 file-only and should point here.
 
+**A track with no album is not a release**, and never becomes a row in either
+album answer. Grouping on a NULL album pooled every unrelated album-less track
+in the library into one phantom `album: null` record; they come back as
+`loose_tracks` plus a line saying they are on no record in the player, which is
+both honest and the thing worth acting on — a loose track is usually a download
+nobody tagged.
+
 **A search states its RELEASES, not just its page of tracks** (`albums` /
 `album_count` on every `search` result, `albums_of` in library-ipc.py). "What
 have I got by X" is an album-level question that used to come back as track

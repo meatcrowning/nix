@@ -73,10 +73,14 @@ rows = [
     # that must make Skrillex's Thistle appear when browsing Blawan.
     ("Thistle", "Skrillex, MC Dricka, Randomer & Blawan", "Thistle", "Skrillex", 1, 2026, 5, 0, 0, 0, 13),
     ("B-side", "Skrillex", "Thistle", "Skrillex", 2, 2026, None, 0, 0, 0, 13),
+    # NO ALBUM: a download that was never tagged. The player files it under no
+    # record, and neither may the rollup — pooling these produced one phantom
+    # "album: null" row holding every unrelated loose track in the library.
+    ("Untitled Demo", "Skrillex", None, None, None, 2026, None, 0, 0, 0, None),
 ]
 for i, (title, artist, album, album_artist, tno, year, rating, fav, plays,
         art, album_id) in enumerate(rows, 1):
-    f = TMP / ("%02d %s.flac" % (tno, title))
+    f = TMP / ("%s %s.flac" % ("%02d" % tno if tno else "xx", title))
     f.write_bytes(b"not really audio")
     FILES.append(str(f))
     con.execute("INSERT INTO tracks VALUES (?,?,?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,?)",
@@ -131,7 +135,7 @@ r = call({"op": "search", "min_rating": 5})
 check("a rating floor", r.get("count") == 3, json.dumps(r)[:160])
 r = call({"op": "search", "limit": 1})
 check("a limit pages, and says the total",
-      r.get("count") == 1 and r.get("total") == 6, json.dumps(r)[:160])
+      r.get("count") == 1 and r.get("total") == 7, json.dumps(r)[:160])
 r = call({"op": "search", "q": "100%"})
 check("a wildcard in the query is not one", r.get("count") == 0,
       json.dumps(r)[:160])
@@ -144,6 +148,21 @@ r = call({"op": "search", "q": "blawan"})
 check("...with the release's own track count, not the guest's one matching track",
       [(a["album"], a["tracks"]) for a in r.get("albums", [])] == [("Thistle", 2)],
       json.dumps(r)[:240])
+r = call({"op": "search", "q": "skrillex"})
+check("a track with no album never becomes a phantom 'album: null' row",
+      all(a["album"] for a in r.get("albums", [])), json.dumps(r["albums"])[:240])
+check("...it is counted as a loose track instead",
+      r.get("loose_tracks") == 1 and "no record in the player" in r.get("loose_note", ""),
+      json.dumps({k: r[k] for k in r if k.startswith("loose")})[:200])
+check("...and album_count counts real releases only", r.get("album_count") == 1,
+      json.dumps(r)[:200])
+r = call({"op": "albums"})
+check("browsing albums never lists one either", all(a["album"] for a in r["albums"]),
+      json.dumps(r["albums"])[:240])
+r = call({"op": "search", "q": "boards"})
+check("a match with no loose tracks says nothing about them",
+      "loose_tracks" not in r, json.dumps(r)[:200])
+
 # ---- art state: what a cover IS, not whether a cover.jpg is lying about ----
 r = call({"op": "search", "q": "roygbiv"})
 check("a track row says whether that FILE carries a picture",
@@ -180,7 +199,7 @@ check("an album comes back in play order",
       [t["title"] for t in r.get("tracks", [])] == ["Roygbiv", "Olson"],
       json.dumps(r)[:200])
 r = call({"op": "stats"})
-check("stats size the library", r.get("library", {}).get("tracks") == 6,
+check("stats size the library", r.get("library", {}).get("tracks") == 7,
       json.dumps(r)[:160])
 r = call({"op": "info", "track_id": 1})
 check("info returns cached web facts and manual corrections",
