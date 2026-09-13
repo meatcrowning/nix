@@ -4,6 +4,7 @@ import base64
 import http.server
 import json
 import os
+import shutil
 import sys
 import tempfile
 import threading
@@ -89,6 +90,16 @@ def run(args):
 gibs = run({"source": "gibs", "place": "Lisbon", "date": "2026-09-12"})
 assert gibs["ok"] and gibs["source"] == "NASA GIBS" and images[-1]["ok"]
 assert Path(images[-1]["path"]).is_file()
+# The observed failure copied the downloaded GIBS PNG to /tmp and called
+# show_image. Path-only deduplication treated that byte-identical copy as a
+# second picture. It is now one image by content too.
+copy = Path(scratch.name) / "copied-satellite.png"
+shutil.copyfile(images[-1]["path"], copy)
+before = len(images); got = []
+rem = {"n": 1, "sink": [None], "done": lambda rows: got.extend(rows)}
+o._show_image({"path": str(copy)}, 0, rem, [{}])
+assert len(images) == before
+assert json.loads(got[0]["content"])["already_shown"] is True
 stac = run({"source": "copernicus", "bbox": [-10, 38, -8, 40]})
 assert stac["rows"][0]["id"] == "S2-test"
 fires = run({"source": "firms", "bbox": [-10, 38, -8, 40]})

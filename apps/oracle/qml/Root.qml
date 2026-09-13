@@ -2949,13 +2949,10 @@ Item {
 
                                 // The speaker's name, OUTSIDE the bubble and on its
                                 // side — a caption, not a line of the message
-                                // (§9.1: subordinated, one step dim). The running
-                                // reasoning-token count rides BESIDE THE NAME [his,
-                                // 2026-09-05]: it used to sit in the thinking
-                                // heading below, among the tool disclosures, which
-                                // is where the turn's machinery lives — the count is
-                                // about the message, so it belongs on the message's
-                                // own caption line.
+                                // (§9.1: subordinated, one step dim). This line is
+                                // ONLY the speaker. Reasoning tokens and duration
+                                // belong to the thinking disclosure below [his,
+                                // 2026-09-13].
                                 Item {
                                     width: parent.width
                                     height: whoText.visible ? whoText.height : 0
@@ -2972,20 +2969,6 @@ Item {
                                         // 2026-08-23].
                                         visible: isUser || turn.isHead
                                         text: isUser || Ollama.showModelName ? who : "Nyx"
-                                        color: Theme.textDim
-                                    }
-                                    // Ticks live while the model reasons and PERSISTS
-                                    // once the turn settles — the same number the
-                                    // thinking heading used to carry, one step dim so
-                                    // it stays subordinate to the name it follows.
-                                    PixelText {
-                                        anchors { left: whoText.right; leftMargin: 6
-                                                  baseline: whoText.baseline }
-                                        visible: !isUser && turn.isHead
-                                                 && turn.agg.thinkTokens > 0
-                                        text: win.fmtCount(turn.agg.thinkTokens)
-                                              + (turn.agg.thinkTokens === 1 ? " token"
-                                                                            : " tokens")
                                         color: Theme.textDim
                                     }
                                 }
@@ -3068,12 +3051,21 @@ Item {
                                         // screen through that handoff; its state is not erased
                                         // merely because the next round has not spoken yet.
                                         visible: hasBody || (!turn.agg.loading
-                                                 && (turn.agg.thinkMs > 0
+                                                 && (hasDetails || turn.agg.thinkMs > 0
                                                      || turn.agg.thinkStart > 0
                                                      || turn.agg.awaiting))
                                         height: visible ? thinkToggle.height + thinkReveal.height : 0
 
+                                        // One disclosure owns ALL of the turn's hidden
+                                        // machinery. A tool-only turn must still open:
+                                        // there may be no reasoning prose, but there is
+                                        // tool/web/agent/file detail behind this toggle.
                                         readonly property bool hasBody: turn.agg.thinking !== ""
+                                        readonly property bool hasDetails: hasBody
+                                            || turn.agg.tools !== "" || turn.agg.toolsActive
+                                            || turn.agg.agents !== "" || turn.agg.agentsActive
+                                            || turn.agg.sources !== "" || turn.agg.searching
+                                            || turn.agg.files !== "" || turn.agg.filesActive
                                         // Opening is a view decision, not a property of the
                                         // current stream state.  In particular, a tool call
                                         // changes the heading to "waiting…" after reasoning
@@ -3120,16 +3112,16 @@ Item {
                                                 // clock waiting on tools (§10.2: never a
                                                 // control that opens nothing).
                                                 PixelText {
-                                                    visible: think.hasBody
+                                                    visible: think.hasDetails
                                                     text: think.expanded ? "-" : "+"
                                                     color: Theme.textDim
                                                 }
                                                 // The state, and the ellipsis rides it
                                                 // because it is the part still running:
-                                                // "waiting…" while a tool is out,
-                                                // "thinking for 12s…" while it reasons,
-                                                // and the TOTAL of both as "thought for
-                                                // 12s" once the turn settles.
+                                                // "waiting…" while a tool is out, then
+                                                // "thought for 240 tokens in 12s" once
+                                                // the turn settles. Tokens live here with
+                                                // the reasoning, never beside Nyx.
                                                 PixelText {
                                                     text: {
                                                         if (turn.agg.awaiting)
@@ -3138,12 +3130,17 @@ Item {
                                                                               ? think.elapsed : 0);
                                                         var d = win.fmtDur(turn.agg.thinkingActive ? live
                                                                                           : turn.agg.thinkMs);
+                                                        var n = turn.agg.thinkTokens;
+                                                        var tok = n > 0 ? win.fmtCount(n)
+                                                            + (n === 1 ? " token" : " tokens") : "";
+                                                        var span = tok !== "" && d !== "" ? tok + " in " + d
+                                                                 : (tok !== "" ? tok : d);
                                                         if (turn.agg.thinkingActive)
-                                                            return (d !== "" ? "thinking for " + d
-                                                                             : "thinking")
+                                                            return (span !== "" ? "thinking for " + span
+                                                                                : "thinking")
                                                                    + thinkToggle.dots;
-                                                        return d !== "" ? "thought for " + d
-                                                                        : "thought";
+                                                        return span !== "" ? "thought for " + span
+                                                                           : "thought";
                                                     }
                                                     color: (turn.agg.thinkingActive || turn.agg.awaiting) ? Theme.text
                                                                                         : Theme.textDim
@@ -3151,7 +3148,7 @@ Item {
                                             }
                                             MouseArea {
                                                 anchors.fill: parent
-                                                enabled: think.hasBody
+                                                enabled: think.hasDetails
                                                 cursorShape: Qt.PointingHandCursor
                                                 onClicked: { turn.userOpen = !think.expanded; turn.userSet = true; }
                                             }
@@ -3228,8 +3225,10 @@ Item {
                                     // tool name per line (PixelText verbatim, dim).
                                     Item {
                                         id: toolAct
+                                        objectName: "toolActivity"
                                         width: parent.width
-                                        visible: turn.agg.tools !== "" || turn.agg.toolsActive
+                                        visible: think.expanded
+                                                 && (turn.agg.tools !== "" || turn.agg.toolsActive)
                                         height: visible ? toolToggle.height + toolReveal.height : 0
 
                                         readonly property bool expanded: turn.toolUserSet ? turn.toolUserOpen
@@ -3307,8 +3306,10 @@ Item {
                                     // task, what it cost, and what it answered.
                                     Item {
                                         id: agentAct
+                                        objectName: "agentActivity"
                                         width: parent.width
-                                        visible: turn.agg.agents !== "" || turn.agg.agentsActive
+                                        visible: think.expanded
+                                                 && (turn.agg.agents !== "" || turn.agg.agentsActive)
                                         height: visible ? agentToggle.height + agentReveal.height : 0
 
                                         readonly property bool expanded: turn.agentUserSet ? turn.agentUserOpen
@@ -3389,8 +3390,10 @@ Item {
                                     // through MarkdownText.
                                     Item {
                                         id: src
+                                        objectName: "webActivity"
                                         width: parent.width
-                                        visible: turn.agg.sources !== "" || turn.agg.searching
+                                        visible: think.expanded
+                                                 && (turn.agg.sources !== "" || turn.agg.searching)
                                         height: visible ? srcToggle.height + srcReveal.height : 0
 
                                         readonly property bool expanded: turn.srcUserSet ? turn.srcUserOpen
@@ -3464,8 +3467,10 @@ Item {
                                     // — PixelText verbatim, the shared guard).
                                     Item {
                                         id: fileAct
+                                        objectName: "fileActivity"
                                         width: parent.width
-                                        visible: turn.agg.files !== "" || turn.agg.filesActive
+                                        visible: think.expanded
+                                                 && (turn.agg.files !== "" || turn.agg.filesActive)
                                         height: visible ? fileToggle.height + fileReveal.height : 0
 
                                         // Closed by default, running program or not

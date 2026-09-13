@@ -207,7 +207,9 @@ QMetaObject.invokeMethod(root, "loadTurns", Q_ARG("QVariant", "clocktest"),
                               "body": "let me check", "cutOff": True}])))
 spin(300)
 root.setProperty("model", "stub:latest")
-check("assistant bubbles use Nyx by default", "Nyx" in captions(), repr(captions()))
+check("assistant bubbles use Nyx alone by default",
+      "Nyx" in captions() and not any("token" in x for x in captions()),
+      repr(captions()))
 QMetaObject.invokeMethod(root, "tbAction", Q_ARG("QVariant", "show-model-name"))
 spin(50)
 check("Settings can reveal the selected model name",
@@ -233,6 +235,9 @@ thinking = next((it for it in items_named("thinkingDisclosure")
 thinking_scroll = (items_named("thinkingScroll", thinking)[0]
                    if thinking is not None else None)
 check("the live reasoning disclosure exists", thinking is not None)
+check("tool activity is hidden with folded reasoning",
+      not any(bool(it.property("visible")) for it in items_named("toolActivity")),
+      repr([it.property("visible") for it in items_named("toolActivity")]))
 turn = thinking
 while turn is not None and turn.property("userSet") is None:
     turn = turn.parentItem()
@@ -240,6 +245,9 @@ if turn is not None:
     turn.setProperty("userSet", True)
     turn.setProperty("userOpen", True)
 spin(100)
+check("opening reasoning reveals its tool activity",
+      any(bool(it.property("visible")) for it in items_named("toolActivity")),
+      repr([it.property("visible") for it in items_named("toolActivity")]))
 check("an open reasoning disclosure stays open while `waiting…`",
       thinking is not None and bool(thinking.property("expanded"))
       and any(x.startswith("waiting") for x in headings()),
@@ -263,11 +271,11 @@ spin(100)
 h = headings()
 check("once it settles it reads `thought for …`",
       any(x.startswith("thought for") for x in h), repr(h))
-# The count moved out of the clock heading and onto the speaker caption beside
-# the name [his, 2026-09-05] — still one PixelText in the tree, without the "·"
-# that used to rule it off from the state text.
-check("the token count is drawn, beside the speaker's name",
-      any(x.endswith(" token") or x.endswith(" tokens") for x in h), repr(h))
+# Tokens and duration are one sentence on the thinking line; the Nyx caption
+# above it stays only the speaker's name [his, 2026-09-13].
+check("the thinking line carries tokens and time together",
+      any(x.startswith("thought for") and " token" in x and " in " in x
+          for x in h), repr(h))
 check("no state text is left running",
       not any(x.startswith("waiting") or x.startswith("thinking") for x in h),
       repr(h))
@@ -337,6 +345,36 @@ check("an open reasoning disclosure remains visible through `loading…`",
       "visible=%r expanded=%r headings=%r" %
       (None if thinking is None else thinking.property("visible"),
        None if thinking is None else thinking.property("expanded"), headings()))
+
+# Every activity family belongs to the same outer fold. Their own headings and
+# detailed bodies still exist once opened, but none leaks below a closed
+# thinking line.
+QMetaObject.invokeMethod(root, "loadTurns", Q_ARG("QVariant", "foldall"),
+                         Q_ARG("QVariant", "fold all"), Q_ARG("QVariant", json.dumps([
+                             {"isUser": True, "who": "you", "body": "inspect it"},
+                             {"isUser": False, "who": "stub:latest", "body": "done",
+                              "thinking": "checked each source", "thinkMs": 900,
+                              "thinkTokens": 12, "tools": "read_file",
+                              "toolCount": 1, "agents": "researcher — done",
+                              "agentCount": 1, "sources": "- [source](https://example.com)",
+                              "searchCount": 1, "files": "read /tmp/example",
+                              "fileCount": 1}])) )
+spin(150)
+activity_names = ("toolActivity", "agentActivity", "webActivity", "fileActivity")
+check("every activity family is hidden under folded reasoning",
+      all(not any(bool(it.property("visible")) for it in items_named(name))
+          for name in activity_names))
+thinking = next((it for it in items_named("thinkingDisclosure")
+                 if bool(it.property("visible"))), None)
+turn = thinking
+while turn is not None and turn.property("userSet") is None:
+    turn = turn.parentItem()
+if turn is not None:
+    turn.setProperty("userSet", True); turn.setProperty("userOpen", True)
+spin(100)
+check("opening reasoning reveals every activity family",
+      all(any(bool(it.property("visible")) for it in items_named(name))
+          for name in activity_names))
 
 srv.shutdown()
 print("FAILED: " + ", ".join(fails) if fails else "OK")
