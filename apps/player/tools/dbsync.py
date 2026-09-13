@@ -283,8 +283,8 @@ def snapshot(src, dst):
 # ---------------------------------------------------------------------------
 
 # Columns copied verbatim when a track is NEW to the destination. album_id is
-# excluded on purpose: album ids are per-database rowids, and the app re-derives
-# them from tags in rebuild_albums() on every scan.
+# excluded on purpose: album ids are per-database rowids. _rebuild_albums()
+# derives the destination's IDs after a merge, as the app does after a scan.
 NEW_TRACK_COLS = [
     "path", "mtime", "size", "title", "artist", "album", "album_artist",
     "track", "disc", "date", "year", "orig_year", "genre", "duration",
