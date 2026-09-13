@@ -188,6 +188,14 @@ check("tool names may be a JSON list",
       result["attached"] == ["lastfm", "music_library"],
       str(result["attached"]))
 
+turn([("get_tools", {"names": '"lastfm", "music_library"'})])
+result = json.loads([m for m in CHATS[-1]["messages"]
+                     if m.get("role") == "tool"][-1]["content"])
+check("quoted comma-delimited names attach cleanly",
+      result["attached"] == ["lastfm", "music_library"]
+      and "not_found" not in result,
+      json.dumps(result)[:140])
+
 # ---- groups work, and a bad name is said out loud ---------------------------
 turn([("get_tools", {"names": "images"})])
 result = json.loads([m for m in CHATS[-1]["messages"]
