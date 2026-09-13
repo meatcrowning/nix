@@ -241,8 +241,10 @@ exactly what it always was.
   face, since the log is selectable text and nothing in it is clickable. A model's
   reasoning is a **collapsible disclosure, folded by default** (§9.1
   subordinated) that sits **OUTSIDE the bubble** [his, 2026-08-22]. Since
-  2026-09-13 it owns the whole turn's machinery: tool, agent, web-search and
-  file rows are hidden with it until he opens the reasoning disclosure. The
+  2026-09-13 it owns the turn's inspectable machinery: tool, agent, web-search
+  and file rows are hidden with it until he opens the reasoning disclosure.
+  Generation progress is the one status exception and stays outside the fold.
+  The
   speaker caption above says only the persisted conversational name (initially
   **`Sable`**); tokens no longer trail the name. `set_name` is a core tool, so
   the model can change its own name when he chooses one. It writes
@@ -268,8 +270,9 @@ exactly what it always was.
   (dim, §9.1). `loading…` is that same working toggle, not a separate status
   row, so opening it early reveals activity as it arrives. A tool-only turn
   still gets a working toggle because its activity rows are content to unfold.
-  The outer turn stack has zero spacing: the folded heading's line box meets
-  the answer bubble directly instead of adding a second gutter below it. Harness:
+  The outer turn stack has zero spacing, and the heading uses the selected
+  face's label height rather than a generic cell: its glyph box meets the answer
+  bubble directly instead of leaving a second visual gutter below it. Harness:
   `tools/think-clock-test.py`, which drives the real `Root.qml` against a stub
   ollama and asserts the heading text the delegate actually renders — the count is the running frame
   count `Ollama` emits on `replyThinkTokens` (ollama streams one token per NDJSON
@@ -2366,8 +2369,8 @@ RUNS — `readyReadStandardOutput`, accumulating the whole of it, because
 `finished` still needs the `saved …` lines and `readAllStandardOutput` hands
 back only what has not been read. `genProgress(label, frac)` / `genFinished(ok)`
 land on the turn as `genLabel`/`genFrac`/`genRunning`/`genDone`, and QML draws a
-`Meter` under the tool disclosure's heading — open or shut, since the point is
-that the wait is visible. Transient like `execTail`: what it MADE is the
+`Meter` as a direct turn-status row outside the reasoning/tool fold, so it is
+visible whether that disclosure is open or shut. Transient like `execTail`: what it MADE is the
 picture, so nothing about the bar is persisted.
 
 **EVERY KNOB THE WORKFLOW HAS, not the four it shipped with** [his,
