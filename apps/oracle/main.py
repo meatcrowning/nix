@@ -1599,7 +1599,7 @@ FILE_TOOLS = [
 
 #: The CURRENT-TIME tool, offered on every turn beside the file and web tools.
 #: Without it the model answers "now" from its training and gets timezone/DST
-#: conversions wrong (it put redacted-city an hour out — the classic AKDT/AKST slip).
+#: conversions wrong around daylight-saving transitions.
 #: This resolves any IANA zone through Python's zoneinfo, which carries the real
 #: DST rules, so the model never has to compute an offset itself. Handled
 #: locally in `Ollama` (no subprocess — a wall-clock instant is host-neutral).
@@ -1613,7 +1613,7 @@ TIME_TOOL = {
             "Always use this instead of computing a timezone offset yourself."),
         "parameters": {"type": "object", "properties": {
             "timezone": {"type": "string",
-                         "description": ("IANA timezone, e.g. 'Etc/UTC' "
+                         "description": ("IANA timezone, e.g. 'America/New_York' "
                                          "or 'Europe/London'. Omit for UTC.")}},
             "required": []}},
 }
