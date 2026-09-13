@@ -3,7 +3,11 @@
 # tailscaled and /etc/fstab: install it by hand and redo it after a reinstall.
 #
 #   sudo install -m644 ~/nix/tools/ble-fastconn.service /etc/systemd/system/
+#   sudo install -m600 /path/to/ble-fastconn.env /etc/ble-fastconn.env
 #   sudo systemctl daemon-reload && sudo systemctl enable --now ble-fastconn
+#
+# /etc/ble-fastconn.env must contain the private device address:
+#   BLE_FASTCONN_ADDRESS=<private Bluetooth address>
 #
 # top does not get it: its trackball is on the Logitech USB receiver (a flat
 # 125 Hz poll that cannot skip) and its bluetooth stack is not even enabled.
@@ -14,7 +18,8 @@ BindsTo=bluetooth.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /home/lam/nix/tools/ble-fastconn.py --adopt 00:11:22:33:44:55
+EnvironmentFile=/etc/ble-fastconn.env
+ExecStart=/usr/bin/python3 /home/lam/nix/tools/ble-fastconn.py --adopt ${BLE_FASTCONN_ADDRESS}
 Restart=on-failure
 RestartSec=5
 

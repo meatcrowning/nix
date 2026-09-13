@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, privateConfig, ... }:
 
 let
   # Relabel a filesystem (the "rename drive" action in the disk popup).
@@ -73,13 +73,13 @@ in
     # is unchanged. Escape hatch: delete this entry and udisks resumes its old
     # session-scoped behaviour.
     "/run/media/lam/SSD" = {
-      device = "/dev/disk/by-label/REDACTED";
+      device = privateConfig.devices.music;
       fsType = "exfat";
       options = [ "nofail" "x-systemd.device-timeout=5s"
                   "uid=1000" "gid=100" "fmask=0022" "dmask=0022" "iocharset=utf8" ];
     };
     "/home/lam/drives/cld" = {
-      device = "/dev/disk/by-label/REDACTED";
+      device = privateConfig.devices.cloud;
       fsType = "btrfs";
       options = [ "nofail" "x-systemd.device-timeout=5s" ];
     };
@@ -87,7 +87,7 @@ in
     # the path is exactly where udisks would put it now that it has a label —
     # deleting this entry falls back to identical behaviour, just session-scoped.
     "/run/media/lam/arc" = {
-      device = "/dev/disk/by-label/REDACTED";
+      device = privateConfig.devices.archive;
       fsType = "ext4";
       options = [ "nofail" "x-systemd.device-timeout=10s" "nosuid" "nodev" ];
     };
@@ -95,7 +95,7 @@ in
     # behind a default subvolume; discard=async because this bridge does pass
     # TRIM through (unlike the PNY's, which reports no discard support at all).
     "/run/media/lam/bak" = {
-      device = "/dev/disk/by-label/REDACTED";
+      device = privateConfig.devices.backup;
       fsType = "btrfs";
       options = [ "nofail" "x-systemd.device-timeout=10s" "nosuid" "nodev"
                   "subvolid=5" "discard=async" ];
@@ -106,12 +106,12 @@ in
     # honouring their setuid bit and device nodes is a needless local-privesc
     # reservoir — deny both, matching every other data mount here.
     "/home/lam/drives/linux-old" = {
-      device = "/dev/disk/by-label/REDACTED";
+      device = privateConfig.devices.oldLinux;
       fsType = "btrfs";
       options = [ "nofail" "x-systemd.device-timeout=5s" "nosuid" "nodev" "subvolid=5" ];
     };
     "/home/lam/drives/nixos-old" = {
-      device = "/dev/disk/by-label/REDACTED";
+      device = privateConfig.devices.oldNixos;
       fsType = "ext4";
       options = [ "nofail" "x-systemd.device-timeout=5s" "nosuid" "nodev" ];
     };
@@ -120,7 +120,7 @@ in
     # at a UUID path; declared here so it is present from boot and usable by lam
     # as the canonical cold image archive. Promoted 2026-08-18.
     "/home/lam/drives/img" = {
-      device = "/dev/disk/by-label/REDACTED";
+      device = privateConfig.devices.images;
       fsType = "btrfs";
       options = [ "nofail" "x-systemd.device-timeout=10s" "nosuid" "nodev"
                   "subvolid=5" "discard=async" ];

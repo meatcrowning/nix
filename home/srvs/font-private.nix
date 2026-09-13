@@ -1,15 +1,15 @@
-{ pkgs, lib, ... }:
+{ pkgs, lib, privateConfig, ... }:
 
 # Private mechanism for fonts that cannot live in the PUBLIC ~/nix checkout.
 #
 # Tahoma is proprietary Microsoft TrueType and is not in any free pack, so the
-# binary must not be committed to meatcrowning/nix. The user chose (board
+# binary must not be committed to the public checkout. The user chose (board
 # 2026-08-18) to source it via a claude-state-style PRIVATE repo instead of
 # leaving it top-only. This module deploys a fetch-and-install script and
 # drives it from a systemd user unit + timer, plus a home.activation hook so
 # the very switch that adds this module installs the font on this machine.
 #
-# The repo is private/repository (PRIVATE). Only this mechanism ever writes
+# The repository is private. Only this mechanism ever writes
 # it, so the sync is one-way read: clone once, fast-forward to origin/main, copy
 # the font out. Authentication is the gh credential helper (`!gh auth
 # git-credential`), exactly like claude-state-sync and nix-docs-sync.
@@ -38,7 +38,8 @@ in
   # moment this is activated, and book on its next `home-manager switch`.
   home.activation.installPrivateFonts = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     if [ -x "$HOME/.config/scripts/font-private-install.sh" ]; then
-      PATH=${installPath} "$HOME/.config/scripts/font-private-install.sh" \
+      FONT_REMOTE=${lib.escapeShellArg privateConfig.repositories.fonts} \
+        PATH=${installPath} "$HOME/.config/scripts/font-private-install.sh" \
         || true
     fi
   '';
@@ -47,7 +48,10 @@ in
     Unit.Description = "Fetch proprietary fonts from the private nix-fonts repo";
     Service = {
       Type = "oneshot";
-      Environment = [ "PATH=${installPath}" ];
+      Environment = [
+        "PATH=${installPath}"
+        "FONT_REMOTE=${privateConfig.repositories.fonts}"
+      ];
       ExecStart = "%h/.config/scripts/font-private-install.sh";
     };
   };

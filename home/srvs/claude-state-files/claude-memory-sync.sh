@@ -11,7 +11,7 @@
 # The default policy keeps markdown content with union and leaves true
 # delete/edit conflicts for a human. Worktree projects are excluded outright.
 REPO="${CM_SYNC_REPO:-$HOME/.claude}"
-REMOTE="${CM_SYNC_REMOTE:-https://example.invalid/private-repository.git}"
+REMOTE="${CM_SYNC_REMOTE:-}"
 BRANCH="${CM_SYNC_BRANCH:-main}"
 LOG="${CM_SYNC_LOG:-$HOME/.cache/claude-state-sync.log}"
 # MUST be overridden by any other caller: this default seeds ~/.claude's
@@ -30,6 +30,14 @@ if [ -f "$LOG" ] && [ "$(wc -c <"$LOG")" -gt 262144 ]; then
   tail -c 131072 "$LOG" >"$LOG.tmp" && mv "$LOG.tmp" "$LOG"
 fi
 exec >>"$LOG" 2>&1
+
+if [ -z "$REMOTE" ] && [ -d "$REPO/.git" ]; then
+  REMOTE="$(git -C "$REPO" remote get-url origin 2>/dev/null || true)"
+fi
+if [ -z "$REMOTE" ]; then
+  echo "claude-memory-sync: CM_SYNC_REMOTE is unset and $REPO has no origin remote"
+  exit 1
+fi
 
 # Serialize: the timer and a manual run must not interleave git operations.
 LOCK="${CM_SYNC_LOCK:-$HOME/.cache/$(basename "$LOG" .log).lock}"

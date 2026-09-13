@@ -9,17 +9,17 @@
 # changed in the app; the state under it had evaporated.
 #
 # ~/nix is PUBLIC, so the key cannot be committed in the clear. agenix is the
-# seam: `secrets/tavily-key.age` is committed ENCRYPTED to the recipients in
-# `secrets/secrets.nix`, and `top` decrypts it at activation with its ssh HOST
+# seam: `docs/private-config/tavily-key.age` is committed ENCRYPTED to the recipients in
+# `docs/private-config/secrets.nix`, and `top` decrypts it at activation with its ssh HOST
 # key into /run/agenix/tavily-key. home/prog/oracle.nix points
 # ~/.config/oracle/tavily.key at that path, so the app is unchanged and needs
 # no env var.
 #
-# NixOS-only, so `book` does not get it (see secrets/secrets.nix): it is
+# NixOS-only, so `book` does not get it (see docs/private-config/secrets.nix): it is
 # home-manager over Fedora and is not yet a recipient. chatter there keeps
 # reading its own hand-written ~/.config/oracle/tavily.key.
 #
-# Rotate the key:  cd ~/nix && agenix -e secrets/tavily-key.age
+# Rotate the key:  cd ~/nix/docs/private-config && agenix -e tavily-key.age
 {
   imports = [ inputs.agenix.nixosModules.default ];
 
@@ -28,7 +28,7 @@
   age.identityPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
 
   age.secrets.tavily-key = {
-    file = ../../secrets/tavily-key.age;
+    file = inputs.private-config + "/tavily-key.age";
     owner = user;
     group = "users";
     mode = "0400";

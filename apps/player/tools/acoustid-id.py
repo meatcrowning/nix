@@ -32,7 +32,7 @@ API = 'https://api.acoustid.org/v2/lookup'
 CACHE = os.path.expanduser('~/.cache/acoustid-id')
 AUDIT = os.path.expanduser('~/.cache/library-tag-audit/audit.json')
 KEYFILE = os.path.expanduser('~/.local/state/acoustid/apikey')
-UA = 'lam-library-audit/1.0 ( 63303022+meatcrowning@users.noreply.github.com )'
+UA = 'lam-library-audit/1.0 ( https://github.com/meatcrowning/nix )'
 
 
 def key():

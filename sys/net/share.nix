@@ -1,4 +1,4 @@
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, privateConfig, ... }:
 
 # Serve the music library to `air` over SMB, LAN-only.
 #
@@ -17,7 +17,7 @@
 # to enp12s0 and the share itself re-checks with `hosts allow`.
 let
   lan = "enp12s0";
-  lanCidr = "192.0.2.0/24";
+  lanCidr = privateConfig.lanCidr;
 in
 {
   services.samba = {

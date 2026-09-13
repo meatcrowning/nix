@@ -43,7 +43,7 @@ STATE = os.path.expanduser('~/.cache/library-tag-audit')
 CACHE = os.path.join(STATE, 'mbcache')
 SCAN = os.path.join(STATE, 'tagscan.json')
 OUT = os.path.join(STATE, 'audit.json')
-UA = 'lam-library-audit/1.0 ( 63303022+meatcrowning@users.noreply.github.com )'
+UA = 'lam-library-audit/1.0 ( https://github.com/meatcrowning/nix )'
 # Directories the reorg/sweep tooling also excludes: staging areas, not the library.
 EXCL = {'_inbox', 'Staging', 'Transfer', '_quarantine', '_reorg'}
 EXTS = ('.mp3', '.flac', '.m4a', '.opus', '.ogg', '.wav', '.aiff', '.wma')

@@ -1,4 +1,4 @@
-{ config, pkgs, lib, host, inputs, ... }:
+{ config, pkgs, lib, host, inputs, privateConfig, ... }:
 
 let
   qmlDir = ./quickshell-files;
@@ -178,6 +178,19 @@ in
 
       QtObject {
           readonly property string name: "${host}"
+      }
+    '';
+    # Private weather defaults are generated into the deployed QML tree. They
+    # are used only when settings.json is first seeded or reset; existing
+    # persisted settings remain authoritative.
+    "quickshell/Location.qml".text = ''
+      pragma Singleton
+      import QtQuick
+
+      QtObject {
+          readonly property real latitude: ${toString privateConfig.location.latitude}
+          readonly property real longitude: ${toString privateConfig.location.longitude}
+          readonly property string place: ${builtins.toJSON privateConfig.location.place}
       }
     '';
     # Which icon names are OUR seals — generated from my.appSeals (declared by

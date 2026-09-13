@@ -46,7 +46,7 @@ SCAN_JSON = STATE / "scan.json"
 MB_CACHE = STATE / "mbcache"
 AUDIT_LOG = REMOVED / "audit-report.md"
 
-UA = "lam-library-curate/1.0 ( 63303022+meatcrowning@users.noreply.github.com )"
+UA = "lam-library-curate/1.0 ( https://github.com/meatcrowning/nix )"
 
 # Quality ranking used to decide which copy of a duplicate track survives:
 # lossless codecs always beat lossy ones; within a tier, bitrate breaks ties.

@@ -68,8 +68,13 @@ for f in $(git -C "$REPO" diff --name-only HEAD); do
   fi
 done
 
+if ! python3 "$REPO/tools/privacy-check.py" --repo "$REPO"; then
+  echo "FAIL: private identifiers or unsafe public Git identity detected"
+  fail=1
+fi
+
 echo "eval: nixosConfigurations.top ..."
-if ! nix eval --raw "$FLAKE#nixosConfigurations.top.config.system.build.toplevel.drvPath" >/dev/null; then
+if ! "$REPO/tools/nix-private.sh" eval --raw "$FLAKE#nixosConfigurations.top.config.system.build.toplevel.drvPath" >/dev/null; then
   echo "FAIL: system eval failed"
   fail=1
 fi

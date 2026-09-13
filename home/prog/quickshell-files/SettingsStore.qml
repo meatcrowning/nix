@@ -518,17 +518,9 @@ Singleton {
             // 5x7 dot-matrix readout, or a seven-segment one. Cycled by the
             // button in the widget's own top-right corner.
             property string clockFace: "analog"       // analog | dots | seg
-            // Two decimal places, DELIBERATELY. This repo is public and a
-            // shipped default is a published fact: four places is ~10m, which
-            // is a house, not a city. Two is ~1km — indistinguishable to
-            // open-meteo, which resolves to a forecast grid cell far coarser
-            // than either. Same reason the monitor serial was redacted from
-            // WinState.qml (`ee1d105`). Do not "restore precision" here; if a
-            // sharper fix is ever wanted the user sets it in settings.json,
-            // which is not in the repo.
-            property real   weatherLat: 0.00
-            property real   weatherLon: 0.0
-            property string weatherPlace: "redacted-city"
+            property real   weatherLat: Location.latitude
+            property real   weatherLon: Location.longitude
+            property string weatherPlace: Location.place
             property string weatherUnit: "F"           // F | C
             property int    weatherRefreshMin: 20
             // world-clock zones, top-to-bottom under the analog clock popup.
@@ -608,8 +600,8 @@ Singleton {
         lidClose: "suspend",
         keyRepeatDelay: 300, keyRepeatRate: 40, pointerSpeed: 0.0, naturalScroll: false,
         tapToClick: true, clock24h: false, weekStartsMonday: false, clockFace: "analog",
-        weatherLat: 0.00,
-        weatherLon: 0.0, weatherPlace: "redacted-city", weatherUnit: "F", weatherRefreshMin: 20,
+        weatherLat: Location.latitude,
+        weatherLon: Location.longitude, weatherPlace: Location.place, weatherUnit: "F", weatherRefreshMin: 20,
         worldClocks: ["America/Indiana/Indianapolis", "America/New_York", "Europe/London", "Asia/Tokyo"],
         brightnessStep: 5, brightnessBackend: "auto", nightLight: false,
         nightTemp: 4000, gammaFloor: 20, gammaLevel: 100, brightnessHw: -1,

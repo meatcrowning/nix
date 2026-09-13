@@ -80,7 +80,7 @@ STATE = Path(os.environ.get("TAGTOOL_STATE")
 #: keep honest — see `db_refresh_album_art`.
 ART_CACHE = Path(os.environ.get("XDG_CACHE_HOME")
                  or Path.home() / ".cache") / "player" / "art"
-UA = "lam-tagtool/1.0 ( 63303022+meatcrowning@users.noreply.github.com )"
+UA = "lam-tagtool/1.0 ( https://github.com/meatcrowning/nix )"
 
 AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".dsf", ".ogg", ".opus", ".wv",
               ".ape", ".aiff", ".aif", ".wav", ".mpc", ".tta", ".dff", ".mp4"}

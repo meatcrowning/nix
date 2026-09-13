@@ -1,4 +1,4 @@
-{ pkgs, lib, ... }:
+{ pkgs, lib, privateConfig, ... }:
 
 # Cross-machine sync for chatter's skills, tools and agent definitions.
 #
@@ -57,7 +57,7 @@
           pkgs.inetutils
         ]}"
         "CM_SYNC_REPO=%h/.local/share/oracle"
-        "CM_SYNC_REMOTE=https://example.invalid/private-repository.git"
+        "CM_SYNC_REMOTE=${privateConfig.repositories.oracleSkills}"
         "CM_SYNC_LOG=%h/.cache/oracle-skills-sync.log"
         "CM_SYNC_SEED=%h/.config/scripts/oracle-skills-seed"
         "CM_SYNC_LABEL=skill"

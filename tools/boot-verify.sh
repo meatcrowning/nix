@@ -14,6 +14,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+NIX_PRIVATE="$PWD/tools/nix-private.sh"
 
 ATTR=${BOOT_VERIFY_ATTR:-top}
 WITH_VM=0
@@ -34,11 +35,11 @@ note() { printf '  --    %s\n' "$*"; }
 
 # stderr dropped: the only thing nix prints here is the "Git tree is dirty"
 # warning, and a real eval failure still aborts under set -e.
-evalcfg() { nix eval --raw ".#nixosConfigurations.$ATTR.config.$1" 2>/dev/null; }
-evaljson() { nix eval --json ".#nixosConfigurations.$ATTR.config.$1" 2>/dev/null; }
+evalcfg() { "$NIX_PRIVATE" eval --raw ".#nixosConfigurations.$ATTR.config.$1" 2>/dev/null; }
+evaljson() { "$NIX_PRIVATE" eval --json ".#nixosConfigurations.$ATTR.config.$1" 2>/dev/null; }
 
 echo "== building the toplevel =="
-top=$(nix build --no-link --print-out-paths \
+top=$("$NIX_PRIVATE" build --no-link --print-out-paths \
         ".#nixosConfigurations.$ATTR.config.system.build.toplevel")
 echo "  $top"
 if [ "$top" = "$(readlink -f /run/current-system)" ]; then
@@ -65,7 +66,7 @@ fi
 
 echo
 echo "== the initrd can find the root filesystem =="
-closure=$(nix build --no-link --print-out-paths \
+closure=$("$NIX_PRIVATE" build --no-link --print-out-paths \
             ".#nixosConfigurations.$ATTR.config.system.build.modulesClosure")
 have() {   # module name -> present in the closure, or built into the kernel
   find -L "$closure" -name "$1.ko*" -print -quit 2>/dev/null | grep -q . && return 0
@@ -137,13 +138,36 @@ if [ "$WITH_VM" = 1 ]; then
   echo
   echo "== headless VM boot =="
   echo "  building a VM variant of this configuration (this is the slow part)"
+  private_config=${NIX_PRIVATE_CONFIG:-$PWD/docs/private-config}
+  [ -f "$private_config/default.nix" ] || {
+    echo "private configuration missing: $private_config/default.nix" >&2
+    exit 1
+  }
   expr_file=$(mktemp /tmp/boot-verify-vm.XXXXXX.nix)
   vmdir=$(mktemp -d /tmp/boot-verify-vm.XXXXXX)
-  cleanup() { rm -f "$expr_file"; [ "$KEEP" = 1 ] || rm -rf "$vmdir"; }
+  vmflake=$(mktemp -d /tmp/boot-verify-flake.XXXXXX)
+  cleanup() { rm -f "$expr_file"; rm -rf "$vmflake"; [ "$KEEP" = 1 ] || rm -rf "$vmdir"; }
   trap cleanup EXIT
+  # getFlake inside --file does not inherit CLI overrides. Export only tracked
+  # source (never ignored docs, credentials or generated files), then replace
+  # the fallback input privately in this disposable tree.
+  python3 - "$PWD" "$vmflake" <<'PYEXPORT'
+from pathlib import Path
+import shutil, subprocess, sys
+source, target = map(Path, sys.argv[1:])
+for name in subprocess.check_output(["git", "-C", str(source), "ls-files", "-z"]).decode().split("\0"):
+    if not name:
+        continue
+    src, dst = source / name, target / name
+    if src.is_symlink() or src.is_file():
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst, follow_symlinks=False)
+PYEXPORT
+  rm -rf "$vmflake/lib/private-defaults"
+  cp -a "$private_config" "$vmflake/lib/private-defaults"
   cat > "$expr_file" <<NIXEOF
 let
-  flake = builtins.getFlake "$PWD";
+  flake = builtins.getFlake "$vmflake";
   ext = flake.nixosConfigurations.$ATTR.extendModules {
     modules = [ ({ lib, pkgs, ... }: {
       virtualisation.vmVariant = {
@@ -173,7 +197,7 @@ let
   };
 in ext.config.system.build.vm
 NIXEOF
-  vm=$(nix build --impure --no-link --print-out-paths --file "$expr_file")
+  vm=$("$NIX_PRIVATE" build --impure --no-link --print-out-paths --file "$expr_file")
   # the runner is a symlink into the store, so match on name, not -type f
   runner=$(find -L "$vm/bin" -maxdepth 1 -name 'run-*-vm' -print -quit)
   echo "  runner: $runner"

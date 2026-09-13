@@ -1,4 +1,4 @@
-{ pkgs, lib, ... }:
+{ pkgs, lib, privateConfig, ... }:
 
 # Cross-machine sync for the whole of ~/.claude.
 #
@@ -61,7 +61,7 @@ in
       Environment = [
         "PATH=${syncPath}"
         "CM_SYNC_REPO=%h/.claude"
-        "CM_SYNC_REMOTE=https://example.invalid/private-repository.git"
+        "CM_SYNC_REMOTE=${privateConfig.repositories.claudeState}"
         "CM_SYNC_LOG=%h/.cache/claude-state-sync.log"
         "CM_SYNC_SEED=%h/.config/scripts/claude-state-seed"
         "CM_SYNC_LABEL=file"

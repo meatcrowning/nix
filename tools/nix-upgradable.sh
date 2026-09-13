@@ -65,6 +65,11 @@ REPO="${NIX_UPGRADABLE_REPO:-$HOME/nix}"
 [ -f "$REPO/flake.nix" ] || { echo "no flake at $REPO" >&2; exit 2; }
 [ -f "$REPO/flake.lock" ] || { echo "no flake.lock at $REPO — nothing to compare against" >&2; exit 2; }
 
+# Keep the private-config source anchored to the real checkout even when REPO
+# is the throwaway copy used below.  The helper's --override-input applies to
+# either flake path while its private source stays outside that copy.
+NIX_PRIVATE="$(CDPATH= cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)/nix-private.sh"
+
 # Host gate: the same flake is NixOS on top and home-manager-only on book, and
 # the architecture is the reliable tell (book is aarch64 Asahi).
 if [ -z "$ATTR" ]; then
@@ -155,9 +160,9 @@ if [ -n "$INPUT" ]; then
     # a full rebuild — and it still answers when the new system does not build.
     echo ""
     echo "== drv-closure diff (eval only, no build): current -> updated $INPUT =="
-    OLD_DRV=$(nix eval --raw "$REPO#$ATTR.drvPath") \
+    OLD_DRV=$("$NIX_PRIVATE" eval --raw "$REPO#$ATTR.drvPath") \
         || { echo "FAIL: could not evaluate $ATTR from the current inputs" >&2; exit 1; }
-    NEW_DRV=$(nix eval --raw "$TMP#$ATTR.drvPath") \
+    NEW_DRV=$("$NIX_PRIVATE" eval --raw "$TMP#$ATTR.drvPath") \
         || { echo "FAIL: could not evaluate $ATTR from the updated inputs" >&2; exit 1; }
     python3 "$(dirname "${BASH_SOURCE[0]}")/nix-eval-diff.py" "$OLD_DRV" "$NEW_DRV" \
         || { echo "FAIL: drv-closure diff failed" >&2; exit 1; }
@@ -170,13 +175,13 @@ fi
 
 echo ""
 echo "== building $ATTR from CURRENT inputs =="
-CUR=$(nix build --no-link --print-out-paths --no-update-lock-file "$REPO#$ATTR") \
+CUR=$("$NIX_PRIVATE" build --no-link --print-out-paths "$REPO#$ATTR") \
     || { echo "FAIL: could not build $ATTR from the current inputs" >&2; exit 1; }
 echo "  $CUR"
 
 echo ""
 echo "== building $ATTR from UPDATED inputs (the real download/build) =="
-NEW=$(nix build --no-link --print-out-paths --no-update-lock-file "$TMP#$ATTR") \
+NEW=$("$NIX_PRIVATE" build --no-link --print-out-paths "$TMP#$ATTR") \
     || { echo "FAIL: the UPDATED toplevel does not build with the new inputs." >&2
          echo "      The repo and the running system are untouched; the current" >&2
          echo "      system stays exactly as it is." >&2

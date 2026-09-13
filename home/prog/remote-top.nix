@@ -25,8 +25,8 @@
 # taken. Editing top's system files still means ssh + `sudo -A` there.
 #
 # The KIO sftp worker is libssh, not OpenSSH, so it does not read ~/.ssh/config:
-# the URL names `top` because tailscale MagicDNS resolves it (verified:
-# `getent hosts top` -> 192.0.2.1). Do not switch it to `top.local` — that
+# the URL names `top` because tailscale MagicDNS resolves it (verified with
+# `getent hosts top` -> a tailnet address). Do not switch it to `top.local` — that
 # is mDNS and answers only at home, which is the bug this whole path exists to
 # avoid.
 #

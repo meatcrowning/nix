@@ -398,7 +398,7 @@ def main():
         import urllib.parse
         import urllib.request
 
-        UA = "lam-library-album-inventory/1.0 ( 63303022+meatcrowning@users.noreply.github.com )"
+        UA = "lam-library-album-inventory/1.0 ( https://github.com/meatcrowning/nix )"
         cache_path = os.path.join(args.dump_dir, "album-ref-lookup.json")
         lcache = {}
         if os.path.isfile(cache_path):
