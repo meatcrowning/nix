@@ -758,6 +758,13 @@ MUSIC_TOOL = {
             "for a track, artist or album. Every track comes back with "
             "its `path`, which is what control_media's play_these / "
             "queue_these take — so 'put on X' is this tool and then that one. "
+            "IT ALSO ANSWERS 'DOES THIS HAVE A COVER': every album says `art` "
+            "— `embedded` (in the audio files), `folder` (a cover.jpg beside "
+            "them) or `none` — and every track says `has_art`. Ask here rather "
+            "than listing a directory: most records here keep their cover "
+            "INSIDE the files, so a folder with no cover.jpg is the normal "
+            "case and proves nothing. `stats` counts the albums with no cover "
+            "at all. "
             "Read-only: it never changes a rating, a tag or a play count."),
         "parameters": {"type": "object", "properties": {
             "action": {"type": "string",

@@ -56,8 +56,16 @@ ROLLUP_ALBUMS = 40
 
 #: What one track row says. `path` is the important one — it is what `play` and
 #: `queue` take back — and the rest is what a person would ask about.
+#:
+#: `has_art` is 1 when THAT FILE carries an embedded picture. It is here
+#: because its absence produced a confident wrong answer [2026-09-12]: told a
+#: fresh Soulseek rip of `Structure` was in, an agent ran `ls` on the album
+#: folder, saw no cover.jpg, and reported "no cover art came with the
+#: transfer" — while every FLAC held a 1200x1200 front cover and the player was
+#: already drawing it. Nothing it could call reported art at all, so the only
+#: check available was for the wrong kind of thing.
 TRACK_COLS = ("id", "title", "artist", "album", "album_artist", "track", "year",
-              "duration", "rating", "favorite", "play_count", "path")
+              "duration", "rating", "favorite", "play_count", "has_art", "path")
 
 SORTS = {
     "artist": "artist COLLATE NOCASE, album COLLATE NOCASE, disc, track",
@@ -138,6 +146,24 @@ def limit_of(req):
     return max(1, min(n, MAX_ROWS))
 
 
+def art_state(art_src, any_embedded):
+    """What an album's cover IS, in one word a model can act on.
+
+    `albums.art_src` is how player itself resolved the cover — `embedded:<path>`
+    or `file:<path>` — and is the honest answer whenever it is set. The fallback
+    matters as much: a just-imported album may have art in its files before
+    player has indexed the row, and "the files carry a cover" is still `art`,
+    not `none`. Only `none` means nobody has one."""
+    src = str(art_src or "")
+    if src.startswith("embedded:"):
+        return "embedded"
+    if src.startswith("file:"):
+        return "folder"
+    if any_embedded:
+        return "embedded"
+    return "none"
+
+
 def albums_of(con, where, args, cap=ROLLUP_ALBUMS):
     """The releases a `search`'s WHOLE match belongs to — one short line each,
     regardless of which page of tracks the caller asked for.
@@ -157,14 +183,21 @@ def albums_of(con, where, args, cap=ROLLUP_ALBUMS):
            " FROM tracks%s"
            ") "
            "SELECT t.album, COALESCE(NULLIF(t.album_artist,''), t.artist) AS artist, "
-           "COUNT(*) AS tracks, MAX(t.year) AS year "
+           "COUNT(*) AS tracks, MAX(t.year) AS year, "
+           "MAX(a.art_src) AS art_src, MAX(COALESCE(t.has_art,0)) AS any_art "
            "FROM tracks t JOIN matched m "
            "ON m.album IS t.album "
            "AND m.group_artist IS COALESCE(NULLIF(t.album_artist,''), t.artist) "
+           "LEFT JOIN albums a ON a.id = t.album_id "
            "GROUP BY t.album, COALESCE(NULLIF(t.album_artist,''), t.artist) "
            "ORDER BY artist COLLATE NOCASE, year, t.album COLLATE NOCASE LIMIT ?"
            % ((" WHERE " + " AND ".join(where)) if where else ""))
-    return [dict(r) for r in con.execute(sql, list(args) + [cap]).fetchall()]
+    out = []
+    for row in con.execute(sql, list(args) + [cap]).fetchall():
+        item = dict(row)
+        item["art"] = art_state(item.pop("art_src", None), item.pop("any_art", 0))
+        out.append(item)
+    return out
 
 
 def op_search(req):
@@ -261,16 +294,22 @@ def op_albums(req):
            ") "
            "SELECT t.album, COALESCE(NULLIF(t.album_artist,''), t.artist) AS artist, "
            "COUNT(*) AS tracks, SUM(COALESCE(t.duration,0)) AS seconds, "
-           "MAX(t.year) AS year, MIN(t.path) AS one_path "
+           "MAX(t.year) AS year, MIN(t.path) AS one_path, "
+           "MAX(a.art_src) AS art_src, MAX(COALESCE(t.has_art,0)) AS any_art "
            "FROM tracks t JOIN matched m "
            "ON m.album IS t.album "
            "AND m.group_artist IS COALESCE(NULLIF(t.album_artist,''), t.artist) "
+           "LEFT JOIN albums a ON a.id = t.album_id "
            "GROUP BY t.album, COALESCE(NULLIF(t.album_artist,''), t.artist) "
            "ORDER BY artist COLLATE NOCASE, year, t.album COLLATE NOCASE LIMIT ?"
            % ((" WHERE " + " AND ".join(where)) if where else ""))
     con = db()
     cur = con.execute(sql, args + [n])
-    albums = [dict(r) for r in cur.fetchall()]
+    albums = []
+    for r in cur.fetchall():
+        item = dict(r)
+        item["art"] = art_state(item.pop("art_src", None), item.pop("any_art", 0))
+        albums.append(item)
     return {"ok": True, "count": len(albums), "albums": albums}
 
 
@@ -280,16 +319,24 @@ def op_album_tracks(req):
     if not album:
         fail("album_tracks needs an `album`")
     args = ["%" + album + "%"]
-    where = "album LIKE ?"
+    # Qualified, because the art read below joins `albums`, which carries an
+    # `album` column of its own.
+    where = "t.album LIKE ?"
     artist = str(req.get("artist") or "").strip()
     if artist:
-        where += " AND (album_artist LIKE ? OR artist LIKE ?)"
+        where += " AND (t.album_artist LIKE ? OR t.artist LIKE ?)"
         args += ["%" + artist + "%"] * 2
     con = db()
-    cur = con.execute("SELECT %s FROM tracks WHERE %s ORDER BY disc, track, path"
-                      % (", ".join(TRACK_COLS), where), args)
+    cur = con.execute("SELECT %s FROM tracks t WHERE %s ORDER BY t.disc, t.track, t.path"
+                      % (", ".join("t." + c for c in TRACK_COLS), where), args)
     tracks = rows_of(cur)
-    return {"ok": True, "count": len(tracks), "tracks": tracks}
+    art = con.execute(
+        "SELECT MAX(a.art_src) AS art_src, MAX(COALESCE(t.has_art,0)) AS any_art "
+        "FROM tracks t LEFT JOIN albums a ON a.id = t.album_id WHERE " + where,
+        args).fetchone()
+    return {"ok": True, "count": len(tracks),
+            "art": art_state(art["art_src"], art["any_art"]) if art else "none",
+            "tracks": tracks}
 
 
 def op_stats(_req):
@@ -299,7 +346,13 @@ def op_stats(_req):
         "COUNT(DISTINCT COALESCE(NULLIF(album_artist,''), artist)) AS artists, "
         "SUM(COALESCE(duration,0)) AS seconds, "
         "SUM(favorite = 1) AS favorites FROM tracks").fetchone()
-    return {"ok": True, "library": dict(row), "database": DB}
+    library = dict(row)
+    # The work list, not a curiosity: these are the records that draw blank in
+    # the player, and the only cheap way to ask "which covers are missing".
+    library["albums_without_art"] = con.execute(
+        "SELECT COUNT(*) FROM albums WHERE art_src IS NULL OR art_src = ''"
+    ).fetchone()[0]
+    return {"ok": True, "library": library, "database": DB}
 
 
 def _cache_key(row):
