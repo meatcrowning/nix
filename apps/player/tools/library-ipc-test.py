@@ -43,7 +43,14 @@ con = sqlite3.connect(DB)
 con.execute("""CREATE TABLE tracks (id INTEGER PRIMARY KEY, path TEXT,
     title TEXT, artist TEXT, album TEXT, album_artist TEXT, track INT, disc INT,
     year INT, genre TEXT, duration REAL, rating INT, favorite INT,
-    play_count INT, added_at INT, last_played INT)""")
+    play_count INT, added_at INT, last_played INT, has_art INT DEFAULT 0,
+    album_id INT)""")
+# player's own albums table (main.py's CREATE TABLE), because `art` reads the
+# cover player actually resolved — the fixture has to carry the columns the
+# real schema does or the test passes against a library that cannot exist.
+con.execute("""CREATE TABLE albums (id INTEGER PRIMARY KEY, album TEXT,
+    album_artist TEXT, year INT, orig_year INT, art_src TEXT, thumb TEXT,
+    full_art TEXT)""")
 con.execute("""CREATE TABLE web_metadata (cache_key TEXT, kind TEXT, source TEXT,
     body_json TEXT, fetched_at REAL, expires_at REAL, error TEXT)""")
 con.execute("""CREATE TABLE web_metadata_overrides (cache_key TEXT, kind TEXT,
@@ -52,23 +59,40 @@ con.execute("""CREATE TABLE web_entity_matches (cache_key TEXT, entity_type TEXT
     provider TEXT, entity_id TEXT, label TEXT, confidence REAL, status TEXT,
     candidates_json TEXT, manual INT, fetched_at REAL, error TEXT)""")
 FILES = []
+# The last two columns are the ART state: whether THAT FILE carries an
+# embedded picture, and which albums row it belongs to. The four albums cover
+# every answer `art` can give — player found art inside the files, player found
+# a cover.jpg beside them, the files carry art player has not indexed yet, and
+# nobody has one at all.
 rows = [
-    ("Roygbiv", "Boards of Canada", "Music Has the Right to Children", "Boards of Canada", 1, 1998, 5, 1, 12),
-    ("Olson", "Boards of Canada", "Music Has the Right to Children", "Boards of Canada", 2, 1998, 4, 0, 3),
-    ("Xtal", "Aphex Twin", "Selected Ambient Works 85-92", "Aphex Twin", 1, 1992, 5, 1, 40),
-    ("Stone Age", "Machinedrum", "Psyconia", "Machinedrum", 2, 2021, None, 0, 0),
+    ("Roygbiv", "Boards of Canada", "Music Has the Right to Children", "Boards of Canada", 1, 1998, 5, 1, 12, 1, 10),
+    ("Olson", "Boards of Canada", "Music Has the Right to Children", "Boards of Canada", 2, 1998, 4, 0, 3, 1, 10),
+    ("Xtal", "Aphex Twin", "Selected Ambient Works 85-92", "Aphex Twin", 1, 1992, 5, 1, 40, 0, 11),
+    ("Stone Age", "Machinedrum", "Psyconia", "Machinedrum", 2, 2021, None, 0, 0, 1, 12),
     # Album artist is not the complete contributor list. This is the shape
     # that must make Skrillex's Thistle appear when browsing Blawan.
-    ("Thistle", "Skrillex, MC Dricka, Randomer & Blawan", "Thistle", "Skrillex", 1, 2026, 5, 0, 0),
-    ("B-side", "Skrillex", "Thistle", "Skrillex", 2, 2026, None, 0, 0),
+    ("Thistle", "Skrillex, MC Dricka, Randomer & Blawan", "Thistle", "Skrillex", 1, 2026, 5, 0, 0, 0, 13),
+    ("B-side", "Skrillex", "Thistle", "Skrillex", 2, 2026, None, 0, 0, 0, 13),
 ]
-for i, (title, artist, album, album_artist, tno, year, rating, fav, plays) in enumerate(rows, 1):
+for i, (title, artist, album, album_artist, tno, year, rating, fav, plays,
+        art, album_id) in enumerate(rows, 1):
     f = TMP / ("%02d %s.flac" % (tno, title))
     f.write_bytes(b"not really audio")
     FILES.append(str(f))
-    con.execute("INSERT INTO tracks VALUES (?,?,?,?,?,?,?,1,?,?,?,?,?,?,?,?)",
+    con.execute("INSERT INTO tracks VALUES (?,?,?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,?)",
                 (i, str(f), title, artist, album, album_artist, tno, year, "electronic",
-                 300.0, rating, fav, plays, 1000 + i, 2000 + i))
+                 300.0, rating, fav, plays, 1000 + i, 2000 + i, art, album_id))
+for album_id, album, album_artist, art_src in [
+        (10, "Music Has the Right to Children", "Boards of Canada",
+         "embedded:" + FILES[0]),
+        (11, "Selected Ambient Works 85-92", "Aphex Twin",
+         "file:" + str(TMP / "cover.jpg")),
+        # Just imported: the file holds a picture, player has not resolved the
+        # album row yet. This is the Structure case, and it must read as art.
+        (12, "Psyconia", "Machinedrum", None),
+        (13, "Thistle", "Skrillex", None)]:
+    con.execute("INSERT INTO albums VALUES (?,?,?,?,?,?,?,?)",
+                (album_id, album, album_artist, 2000, 2000, art_src, None, None))
 cache_key = "boards of canada|music has the right to children|boards of canada|roygbiv"
 con.execute("INSERT INTO web_metadata VALUES (?,?,?,?,?,?,?)",
             (cache_key, "album", "musicbrainz+wikipedia",
@@ -120,6 +144,29 @@ r = call({"op": "search", "q": "blawan"})
 check("...with the release's own track count, not the guest's one matching track",
       [(a["album"], a["tracks"]) for a in r.get("albums", [])] == [("Thistle", 2)],
       json.dumps(r)[:240])
+# ---- art state: what a cover IS, not whether a cover.jpg is lying about ----
+r = call({"op": "search", "q": "roygbiv"})
+check("a track row says whether that FILE carries a picture",
+      r["tracks"][0].get("has_art") == 1, json.dumps(r)[:200])
+check("...and the album rollup says where the cover comes from",
+      r["albums"][0].get("art") == "embedded", json.dumps(r["albums"])[:200])
+r = call({"op": "albums"})
+art = {a["album"]: a.get("art") for a in r["albums"]}
+check("a cover player found inside the files reads embedded",
+      art.get("Music Has the Right to Children") == "embedded", str(art))
+check("...a cover.jpg beside them reads folder",
+      art.get("Selected Ambient Works 85-92") == "folder", str(art))
+check("...files with art player has not indexed yet still read as art",
+      art.get("Psyconia") == "embedded", str(art))
+check("...and only a record nobody has a cover for reads none",
+      art.get("Thistle") == "none", str(art))
+r = call({"op": "album_tracks", "album": "Psyconia"})
+check("album_tracks states the album's art in one word", r.get("art") == "embedded",
+      json.dumps(r)[:200])
+r = call({"op": "stats"})
+check("stats counts the albums drawing blank in the player",
+      r["library"].get("albums_without_art") == 2, json.dumps(r)[:200])
+
 r = call({"op": "albums"})
 check("albums group with their track counts",
       r.get("count") == 4 and any(a["tracks"] == 2 for a in r["albums"]),

@@ -2673,6 +2673,21 @@ Every row carries its `path`, which is the whole point: search, then hand those
 paths to `control_player` `play_these` (replace the queue and start) or
 `queue_these` (append).
 
+**It answers "does this have a cover", because listing a directory does not.**
+Every album carries `art` — `embedded`, `folder` or `none` — every track
+carries `has_art`, and `stats` counts the albums with no cover at all (73 of
+2,358 on `top` as of 2026-09-12). The gap was worth a wrong answer: told a
+fresh Soulseek rip of `Structure` had landed, an agent ran `ls` on the album
+folder, saw no `cover.jpg`, and reported "no cover art came with the transfer"
+— while every FLAC carried a 1200×1200 front cover and player was already
+drawing it from `albums.art_src`. It checked the only way it had, and that way
+is wrong for this library: most records keep the cover INSIDE the files, so an
+absent `cover.jpg` is the normal case. `art_state()` reads player's own
+resolution first and falls back to the files' own pictures, so a just-imported
+album whose `albums` row player has not indexed yet still reads as art rather
+than `none`. The `soulseek-acquisition` skill's cover section is still
+file-only and should point here.
+
 **A search states its RELEASES, not just its page of tracks** (`albums` /
 `album_count` on every `search` result, `albums_of` in library-ipc.py). "What
 have I got by X" is an album-level question that used to come back as track
