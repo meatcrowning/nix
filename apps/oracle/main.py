@@ -90,6 +90,7 @@ import fleet  # noqa: E402  (chatter's own; the subagent/jobs pane and its targe
 from sessions import Sessions  # noqa: E402  (named transcript/store Qt seam)
 from turnmetrics import TurnMetrics  # noqa: E402  (content-free turn timings)
 from routing import request_tools  # noqa: E402  (first-request schema routing)
+import satellite  # noqa: E402  (global earth-observation request builders)
 
 #: The local ollama daemon. Loopback-pinned like everything else that speaks to
 #: a local backend here — never a new listener (root AGENTS.md → the tailnet).
@@ -1258,6 +1259,43 @@ CALL_API_TOOL = {
 }
 CALL_API_TOOL_NAMES = {"call_api"}
 
+SATELLITE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "satellite_observe",
+        "description": (
+            "Pull real satellite imagery or observation data for anywhere on "
+            "Earth. `gibs` returns and displays a NASA global map image; "
+            "`copernicus` searches Sentinel-2 optical or Sentinel-1 radar "
+            "acquisitions; `firms` returns active-fire detections; `goes` "
+            "lists NOAA GOES full-disk weather data over the Americas. Give a "
+            "place name, coordinates plus radius, or a WGS84 bbox. Acquisition "
+            "times are returned explicitly: satellite data is not a live "
+            "camera. FIRMS needs a free keyring entry named `firms`; the other "
+            "catalogue/image paths need no key."),
+        "parameters": {"type": "object", "properties": {
+            "source": {"type": "string",
+                       "enum": ["gibs", "copernicus", "firms", "goes"],
+                       "description": "Default gibs."},
+            "place": {"type": "string",
+                      "description": "City or place to resolve globally."},
+            "latitude": {"type": "number"}, "longitude": {"type": "number"},
+            "radius_km": {"type": "number", "description": "Default 100; max 2500."},
+            "bbox": {"type": "array", "items": {"type": "number"},
+                     "description": "[west,south,east,north] in WGS84."},
+            "date": {"type": "string", "description": "YYYY-MM-DD; default is the newest reliably complete date."},
+            "product": {"type": "string",
+                        "description": ("GIBS: natural, natural_aqua, night, clouds, fires, snow, sea_ice; "
+                                        "Copernicus: optical or radar; GOES: an AWS product prefix.")},
+            "days": {"type": "integer", "description": "Copernicus search window or FIRMS range."},
+            "cloud_max": {"type": "number", "description": "Sentinel-2 cloud-cover ceiling, default 30%."},
+            "limit": {"type": "integer", "description": "Maximum data rows, default 10."},
+            "width": {"type": "integer"}, "height": {"type": "integer"},
+            "hour_utc": {"type": "integer", "description": "GOES hour, 0-23."}},
+            "required": []}},
+}
+SATELLITE_TOOL_NAMES = {"satellite_observe"}
+
 
 def _api_dig(obj, path):
     """`obj` walked by a dotted path; None if any step is missing. List indices
@@ -2371,6 +2409,7 @@ AGENT_TOOL_GROUPS = {
     "author": ["make_tool", "make_skill", "make_agent"],
     "time": ["get_current_time"],
     "jobs": ["run_job", "job_status", "job_log", "job_stop"],
+    "satellite": ["satellite_observe"],
     # The one thing a subagent may come back for: a DECISION, as buttons.
     # Prose questions are still pointless down there — nobody reads a
     # subagent's transcript — but this one renders in HIS window.
@@ -2582,7 +2621,7 @@ def _tool_registry():
     itself is absent, which is what keeps subagents one level deep."""
     tools = (list(FILE_TOOLS) + [WEB_SEARCH_TOOL, TIME_TOOL, FETCH_URL_TOOL,
              WIKIPEDIA_TOOL,
-             CALL_API_TOOL, EXEC_TOOL, BASH_TOOL, SHOW_IMAGE_TOOL,
+             CALL_API_TOOL, SATELLITE_TOOL, EXEC_TOOL, BASH_TOOL, SHOW_IMAGE_TOOL,
              MUSIC_TOOL, LASTFM_TOOL, PLAYER_TOOL] + list(JOB_TOOLS)
              + list(SESSION_TOOLS) + [PROMPT_HISTORY_TOOL] + list(AUTHOR_TOOLS)
              + [ASK_CHOICE_TOOL]
@@ -3035,7 +3074,8 @@ CAPABILITY_NOTE = (
     "arguments. The families cover: files and a real Python/Bash shell; web, "
     "Wikipedia, URLs and APIs; current time; past sessions and durable memory; "
     "music search/playback and Last.fm; images, video, audio and the screen; "
-    "model management; long background jobs; reusable skills; and subagents "
+    "model management; satellite imagery and Earth-observation data; long "
+    "background jobs; reusable skills; and subagents "
     "whose bulky work stays out of this context. describe_self reports the "
     "exact live inventory. For image/video GENERATION, load the matching prompt "
     "skill before writing the generator arguments: anima-prompt (then validate "
@@ -6676,7 +6716,7 @@ class Ollama(QObject):
                 VIDEO_TOOL, PLAYER_TOOL, LISTEN_TOOL,
                 MUSIC_TOOL, LASTFM_TOOL, MODEL_TOOL,
                 FETCH_URL_TOOL, WIKIPEDIA_TOOL,
-                CALL_API_TOOL, EXEC_TOOL, BASH_TOOL]
+                CALL_API_TOOL, SATELLITE_TOOL, EXEC_TOOL, BASH_TOOL]
                 + list(SESSION_TOOLS) + [PROMPT_HISTORY_TOOL]
                 + list(MEMORY_TOOLS) + list(AUTHOR_TOOLS)
                 + [GET_TOOLS_TOOL, ASK_CHOICE_TOOL] + list(JOB_TOOLS)
@@ -7509,6 +7549,8 @@ class Ollama(QObject):
                             args.get("offset", 0), i, remaining, calls)
         elif name in CALL_API_TOOL_NAMES:
             self._call_api(args, i, remaining, calls)
+        elif name in SATELLITE_TOOL_NAMES:
+            self._satellite_observe(args, i, remaining, calls)
         elif name in FILE_TOOL_NAMES:
             self._run_fs_tool(name, args, i, remaining, calls)
         elif name in EXEC_TOOL_NAMES or name in BASH_TOOL_NAMES:
@@ -8379,6 +8421,172 @@ class Ollama(QObject):
             lambda: self._on_call_api(reply, safe, site, fields, select,
                                       row_offset, method, idx, remaining, calls))
 
+    def _satellite_fail(self, source, message, idx, remaining, calls):
+        self.webSearchError.emit("satellite: " + (source or "request"), message)
+        remaining["sink"][idx] = {
+            "role": "tool", "tool_name": "satellite_observe",
+            "content": json.dumps({"error": message, "source": source})}
+        self._tool_done(remaining, calls)
+
+    def _satellite_observe(self, args, idx, remaining, calls):
+        """Resolve an area, then fetch one bounded Earth-observation result."""
+        a = dict(args) if isinstance(args, dict) else {}
+        source = str(a.get("source") or "gibs").strip().lower()
+        if source not in ("gibs", "copernicus", "firms", "goes"):
+            self._satellite_fail(source, "unknown satellite source", idx,
+                                 remaining, calls)
+            return
+        if not a.get("bbox") and not (a.get("latitude") is not None
+                                      and a.get("longitude") is not None):
+            place = str(a.get("place") or "").strip()
+            if not place:
+                self._satellite_fail(source, "give place, latitude/longitude, or bbox",
+                                     idx, remaining, calls)
+                return
+            u = QUrl(satellite.GEOCODE)
+            q = QUrlQuery(); q.addQueryItem("name", place); q.addQueryItem("count", "1")
+            q.addQueryItem("language", "en"); q.addQueryItem("format", "json")
+            u.setQuery(q)
+            req = QNetworkRequest(u); req.setRawHeader(b"User-Agent", API_USER_AGENT)
+            self.webSearchStarted.emit("satellite: locating " + place)
+            reply = self._nam.get(req)
+            reply.finished.connect(lambda: self._satellite_geocoded(
+                reply, a, source, idx, remaining, calls))
+            return
+        self._satellite_fetch(a, source, idx, remaining, calls)
+
+    def _satellite_geocoded(self, reply, args, source, idx, remaining, calls):
+        try:
+            if reply.error() != QNetworkReply.NetworkError.NoError:
+                self._satellite_fail(source, "place lookup failed: " + reply.errorString(),
+                                     idx, remaining, calls)
+                return
+            doc = json.loads(bytes(reply.readAll().data()) or b"{}")
+            rows = doc.get("results") or []
+            if not rows:
+                self._satellite_fail(source, "place was not found", idx,
+                                     remaining, calls)
+                return
+            hit = rows[0]
+            args["latitude"], args["longitude"] = hit["latitude"], hit["longitude"]
+            args["resolved_place"] = ", ".join(x for x in
+                (str(hit.get("name") or ""), str(hit.get("admin1") or ""),
+                 str(hit.get("country") or "")) if x)
+            self._satellite_fetch(args, source, idx, remaining, calls)
+        except (ValueError, TypeError, KeyError) as e:
+            self._satellite_fail(source, "bad place response: " + str(e), idx,
+                                 remaining, calls)
+        finally:
+            reply.deleteLater()
+
+    def _satellite_fetch(self, args, source, idx, remaining, calls):
+        try:
+            box = satellite.bounds(args)
+            date = str(args.get("date") or "")
+            product = str(args.get("product") or "").strip().lower()
+            limit = min(100, max(1, int(args.get("limit") or 10)))
+        except (ValueError, TypeError, KeyError) as e:
+            self._satellite_fail(source, str(e), idx, remaining, calls)
+            return
+        place = str(args.get("resolved_place") or args.get("place") or "").strip()
+        if source == "gibs":
+            try:
+                url, layer = satellite.gibs_url(
+                    box, product or "natural", date, args.get("width") or 1024,
+                    args.get("height") or 768)
+            except (ValueError, TypeError) as e:
+                self._satellite_fail(source, str(e), idx, remaining, calls)
+                return
+            observed = satellite.default_date(date)
+            meta = {"source": "NASA GIBS", "layer": layer,
+                    "acquisition_date": observed, "bbox": box,
+                    "resolved_place": place,
+                    "note": ("Satellite image shown inline. The acquisition date "
+                             "is explicit; this is not a live camera.")}
+            self._fetch_image(url, place or layer, idx, remaining, calls,
+                              "satellite_observe", meta)
+            return
+        if source == "copernicus":
+            try:
+                body = satellite.stac_body(
+                    box, product or "optical", date, args.get("days") or 14,
+                    args.get("cloud_max") if args.get("cloud_max") is not None else 30,
+                    limit)
+            except (ValueError, TypeError) as e:
+                self._satellite_fail(source, str(e), idx, remaining, calls)
+                return
+            req = QNetworkRequest(QUrl(satellite.CDSE_STAC))
+            req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
+                          "application/json")
+            req.setRawHeader(b"User-Agent", API_USER_AGENT)
+            self.webSearchStarted.emit("satellite: Copernicus catalogue")
+            reply = self._nam.post(req, json.dumps(body).encode())
+            reply.finished.connect(lambda: self._satellite_data_done(
+                reply, source, box, place, idx, remaining, calls, limit))
+            return
+        if source == "firms":
+            cred = api_credentials("firms")
+            key = str((cred.get("params") or {}).get("map_key")
+                      or (cred.get("params") or {}).get("key") or "").strip()
+            if not key:
+                self._satellite_fail(
+                    source, "FIRMS needs a free MAP_KEY at api-keys.json entry "
+                    "firms.params.map_key", idx, remaining, calls)
+                return
+            url = satellite.firms_url(key, box, product.upper() or "VIIRS_SNPP_NRT",
+                                      args.get("days") or 1, date)
+            req = QNetworkRequest(QUrl(url)); req.setRawHeader(b"User-Agent", API_USER_AGENT)
+            self.webSearchStarted.emit("satellite: NASA FIRMS")
+            reply = self._nam.get(req)
+            reply.finished.connect(lambda: self._satellite_data_done(
+                reply, source, box, place, idx, remaining, calls, limit))
+            return
+        url, prefix = satellite.goes_url(
+            date, args.get("hour_utc"), product.upper() or "ABI-L2-CMIPF")
+        req = QNetworkRequest(QUrl(url)); req.setRawHeader(b"User-Agent", API_USER_AGENT)
+        self.webSearchStarted.emit("satellite: NOAA GOES " + prefix)
+        reply = self._nam.get(req)
+        reply.finished.connect(lambda: self._satellite_data_done(
+            reply, source, box, place, idx, remaining, calls, limit))
+
+    def _satellite_data_done(self, reply, source, box, place, idx, remaining,
+                             calls, limit):
+        try:
+            if reply.error() != QNetworkReply.NetworkError.NoError:
+                result = {"error": "request failed: " + reply.errorString()}
+            else:
+                raw = bytes(reply.readAll().data()).decode("utf-8", "replace")
+                if source == "copernicus":
+                    rows = satellite.stac_result(json.loads(raw))[:limit]
+                elif source == "firms":
+                    rows = satellite.firms_result(raw, limit)
+                else:
+                    rows = [{"object_key": k} for k in satellite.goes_result(raw)[:limit]]
+                result = {"source": source, "bbox": box,
+                          "resolved_place": place, "count": len(rows), "rows": rows}
+                if source == "copernicus":
+                    result["note"] = ("Catalogue metadata only. Use a returned preview URL "
+                                      "with fetch_image when present; full rendered Sentinel "
+                                      "imagery needs Copernicus OAuth credentials.")
+                elif source == "goes":
+                    result["note"] = ("GOES covers the Americas and adjacent oceans; these "
+                                      "are public NetCDF object keys, not ready-made pictures.")
+            if result.get("error"):
+                self.webSearchError.emit("satellite: " + source, result["error"])
+            else:
+                self.webSearchDone.emit("satellite: " + source, "", len(result["rows"]))
+            remaining["sink"][idx] = {"role": "tool",
+                                       "tool_name": "satellite_observe",
+                                       "content": json.dumps(result)}
+        except (ValueError, TypeError) as e:
+            remaining["sink"][idx] = {"role": "tool",
+                                       "tool_name": "satellite_observe",
+                                       "content": json.dumps({"error": str(e),
+                                                              "source": source})}
+        finally:
+            reply.deleteLater()
+            self._tool_done(remaining, calls)
+
     def _on_call_api(self, reply, safe, site, fields, select, row_offset,
                      method, idx, remaining, calls):
         if not self._busy:              # turn was cancelled mid-call
@@ -8617,18 +8825,20 @@ class Ollama(QObject):
                     self._image_entries[url] = entry
         self.imageFetchResult.emit(json.dumps(entry))
 
-    def _image_failed(self, url, reason, idx, remaining, calls):
+    def _image_failed(self, url, reason, idx, remaining, calls,
+                      tool_name="fetch_image"):
         """Fail one image the same way for both audiences, tool or not."""
         entry, result = self._image_error(url, reason)
         self._emit_image(entry)
         if idx is None:
             self._typed_image_done(remaining)
             return
-        remaining["sink"][idx] = {"role": "tool", "tool_name": "fetch_image",
+        remaining["sink"][idx] = {"role": "tool", "tool_name": tool_name,
                                    "content": json.dumps(result)}
         self._tool_done(remaining, calls)
 
-    def _fetch_image(self, url, alt, idx, remaining, calls):
+    def _fetch_image(self, url, alt, idx, remaining, calls,
+                     tool_name="fetch_image", result_extra=None):
         """Download one image by URL and hand the local path to QML to render.
 
         A GET on the shared QNAM (Qt6 follows redirects by default), validated on
@@ -8646,12 +8856,12 @@ class Ollama(QObject):
         if not url or not re.match(r"^https?://", url, re.I):
             self.imageFetchStarted.emit(url or "(no url)")
             self._image_failed(url, "not a valid http(s) image URL",
-                               idx, remaining, calls)
+                               idx, remaining, calls, tool_name)
             return
         fault = self._booru_url_fault(url)
         if fault:
             self.imageFetchStarted.emit(url)
-            self._image_failed(url, fault, idx, remaining, calls)
+            self._image_failed(url, fault, idx, remaining, calls, tool_name)
             return
         self.imageFetchStarted.emit(url)
         req = QNetworkRequest(QUrl(url))
@@ -8659,9 +8869,11 @@ class Ollama(QObject):
                       "oracle-chatter/1.0")
         reply = self._nam.get(req)
         reply.finished.connect(
-            lambda: self._on_image(reply, url, alt, idx, remaining, calls))
+            lambda: self._on_image(reply, url, alt, idx, remaining, calls,
+                                   tool_name, result_extra))
 
-    def _on_image(self, reply, url, alt, idx, remaining, calls):
+    def _on_image(self, reply, url, alt, idx, remaining, calls,
+                  tool_name="fetch_image", result_extra=None):
         """Validate the download, save it locally, and feed both audiences.
 
         Three honest failure modes (docs/DESIGN.md §10): a network/HTTP error, a
@@ -8709,6 +8921,8 @@ class Ollama(QObject):
                                   "height": img.height(),
                                   "note": ("Image downloaded and now shown inline "
                                            "in the chat for the user to see.")}
+                        if isinstance(result_extra, dict):
+                            result.update(result_extra)
         except (ValueError, TypeError, OSError) as e:
             entry, result = self._image_error(url, str(e))
         finally:
@@ -8717,7 +8931,7 @@ class Ollama(QObject):
         if idx is None:
             self._typed_image_done(remaining)
             return
-        remaining["sink"][idx] = {"role": "tool", "tool_name": "fetch_image",
+        remaining["sink"][idx] = {"role": "tool", "tool_name": tool_name,
                                    "content": json.dumps(result)}
         self._tool_done(remaining, calls)
 

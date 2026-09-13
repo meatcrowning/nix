@@ -476,6 +476,33 @@ Ordinary chat saves their ~1.9k schema tokens.
 
 Harness: `tools/lazy-tools-test.py`.
 
+### `satellite_observe` — imagery and measured Earth data
+
+One routed tool covers four public observation seams without making the model
+invent endpoint syntax. NASA GIBS returns a dated WMS PNG and feeds it through
+the same validated inline-image path as `fetch_image`; Copernicus Data Space
+searches Sentinel-2 optical or Sentinel-1 radar metadata through STAC; NASA
+FIRMS returns bounded active-fire detections; NOAA's public GOES bucket returns
+dated NetCDF object keys for the Americas. Every result names its acquisition
+date/time or says it is catalogue data — none is presented as a live camera.
+
+The caller supplies a WGS84 bounding box, a coordinate/radius pair, or a place.
+Place names resolve through Open-Meteo's keyless GeoNames endpoint before the
+provider request. GIBS defaults to yesterday, the newest date reliably complete
+across an arbitrary box; an explicit date is preserved. FIRMS alone needs a
+credential: `firms.params.map_key` in the existing private
+`~/.config/oracle/api-keys.json` keyring. Keys never enter a result or source
+URL. Full rendered Copernicus scenes need OAuth, so the keyless path honestly
+returns catalogue metadata and any published preview rather than promising a
+render it cannot fetch.
+
+`satellite.py` owns the pure bounds/request/parser seams. Harness:
+`tools/satellite-test.py`; `tools/satellite-tool-test.py` drives all four
+providers and inline image delivery through local HTTP fixtures;
+`tools/request-routing-test.py` covers first-request attachment for satellite,
+Sentinel, Copernicus and active-fire wording. The `satellite` subagent tool group
+exposes the same schema when a specialized agent is defined to use it.
+
 ### Not inventing facts
 
 Two things, both of them on the wire every turn, against the one complaint a
