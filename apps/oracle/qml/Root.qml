@@ -393,6 +393,7 @@ Item {
     // he last used if the daemon still has it, else the first it reports.
     Connections {
         target: Ollama
+        function onSettingsError(message) { win.serverNote = message; }
         function onModelsChanged() {
             if (win.model !== "" && Ollama.models.indexOf(win.model) >= 0)
                 return;                       // a still-valid selection stands
@@ -1491,6 +1492,11 @@ Item {
                    state: Ollama.promptChoice === "custom" ? 1 : 0 });
         out.push({ id: "edit-prompt", menu: "settings",
                    menuText: "Edit Custom Prompt…", icon: "document-edit" });
+        out.push("-");
+        out.push({ id: "qwen-sampling", menu: "settings",
+                   menuText: "qwen published sampling", checkable: true,
+                   tip: "use qwen 3.6's published general-purpose thinking settings",
+                   state: Ollama.qwenSampling ? 1 : 0 });
         return out;
     }
 
@@ -1637,6 +1643,8 @@ Item {
                                }
                                break;
         case "edit-prompt":    win.openPromptEditor();          break;
+        case "qwen-sampling":  Ollama.setQwenSampling(!Ollama.qwenSampling);
+                               break;
         // The Edit menu, through the SAME code the transcript's right-click
         // menu runs (win.textMenu) — one implementation of copy, two ways in,
         // so a reply is copied as MARKDOWN from either.

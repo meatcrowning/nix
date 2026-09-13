@@ -19,12 +19,15 @@ import http.server
 import json
 import os
 import sys
+import tempfile
 import threading
 from pathlib import Path
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 os.environ.pop("WAYLAND_DISPLAY", None)
 os.environ.pop("DISPLAY", None)
+_config = tempfile.TemporaryDirectory(prefix="chatter-sampling-")
+os.environ["ORACLE_CONFIG"] = _config.name
 
 HERE = Path(__file__).resolve().parent
 APP = HERE.parent
@@ -82,6 +85,7 @@ sys.argv = [sys.argv[0], "--selftest"]
 import main as oracle                      # noqa: E402
 
 app = QGuiApplication([])
+assert app.platformName() == "offscreen"
 o = oracle.Ollama()
 done = []
 o.replyDone.connect(lambda: done.append(1))
@@ -153,6 +157,44 @@ check("...and under a creative preset it is untouched",
       oracle.sampler_for("gemma4:26b", "casual").get("temperature") == 1.0)
 check("a custom base prompt is still a factual turn",
       oracle.sampler_for("stub:latest", "custom").get("temperature") == 0.3)
+
+# ---- the persistent published profile overrides the clamp on the wire ---
+published = {"temperature": 1.0, "top_p": 0.95, "top_k": 20, "min_p": 0.0,
+             "presence_penalty": 1.5, "repeat_penalty": 1.0}
+check("published sampling starts off", not o.qwenSampling)
+o.setQwenSampling(True)
+check("the choice survives a new instance", oracle.Ollama().qwenSampling)
+for preset in ("custom", "coder", "writer"):
+    wire = turn("qwen3.6:35b-a3b", preset)["options"]
+    check("published sampling reaches the request under " + preset,
+          wire == dict(published, num_ctx=o._num_ctx), str(wire))
+check("GGUF imports use the same profile",
+      oracle.sampler_for("hf.co/example/Qwen3.6-35B-A3B-GGUF:Q4_K_M",
+                         qwen_published=True) == published)
+check("Gemma keeps its sampler while the switch is on",
+      turn("gemma4:e4b")["options"]["temperature"] == 0.3)
+check("unverified Qwen families keep their sampler",
+      oracle.sampler_for("qwen3.8:27b", qwen_published=True)["temperature"] == 0.3)
+
+CHATS.clear()
+o._agent_post({"model": "qwen3.6:35b-a3b", "messages": [],
+               "tools": [], "wrap": False})
+pump(lambda: bool(CHATS))
+check("subagent requests inherit published sampling",
+      bool(CHATS) and CHATS[0]["options"] == dict(published, num_ctx=o._num_ctx))
+
+errors = []
+o.settingsError.connect(errors.append)
+saved_path = oracle.SAMPLING_PATH
+oracle.SAMPLING_PATH = Path(_config.name)  # a directory cannot be replaced
+o.setQwenSampling(False)
+check("a failed save leaves the choice on and reports the failure",
+      o.qwenSampling and bool(errors))
+oracle.SAMPLING_PATH = saved_path
+o.setQwenSampling(False)
+check("unchecking persists and restores the factual sampler",
+      not oracle.Ollama().qwenSampling
+      and turn("qwen3.6:35b-a3b", "custom")["options"]["temperature"] == 0.3)
 
 # ---- and describe_self reports what is actually sent --------------------
 src = open(APP / "main.py").read()
