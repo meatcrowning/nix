@@ -114,7 +114,11 @@ check("t4 older rating rejected", g(t4, "rating"), 0.2)
 check("t5 favourite propagates",  g(t5, "favorite"), 1)
 check("t6 rating clear propagates", g(t6, "rating"), None)
 check("new track inserted",       cb.execute("SELECT title FROM tracks WHERE path='/run/media/lam/SSD/aud/ZZ/new.flac'").fetchone()[0], "newtrack")
-check("new track album_id NULL",  cb.execute("SELECT album_id FROM tracks WHERE path='/run/media/lam/SSD/aud/ZZ/new.flac'").fetchone()[0], None)
+check("new track album derived",  tuple(cb.execute("""
+    SELECT a.album, a.album_artist
+      FROM tracks t JOIN albums a ON a.id = t.album_id
+     WHERE t.path='/run/media/lam/SSD/aud/ZZ/new.flac'
+""").fetchone()), ("ZZ", "ZZ"))
 check("b-only track survives",    cb.execute("SELECT COUNT(*) FROM tracks WHERE path='/run/media/lam/SSD/aud/ZZ/bonly.flac'").fetchone()[0], 1)
 check("no deletions",             cb.execute("SELECT COUNT(*) FROM tracks").fetchone()[0], before_b + 1)
 check("t1 synced lyrics win",     (L(t1)["source"], L(t1)["synced"]), ("lrclib", 1))
