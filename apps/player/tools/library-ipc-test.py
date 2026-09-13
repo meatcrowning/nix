@@ -111,6 +111,15 @@ check("a limit pages, and says the total",
 r = call({"op": "search", "q": "100%"})
 check("a wildcard in the query is not one", r.get("count") == 0,
       json.dumps(r)[:160])
+r = call({"op": "search", "q": "boards", "limit": 1})
+check("a search says which RELEASES it matched, not just this page of tracks",
+      r.get("album_count") == 1
+      and [a["album"] for a in r.get("albums", [])] == ["Music Has the Right to Children"]
+      and r["albums"][0]["tracks"] == 2, json.dumps(r)[:240])
+r = call({"op": "search", "q": "blawan"})
+check("...with the release's own track count, not the guest's one matching track",
+      [(a["album"], a["tracks"]) for a in r.get("albums", [])] == [("Thistle", 2)],
+      json.dumps(r)[:240])
 r = call({"op": "albums"})
 check("albums group with their track counts",
       r.get("count") == 4 and any(a["tracks"] == 2 for a in r["albums"]),

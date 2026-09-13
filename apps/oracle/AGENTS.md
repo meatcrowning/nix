@@ -2654,6 +2654,23 @@ Every row carries its `path`, which is the whole point: search, then hand those
 paths to `control_player` `play_these` (replace the queue and start) or
 `queue_these` (append).
 
+**A search states its RELEASES, not just its page of tracks** (`albums` /
+`album_count` on every `search` result, `albums_of` in library-ipc.py). "What
+have I got by X" is an album-level question that used to come back as track
+rows: asked how much James Ferraro he was missing, qwen3.6 paged 62 tracks over
+three calls, fetched the Wikipedia discography in the same turn, and then
+reported nine records he owned — five of them simply a contiguous run of the
+Wikipedia table [2026-09-12]. Nothing was invented and the library WAS checked;
+the model answered "what he has" off the wrong source, because the right source
+was 82 track rows and the wrong one was already a list of albums. Replaying that
+turn against the same model reproduces it about half the time. Two changes
+close it, and both were needed elsewhere anyway: the rollup, so the first call
+answers the question in the shape the answer takes, and GROUNDING_NOTE's last
+paragraph — what he HAS comes from his machine, never from a page; every entry
+must be one you can point at in a tool result from this turn. The rollup counts
+each release's own tracks, not the match's, so a guest appearance does not read
+as a record he owns one track of.
+
 **The queue verbs go over player's socket, not MPRIS** — `OPEN` was already
 there for a second launch's `%F`, and `QUEUE` is its new counterpart
 (`Player.queuePaths`, apps/player/AGENTS.md). Read-only on the database, always:

@@ -49,6 +49,11 @@ SOCK = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp",
 MAX_ROWS = 60
 DEFAULT_ROWS = 20
 
+#: How many albums a `search` names in its rollup. It is a summary of the WHOLE
+#: match, not of the page, so it must not become the long part of the answer;
+#: past this the count alone is the honest thing to report.
+ROLLUP_ALBUMS = 40
+
 #: What one track row says. `path` is the important one — it is what `play` and
 #: `queue` take back — and the rest is what a person would ask about.
 TRACK_COLS = ("id", "title", "artist", "album", "album_artist", "track", "year",
@@ -133,6 +138,35 @@ def limit_of(req):
     return max(1, min(n, MAX_ROWS))
 
 
+def albums_of(con, where, args, cap=ROLLUP_ALBUMS):
+    """The releases a `search`'s WHOLE match belongs to — one short line each,
+    regardless of which page of tracks the caller asked for.
+
+    "What have I got by X" is an album-level question, and until this existed
+    the only answer was track rows: a model asking it paged 62 James Ferraro
+    tracks over three calls, then read a Wikipedia discography in the same turn
+    and reported back five records he does not own [2026-09-12]. Track rows are
+    the wrong shape to hold that fact against a page that IS a list of albums —
+    so `search` now states the fact itself, in the shape the answer needs.
+
+    Track counts are the album's own, not the match's, for the same reason
+    `op_albums` uses this shape: a guest appearance matching one track does not
+    mean he has one track of the record."""
+    sql = ("WITH matched AS ("
+           " SELECT DISTINCT album, COALESCE(NULLIF(album_artist,''), artist) AS group_artist"
+           " FROM tracks%s"
+           ") "
+           "SELECT t.album, COALESCE(NULLIF(t.album_artist,''), t.artist) AS artist, "
+           "COUNT(*) AS tracks, MAX(t.year) AS year "
+           "FROM tracks t JOIN matched m "
+           "ON m.album IS t.album "
+           "AND m.group_artist IS COALESCE(NULLIF(t.album_artist,''), t.artist) "
+           "GROUP BY t.album, COALESCE(NULLIF(t.album_artist,''), t.artist) "
+           "ORDER BY artist COLLATE NOCASE, year, t.album COLLATE NOCASE LIMIT ?"
+           % ((" WHERE " + " AND ".join(where)) if where else ""))
+    return [dict(r) for r in con.execute(sql, list(args) + [cap]).fetchall()]
+
+
 def op_search(req):
     """Tracks matching a free-text query and/or an artist/album filter.
 
@@ -187,8 +221,15 @@ def op_search(req):
     total = con.execute("SELECT COUNT(*) FROM tracks%s"
                         % ((" WHERE " + " AND ".join(where)) if where else ""),
                         args).fetchone()[0]
+    rollup = albums_of(con, where, args)
+    albums_total = con.execute(
+        "SELECT COUNT(*) FROM (SELECT DISTINCT album, "
+        "COALESCE(NULLIF(album_artist,''), artist) FROM tracks%s)"
+        % ((" WHERE " + " AND ".join(where)) if where else ""),
+        args).fetchone()[0]
     return {"ok": True, "count": len(tracks), "total": total,
-            "offset": offset, "tracks": tracks}
+            "offset": offset, "tracks": tracks,
+            "album_count": albums_total, "albums": rollup}
 
 
 def op_albums(req):
