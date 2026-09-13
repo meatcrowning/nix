@@ -57,4 +57,8 @@ def request_tools(prompt, generated_tool=""):
                  r"\b(create|make)\b.{0,20}\b(folder|directory)\b", text):
         out.update(("write_file", "edit_file", "move_path", "delete_path",
                     "make_dir"))
+    if re.search(r"\b(satellite|earth observation|sentinel-[12]|copernicus|"
+                 r"firms|active fires?|goes-[0-9]*|space image|imagery from space)\b",
+                 text):
+        out.add("satellite_observe")
     return out
