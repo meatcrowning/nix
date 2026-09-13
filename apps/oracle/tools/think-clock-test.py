@@ -330,9 +330,12 @@ QMetaObject.invokeMethod(root, "loadTurns", Q_ARG("QVariant", "loadingtest"),
                              {"isUser": False, "who": "stub:latest",
                               "thinking": "the first round's reasoning", "thinkMs": 1000}])) )
 QMetaObject.invokeMethod(root, "appendReplyRow", Q_ARG("QVariant", 2))
+ollama.genProgress.emit("sampling", 0.5)
 spin(100)
 thinking = next((it for it in items_named("thinkingDisclosure")
                  if bool(it.property("visible"))), None)
+check("generation progress remains outside the reasoning fold",
+      any(bool(it.property("visible")) for it in items_named("generationProgress")))
 turn = thinking
 while turn is not None and turn.property("userSet") is None:
     turn = turn.parentItem()

@@ -3066,7 +3066,12 @@ Item {
                                         Item {
                                             id: thinkToggle
                                             width: parent.width
-                                            height: Theme.lineHeight
+                                            // Use the face's REAL label box. Oxygen's
+                                            // proportional QLabel is shorter than the
+                                            // generic desktop cell; centring it inside
+                                            // Theme.lineHeight left a visible blank row
+                                            // between this heading and the bubble.
+                                            height: thinkHead.implicitHeight
                                             // The ellipsis cycles 0→1→2→3 dots while the
                                             // reasoning streams, so the heading reads as
                                             // alive even between token deltas. One roll
@@ -3102,6 +3107,7 @@ Item {
                                                 // the turn settles. Tokens live here with
                                                 // the reasoning, never beside the speaker name.
                                                 PixelText {
+                                                    id: thinkHead
                                                     text: {
                                                         if (turn.agg.loading || turn.agg.awaiting)
                                                             return "loading" + thinkToggle.dots;
@@ -3193,6 +3199,33 @@ Item {
 
                                                 ScrollBar.vertical: VScroll { id: thinkScroll }
                                             }
+                                            }
+                                        }
+
+                                    // Generation progress is TURN STATUS, not hidden
+                                    // tool detail. Keep it outside the reasoning fold so
+                                    // a long image/video render remains measurable even
+                                    // when the machinery above is collapsed.
+                                    Row {
+                                        id: genProgress
+                                        objectName: "generationProgress"
+                                        width: parent.width
+                                        height: visible ? Theme.lineHeight : 0
+                                        spacing: 8
+                                        visible: turn.agg.genRunning || turn.agg.genDone
+                                        Meter {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: 120
+                                            frac: turn.agg.genFrac
+                                        }
+                                        PixelText {
+                                            text: turn.agg.genLabel
+                                            color: Theme.textDim
+                                        }
+                                        PixelText {
+                                            text: Math.round(turn.agg.genFrac * 100) + "%"
+                                            color: Theme.textDim
+                                            opacity: 0.6
                                         }
                                     }
 
@@ -3476,7 +3509,6 @@ Item {
                                             // way, below both.
                                             height: (fileHead.visible ? Theme.lineHeight : 0)
                                                     + (execPeek.visible ? Theme.lineHeight : 0)
-                                                    + (genRow.visible ? Theme.lineHeight : 0)
                                             property int dotPhase: 0
                                             readonly property string dots:
                                                 motion.reduceMotion ? "…" : "...".substring(0, dotPhase)
@@ -3551,40 +3583,6 @@ Item {
                                                 elide: Text.ElideRight
                                                 text: win.lastLine(turn.agg.execTail)
                                                 color: Theme.text
-                                            }
-                                            // A RENDER'S PROGRESS, under the
-                                            // heading and always visible —
-                                            // open or shut, because the whole
-                                            // point is that a minutes-long
-                                            // wait does not look like a
-                                            // stalled one [his, 2026-08-24].
-                                            // The label says which part is
-                                            // running; the bar is the same
-                                            // Meter the context readout uses,
-                                            // so there is one progress shape
-                                            // in this window and not two.
-                                            Row {
-                                                id: genRow
-                                                anchors { left: parent.left; leftMargin: 12
-                                                          top: execPeek.visible ? execPeek.bottom
-                                                                                : fileHead.bottom }
-                                                height: visible ? Theme.lineHeight : 0
-                                                spacing: 8
-                                                visible: turn.agg.genRunning || turn.agg.genDone
-                                                Meter {
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                    width: 120
-                                                    frac: turn.agg.genFrac
-                                                }
-                                                PixelText {
-                                                    text: turn.agg.genLabel
-                                                    color: Theme.textDim
-                                                }
-                                                PixelText {
-                                                    text: Math.round(turn.agg.genFrac * 100) + "%"
-                                                    color: Theme.textDim
-                                                    opacity: 0.6
-                                                }
                                             }
                                             MouseArea {
                                                 anchors.fill: parent
