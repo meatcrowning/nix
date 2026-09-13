@@ -1129,17 +1129,15 @@ i want it to be able to control all types of media playback"*].
 
 ## Gemma 4, and per-family sampler defaults
 
-Settings has a separate checkable **qwen published sampling** row, off by
-default, persisted atomically in `~/.config/oracle/sampling.json` (under
-`ORACLE_CONFIG` in harnesses). It applies the Qwen 3.6 model card's general-task
-thinking profile to Qwen 3.6 names, including GGUF imports: temperature 1.0,
+Qwen 3.6 automatically uses its model card's general-task thinking profile,
+including GGUF imports: temperature 1.0,
 top_p 0.95, top_k 20, min_p 0.0, presence_penalty 1.5, repeat_penalty 1.0
 (Ollama's name for repetition_penalty). This overrides the factual clamp and
 persona sampler on every subsequent request, including tool follow-ups,
 continuations and subagents. Other model families retain their existing
-sampling; unchecking restores the existing preset behavior. The setting does
-not switch thinking mode. `describe_self` uses the same sampler function as
-the requests. Failed persistence reports an error and restores the checkmark.
+sampling. There is no Settings toggle or persisted sampling preference; old
+`sampling.json` files are ignored. This does not switch thinking mode.
+`describe_self` uses the same sampler function as the requests.
 
 Chatter sent **no sampling options at all** until 2026-08-23 — fine for a model
 whose published Modelfile carries good ones, wrong for a raw GGUF imported from
