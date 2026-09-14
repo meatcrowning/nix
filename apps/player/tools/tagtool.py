@@ -1005,8 +1005,9 @@ def db_refresh_album_art(paths, data=None):
     possible here, the row's art is CLEARED instead: the player's own
     "stale art and nothing to replace it with" path, which re-resolves on the
     next scan. Never leave a row pointing at a cover that is no longer there."""
+    status = {"album_rows": 0, "cache_rendered": False}
     if not DB_PATH.exists() or not paths:
-        return
+        return status
     thumb = full = None
     if data:
         thumb, full = _art_cache_write(data)
@@ -1028,8 +1029,10 @@ def db_refresh_album_art(paths, data=None):
                             "full_art=NULL WHERE id IN (%s)" % marks, ids)
         con.commit()
         con.close()
+        status = {"album_rows": len(ids), "cache_rendered": bool(thumb)}
     except sqlite3.Error:
         pass
+    return status
 
 
 # ---------------------------------------------------------------------------
@@ -1187,6 +1190,7 @@ def op_art(req):
                       "width": w, "height": h},
             "tracks": len(paths), "dirs": dirs}
     entries, blobs, errors, wrote = [], {}, [], 0
+    player_refresh = {"album_rows": 0, "cache_rendered": False}
     if embed:
         for p in paths:
             old, old_mime = read_art(p)
@@ -1210,7 +1214,7 @@ def op_art(req):
             entries.append({"path": p, "art_old": oh, "art_mime": old_mime})
             db_update(p, {}, has_art=True)
         if wrote:
-            db_refresh_album_art(paths, data)
+            player_refresh = db_refresh_album_art(paths, data)
     covers = []
     if folder:
         for d in dirs:
@@ -1230,6 +1234,19 @@ def op_art(req):
             covers.append(str(dest))
             entries.append({"path": str(dest), "cover_old": ph, "is_cover": True})
     plan.update({"files_embedded": wrote, "covers_written": covers})
+    if player_refresh["album_rows"] and player_refresh["cache_rendered"]:
+        plan["player_refresh"] = {
+            "state": "immediate",
+            "album_rows": player_refresh["album_rows"],
+            "message": ("The player database and rendered art cache were updated "
+                        "as part of this apply. On top the new cover is already "
+                        "reflected; do not tell the user to restart or rescan.")}
+    else:
+        plan["player_refresh"] = {
+            "state": "not_cached",
+            "album_rows": player_refresh["album_rows"],
+            "message": ("The files were updated, but no rendered player-art cache "
+                        "entry was written by this apply.")}
     if entries:
         plan["undo_token"] = manifest_write("art", entries, blobs)
     if errors:

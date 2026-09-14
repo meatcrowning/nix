@@ -39,7 +39,7 @@ o._post_chat = lambda: posts.append(True)
 ran = []
 
 
-def dispatch(name, args, idx, remaining, calls):
+def dispatch(name, args, idx, remaining, calls, attached_images=()):
     ran.append((name, args))
     result = ({"error": "no such path"} if args.get("fail")
               else {"timed_out": True} if args.get("timeout")

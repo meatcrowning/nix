@@ -2935,6 +2935,12 @@ clears when the message is sent. A message may be text, files, or both.
   never silently dropped; pick a vision model). Each image previews in the
   compose tray, then is persisted as a local `{path,w,h}` entry and drawn in the
   user's own bubble — a picture is never reduced to its filename.
+- **One attached cover is source-bound before `music_tag` runs.** A main-turn
+  `music_tag` art dry run with no explicit `art.file`, `art.url`, or
+  `art.source` receives that single image's full local path. This prevents the
+  tool's intentional auto-lookup fallback from substituting a provider
+  thumbnail for the picture he attached. Two or more images are refused until
+  the model names `art.file`; delegated agents never inherit attachments.
 - **URLs are resolved in Python** (`Ollama.localFileInfo` → `QUrl.toLocalFile`),
   never decoded in QML (§13 — `decodeURI` mangles `#`/`?` in a uri-list).
 - **Staged into the sandbox for the file tools.** Beyond inlining a text file's
