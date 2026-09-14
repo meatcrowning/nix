@@ -2846,6 +2846,14 @@ he listen to", which is a different question and the one a recommendation
 actually needs. player scrobbles every play into the same account, so `recent`
 is a live read of what it has been writing.
 
+`music_library` also owns atomic recommendations: `recommend` ranks complete
+local albums in `familiar`, `rediscover`, or `explore` mode; `play_recommendation`
+plays the top whole album; `recommend_feedback` records `more_like_this`,
+`not_now`, or `too_familiar`. `apps/player/recommend.py` is the scorer. It reads
+the player DB, gets a bounded dated Last.fm snapshot off the GUI thread, and
+writes only `~/.local/state/oracle/music-recommendations.json`; never add a
+second writer to `library.db`. Its harness is `apps/player/tools/recommend-test.py`.
+
 - **One account, one credential file** — `~/.config/lastfm/account.json`,
   owned by `pylib/lastfm.py` (read `apps/AGENTS.md` → `pylib/lastfm.py`
   first). Linked once with `apps/player/tools/lastfm-connect.py` or from

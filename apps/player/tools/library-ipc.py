@@ -40,6 +40,7 @@ import trackmatch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import infostore
 import artistalias
+import recommend as musicrecommend
 
 DB = os.path.expanduser(
     os.environ.get("PLAYER_DB", "~/.local/share/player/library.db"))
@@ -679,6 +680,28 @@ def op_queue(req):
     return _send("QUEUE", req.get("paths") or [])
 
 
+def op_recommend(req):
+    return musicrecommend.recommend(db(), str(req.get("mode") or "familiar"),
+                                    req.get("limit") or 3)
+
+
+def op_play_recommendation(req):
+    picks = op_recommend(req)
+    if "error" in picks or not picks.get("albums"):
+        return picks if "error" in picks else {"error": "no recommendation available"}
+    picked = picks["albums"][0]
+    result = _send("OPEN", picked["paths"])
+    result.update({"recommendation_id": picks["recommendation_id"],
+                   "mode": picks["mode"], "album": picked["album"],
+                   "artist": picked["artist"], "reason": picked["reason"]})
+    return result
+
+
+def op_recommend_feedback(req):
+    return musicrecommend.feedback(str(req.get("recommendation_id") or ""),
+                                   str(req.get("feedback") or ""))
+
+
 def op_selection(req, verb, kind):
     result = _send(verb, selection_rows(req, kind))
     result["selection"] = kind
@@ -697,6 +720,8 @@ def op_queue_decade(req): return op_selection(req, "QUEUE", "decade")
 
 OPS = {"search": op_search, "albums": op_albums, "album_tracks": op_album_tracks,
        "info": op_info, "stats": op_stats, "play": op_play, "queue": op_queue,
+       "recommend": op_recommend, "play_recommendation": op_play_recommendation,
+       "recommend_feedback": op_recommend_feedback,
        "play_album": op_play_album, "queue_album": op_queue_album,
        "play_artist": op_play_artist, "queue_artist": op_queue_artist,
        "play_year": op_play_year, "queue_year": op_queue_year,
