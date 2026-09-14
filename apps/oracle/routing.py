@@ -30,6 +30,9 @@ def request_tools(prompt, generated_tool=""):
         out.update(("search_images", "fetch_image"))
     if re.search(r"\b(screenshot|screen shot|look at (my|the) screen)\b", text):
         out.add("screenshot")
+    if re.search(r"\b(open|launch|start|close|focus|move|resize|position)\b.{0,35}"
+                 r"\b(app|application|program|window|player|browser|editor|terminal)\b", text):
+        out.add("desktop_control")
 
     if re.search(r"\b(music|audio) library\b|\b(library|collection) stats\b|"
                  r"\b(what|which).{0,30}\b(albums?|artists?|tracks?|comps?)\b",
