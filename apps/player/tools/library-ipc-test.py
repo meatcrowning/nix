@@ -42,7 +42,7 @@ def check(name, cond, extra=""):
 con = sqlite3.connect(DB)
 con.execute("""CREATE TABLE tracks (id INTEGER PRIMARY KEY, path TEXT,
     title TEXT, artist TEXT, album TEXT, album_artist TEXT, track INT, disc INT,
-    year INT, genre TEXT, duration REAL, rating INT, favorite INT,
+    year INT, orig_year INT, genre TEXT, duration REAL, rating INT, favorite INT,
     play_count INT, added_at INT, last_played INT, has_art INT DEFAULT 0,
     album_id INT)""")
 # player's own albums table (main.py's CREATE TABLE), because `art` reads the
@@ -84,8 +84,8 @@ for i, (title, artist, album, album_artist, tno, year, rating, fav, plays,
     f = TMP / ("%s %s.flac" % ("%02d" % tno if tno else "xx", title))
     f.write_bytes(b"not really audio")
     FILES.append(str(f))
-    con.execute("INSERT INTO tracks VALUES (?,?,?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,?)",
-                (i, str(f), title, artist, album, album_artist, tno, year, "electronic",
+    con.execute("INSERT INTO tracks (id,path,title,artist,album,album_artist,track,disc,year,orig_year,genre,duration,rating,favorite,play_count,added_at,last_played,has_art,album_id) VALUES (?,?,?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?)",
+                (i, str(f), title, artist, album, album_artist, tno, year, None, "electronic",
                  300.0, rating, fav, plays, 1000 + i, 2000 + i, art, album_id))
 for album_id, album, album_artist, art_src in [
         (10, "Music Has the Right to Children", "Boards of Canada",
@@ -260,6 +260,23 @@ check("...and answers with what is playing now",
 r = call({"op": "queue", "paths": FILES[2:]})
 check("queue sends QUEUE", heard[-1].startswith("QUEUE "),
       heard[-1][:80])
+r = call({"op": "play_album", "artist": "boards of canada",
+          "album": "music has the right to children"})
+check("play_album resolves every album track before one OPEN",
+      r.get("sent") == 2 and r.get("selection") == "album"
+      and len(heard[-1].split()) == 3, json.dumps(r)[:160])
+r = call({"op": "queue_artist", "artist": "boards of canada"})
+check("queue_artist sends a complete discography", r.get("sent") == 2
+      and r.get("selection") == "artist" and heard[-1].startswith("QUEUE "),
+      json.dumps(r)[:160])
+r = call({"op": "play_year", "year": 1998})
+check("play_year resolves every track from its year", r.get("sent") == 2
+      and r.get("selection") == "year", json.dumps(r)[:160])
+r = call({"op": "queue_decade", "decade": 1990})
+check("queue_decade resolves the whole decade", r.get("sent") == 3
+      and r.get("selection") == "decade", json.dumps(r)[:160])
+r = call({"op": "play_decade", "decade": 1993})
+check("a malformed decade is refused", "error" in r, json.dumps(r)[:160])
 r = call({"op": "play", "paths": [str(TMP / "not-here.flac")]})
 check("a path that is not there is refused before the socket",
       "error" in r and "no such file" in r["error"], json.dumps(r)[:160])

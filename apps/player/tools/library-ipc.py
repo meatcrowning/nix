@@ -13,8 +13,10 @@ one JSON result object on stdout, an error is `{"error": …}` with exit 0.
 
     {"op": "search", "q": "boards of canada", "limit": 20}
     {"op": "albums", "artist": "aphex"}
-    {"op": "play",  "paths": ["/run/media/lam/SSD/aud/…/01 x.flac"]}
-    {"op": "queue", "paths": [...]}
+    {"op": "play_album", "artist": "boards of canada", "album": "music…"}
+    {"op": "play_artist", "artist": "boards of canada"}
+    {"op": "play_year", "year": 1998}
+    {"op": "play_decade", "decade": 1990}
     {"op": "stats"}
 
 READ-ONLY on the database, always: the library is written by player (and by
@@ -373,6 +375,61 @@ def op_album_tracks(req):
             "tracks": tracks}
 
 
+def selection_rows(req, kind):
+    """Resolve one human-sized playback intent into every matching file.
+
+    The agent must never be the lossy middleman between an album query and the
+    queue command: a 12-track record is one operation, not 12 paths it may
+    truncate or confuse with a search page.  These reads retain the player's
+    ordering, then the socket receives the exact resulting list atomically.
+    """
+    where, args, order = [], [], "disc, track, path"
+    if kind == "album":
+        album = str(req.get("album") or "").strip()
+        if not trackmatch.fold(album):
+            fail("play_album needs an album")
+        where.append("matchfold(album) LIKE ? ESCAPE '\\'")
+        args.append(like_text(album))
+        artist = str(req.get("artist") or "").strip()
+        if trackmatch.fold(artist):
+            where.append("(" + text_clause(("album_artist", "artist")) + ")")
+            args += [like_text(artist)] * 2
+    elif kind == "artist":
+        artist = str(req.get("artist") or "").strip()
+        if not trackmatch.fold(artist):
+            fail("play_artist needs an artist")
+        clause = text_clause(("artist", "album_artist"))
+        args += [like_text(artist)] * 2
+        alias_sql, alias_args = artist_or(alias_others(artist))
+        if alias_sql:
+            clause += " OR " + alias_sql
+            args += alias_args
+        where.append("(" + clause + ")")
+        order = "COALESCE(orig_year, year, 9999), album COLLATE NOCASE, disc, track, path"
+    elif kind in ("year", "decade"):
+        try:
+            start = int(req.get(kind) or 0)
+        except (TypeError, ValueError):
+            start = 0
+        if kind == "year" and not (1000 <= start <= 2999):
+            fail("play_year needs a four-digit year")
+        if kind == "decade" and (not (1000 <= start <= 2990) or start % 10):
+            fail("play_decade needs a decade ending in 0")
+        end = start + (1 if kind == "year" else 10)
+        where.append("COALESCE(orig_year, year) >= ? AND COALESCE(orig_year, year) < ?")
+        args += [start, end]
+        order = "COALESCE(orig_year, year), album_artist COLLATE NOCASE, album COLLATE NOCASE, disc, track, path"
+    else:
+        fail("unknown playback selection: " + kind)
+    con = db()
+    rows = con.execute("SELECT path FROM tracks WHERE " + " AND ".join(where)
+                       + " ORDER BY " + order, args).fetchall()
+    paths = [r["path"] for r in rows if r["path"]]
+    if not paths:
+        fail("no tracks match that " + kind)
+    return paths
+
+
 def op_stats(_req):
     con = db()
     row = con.execute(
@@ -622,9 +679,28 @@ def op_queue(req):
     return _send("QUEUE", req.get("paths") or [])
 
 
+def op_selection(req, verb, kind):
+    result = _send(verb, selection_rows(req, kind))
+    result["selection"] = kind
+    return result
+
+
+def op_play_album(req): return op_selection(req, "OPEN", "album")
+def op_queue_album(req): return op_selection(req, "QUEUE", "album")
+def op_play_artist(req): return op_selection(req, "OPEN", "artist")
+def op_queue_artist(req): return op_selection(req, "QUEUE", "artist")
+def op_play_year(req): return op_selection(req, "OPEN", "year")
+def op_queue_year(req): return op_selection(req, "QUEUE", "year")
+def op_play_decade(req): return op_selection(req, "OPEN", "decade")
+def op_queue_decade(req): return op_selection(req, "QUEUE", "decade")
+
+
 OPS = {"search": op_search, "albums": op_albums, "album_tracks": op_album_tracks,
-       "info": op_info,
-       "stats": op_stats, "play": op_play, "queue": op_queue}
+       "info": op_info, "stats": op_stats, "play": op_play, "queue": op_queue,
+       "play_album": op_play_album, "queue_album": op_queue_album,
+       "play_artist": op_play_artist, "queue_artist": op_queue_artist,
+       "play_year": op_play_year, "queue_year": op_queue_year,
+       "play_decade": op_play_decade, "queue_decade": op_queue_decade}
 
 
 def main():
