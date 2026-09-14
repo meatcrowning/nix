@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """How a reply's LINES and PARAGRAPHS come out, and where sending leaves the view.
 
-Three things, all measured off the laid-out document rather than the source:
+Four things, all measured off the laid-out document rather than the source:
 
 1. A single newline is a LINE BREAK inside the paragraph — Qt's markdown reader
    joins it into the line above, so a reply written as short lines came back as
@@ -10,6 +10,9 @@ Three things, all measured off the laid-out document rather than the source:
    one above it (`MdFormat.PARA_TOP`) — the gap that says "new paragraph" where
    Qt's own 6px read no stronger than a wrapped line. Bullets stay tight.
 3. Sending scrolls him to the BOTTOM, wherever he was reading.
+4. Paragraph spacing is installed WHILE a reply streams. The formatter is
+   coalesced rather than trailing-edge debounced, so the bubble does not jump
+   taller only after the final token arrives.
 
 Offscreen, in-process, against a stub ollama on 127.0.0.1 — his daemon is never
 touched and nothing reaches his screen.
@@ -90,7 +93,7 @@ def check(name, cond, extra=""):
 
 
 def spin(ms=600):
-    """Real time, not just events: the document pass is debounced 60ms."""
+    """Give QML timers and document layout real wall-clock turns."""
     end = time.monotonic() + ms / 1000.0
     while time.monotonic() < end:
         app.processEvents()
@@ -161,7 +164,29 @@ if md:
     check("what gets copied is the model's text, verbatim",
           body.property("source") == BODY, repr(body.property("source"))[:80])
 
-# ---- 3. sending scrolls him to the bottom ---------------------------------
+# ---- 3. streaming paragraph spacing ---------------------------------------
+# Keep deltas arriving continuously. A trailing-edge debounce never fires in
+# this interval; the coalesced pass must still install the second paragraph's
+# margin before the stream is declared finished.
+QMetaObject.invokeMethod(root, "appendReplyRow", Q_ARG("QVariant", 1))
+for piece in ("alpha", ".", "\n", "\n", "bravo", " ", "keeps", " ",
+              "streaming", ".", " more", " words", " arrive"):
+    ollama.replyChunk.emit(piece)
+    spin(20)
+stream_md = walk(win, lambda c: c.objectName() == "mdBody", [])
+check("paragraph spacing lands before the stream finishes", bool(stream_md))
+if stream_md:
+    stream_qdoc = stream_md[-1].property("textDocument")
+    stream_doc = stream_qdoc.textDocument()
+    second = stream_doc.begin().next()
+    check("the streaming second paragraph already has its gap",
+          second.isValid() and second.blockFormat().topMargin()
+          == oracle.MdFormat.PARA_TOP,
+          str(second.blockFormat().topMargin()) if second.isValid() else "missing")
+ollama.replyDone.emit()
+spin(100)
+
+# ---- 4. sending scrolls him to the bottom ---------------------------------
 # Scrolled back up through the log, a prompt goes: his own message must not
 # land off-screen below him [his, 2026-08-23].
 flick = walk(win, lambda c: c.objectName() == "replyFlick", [])

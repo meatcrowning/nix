@@ -66,10 +66,16 @@ TextEdit {
     // bubble. The TEXT is never touched, so
     // Ctrl+C below still hands over the model's own markdown.
     //
-    // DEBOUNCED, because a streaming reply rewrites the document on every
-    // delta and each rewrite brings the flag back. The call reports whether it
-    // changed anything, so re-running it on its own edit stops there rather
-    // than looping.
+    // COALESCED, because a streaming reply rewrites the document on every
+    // delta and each rewrite brings the flag back. Do not restart the clock on
+    // every token: that postponed every paragraph margin until the stream
+    // ended, then made the finished bubble jump taller all at once. Starting
+    // only while idle runs one pass on the next event-loop turn, after Qt has
+    // laid out the latest delta and before another rendered frame can expose
+    // the unformatted margins. The call reports whether it changed anything,
+    // so the one
+    // follow-up caused by its own document edit stops there rather than
+    // looping.
     // A quarter of the way from the bubble's own fill toward the border tone:
     // visible as an inset panel on a near-black wallpaper palette AND on a
     // light KDE scheme, without adding a colour to docs/DESIGN.md §3 that has
@@ -81,16 +87,20 @@ TextEdit {
     property var codeRuns: []
     Timer {
         id: codeFmt
-        interval: 60
+        interval: 0
         onTriggered: {
             if (typeof Md === "undefined" || !Md) { mdRoot.codeRuns = []; return; }
             try { mdRoot.codeRuns = JSON.parse(Md.styleCode(mdRoot.textDocument)); }
             catch (e) { mdRoot.codeRuns = []; }
         }
     }
-    onTextChanged: codeFmt.restart()
-    onWidthChanged: codeFmt.restart()
-    Component.onCompleted: codeFmt.restart()
+    function scheduleFormat() {
+        if (!codeFmt.running)
+            codeFmt.start();
+    }
+    onTextChanged: scheduleFormat()
+    onWidthChanged: scheduleFormat()
+    Component.onCompleted: scheduleFormat()
 
     // The panel itself, BEHIND the glyphs (z: -1) and the full width of the
     // item, so a two-word command reads as an embedded block rather than as a
