@@ -131,6 +131,16 @@ def main():
           all(f["tags"].get("mood") == "cold" for f in after["files"]),
           [(f["path"][-5:], sorted(f["tags"])) for f in after["files"]])
 
+    # A malformed lyrics tag must not be able to consume the caller's entire
+    # context when it asks `show` to inspect a file.
+    tagtool.run({"op": "set", "paths": [paths[0]], "apply": True,
+                 "tags": {"lyrics": "x" * (tagtool.SHOW_TAG_VALUE_MAX + 200)}})
+    shown = tagtool.run({"op": "show", "paths": [paths[0]]})["files"][0]
+    check("show bounds oversized tag values",
+          len(shown["tags"].get("lyrics", "")) == tagtool.SHOW_TAG_VALUE_MAX + 1
+          and shown.get("truncated_tags", {}).get("lyrics", 0) > tagtool.SHOW_TAG_VALUE_MAX,
+          shown.get("truncated_tags"))
+
     r = tagtool.run({"op": "set", "paths": paths, "apply": True,
                      "tags": {"genre": "IDM"}})
     check("a no-op change is not a write", r["changes_total"] == 0)

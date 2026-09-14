@@ -87,6 +87,11 @@ o = oracle.Ollama()
 seen = []
 o.playerToolDone.connect(lambda j: seen.append(json.loads(j)))
 
+check("music tool says to identify a currently playing record first",
+      "call control_media status first" in json.dumps(oracle.MUSIC_TOOL).lower())
+check("system prompt makes playback authoritative for a listening request",
+      "playback is the authoritative current identification" in o._system_prompt())
+
 
 def player(args, ms=6000):
     seen.clear()
