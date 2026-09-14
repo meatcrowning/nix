@@ -5905,13 +5905,25 @@ class Ollama(QObject):
 
     @Slot(str, result="QVariant")
     def localFileInfo(self, url):
-        """Resolve a dropped file URL to {name, path}. QUrl does the decode, in
-        Python, once — never `decodeURI` in QML, which mangles `#`/`?` in a
-        uri-list (docs/DESIGN.md §13). Returns {} for a non-local URL."""
+        """Resolve a dropped file URL and identify a displayable image.
+
+        QUrl does the decode in Python, once — never `decodeURI` in QML, which
+        mangles `#`/`?` in a uri-list (docs/DESIGN.md §13).  The dimensions are
+        carried with the attachment so both the compose preview and the saved
+        user bubble can lay the same local picture out without guessing.
+        Returns {} for a non-local URL.
+        """
         p = QUrl(url).toLocalFile()
         if not p:
             return {}
-        return {"name": os.path.basename(p) or p, "path": p}
+        info = {"name": os.path.basename(p) or p, "path": p,
+                "image": False, "w": 0, "h": 0}
+        if self._sniff_image(p):
+            probe = QImage(p)
+            if not probe.isNull():
+                info.update({"image": True, "w": probe.width(),
+                             "h": probe.height()})
+        return info
 
     @staticmethod
     def _parse_attachment_items(attachments_json):

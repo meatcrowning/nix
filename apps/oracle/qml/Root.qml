@@ -360,8 +360,8 @@ Item {
 
     // Files he dragged onto the window, attached to the NEXT message and cleared
     // once it is sent (docs/DESIGN.md §13 — dropping into a window works like a
-    // file manager). Each row is {name, path}; the paths are read locally and
-    // inlined as context by Ollama.send.
+    // file manager). Image rows retain their measured dimensions so the compose
+    // preview and the saved user bubble show the very picture being sent.
     ListModel { id: attachments }
     function addAttachmentUrl(u) {
         var info = Ollama.localFileInfo("" + u);   // QUrl decode in Python (§13)
@@ -370,7 +370,8 @@ Item {
         for (var i = 0; i < attachments.count; i++)
             if (attachments.get(i).path === info.path)
                 return;                            // already attached
-        attachments.append({ name: info.name, path: info.path });
+        attachments.append({ name: info.name, path: info.path,
+                             image: !!info.image, w: info.w || 0, h: info.h || 0 });
     }
     function removeAttachment(i) {
         if (i >= 0 && i < attachments.count) attachments.remove(i);
@@ -843,7 +844,7 @@ Item {
                          files: t.files, fileCount: t.fileCount,
                          agents: t.agents, agentCount: t.agentCount,
                          agentsBad: t.agentsBad,
-                         images: t.images, videos: t.videos,
+                         images: t.images, userImages: t.userImages || "[]", videos: t.videos,
                          choices: t.choices,
                          tools: t.tools, toolCount: t.toolCount,
                          isError: t.isError,
@@ -1106,7 +1107,8 @@ Item {
                          files: "", fileCount: 0, filesActive: false, filesPending: 0,
                          agents: "", agentCount: 0, agentsActive: false,
                          agentsPending: 0, agentHead: "", agentsBad: false,
-                         images: "[]", imagesActive: false, imagesPending: 0,
+                         images: "[]", userImages: "[]",
+                         imagesActive: false, imagesPending: 0,
                          videos: "[]", videosActive: false, videosPending: 0,
                          choices: "[]", choicesActive: false,
                          execTail: "", execRunning: false,
@@ -1135,7 +1137,8 @@ Item {
             a.push({ isUser: r.isUser, who: r.who, step: r.step, ts: r.ts,
                      body: r.body, tools: r.tools, toolCount: r.toolCount,
                      agents: r.agents, agentCount: r.agentCount,
-                     images: r.images, imagesActive: r.imagesActive,
+                     images: r.images, userImages: r.userImages || "[]",
+                     imagesActive: r.imagesActive,
                      videos: r.videos, videosActive: r.videosActive,
                      choices: r.choices, choicesActive: r.choicesActive,
                      streaming: r.streaming, isError: r.isError });
@@ -1202,7 +1205,8 @@ Item {
                              agents: t.agents || "", agentCount: t.agentCount || 0,
                              agentsActive: false, agentsPending: 0, agentHead: "",
                              agentsBad: !!t.agentsBad,
-                             images: t.images || "[]", imagesActive: false, imagesPending: 0,
+                             images: t.images || "[]", userImages: t.userImages || "[]",
+                             imagesActive: false, imagesPending: 0,
                              videos: t.videos || "[]", videosActive: false, videosPending: 0,
                              // A card whose turn is over can never be answered:
                              // it comes back LOCKED and says so (§10.2), never
@@ -1314,7 +1318,8 @@ Item {
                              filesPending: 0,
                              agents: "", agentCount: 0, agentsActive: false,
                              agentsPending: 0, agentHead: "", agentsBad: false,
-                             images: "[]", imagesActive: false, imagesPending: 0,
+                             images: "[]", userImages: "[]",
+                             imagesActive: false, imagesPending: 0,
                              videos: "[]", videosActive: false, videosPending: 0,
                              choices: "[]", choicesActive: false,
                              execTail: "", execRunning: false,
@@ -1338,16 +1343,22 @@ Item {
         // Snapshot the attachments for this turn, then clear the tray.
         var atts = [];
         var names = [];
+        var userImages = [];
         for (var a = 0; a < attachments.count; a++) {
             var at = attachments.get(a);
             atts.push({ name: at.name, path: at.path });
-            names.push(at.name);
+            if (at.image)
+                userImages.push({ ok: true, url: "", path: at.path, alt: "",
+                                  w: at.w, h: at.h });
+            else
+                names.push(at.name);
         }
         // What the model gets as the prompt (Ollama.send inlines the file text
         // after it); a files-only message still needs an instruction.
         var sendPrompt = p !== "" ? p : "Please look at the attached file(s).";
-        // What is DISPLAYED and saved: his text plus a dim note of the filenames
-        // (the file bodies are not dumped into the visible log).
+        // What is DISPLAYED and saved: pictures draw as pictures below, never
+        // collapse to a filename. Other attachments retain their compact note;
+        // file bodies are not dumped into the visible log.
         var shownBody = (p !== "" ? p : "(attached files)")
                       + (names.length > 0 ? "\n[attached: " + names.join(", ") + "]" : "");
         // The prior turns of THIS chat, so the model sees the whole conversation
@@ -1375,7 +1386,8 @@ Item {
                          files: "", fileCount: 0, filesActive: false, filesPending: 0,
                          agents: "", agentCount: 0, agentsActive: false,
                          agentsPending: 0, agentHead: "", agentsBad: false,
-                         images: "[]", imagesActive: false, imagesPending: 0,
+                         images: "[]", userImages: JSON.stringify(userImages),
+                         imagesActive: false, imagesPending: 0,
                          videos: "[]", videosActive: false, videosPending: 0,
                          choices: "[]", choicesActive: false,
                          execTail: "", execRunning: false,
@@ -2824,6 +2836,13 @@ Item {
                                     out.push(leftoverImages[i]);
                             return out;
                         })()
+                        // A user attachment is not reply media: it is the exact
+                        // local picture he sent. Keep it on the user row so a
+                        // reloaded session still shows what the model saw.
+                        readonly property var userImageEntries: (function () {
+                            try { return JSON.parse(userImages || "[]"); }
+                            catch (e) { return []; }
+                        })()
                         // The widest laid-out line across the reply's TEXT runs,
                         // for the bubble's hug. Images and failures contribute
                         // nothing (a hidden run reports 0), so this is the old
@@ -2908,8 +2927,9 @@ Item {
                         // the bubble's `visible` below, where reading a child's
                         // `visible` instead latched a picture off for good.
                         readonly property bool hasMedia:
-                            !isUser && (images !== "[]" || imagesActive
-                                        || videos !== "[]" || videosActive)
+                            isUser ? userImageEntries.length > 0
+                                   : (images !== "[]" || imagesActive
+                                      || videos !== "[]" || videosActive)
                         // A DECISION CARD is content too, and a round can carry
                         // one with no words at all — the same latch the picture
                         // fell into (see the bubble's `visible` below), so it is
@@ -3926,6 +3946,22 @@ Item {
                                             }
                                         }
 
+                                        // Pictures he attached belong in HIS
+                                        // bubble, directly under the words that
+                                        // accompanied them. This is the same
+                                        // gallery/frame used for reply media, so
+                                        // alpha, sizing, lightbox and file menu
+                                        // behavior do not drift by speaker.
+                                        ImageGallery {
+                                            id: userImageGallery
+                                            objectName: "userImageGallery"
+                                            width: parent.width
+                                            visible: isUser && turn.userImageEntries.length > 0
+                                            entries: turn.userImageEntries
+                                            onEnlarge: (i) => win.openPicture(turn.userImageEntries[i])
+                                            onContextRequested: (p, x, y) => win.openMediaMenu(p, x, y, false)
+                                        }
+
                                     }
                                 }
 
@@ -3995,6 +4031,8 @@ Item {
     // when the tray is empty.
     Flow {
         id: attachBar
+        objectName: "attachBar"
+        readonly property int attachmentCount: attachments.count
         anchors { left: parent.left; right: parent.right; bottom: promptBox.top
                   leftMargin: 10; rightMargin: 10
                   bottomMargin: attachments.count > 0 ? 6 : 0 }
@@ -4003,11 +4041,51 @@ Item {
 
         Repeater {
             model: attachments
-            // One chip per attached file, with its own [x] — and the KStyle's
-            // own button under Plasma (`+plasma/Chip.qml`).
-            delegate: Chip {
-                label: model.name
-                onRemoved: win.removeAttachment(index)
+            // Images preview as pixels, not merely as names. Other files keep
+            // the existing removable chip.
+            delegate: Item {
+                width: model.image ? 96 : fileChip.width
+                height: model.image ? 72 : fileChip.height
+
+                Chip {
+                    id: fileChip
+                    visible: !model.image
+                    label: model.name
+                    onRemoved: win.removeAttachment(index)
+                }
+
+                Rectangle {
+                    id: imagePreview
+                    objectName: "attachmentPreview"
+                    anchors.fill: parent
+                    visible: model.image
+                    color: "transparent"
+                    radius: Theme.rounding
+                    border.width: Theme.ctrlBorder
+                    border.color: Theme.border
+
+                    Image {
+                        anchors { fill: parent; margins: 1 }
+                        source: "file://" + model.path
+                        sourceSize.width: width
+                        sourceSize.height: height
+                        fillMode: Image.PreserveAspectFit
+                        asynchronous: true
+                    }
+                    Rectangle {
+                        anchors { right: parent.right; top: parent.top; margins: 2 }
+                        width: 14; height: 14
+                        color: Theme.bgAlt
+                        border.width: Theme.ctrlBorder
+                        border.color: Theme.border
+                        PixelText { anchors.centerIn: parent; text: "x"; color: Theme.text }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: win.removeAttachment(index)
+                        }
+                    }
+                }
             }
         }
     }
