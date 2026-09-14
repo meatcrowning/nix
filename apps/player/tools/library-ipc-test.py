@@ -27,6 +27,8 @@ RUN = TMP / "run"
 RUN.mkdir()
 os.environ["PLAYER_DB"] = str(DB)
 os.environ["XDG_RUNTIME_DIR"] = str(RUN)
+os.environ["LASTFM_CONFIG"] = str(TMP / "no-lastfm.json")
+os.environ["MUSIC_RECOMMEND_STATE"] = str(TMP / "recommendations.json")
 SOCK = RUN / "player-queue.sock"
 
 FAILS = []
@@ -277,6 +279,17 @@ check("queue_decade resolves the whole decade", r.get("sent") == 3
       and r.get("selection") == "decade", json.dumps(r)[:160])
 r = call({"op": "play_decade", "decade": 1993})
 check("a malformed decade is refused", "error" in r, json.dumps(r)[:160])
+r = call({"op": "recommend", "mode": "rediscover", "limit": 2})
+check("recommend stays local when Last.fm is unavailable", r.get("history") == "local"
+      and r.get("albums") and r.get("recommendation_id"), json.dumps(r)[:200])
+rid = r.get("recommendation_id")
+r = call({"op": "recommend_feedback", "recommendation_id": rid,
+          "feedback": "not_now"})
+check("recommendation feedback is persisted outside the library DB", r.get("ok")
+      and r.get("feedback") == "not_now", json.dumps(r)[:160])
+r = call({"op": "play_recommendation", "mode": "explore"})
+check("play_recommendation resolves then sends one complete album", r.get("sent")
+      and r.get("album") and r.get("reason"), json.dumps(r)[:200])
 r = call({"op": "play", "paths": [str(TMP / "not-here.flac")]})
 check("a path that is not there is refused before the socket",
       "error" in r and "no such file" in r["error"], json.dumps(r)[:160])

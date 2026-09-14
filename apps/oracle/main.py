@@ -772,13 +772,18 @@ MUSIC_TOOL = {
             "than listing a directory: most records here keep their cover "
             "INSIDE the files, so a folder with no cover.jpg is the normal "
             "case and proves nothing. `stats` counts the albums with no cover "
-            "at all. "
+            "at all. `recommend` ranks whole local albums in familiar, "
+            "rediscover or explore mode from ratings, favourites, dated Last.fm "
+            "history, related artists, and saved feedback; `play_recommendation` "
+            "starts its best complete album. When he reacts, send "
+            "`recommend_feedback` with the returned id. "
             "Read-only: it never changes a rating, a tag or a play count."),
         "parameters": {"type": "object", "properties": {
             "action": {"type": "string",
                        "enum": ["search", "albums", "album_tracks", "info", "stats",
                                 "play_album", "queue_album", "play_artist", "queue_artist",
-                                "play_year", "queue_year", "play_decade", "queue_decade"],
+                                "play_year", "queue_year", "play_decade", "queue_decade",
+                                "recommend", "play_recommendation", "recommend_feedback"],
                        "description": "What to ask for. Default `search`."},
             "query": {"type": "string",
                       "description": "Free text: part of a title, artist or album."},
@@ -793,6 +798,12 @@ MUSIC_TOOL = {
                      "description": "Four-digit year for play_year or queue_year."},
             "decade": {"type": "integer",
                        "description": "Decade beginning, e.g. 1990, for play_decade or queue_decade."},
+            "mode": {"type": "string", "enum": ["familiar", "rediscover", "explore"],
+                     "description": "Recommendation mode; familiar is the default."},
+            "recommendation_id": {"type": "string",
+                                  "description": "The id returned by recommend, required for feedback."},
+            "feedback": {"type": "string", "enum": ["more_like_this", "not_now", "too_familiar"],
+                         "description": "Feedback on the returned recommendation."},
             "favorites_only": {"type": "boolean",
                                "description": "Only tracks he has hearted."},
             "min_rating": {"type": "integer",
@@ -9804,6 +9815,9 @@ class Ollama(QObject):
                "min_rating": a.get("min_rating") or 0,
                "year": a.get("year") or 0,
                "decade": a.get("decade") or 0,
+               "mode": str(a.get("mode") or ""),
+               "recommendation_id": str(a.get("recommendation_id") or ""),
+               "feedback": str(a.get("feedback") or ""),
                "limit": a.get("limit") or 0,
                "offset": a.get("offset") or 0}
         head = a.get("query") or a.get("album") or a.get("artist") or action

@@ -27,6 +27,7 @@ SMB setup and recovery live in `docs/agents/air-library-share.md`.
 | Artist facts and biography | `artistinfo.py`; `albuminfo.py` owns its stage and cache |
 | Album write-up parsing | `albumprose.py` (Last.fm and linked Bandcamp album pages) |
 | Last.fm integration | `scrobble.py`, shared `pylib/lastfm.py` |
+| Chatter recommendations | `recommend.py`; reads the library, bounded Last.fm history and Oracle feedback state |
 | Acquisition, repair, migration tools | `tools/`; private maintenance runbook |
 
 Library metadata is in `$XDG_DATA_HOME/player/library.db`, artwork in
