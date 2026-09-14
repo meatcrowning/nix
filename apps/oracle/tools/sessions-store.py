@@ -18,6 +18,8 @@ PROTOCOL: one JSON request object on stdin, one JSON result object on stdout.
     -> {"sessions": [{"id","title","updated","turns"}, ...]}   (newest first)
     {"op": "load", "id": "sess-…"}
     -> {"id","title","created","updated","turns": [...]}
+    {"op": "search", "query": "words", "limit": 8, "exclude_id": "sess-…"}
+    -> {"query", "matches": [{"id","title","updated","turn","who","excerpt"}]}
     {"op": "save", "id": "sess-…", "title": "…", "turns": [...]}
     -> {"ok": true, "id": "…", "title": "…", "updated": <epoch>}
     {"op": "delete", "id": "sess-…"}
@@ -38,6 +40,8 @@ import time
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 TITLE_MAX = 200          # a title is a one-line label; clip an absurd one
 TURNS_MAX = 5000         # refuse a runaway transcript outright
+SEARCH_LIMIT_MAX = 20
+SEARCH_EXCERPT = 360
 
 
 def fail(reason):
@@ -97,6 +101,69 @@ def op_load(root, req):
     }
 
 
+def op_search(root, req):
+    """Bounded lexical retrieval over the authoritative transcript text.
+
+    Exact phrases rank above token hits. Results are verbatim excerpts with
+    enough identity to open the full session; no generated summary becomes a
+    second, lossy history.
+    """
+    query = " ".join(str(req.get("query") or "").split())
+    if not query:
+        fail("search needs a query")
+    try:
+        limit = max(1, min(int(req.get("limit") or 8), SEARCH_LIMIT_MAX))
+    except (TypeError, ValueError):
+        limit = 8
+    phrase = query.casefold()
+    terms = list(dict.fromkeys(re.findall(r"[\w'-]+", phrase)))
+    exclude = str(req.get("exclude_id") or "")
+    matches = []
+    try:
+        names = os.listdir(root)
+    except OSError:
+        names = []
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        try:
+            obj = json.loads(open(os.path.join(root, name), encoding="utf-8").read())
+        except (OSError, ValueError):
+            continue
+        if not isinstance(obj, dict) or obj.get("id", name[:-5]) == exclude:
+            continue
+        sid = obj.get("id", name[:-5])
+        title = obj.get("title", "") or sid
+        for turn_i, turn in enumerate(obj.get("turns") or []):
+            if not isinstance(turn, dict):
+                continue
+            body = str(turn.get("body") or turn.get("content") or "")
+            low = body.casefold()
+            hits = sum(low.count(t) for t in terms)
+            if not hits:
+                continue
+            pos = low.find(phrase)
+            score = hits + (100 if pos >= 0 else 0)
+            if pos < 0:
+                pos = min((low.find(t) for t in terms if t in low), default=0)
+            start = max(0, pos - SEARCH_EXCERPT // 3)
+            end = min(len(body), start + SEARCH_EXCERPT)
+            excerpt = body[start:end]
+            if start:
+                excerpt = "…" + excerpt
+            if end < len(body):
+                excerpt += "…"
+            matches.append({"id": sid, "title": title,
+                            "updated": obj.get("updated", 0), "turn": turn_i,
+                            "who": turn.get("who") or
+                                   ("you" if turn.get("isUser") else "assistant"),
+                            "excerpt": excerpt, "_score": score})
+    matches.sort(key=lambda m: (m["_score"], m.get("updated", 0)), reverse=True)
+    for match in matches[:limit]:
+        match.pop("_score", None)
+    return {"query": query, "matches": matches[:limit]}
+
+
 def op_save(root, req):
     sid = req.get("id", "")
     p = path_for(root, sid)
@@ -151,6 +218,7 @@ def main():
     op = req.get("op", "")
     handler = {"list": lambda: op_list(root),
                "load": lambda: op_load(root, req),
+               "search": lambda: op_search(root, req),
                "save": lambda: op_save(root, req),
                "delete": lambda: op_delete(root, req)}.get(op)
     if handler is None:

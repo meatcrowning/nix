@@ -119,6 +119,12 @@ chat = turn()
 system = "\n".join(m.get("content", "") for m in chat["messages"]
                    if m.get("role") == "system")
 
+o._prompt_choice = "custom"
+o._custom_prompt = "CUSTOM OVERRIDE SENTINEL"
+ordered = o._system_prompt("")
+check("stable working defaults lead the user's custom prompt",
+      ordered.index(oracle.WORKING_DEFAULTS) < ordered.index("CUSTOM OVERRIDE SENTINEL"))
+
 # ---- the contract is on the wire ----------------------------------------
 check("the anti-confabulation block rides the system prompt",
       "DO NOT INVENT FACTS" in system)

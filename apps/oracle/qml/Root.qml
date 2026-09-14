@@ -1397,7 +1397,8 @@ Item {
         win.appendReplyRow(1);
         win.autoContinues = 0;             // a new prompt re-arms the auto-press
         Ollama.rememberModel(win.model);   // the model he last used is next launch's default
-        Ollama.send(win.model, sendPrompt, JSON.stringify(history), JSON.stringify(atts));
+        Ollama.send(win.model, sendPrompt, JSON.stringify(history),
+                    JSON.stringify(atts), win.ensureSessionId());
         promptBox.clear();
         win.clearAttachments();
         // Sending puts him back at the BOTTOM [his, 2026-08-23]. Reading back

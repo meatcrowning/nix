@@ -44,7 +44,7 @@ def request_tools(prompt, generated_tool=""):
     if re.search(r"\b(earlier|previous|past|old)\b.{0,30}"
                  r"\b(chat|conversation|session)\b|"
                  r"\b(what|do) (i|you) (said|tell|remember)\b", text):
-        out.update(("list_sessions", "read_session"))
+        out.update(("search_sessions", "read_session"))
     if re.search(r"\b(list|show|pull|download|remove|delete|manage|inspect)\b"
                  r".{0,25}\b(models?|ollama)\b|\bunload (the )?model\b", text):
         out.add("manage_models")

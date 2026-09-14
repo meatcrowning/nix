@@ -171,6 +171,38 @@ res = json.loads(sink["sink"][0]["content"])
 check("job_log reads the output", "hello" in res["jobs"][0]["tail"],
       json.dumps(res)[:120])
 
+# A completion belongs to the session that started it, survives in the job
+# directory, and is delivered once. Desktop notification is separately opt-in.
+origin = jobs.start("echo carried", label="session job", session="sess-test")
+pump(lambda: jobs.status(origin["id"])["jobs"][0]["state"] == "done", 15000)
+jobs.refresh()
+pump(lambda: any(r["id"] == origin["id"] and r["state"] == "done"
+                 for r in jobs.rows), 8000)
+pending = jobs.pending_completions("sess-test")
+check("a finished job is delivered to its originating session once",
+      len(pending) == 1 and pending[0]["id"] == origin["id"], json.dumps(pending))
+check("the same completion is acknowledged durably",
+      jobs.pending_completions("sess-test") == [])
+quiet = jobs.status(origin["id"])["jobs"][0]
+check("desktop completion notification defaults off",
+      quiet["notify_on_completion"] is False, json.dumps(quiet))
+prompted = jobs.start("true", label="prompt event", session="sess-prompt")
+pump(lambda: jobs.status(prompted["id"])["jobs"][0]["state"] == "done", 15000)
+jobs.refresh()
+pump(lambda: any(r["id"] == prompted["id"] and r["state"] == "done"
+                 for r in jobs.rows), 8000)
+ol._current_session_id = "sess-prompt"
+system = ol._system_prompt("")
+check("the next originating-session turn receives the passive completion",
+      "prompt event · done" in system and prompted["id"] in system, system[-300:])
+check("the completion does not repeat on another turn",
+      "prompt event · done" not in ol._system_prompt(""))
+asked = jobs.start("true", label="notify job", session="sess-test",
+                   notify_on_completion=True)
+check("notification intent is persisted with the job",
+      jobs.status(asked["id"])["jobs"][0]["notify_on_completion"] is True)
+pump(lambda: jobs.status(asked["id"])["jobs"][0]["state"] == "done", 15000)
+
 check("run_job is offered on EVERY turn", "run_job" in oracle.CORE_TOOL_NAMES)
 note = oracle.tools_note()
 check("and the other three are in the index",

@@ -26,7 +26,7 @@ has("show me a photo of an arctic fox", "search_images", "fetch_image")
 has("what albums are in my music library?", "music_library")
 has("pause the music player", "control_media")
 has("what did I tell you in our previous conversation?",
-    "list_sessions", "read_session")
+    "search_sessions", "read_session")
 has("pull a new ollama model", "manage_models")
 has("run this fingerprint pass in the background",
     "run_job", "job_status", "job_log", "job_stop")

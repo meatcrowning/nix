@@ -422,7 +422,8 @@ fake `nvidia-smi` — it never reads the real journal or loads a model.
 
 ## The base prompt
 
-A selectable **base system prompt** leads every turn's system message: a handful
+A selectable **base system prompt** follows chatter's short stable working
+defaults in every turn's system message: a handful
 of built-in **presets** (`default` — no persona, the historical behaviour —
 plus `concise`, `coder`, `tutor`, `writer`, `casual`) and **your own custom
 text**, picked from the *prompt* row (a boxed selector, docs/DESIGN.md §7.2, like
@@ -435,8 +436,9 @@ be read before it is chosen, not picked blind from a label.
   `custom` is offered in the QML dropdown alongside them. `_base_prompt()`
   resolves the active base (the custom text when `custom` is chosen, else the
   preset's text, else empty).
-- **It only swaps the LEADING block.** `_system_prompt` prepends the resolved
-  base ahead of the time line, the injected memory block, and the recall/save
+- **It only swaps the USER-CONTROLLED block.** `_system_prompt` puts stable
+  working defaults first, then the resolved base ahead of the time line, the
+  injected memory block, and the recall/save
   guidance — **all of which run regardless of which base is active**. A preset
   changes the model's persona; it never turns off memory recall.
 - **Persisted** like `last-model`, no rebuild: `~/.config/oracle/system-prompt.json`,
@@ -484,6 +486,11 @@ Ordinary chat saves their ~1.9k schema tokens.
   used correctly. That self-attach lives in `_run_tool_calls`, NOT in
   `_dispatch_tool`, because subagents share the dispatcher and their tool sets
   are their own.
+- **Every tool failure has one recovery envelope.** `_tool_done` normalizes
+  backend errors to `ok: false`, a stable `kind`, `retryable`, and bounded
+  `suggested_next` actions before either the main model or a subagent sees the
+  result. The original error stays verbatim. Hints inform the next reasoning
+  round; they never execute a retry or widen authority themselves.
 - **`describe_self` reports both**: `tools_available` is everything reachable
   (the registry), `tools_attached_now` is what this message carries. Neither is
   a remembered list; both are read off the same objects the payload is built
@@ -921,12 +928,14 @@ naming modal.
   "for now"), kept where oracle's compute is — on `top`, reached from `book`
   over the tunnel's ssh master exactly like the file-tool sandbox.
 - **The model can read past sessions too**, not just this one — a small
-  **read-only** tool pair (`SESSION_TOOLS` in `main.py`, offered on every turn
+  **read-only** tool set (`SESSION_TOOLS` in `main.py`, offered on every turn
   alongside the file/web/time tools): `list_sessions` (id, title, updated,
-  turn count) and `read_session` (full transcript by id, see
+  turn count), `search_sessions` (bounded, ranked verbatim excerpts with
+  session/turn provenance, excluding the current chat), and `read_session`
+  (full transcript by id, see
   `SESSION_TOOL_NAMES`, dispatched in `_run_tool_calls` via
   `_run_session_tool`). It shells out to `tools/sessions-store.py` exactly
-  like `Sessions` does — `list`/`load` ops only — over the same host branch
+  like `Sessions` does — `list`/`search`/`load` ops only — over the same host branch
   (`Ollama._sessions_argv`, local on `top`, ssh from `book`, since `Ollama`
   and `Sessions` are separate QObjects with no cross-ref). No `save`/`delete`
   is ever exposed to the model, and `sessions-store.py`'s own id validation
@@ -1271,10 +1280,13 @@ so `stop` can take the whole process group down rather than a shell.
   `job_stop` in the index, which attach themselves the moment one is called.
   All four go through the same `Jobs` object the tray draws from, so what the
   model is told and what he sees are one read of one directory (§10).
-- **`Jobs.notify`** raises a desktop notification when a job ends while chatter
-  is not the active window — a job runs for an hour, and the row going still is
-  only visible to someone watching it. `--` before the positionals: notify-send
-  parses a summary starting with `-` as an option.
+- **Completion has two channels.** Every job records the session that started
+  it. Its terminal state is injected once into that session's next model turn,
+  across a chatter relaunch, with an instruction to inspect `job_log` before
+  claiming an outcome. `Jobs.notify` raises a desktop notification only when
+  `run_job.notify_on_completion` was explicitly requested and chatter is not
+  active; ordinary jobs finish quietly in the tray. `--` before the positionals:
+  notify-send parses a summary starting with `-` as an option.
 
 **The tray** (`qml/JobsTray.qml` + `qml/JobRow.qml`, both with `+plasma`
 twins) sits ABOVE the conversation, under the stat line [his, 2026-08-23:
