@@ -149,8 +149,14 @@ QMetaObject.invokeMethod(
 )
 settle()
 vis, h = visible_of("ImageGallery")
-check("an attached image stays in the user's bubble", vis and h > 100,
+check("an attached image stays thumbnail-sized in the user's bubble",
+      vis and h > 50 and h < 120,
       "visible=%s height=%s" % (vis, h))
+
+# Clear the user fixture before exercising the assistant-media arrival latch.
+QMetaObject.invokeMethod(content, "loadTurns", Q_ARG("QVariant", "empty"),
+                         Q_ARG("QVariant", "Empty"), Q_ARG("QVariant", "[]"))
+settle()
 
 # 1. a picture arriving on a row with NO text — the live order, the regression
 QMetaObject.invokeMethod(content, "appendReplyRow", Q_ARG("QVariant", 1))

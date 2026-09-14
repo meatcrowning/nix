@@ -2917,11 +2917,11 @@ Item {
                         readonly property real bubbleMax:
                             Math.max(160, replyCol.width * 0.82)
                         readonly property real innerW: bubbleMax - 2 * pad
-                        // A row carrying a picture takes the full cap: an image
-                        // wraps to the bubble, and hugging a two-word caption
-                        // would fold it into a column two words wide. The
-                        // disclosures no longer count — they sit OUTSIDE the
-                        // bubble now [his, 2026-08-22].
+                        // Assistant media needs the full cap to stay readable.
+                        // His own attachments are compact thumbnails instead:
+                        // they sit beside a short prompt without turning his
+                        // bubble into a wide media card. The disclosures no
+                        // longer count — they sit OUTSIDE the bubble now.
                         // MEDIA IS A PROPERTY OF THE ROW, not of an item's
                         // visibility. Read it off the model roles only — see
                         // the bubble's `visible` below, where reading a child's
@@ -2938,7 +2938,7 @@ Item {
                         // choosing between and they must not wrap to ribbons.
                         readonly property bool hasCard:
                             !isUser && choices !== "[]" && choices !== ""
-                        readonly property bool wide: hasMedia || hasCard
+                        readonly property bool wide: (!isUser && hasMedia) || hasCard
 
                         Column {
                             id: rowStack
@@ -3955,7 +3955,11 @@ Item {
                                         ImageGallery {
                                             id: userImageGallery
                                             objectName: "userImageGallery"
-                                            width: parent.width
+                                            // A user-uploaded picture is a
+                                            // thumbnail, not a reply's full
+                                            // media card. Click still opens it
+                                            // at full size in the Lightbox.
+                                            width: Math.min(parent.width, 128)
                                             visible: isUser && turn.userImageEntries.length > 0
                                             entries: turn.userImageEntries
                                             onEnlarge: (i) => win.openPicture(turn.userImageEntries[i])
