@@ -1959,6 +1959,31 @@ BASH_TOOL = {
 }
 BASH_TOOL_NAMES = {"run_bash"}
 
+#: GUI applications must not use the bounded code runner: its timeout kills the
+#: whole process group. This broker returns one durable handle for later actions.
+DESKTOP_CONTROL_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "desktop_control",
+        "description": (
+            "Control an application window that YOU launched through this tool. "
+            "Use this, never run_bash, to open, inspect, move, resize, focus or "
+            "close a desktop program. launch takes a desktop entry id such as "
+            "'player' and returns a handle. Later actions require that exact "
+            "handle; you cannot control windows he opened. Only say it is open "
+            "when state is window_observed. close never dismisses unsaved work."),
+        "parameters": {"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["list", "launch", "inspect", "focus", "move", "resize", "close"]},
+            "app": {"type": "string", "description": "Desktop entry id for launch, e.g. player."},
+            "handle": {"type": "string", "description": "Handle returned by launch."},
+            "geometry": {"type": "object", "description": "move: integer x,y; resize: integer width,height.", "properties": {
+                "x": {"type": "integer"}, "y": {"type": "integer"},
+                "width": {"type": "integer"}, "height": {"type": "integer"}}},
+            "wait": {"type": "number", "description": "Window-observation wait in seconds, 0-5 (default 2)."}},
+            "required": ["action"]}},
+}
+DESKTOP_CONTROL_TOOL_NAMES = {"desktop_control"}
+
 #: SKILLS — the reusable expert instructions Claude Code carries, reached here
 #: as a REAL TOOL rather than baked in as a persona (his call, 2026-08-22: the
 #: video-prompt skill used to be the `vidprompt` base prompt, which meant
@@ -2450,6 +2475,7 @@ AGENT_TOOL_GROUPS = {
     "read": ["list_dir", "read_file", "find_files", "search_text", "show_tree"],
     "write": ["write_file", "edit_file", "move_path", "delete_path", "make_dir"],
     "exec": ["run_python", "run_bash"],
+    "desktop": ["desktop_control"],
     "web": ["web_search", "fetch_url", "wikipedia", "call_api"],
     "music": ["music_library", "lastfm", "control_media"],
     "sessions": ["list_sessions", "search_sessions", "read_session"],
@@ -2475,6 +2501,7 @@ CORE_TOOL_NAMES = [
     "list_dir", "read_file", "find_files", "search_text",
     "write_file", "edit_file",
     "run_bash", "run_python",
+    "desktop_control",
     "web_search", "fetch_url",
     # WIKIPEDIA IS CORE, on purpose: the fix for a model that states facts it
     # does not have is a source it can reach without being asked to go looking
@@ -2522,13 +2549,13 @@ TOOL_COMPANIONS = {
     "booru_tags": ["make_image"],
 }
 
-#: What a subagent gets when its definition names no tools. Everything that
-#: does real work and nothing that touches the WINDOW: the image tools render
-#: into the transcript of the turn that spawned it and the memory tools write
-#: what the main agent recalls, so both stay with the main agent. `spawn_agent`
-#: is never in any set — subagents are one level deep, on purpose.
+#: What a subagent gets when its definition names no tools. Desktop control is
+#: safe to delegate because its broker rejects every window it did not launch;
+#: image tools and memory still stay with the main agent for transcript/state
+#: ownership. `spawn_agent` is never in any set — one level deep on purpose.
 AGENT_TOOLS_DEFAULT = (AGENT_TOOL_GROUPS["read"] + AGENT_TOOL_GROUPS["write"]
                        + AGENT_TOOL_GROUPS["exec"] + AGENT_TOOL_GROUPS["web"]
+                       + AGENT_TOOL_GROUPS["desktop"]
                        + ["music_library"]
                        + AGENT_TOOL_GROUPS["history"]
                        + AGENT_TOOL_GROUPS["skills"] + AGENT_TOOL_GROUPS["author"]
@@ -6892,7 +6919,8 @@ class Ollama(QObject):
                 VIDEO_TOOL, PLAYER_TOOL, LISTEN_TOOL,
                 MUSIC_TOOL, LASTFM_TOOL, MODEL_TOOL,
                 FETCH_URL_TOOL, WIKIPEDIA_TOOL,
-                CALL_API_TOOL, SATELLITE_TOOL, EXEC_TOOL, BASH_TOOL]
+                CALL_API_TOOL, SATELLITE_TOOL, EXEC_TOOL, BASH_TOOL,
+                DESKTOP_CONTROL_TOOL]
                 + list(SESSION_TOOLS) + [PROMPT_HISTORY_TOOL]
                 + list(MEMORY_TOOLS) + list(AUTHOR_TOOLS)
                 + [GET_TOOLS_TOOL, ASK_CHOICE_TOOL] + list(JOB_TOOLS)
@@ -7738,6 +7766,8 @@ class Ollama(QObject):
             self._run_fs_tool(name, args, i, remaining, calls)
         elif name in EXEC_TOOL_NAMES or name in BASH_TOOL_NAMES:
             self._run_exec_tool(name, args, i, remaining, calls)
+        elif name in DESKTOP_CONTROL_TOOL_NAMES:
+            self._run_desktop_control(args, i, remaining, calls)
         elif name in SESSION_TOOL_NAMES:
             self._run_session_tool(name, args, i, remaining, calls)
         elif name in PROMPT_HISTORY_TOOL_NAMES:
@@ -12067,6 +12097,40 @@ class Ollama(QObject):
         proc.errorOccurred.connect(lambda *_: None)  # surfaced through finished
         proc.start(self._exec_argv()[0], self._exec_argv()[1:])
         proc.write(json.dumps(req).encode("utf-8"))
+        proc.closeWriteChannel()
+
+    def _run_desktop_control(self, args, idx, remaining, calls):
+        """Ask the persistent local desktop broker for one bounded action."""
+        proc = QProcess(self)
+        self._procs.append(proc)
+        self.fileToolStarted.emit("controlling desktop")
+
+        def finished(*_):
+            if proc not in self._procs:
+                return
+            self._procs.remove(proc)
+            out = bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")
+            err = bytes(proc.readAllStandardError()).decode("utf-8", "replace")
+            rc = proc.exitCode()
+            proc.deleteLater()
+            try:
+                result = json.loads(out)
+            except ValueError:
+                result = {"ok": False, "error": (err.strip() or out.strip()
+                          or "desktop-control returned no JSON"), "exit_code": rc}
+            if not isinstance(result, dict):
+                result = {"ok": False,
+                          "error": "desktop-control returned an invalid response"}
+            remaining["sink"][idx] = {"role": "tool", "tool_name": "desktop_control",
+                                      "content": json.dumps(result)}
+            self.fileToolDone.emit("desktop_control " +
+                                   ("ok" if result.get("ok") else "failed"),
+                                   bool(result.get("ok")))
+            self._tool_done(remaining, calls)
+
+        proc.finished.connect(finished)
+        proc.start(sys.executable, [str(HERE / "tools" / "desktop-control.py")])
+        proc.write(json.dumps(args if isinstance(args, dict) else {}).encode())
         proc.closeWriteChannel()
 
     @staticmethod

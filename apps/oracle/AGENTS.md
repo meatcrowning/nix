@@ -684,6 +684,32 @@ no code change at all.
   `soulseek_acquisition` for `soulseek-acquisition`. It never fuzzy-matches any
   other typo.
 
+## Desktop control
+
+`desktop_control` is the only way a chatter agent launches or manipulates a
+GUI application. It talks to the persistent `oracle-desktop-control` user
+service, rather than `run_bash`: the shell runner is intentionally capped and
+kills its whole child process group on timeout, so it can never be used to
+launch a desktop app.
+
+- `launch` resolves an installed `.desktop` id and returns a broker-owned
+  handle. The child is in its own process session and outlives both the turn
+  and chatter itself.
+- `inspect`/`list` distinguish `window_observed`,
+  `process_running_no_window`, and `process_exited`. A model may say an app is
+  open only for the first state.
+- `focus`, `move`, `resize`, and `close` accept broker handles only; a window
+  the user opened is never adopted. Hyprland operations are measured with IPC.
+  Plasma uses a one-shot KWin scripting call and says when the compositor does
+  not provide a readback, rather than pretending its requested geometry landed.
+- `close` asks the window manager to close normally; it does not send a kill
+  signal or dismiss an application’s unsaved-work prompt.
+
+The tool is core and in the default subagent tool set because ownership is
+enforced by the broker, not by model instructions. `home/srvs/desktop-control.nix`
+starts the service on both hosts. `tools/desktop-control-test.py` is hermetic:
+it starts only a temporary `sleep` process with window probing disabled.
+
 ## Subagents (spawn_agent)
 
 `spawn_agent` (`spawn_agent_tool()`, offered every turn, dispatched
