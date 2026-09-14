@@ -23,10 +23,12 @@ Pure stdlib: it runs under top's system python3 with nothing installed, exactly
 like `sandbox-exec.py`.
 
     job-run.py start <root> --command CMD [--lang bash|python] [--cwd DIR]
-                            [--label TEXT] [--max-seconds N]
+                            [--label TEXT] [--max-seconds N] [--session ID]
+                            [--notify-on-completion]
     job-run.py list  <root> [--tail N] [--id ID]
     job-run.py stop  <root> --id ID
     job-run.py clear <root> [--id ID]      # forget a FINISHED job
+    job-run.py ack   <root> --id ID        # completion delivered to its session
     job-run.py run   <root> --id ID        # the runner itself (internal)
 """
 import argparse
@@ -118,6 +120,8 @@ def cmd_start(args):
         return 1
     spec = {"id": job_id, "label": (args.label or "").strip() or "job",
             "command": args.command, "lang": args.lang, "cwd": cwd,
+            "session": (args.session or "").strip(),
+            "notify_on_completion": bool(args.notify_on_completion),
             "max_seconds": max(1, min(int(args.max_seconds or
                                           MAX_SECONDS_DEFAULT),
                                       MAX_SECONDS_CEILING))}
@@ -242,7 +246,7 @@ def _snapshot(d, tail_n):
     lines, size = _tail(os.path.join(d, "log"), tail_n)
     started = status.get("started") or 0
     ended = status.get("ended") or 0
-    return {"id": spec.get("id") or os.path.basename(d),
+    out = {"id": spec.get("id") or os.path.basename(d),
             "label": spec.get("label") or "job",
             "command": spec.get("command") or "",
             "lang": spec.get("lang") or "bash",
@@ -254,7 +258,11 @@ def _snapshot(d, tail_n):
             "seconds": round((ended or time.time()) - started, 1)
                        if started else 0,
             "log_bytes": size,
-            "tail": lines}
+           "tail": lines}
+    out["session"] = spec.get("session") or ""
+    out["notify_on_completion"] = bool(spec.get("notify_on_completion"))
+    out["completion_delivered"] = bool(status.get("completion_delivered"))
+    return out
 
 
 def cmd_list(args):
@@ -316,10 +324,24 @@ def cmd_clear(args):
     return 0
 
 
+def cmd_ack(args):
+    root = os.path.abspath(os.path.expanduser(args.root))
+    d = os.path.join(root, args.id or "")
+    status_path = os.path.join(d, "status.json")
+    status = _read(status_path)
+    if not isinstance(status, dict):
+        print(json.dumps({"error": "no such job: " + str(args.id)}))
+        return 1
+    status["completion_delivered"] = True
+    _write(status_path, status)
+    print(json.dumps({"ok": True, "id": args.id}))
+    return 0
+
+
 def main():
     p = argparse.ArgumentParser(add_help=True)
     sub = p.add_subparsers(dest="cmd", required=True)
-    for name in ("start", "run", "list", "stop", "clear"):
+    for name in ("start", "run", "list", "stop", "clear", "ack"):
         s = sub.add_parser(name)
         s.add_argument("root")
         s.add_argument("--id")
@@ -329,9 +351,11 @@ def main():
         s.add_argument("--label", default="")
         s.add_argument("--max-seconds", type=int, default=MAX_SECONDS_DEFAULT)
         s.add_argument("--tail", type=int, default=None)
+        s.add_argument("--session", default="")
+        s.add_argument("--notify-on-completion", action="store_true")
     args = p.parse_args()
     return {"start": cmd_start, "run": cmd_run, "list": cmd_list,
-            "stop": cmd_stop, "clear": cmd_clear}[args.cmd](args)
+            "stop": cmd_stop, "clear": cmd_clear, "ack": cmd_ack}[args.cmd](args)
 
 
 if __name__ == "__main__":

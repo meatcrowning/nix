@@ -1744,7 +1744,7 @@ FILE_READ_TOOL_NAMES = {"list_dir", "read_file", "find_files", "search_text",
 # call; the process stays referenced until the kernel eventually releases it.
 FS_TOOL_TIMEOUT_MS = 20_000
 
-#: The SESSION-READ tools (list_sessions / read_session), offered beside the
+#: The SESSION-READ tools (list/search/read), offered beside the
 #: file and web tools so the model can reach past conversations he has had with
 #: it — not just this one. Read-only from the model's side: no save/delete
 #: tool is offered, so a model call can never touch what saveCurrent() writes.
@@ -1759,14 +1759,23 @@ SESSION_TOOLS = [
                         "this list to read one."),
         "parameters": {"type": "object", "properties": {}, "required": []}}},
     {"type": "function", "function": {
+        "name": "search_sessions",
+        "description": ("Search earlier Chatter transcripts for relevant verbatim "
+                        "excerpts. Returns session id, title, time, speaker and turn "
+                        "index; use read_session when the surrounding conversation matters."),
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string"},
+            "limit": {"type": "integer", "description": "Default 8; max 20."}},
+            "required": ["query"]}}},
+    {"type": "function", "function": {
         "name": "read_session",
         "description": ("Read the full transcript of one previous conversation "
-                        "session by id (see list_sessions)."),
+                        "session by id (see list_sessions or search_sessions)."),
         "parameters": {"type": "object", "properties": {
             "id": {"type": "string", "description": "Session id, from list_sessions."}},
             "required": ["id"]}}},
 ]
-SESSION_TOOL_NAMES = {"list_sessions", "read_session"}
+SESSION_TOOL_NAMES = {"list_sessions", "search_sessions", "read_session"}
 
 #: A narrow, read-only door onto HIS typed prompt history. The executable
 #: structurally filters Claude JSONL just as tools/voice-corpus.py does and
@@ -2099,7 +2108,10 @@ JOB_TOOLS = [
                  "cwd": {"type": "string",
                          "description": "Directory to run in. Optional."},
                  "lang": {"type": "string", "enum": ["bash", "python"],
-                          "description": "Default bash."}},
+                          "description": "Default bash."},
+                 "notify_on_completion": {"type": "boolean",
+                          "description": ("Default false. Set true only when he "
+                                          "asked for a desktop notification.")}},
              "required": ["command", "label"]}}},
     {"type": "function",
      "function": {
@@ -2419,7 +2431,7 @@ AGENT_TOOL_GROUPS = {
     "exec": ["run_python", "run_bash"],
     "web": ["web_search", "fetch_url", "wikipedia", "call_api"],
     "music": ["music_library", "lastfm", "control_media"],
-    "sessions": ["list_sessions", "read_session"],
+    "sessions": ["list_sessions", "search_sessions", "read_session"],
     "history": ["prompt_history"],
     "skills": ["use_skill"],
     "author": ["make_tool", "make_skill", "make_agent"],
@@ -3026,7 +3038,7 @@ TOOL_ONCE_NAMES = {
 #: The recall guidance, on the system prompt of EVERY turn. Without it the model
 #: treats a fact it does not see in the CURRENT chat as unknown — or, worse, as
 #: something it must have made up — and denies it, even though he told it in an
-#: earlier conversation and list_sessions/read_session can reach that chat. This
+#: earlier conversation and search_sessions/read_session can reach that chat. This
 #: tells the model those past sessions are its own genuine memory of real
 #: conversations with the same person, to be consulted and TRUSTED (never
 #: dismissed as a hallucination) before it says it does not know something —
@@ -3035,8 +3047,8 @@ RECALL_GUIDANCE = (
     "Answer from the current conversation whenever it already contains the "
     "fact; do not call memory or session tools to rediscover visible context. "
     "You are talking with the same person across many separate conversations, "
-    "and you can read your earlier ones: call list_sessions to see your past "
-    "conversations with him and read_session to read any of them in full. "
+    "and you can search your earlier ones: call search_sessions for bounded, "
+    "verbatim excerpts and read_session when their surrounding context matters. "
     "Those transcripts are a real record of things he actually told you — treat "
     "anything he stated there as true, not as something you imagined. When he "
     "refers to something you do not see in the current conversation (his name, a "
@@ -3107,6 +3119,16 @@ CAPABILITY_NOTE = (
     "never delete or move anything you did not create unless he asked for it in "
     "this conversation, verify changes, and say what changed. Never claim a "
     "capability absent from describe_self or deny one it lists.")
+
+#: Stable working defaults lead the user-selected base prompt, so his custom
+#: prompt can deliberately override them without having to repeat the ordinary
+#: mechanics of concise, inspectable agent work.
+WORKING_DEFAULTS = (
+    "Working defaults: prefer Bash for ordinary shell and repository work; "
+    "use Python when it materially simplifies the task. Summarize bulky tool "
+    "output while retaining the facts needed to verify the result. When naming "
+    "a file, include its exact path. The user's current request and selected "
+    "base prompt may override these defaults.")
 
 #: Training-time guesses about a generic chatbot must never override the live
 #: app around Nyx, whether he asks about Nyx directly or a normal task exposes
@@ -4172,6 +4194,7 @@ class Jobs(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._rows = []
+        self._loaded = False          # first asynchronous snapshot has landed
         self._states = {}          # id -> the state we last told anyone about
         self._proc = None          # the live `list` poll
         self._refresh_again = False  # an event landed during that poll
@@ -4219,7 +4242,10 @@ class Jobs(QObject):
             wanted.add(root)
             wanted.add(os.path.join(root, "status.json"))
             wanted.add(os.path.join(root, "log"))
-        current = set(self._watch.directories()) | set(self._watch.files())
+        try:
+            current = set(self._watch.directories()) | set(self._watch.files())
+        except RuntimeError:
+            return                    # QObject teardown raced the final poll
         stale = list(current - wanted)
         if stale:
             self._watch.removePaths(stale)
@@ -4293,14 +4319,16 @@ class Jobs(QObject):
             proc.deleteLater()
         except RuntimeError:
             pass
+        self._loaded = True
         # SAY WHEN ONE ENDS. A job runs for an hour; the row going quiet is not
         # enough on its own (docs/DESIGN.md §10 — the state is shown, and the
         # end of a long wait is the state that matters most).
         for r in rows:
             was = self._states.get(r["id"])
             now = r.get("state")
-            if was and was != now and now in ("done", "failed", "stopped",
-                                              "timeout"):
+            if (was and was != now and now in ("done", "failed", "stopped",
+                                               "timeout")
+                    and r.get("notify_on_completion")):
                 self.jobFinished.emit(r.get("label") or "job", now,
                                       int(r.get("exit") or 0))
         self._states = {r["id"]: r.get("state") for r in rows}
@@ -4367,7 +4395,8 @@ class Jobs(QObject):
 
     # ---- the verbs (QML and the tools use the same four) ----
 
-    def start(self, command, lang="bash", cwd="", label="", max_seconds=0):
+    def start(self, command, lang="bash", cwd="", label="", max_seconds=0,
+              session="", notify_on_completion=False):
         args = ["start", JOBS_ROOT, "--command", command,
                 "--lang", "python" if lang == "python" else "bash",
                 "--label", label or "job"]
@@ -4375,6 +4404,10 @@ class Jobs(QObject):
             args += ["--cwd", cwd]
         if max_seconds:
             args += ["--max-seconds", int(max_seconds)]
+        if session:
+            args += ["--session", session]
+        if notify_on_completion:
+            args += ["--notify-on-completion"]
         out = self._run(*args)
         self.refresh()
         return out
@@ -4384,6 +4417,24 @@ class Jobs(QObject):
         if job_id:
             args += ["--id", job_id]
         return self._run(*args)
+
+    def pending_completions(self, session):
+        """Finished jobs belonging to this chat, once, across app relaunches."""
+        if not session:
+            return []
+        # `refresh()` already keeps the canonical snapshot warm (watched locally,
+        # polled remotely). Never add an SSH round trip to every chat send merely
+        # to discover that there was no completion.
+        if not self._loaded:
+            return []
+        out = [r for r in self._rows if r.get("session") == session
+               and r.get("state") in ("done", "failed", "stopped", "timeout")
+               and not r.get("completion_delivered")]
+        for row in out:
+            ack = self._run("ack", JOBS_ROOT, "--id", row["id"])
+            if not ack.get("error"):
+                row["completion_delivered"] = True
+        return out
 
     @Slot(str, result="QVariant")
     def stop(self, job_id):
@@ -4839,6 +4890,7 @@ class Ollama(QObject):
         self._stream_flush.timeout.connect(self._flush_stream)
         self._think_tokens = 0   # reasoning tokens seen this turn (one per delta)
         self._model = ""         # the model for the current turn
+        self._current_session_id = ""
         self._messages = []      # the growing message list across a tool loop
         self._acc_content = ""   # assistant content accumulated in this sub-turn
         self._done_reason = ""   # ollama's reason the last frame was the last
@@ -5586,7 +5638,8 @@ class Ollama(QObject):
 
     @Slot(str, str, str)
     @Slot(str, str, str, str)
-    def send(self, model, prompt, history_json, attachments_json=""):
+    @Slot(str, str, str, str, str)
+    def send(self, model, prompt, history_json, attachments_json="", session_id=""):
         """`history_json` is the CURRENT chat's prior turns (QML's chatLog,
         user+assistant, before this one), so the model sees the whole
         conversation so far rather than just the latest prompt — the tool-call
@@ -5601,6 +5654,7 @@ class Ollama(QObject):
             return
         self.cancel()          # one turn at a time
         self._model = model
+        self._current_session_id = str(session_id or "")
         # Scale research depth to the ask: a simple factual question gets a small
         # source cap and is told not to fan out; a broad one may go wide. Judged
         # on the PROMPT, before attachments are inlined — a dropped file's bulk
@@ -6565,7 +6619,7 @@ class Ollama(QObject):
         """
         now = datetime.now(timezone.utc)
         local = now.astimezone()
-        blocks = []
+        blocks = [WORKING_DEFAULTS]
         lead = self._base_prompt()
         if lead:
             blocks.append(lead)
@@ -6587,6 +6641,18 @@ class Ollama(QObject):
         memory_block = self._memory_block()
         if memory_block:
             blocks.append(memory_block)
+        if self._jobs is not None:
+            completed = self._jobs.pending_completions(self._current_session_id)
+            if completed:
+                lines = ["- %s · %s%s · job %s" %
+                         (r.get("label") or "job", r.get("state") or "finished",
+                          (" · exit %s" % r.get("exit"))
+                          if r.get("exit") is not None else "", r.get("id"))
+                         for r in completed]
+                blocks.append(
+                    "Background-job completions from this conversation, delivered "
+                    "passively since the previous turn. Inspect job_log before "
+                    "claiming what the work produced:\n" + "\n".join(lines))
         if research:
             blocks.append(research)
         blocks.append(
@@ -6614,7 +6680,10 @@ class Ollama(QObject):
                 result = jobs.start(command,
                                     lang=str(a.get("lang") or "bash"),
                                     cwd=str(a.get("cwd") or ""),
-                                    label=str(a.get("label") or "job"))
+                                    label=str(a.get("label") or "job"),
+                                    session=self._current_session_id,
+                                    notify_on_completion=bool(
+                                        a.get("notify_on_completion", False)))
                 result.setdefault("note", "it is running in the background; "
                                   "come back to it with job_status")
         elif name == "job_status":
@@ -8797,12 +8866,52 @@ class Ollama(QObject):
             out["fields"] = keep
         return out
 
+    @staticmethod
+    def _normalized_tool_result(result):
+        """Add one recovery contract without rewriting every tool backend."""
+        if not isinstance(result, dict):
+            return result
+        try:
+            body = json.loads(str(result.get("content") or "{}"))
+        except (TypeError, ValueError):
+            return result
+        if not isinstance(body, dict):
+            return result
+        failed = bool(body.get("error") or body.get("timed_out")
+                      or body.get("ok") is False)
+        body.setdefault("ok", not failed)
+        if failed:
+            msg = str(body.get("error") or "tool timed out").casefold()
+            if body.get("timed_out") or "timed out" in msg or "timeout" in msg:
+                kind, retry, next_ = "timeout", True, ["retry_once", "reduce_scope"]
+            elif "no such" in msg or "not found" in msg:
+                kind, retry, next_ = "not_found", False, ["check_identifier_or_path"]
+            elif "permission" in msg or "denied" in msg or "not allowed" in msg:
+                kind, retry, next_ = "permission_denied", False, ["request_authority_or_choose_an_allowed_target"]
+            elif any(x in msg for x in ("connection refused", "server down",
+                                        "unavailable", "not available",
+                                        "could not connect")):
+                kind, retry, next_ = "service_unavailable", True, ["check_service_status", "retry_once"]
+            elif any(x in msg for x in ("needs a", "invalid", "bad ",
+                                        "unknown op", "unknown tool")):
+                kind, retry, next_ = "invalid_request", False, ["correct_arguments"]
+            else:
+                kind, retry, next_ = "tool_error", False, ["inspect_error", "change_approach"]
+            body.setdefault("kind", kind)
+            body.setdefault("retryable", retry)
+            body.setdefault("suggested_next", next_)
+        return dict(result, content=json.dumps(body, ensure_ascii=False))
+
     def _tool_done(self, remaining, calls):
         """One call of a round finished. When the LAST one does, the round is
         handed on: to whatever spawned it if it set `done` (a subagent's inner
         loop), otherwise to the chat loop below."""
         remaining["n"] -= 1
-        if remaining["n"] > 0 or not self._busy:
+        if remaining["n"] > 0:
+            return
+        remaining["sink"] = [self._normalized_tool_result(r)
+                             for r in remaining["sink"]]
+        if not self._busy:
             return
         cache = remaining.get("cache")
         if cache is not None:
@@ -12011,14 +12120,19 @@ class Ollama(QObject):
         return [sys.executable, SESSIONS_SCRIPT, SESSIONS_ROOT]
 
     def _run_session_tool(self, name, args, idx, remaining, calls):
-        """list_sessions / read_session: the model reaching past THIS chat into
+        """list/search/read sessions: the model reaching past THIS chat into
         his other oracle conversations, through the same store the session
-        picker drives. Read-only from here — only `list`/`load` ops are ever
+        picker drives. Read-only from here — only `list`/`search`/`load` ops are ever
         sent, so a model call can never save or delete a session."""
         a = args if isinstance(args, dict) else {}
         if name == "list_sessions":
             req = {"op": "list"}
             heading = "listing sessions"
+        elif name == "search_sessions":
+            req = {"op": "search", "query": str(a.get("query") or ""),
+                   "limit": a.get("limit", 8),
+                   "exclude_id": self._current_session_id}
+            heading = "searching sessions"
         else:
             sid = str(a.get("id", ""))
             req = {"op": "load", "id": sid}
@@ -12059,6 +12173,9 @@ class Ollama(QObject):
         if name == "list_sessions":
             n = len(result.get("sessions", []))
             return "listed %d session%s" % (n, "" if n == 1 else "s")
+        if name == "search_sessions":
+            n = len(result.get("matches", []))
+            return "found %d past-session match%s" % (n, "" if n == 1 else "es")
         return "read session " + str(result.get("id", args.get("id", "")))
 
     # ---- prompt history (typed Claude/Codex + Chatter prompts, read-only) ---

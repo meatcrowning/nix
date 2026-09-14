@@ -228,6 +228,20 @@ check("a name that does not exist is reported, not silently dropped",
       result.get("not_found") == ["nonesuch"] and result.get("available"),
       json.dumps(result)[:140])
 
+normalized = oracle.Ollama._normalized_tool_result(
+    {"role": "tool", "tool_name": "read_file",
+     "content": json.dumps({"error": "no such file"})})
+recovery = json.loads(normalized["content"])
+check("tool failures carry structured recovery metadata",
+      recovery.get("ok") is False and recovery.get("kind") == "not_found"
+      and recovery.get("retryable") is False and recovery.get("suggested_next"),
+      json.dumps(recovery))
+successful = oracle.Ollama._normalized_tool_result(
+    {"role": "tool", "tool_name": "read_file",
+     "content": json.dumps({"content": "hello"})})
+check("successful tool results carry the same ok contract",
+      json.loads(successful["content"]).get("ok") is True)
+
 # ---- calling straight off the index still works -----------------------------
 turn([("describe_self", {})])
 check("an unattached tool called by name RUNS",
