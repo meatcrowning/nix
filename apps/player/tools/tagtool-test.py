@@ -167,8 +167,18 @@ def main():
         check("refuses %s on the rating" % req["op"], not r["ok"] and "refusing" in r["error"], r)
 
     # --- cover art -----------------------------------------------------
+    cover = png()
+    planned = tagtool.run({"op": "art", "paths": paths,
+                           "art": {"file": cover}})
+    check("art dry run returns a source-bound plan token",
+          planned["ok"] and planned.get("source") == "file"
+          and planned.get("plan_token"), planned)
     r = tagtool.run({"op": "art", "paths": paths,
-                     "art": {"file": png()}, "apply": True})
+                     "art": {"source": "auto"}, "apply": True})
+    check("art apply refuses a reconstructed request", not r["ok"]
+          and "plan_token" in r.get("error", ""), r)
+    r = tagtool.run({"op": "art", "apply": True,
+                     "plan_token": planned.get("plan_token")})
     check("art embedded + cover.jpg written",
           r["ok"] and r["files_embedded"] == 4 and len(r["covers_written"]) == 1, r)
     tok_art = r.get("undo_token")
@@ -177,8 +187,11 @@ def main():
           all(f["tags"].get("_art") for f in after["files"]),
           [(f["path"][-5:], f["tags"].get("_art")) for f in after["files"]])
     data, mime = tagtool.read_art(paths[0])
-    check("the embedded bytes are the image we gave it",
-          data and len(data) > 100 and mime in ("image/png", "image/jpeg"), mime)
+    check("the embedded bytes are the planned image, not a refetch",
+          data == Path(cover).read_bytes() and mime == "image/png", mime)
+    check("the plan token cannot be replayed",
+          not tagtool.run({"op": "art", "apply": True,
+                           "plan_token": planned.get("plan_token")})["ok"])
 
     # --- the PLAYER's album row has to follow the cover -----------------
     # Without this the file changes and the player keeps drawing the old art:
