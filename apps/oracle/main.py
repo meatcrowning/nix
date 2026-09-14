@@ -759,6 +759,9 @@ MUSIC_TOOL = {
             "for a track, artist or album. Every track comes back with "
             "its `path`, which is what control_media's play_these / "
             "queue_these take — so 'put on X' is this tool and then that one. "
+            "When he says he is listening to a record, call control_media "
+            "status first and use its exact artist and album here; do not "
+            "recover them from an approximate spelling in his message. "
             "IT ALSO ANSWERS 'DOES THIS HAVE A COVER': every album says `art` "
             "— `embedded` (in the audio files), `folder` (a cover.jpg beside "
             "them) or `none` — and every track says `has_art`. Ask here rather "
@@ -3195,6 +3198,16 @@ GROUNDING_NOTE = (
     "has, every entry must be one you can point at in a tool result from this "
     "turn; anything you cannot point at, he does not have. Reading a list off "
     "the web and calling it his is the same lie as inventing it.")
+
+# Playback state is the authoritative spelling of a record the user is hearing.
+# Searching a remembered/transcribed title first made a real album look absent
+# when its slash, hyphen or artist spelling differed by one character.
+MUSIC_LOOKUP_NOTE = (
+    "MUSIC LOOKUPS: when he says he is listening to a specific record or track, "
+    "call control_media with action `status` FIRST. Then use the exact artist "
+    "and album it returns in music_library. Do not declare a record absent from "
+    "a zero-result search of an approximate user spelling; search normalises "
+    "punctuation, but playback is the authoritative current identification.")
 
 #: The app's own notes inside the conversation, and the rule that they are not
 #: his words. A turn that made a picture or a clip carries a
@@ -6559,7 +6572,7 @@ class Ollama(QObject):
         blocks.append("Your conversational name is %s. You can change it with "
                       "set_name when the user chooses another name." % self._assistant_name)
         blocks += [HOST_CONTEXT_NOTE, PERSISTENCE_NOTE, TURN_BOUNDARY_NOTE,
-                   GROUNDING_NOTE, CAPABILITY_NOTE, SELF_KNOWLEDGE_NOTE,
+                   GROUNDING_NOTE, MUSIC_LOOKUP_NOTE, CAPABILITY_NOTE, SELF_KNOWLEDGE_NOTE,
                    RECALL_GUIDANCE, SAVE_GUIDANCE, MARKER_NOTE]
         tools = tools_note()
         if tools:

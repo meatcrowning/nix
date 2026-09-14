@@ -73,6 +73,7 @@ rows = [
     # that must make Skrillex's Thistle appear when browsing Blawan.
     ("Thistle", "Skrillex, MC Dricka, Randomer & Blawan", "Thistle", "Skrillex", 1, 2026, 5, 0, 0, 0, 13),
     ("B-side", "Skrillex", "Thistle", "Skrillex", 2, 2026, None, 0, 0, 0, 13),
+    ("Jammin On The One", "Persona La Ave", "Relation - Temptation", "Persona La Ave", 3, 2020, 5, 1, 2, 1, 14),
     # NO ALBUM: a download that was never tagged. The player files it under no
     # record, and neither may the rollup — pooling these produced one phantom
     # "album: null" row holding every unrelated loose track in the library.
@@ -97,6 +98,8 @@ for album_id, album, album_artist, art_src in [
         (13, "Thistle", "Skrillex", None)]:
     con.execute("INSERT INTO albums VALUES (?,?,?,?,?,?,?,?)",
                 (album_id, album, album_artist, 2000, 2000, art_src, None, None))
+con.execute("INSERT INTO albums VALUES (14, 'Relation - Temptation', 'Persona La Ave', "
+            "2020, 2020, 'embedded:" + FILES[-2].replace("'", "''") + "', NULL, NULL)")
 cache_key = "boards of canada|music has the right to children|boards of canada|roygbiv"
 con.execute("INSERT INTO web_metadata VALUES (?,?,?,?,?,?,?)",
             (cache_key, "album", "musicbrainz+wikipedia",
@@ -129,13 +132,22 @@ check("...and every row carries its path",
       all(t.get("path") for t in r.get("tracks", [])))
 r = call({"op": "search", "q": "roygbiv"})
 check("free text matches a title", r.get("count") == 1, json.dumps(r)[:160])
+r = call({"op": "search", "q": "Relation / Temptation"})
+check("free text ignores punctuation in an album title",
+      r.get("count") == 1 and r["tracks"][0]["album"] == "Relation - Temptation",
+      json.dumps(r)[:200])
+r = call({"op": "album_tracks", "album": "Relation / Temptation",
+          "artist": "Persona La Ave"})
+check("album tracks use the same punctuation-insensitive match",
+      r.get("count") == 1 and r["tracks"][0]["title"] == "Jammin On The One",
+      json.dumps(r)[:200])
 r = call({"op": "search", "favorites_only": True})
-check("favourites only", r.get("count") == 2, json.dumps(r)[:160])
+check("favourites only", r.get("count") == 3, json.dumps(r)[:160])
 r = call({"op": "search", "min_rating": 5})
-check("a rating floor", r.get("count") == 3, json.dumps(r)[:160])
+check("a rating floor", r.get("count") == 4, json.dumps(r)[:160])
 r = call({"op": "search", "limit": 1})
 check("a limit pages, and says the total",
-      r.get("count") == 1 and r.get("total") == 7, json.dumps(r)[:160])
+      r.get("count") == 1 and r.get("total") == 8, json.dumps(r)[:160])
 r = call({"op": "search", "q": "100%"})
 check("a wildcard in the query is not one", r.get("count") == 0,
       json.dumps(r)[:160])
@@ -188,7 +200,7 @@ check("stats counts the albums drawing blank in the player",
 
 r = call({"op": "albums"})
 check("albums group with their track counts",
-      r.get("count") == 4 and any(a["tracks"] == 2 for a in r["albums"]),
+      r.get("count") == 5 and any(a["tracks"] == 2 for a in r["albums"]),
       json.dumps(r)[:200])
 r = call({"op": "albums", "artist": "blawan"})
 check("artist album search includes a track collaborator's release",
@@ -199,7 +211,7 @@ check("an album comes back in play order",
       [t["title"] for t in r.get("tracks", [])] == ["Roygbiv", "Olson"],
       json.dumps(r)[:200])
 r = call({"op": "stats"})
-check("stats size the library", r.get("library", {}).get("tracks") == 7,
+check("stats size the library", r.get("library", {}).get("tracks") == 8,
       json.dumps(r)[:160])
 r = call({"op": "info", "track_id": 1})
 check("info returns cached web facts and manual corrections",

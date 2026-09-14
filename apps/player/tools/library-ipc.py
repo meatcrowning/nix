@@ -92,7 +92,23 @@ def db():
     except sqlite3.Error as e:
         fail("cannot open the library: " + str(e))
     con.row_factory = sqlite3.Row
+    # A person does not distinguish Relation / Temptation from Relation -
+    # Temptation. The player database retains the original tag spelling, but
+    # this read-only seam must not make punctuation or accents a failed lookup.
+    con.create_function("matchfold", 1, trackmatch.fold, deterministic=True)
     return con
+
+
+def like_text(value):
+    """A literal, punctuation-insensitive LIKE pattern for a human query."""
+    return "%" + trackmatch.fold(value).replace("\\", "\\\\").replace(
+        "%", r"\%").replace("_", r"\_") + "%"
+
+
+def text_clause(columns):
+    """SQL matching one normalised human value against any named columns."""
+    return " OR ".join("matchfold(%s) LIKE ? ESCAPE '\\'" % col
+                        for col in columns)
 
 
 def alias_others(name):
@@ -120,8 +136,8 @@ def artist_or(names, cols=("artist", "album_artist")):
     parts, args = [], []
     for n in names:
         for col in cols:
-            parts.append("%s LIKE ? ESCAPE '\\'" % col)
-            args.append("%" + n.replace("%", r"\%") + "%")
+            parts.append("matchfold(%s) LIKE ? ESCAPE '\\'" % col)
+            args.append(like_text(n))
     return " OR ".join(parts), args
 
 
@@ -215,10 +231,9 @@ def op_search(req):
     "play tomorrow's harvest" are the same kind of ask."""
     where, args = [], []
     q = str(req.get("q") or "").strip()
-    if q:
-        like = "%" + q.replace("%", r"\%") + "%"
-        clause = ("title LIKE ? ESCAPE '\\' OR artist LIKE ? ESCAPE '\\' "
-                  "OR album LIKE ? ESCAPE '\\' OR album_artist LIKE ? ESCAPE '\\'")
+    if trackmatch.fold(q):
+        like = like_text(q)
+        clause = text_clause(("title", "artist", "album", "album_artist"))
         alias_sql, alias_args = artist_or(alias_others(q))
         if alias_sql:
             clause += " OR " + alias_sql
@@ -226,12 +241,12 @@ def op_search(req):
         args += [like] * 4 + alias_args
     for field in ("artist", "album", "genre"):
         val = str(req.get(field) or "").strip()
-        if val:
-            clause = "%s LIKE ? ESCAPE '\\'" % field
-            args.append("%" + val + "%")
+        if trackmatch.fold(val):
+            clause = text_clause((field,))
+            args.append(like_text(val))
             if field == "artist":
-                clause += " OR album_artist LIKE ? ESCAPE '\\'"
-                args.append("%" + val + "%")
+                clause += " OR " + text_clause(("album_artist",))
+                args.append(like_text(val))
                 alias_sql, alias_args = artist_or(alias_others(val))
                 if alias_sql:
                     clause += " OR " + alias_sql
@@ -289,14 +304,14 @@ def op_albums(req):
     list."""
     where, args = [], []
     q = str(req.get("q") or "").strip()
-    if q:
-        like = "%" + q + "%"
-        where.append("(album LIKE ? OR album_artist LIKE ? OR artist LIKE ?)")
+    if trackmatch.fold(q):
+        like = like_text(q)
+        where.append("(" + text_clause(("album", "album_artist", "artist")) + ")")
         args += [like] * 3
     artist = str(req.get("artist") or "").strip()
-    if artist:
-        clause = "album_artist LIKE ? OR artist LIKE ?"
-        args += ["%" + artist + "%"] * 2
+    if trackmatch.fold(artist):
+        clause = text_clause(("album_artist", "artist"))
+        args += [like_text(artist)] * 2
         alias_sql, alias_args = artist_or(alias_others(artist))
         if alias_sql:
             clause += " OR " + alias_sql
@@ -335,16 +350,16 @@ def op_albums(req):
 def op_album_tracks(req):
     """Every track of one album, in play order — what `play` is usually fed."""
     album = str(req.get("album") or "").strip()
-    if not album:
+    if not trackmatch.fold(album):
         fail("album_tracks needs an `album`")
-    args = ["%" + album + "%"]
+    args = [like_text(album)]
     # Qualified, because the art read below joins `albums`, which carries an
     # `album` column of its own.
-    where = "t.album LIKE ?"
+    where = "matchfold(t.album) LIKE ? ESCAPE '\\'"
     artist = str(req.get("artist") or "").strip()
-    if artist:
-        where += " AND (t.album_artist LIKE ? OR t.artist LIKE ?)"
-        args += ["%" + artist + "%"] * 2
+    if trackmatch.fold(artist):
+        where += " AND (" + text_clause(("t.album_artist", "t.artist")) + ")"
+        args += [like_text(artist)] * 2
     con = db()
     cur = con.execute("SELECT %s FROM tracks t WHERE %s ORDER BY t.disc, t.track, t.path"
                       % (", ".join("t." + c for c in TRACK_COLS), where), args)
@@ -486,17 +501,17 @@ def op_info(req):
         args.append(track_id)
     for field in ("title", "artist", "album"):
         value = str(req.get("track" if field == "title" else field) or "").strip()
-        if value:
+        if trackmatch.fold(value):
             if field == "artist":
-                where.append("(artist LIKE ? OR album_artist LIKE ?)")
-                args.extend(["%" + value + "%"] * 2)
+                where.append("(" + text_clause(("artist", "album_artist")) + ")")
+                args.extend([like_text(value)] * 2)
             else:
-                where.append(field + " LIKE ?")
-                args.append("%" + value + "%")
+                where.append(text_clause((field,)))
+                args.append(like_text(value))
     query = str(req.get("q") or "").strip()
-    if query:
-        where.append("(title LIKE ? OR artist LIKE ? OR album LIKE ? OR album_artist LIKE ?)")
-        args.extend(["%" + query + "%"] * 4)
+    if trackmatch.fold(query):
+        where.append("(" + text_clause(("title", "artist", "album", "album_artist")) + ")")
+        args.extend([like_text(query)] * 4)
     if not where:
         fail("info needs track_id, query, track, artist or album")
     found = con.execute("SELECT * FROM tracks WHERE " + " AND ".join(where)

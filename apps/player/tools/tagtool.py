@@ -85,6 +85,9 @@ UA = "lam-tagtool/1.0 ( https://github.com/meatcrowning/nix )"
 AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".dsf", ".ogg", ".opus", ".wv",
               ".ape", ".aiff", ".aif", ".wav", ".mpc", ".tta", ".dff", ".mp4"}
 COVER_NAMES = re.compile(r"^(cover|folder|front|albumart.*)\.(jpe?g|png|webp|gif|bmp)$", re.I)
+# `show` returns its tags to a language model. A malformed lyrics/comment field
+# must not turn a bounded inspection into an entire lost tool round.
+SHOW_TAG_VALUE_MAX = 1200
 
 #: Rule 3. Anything that folds to one of these is refused, whichever spelling
 #: or container it arrives in — these carry the only library metadata that has
@@ -957,7 +960,18 @@ def op_show(req):
     out = []
     for p in paths[:limit]:
         t = read_tags(p)
-        out.append({"path": p, "tags": t})
+        tags, truncated = {}, {}
+        for key, value in t.items():
+            text = str(value)
+            if len(text) > SHOW_TAG_VALUE_MAX:
+                tags[key] = text[:SHOW_TAG_VALUE_MAX] + "…"
+                truncated[key] = len(text)
+            else:
+                tags[key] = value
+        item = {"path": p, "tags": tags}
+        if truncated:
+            item["truncated_tags"] = truncated
+        out.append(item)
     return {"ok": True, "op": "show", "tracks": len(paths),
             "shown": len(out), "files": out}
 
