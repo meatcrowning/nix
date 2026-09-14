@@ -10,8 +10,8 @@ these to ambient"*. Any key, any format, one selection at a time.
     tagtool.py show   --album "Geogaddi"
     tagtool.py set    --album "Geogaddi" genre=IDM date=2002 --apply
     tagtool.py remove --album "Geogaddi" disc disctotal --apply
-    tagtool.py art    --album "Geogaddi" --source lastfm --apply
-    tagtool.py art    --album "Geogaddi" --file ~/cover.png --apply
+    tagtool.py art    --album "Geogaddi" --file ~/cover.png
+    tagtool.py art    --plan-token <dry-run-token> --apply
     tagtool.py undo   <token> --apply
 
     echo '{"op":"remove","album":"Geogaddi","keys":["disc"],"apply":true}' \
@@ -23,8 +23,10 @@ Run with the player's wrapped python (it has mutagen):
 Five rules, each of which is a way this could destroy something:
 
 1. **Dry run is the default.** Nothing writes without `--apply` / `"apply":
-   true`. The dry run prints the exact per-file, per-key change list that the
-   apply will make — it is the same code path, stopped one step early.
+   true`. Cover art is stricter: its dry run stores the exact bytes, selection
+   and options behind a short-lived, single-use plan token; only that token can
+   apply the cover. A later caller cannot accidentally substitute an auto-found
+   image for an attached one.
 2. **Every write goes through `atomicsave.atomic_save`** — copy beside the
    original, mutate the copy, `os.replace()`. This library is exFAT with no
    snapshots (`no-btrfs-snapshots`); an interrupted in-place rewrite is a lost
@@ -48,6 +50,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import sqlite3
 import sys
 import time
@@ -88,6 +91,14 @@ COVER_NAMES = re.compile(r"^(cover|folder|front|albumart.*)\.(jpe?g|png|webp|gif
 # `show` returns its tags to a language model. A malformed lyrics/comment field
 # must not turn a bounded inspection into an entire lost tool round.
 SHOW_TAG_VALUE_MAX = 1200
+
+#: A cover-art dry run is approval for one exact byte sequence and one exact
+#: selection, not a suggestion that a caller should reconstruct later. Keep
+#: its payload local, short-lived and single-use so a follow-up cannot silently
+#: replace a dropped image with an automatic web lookup.
+ART_PLAN_TTL = 15 * 60
+ART_PLAN_DIR = STATE / "art-plans"
+ART_PLAN_TOKEN = re.compile(r"^[A-Za-z0-9_-]{24,128}$")
 
 #: Rule 3. Anything that folds to one of these is refused, whichever spelling
 #: or container it arrives in — these carry the only library metadata that has
@@ -821,6 +832,79 @@ def manifest_read(token):
         return None
 
 
+def art_plan_write(paths, data, mime, source, artist, album, embed, folder):
+    """Persist one exact cover-art dry run and return its opaque token.
+
+    The image bytes are deliberately saved rather than fetched again on apply:
+    an URL can change and, more importantly, a language model must not have to
+    remember a dropped-file path in a later turn.
+    """
+    ART_PLAN_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        ART_PLAN_DIR.chmod(0o700)
+    except OSError:
+        pass
+    token = secrets.token_urlsafe(24)
+    payload = {
+        "created": time.time(),
+        "paths": [str(p) for p in paths],
+        "data": base64.b64encode(data).decode("ascii"),
+        "mime": str(mime or ""),
+        "source": str(source or ""),
+        "artist": str(artist or ""),
+        "album": str(album or ""),
+        "embed": bool(embed),
+        "folder": bool(folder),
+    }
+    path = ART_PLAN_DIR / (token + ".json")
+    tmp = ART_PLAN_DIR / ("." + token + ".tmp")
+    try:
+        with open(tmp, "x", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return None
+    return token
+
+
+def art_plan_take(token):
+    """Return and consume a valid cover-art plan, or an honest refusal."""
+    token = str(token or "")
+    if not ART_PLAN_TOKEN.fullmatch(token):
+        return None, "the cover-art plan token is invalid"
+    path = ART_PLAN_DIR / (token + ".json")
+    try:
+        raw = path.read_text(encoding="utf-8")
+        # Consume before writing: a retry must start from a fresh inspected
+        # plan, rather than replaying an approval after a partial failure.
+        path.unlink()
+        plan = json.loads(raw)
+    except FileNotFoundError:
+        return None, "that cover-art plan was already used or is no longer available"
+    except (OSError, ValueError):
+        return None, "could not read that cover-art plan; make a new dry run"
+    try:
+        created = float(plan["created"])
+        paths = [str(p) for p in plan["paths"]]
+        data = base64.b64decode(plan["data"], validate=True)
+        if not paths or not data:
+            raise ValueError("empty plan")
+    except (KeyError, TypeError, ValueError):
+        return None, "that cover-art plan is malformed; make a new dry run"
+    if time.time() - created > ART_PLAN_TTL:
+        return None, "that cover-art plan expired; make a new dry run"
+    plan["paths"] = paths
+    plan["data"] = data
+    return plan, None
+
+
 # ---------------------------------------------------------------------------
 # the database, kept level with the tags
 # ---------------------------------------------------------------------------
@@ -1041,35 +1125,67 @@ def op_set(req, remove=False):
 
 
 def op_art(req):
-    paths, why = select(req)
-    if not paths:
-        return {"ok": False, "error": why or "nothing selected"}
-    spec = req.get("art") or {}
     apply_ = bool(req.get("apply"))
-    embed = spec.get("embed", True)
-    folder = spec.get("folder", True)
-    first = read_tags(paths[0])
-    artist = (req.get("artist") or req.get("album_artist")
-              or first.get("album_artist") or first.get("artist") or "")
-    album = req.get("album") or first.get("album") or ""
-    data, mime, source, err = fetch_art(spec, artist, album, paths)
-    if not data:
-        return {"ok": False, "error": err or "no cover found",
-                "artist": artist, "album": album}
-    digest = hashlib.sha256(data).hexdigest()[:16]
-    dirs = sorted({str(Path(p).parent) for p in paths})
-    w, h = _dims(data)
-    plan = {"ok": True, "op": "art", "applied": apply_, "source": source,
-            "artist": artist, "album": album,
-            "image": {"bytes": len(data), "mime": mime, "sha256": digest,
-                      "width": w, "height": h},
-            "tracks": len(paths), "dirs": dirs}
-    if not apply_:
-        plan["dry_run"] = ("would %s%s%s — say apply to write it"
+    token = req.get("plan_token")
+    if token:
+        if not apply_:
+            return {"ok": False, "error": "a cover-art plan token is only for apply: true"}
+        saved, err = art_plan_take(token)
+        if not saved:
+            return {"ok": False, "error": err}
+        paths = saved["paths"]
+        data = saved["data"]
+        mime = saved.get("mime") or _mime_of(data)
+        source = saved.get("source") or "plan"
+        artist = saved.get("artist") or ""
+        album = saved.get("album") or ""
+        embed = bool(saved.get("embed", True))
+        folder = bool(saved.get("folder", True))
+    else:
+        if apply_:
+            return {"ok": False,
+                    "error": "cover-art apply needs the plan_token from its dry run; make a new dry run first"}
+        paths, why = select(req)
+        if not paths:
+            return {"ok": False, "error": why or "nothing selected"}
+        spec = req.get("art") or {}
+        embed = spec.get("embed", True)
+        folder = spec.get("folder", True)
+        first = read_tags(paths[0])
+        artist = (req.get("artist") or req.get("album_artist")
+                  or first.get("album_artist") or first.get("artist") or "")
+        album = req.get("album") or first.get("album") or ""
+        data, mime, source, err = fetch_art(spec, artist, album, paths)
+        if not data:
+            return {"ok": False, "error": err or "no cover found",
+                    "artist": artist, "album": album}
+        token = art_plan_write(paths, data, mime, source, artist, album,
+                               embed, folder)
+        if not token:
+            return {"ok": False, "error": "could not save the cover-art plan; nothing was written"}
+        digest = hashlib.sha256(data).hexdigest()[:16]
+        dirs = sorted({str(Path(p).parent) for p in paths})
+        w, h = _dims(data)
+        plan = {"ok": True, "op": "art", "applied": False, "source": source,
+                "artist": artist, "album": album,
+                "image": {"bytes": len(data), "mime": mime, "sha256": digest,
+                          "width": w, "height": h},
+                "tracks": len(paths), "dirs": dirs,
+                "plan_token": token, "plan_expires_in": ART_PLAN_TTL}
+        plan["dry_run"] = ("would %s%s%s — apply this plan_token to write it"
                            % ("embed into %d file(s)" % len(paths) if embed else "",
                               " and " if embed and folder else "",
                               "write cover.jpg into %d dir(s)" % len(dirs) if folder else ""))
         return plan
+
+    digest = hashlib.sha256(data).hexdigest()[:16]
+    dirs = sorted({str(Path(p).parent) for p in paths})
+    w, h = _dims(data)
+    plan = {"ok": True, "op": "art", "applied": True, "source": source,
+            "artist": artist, "album": album,
+            "image": {"bytes": len(data), "mime": mime, "sha256": digest,
+                      "width": w, "height": h},
+            "tracks": len(paths), "dirs": dirs}
     entries, blobs, errors, wrote = [], {}, [], 0
     if embed:
         for p in paths:
@@ -1266,6 +1382,7 @@ def main():
                     help="art: auto | lastfm | caa | itunes | discogs")
     ap.add_argument("--url", help="art: fetch the cover from this URL")
     ap.add_argument("--file", help="art: use this local image")
+    ap.add_argument("--plan-token", help="art: apply this exact dry-run plan")
     ap.add_argument("--no-embed", action="store_true")
     ap.add_argument("--no-folder", action="store_true")
     ap.add_argument("--limit", type=int, default=40)
@@ -1274,6 +1391,7 @@ def main():
 
     req = {"op": a.op, "album": a.album, "artist": a.artist, "query": a.query,
            "dir": a.dir, "paths": a.path, "apply": a.apply, "limit": a.limit,
+           "plan_token": a.plan_token,
            "art": {"source": a.source, "url": a.url, "file": a.file,
                    "embed": not a.no_embed, "folder": not a.no_folder}}
     if a.op == "set":
