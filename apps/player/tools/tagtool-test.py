@@ -181,6 +181,8 @@ def main():
                      "plan_token": planned.get("plan_token")})
     check("art embedded + cover.jpg written",
           r["ok"] and r["files_embedded"] == 4 and len(r["covers_written"]) == 1, r)
+    check("art apply reports the player cache as refreshed immediately",
+          r.get("player_refresh", {}).get("state") == "immediate", r)
     tok_art = r.get("undo_token")
     after = tagtool.run({"op": "show", "paths": paths})
     check("every file reports embedded art",

@@ -4933,6 +4933,9 @@ class Ollama(QObject):
         self._partial_prefix = ""  # the answer so far, when this turn continues one
         self._house_seen = set()  # guides already named this conversation
         self._max_results = RESEARCH_MAX  # per-search source cap for this turn (set in send)
+        # Only the main turn receives this.  A delegated agent must name an
+        # image path deliberately; it cannot silently inherit his attachment.
+        self._tool_image_attachments = ()
         self._procs = []         # live file-tool QProcesses, so none is GC'd mid-run
         self._gen_procs = []     # the generator ones among them — Stop kills these
         self._memories = []      # oracle's own durable memories, injected each turn
@@ -5672,6 +5675,7 @@ class Ollama(QObject):
                 audio_items.append(it)
             else:
                 file_items.append(it)
+        self._tool_image_attachments = tuple(it["path"] for it in image_items)
         # Trust the capability list only when it was read for THIS model (the
         # selection triggers the /api/show that fills it); otherwise treat vision
         # as unknown, which falls back to the honest "not sent" note below.
@@ -7636,9 +7640,11 @@ class Ollama(QObject):
                 remaining["sink"][i] = self._reused_tool_result(cached)
                 self._tool_done(remaining, calls)
                 continue
-            self._dispatch_tool(name, args, i, remaining, calls)
+            self._dispatch_tool(name, args, i, remaining, calls,
+                                self._tool_image_attachments)
 
-    def _dispatch_tool(self, name, args, i, remaining, calls):
+    def _dispatch_tool(self, name, args, i, remaining, calls,
+                       attached_images=()):
         """Run ONE tool call into `remaining`'s sink at index `i`.
 
         Split out of `_run_tool_calls` so the subagent loop (`_spawn_agent`)
@@ -7722,7 +7728,8 @@ class Ollama(QObject):
         elif name in SPAWN_TOOL_NAMES:
             self._spawn_agent(args, i, remaining, calls)
         elif name in custom_tools():
-            self._run_custom_tool(name, args, i, remaining, calls)
+            self._run_custom_tool(name, args, i, remaining, calls,
+                                  attached_images)
         else:
             remaining["sink"][i] = {
                 "role": "tool", "tool_name": name,
@@ -9415,7 +9422,39 @@ class Ollama(QObject):
 
     # ---- his own tools (a directory of manifests, see CUSTOM_TOOLS_ROOT) ----
 
-    def _run_custom_tool(self, name, args, idx, remaining, calls):
+    @staticmethod
+    def _bind_attached_art(name, args, attached_images):
+        """Bind a one-image main turn to an otherwise-unspecified art plan.
+
+        The model sees an attachment as a vision block, but a custom tool gets
+        only its JSON arguments.  Leaving the bridge to guess used tagtool's
+        deliberate auto-fetch fallback, which could replace the attachment
+        with a small provider thumbnail.  An explicit source always wins;
+        ambiguity is an error rather than an arbitrary attachment choice.
+        """
+        if name != "music_tag" or not isinstance(args, dict):
+            return args, None
+        if args.get("op") != "art" or args.get("apply") or args.get("plan_token"):
+            return args, None
+        art = args.get("art") or {}
+        if not isinstance(art, dict):
+            return args, None
+        if art.get("file") or art.get("url") or art.get("source"):
+            return args, None
+        paths = tuple(str(p) for p in attached_images if str(p))
+        if not paths:
+            return args, None
+        if len(paths) != 1:
+            return args, ("cover-art dry run has multiple attached images; "
+                          "pass art.file explicitly so no image is guessed")
+        bound = dict(args)
+        bound_art = dict(art)
+        bound_art["file"] = paths[0]
+        bound["art"] = bound_art
+        return bound, None
+
+    def _run_custom_tool(self, name, args, idx, remaining, calls,
+                         attached_images=()):
         """Run one of HIS tools: arguments as JSON on stdin, stdout is the
         answer.
 
@@ -9425,6 +9464,13 @@ class Ollama(QObject):
         his scripts broke and how (docs/DESIGN.md §10). Output is capped like
         any other tool result; a program that never exits is killed at its own
         `timeout` and says so."""
+        args, bind_error = self._bind_attached_art(name, args, attached_images)
+        if bind_error:
+            remaining["sink"][idx] = {
+                "role": "tool", "tool_name": name,
+                "content": json.dumps({"ok": False, "error": bind_error})}
+            self._tool_done(remaining, calls)
+            return
         spec = custom_tools().get(name)
         if not spec:
             remaining["sink"][idx] = {
