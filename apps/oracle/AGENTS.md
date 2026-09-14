@@ -2920,8 +2920,9 @@ clears when the message is sent. A message may be text, files, or both.
   an over-cap or unreadable one is named, not dropped). For a model with **no
   vision support** no image bytes are sent and the message carries an honest note
   that images were attached but this model cannot see them (docs/DESIGN.md §10 —
-  never silently dropped; pick a vision model). Either way a `[attached
-  image(s): …]` line is added to the visible/saved turn.
+  never silently dropped; pick a vision model). Each image previews in the
+  compose tray, then is persisted as a local `{path,w,h}` entry and drawn in the
+  user's own bubble — a picture is never reduced to its filename.
 - **URLs are resolved in Python** (`Ollama.localFileInfo` → `QUrl.toLocalFile`),
   never decoded in QML (§13 — `decodeURI` mangles `#`/`?` in a uri-list).
 - **Staged into the sandbox for the file tools.** Beyond inlining a text file's

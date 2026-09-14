@@ -117,6 +117,41 @@ def visible_of(kind):
     return False, (found[0].property("height") if found else 0)
 
 
+# 0. A dropped image is visible before send, then stays on the user's saved
+# bubble. The app used to retain only its filename at both sites.
+content.addAttachmentUrl(QUrl.fromLocalFile(str(PIC)).toString())
+settle()
+attach_bar = content.findChild(QObject, "attachBar")
+previews = []
+
+
+def find_named(it, name):
+    for ch in it.childItems():
+        if ch.objectName() == name:
+            previews.append(ch)
+        find_named(ch, name)
+
+
+find_named(content, "attachmentPreview")
+check("an attached image previews above the compose box",
+      attach_bar is not None and attach_bar.property("attachmentCount") == 1
+      and len(previews) == 1 and previews[0].property("visible"),
+      "count=%s previews=%d" % (attach_bar.property("attachmentCount")
+                                  if attach_bar else None, len(previews)))
+
+QMetaObject.invokeMethod(
+    content, "loadTurns", Q_ARG("QVariant", "user-image"),
+    Q_ARG("QVariant", "User image"), Q_ARG("QVariant", json.dumps([
+        {"isUser": True, "who": "you", "body": "what is this?",
+         "userImages": json.dumps([
+             {"ok": True, "url": "", "path": str(PIC), "alt": "graph",
+              "w": 600, "h": 300}])}]))
+)
+settle()
+vis, h = visible_of("ImageGallery")
+check("an attached image stays in the user's bubble", vis and h > 100,
+      "visible=%s height=%s" % (vis, h))
+
 # 1. a picture arriving on a row with NO text — the live order, the regression
 QMetaObject.invokeMethod(content, "appendReplyRow", Q_ARG("QVariant", 1))
 for _ in range(3):
