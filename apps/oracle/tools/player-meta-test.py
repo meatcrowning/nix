@@ -91,6 +91,8 @@ check("music tool says to identify a currently playing record first",
       "call control_media status first" in json.dumps(oracle.MUSIC_TOOL).lower())
 check("system prompt makes playback authoritative for a listening request",
       "playback is the authoritative current identification" in o._system_prompt())
+check("system prompt requires atomic playback selections",
+      "music playback: for a whole album" in o._system_prompt().lower())
 
 
 def player(args, ms=6000):
@@ -210,7 +212,7 @@ LIB.write_text(
     "import json, sys\n"
     "req = json.loads(sys.stdin.read() or '{}')\n"
     "open(%r, 'a').write(json.dumps(req) + '\\n')\n"
-    "if req.get('op') in ('play', 'queue'):\n"
+    "if req.get('op') in ('play', 'queue') or req.get('op', '').startswith(('play_', 'queue_')):\n"
     "    print(json.dumps({'ok': True, 'sent': len(req.get('paths') or []),\n"
     "                      'queue_length': 3,\n"
     "                      'now_playing': {'title': 'Roygbiv'}}))\n"
@@ -258,6 +260,14 @@ check("...and the rows come back with their paths",
 res, sent = library({"action": "albums", "artist": "aphex"})
 check("albums is its own action", sent and sent[0]["op"] == "albums",
       json.dumps(sent)[:120])
+res, sent = library({"action": "play_album", "artist": "boards of canada",
+                     "album": "music has the right to children"})
+check("play_album remains one backend operation", sent and sent[0]["op"] == "play_album"
+      and sent[0]["artist"] == "boards of canada"
+      and sent[0]["album"] == "music has the right to children", json.dumps(sent)[:160])
+res, sent = library({"action": "play_decade", "decade": 1990})
+check("play_decade carries its calendar constraint", sent and sent[0]["op"] == "play_decade"
+      and sent[0]["decade"] == 1990, json.dumps(sent)[:160])
 
 
 def put_on(args, ms=6000):

@@ -752,8 +752,12 @@ MUSIC_TOOL = {
             "and `album_count`, the whole match rather than the page of tracks, "
             "so 'what have I got by X' is answered by the first call and that "
             "list is the complete answer. `albums` lists albums, "
-            "`album_tracks` gives one album in "
-            "play order, `info` returns local tags plus any cached MusicBrainz, "
+            "`album_tracks` gives one album in play order. For whole-album, "
+            "artist-discography, year or decade playback use the corresponding "
+            "play_* or queue_* action: it resolves every matching track inside "
+            "the library, changes the queue, and returns exact sent/queue counts. "
+            "Never reconstruct those operations with `play_these`. `info` "
+            "returns local tags plus any cached MusicBrainz, "
             "Wikipedia and similar-track facts (including manual corrections), "
             "and `stats` sizes the library. Use `info` before searching the web "
             "for a track, artist or album. Every track comes back with "
@@ -772,17 +776,23 @@ MUSIC_TOOL = {
             "Read-only: it never changes a rating, a tag or a play count."),
         "parameters": {"type": "object", "properties": {
             "action": {"type": "string",
-                       "enum": ["search", "albums", "album_tracks", "info", "stats"],
+                       "enum": ["search", "albums", "album_tracks", "info", "stats",
+                                "play_album", "queue_album", "play_artist", "queue_artist",
+                                "play_year", "queue_year", "play_decade", "queue_decade"],
                        "description": "What to ask for. Default `search`."},
             "query": {"type": "string",
                       "description": "Free text: part of a title, artist or album."},
             "artist": {"type": "string", "description": "Narrow to an artist."},
             "album": {"type": "string",
-                      "description": "The album — required for `album_tracks`."},
+                      "description": "The album — required for album_tracks, play_album and queue_album."},
             "track": {"type": "string", "description": "Track title for `info`."},
             "track_id": {"type": "integer",
                          "description": "Exact library track id for `info`; safest after search."},
             "genre": {"type": "string", "description": "Narrow to a genre."},
+            "year": {"type": "integer",
+                     "description": "Four-digit year for play_year or queue_year."},
+            "decade": {"type": "integer",
+                       "description": "Decade beginning, e.g. 1990, for play_decade or queue_decade."},
             "favorites_only": {"type": "boolean",
                                "description": "Only tracks he has hearted."},
             "min_rating": {"type": "integer",
@@ -3229,7 +3239,15 @@ MUSIC_LOOKUP_NOTE = (
     "call control_media with action `status` FIRST. Then use the exact artist "
     "and album it returns in music_library. Do not declare a record absent from "
     "a zero-result search of an approximate user spelling; search normalises "
-    "punctuation, but playback is the authoritative current identification.")
+    "punctuation, but playback is the authoritative current identification.\n"
+    "MUSIC PLAYBACK: for a whole album, an artist's discography, or a year or "
+    "decade, call music_library's direct play_* or queue_* action. Those are "
+    "atomic: do not copy paths into control_media, and report the returned "
+    "sent and queue_length numbers, not the operation you meant to do.\n"
+    "MUSIC RECOMMENDATIONS: inspect lastfm recent plus a relevant top_* period "
+    "before suggesting what he should hear. Its dated scrobble history is the "
+    "evidence for what is overplayed or long-unheard; use music_library to "
+    "confirm he owns a proposed record before putting it on.")
 
 #: The app's own notes inside the conversation, and the rule that they are not
 #: his words. A turn that made a picture or a clip carries a
@@ -9784,6 +9802,8 @@ class Ollama(QObject):
                "sort": str(a.get("sort") or ""),
                "favorites_only": bool(a.get("favorites_only")),
                "min_rating": a.get("min_rating") or 0,
+               "year": a.get("year") or 0,
+               "decade": a.get("decade") or 0,
                "limit": a.get("limit") or 0,
                "offset": a.get("offset") or 0}
         head = a.get("query") or a.get("album") or a.get("artist") or action
