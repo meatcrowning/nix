@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
-"""Pull every prompt HE actually typed out of the Claude Code transcripts.
+"""Extract human prompts from Claude Code JSONL transcripts.
 
-The corpus behind `docs/agents/his-voice.md`. Claude Code keeps a JSONL per
-session under `~/.claude/projects/`, and a transcript holds four kinds of
-"user" turn that look alike on the wire — what he typed, tool results fed back,
-task notifications, and the prompts agents write for each other (board-watch's
-headless `claude -p`, subagent briefs). Only the first is his voice, so the
-filter is structural rather than stylistic: filtering by how a line READS would
-select for whatever the reader already believed, which is the one mistake this
-corpus exists to prevent.
+Optional historical analysis of ~/.claude/projects/. Filter by message
+metadata to exclude tool results, task notifications, and agent prompts;
+do not infer authorship from writing style.
 
 What survives, and why:
 

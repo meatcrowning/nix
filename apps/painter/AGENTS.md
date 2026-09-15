@@ -28,293 +28,99 @@ gallery with synthetic PNGs. Its normal/stress/clear protocol is offscreen-only
 and never acquires the warden, backend, network, clipboard, or notification
 seams.
 
-## Two roofs: `Main.qml` is the Hyprland one, the KDE shell is the other
+## Session shells and controls
 
-`Root.qml` is the app — an `Item`, not a `Window`. `Main.qml` is a twenty-line
-`Window` around it for the Hyprland session; in a Plasma session `main.py` puts
-the same `Root.qml` in a `QQuickWidget` inside a real `QMainWindow`
-(`pylib/kdeshell.py`), so the menubar, toolbar and statusbar are genuine KDE
-widgets and the window background is Oxygen's own gradient, painted behind this
-QML. The full argument, and what an app has to do to adopt it, is in
-[`../AGENTS.md`](../AGENTS.md) → `pylib/kdeshell.py`. What it means when editing
-here:
+Root.qml is an Item shared by Main.qml's Hyprland Window and Plasma's
+QMainWindow/QQuickWidget (pylib/kdeshell.py; see ../AGENTS.md). Window-only
+operations go through root.Window.*, a window Connection, or wrapper signals.
+Theme.windowFill/paneFill let the Plasma background show through; fields and
+tiles retain their inset colours. DeskMenuBar is systemBar: true, and QueueBar
+has zero height under Plasma, which uses statusLine/statusProgress instead.
 
-- **Nothing Window-only in `Root.qml`.** `onClosing`, `contentItem`,
-  `activeFocusItem` and assigning `root.width` all belong to a Window; they go
-  through `root.Window.*`, a `Connections` on `root.Window.window`, or a signal
-  the Window wrapper handles (`requestResize`).
-- **`Theme.windowFill`, not `Theme.bg`, for a pane's background** — it is
-  `transparent` under Plasma so the styled gradient shows through. `bgAlt`
-  panels and fields are insets and keep their colour.
-- **`tbButtons` carries `icon:` and `bar:`** alongside `menu:`, for the real
-  toolbar. The DeskMenuBar in this file is `systemBar: true` — painter has a
-  real QMenuBar and must not draw a second one.
-- **`statusLine` / `statusProgress`** are what the KDE status bar shows;
-  `QueueBar` is the Hyprland strip and is hidden (and `barH` 0) there.
-- **`actions` is the whole table of verbs; `tbButtons` is a filter over it.**
-  The titlebar column has six cells and a menubar has thirty rows, so the rows
-  the titlebar gets are the ones marked `tb:`. Everything else on a row is inert
-  on the other side: `vtbclient.py` reads id/label/state/tip/bottom and ignores
-  the rest, `kdeshell` never sees `label`. `menu:`/`menuText:`/`icon:`/`bar:`/
-  `shortcut:`/`checkable:`/`group:` are the KDE half; `menuOrder` names the
-  menus. A row whose target is missing is **disabled, not removed**.
-- **A `shortcut:` in that table is the Plasma face\'s alone.** Two owners of one
-  sequence in a window is an ambiguous shortcut and Qt fires NEITHER, so the QML
-  `Shortcut`s that duplicate one carry `enabled: !root.plasma`.
-- **The panes are their own files.** `ResultsPane.qml` (preview + gallery +
-  `OutputView`) and `ParamsPane.qml` (the parameter column), because under
-  Plasma the parameters are a real `QDockWidget` — a second scene — while
-  `Root.qml` stays the app. Each pane declares `id: root` and FORWARDS to an
-  `app` property rather than relying on QML resolving `root` up the
-  creation-context chain, which is what every panel in here does and which has
-  nothing to resolve against when a pane is the root of its own view. Add a
-  property to `Root.qml` that a panel reads, and it must be added to the pane\'s
-  forwarding block too.
-- **The parameter column is NOT a `QDockWidget`.** It was one for a day. A dock
-  is a second `QQuickWidget`, which is a second scene graph rendered on the GUI
-  thread every frame — a QQuickWidget cannot use the threaded render loop — and
-  his verdict (2026-08-22) was that the detaching was not wanted, its header was
-  not wanted, and the window felt slower for it. The column lives in the one
-  scene, behind the splitter, in both sessions; `showParams` (F7) puts it away
-  and on a window too narrow to split it moves `view` with it, so the toggle
-  cannot leave you looking at the wrong pane. `kdeshell.dock` stays — general,
-  tested, unused here.
-- **The window is dragged by its CHROME, and nothing else.** Oxygen's
-  WindowManager drags from every unclaimed pixel, including inside the QML —
-  it filters the window contentItem, which only ever sees a press nothing in
-  the scene accepted. `Root.qml` therefore keeps a full-window `MouseArea` at
-  `z: -1000` that accepts those, so a press on a panel's background or between
-  two thumbnails no longer moves the window; the menubar and toolbar still do,
-  natively. The status bar is excluded on the widget side (`_kde_no_window_grab`
-  plus a press filter, `kdeshell._ensure_status`). painter briefly had its own
-  26px drag band instead; it was a strip of nothing and it went, along with the
-  "output N outputs" heading it replaced — that tally is in `statusRight` now.
-  Both panes sit flush under the chrome. Since 2026-08-22 the style is *also*
-  narrowed at its own end — `home/prog/oxygen.nix` sets Oxygen's
-  `WindowDragMode=WD_MINIMAL`, upstream's supported "chrome only" — but the
-  MouseArea stays: it is session-independent and it is the only guard on a
-  machine where that rc has not been applied.
-- **Under Plasma the results side paints NOTHING of its own** — the viewer's
-  frame and the history grid are transparent (`Theme.paneFill`) over the
-  `StyledBackground` at the back of `Root.qml`, so the style's gradient runs
-  unbroken from the titlebar down through the toolbar and behind both. It used
-  to fill `QPalette.Base` (`DeskStyle.viewBg`, the colour Dolphin gives its file
-  list) on the reasoning that a view is not a window; on a LIGHT scheme that is
-  a white slab over most of the window and it stopped reading as one object
-  [2026-09-05], so both the property and the fill are gone. `paneFill` is
-  `bgAlt` under Hyprland, where the window is ours and the inset is the point —
-  tiles, fields and menus keep `bgAlt` in both roofs.
-- **The grid shows EVERY output** — `load_existing` was capped at 60, a number
-  from when the results were a strip, and the history simply stopped partway
-  with nothing saying so. A `GridView` only builds what it can see, so the rest
-  costs one small dict each. What makes that affordable is that **a tile never
-  draws the output**: every picture in the grid is a small cached JPEG made
-  once, on local disk.
-    - **Stills: `~/.cache/painter/thumbs`, keyed by mtime+size** (`_ThumbJob`,
-      `Gallery.requestThumb`, three worker threads, a bounded LIFO queue so a
-      flick decodes what he stopped on and not what he passed). The row already
-      carries the URL when the scan finds one cached, so the common case emits
-      no `dataChanged` at all. This is not a nicety: on `book` most of the
-      history is **top's output directory over sshfs**
-      (`tools/comfy-tunnel.sh`), a delegate bound at the original re-read a
-      1.2 MB PNG over the network every time it came back — measured **0.70s
-      for one file** — and QQuickPixmapCache holds only a couple of
-      unreferenced thumbnails, so scrolling back over a row paid it again. That
-      was the whole of the scroll lag, and the reason toggling the preview pane
-      stuttered: it reveals another row and a half at once.
-    - **Clips: `~/.cache/painter/posters`**, one ffmpeg frame extracted **on
-      demand** (`Gallery.requestPoster`) after a realised tile dwells for
-      250ms. Nothing is queued by the history scan. Stills follow the same
-      realised-delegate rule immediately; eagerly preparing 24 of each made a
-      new window consume 27 CPU-seconds before it felt usable on `book`.
-    - **Nothing on the scroll path may stat a file.** Both cache names are
-      built from the mtime+size the scan already read (`Gallery._ck`,
-      `cache_stamp`), because half these paths are on an sshfs mount and a stat
-      is a network round trip on the GUI thread. Same reason the collage key
-      asks the gallery before stat-ing — a shift-range over 200 outputs was
-      200 of them.
-    - **A closed preview pane decodes nothing.** `PreviewPane`'s three sources
-      are gated on `pane.open`, not merely on `visible`: a MediaPlayer holding
-      a source is a decoder looping a clip for as long as the app is up.
-    - Harness: `tools/ui-test.py` → `test_thumb_cache`.
-- **`Gallery` keeps `_all` and shows `_rows`.** The toolbar\'s filter field
-  (`kdeshell.toolbar_search`) calls `Gallery.setFilter`, which matches every
-  word against the filename AND the prompt — read out of the file once and
-  cached on the row. Both lists hold the SAME dicts, so a poster landing
-  reaches both; every index QML asks about is a VISIBLE index.
-- **Gallery/history lives in `gallery.py`, not the controller.** It owns output
-  discovery and de-duplication, the live-generation row, filtering, and the
-  bounded thumbnail/poster workers. `main.py` re-exports its public names for
-  existing callers. `tools/gallery-bench.py` measures the synchronous cold
-  scan against synthetic local and peer roots without touching real outputs;
-  the 2026-09-05 baseline was 24 ms for 1,450 rows and 119 ms for 7,000.
-- **The parameter column is a `Repeater` over an ORDER, not a declared stack.**
-  `ParamsPane.builtinOrder` is the old declaration order and one saved list
-  (`Prefs["sections"]`) reorders it — dragging any panel header moves that
-  section, live, and a right-click on a header offers the way back. Three rules
-  it is built on:
-    - **One order serves all three modes.** A section a mode does not have is
-      hidden, and a `Column` skips an invisible child — which is exactly what
-      produced the per-mode orders before, so nothing had to be per-mode.
-    - **`sectionVisible(key)` on the pane owns the gate, not a `visible:` on the
-      panel.** An item\'s `visible` reads back its EFFECTIVE visibility, so
-      `Loader.visible: item.visible` latches false the moment it is false once
-      and empties the whole column. Measured exactly that way.
-    - **A `ListModel`, not a JS array.** `move()` moves a delegate; reassigning
-      an array rebuilds every one of them, which would destroy the header being
-      dragged mid-drag.
-  A key the saved order does not name is re-inserted at its BUILT-IN position,
-  so a new panel can never be buried at the bottom or lost.
-- **Pins are the ROWS THEMSELVES, and collapsing hides what is not pinned.** A
-  folded panel is its header plus the rows he pinned, laid out where they always
-  were and still live — a pinned Spin steps, a pinned Toggle toggles, the pinned
-  preset row still switches presets (his call, 2026-08-22). Nothing pinned means
-  header only, as before. Right-click a row's label and take
-  `pin <name> to the header` — a MENU, because a bare right-click that pins
-  outright is an action with no name and no way to find out it exists
-  (docs/DESIGN.md §10). Four things this needed, each a bug first:
-    - **Unpinned rows are PARKED in `stash`, not hidden.** Their `visible` is
-      often bound by the caller (`visible: !panel.fromImage`) and assigning it
-      would destroy that binding for good.
-    - **Order comes back by re-seating, and re-seating needs a bounce.**
-      Assigning a row the parent it already has does not move it, so a row
-      returning from the stash landed after the ones that never left; from the
-      first row whose home changed, every row is bounced through `stash` and
-      back in declared order. Through the stash, never through `null` — half
-      these rows are `width: parent.width`, and a null parent makes that a
-      TypeError for the frame it lasts.
-    - **A row with a `Repeater` in it cannot be reparented at all.** The preset
-      switcher's four buttons stayed measured, laid out and counted by QML while
-      nothing drew them. Such a row sets `selfHides: true`, is never parked, and
-      binds its own `visible` to the panel's state instead (`ModeSwitcher.qml`).
-      It has to be the FIRST row in its panel for the ordering above to hold.
-    - **`rowOrder`** is captured once at completion; QML cannot insert a child
-      at an index, so it is the only record of what the column should look like.
-- **The single-output view is an image viewer.** The wheel ZOOMS (through the
-  notch accumulator — the flickable's own wheel overlay stands down,
-  `wheelEnabled: false`), the left button PANS, and an edit output opens with
-  the before/after slider on: `qmlcommon/CompareView.qml`, the same file
-  viewer's `--compare` uses, moved there rather than copied. `App.compareSource`
-  answers what to compare against; anything that is not an edit gets "" and
-  shows normally. The toolbar's `compare` button (icon + the word, via
-  kdeshell's `barText`) is the switch; it is remembered — and it is **offered
-  only where it can do something**, i.e. in View, on an edit, with a before that
-  this machine can find ([his] *"the compare button should only show when the
-  output viewed is an edit"*). That is `hidden:` on the row plus the `actions`
-  filter in `Root.qml`; kdeshell rebuilds its chrome when the SET of rows
-  changes, since a state flip alone cannot remove a button (apps/AGENTS.md).
-- **A completed still in either preview has `copy image` on right-click.** It
-  runs `clipfile.py --image-only`: the clipboard advertises only the file's
-  image MIME, never text, a URI or the filename, so pasting into a browser post
-  editor attaches the picture without adding anything to the post body. Live
-  sampler frames and videos do not offer the row.
-- **The before-image is filed beside the output, because a recorded path was
-  not enough.** [his] *"the compare mode just doesnt work in general"* —
-  measured 2026-08-22: the slider itself is fine (the harness drives it end to
-  end), what failed was finding the BEFORE. `input_image_local` names a path on
-  the machine that ran the edit, and painter reads two histories: its own
-  outputs, and — on book — top's over the sshfs peer mount, where a path like
-  `/run/media/lam/bak/…` means nothing. A source that has since been moved or
-  deleted is the same failure locally. So `_keep_before` copies the source into
-  `<out root>/.before/<output stem>.<ext>` as the output lands (hidden, and
-  outside the two globs the gallery scans, so it is never itself an output), and
-  `_compare_source` looks there FIRST, then at the recorded path, then for the
-  same file NAME in any output root — an edit of an earlier generation, which is
-  the common case. Outputs made before this exists still resolve through the
-  last two.
-- **The status bar's right-hand end names what you are looking at.** In View it
-  leads with the output's pixels — and a clip's running time after them — then
-  the tally of outputs, the selection and the queue depth ([his] *"in individual
-  output view it should display the resolution of the output and, if video, the
-  duration - to the left of the number of outputs"*). `OutputView.infoText`
-  measures it off the decode that is already happening (the `Image`'s implicit
-  size, the `MediaPlayer`'s metadata), so there is one answer and it costs
-  nothing; it is empty until something has decoded rather than saying `0x0`.
-- **The grid's column count is a choice, defaulting to automatic.** View →
-  Columns (a `group:` radio set, `cols0`..`cols6`, remembered as `gridColumns`).
-  0 keeps the width-driven layout — whole columns of a cell near 210px — and a
-  chosen count is still clamped by the 60px cell floor, because honouring a
-  number the pane cannot fit is how the grid goes empty (the note in
-  `GalleryView.qml`).
-- **Generate stays live while a job runs, so a second one can be QUEUED** ([his]
-  *"allow the user to queue generations, currently they are unable to"*).
-  ComfyUI has a queue and `_start_jobs` adds to it; what stopped him was the
-  chrome — the row greyed out on `App.busy`, which also swallowed Ctrl+Return,
-  since a disabled `QAction` eats its own shortcut. The word changes instead
-  (`Queue another generation`, `[ queue ]` in the Hyprland strip) and `queued N`
-  beside it is where the extra job shows up.
-- **Back leaves the output, Forward returns to it.** `@Back`/`@Forward` are the
-  Browse↔View pair, not the output walk — the grid keeps its place because the
-  selection never moves. Walking outputs is PgUp/PgDown (QML shortcuts, gated on
-  being in View so they do not take paging from a text box) and the Go menu's
-  two rows, which carry no shortcut of their own.
-- **Browse ↔ View.** `inView` plus `OutputView.qml` — one output filling the
-  pane, entered by Return or a double-click (which no longer launches `viewer`;
-  that is still File → Open in Viewer), left by Escape, walked with Alt+Left/
-  Right and PgUp/PgDown. **The selection is the cursor**: View shows `selOne`,
-  so there are never two places that disagree about which output is current.
-  Zoom belongs to a still; a clip\'s zoom rows are disabled.
+The actions table owns menus/toolbars; tbButtons filters rows marked tb: for
+hyprvtb. Missing targets disable their actions. Plasma QAction shortcuts must
+disable duplicate QML Shortcuts with !root.plasma, or neither owner fires.
+ResultsPane.qml and ParamsPane.qml forward app properties explicitly; extend
+those forwarding blocks when adding properties used by their children.
+Both panes share one scene and splitter; parameters are not a QDockWidget.
+showParams/F7 must also switch view when the window is too narrow to split.
 
-## The look is the desktop's, and painter is where it was worst
+Keep the background MouseArea at z: -1000: it consumes unclaimed content
+presses so Oxygen cannot drag the window from between controls. The native
+chrome still drags; the shared shell excludes the status bar.
 
-painter used to break eight of `~/nix/docs/DESIGN.md`'s rules at once; §19.1 there
-records each one and what it became. What that leaves you with, mechanically:
+### Gallery
 
-- **`TextButton.qml` is the only clickable label.** Every action in this app
-  goes through it — hover tint, `PointingHandCursor`, `enabled` (0.4 opacity,
-  click refused), `lit`, `winActive` greying to `Theme.inactive` (the §3.1.1
-  fade — RETIRED 2026-08-09, so the window pins `winActive` true and the grey
-  never fires; the property survives for a re-arm), and `flipY` for a mirrored
-  paired glyph. Do not drop a bare `MouseArea` on a `PixelText`.
-- **No `radius:` anywhere, and no `QtQuick.Controls` `ToolTip`.** `ToolTipArea`
-  is ours now: it reparents its chip into the window `contentItem`, because the
-  left column is `clip: true` panels inside a Flickable.
-- **`Spin` is a DISCRETE STEPPER**, so its wheel goes through
-  `qmlcommon/WheelNotch.qml`, not `WheelScroll`. Content scrollers take
-  `WheelScroll`; anything that steps a value takes the notch accumulator.
-- **`NO lineHeight/lineHeightMode` on the prompt `TextEdit`.** They are
-  `Text`-only; assigning them is a component-creation error that made
-  `PromptBox` unavailable and stopped the whole app loading for a while. The
-  comment in `PromptBox.qml` is load-bearing.
-- **Backend controls report `systemctl`, not intent** — `App.backendRunning` /
-  `App.unitState` are polled, and `startBackend`/`stopBackend`/`unloadModels`
-  all check their result before they claim one.
+gallery.py owns discovery, deduplication, filtering, live rows, and bounded
+thumbnail/poster workers; main.py re-exports its public names. Keep all outputs
+in the virtualized grid. Gallery._all and _rows share row dicts; QML indices
+refer to the filtered rows. setFilter matches every word against filename and
+cached prompt metadata.
 
-**Every scrollable surface here is a `Kinetic*` view from `../qmlcommon/`** — the gallery grid, the model/LoRA/dropdown lists, the left parameter column and the prompt boxes. painter used to carry its own copy of `WheelScroll.qml` that nothing imported, so every one of those was a bare Flickable adding Qt's flick on top of the compositor's momentum. Never write a bare `ListView`/`GridView`/`Flickable` here; see [`../AGENTS.md`](../AGENTS.md).
+- Tiles use local cached JPEGs, never full outputs. Stills use _ThumbJob and
+  requestThumb (three workers, bounded LIFO queue); clips use requestPoster
+  after 250 ms of delegate dwell. Do not eagerly decode during the scan.
+- Cache keys use scan-time mtime/size (Gallery._ck, cache_stamp).
+  Do not stat files on the scroll/selection path: peer roots can be sshfs.
+- Gate PreviewPane media sources on pane.open, not only visible, to stop
+  hidden decoders.
+- Verify with tools/ui-test.py:test_thumb_cache and tools/gallery-bench.py
+  against synthetic local/peer roots.
 
-## `gen` is a `property var` — NEVER mutate it in place
+### Parameter layout
 
-`Main.qml`'s `gen` holds every generation setting, and this is the trap that
-made most of the UI silently wrong until 2026-08-04:
+ParamsPane.builtinOrder and Prefs["sections"] define one order across modes.
+Use a ListModel and move(), since replacing an array destroys dragged delegates.
+Reinsert new keys at their built-in positions. sectionVisible(key) owns each
+gate; deriving Loader.visible from item.visible latches effective visibility
+false.
 
-```qml
-var g = root.gen; g.steps = v; root.gen = g   // WRONG: emits no change signal
-root.set("steps", v)                          // right: hands out a NEW object
-```
+Collapsed sections retain their pinned, interactive rows. Pinning is a named
+context-menu action. Park unpinned rows in stash without assigning visible,
+which would destroy caller bindings. Capture rowOrder at completion; restore
+order by bouncing rows through stash, never null (children use parent.width).
+Rows containing Repeaters use selfHides: true, remain parented, and must be
+first in their section.
 
-Assigning a `property var` the object it already holds notifies nothing — proved
-directly, not inferred: the same edit through a fresh object updates its
-bindings, through the same object does not. Every panel used the first form, so
-the values still reached `submit()` (which reads `gen` at click time, which is
-why this looked like it worked) while **everything displayed from `gen` was
-stale**: the resolution badge, a `Spin` showing a family's default, the seed
-box's grey-out, and the entire ModelSampling block, bound to
-`root.gen.modelSampling` and therefore never revealed by its own toggle.
+### Output view and actions
 
-`root.set(key, value)`, `root.setMs(key, value)` and `root.clone(o)` are the
-only sanctioned writers. Two corollaries, both the same rule one level down:
+OutputView shows selOne; selection is the single current-output cursor.
+Return/double-click enters View, Escape leaves it, and Back/Forward switch
+Browse/View without changing selection. PgUp/PgDown walk outputs only in View;
+the Go-menu equivalents must not duplicate those shortcuts. Open in Viewer
+remains a separate action. Grid columns use gridColumns (0 automatic), clamped
+to a 60px minimum cell width.
 
-- **A control must not assign its own bound property.** `Spin.commit()` used to
-  write `value`, and `Picker` used to write `value` — writing a bound property
-  in QML *destroys the binding*, so one edit permanently disconnected that box
-  from the model and no later family default or reused image could move it
-  again. Both now only emit (`edited` / `picked`) and let the value come back.
-- **A two-way text binding is a loop.** `PromptBox` takes `value` (model in) and
-  emits `edited` (user out), with the model→editor write flagged (`syncing`) so
-  an echo is not re-reported as a keystroke. Binding `text:` straight to
-  `root.gen.positive` is a live binding loop the moment `gen` notifies properly.
+Stills zoom through WheelNotch and pan with the left button; disable the
+flickable's wheel handler. Clips disable zoom actions. CompareView.qml is
+shared with viewer. Offer compare only for an edit whose before-image resolves;
+changes to available action IDs must rebuild the native chrome.
+_keep_before stores the source at <output root>/.before/<output stem>.<ext>,
+outside the gallery globs. _compare_source tries that copy, the recorded path,
+then the filename in output roots, including peer history.
 
-`tools/ui-test.py` covers all of this — see below.
+Completed stills offer clipfile.py --image-only; sampler frames and videos do
+not. OutputView.infoText uses decoded dimensions/duration and stays empty until
+known; statusRight adds output/selection/queue counts. Generate remains enabled
+while busy so _start_jobs can enqueue more work.
+
+### Shared controls
+
+Use TextButton for custom clickable labels, ToolTipArea for clipped-panel
+tooltips, WheelNotch for Spin, and shared Kinetic* views for scrolling.
+The custom Hyprland controls have no corner radius; native Plasma variants
+follow their style. Do not assign lineHeight/lineHeightMode to TextEdit: those
+Text-only properties prevent PromptBox from loading. Backend controls must
+report polled unitState/backendRunning and check command results.
+
+## Generation settings and bindings
+
+Use root.set(key, value), root.setMs(key, value), and root.clone(o) to replace
+gen objects. Reassigning the same object after mutation emits no change signal.
+
+Controls emit edited/picked instead of assigning their own bound values.
+PromptBox's syncing flag distinguishes model updates from user edits, avoiding
+a two-way binding loop. tools/ui-test.py covers these paths.
 
 ## The four modes are shortcuts to four models
 

@@ -57,9 +57,7 @@ Column {
 
     spacing: 6
 
-    // The picture's SOURCE, for the small caption under it: the host of the
-    // url it was fetched from, lowercased — `danbooru.donmai.us`, never the
-    // whole path (his-voice §3: a number/name, not a sentence).
+    // Keep source captions compact by showing only the URL's host.
     function hostOf(u) {
         var s = "" + (u || "");
         s = s.replace(/^[a-z]+:\/\//i, "").split("/")[0];

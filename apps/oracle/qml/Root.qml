@@ -871,23 +871,8 @@ Item {
         sessionPicker.open = false;
     }
 
-    // THE MESSAGE MENU. Right-clicking a message is how every other program on
-    // this desktop offers to copy a piece of text, and the log had no way in at
-    // all: Ctrl+C only, on a selection made with the mouse. The rows are the
-    // three a read-only transcript can honestly offer (docs/DESIGN.md §10.2 —
-    // "copy" is dead while nothing is selected rather than quietly copying
-    // something else). `md` is true for a model's reply, which is Markdown and
-    // must be copied AS Markdown (main.py → Clip; the rendered document
-    // flattens to one run-on block).
-    //
-    // The words follow the session: the KDE menu around it says Copy and Select
-    // All, this desktop's own menus are lowercase (docs/agents/his-voice.md).
-    // THE MESSAGE THE EDIT MENU ACTS ON. A transcript is many independent
-    // read-only editors, so "Copy" has no single target the way it does in a
-    // text editor; the one a KDE hand means is the message it just selected in.
-    // Each body reports itself here when its selection changes, and the Edit
-    // menu's rows are disabled while nothing has one — never a row that looks
-    // live and does nothing (docs/DESIGN.md §10).
+    // The Edit and context menus share the selected message as their target.
+    // Copy replies from source Markdown; rendered text loses its formatting.
     property var selectedBody: null
     property bool selectedIsMd: false
     property string selectedText: ""
@@ -1709,15 +1694,8 @@ Item {
                       : "")
                    + (Ollama.memoryCount > 0
                       ? Ollama.memoryCount + " mem · " : "");
-        // "server", never "ollama" [his, 2026-08-23]. What he is looking at is
-        // this window's model server; which daemon happens to be behind it is
-        // an implementation detail, and the name of one is noise in a status
-        // bar (docs/agents/his-voice.md — the fact, not the plumbing).
         if (!Backend.serverUp) return jobs + counts + "server down";
-        // Up with nothing loaded used to read "server idle" — a noun and a
-        // state that both belong to the LEFT half, which now says "idle"
-        // itself. This half is the standing fact: the daemon is running, and
-        // what it is holding when it holds something.
+        // Activity is reported on the left; this side reports server state.
         return jobs + counts + (Backend.loadedModels.length > 0
                ? "server · " + Backend.loadedModels.join(", ") : "server running");
     }
