@@ -757,7 +757,7 @@ duplicate dies, which model to pull.
   background with dim text and no outline. Every block stops responding,
   hovering and showing the hand cursor [his, 2026-09-11].
   A row carrying a choice card drops the reply bubble's generic content inset;
-  the card owns its internal spacing and occupies that parent edge-to-edge.
+  the card owns one standard 8px internal inset instead of stacking both.
   There is no separate label to write: the block is its own name, its details
   and its note, so the control's label is literally the candidate (§10.1) and
   nothing is clipped to fit a button. Each block still answers a button's
