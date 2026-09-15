@@ -75,7 +75,11 @@ in `$XDG_STATE_HOME/player/`. Respect each tool's path overrides in harnesses.
 - `AutoScanner` delegates download import to `tools/player-add.py`; do not
   duplicate its move/tag logic. Coalesce changes arriving during an import
   into follow-up work. Watch discovery covers local descendants off-thread and
-  excludes remote libraries. Busy rescans retain follow-up requests too. Child
+  excludes remote libraries. On air, `RemoteLibraryWatch` consumes a fixed
+  marker stream from `inotifywait` running locally on top over SSH, debounces
+  copy bursts, and uses the same incremental scanner. It must reconnect with a
+  catch-up scan and must never interpolate event paths into commands. Busy
+  rescans retain follow-up requests too. Child
   start failures release busy state and report errors. The importer uses the
   shared Scanner, not a separate deletion/transaction implementation. Manual
   remote scans remain supported.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression test: AutoScanner never stats or watches a REMOTE library root.
+"""Regression test: remote libraries use SSH events, never CIFS watches.
 
 The bug it guards: `AutoScanner._watch_dirs` runs on the GUI thread at startup
 and every REWATCH_S, and used to `os.path.isdir(LIBRARY_ROOT)` +
@@ -25,6 +25,7 @@ import sys
 import tempfile
 import shutil
 import time
+import json
 from unittest.mock import patch
 from pathlib import Path
 
@@ -77,8 +78,12 @@ class FakeLibrary(QObject):
     """AutoScanner only needs scanRunning to connect and rescan to call."""
     scanRunning = Signal(bool)
 
+    def __init__(self):
+        super().__init__()
+        self.rescans = 0
+
     def rescan(self):
-        pass
+        self.rescans += 1
 
 
 def watched(remote):
@@ -115,6 +120,59 @@ check("remote: downloads dir watched", str(DOWNLOADS) in remote, True)
 local = watched(False)
 check("local: library root watched", str(LIB) in local, True)
 check("local: downloads dir watched", str(DOWNLOADS) in local, True)
+
+# A fake ssh executable proves three contracts without a live connection:
+# bursts debounce to one scan, losing the stream reconnects, and reconnecting
+# performs a catch-up scan for the blind interval. Its argv capture also keeps
+# the remote command fixed and path-free apart from the declared library root.
+bindir = os.path.join(SCRATCH, "bin")
+os.makedirs(bindir)
+fake_ssh = os.path.join(bindir, "ssh")
+state = os.path.join(SCRATCH, "ssh-count")
+argv_log = os.path.join(SCRATCH, "ssh-argv.jsonl")
+Path(fake_ssh).write_text("""#!/usr/bin/env python3
+import json, os, sys, time
+state, log = os.environ['FAKE_SSH_STATE'], os.environ['FAKE_SSH_ARGV']
+try:
+    n = int(open(state).read())
+except (OSError, ValueError):
+    n = 0
+open(state, 'w').write(str(n + 1))
+with open(log, 'a') as f:
+    f.write(json.dumps(sys.argv[1:]) + '\\n')
+if n == 0:
+    print('PLAYER_LIBRARY_READY')
+    print('PLAYER_LIBRARY_CHANGED')
+    print('PLAYER_LIBRARY_CHANGED')
+    print('PLAYER_LIBRARY_CHANGED', flush=True)
+    time.sleep(.15)
+else:
+    print('PLAYER_LIBRARY_READY', flush=True)
+    time.sleep(2)
+""")
+os.chmod(fake_ssh, 0o755)
+old_path = os.environ.get("PATH", "")
+os.environ["PATH"] = bindir + os.pathsep + old_path
+os.environ["FAKE_SSH_STATE"] = state
+os.environ["FAKE_SSH_ARGV"] = argv_log
+P.RemoteLibraryWatch.QUIET_MS = 30
+P.RemoteLibraryWatch.RECONNECT_MS = 30
+lib = FakeLibrary()
+bridge = P.RemoteLibraryWatch(lib, "top-test")
+deadline = time.monotonic() + 1.5
+while lib.rescans < 2 and time.monotonic() < deadline:
+    app.processEvents()
+    time.sleep(.005)
+bridge.stop()
+bridge.deleteLater()
+app.processEvents()
+calls = [json.loads(line) for line in Path(argv_log).read_text().splitlines()]
+check("remote: event burst + reconnect catch-up scan", lib.rescans, 2)
+check("remote: stream reconnected", len(calls) >= 2, True)
+check("remote: fixed host", calls[0][-2], "top-test")
+check("remote: fixed watch command", "exec inotifywait" in calls[0][-1], True)
+check("remote: watches declared root", calls[0][-1].endswith(str(P.LIBRARY_ROOT)), True)
+os.environ["PATH"] = old_path
 
 print()
 shutil.rmtree(SCRATCH)

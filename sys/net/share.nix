@@ -20,6 +20,12 @@ let
   lanCidr = privateConfig.lanCidr;
 in
 {
+  # Player on air cannot receive inotify through its CIFS mount. It opens a
+  # read-only SSH event stream instead and runs this against the local SSD on
+  # top, then performs its existing incremental scan on air after the copy
+  # burst settles. Keep the watcher beside the share it observes.
+  environment.systemPackages = [ pkgs.inotify-tools ];
+
   services.samba = {
     enable = true;
     # netbios name resolution — air finds this host over mDNS (avahi, below),
