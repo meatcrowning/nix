@@ -23,6 +23,7 @@ Item {
     id: root
     property string face: "plasma"
     property bool lit: false
+    property bool interactive: enabled
     default property alias blockData: holder.data
 
     signal clicked()
@@ -36,11 +37,24 @@ Item {
     height: implicitHeight
 
     QQC.Button {
+        visible: root.enabled
         anchors.fill: parent
         checkable: root.lit
         checked: root.lit
         enabled: root.enabled
-        onClicked: root.clicked()
+        hoverEnabled: root.interactive
+        onClicked: if (root.interactive) root.clicked()
+    }
+
+    // A settled sibling is a readout on the parent bubble, not a disabled
+    // KStyle slab. Keep only the fine boundary needed to separate candidates.
+    Rectangle {
+        visible: !root.enabled
+        anchors.fill: parent
+        color: "transparent"
+        radius: Theme.rounding
+        border.width: Theme.ctrlBorder
+        border.color: Theme.border
     }
 
     Item {

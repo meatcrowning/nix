@@ -752,9 +752,10 @@ duplicate dies, which model to pull.
   arrive and do nothing [his: *"once the user makes a selection they shouldnt
   even be able to click another button in that bubble later"*]. The rule lives
   in main.py where it cannot be got around; the QML keeps the CANDIDATES and
-  turns them into the record of the decision — the one he took keeps its
-  `highlight` fill and 2px accent gutter (§9.1), the rest go quiet and every
-  block stops hovering and stops showing the hand cursor [his, 2026-09-11].
+  turns them into the record of the decision — the one he took remains an
+  enabled-looking, held-down button, while the rest inherit the reply bubble's
+  background with dim text and a fine boundary. Every block stops responding,
+  hovering and showing the hand cursor [his, 2026-09-11].
   There is no separate label to write: the block is its own name, its details
   and its note, so the control's label is literally the candidate (§10.1) and
   nothing is clipped to fit a button. Each block still answers a button's
@@ -795,10 +796,14 @@ duplicate dies, which model to pull.
   four spellings of one intent, and rejecting three would make the card a coin
   flip on phrasing. `ASK_CHOICE_MAX_OPTIONS` (8) and `ASK_CHOICE_MAX_DETAILS`
   (8) keep it a decision rather than a listing.
+  ChoiceCard takes the union of those names and gives each one a stable grid
+  column across every candidate (up to four per row); missing values retain an
+  empty cell. This keeps record metadata such as format, queue, size and speed
+  aligned without making those generic names part of the component's schema.
 - Harness: `tools/choice-test.py`, which drives real turns against a stub
   ollama and reads both halves — the request bodies the model gets back, and
-  the candidate blocks actually drawn on the card (live while waiting, dead
-  once answered, the one he took held). `ORACLE_CHOICE=0|none|ignore` is the selftest hook it presses
+  the candidate blocks actually drawn on the card (live while waiting, settled
+  siblings dead, the one he took held but enabled-looking). `ORACLE_CHOICE=0|none|ignore` is the selftest hook it presses
   with.
 
 ## Sessions

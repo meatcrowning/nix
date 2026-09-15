@@ -13378,8 +13378,8 @@ def run_selftest(app, shell, win, plasma, warnings, fleet_pane=None):
 
             def _card_verbs(item, depth=0):
                 """(drawn, held-down, dead) verbs on a card. An answered card
-                KEEPS its buttons — the one he took held down, the rest dead —
-                so all three lists are what the harness reads."""
+                KEEPS its buttons — the one he took held down but enabled-looking,
+                the rest dead — so all three lists are what the harness reads."""
                 out, lit, dead = [], [], []
                 if item is None or depth > 8:
                     return out, lit, dead
