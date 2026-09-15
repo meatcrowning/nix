@@ -24,11 +24,12 @@ Rectangle {
     id: root
     property string face: "hypr"
     property bool lit: false
+    property bool interactive: enabled
     default property alias blockData: holder.data
 
     signal clicked()
 
-    readonly property bool live: root.enabled
+    readonly property bool live: root.interactive
     readonly property bool hot: root.live && mouse.containsMouse
 
     readonly property color fg: root.live ? Theme.text : Theme.textDim
@@ -39,7 +40,10 @@ Rectangle {
     implicitHeight: holder.childrenRect.height + pad * 2
     height: implicitHeight
     radius: 3
-    color: (root.hot || root.lit) ? Theme.highlight : Theme.bgAlt
+    // Once settled, an unchosen block inherits the reply bubble's continuous
+    // gradient. The chosen block stays visibly held down, not disabled.
+    color: !root.enabled ? "transparent"
+         : (root.hot || root.lit) ? Theme.highlight : Theme.bgAlt
     border.width: Theme.ctrlBorder
     border.color: root.lit ? Theme.accent : Theme.border
 
@@ -54,8 +58,8 @@ Rectangle {
     MouseArea {
         id: mouse
         anchors.fill: parent
-        hoverEnabled: root.live
-        enabled: root.live
+        hoverEnabled: root.interactive
+        enabled: root.interactive
         cursorShape: Qt.PointingHandCursor
         onClicked: root.clicked()
     }

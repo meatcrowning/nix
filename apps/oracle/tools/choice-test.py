@@ -232,9 +232,9 @@ held = re.search(r"^choice after: .*lit=(\[.*?\]) dead=(\[.*?\])$", txt, re.M)
 check("with the one he took held DOWN",
       bool(held) and held.group(1) == "[%r]" % OPTIONS[0]["label"],
       held.group(1) if held else "no card")
-check("and every button dead, his included — a record, not an offer",
-      bool(held) and held.group(2).count(",") == 2
-      and OPTIONS[0]["label"] in held.group(2),
+check("and only its siblings disabled — the held choice does not look dead",
+      bool(held) and held.group(2).count(",") == 1
+      and OPTIONS[0]["label"] not in held.group(2),
       held.group(2) if held else "no card")
 live = re.search(r"^choice before: .*lit=(\[.*?\]) dead=(\[.*?\])$", txt, re.M)
 check("…and nothing was dead or held down while it waited",

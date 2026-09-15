@@ -18,9 +18,9 @@ import QtQuick
 //     drawn) and says what happened once it stops waiting.
 //   * ONCE ANSWERED IT IS OVER [his]: "once the user makes a selection they
 //     shouldnt even be able to click another button in that bubble later". The
-//     candidates STAY [his, 2026-09-11] — the one he took keeps its highlight
-//     and accent gutter and the rest go quiet beside it, so the card reads as
-//     the record of a decision rather than losing the thing he was looking at.
+//     candidates STAY [his, 2026-09-11] — the one he took stays held down and
+//     the rest go quiet on the parent surface, so the card reads as the record
+//     of a decision rather than losing the thing he was looking at.
 //     They are a READOUT then, not an offer, which is why they stop hovering
 //     and stop showing the hand cursor (§10.1 forbids a control that looks live
 //     and does nothing — this one does not look live). main.py's
@@ -70,10 +70,24 @@ Rectangle {
     // slab on top of it was one panel too many (§5.1: the surface runs
     // unbroken; §4: a frame, not a stack of boxes).
     color: "transparent"
-    border.width: Theme.ctrlBorder
-    // Waiting on HIM is a state worth seeing from across the room (§3.5): the
-    // frame carries the accent while it is open and goes quiet once it is not.
-    border.color: root.pending ? Theme.accent : Theme.border
+    // No frame: the reply bubble is already the card's boundary, and tracing
+    // it again makes the transparent card read as a panel inside that bubble.
+    border.width: 0
+
+    // One schema for the whole card. A missing value keeps an empty cell, so
+    // format / queue / size / speed remain in the same visual column from one
+    // candidate to the next instead of moving with each option's prose.
+    readonly property var detailNames: {
+        var names = [];
+        for (var i = 0; i < options.length; i++) {
+            var details = options[i].details || [];
+            for (var j = 0; j < details.length; j++) {
+                var name = String(details[j][0] || "");
+                if (name !== "" && names.indexOf(name) < 0) names.push(name);
+            }
+        }
+        return names;
+    }
 
     Column {
         id: body
@@ -122,23 +136,22 @@ Rectangle {
                 readonly property string label: String(modelData.label || "")
                 readonly property bool isChosen: root.chosen === optionRow.index
                 lit: isChosen
-                enabled: root.pending
+                // The selected block remains an enabled, held-down button
+                // visually; `interactive` is the separate once-only gate.
+                // Settled siblings become quiet readouts with no fill.
+                enabled: root.pending || isChosen
+                interactive: root.pending
                 width: body.width
 
                 onClicked: root.picked(optionRow.index)
 
-                // Every `[name, value]` the agent gave, on one line. The names
-                // are the agent's own words (format, size, speed, queue…) —
-                // this draws them, it does not know them.
-                readonly property string detailLine: {
+                function detailValue(name) {
                     var d = optionRow.modelData.details || [];
-                    var parts = [];
                     for (var i = 0; i < d.length; i++) {
-                        var name = d[i][0] || "";
-                        var value = d[i][1] || "";
-                        parts.push(name === "" ? value : name + " " + value);
+                        if (String(d[i][0] || "") === name)
+                            return String(d[i][1] || "");
                     }
-                    return parts.join("  ·  ");
+                    return "";
                 }
 
                 Column {
@@ -152,13 +165,26 @@ Rectangle {
                         // The one he took is the one worth finding again later.
                         color: optionRow.isChosen ? Theme.accent : optionRow.fg
                     }
-                    PixelText {
+                    Grid {
                         x: 18
                         width: parent.width - 18
-                        wrapMode: Text.WordWrap
-                        visible: text !== ""
-                        text: optionRow.detailLine
-                        color: optionRow.fgDim
+                        visible: root.detailNames.length > 0
+                        columns: Math.min(4, root.detailNames.length)
+                        rowSpacing: 1
+
+                        Repeater {
+                            model: root.detailNames
+                            delegate: PixelText {
+                                required property var modelData
+                                width: (parent.width / parent.columns)
+                                elide: Text.ElideRight
+                                text: {
+                                    var value = optionRow.detailValue(String(modelData));
+                                    return value === "" ? "" : String(modelData) + " " + value;
+                                }
+                                color: optionRow.fgDim
+                            }
+                        }
                     }
                     PixelText {
                         x: 18
