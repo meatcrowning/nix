@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import socket
 import sqlite3
@@ -5012,6 +5013,125 @@ class WatchDirectories(QThread):
                 self.paths.append(directory)
 
 
+class RemoteLibraryWatch(QObject):
+    """Turn top's local inotify events into debounced remote-library scans.
+
+    QFileSystemWatcher/inotify cannot see changes through air's CIFS mount.
+    SSH therefore runs inotifywait against the local SSD on top and sends only
+    a constant marker back. No event path enters a command line. QProcess and
+    Scanner are asynchronous, so neither SSH failure nor the SMB walk can
+    block the GUI thread.
+    """
+
+    QUIET_MS = 8000
+    RECONNECT_MS = 5000
+
+    def __init__(self, library, host, parent=None):
+        super().__init__(parent)
+        self._library = library
+        self._host = host
+        self._proc = None
+        self._stdout = b""
+        self._catch_up = False
+        self._stopping = False
+        self._scan_timer = QTimer(self)
+        self._scan_timer.setSingleShot(True)
+        self._scan_timer.timeout.connect(self._library.rescan)
+        self._restart_timer = QTimer(self)
+        self._restart_timer.setSingleShot(True)
+        self._restart_timer.timeout.connect(self._start)
+        app = QGuiApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self.stop)
+        self._start()
+
+    def _start(self):
+        if self._stopping or self._proc is not None:
+            return
+        proc = QProcess(self)
+        proc.setProcessChannelMode(QProcess.SeparateChannels)
+        proc.readyReadStandardOutput.connect(self._read_stdout)
+        proc.readyReadStandardError.connect(self._read_stderr)
+        proc.finished.connect(self._on_finished)
+        proc.errorOccurred.connect(self._on_error)
+        args = [
+            "-o", "BatchMode=yes",
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "ConnectTimeout=5",
+            "-o", "ServerAliveInterval=15",
+            "-o", "ServerAliveCountMax=2",
+        ]
+        control = os.environ.get("PLAYER_SSH_CONTROL")
+        if control:
+            args += ["-o", "ControlMaster=auto", "-o", "ControlPersist=30",
+                     "-o", f"ControlPath={control}"]
+        self._proc = proc
+        self._stdout = b""
+        command = (
+            "printf 'PLAYER_LIBRARY_READY\\n'; exec inotifywait "
+            "--monitor --recursive --quiet "
+            "--format PLAYER_LIBRARY_CHANGED "
+            "--event close_write,moved_to,moved_from,create,delete "
+            f"{shlex.quote(str(LIBRARY_ROOT))}"
+        )
+        args += [self._host, command]
+        proc.start("ssh", args)
+
+    def _read_stdout(self):
+        if self._proc is None:
+            return
+        self._stdout += bytes(self._proc.readAllStandardOutput())
+        while b"\n" in self._stdout:
+            line, self._stdout = self._stdout.split(b"\n", 1)
+            line = line.strip()
+            if line == b"PLAYER_LIBRARY_READY":
+                # Only remote readiness closes the blind interval; QProcess's
+                # started signal means merely that the local ssh binary ran.
+                if self._catch_up:
+                    self._scan_timer.start(self.QUIET_MS)
+                    self._catch_up = False
+            elif line == b"PLAYER_LIBRARY_CHANGED":
+                self._scan_timer.start(self.QUIET_MS)
+
+    def _read_stderr(self):
+        if self._proc is None:
+            return
+        data = bytes(self._proc.readAllStandardError()).decode(errors="replace").strip()
+        if data:
+            print(f"remote library watch: {data}", file=sys.stderr, flush=True)
+
+    def _on_error(self, error):
+        if error == QProcess.FailedToStart:
+            self._lost()
+
+    def _on_finished(self, _code, _status):
+        self._lost()
+
+    def _lost(self):
+        proc = self._proc
+        if proc is None:
+            return
+        self._proc = None
+        self._catch_up = True
+        proc.deleteLater()
+        if not self._stopping:
+            self._restart_timer.start(self.RECONNECT_MS)
+
+    @Slot()
+    def stop(self):
+        self._stopping = True
+        self._restart_timer.stop()
+        self._scan_timer.stop()
+        if self._proc is not None:
+            proc = self._proc
+            self._proc = None
+            proc.terminate()
+            if not proc.waitForFinished(1000):
+                proc.kill()
+                proc.waitForFinished(1000)
+            proc.deleteLater()
+
+
 class AutoScanner(QObject):
     """Pick newly-downloaded tracks up without a manual rescan.
 
@@ -5067,6 +5187,10 @@ class AutoScanner(QObject):
         self._rewatch_timer.timeout.connect(self._watch_dirs)
         self._rewatch_timer.start(self.REWATCH_S * 1000)
         self._watch_dirs()
+        self._remote_watch = None
+        remote_host = os.environ.get("PLAYER_REMOTE_WATCH_HOST")
+        if library_is_remote_cached() and remote_host:
+            self._remote_watch = RemoteLibraryWatch(library, remote_host, self)
         # New-track hook: whenever a rescan finishes, compute+write ReplayGain
         # tags for any supported track that landed without them, as a child
         # (mirrors player-add.py). Debounced so a burst of scan completions
@@ -5103,6 +5227,8 @@ class AutoScanner(QObject):
         self._rescan_timer.stop()
         self._import_timer.stop()
         self._rg_timer.stop()
+        if self._remote_watch is not None:
+            self._remote_watch.stop()
         if self._watch_worker is not None:
             self._watch_worker.requestInterruption()
             self._watch_worker.wait()

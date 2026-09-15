@@ -154,6 +154,7 @@ share_heal() {
 }
 
 ONLINE=0
+SHARE_READY=0
 HOST="${CANDIDATES[0]}"
 ADDR="$HOST"
 for cand in "${CANDIDATES[@]}"; do
@@ -185,6 +186,8 @@ if [ "$ONLINE" = 1 ]; then
             die_ui "top is up but the library share at $MOUNT is down and would not remount — nothing would be playable. Check that top is still sharing aud, then try again."
         fi
         say "share unusable at $MOUNT — tracks will show unavailable"
+    else
+        SHARE_READY=1
     fi
 
     # Metadata first and synchronously: it is ~17 MB, rsync-delta, and the app
@@ -194,6 +197,14 @@ if [ "$ONLINE" = 1 ]; then
     # "unrecognized arguments" — which this script then reported as the far
     # more innocent-sounding "db pull failed (continuing)".
     "$PY" "$DBSYNC" --host "$HOST" pull || say "db pull failed (continuing)"
+
+    # main.py uses this exact host for a long-lived, read-only inotify stream.
+    # Export it only after both top and the share have proved usable; an
+    # offline launch must not grow a reconnect loop for a library it cannot
+    # read. The SSH control socket is already exported above and is reused.
+    if [ "$SHARE_READY" = 1 ]; then
+        export PLAYER_REMOTE_WATCH_HOST="$HOST"
+    fi
 
     # Art: a FIRST cache fill blocks, because an empty album grid is not an
     # honest first frame. Once air already has thumbnails, though, refreshing
