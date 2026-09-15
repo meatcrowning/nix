@@ -44,7 +44,7 @@ Rectangle {
     // gradient. The chosen block stays visibly held down, not disabled.
     color: !root.enabled ? "transparent"
          : (root.hot || root.lit) ? Theme.highlight : Theme.bgAlt
-    border.width: Theme.ctrlBorder
+    border.width: root.enabled ? Theme.ctrlBorder : 0
     border.color: root.lit ? Theme.accent : Theme.border
 
     Item {
