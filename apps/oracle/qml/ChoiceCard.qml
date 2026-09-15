@@ -62,7 +62,7 @@ Rectangle {
     }
 
     width: parent ? parent.width : 0
-    implicitHeight: body.implicitHeight + 20
+    implicitHeight: body.implicitHeight
     height: implicitHeight
     radius: Theme.rounding
     // NO FILL [his, 2026-09-11]. The card already sits inside the reply's own
@@ -91,9 +91,7 @@ Rectangle {
 
     Column {
         id: body
-        x: 10
-        y: 10
-        width: parent.width - 20
+        width: parent.width
         spacing: 6
 
         PixelText {

@@ -2893,9 +2893,14 @@ Item {
                         // alphas of `accent`/`crit` over the existing tokens,
                         // the same idiom the drop overlay already uses (§3).
                         readonly property real pad: 8
+                        // A choice card already spaces its own heading and
+                        // candidate controls. Let it occupy the reply bubble
+                        // edge-to-edge instead of nesting inside the generic
+                        // message inset.
+                        readonly property real contentPad: hasCard ? 0 : pad
                         readonly property real bubbleMax:
                             Math.max(160, replyCol.width * 0.82)
-                        readonly property real innerW: bubbleMax - 2 * pad
+                        readonly property real innerW: bubbleMax - 2 * contentPad
                         // Assistant media needs the full cap to stay readable.
                         // His own attachments are compact thumbnails instead:
                         // they sit beside a short prompt without turning his
@@ -3676,13 +3681,13 @@ Item {
                                     // a padded slab around a `k`.
                                     width: turn.wide ? turn.bubbleMax
                                            : Math.min(turn.bubbleMax,
-                                                      turnCol.natural + 2 * turn.pad)
-                                    height: visible ? turnCol.height + 2 * turn.pad : 0
+                                                      turnCol.natural + 2 * turn.contentPad)
+                                    height: visible ? turnCol.height + 2 * turn.contentPad : 0
 
                                     Column {
                                         id: turnCol
-                                        x: turn.pad
-                                        y: turn.pad
+                                        x: turn.contentPad
+                                        y: turn.contentPad
                                         // A FIXED wrapping width, not the bubble's:
                                         // the bubble hugs `natural`, which is measured
                                         // from these items, so reading it back here
